@@ -30,7 +30,7 @@ signed, temporal, CRDT graph-substrate. The spec is the source of truth for the 
 - **Race to a working spine, not to the whole spec.** The spec is large and marks the north-star;
   build the tractable spine first (see Sequencing in the brief). Clarity over cleverness; the CRDT is
   the safety net — lean on it.
-- **Spike first.** Before planning the rest, answer the one question that sizes everything: _can
+- **Spike first — map the substrate.** rhizomatic's reactor already ships `eval` + a `SchemaRegistry` + `HView` + maintained, subscribable materializations, so **first map its actual surface against the spec and re-draw the Loam/rhizomatic line** (Loam may be thinner than the spec implies; disambiguate rhizomatic's schema concept from our Schema/Hyperschema). Within that, the sizing question: _can
   rhizomatic's evaluator + policies express the resolution reductions a schema field needs_
   (latest / trusted-first / set-union / surface-all / custom)? It's the only likely source of a
   rhizomatic change. Report what you find; it may reshape the plan.

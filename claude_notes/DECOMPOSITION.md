@@ -221,7 +221,7 @@ genesis, gateway mutations, accounts-as-schema, and (later) the function substra
 
 ## Sequencing (never destabilizing the live node)
 
-1. **Spike first:** can rhizomatic's evaluator + policies express the resolution reductions a
+1. **Spike first — map the substrate, then re-draw the line:** rhizomatic's reactor already ships `eval` + a `SchemaRegistry` + `HView` + maintained, subscribable materializations, so map its actual surface against the spec and re-draw the Loam/rhizomatic line (Loam may be thinner than written; disambiguate rhizomatic's schema concept from ours). Within that: can rhizomatic's evaluator + policies express the resolution reductions a
    hyperschema field needs (latest / trusted-first / set-union / surface-all / custom)? This sizes
    the whole DB layer and is the only likely source of a rhizomatic change. **Do this before
    planning the rest.**

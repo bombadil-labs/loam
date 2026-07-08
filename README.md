@@ -28,7 +28,7 @@ being built from them. Start with the spec.
 
 1. **[rhizomatic](https://github.com/bombadil-labs/rhizomatic)** (`@bombadil/rhizomatic`, frozen /
    normative) — the format: signed content-addressed deltas, the delta-set CRDT (merge = union), the
-   evaluator + resolution policies, the reactor, `Peer`/federation.
+   evaluator + resolution policies, and the **reactor** (ingest + live indexes + `eval` + named _materializations_ = maintained hyperviews/`HView`s, with `subscribe` change-notification — it already carries `HView` and a `SchemaRegistry`), `Peer`/federation.
 2. **Loam** (this repo) — the typed, self-hosting, reactive, capability-secured layer: hyperschemas
    → GraphQL, resolution-policy-as-schema, the self-hosting schema-schema, the function substrate,
    accounts/capabilities, federation.

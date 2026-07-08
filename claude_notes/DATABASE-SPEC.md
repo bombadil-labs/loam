@@ -34,7 +34,7 @@ ship domain semantics beyond the genesis standard library.
 1. **rhizomatic** (`@bombadil/rhizomatic`, existing, **frozen/normative**) provides: the **Delta**
    (arbitrary typed pointers/roles, canonical bytes, content address, signature), the **delta-set
    CRDT** (merge = union; order-blind, idempotent), the **evaluator** (8 operators) + **resolution
-   policies**, the **reactor** (live indexes / change-detection), **`Peer`**/federation, packs,
+   policies**, and the **reactor** — more than a live-index shorthand: ingest + live indexes + `arrivalLog` + `eval` over a **`SchemaRegistry`** + named, rooted **materializations** returning **`HView`s** (hyperviews), kept current on each ingest, with **`subscribe`** (push change-notification via `MaterializationChange`). **Consequence: rhizomatic already ships `HView`, a `SchemaRegistry`, and maintained/subscribable materializations — so it may already provide much of what §3–§4 call resolution and §3's live-view mechanism. The Loam/rhizomatic line in this spec is PROVISIONAL until mapped (§11 spike #1); rhizomatic's schema concept must be disambiguated from our Schema/Hyperschema.** Also **`Peer`**/federation, packs,
    derivation. We change it only by a deliberate PR there (conformance vectors + version bump).
 2. **the database** (this spec) — the typed, self-hosting, reactive, capability-secured layer.
 3. **applications** (e.g. Chorus) — a genesis-extending **bootstrap delta-set** + client
@@ -304,7 +304,7 @@ into one idea, natural here because everything is already a signed content-addre
 
 ## 11. The spike + sequencing
 
-1. **Spike first (do before planning the rest):** can rhizomatic's evaluator + policies express the
+1. **Spike first — map the substrate, then re-draw the line.** rhizomatic's reactor already exposes `eval` + a `SchemaRegistry` + `HView` + maintained, subscribable materializations (§2), so the first task is to map its actual reactor/HView/SchemaRegistry/materialization surface against this spec's object model and re-draw the Loam/rhizomatic line — Loam may be much thinner than written, and rhizomatic's schema concept must be disambiguated from ours. Within that: can rhizomatic's evaluator + policies express the
    resolution reductions a Schema field needs? Sizes the whole layer; the only likely rhizomatic
    change. Report findings before building.
 2. **The spine:** the minimal self-describing **genesis set** (four meta-nodes) + the **gateway**
