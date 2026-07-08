@@ -170,6 +170,55 @@ hyperschemas). The design that makes it sound:
 - **The poetry is as important as the engineering** (standing directive). Prose surfaces are
   first-class craft.
 
+## Already built in Chorus — the extraction inventory
+
+**Roughly half of Loam already exists, shipped and tested, in [Chorus](https://github.com/bombadil-labs/chorus).** "Clean-room"
+(below) means clean-room the **model** — the schema/resolution/self-hosting/function core, built
+right rather than inheriting EAV-era assumptions. It does **not** mean rewrite the plumbing. A large
+part of Loam's infrastructure is model-agnostic and worth **extracting (lift-and-adapt), not
+rebuilding**. Inventory (paths in the chorus repo's `src/`):
+
+**Extract — model-agnostic, already tested:**
+
+- **Persistence tier** — `store-tier.ts`, `sqlite-core.ts`, `node-sqlite-store.ts`,
+  `sqlite-store.ts`, `shared-store.ts`, `encrypted-store.ts`: the `StoreBackend` contract,
+  the driver family (node-sqlite / better-sqlite3 / jsonl / encrypted), content-sniffing, and
+  bidirectional driver substitution. This is Loam's persistence tier nearly whole — the main work is
+  the **sync → async** conversion (§9) and adding a Turso/libSQL driver.
+- **Store registry** — `stores.ts`: named/keyed instances, the format-version upgrade ladder, and
+  `adopt` (the union-verify import). Loam's multi-store management.
+- **Packs / save-restore** — `store.ts` (savePack/loadPack), rhizomatic-backed. The portable
+  store bundle.
+- **GraphQL machinery** — `gql.ts`: the pin-a-snapshot → expose-GraphQL → prepare/query/release
+  lifecycle. Re-source the schema from **hyperschemas** (not observed shape) and add **mutations**,
+  but the lifecycle and plumbing extract directly.
+- **MCP / HTTP transport** — `mcp-http.ts` (+ parts of `mcp-server.ts`): streamable-HTTP,
+  multi-store mounts, token auth, timing-safe compare, the `@union` mount. The gateway's _ops_
+  become generic (query/mutate/loadSchema); the _transport_ extracts.
+- **CLI scaffolding** — `cli.ts`, `cli-args.ts`, `cli-store.ts`, `cli-serve.ts`,
+  `config.ts`: init / serve / store commands, flag parsing, `redactSecrets`, home resolution,
+  the golden-pins pattern.
+- **Resolution policies** — `policies.ts`: latest / trustFirst / everything / disagreements — the
+  starting reducer library for resolution-as-schema.
+- **The _measure_ instruments** — `vitals.ts`, `belief-diff.ts`, `bisect.ts`: per the split,
+  these become Loam query tools; extract close to as-is.
+
+**Reference only — carries the EAV belief-model; study the pattern, don't lift wholesale:**
+
+- `agent.ts` (`beliefPointers`, the EAV encoding) — exactly the thing Loam _generalizes_ into
+  hyperschemas. Study it to know what NOT to bake in.
+- `decisions.ts` — the pin-(view-hash + arrival-prefix)-and-replay pattern is the reference for
+  Loam's snapshot + hyperview-snapshot + execution-replay, but it's decision-shaped.
+- The _active_ instruments (`review` / `challenge` / `skeptic` / `contradictions`),
+  `messages.ts`, `briefing.ts`, `librarian.ts` — these are **Chorus-app (belief) logic** that
+  becomes Chorus's bootstrap deltas + skill, not Loam. Read them as worked examples of the
+  function/trigger and superposition-consuming patterns.
+
+The upshot for scoping: the **spine (§Sequencing #2)** is more _assembly + adaptation_ than
+greenfield typing — the persistence tier, registry, GraphQL lifecycle, transport, and CLI are lifts;
+the genuinely new code is the hyperschema→schema resolution model, the self-hosting schema-schema +
+genesis, gateway mutations, accounts-as-schema, and (later) the function substrate.
+
 ## Sequencing (never destabilizing the live node)
 
 1. **Spike first:** can rhizomatic's evaluator + policies express the resolution reductions a
@@ -197,7 +246,9 @@ hyperschemas). The design that makes it sound:
 2. **Multi-tenant scope for v1.** Plan the accounts/capability model fully; decide whether v1 ships
    single-tenant (operator + bearer, the schema present but simple) or multi-tenant. ("Have a plan,
    then decide how to scope it.")
-3. **Clean-room vs. port** into the greenfield repo. Greenfield strongly implies **clean-room** —
+3. **Clean-room vs. port** into the greenfield repo. Greenfield implies **clean-room the _model_,
+   extract the _plumbing_** (see "Already built in Chorus" above — roughly half of Loam is already
+   shipped and tested there) —
    build it right from the genesis set up (schema-first, async-persistence-first, gateway-first),
    cannibalizing the chorus repo's `src/` (https://github.com/bombadil-labs/chorus) as a **reference/quarry**, not a foundation. Confirm.
 4. **What remains of the current `chorus` repo** once the DB is greenfield and Chorus is
@@ -207,7 +258,9 @@ hyperschemas). The design that makes it sound:
 ## Fable's first actions
 
 1. Read this, [CONSTELLATION.md](https://github.com/bombadil-labs/chorus/blob/main/claude_notes/CONSTELLATION.md) (federation), and skim the chorus repo's `src/` (https://github.com/bombadil-labs/chorus) as the
-   reference quarry (especially `store-tier.ts`, `gql.ts`, `agent.ts`, `mcp-http.ts`, `stores.ts`).
+   reference quarry — and note that much of it is **extractable, not just referenceable** (see the
+   extraction inventory): the persistence tier, `stores.ts`, `gql.ts`'s lifecycle, `mcp-http.ts`, and
+   the CLI lift with adaptation; `agent.ts`/`decisions.ts` are reference-only (EAV).
 2. Run **the spike** (item 1 in Sequencing) and report what it found — it may change the plan.
 3. Produce the greenfield repo's own design docs (schema-schema shape, gateway contract, genesis-set
    contents) — this brief is the seed, not the spec.

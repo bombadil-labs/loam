@@ -55,10 +55,15 @@ signed, temporal, CRDT graph-substrate. The spec is the source of truth for the 
 - **Multi-tenant scope for v1** — plan the accounts/capability model fully; decide whether v1 ships
   single-tenant (operator + bearer, schema present but simple) or multi-tenant. ("Have a plan, then
   decide how to scope it.")
-- **Clean-room vs port** — the greenfield repo implies **clean-room**: build from the genesis set up
-  (schema-first, async-persistence-first, gateway-first), treating the
-  [chorus](https://github.com/bombadil-labs/chorus) `src/` as a **reference quarry**, not a
-  foundation. Confirm with Myk before mining it heavily.
+- **Clean-room vs port** — the greenfield repo implies **clean-room the _model_, extract the
+  _plumbing_.** Build the schema/resolution/self-hosting/function core from the genesis set up
+  (schema-first, async-persistence-first) rather than inheriting Chorus's EAV assumptions — but
+  **roughly half of Loam is already shipped and tested in [chorus](https://github.com/bombadil-labs/chorus)**
+  and is worth _extracting_, not rebuilding: the persistence tier (`store-tier`/`sqlite-core`/drivers),
+  the store registry (`stores.ts`), the GraphQL lifecycle (`gql.ts`), the MCP/HTTP transport
+  (`mcp-http.ts`), the CLI scaffolding, and the measure-instruments. `agent.ts`/`decisions.ts` are
+  reference-only (they carry the EAV model). See the extraction inventory in the brief. Confirm the
+  clean-room-vs-extract line with Myk.
 - The remaining open questions live in the spec's §12.
 
 ## Pointers
