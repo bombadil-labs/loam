@@ -68,8 +68,11 @@ signed, temporal, CRDT graph-substrate. The spec is the source of truth for the 
 
 ## Pointers
 
-- [claude_notes/DATABASE-SPEC.md](claude_notes/DATABASE-SPEC.md) — the specification. **Start here
-  after this file.**
+- [claude_notes/RHIZOMATIC-SURFACE.md](claude_notes/RHIZOMATIC-SURFACE.md) — **read-first.** What
+  rhizomatic already provides (most of the core) vs. what Loam adds. A type-level pass on the spike
+  is already done here; confirm its findings against rhizomatic's source.
+- [claude_notes/DATABASE-SPEC.md](claude_notes/DATABASE-SPEC.md) — the specification. Read after the
+  map above (§3/§6/§7 are pending reconciliation with it).
 - [claude_notes/DECOMPOSITION.md](claude_notes/DECOMPOSITION.md) — the brief / assignment / sequencing.
 - [Chorus](https://github.com/bombadil-labs/chorus) — the first application of Loam (and the
   reference quarry). Its `claude_notes/` (CONSTELLATION.md, EPISTEME.md, JOURNAL.md) hold the fuller

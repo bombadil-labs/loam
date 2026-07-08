@@ -5,6 +5,11 @@ The root of this repo holds exactly [README.md](../README.md) (the product) and
 
 ## The design papers (seeded from the Chorus conversation, 2026-07-07)
 
+- [RHIZOMATIC-SURFACE.md](RHIZOMATIC-SURFACE.md) — **read-first reality check.** A type-level
+  map of what rhizomatic already provides (most of the core) vs. what Loam genuinely adds
+  (GraphQL, persistence, accounts, gateway, deploy). The spec below is pending reconciliation
+  with it.
+
 - [DATABASE-SPEC.md](DATABASE-SPEC.md) — **the specification** (the _what_): the object model
   (Delta / Domain node / Hyperschema / Hyperview / Selector / Schema / View=Snapshot|Subscription),
   resolution, the gateway, self-hosting + the genesis bootstrap, the function substrate (core /

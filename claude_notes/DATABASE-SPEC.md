@@ -19,6 +19,18 @@ mergeable). Everything above the raw delta stream — types, resolutions, comput
 is itself data in the same store, so the system can evolve its own types and behavior by writing
 claims, and every step of that evolution is a signed, replayable delta.
 
+> ⚠️ **Read [RHIZOMATIC-SURFACE.md](RHIZOMATIC-SURFACE.md) first.** A deep read of rhizomatic's
+> actual type surface (2026-07-08) found that **most of the core this spec describes — the object
+> model (§3), the self-hosting schema-schema (§6), and the function substrate (§7) — is already
+> provided by rhizomatic** (`HyperSchema`, `HView`, `resolveView`/`Policy`, `SCHEMA_SCHEMA` +
+> `loadSchema`, `DerivationHost`/`DerivedFn`/`BindingSpec`/`verifyPureDerivation`, and the reactor
+> with subscribable materializations). **Build on it; do not reinvent it.** Loam's genuine scope is
+> the _wrapper_: GraphQL interface, durable/pluggable persistence, accounts/capabilities, the
+> gateway transport, deployment, and the genesis assembly. §3/§6/§7 are pending revision to
+> _import_ that core rather than re-specify it; the §11 spike is largely answered (rhizomatic's
+> `Policy` is the reduction library). Treat this spec's model as _conceptually_ right but
+> _mis-attributed_ until reconciled with the map.
+
 ## 1. Purpose, scope, non-goals
 
 **Purpose:** a domain-agnostic database that makes full use of rhizomatic's affordances (signed
