@@ -16,8 +16,11 @@ import {
   computeId,
   evalTerm,
   loadSchema,
+  policyToJson,
+  publishSchemaClaims,
   resolveView,
   signClaims,
+  termHash,
   verifyDelta,
   viewCanonicalHex,
   type Delta,
@@ -35,8 +38,14 @@ import type { StoreBackend } from "../store/backend.js";
 import { authorize } from "./accounts.js";
 import { Channel } from "./channel.js";
 import type { Genesis } from "./genesis.js";
-import { buildGqlSchema, type PatchNode, type Registered, type ResolvedNode } from "./gql.js";
-import { readRegistrations, registrationClaims, type Registration } from "./registration.js";
+import { buildGqlSchema, type GqlHooks, type PatchNode, type ResolvedNode } from "./gql.js";
+import {
+  lawfulSnapshot,
+  readRegistrations,
+  registrationClaims,
+  schemaEntityFor,
+  type Registration,
+} from "./registration.js";
 
 export interface AppendReceipt {
   readonly accepted: number;
@@ -73,10 +82,26 @@ export interface RequestContext {
 
 const toError = (e: unknown): Error => (e instanceof Error ? e : new Error(String(e)));
 
+// The gateway's own alphabet: NUL separates the segments of internal materialization names and
+// comparison keys, and register() refuses it in schema names, so nothing user-supplied collides.
+const NUL = "\u0000";
+
+// What the gateway holds bound: a registration plus where it came from. Manual registrations
+// (register()) live only in this process; store-derived ones are re-generated from deltas on
+// every replay — so a store one can evolve or retire underneath us, and a manual one cannot.
+interface Bound extends Registration {
+  readonly origin: "manual" | "store";
+}
+
 export class Gateway {
-  private readonly registered: Registered[] = [];
+  private registered: Bound[] = [];
   private registry = SchemaRegistry.build([]);
   private gql: GraphQLSchema | undefined;
+  // Materialization names are generation-qualified (see matName): the reactor has no
+  // deregister, so an evolved schema binds a FRESH materialization under a bumped generation
+  // and the superseded one is simply left behind (it costs memory and per-ingest CPU for the
+  // process lifetime — registration is administrative and rare; a reopen starts clean).
+  private generation = 0;
   // The write-through queue: raw-stream deltas append to the backend in arrival order. The
   // chain itself always resolves (later writes are still attempted); the FIRST failure latches
   // in `writeFailure`, and from then on the gateway is degraded: append refuses new work
@@ -159,24 +184,37 @@ export class Gateway {
     return gateway;
   }
 
-  // Re-register from the registrations the store holds — the surface as a function of the store.
-  // In a governed store only the operator's registrations bind (a hostile one roots nowhere).
-  // A schema that refs another must register after it; timestamp order is not enough (ties, same
-  // millisecond), so install in fixpoint rounds — each pass registers every pending schema whose
-  // refs now resolve, until a round adds nothing. A schema that never resolves is left unbound
-  // rather than crashing the boot.
+  // The seams gql.ts resolves through — one object, shared by every (re)build of the surface.
+  private gqlHooks(): GqlHooks {
+    return {
+      resolve: (name, entity) => this.resolvedNode(name, entity),
+      mutate: (name, entity, props, actorSeed) => this.mutateEntity(name, entity, props, actorSeed),
+      watch: (name, entity) => this.watchEntity(name, entity),
+    };
+  }
+
+  // Re-derive the store's slice of the surface and rebind if it moved. The desired set is the
+  // manual registrations (this process's own) plus every store registration whose schema
+  // GENERATES from surviving definitions — so an evolved definition reshapes the surface, and
+  // a negated one retires its type. Store registrations install in fixpoint rounds: a schema
+  // that refs another must validate after it, and timestamp order is not enough (ties, same
+  // millisecond). One that never resolves is left unbound rather than crashing the boot.
   private replayRegistrations(): void {
-    const known = new Set(this.registered.map((r) => r.schema.name));
-    let pending = readRegistrations(this.reactor, this.operatorAuthor).filter(
-      (r) => !known.has(r.schema.name),
-    );
+    const manual = this.registered.filter((r) => r.origin === "manual");
+    const accepted: Bound[] = [...manual];
+    let pending: Bound[] = readRegistrations(this.reactor, this.operatorAuthor).map((r) => ({
+      ...r,
+      origin: "store" as const,
+    }));
     for (;;) {
-      const stillPending: Registration[] = [];
+      const stillPending: Bound[] = [];
       let progressed = false;
       for (const reg of pending) {
+        const trial = [...accepted, reg];
         try {
-          this.register(reg.schema, reg.policy, reg.roots);
-          known.add(reg.schema.name);
+          SchemaRegistry.build(trial.map((r) => r.schema)); // dups, refs, cycles
+          buildGqlSchema(trial, this.gqlHooks()); // GraphQL name collisions
+          accepted.push(reg);
           progressed = true;
         } catch {
           stillPending.push(reg); // its refs are not registered yet — try again next round
@@ -185,6 +223,38 @@ export class Gateway {
       if (!progressed || stillPending.length === 0) break;
       pending = stillPending;
     }
+    if (!this.sameBound(accepted)) this.rebind(accepted);
+  }
+
+  // Is the desired set exactly what is already bound? Compared by everything that shapes the
+  // surface — name, body hash, policy, roots, entity, origin — order-blind.
+  private sameBound(next: readonly Bound[]): boolean {
+    const key = (r: Bound): string =>
+      [
+        r.schema.name,
+        termHash(r.schema.body),
+        JSON.stringify(policyToJson(r.policy)),
+        JSON.stringify(r.roots),
+        r.entity ?? "",
+        r.origin,
+      ].join(NUL);
+    if (next.length !== this.registered.length) return false;
+    const current = new Set(this.registered.map(key));
+    return next.every((r) => current.has(key(r)));
+  }
+
+  // Bind a whole desired set at once, under a fresh generation of materializations. The set was
+  // validated by the caller (fixpoint or register()), so nothing here can half-apply.
+  private rebind(next: Bound[]): void {
+    const registry = SchemaRegistry.build(next.map((r) => r.schema));
+    const gql = buildGqlSchema(next, this.gqlHooks());
+    this.generation += 1;
+    for (const reg of next) {
+      this.reactor.register(this.matName(reg.schema.name), reg.schema.body, reg.roots, registry);
+    }
+    this.registered = next;
+    this.registry = registry;
+    this.gql = gql;
   }
 
   // Persist a batch, THEN serve it. The batch is validated whole (one bad delta refuses the
@@ -238,10 +308,12 @@ export class Gateway {
 
   // Meta-resolve schema-defining deltas via SCHEMA_SCHEMA into a HyperSchema. The definition is
   // proven against a TRIAL set first — the store is append-only, so nothing lands until the
-  // deltas are known to define what the caller says they define.
+  // deltas are known to define what the caller says they define. The trial reads the LAWFUL
+  // slice (the operator's, in a governed store): a federated foreign definition at the same
+  // entity — newer, or malformed — must not shadow what the operator is proving.
   async loadSchema(deltas: Iterable<Delta>, entity: string): Promise<HyperSchema> {
     const batch = [...deltas];
-    const trial = this.reactor.snapshot();
+    const trial = lawfulSnapshot(this.reactor, this.operatorAuthor);
     for (const d of batch) trial.add(d);
     const schema = loadSchema(trial, entity); // throws here → nothing was persisted
     await this.append(batch);
@@ -254,44 +326,54 @@ export class Gateway {
   // failed registration leaves the gateway exactly as it was. Register dependencies first:
   // earlier schemas are visible to later refs.
   register(schema: HyperSchema, policy: Policy, roots: readonly string[]): void {
-    if (schema.name.includes("\u0000")) {
+    if (schema.name.includes(NUL)) {
       throw new Error("a schema name may not contain NUL — that alphabet is the gateway's own");
     }
-    const next = [...this.registered, { schema, policy, roots }];
+    const next: Bound[] = [...this.registered, { schema, policy, roots, origin: "manual" }];
     const registry = SchemaRegistry.build(next.map((r) => r.schema)); // refuses dups + bad refs
-    const gql = buildGqlSchema(next, {
-      resolve: (name, entity) => this.resolvedNode(name, entity),
-      mutate: (name, entity, props, actorSeed) => this.mutateEntity(name, entity, props, actorSeed),
-      watch: (name, entity) => this.watchEntity(name, entity),
-    }); // refuses collisions
-    this.reactor.register(schema.name, schema.body, roots, registry);
-    this.registered.push({ schema, policy, roots });
+    const gql = buildGqlSchema(next, this.gqlHooks()); // refuses collisions
+    // Incremental: only the NEW materialization registers, under the current generation.
+    this.reactor.register(this.matName(schema.name), schema.body, roots, registry);
+    this.registered = next;
     this.registry = registry;
     this.gql = gql;
   }
 
-  // Persist a registration (schema + policy + roots) as data, then register it, so the surface
-  // survives reopen with no code. A registration files under an ungoverned-tenant entity, so
-  // append authorizes it for the operator only — it is the operator's to shape the store.
+  // Publish a schema and its registration as data, then bind them, so the surface survives
+  // reopen with no code. Two deltas: the DEFINITION (schema-schema claims at the schema
+  // entity — proven by loadSchema before anything lands) and the REFERENCE that registers it.
+  // Republishing at the same entity is evolution: the running surface rebinds to the latest
+  // surviving definition. Both deltas file on ungoverned ground, so append authorizes them for
+  // the operator only — the store's shape is the operator's to shape.
   async publishRegistration(
     schema: HyperSchema,
     policy: Policy,
     roots: readonly string[],
     context?: RequestContext,
+    entity?: string,
   ): Promise<void> {
     const seed = context?.actor ?? this.options.seed;
     if (seed === undefined) {
       throw new Error("this gateway holds no signing seed and cannot publish a registration");
     }
-    // A governed store binds only the OPERATOR's registrations (replayRegistrations filters on
-    // it), so refuse a non-operator publish here rather than persist a delta that would look
+    // A governed store binds only the OPERATOR's law (readRegistrations filters on it), so
+    // refuse a non-operator publish here rather than persist deltas that would look
     // registered but silently never shape the surface.
     if (this.operatorAuthor !== undefined && authorForSeed(seed) !== this.operatorAuthor) {
       throw new Error("append rejected: only the operator may publish a registration");
     }
-    const reg: Registration = { schema, policy, roots };
-    const claims = registrationClaims(reg, authorForSeed(seed), this.nextTimestamp());
-    await this.append([signClaims(claims, seed)]);
+    const author = authorForSeed(seed);
+    const schemaEntity = schemaEntityFor(schema, entity);
+    const definition = signClaims(
+      publishSchemaClaims(schema, schemaEntity, author, this.nextTimestamp()),
+      seed,
+    );
+    await this.loadSchema([definition], schemaEntity); // proves, then persists the definition
+    const reference = signClaims(
+      registrationClaims(schemaEntity, policy, roots, author, this.nextTimestamp()),
+      seed,
+    );
+    await this.append([reference]);
     this.replayRegistrations();
   }
 
@@ -368,6 +450,16 @@ export class Gateway {
     return this.operatorAuthor;
   }
 
+  // The reactor materialization currently backing a registered schema — internal names are
+  // generation-qualified, so anything that binds to a materialization by name (the runner's
+  // BindingSpecs) resolves through here. An unregistered name passes through unchanged: it may
+  // name a materialization registered outside the gateway, or an orphan that simply waits.
+  // NOTE: the resolution is AS OF NOW — after an evolution, work bound to the superseded
+  // generation keeps watching the old shape until it re-attaches.
+  materializationFor(name: string): string {
+    return this.registered.some((r) => r.schema.name === name) ? this.matName(name) : name;
+  }
+
   private nextTimestamp(): number {
     this.lastMutationTs = Math.max(Date.now(), this.lastMutationTs + 1);
     return this.lastMutationTs;
@@ -375,7 +467,7 @@ export class Gateway {
 
   // --- the read seam ---------------------------------------------------------------------------
 
-  private def(name: string): Registered {
+  private def(name: string): Bound {
     const def = this.registered.find((r) => r.schema.name === name);
     if (def === undefined) throw new Error(`no registered schema named ${name}`);
     return def;
@@ -384,15 +476,22 @@ export class Gateway {
   // The materialization watching (schema, entity) — the schema's own when the entity is a
   // registered root, a lazily-created cached one otherwise. Lazy names live in a NUL-separated
   // namespace no schema name can enter (register() refuses NUL), so they can never collide.
+  // Generation-qualified (see the class note): an evolved schema binds a fresh materialization
+  // under the bumped generation; a superseded one is left behind, and a stream still attached
+  // to it keeps watching the old shape until it resubscribes.
+  private matName(name: string): string {
+    return ["", `g${this.generation}`, name].join(NUL);
+  }
+
   private lazyMatName(name: string, entity: string): string {
-    return `\u0000${name}\u0000${entity}`;
+    return [this.matName(name), entity].join(NUL);
   }
 
   private static readonly MAX_LAZY_MATS = 1024;
 
   private matFor(name: string, entity: string): string {
     const def = this.def(name);
-    if (def.roots.includes(entity)) return name;
+    if (def.roots.includes(entity)) return this.matName(name);
     const matName = this.lazyMatName(name, entity);
     if (!this.lazyMats.has(matName)) {
       // The reactor has no deregister, so every watched entity costs memory and per-ingest CPU
@@ -414,7 +513,7 @@ export class Gateway {
   // registered root or lazy — and batch evaluation otherwise (the spike proved them identical).
   private gather(name: string, entity: string): HView {
     const live =
-      this.reactor.materializedView(name, entity) ??
+      this.reactor.materializedView(this.matName(name), entity) ??
       this.reactor.materializedView(this.lazyMatName(name, entity), entity);
     if (live !== undefined) return live;
     const def = this.def(name);

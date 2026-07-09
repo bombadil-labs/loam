@@ -16,8 +16,10 @@
 
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { parsePolicy, parseTerm, type HyperSchema } from "@bombadil/rhizomatic";
 import { toWire } from "../federation/wire.js";
 import type { Gateway, QueryResult, RequestContext } from "../gateway/gateway.js";
+import { schemaEntityFor } from "../gateway/registration.js";
 
 export interface TokenIdentity {
   readonly actor?: string; // a signing seed: requests act as this identity
@@ -81,6 +83,42 @@ const json = (res: ServerResponse, status: number, body: unknown): void => {
   res.writeHead(status, { "content-type": "application/json" });
   res.end(text);
 };
+
+// Parse and perform a registration request: { schema: { name, alg?, body }, policy, roots,
+// entity? }. The term and policy travel as their JSON profiles (rhizomatic's own); anything
+// that will not parse, or will not register, throws — the caller answers 400 with the reason.
+// Operator gating happens BEFORE this is called: shaping the store is constitutional.
+async function performRegistration(
+  gateway: Gateway,
+  raw: unknown,
+): Promise<{ registered: string; entity: string }> {
+  const o = raw as {
+    schema?: { name?: unknown; alg?: unknown; body?: unknown };
+    policy?: unknown;
+    roots?: unknown;
+    entity?: unknown;
+  } | null;
+  if (o === null || typeof o !== "object" || o.schema === null || typeof o.schema !== "object") {
+    throw new Error("register wants { schema: { name, alg?, body }, policy, roots, entity? }");
+  }
+  const { name, alg, body } = o.schema;
+  if (typeof name !== "string" || name.length === 0) {
+    throw new Error("register: schema.name must be a non-empty string");
+  }
+  if (alg !== undefined && typeof alg !== "number") {
+    throw new Error("register: schema.alg must be a number when given");
+  }
+  if (!Array.isArray(o.roots) || o.roots.some((r) => typeof r !== "string")) {
+    throw new Error("register: roots must be an array of entity ids");
+  }
+  if (o.entity !== undefined && typeof o.entity !== "string") {
+    throw new Error("register: entity must be a string when given");
+  }
+  const schema: HyperSchema = { name, alg: alg ?? 1, body: parseTerm(body) };
+  const policy = parsePolicy(o.policy);
+  await gateway.publishRegistration(schema, policy, o.roots as string[], undefined, o.entity);
+  return { registered: name, entity: schemaEntityFor(schema, o.entity) };
+}
 
 export async function serve(options: ServeOptions): Promise<ServerHandle> {
   const host = options.host ?? "127.0.0.1";
@@ -222,6 +260,30 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         required: ["mutation"],
       },
     },
+    {
+      name: "loam_register",
+      description:
+        "Define a schema as schema-schema deltas and register it (operator token only). " +
+        "The surface serves the new type immediately; republishing at the same entity evolves it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          schema: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              alg: { type: "number" },
+              body: { type: "object", description: "the hyperschema body, term JSON" },
+            },
+            required: ["name", "body"],
+          },
+          policy: { type: "object", description: "the policy, policy JSON" },
+          roots: { type: "array", items: { type: "string" } },
+          entity: { type: "string", description: "the schema entity (default schema:<name>)" },
+        },
+        required: ["schema", "policy", "roots"],
+      },
+    },
   ];
 
   const handleMcp = async (
@@ -278,6 +340,31 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       case "tools/call": {
         const params = rpc.params ?? {};
         const name = params["name"];
+        if (name === "loam_register") {
+          // The same constitutional gate as POST /register: shaping the store is the operator's.
+          if (identity.operator !== true) {
+            reply({
+              content: [
+                {
+                  type: "text",
+                  text: "registration is constitutional: it requires an operator token",
+                },
+              ],
+              isError: true,
+            });
+            return;
+          }
+          try {
+            const outcome = await performRegistration(gateway, params["arguments"] ?? {});
+            reply({ content: [{ type: "text", text: JSON.stringify(outcome) }] });
+          } catch (err) {
+            reply({
+              content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
+              isError: true,
+            });
+          }
+          return;
+        }
         const args = (params["arguments"] ?? {}) as {
           query?: string;
           mutation?: string;
@@ -346,6 +433,36 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         case "mcp":
           await handleMcp(gateway, identity, req, res);
           return;
+        case "register": {
+          // Registration is constitutional — the schema-schema mutation mechanism, served. An
+          // HTTP endpoint rather than a GraphQL mutation because an empty store has no GraphQL
+          // surface to mutate through; this is how it gains one.
+          if (identity.operator !== true) {
+            json(res, 403, {
+              errors: ["registration is constitutional: it requires an operator token"],
+            });
+            return;
+          }
+          let raw: unknown;
+          try {
+            raw = JSON.parse(await readBody(req, maxBody));
+          } catch (err) {
+            if (err instanceof BodyTooLarge) {
+              json(res, 413, { errors: ["request body too large"] });
+              return;
+            }
+            json(res, 400, {
+              errors: ["the body must be JSON: { schema, policy, roots, entity? }"],
+            });
+            return;
+          }
+          try {
+            json(res, 200, await performRegistration(gateway, raw));
+          } catch (err) {
+            json(res, 400, { errors: [err instanceof Error ? err.message : String(err)] });
+          }
+          return;
+        }
         case "federate":
           // Federation is an OPERATOR-level trust relationship: the offer hands a peer the raw
           // signed deltas (grants, memberships, registrations included) that the GraphQL surface

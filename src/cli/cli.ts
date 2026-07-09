@@ -6,8 +6,11 @@
 // live ServerHandle so a caller (a test, or a supervisor) can drive and close it. The default
 // `serve` blocks until the process is signalled.
 
+import { readFileSync } from "node:fs";
+import { parsePolicy, parseTerm, type HyperSchema } from "@bombadil/rhizomatic";
 import { Gateway } from "../gateway/gateway.js";
 import { assembleGenesis } from "../gateway/genesis.js";
+import { schemaEntityFor } from "../gateway/registration.js";
 import { serve, type ServerHandle } from "../server/http.js";
 import { SqliteBackend } from "../store/sqlite.js";
 import { parseArgs, rejectUnknown } from "./args.js";
@@ -30,9 +33,10 @@ const HELP = `loam — a general database grown on rhizomatic
 usage: loam <command> [options]
 
 commands:
-  init     create a home, mint or import the operator seed, write config
-  serve    boot a store and serve it (GraphQL + SSE + MCP over HTTP)
-  store    inspect a store
+  init      create a home, mint or import the operator seed, write config
+  serve     boot a store and serve it (GraphQL + SSE + MCP over HTTP)
+  register  define a schema from a file and register it in the home's store
+  store     inspect a store
 
 run \`loam <command> --help\` for a command's options.`;
 
@@ -120,6 +124,85 @@ async function cmdServe(
   return 0;
 }
 
+// Register a schema from a file: { name, alg?, body, policy, roots, entity? } — the body and
+// policy in their JSON profiles. The definition and its registration land as operator-signed
+// deltas in the home's store; the next serve generates the surface from them. Offline by
+// design (the store is single-writer): register before serving, or use POST /:mount/register
+// against a running server.
+async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
+  const parsed = parseArgs(args, new Set());
+  rejectUnknown(parsed, new Set(["home", "store"]), "register");
+  const file = parsed.positionals[0];
+  if (file === undefined) {
+    io.err(
+      "register wants a schema file: `loam register <schema.json>` — " +
+        "{ name, alg?, body, policy, roots, entity? }",
+    );
+    return 2;
+  }
+  if (parsed.positionals.length > 1) {
+    io.err("register takes exactly one file");
+    return 2;
+  }
+  let raw: string;
+  try {
+    raw = readFileSync(file, "utf8");
+  } catch (err) {
+    io.err(`register: cannot read ${file}: ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
+  }
+  const spec = JSON.parse(raw) as {
+    name?: unknown;
+    alg?: unknown;
+    body?: unknown;
+    policy?: unknown;
+    roots?: unknown;
+    entity?: unknown;
+  };
+  if (typeof spec.name !== "string" || spec.name.length === 0) {
+    io.err("register: the file must name the schema (a non-empty `name`)");
+    return 2;
+  }
+  if (!Array.isArray(spec.roots) || spec.roots.some((r) => typeof r !== "string")) {
+    io.err("register: the file must carry `roots`, an array of entity ids");
+    return 2;
+  }
+  if (spec.entity !== undefined && typeof spec.entity !== "string") {
+    io.err("register: `entity` must be a string when given");
+    return 2;
+  }
+  const schema: HyperSchema = {
+    name: spec.name,
+    alg: typeof spec.alg === "number" ? spec.alg : 1,
+    body: parseTerm(spec.body),
+  };
+  const policy = parsePolicy(spec.policy);
+
+  const home = parsed.flags.get("home") ?? defaultHome();
+  const init = initHome(home);
+  if (init.created) io.out(`loam: initialized ${home}\n  operator ${init.operator}`);
+  const gateway = await Gateway.boot(
+    new SqliteBackend(storePath(home, parsed.flags.get("store"))),
+    assembleGenesis({ operatorSeed: readSeed(home) }),
+  );
+  try {
+    await gateway.publishRegistration(
+      schema,
+      policy,
+      spec.roots as string[],
+      undefined,
+      spec.entity,
+    );
+  } finally {
+    await gateway.close();
+  }
+  io.out(
+    `loam: registered ${spec.name} at ${schemaEntityFor(schema, spec.entity)}\n` +
+      `  the definition is deltas now — the next serve grows the surface from it`,
+  );
+  return 0;
+}
+
 async function cmdStore(args: readonly string[], io: IO): Promise<number> {
   const parsed = parseArgs(args, new Set());
   rejectUnknown(parsed, new Set(["home", "store"]), "store");
@@ -166,6 +249,8 @@ export async function run(
         return cmdInit(rest, io);
       case "serve":
         return await cmdServe(rest, io, options);
+      case "register":
+        return await cmdRegister(rest, io);
       case "store":
         return await cmdStore(rest, io);
       default:

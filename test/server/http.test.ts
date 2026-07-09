@@ -292,3 +292,110 @@ describe("MCP: the same gateway as JSON-RPC tools", () => {
     expect(res.status).toBe(401);
   });
 });
+
+// The turnkey path: a served store gains its first (or next) schema with nothing but curl.
+// Registration is constitutional, so the gate is the operator token — authentication is not
+// authorization here any more than anywhere else.
+describe("POST /:mount/register: the schema-schema mutation mechanism, served", () => {
+  const PICK = { pick: { order: { byTimestamp: "desc" } } };
+  const rockBody = {
+    schema: {
+      name: "Rock",
+      alg: 1,
+      body: {
+        op: "group",
+        key: "byTargetContext",
+        in: {
+          op: "select",
+          pred: { hasPointer: { targetEntity: { var: "root" } } },
+          in: { op: "mask", policy: "drop", in: "input" },
+        },
+      },
+    },
+    policy: { props: { color: PICK }, default: PICK },
+    roots: ["rock:1"],
+  };
+  const register = (mount: string, token: string, body: unknown) =>
+    fetch(`${base}/${mount}/register`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    });
+
+  it("an operator registers a schema over HTTP; the new type answers immediately", async () => {
+    const res = await register("meadow", "op-token", rockBody);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { registered: string; entity: string };
+    expect(body.registered).toBe("Rock");
+    expect(body.entity).toBe("schema:Rock");
+
+    // write and read through the brand-new surface — no restart, no library
+    const write = await gql(
+      "meadow",
+      "op-token",
+      `mutation { rock(entity: "rock:1", color: "basalt") { color } }`,
+    );
+    const written = (await write.json()) as { data: { rock: { color: string } } };
+    expect(written.data.rock.color).toBe("basalt");
+    // and the pre-existing manual registration (Plant) still serves beside it
+    const both = await gql("meadow", "op-token", `{ plant(entity: "plant:moss") { _hex } }`);
+    expect(((await both.json()) as { errors?: string[] }).errors).toBeUndefined();
+  });
+
+  it("a non-operator token is 403: registration is constitutional", async () => {
+    const res = await register("garden", "alice-token", rockBody);
+    expect(res.status).toBe(403);
+  });
+
+  it("a malformed registration is 400 with a reason, and nothing binds", async () => {
+    const res = await register("meadow", "op-token", {
+      schema: { name: "Broken", alg: 1, body: { op: "no-such-op" } },
+      policy: { default: PICK },
+      roots: [],
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { errors: string[] };
+    expect(body.errors.length).toBeGreaterThan(0);
+    const gone = await gql("meadow", "op-token", `{ broken(entity: "x") { _hex } }`);
+    expect(((await gone.json()) as { errors?: string[] }).errors).toBeDefined();
+  });
+
+  it("loam_register rides MCP under the same operator gate", async () => {
+    const pondBody = {
+      ...rockBody,
+      schema: { ...rockBody.schema, name: "Pond" },
+      roots: ["pond:1"],
+    };
+    const denied = await rpcOn("garden", "alice-token", {
+      method: "tools/call",
+      params: { name: "loam_register", arguments: pondBody },
+    });
+    const deniedBody = (await denied.json()) as {
+      result: { content: Array<{ text: string }>; isError?: boolean };
+    };
+    expect(deniedBody.result.isError).toBe(true);
+    expect(deniedBody.result.content[0]!.text).toMatch(/operator/);
+
+    const ok = await rpcOn("garden", "op-token", {
+      method: "tools/call",
+      params: { name: "loam_register", arguments: pondBody },
+    });
+    const okBody = (await ok.json()) as {
+      result: { content: Array<{ text: string }>; isError?: boolean };
+    };
+    expect(okBody.result.isError).not.toBe(true);
+    const listed = await rpcOn("garden", "alice-token", { method: "tools/list", params: {} });
+    const tools = ((await listed.json()) as { result: { tools: Array<{ name: string }> } }).result
+      .tools;
+    expect(tools.map((t) => t.name)).toContain("loam_register");
+    const answer = await gql("garden", "alice-token", `{ pond(entity: "pond:1") { _hex } }`);
+    expect(((await answer.json()) as { errors?: string[] }).errors).toBeUndefined();
+  });
+
+  const rpcOn = (mount: string, token: string, body: Record<string, unknown>) =>
+    fetch(`${base}/${mount}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, ...body }),
+    });
+});

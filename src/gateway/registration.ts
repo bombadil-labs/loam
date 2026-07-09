@@ -1,14 +1,22 @@
-// A registration is data. Schema, policy, and roots — the three inputs to `register` — are
-// serialized into one delta filed at a registration entity under the constitutional context
-// `loam.registration`. Because they are deltas, the GraphQL surface is a function of the store:
-// a reopened gateway replays them and re-registers, with no re-registration code and no drift
-// between what a store holds and what it will answer.
+// A registration is a REFERENCE, not a carrier. The schema itself is DEFINED by schema-schema
+// deltas — rhizomatic's `publishSchemaClaims` shape — filed at a schema entity (`schema:<Name>`
+// by default); the registration delta, under the constitutional context `loam.registration`,
+// holds only a pointer to that entity, the policy as canonical JSON, and the roots. The GraphQL
+// surface is therefore GENERATED: `readRegistrations` meta-resolves each referenced entity via
+// `loadSchema` over the store's surviving definitions, so evolution is append (republish at the
+// same entity) and deprecation is negation (a definition with no survivor binds nothing).
+//
+// Policy carries no schema-schema and needs none: it is the reader's lens, not the entity's
+// shape, and travels as canonical JSON (rhizomatic's own profile, so parse∘serialize is
+// identity). In a governed store only the operator's law binds — definitions, registrations,
+// and the negations that retire them are all read from the operator-authored slice, so a
+// federated foreign delta merges as data but reshapes nothing.
 
 import {
+  DeltaSet,
+  loadSchema,
   parsePolicy,
-  parseTerm,
   policyToJson,
-  termToJson,
   type Claims,
   type HyperSchema,
   type Policy,
@@ -21,36 +29,58 @@ export interface Registration {
   readonly schema: HyperSchema;
   readonly policy: Policy;
   readonly roots: readonly string[];
+  // The schema entity the definition lives at. Identity is the ENTITY, not the name:
+  // republishing here evolves; a different entity is a different schema.
+  readonly entity?: string;
 }
 
-// The registration entity for a schema name — one registration per name, latest wins.
-const registrationEntity = (schemaName: string): string => `registration:${schemaName}`;
+export const schemaEntityFor = (schema: HyperSchema, entity?: string): string =>
+  entity ?? `schema:${schema.name}`;
 
-// Serialize (schema, policy, roots) into a signed registration's claims. The body and policy
-// travel as canonical JSON strings (rhizomatic's own profile, so parse∘serialize is identity).
-export function registrationClaims(reg: Registration, author: string, timestamp: number): Claims {
-  const entity = registrationEntity(reg.schema.name);
+// The registration entity for a schema entity — one registration per schema entity, latest wins.
+const registrationEntity = (schemaEntity: string): string => `registration:${schemaEntity}`;
+
+// Serialize a registration's claims: a pointer to the schema entity plus policy and roots.
+// The schema-entity pointer targets the "registration" context, NEVER "definition" — the
+// definition bucket is loadSchema's alone, and a registration must not masquerade in it.
+export function registrationClaims(
+  schemaEntity: string,
+  policy: Policy,
+  roots: readonly string[],
+  author: string,
+  timestamp: number,
+): Claims {
   return {
     timestamp,
     author,
     pointers: [
       {
         role: "registers",
-        target: { kind: "entity", entity: { id: entity, context: CTX_REGISTRATION } },
+        target: {
+          kind: "entity",
+          entity: { id: registrationEntity(schemaEntity), context: CTX_REGISTRATION },
+        },
       },
-      { role: "schemaName", target: { kind: "primitive", value: reg.schema.name } },
-      { role: "alg", target: { kind: "primitive", value: reg.schema.alg } },
       {
-        role: "body",
-        target: { kind: "primitive", value: JSON.stringify(termToJson(reg.schema.body)) },
+        role: "schema",
+        target: { kind: "entity", entity: { id: schemaEntity, context: "registration" } },
       },
       {
         role: "policy",
-        target: { kind: "primitive", value: JSON.stringify(policyToJson(reg.policy)) },
+        target: { kind: "primitive", value: JSON.stringify(policyToJson(policy)) },
       },
-      { role: "roots", target: { kind: "primitive", value: JSON.stringify(reg.roots) } },
+      { role: "roots", target: { kind: "primitive", value: JSON.stringify(roots) } },
     ],
   };
+}
+
+// The slice of the store whose law binds: everything when ungoverned, the operator's deltas
+// when governed. Definitions, registrations, and negations are all read from this set — a
+// foreign negation can no more retire the operator's schema than a foreign definition can
+// replace it.
+export function lawfulSnapshot(reactor: Reactor, operator?: string): DeltaSet {
+  if (operator === undefined) return reactor.snapshot();
+  return DeltaSet.from([...reactor.snapshot()].filter((d) => d.claims.author === operator));
 }
 
 const primitive = (claims: Claims, role: string): string | number | boolean | undefined => {
@@ -58,48 +88,80 @@ const primitive = (claims: Claims, role: string): string | number | boolean | un
   return p?.target.kind === "primitive" ? p.target.value : undefined;
 };
 
-// Every surviving registration in the store — the latest per schema name, negations honored. In
-// a governed store (an operator is named) only the operator's registrations bind, so one planted
-// while the store was ungoverned cannot silently reshape the surface once an operator opens it.
+// Every surviving registration, its schema GENERATED from the surviving definition deltas.
+// The latest registration per schema entity names the policy and roots; `loadSchema` over the
+// lawful slice yields the schema itself. A registration whose definition does not survive (or
+// never arrived, or is malformed) binds nothing — unbound, never a crash.
 export function readRegistrations(reactor: Reactor, operator?: string): Registration[] {
-  const latest = new Map<string, { reg: Registration; timestamp: number; id: string }>();
-  for (const delta of reactor.snapshot()) {
-    const files = delta.claims.pointers.some(
+  const lawful = lawfulSnapshot(reactor, operator);
+  const lawfulIds = new Set([...lawful].map((d) => d.id));
+  const negated = (id: string): boolean =>
+    reactor.negationsOf(id).some((negation) => lawfulIds.has(negation));
+
+  interface Candidate {
+    schemaEntity: string;
+    policy: Policy;
+    roots: readonly string[];
+    timestamp: number;
+    id: string;
+  }
+  const latest = new Map<string, Candidate>();
+  for (const delta of lawful) {
+    const files = delta.claims.pointers.find(
       (p) => p.target.kind === "entity" && p.target.entity.context === CTX_REGISTRATION,
     );
-    if (!files) continue;
-    if (reactor.negationsOf(delta.id).length > 0) continue;
-    if (operator !== undefined && delta.claims.author !== operator) continue;
+    if (files === undefined) continue;
+    if (negated(delta.id)) continue;
 
-    const schemaName = primitive(delta.claims, "schemaName");
-    const alg = primitive(delta.claims, "alg");
-    const body = primitive(delta.claims, "body");
-    const policy = primitive(delta.claims, "policy");
-    const roots = primitive(delta.claims, "roots");
+    const schemaRef = delta.claims.pointers.find(
+      (p) => p.role === "schema" && p.target.kind === "entity",
+    );
+    const policyJson = primitive(delta.claims, "policy");
+    const rootsJson = primitive(delta.claims, "roots");
     if (
-      typeof schemaName !== "string" ||
-      typeof alg !== "number" ||
-      typeof body !== "string" ||
-      typeof policy !== "string" ||
-      typeof roots !== "string"
+      schemaRef?.target.kind !== "entity" ||
+      typeof policyJson !== "string" ||
+      typeof rootsJson !== "string"
     ) {
       continue; // a malformed registration binds nothing
     }
-    const reg: Registration = {
-      schema: { name: schemaName, alg, body: parseTerm(JSON.parse(body)) },
-      policy: parsePolicy(JSON.parse(policy)),
-      roots: JSON.parse(roots) as string[],
+    let policy: Policy;
+    let roots: string[];
+    try {
+      policy = parsePolicy(JSON.parse(policyJson));
+      roots = JSON.parse(rootsJson) as string[];
+    } catch {
+      continue;
+    }
+    const schemaEntity = schemaRef.target.entity.id;
+    const key = files.target.kind === "entity" ? files.target.entity.id : schemaEntity;
+    const candidate: Candidate = {
+      schemaEntity,
+      policy,
+      roots,
+      timestamp: delta.claims.timestamp,
+      id: delta.id,
     };
-    const prior = latest.get(schemaName);
-    const candidate = { reg, timestamp: delta.claims.timestamp, id: delta.id };
+    const prior = latest.get(key);
     if (
       prior === undefined ||
       candidate.timestamp > prior.timestamp ||
       (candidate.timestamp === prior.timestamp && candidate.id > prior.id)
     ) {
-      latest.set(schemaName, candidate);
+      latest.set(key, candidate);
     }
   }
-  // Registrations dependency-order themselves loosely by timestamp so refs resolve on replay.
-  return [...latest.values()].sort((a, b) => a.timestamp - b.timestamp).map((v) => v.reg);
+
+  // Loosely dependency-ordered by timestamp so refs tend to resolve on replay; the gateway's
+  // fixpoint handles what order cannot (ties, forward refs).
+  const out: Registration[] = [];
+  for (const cand of [...latest.values()].sort((a, b) => a.timestamp - b.timestamp)) {
+    try {
+      const schema = loadSchema(lawful, cand.schemaEntity);
+      out.push({ schema, policy: cand.policy, roots: cand.roots, entity: cand.schemaEntity });
+    } catch {
+      // no surviving (or a malformed) definition: the registration is unbound, not fatal
+    }
+  }
+  return out;
 }

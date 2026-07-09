@@ -126,6 +126,25 @@ return it). Nothing is reachable except through GraphQL over a schema — includ
 reflective (resolving a schema is itself a resolve); snapshots amortize the reflection (meta-resolve
 once at snapshot time, read cheap thereafter).
 
+**Registration (decided 2026-07-09, step 10 — cutover from step 7's blob form).** A schema is
+DEFINED by schema-schema deltas — rhizomatic's `publishSchemaClaims` shape (`rdb.schema.defines` /
+`.name` / `.alg` / `.term`) filed at a schema entity, `schema:<Name>` by default. A REGISTRATION is
+a separate delta under `loam.registration` holding only references: a pointer to the schema entity,
+the policy as canonical JSON, and the roots. The GraphQL surface is generated: `readRegistrations`
+meta-resolves each referenced entity via `loadSchema` over the store's surviving definitions —
+so **evolution is append** (republish at the same entity; the running gateway rebinds — the
+reactor has no deregister, so live materialization names are generation-qualified internally —
+and a reopened store replays the latest shape) and **deprecation is negation** (a negated
+definition leaves its registration unbound; the type drops from the surface). The schema's
+identity is the **entity**, not the name. In a governed store only operator-authored definitions
+and registrations bind — a federated foreign definition merges as a delta but reshapes nothing
+(the same operator-rooting that keeps foreign grants inert). Policy carries no schema-schema and
+needs none: it is the reader's lens, not the entity's shape, and travels as canonical JSON.
+The register surface is `POST /:mount/register` (operator token), the `loam_register` MCP tool,
+and `loam register <file>` — an HTTP endpoint rather than a GraphQL mutation because an empty
+store has no GraphQL surface to mutate through; the endpoint IS the schema-schema mutation
+mechanism, and GraphQL stays strictly derived-from-what-is-registered.
+
 ## 6. Functions & the runner (roles across a hub + a flat ring)
 
 The reactive substrate is three **roles**, not three layers:

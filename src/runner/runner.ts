@@ -115,7 +115,13 @@ export const Runner = {
         skipped.push(spec.name);
         continue;
       }
-      host.install(spec, fn, options.seed);
+      // A spec names its materialization by the SCHEMA name (data outlives process details);
+      // the gateway resolves it to the generation-qualified materialization backing it now.
+      host.install(
+        { ...spec, materialization: gateway.materializationFor(spec.materialization) },
+        fn,
+        options.seed,
+      );
       installed.push(spec.name);
     }
     gateway.animate(host);

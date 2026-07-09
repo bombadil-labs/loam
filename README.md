@@ -47,6 +47,9 @@ store driver — a native addon with prebuilt binaries for common platforms).
 # create a home directory and mint an operator identity (the seed is written 0600, never printed)
 loam init --home ./my-store
 
+# give the store a shape: define + register a schema from a file (see "Schemas are data")
+loam register plant.json --home ./my-store
+
 # serve it over HTTP with a bearer token
 loam serve --http --home ./my-store --token "$(openssl rand -hex 16)" --port 4321
 
@@ -71,10 +74,18 @@ A served store exposes three surfaces per mount, behind a `Bearer` token:
 
 - **`POST /:mount/graphql`** — `{ query, variables? }` → `{ data, errors }`. Both queries and
   mutations; the mutation acts as the token's identity.
-- **`GET /:mount/subscribe?query=…`** — a `text/event-stream` (SSE): an initial snapshot, then one
-  `data:` frame per change (`_fromHex → _hex`, `_changed`, and the fields).
+- **`GET /:mount/subscribe?query=…`** — a `text/event-stream` (SSE). The query must be a
+  `subscription` operation (`subscription { plant(entity: "…") { height _hex _fromHex _changed } }`):
+  an initial snapshot, then one `data:` frame per change (`_fromHex → _hex`, `_changed`, and the
+  fields).
 - **`POST /:mount/mcp`** — a minimal MCP JSON-RPC surface (`initialize`, `tools/list`,
-  `tools/call`) exposing `loam_query` and `loam_mutate`.
+  `tools/call`) exposing `loam_query`, `loam_mutate`, and `loam_register`.
+- **`POST /:mount/register`** — `{ schema: { name, alg?, body }, policy, roots, entity? }` →
+  `{ registered, entity }` (operator token only). The schema-schema mutation mechanism, served:
+  the definition and its registration land as deltas, and the surface serves the new type
+  immediately. Republishing at the same entity evolves it. (An endpoint rather than a GraphQL
+  mutation because an empty store has no GraphQL surface to mutate through — this is how it
+  gains one.)
 - **`GET /:mount/federate`** — the store's published deltas as wire JSON (operator token only).
 
 A junk or missing token is `401`; an unknown mount is `404` (only to the authenticated — an
@@ -125,8 +136,60 @@ const server = await serve({
 ```
 
 `Gateway.boot(backend, genesis)` opens a store already governed and registered from a genesis
-delta-set (`assembleGenesis({ operatorSeed, registrations, grants })`) — registrations are stored
-as deltas, so a reopened store serves its schemas with no re-registration code.
+delta-set (`assembleGenesis({ operatorSeed, registrations, grants })`). `register` binds in this
+process only; `publishRegistration` (and the genesis) lands the schema **as deltas**, so a
+reopened store grows its surface back with no re-registration code.
+
+## Schemas are data
+
+A schema is not configuration — it is DEFINED by deltas, like everything else. Registering a
+schema lands two of them:
+
+- a **definition** — rhizomatic's schema-schema claims (`publishSchemaClaims` shape: name, alg,
+  and the body as canonical CBOR) filed at a schema entity, `schema:<Name>` by default;
+- a **registration** — a reference under `loam.registration`: a pointer to that entity, the
+  policy as canonical JSON, and the roots. No schema body rides it.
+
+The GraphQL surface is **generated**: on boot (and after every publish) the gateway
+meta-resolves each referenced entity via `loadSchema` over the surviving definitions. The
+consequences are the whole point:
+
+- **Evolution is append.** Republish a definition at the same entity — via
+  `publishRegistration`, `POST /:mount/register`, or `loam register` — and the surface serves
+  the new shape, live, no restart. The schema's identity is the *entity*, not the name.
+- **Deprecation is negation.** Negate a definition and its registration is unbound; the type
+  drops from the surface. Nothing is deleted; the store only learns.
+- **Foreign law stays inert.** In a governed store only operator-authored definitions and
+  registrations bind — a peer's federated definition merges as data and reshapes nothing, the
+  same discipline that keeps foreign grants powerless.
+- Streams subscribed before an evolution keep watching the shape they subscribed to; new
+  subscriptions see the new shape.
+
+The `loam register` file (also the `POST /register` body, under a `schema` key):
+
+```json
+{
+  "name": "Plant",
+  "alg": 1,
+  "body": {
+    "op": "group",
+    "key": "byTargetContext",
+    "in": {
+      "op": "select",
+      "pred": { "hasPointer": { "targetEntity": { "var": "root" } } },
+      "in": { "op": "mask", "policy": "drop", "in": "input" }
+    }
+  },
+  "policy": {
+    "props": { "height": { "pick": { "order": { "byTimestamp": "desc" } } } },
+    "default": { "pick": { "order": { "byTimestamp": "desc" } } }
+  },
+  "roots": ["plant:fern"]
+}
+```
+
+`loam register` writes to the home's store directly, so run it before `loam serve` (the store is
+single-writer); a running server takes the same registration over `POST /:mount/register`.
 
 ## Capabilities
 

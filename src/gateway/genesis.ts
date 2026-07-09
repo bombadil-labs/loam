@@ -5,8 +5,14 @@
 // (the second boot's deltas are the first's, by id) and authorized (the operator needs no
 // grant). A store's shape is thus reproducible from a single seed value.
 
-import { authorForSeed, signClaims, type Claims, type Delta } from "@bombadil/rhizomatic";
-import { registrationClaims, type Registration } from "./registration.js";
+import {
+  authorForSeed,
+  publishSchemaClaims,
+  signClaims,
+  type Claims,
+  type Delta,
+} from "@bombadil/rhizomatic";
+import { registrationClaims, schemaEntityFor, type Registration } from "./registration.js";
 
 export interface GenesisSpec {
   readonly operatorSeed: string;
@@ -51,7 +57,13 @@ export function assembleGenesis(spec: GenesisSpec): Genesis {
   const deltas: Delta[] = [signClaims(operatorMarkerClaims(operator), seed)];
   let clock = 1;
   for (const reg of spec.registrations ?? []) {
-    deltas.push(signClaims(registrationClaims(reg, operator, clock++), seed));
+    // Two deltas per registration: the DEFINITION (schema-schema claims at the schema entity)
+    // and the REFERENCE that registers it. Deterministic timestamps keep boot idempotent.
+    const entity = schemaEntityFor(reg.schema, reg.entity);
+    deltas.push(signClaims(publishSchemaClaims(reg.schema, entity, operator, clock++), seed));
+    deltas.push(
+      signClaims(registrationClaims(entity, reg.policy, reg.roots, operator, clock++), seed),
+    );
   }
   for (const claims of spec.grants ?? []) deltas.push(signClaims(claims, seed));
   for (const claims of spec.extra ?? []) deltas.push(signClaims(claims, seed));

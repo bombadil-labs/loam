@@ -62,7 +62,9 @@ async function plantStore(): Promise<{ gateway: Gateway; backend: MemoryBackend 
 }
 
 const avgAt = (gateway: Gateway) =>
-  gateway.reactor.materializedView("Plant", FERN)?.props.get("derived:avgHeight") ?? [];
+  gateway.reactor
+    .materializedView(gateway.materializationFor("Plant"), FERN)
+    ?.props.get("derived:avgHeight") ?? [];
 
 describe("the runner: definitions in the store, execution in a peer client", () => {
   it("passive: a definition IS present in the store, yet without a runner computes nothing", async () => {
@@ -136,7 +138,7 @@ describe("the runner: definitions in the store, execution in a peer client", () 
     const reopened = await Gateway.open(backend);
     reopened.register(PLANT, PLANT_POLICY, [FERN]);
     const entries = reopened.reactor
-      .materializedView("Plant", FERN)!
+      .materializedView(reopened.materializationFor("Plant"), FERN)!
       .props.get("derived:avgHeight");
     expect(entries).toHaveLength(1);
     await gateway.close();

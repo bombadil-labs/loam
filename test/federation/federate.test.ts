@@ -183,6 +183,54 @@ describe("federation: two instances meet and merge", () => {
     void a;
   });
 
+  it("a peer's schema definition merges as data but never reshapes the local surface", async () => {
+    // B's operator publishes its own law: Plant, defined and registered through the store
+    const OP_B_LOCAL = "0c".repeat(32);
+    const backend = new MemoryBackend();
+    const b = await Gateway.open(backend, { seed: OP_B_LOCAL });
+    await b.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+    await b.query(`mutation { plant(entity: "${FERN}", height: 42) { height } }`); // operator writes
+    gateways.push(b);
+
+    // Mallory federates a self-authored definition + registration for an "Intruder" schema,
+    // AND a newer definition at B's own schema entity — all verified, all admitted (union).
+    const MALLORY_SEED = "ee".repeat(32);
+    const MALLORY = authorForSeed(MALLORY_SEED);
+    const { publishSchemaClaims } = await import("@bombadil/rhizomatic");
+    const { registrationClaims } = await import("../../src/gateway/registration.js");
+    const byRole = parseTerm({ op: "group", key: "byRole", in: "input" });
+    const report = await b.federate([
+      signClaims(
+        publishSchemaClaims(
+          { name: "Intruder", alg: 1, body: byRole },
+          "schema:Intruder",
+          MALLORY,
+          50,
+        ),
+        MALLORY_SEED,
+      ),
+      signClaims(
+        registrationClaims("schema:Intruder", PLANT_POLICY, [FERN], MALLORY, 51),
+        MALLORY_SEED,
+      ),
+      signClaims(
+        publishSchemaClaims({ name: "Plant", alg: 1, body: byRole }, "schema:Plant", MALLORY, 9e12),
+        MALLORY_SEED,
+      ),
+    ]);
+    expect(report.accepted).toBe(3); // union is union: the deltas cross
+
+    // …but the surface a reopened store GENERATES is the operator's alone
+    const reopened = await Gateway.open(backend, { seed: OP_B_LOCAL });
+    gateways.push(reopened);
+    const plant = await reopened.query(`{ plant(entity: "${FERN}") { height _hex } }`);
+    expect(plant.errors).toBeUndefined();
+    // 42 gathers only under the operator's byTargetContext body — Mallory's byRole would lose it
+    expect((plant.data as { plant: { height: number } }).plant.height).toBe(42);
+    const intruder = await reopened.query(`{ intruder(entity: "${FERN}") { _hex } }`);
+    expect(intruder.errors?.join(" ")).toMatch(/Cannot query|intruder/);
+  });
+
   it("the wire path refuses a tampered offer, and /federate demands an operator token", async () => {
     const a = await instance(OP_A);
     const b = await instance(OP_B);
