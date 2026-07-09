@@ -27,9 +27,12 @@ update `CURRENT_WORK.md`** so the next run resumes exactly here.
    **without dropping a desired behavior**. Keep `CURRENT_WORK.md` current as items complete.
 4. **Green → PR.** When the gate passes — `npm run check` (format + lint + typecheck + **all** tests;
    read the counts, never trust a silent grep) — commit to a **new feature branch** and open a PR.
-5. **Adversarial review.** Run a strict review (the `code-review` skill or a review agent) against:
-   (a) is the code high-quality, concise, efficient — no dead weight, no cleverness that hides
-   behavior; (b) are any tests misaligned with the step's goals; (c) are there missing tests.
+5. **Adversarial review.** Run a strict review against: (a) is the code high-quality, concise,
+   efficient — no dead weight, no cleverness that hides behavior; (b) are any tests misaligned
+   with the step's goals; (c) are there missing tests. **Budget: one careful review agent by
+   default** (self-review directly for small mechanical diffs); a 2–3-angle panel only for the
+   riskiest steps (gateway semantics, capabilities/auth, federation). Token spend must last the
+   whole plan.
 6. **Resolve → merge.** If step 5 generates feedback, take it into consideration and go back to step 1,
    and feed forward; confirm the PR is genuinely good. Append a record to `JOURNAL.md` (what was done +
    any novel learning).
