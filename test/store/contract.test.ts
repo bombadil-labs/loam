@@ -7,12 +7,19 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Database from "better-sqlite3";
 import { afterAll, describe, expect, it } from "vitest";
-import { makeDelta, verifyDelta, type Delta } from "@bombadil/rhizomatic";
+import {
+  claimsToJson,
+  makeDelta,
+  makeNegationClaims,
+  verifyDelta,
+  type Delta,
+} from "@bombadil/rhizomatic";
 import type { StoreBackend } from "../../src/store/backend.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
-import { FERN, GARDENER_SEED, SURVEYOR_SEED, observed } from "../spike/garden.js";
+import { FERN, GARDENER, GARDENER_SEED, SURVEYOR_SEED, observed } from "../spike/garden.js";
 
 const signed1 = observed(FERN, "height", 30, 1000, GARDENER_SEED);
 const signed2 = observed(FERN, "height", 34, 2000, SURVEYOR_SEED);
@@ -21,7 +28,17 @@ const unsigned = makeDelta({
   author: "did:key:zAnon",
   pointers: [{ role: "note", target: { kind: "primitive", value: "unsigned but true" } }],
 });
-const all = [signed1, signed2, unsigned];
+// The shapes step 3 will persist: a delta-ref (negation), an entity-ref with context, a boolean.
+const negation = makeDelta(makeNegationClaims(GARDENER, 3500, signed2.id, "remeasured"));
+const mixed = makeDelta({
+  timestamp: 4000,
+  author: "did:key:zAnon",
+  pointers: [
+    { role: "subject", target: { kind: "entity", entity: { id: FERN, context: "watered" } } },
+    { role: "value", target: { kind: "primitive", value: true } },
+  ],
+});
+const all = [signed1, signed2, unsigned, negation, mixed];
 
 const ids = (deltas: readonly Delta[]) => deltas.map((d) => d.id).sort();
 
@@ -68,21 +85,54 @@ for (const makeHarness of harnesses) {
       await store.append(all);
       expect(ids(await store.deltasSince(new Set()))).toEqual(ids(all));
       const complement = await store.deltasSince(new Set([signed1.id, unsigned.id]));
-      expect(ids(complement)).toEqual([signed2.id]);
+      expect(ids(complement)).toEqual(ids([signed2, negation, mixed]));
       expect(ids(await store.deltasSince(new Set(ids(all))))).toEqual([]);
       await store.close();
     });
 
-    it("what comes back is what went in — claims, signatures, verification", async () => {
+    it("what comes back is what went in — claims, signatures, refs, verification", async () => {
       const h = makeHarness();
       const store = h.open();
       await store.append(all);
       const back = new Map((await store.deltasSince(new Set())).map((d) => [d.id, d]));
-      expect(back.get(signed1.id)).toEqual(signed1);
-      expect(back.get(unsigned.id)).toEqual(unsigned);
+      for (const d of all) expect(back.get(d.id)).toEqual(d);
       expect(verifyDelta(back.get(signed1.id)!)).toBe("verified");
       expect(verifyDelta(back.get(unsigned.id)!)).toBe("unsigned");
       await store.close();
+    });
+
+    it("every driver returns the canonical form: -0 comes back as 0, id unchanged", async () => {
+      const minusZero = makeDelta({
+        timestamp: 5000,
+        author: "did:key:zAnon",
+        pointers: [{ role: "value", target: { kind: "primitive", value: -0 } }],
+      });
+      const h = makeHarness();
+      const store = h.open();
+      await store.append([minusZero]);
+      const [back] = await store.deltasSince(new Set());
+      expect(back!.id).toBe(minusZero.id); // canonical CBOR never saw a -0 to begin with
+      const value = back!.claims.pointers[0]!.target;
+      expect(value.kind === "primitive" && Object.is(value.value, 0)).toBe(true);
+      await store.close();
+    });
+
+    it("a forged id is refused as a rejection; nothing is stored", async () => {
+      const forged: Delta = { ...signed1, id: `1e20${"00".repeat(32)}` };
+      const h = makeHarness();
+      const store = h.open();
+      await expect(store.append([forged])).rejects.toThrow(/does not match its claims/);
+      expect(await store.deltasSince(new Set())).toEqual([]);
+      await store.close();
+    });
+
+    it("after close, every method rejects", async () => {
+      const h = makeHarness();
+      const store = h.open();
+      await store.append([signed1]);
+      await store.close();
+      await expect(store.append([signed2])).rejects.toThrow(/closed/);
+      await expect(store.deltasSince(new Set())).rejects.toThrow(/closed/);
     });
 
     if (sample.reopen !== undefined) {
@@ -95,6 +145,23 @@ for (const makeHarness of harnesses) {
         expect(ids(await again.deltasSince(new Set()))).toEqual(ids(all));
         // and the reopened handle still dedups against what the first one wrote
         expect(await again.append([signed1])).toBe(0);
+        await again.close();
+      });
+
+      it("a tampered row is corruption: reads refuse, they do not launder", async () => {
+        const h = makeHarness();
+        const store = h.open() as SqliteBackend;
+        await store.append([signed1]);
+        await store.close();
+        // Swap in ANOTHER delta's (well-formed) claims behind the store's back — the row is
+        // valid in shape but no longer recomputes to its own id.
+        const raw = new Database(store.filePath);
+        raw
+          .prepare("UPDATE deltas SET claims = ? WHERE id = ?")
+          .run(JSON.stringify(claimsToJson(signed2.claims)), signed1.id);
+        raw.close();
+        const again = h.reopen!();
+        await expect(again.deltasSince(new Set())).rejects.toThrow(/corruption/);
         await again.close();
       });
 

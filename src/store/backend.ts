@@ -11,6 +11,13 @@
 
 import type { Delta } from "@bombadil/rhizomatic";
 
+// Failure semantics, uniform across drivers: every failure is a REJECTED PROMISE, never a
+// synchronous throw. A delta whose id does not recompute from its claims is refused (rejection;
+// nothing stored). A stored row that no longer recomputes is corruption: reads reject rather
+// than laundering it into a differently-addressed delta. After `close()`, every method rejects.
+// What a store returns is the canonical form of what went in (the JSON profile's fixed point) —
+// so any two drivers return byte-identical deltas.
+
 export interface StoreBackend {
   // Durably store every supplied delta not already held. Idempotent by id, deduped within the
   // batch. Resolves to the count newly stored.
@@ -19,6 +26,6 @@ export interface StoreBackend {
   // Every stored delta whose id is not in `knownIds` — the watermark read.
   deltasSince(knownIds: ReadonlySet<string>): Promise<Delta[]>;
 
-  // Release held resources. Further use of the handle is undefined.
+  // Release held resources.
   close(): Promise<void>;
 }

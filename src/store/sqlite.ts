@@ -1,18 +1,22 @@
 // The durable driver: one deltas table keyed by content-addressed id (UNIQUE is the CRDT dedup),
-// WAL + busy-timeout so concurrent handles wait their turn, one IMMEDIATE transaction per append
-// batch. Ids are marked durable only AFTER commit — a rollback undoes rows, never a Set, and an
-// id marked durable-but-rolled-back would be skipped forever after.
+// WAL + busy-timeout as the multi-handle provision, one IMMEDIATE transaction per append batch.
+// Ids are marked durable only AFTER commit — a rollback undoes rows, never a Set, and an id
+// marked durable-but-rolled-back would be skipped forever after.
 //
-// better-sqlite3 is synchronous inside; the async seam is kept honestly (the promises resolve
-// with the work already done). Claims travel as canonical JSON (rhizomatic's json-profile);
-// rehydration recomputes each id from its claims, so a tampered row cannot impersonate the
-// delta it replaced.
+// better-sqlite3 is synchronous inside; the methods are `async` so every failure — SQLITE_BUSY,
+// a closed handle, a refused delta — arrives as a rejected promise, exactly as the seam
+// promises. Claims travel as canonical JSON; rehydration recomputes each id from its claims and
+// REFUSES a row whose id does not recompute — corruption is an error, never a quiet new delta.
 
+/* eslint-disable @typescript-eslint/require-await -- the async keyword is load-bearing: it
+   turns every synchronous throw (SQLITE_BUSY, a closed handle, a refused delta) into the
+   rejected promise the seam promises. */
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import Database from "better-sqlite3";
-import { claimsToJson, makeDelta, parseClaims, type Delta } from "@bombadil/rhizomatic";
+import { claimsToJson, computeId, makeDelta, parseClaims, type Delta } from "@bombadil/rhizomatic";
 import type { StoreBackend } from "./backend.js";
+import { canonicalDelta } from "./canon.js";
 
 interface DeltaRow {
   readonly id: string;
@@ -51,15 +55,20 @@ export class SqliteBackend implements StoreBackend {
     this.selectAll = this.db.prepare("SELECT id, claims, sig FROM deltas ORDER BY seq");
   }
 
-  append(deltas: Iterable<Delta>): Promise<number> {
+  private assertOpen(): void {
+    if (!this.db.open) throw new Error("this store is closed");
+  }
+
+  async append(deltas: Iterable<Delta>): Promise<number> {
+    this.assertOpen();
     const fresh: Delta[] = [];
     const seen = new Set<string>();
     for (const d of deltas) {
       if (this.onDisk.has(d.id) || seen.has(d.id)) continue;
       seen.add(d.id);
-      fresh.push(d);
+      fresh.push(canonicalDelta(d)); // refuses a forged id before anything touches the disk
     }
-    if (fresh.length === 0) return Promise.resolve(0);
+    if (fresh.length === 0) return 0;
 
     const stored: string[] = [];
     this.db.exec("BEGIN IMMEDIATE");
@@ -81,24 +90,30 @@ export class SqliteBackend implements StoreBackend {
       } catch {
         /* already rolled back */
       }
-      return Promise.reject(err instanceof Error ? err : new Error(String(err)));
+      throw err;
     }
     for (const id of stored) this.onDisk.add(id); // durable only after the commit
-    return Promise.resolve(stored.length);
+    return stored.length;
   }
 
-  deltasSince(knownIds: ReadonlySet<string>): Promise<Delta[]> {
+  async deltasSince(knownIds: ReadonlySet<string>): Promise<Delta[]> {
+    this.assertOpen();
     const out: Delta[] = [];
     for (const row of this.selectAll.all() as DeltaRow[]) {
+      const claims = parseClaims(JSON.parse(row.claims));
+      if (computeId(claims) !== row.id) {
+        throw new Error(
+          `store corruption: row ${row.id} does not recompute from its claims — refusing to read`,
+        );
+      }
       this.onDisk.add(row.id);
       if (knownIds.has(row.id)) continue;
-      out.push(makeDelta(parseClaims(JSON.parse(row.claims)), row.sig ?? undefined));
+      out.push(makeDelta(claims, row.sig ?? undefined));
     }
-    return Promise.resolve(out);
+    return out;
   }
 
-  close(): Promise<void> {
+  async close(): Promise<void> {
     this.db.close();
-    return Promise.resolve();
   }
 }
