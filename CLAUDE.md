@@ -69,10 +69,8 @@ Ordered; re-evaluated after each merge (cycle stage 7). Adopt rhizomatic's core;
    changes were needed._
 2. **Persistence tier.** _Done — merged as PR #3 (2026-07-09); async `StoreBackend` + memory/sqlite
    witnesses behind one contract (see `JOURNAL.md`)._
-3. **Read gateway.** GraphQL derived from a `HyperSchema` + `Policy`, exposing `query` + `loadSchema`,
-   resolving via `resolveView` over reactor materializations, with content-addressed snapshots.
-   _Success:_ load `SCHEMA_SCHEMA`; define a schema via `loadSchema`; append deltas; a GraphQL query
-   returns the resolved view; its snapshot hash is stable.
+3. **Read gateway.** _Done — merged as PR #4 (2026-07-09); GraphQL derived from (HyperSchema,
+   Policy) over a boot-replaying, write-through Gateway (see `JOURNAL.md`)._
 4. **Mutations + subscriptions.** GraphQL `mutate` (args → deltas → append) and `subscribe`
    (materialization → initial snapshot + patch stream).
    _Success:_ a mutation appends the right deltas and a re-query reflects them; a subscription emits an

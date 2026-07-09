@@ -1,35 +1,32 @@
-# Current work — Step 3: Read gateway
+# Current work — Step 4: Mutations + subscriptions
 
 _The live checklist for the step in progress: its success criteria, the sub-tasks (checked as they complete), and a "left off here" note so any model can resume mid-step. Replaced at the start of each step; cleared when a step merges._
 
 **Success criteria (the gate):**
 
-- A `Gateway` that fronts one `StoreBackend`: boots by replaying `deltasSince(∅)` into a
-  `Reactor`; `append` ingests + writes through to the backend (via `subscribeRaw`, so future
-  derivation emissions persist by the same path); `loadSchema(deltas, entity)` appends
-  schema-defining deltas and meta-resolves them via `SCHEMA_SCHEMA`; `register(schema, policy,
-  roots)` holds a live materialization per root.
-- A GraphQL schema **derived from `HyperSchema` + `Policy`**: one query field + object type per
-  registered schema; field names from `Policy.props` (+ observed props); field shapes from the
-  `PropPolicy` kind (pick → scalar, all/conflicts → list, merge → number/boolean, absentAs →
-  inner shape); every view type carries `_entity: ID!` and `_hex: String!` (the content-addressed
-  snapshot).
-- _Success (from CLAUDE.md):_ define a schema via `loadSchema` (meta-resolved through
-  `SCHEMA_SCHEMA`); append deltas; a GraphQL query returns the resolved view; its snapshot hash
-  is stable (same deltas any order → same `_hex`); and it all survives close/reopen on the
-  sqlite backend.
+- **`mutate`**: GraphQL mutation fields derived per registered schema — one field per schema,
+  one argument per policy prop; each provided arg becomes a signed property-claim delta
+  (`subject → {entity, context: prop}` + `value → primitive`), appended through the same
+  validated write-through path. The mutation returns the re-resolved view, so the response IS
+  the re-query. A gateway without a signing seed refuses mutations.
+- **`subscribe`**: GraphQL subscription fields per schema — an initial snapshot event, then a
+  patch event per relevant change (`_fromHex → _hex`, `changedProps`, and the fields). Backed
+  by a lazily-created, cached materialization per (schema, entity) (the reactor has no
+  deregister; reuse is the design). Irrelevant mutations emit nothing.
+- _Success (from CLAUDE.md):_ a mutation appends the right deltas (verifiable, signed,
+  persisted) and a re-query reflects them; a subscription emits an initial snapshot then a
+  patch on a relevant mutation.
 - `npm run check` green.
 
 **Sub-tasks:**
 
-- [ ] `test/gateway/read.test.ts` — tests first: boot/replay, append + re-query, loadSchema,
-      policy-shaped fields, stable `_hex`, order-independence, sqlite reopen survival,
-      write-through completeness
-- [ ] `src/gateway/gateway.ts` — the Gateway (backend + reactor + write-through + loadSchema +
-      register)
-- [ ] `src/gateway/gql.ts` — HyperSchema + Policy → GraphQLSchema; resolveView over
-      materializations
-- [ ] `graphql` dependency; exports from `src/index.ts`
-- [ ] Gate green → branch → PR → one review agent → resolve → merge → journal
+- [ ] `test/gateway/mutate.test.ts` — tests first: right deltas (pointers/signature/persistence),
+      re-query reflects, multi-prop mutation, seedless refusal, receipt
+- [ ] `test/gateway/subscribe.test.ts` — initial snapshot + patch; irrelevant silence;
+      two subscribers; unsubscribe stops delivery
+- [ ] `src/gateway/gateway.ts` — signing seed option; `mutate` path; subscription
+      materialization cache + fan-out
+- [ ] `src/gateway/gql.ts` — Mutation + Subscription types derived from the registered defs
+- [ ] Gate green → PR → one review agent → resolve → merge → journal
 
 **Left off here:** plan written; next: tests.
