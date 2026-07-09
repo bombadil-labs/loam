@@ -30,27 +30,31 @@ update `CURRENT_WORK.md`** so the next run resumes exactly here.
 5. **Adversarial review.** Run a strict review (the `code-review` skill or a review agent) against:
    (a) is the code high-quality, concise, efficient — no dead weight, no cleverness that hides
    behavior; (b) are any tests misaligned with the step's goals; (c) are there missing tests.
-6. **Resolve → merge.** Apply the review's findings; re-test; confirm the PR is genuinely good. Append
-   a record to `JOURNAL.md` (what was done + any novel learning). Merge **by PR number** — and note a
-   gotcha on these repos: `gh pr checks` sometimes returns an empty list even when runs passed; treat
-   empty as "do not merge" and verify via `gh run list`.
-7. **Re-plan.** With the step done, re-evaluate the **remaining** steps against what you just learned.
-   If a learning changes the plan, edit the step list below, log the change in `JOURNAL.md`, and
-   commit it.
+6. **Resolve → merge.** If step 5 generates feedback, take it into consideration and go back to step 1,
+   and feed forward; confirm the PR is genuinely good. Append a record to `JOURNAL.md` (what was done +
+   any novel learning).
+7. **Re-plan.** With the step done, re-evaluate the **remaining** steps against anything you just learned.
+   If a learning changes the plan, edit SPEC.md to take it into consideration, log the change in 
+   `JOURNAL.md`, and commit it.
 8. **Next step.** Clear `CURRENT_WORK.md` and begin the next unchecked step at stage 1.
 
 ## Standing rules
 
-- **Root holds exactly five docs** — `README.md` (the vision), `CLAUDE.md`, `SPEC.md`, `JOURNAL.md`,
-  `CURRENT_WORK.md`. Do not accumulate more markdown; fold, don't add.
+- **Root holds exactly five markdown docs** — `README.md` (the vision), `CLAUDE.md`, `SPEC.md`, `JOURNAL.md`,
+  `CURRENT_WORK.md`. Do not accumulate more markdown; fold, don't add. `CURRENT_WORK.md` is intended to be 
+  ephemeral and evolving, PRs hold prior snapshots, don't be afraid to blow it away as necessary.
 - **Strict in PRs, creative and aggressive in execution.** Ship real vertical slices; don't gold-plate;
   don't reward-hack a green bar.
-- **Match rhizomatic's vocabulary** (`HyperSchema`, `HView`, `View`, `Policy`, `DerivedFn`,
+- **Match rhizomatic's vocabulary** (`HyperSchema`, `HyperView`, `View`, `Policy`, `DerivedFunction`,
   `BindingSpec`); don't parallel it with near-synonyms.
 - **The poetry is as important as the engineering** — errors, help text, commit messages, and docs are
   first-class craft.
 
 ## The plan — build steps (success criteria are the gate)
+
+The following are the anticipated initial steps. If you are coming at this fresh, start here - use these
+to inform your initial plan (but verify that they're necessary, and use your own judgment about the process), 
+then remove these items from `CLAUDE.md` when they are accounted for.
 
 Ordered; re-evaluated after each merge (cycle stage 7). Adopt rhizomatic's core; build the wrapper.
 
@@ -64,6 +68,10 @@ Ordered; re-evaluated after each merge (cycle stage 7). Adopt rhizomatic's core;
    binding firing and emitting.
    _Success:_ those pass; `JOURNAL.md` records what's confirmed vs. differs from SPEC §2, and SPEC is
    corrected if reality differs.
+   _Flag:_ if `rhizomatic` itself needs to be changed, surface this need immediately. If this is a long-
+   running loop and the user is away, you MAY create a local mutation to `rhizomatic` to unblock yourself,
+   but *be sure to create a matching PR it into `rhizomatic` too* and be sure to flag this for the user!
+   Ideally, `rhizomatic` is frozen and will not need updates, but let's be intentional!
 2. **Persistence tier.** An **async** `StoreBackend` seam + an in-memory driver + one durable driver
    (sqlite or libSQL). Adapt from chorus (SPEC §10), async-ified.
    _Success:_ append; `deltasSince(known)` returns the complement; state survives close/reopen;
@@ -96,6 +104,3 @@ Ordered; re-evaluated after each merge (cycle stage 7). Adopt rhizomatic's core;
 9. **Federation.** Expose `Peer` sync over the authed HTTP + a "subscribe to instance X's published
    lens" declaration.
    _Success:_ two instances federate — a delta on A resolves on B; union-merge holds; no conflict.
-
-**Open decisions (ask Myk; don't guess):** multi-tenant scope for v1 (§7); confirm the clean-room
-(build the wrapper) vs. how heavily to lift chorus's plumbing (§10).
