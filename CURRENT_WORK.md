@@ -64,9 +64,17 @@ negation; and registration is reachable turnkey (HTTP + MCP + CLI), closing the 
   - [x] README: quickstart, HTTP API, "Schemas are data" section, embedding note; SSE fix rode
         along
 - [x] Gate: `npm run check` — 175/175 tests, format+lint+typecheck+build green
-- [ ] Branch + PR  ← **left off here: commit to `schema-schema-cutover`, open the PR**
-- [ ] Review (one agent, neutral correctness register) → resolve → merge
-- [ ] JOURNAL entry; re-plan; clear this file
+- [x] Branch + PR — [#13](https://github.com/bombadil-labs/loam/pull/13)
+- [x] Review (one agent, neutral register) — 15 findings, 5 correctness, strong ones
+- [x] Resolve review — all correctness findings fixed, 10 new tests, 185/185:
+  - [x] (1) assertMaterializable (content-independent sort trial) in fixpoint, register(), and
+        publishRegistration — refuse before persisting; a hand-planted poison boots unbound
+  - [x] (2) NUL refused at publish, skipped at read; (3) negation algebra honored (revival);
+        (4) publish verifies BOUND or throws plainly; (5) streams capture (policy, mat) at
+        subscribe; (6) lazyMats cleared on rebind; (7) additive replay binds incrementally;
+        (9) dead branch removed; (10) CLI names the file, close() cannot mask the refusal
+  - [x] accepted as-is: (8) fixpoint builds gql per trial — administrative scale
+- [ ] Merge; JOURNAL entry; re-plan; clear this file  ← **left off here**
 
 ## Decisions taken at planning (so the next cycle doesn't re-litigate)
 

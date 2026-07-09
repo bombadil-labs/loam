@@ -126,6 +126,29 @@ describe("readRegistrations: the surface is generated from surviving definitions
     expect(readRegistrations(reactor, OPERATOR)).toEqual([]);
   });
 
+  it("negating the negation revives: the substrate's algebra, honored on registrations too", () => {
+    const registration = register(OPERATOR, 2);
+    const retirement = makeDelta(makeNegationClaims(OPERATOR, 3, registration.id));
+    const reactor = world(
+      define(PLANT, OPERATOR, 1),
+      registration,
+      retirement,
+      makeDelta(makeNegationClaims(OPERATOR, 4, retirement.id)), // the retirement, retired
+    );
+    const regs = readRegistrations(reactor, OPERATOR);
+    expect(regs).toHaveLength(1); // the registration lives again
+  });
+
+  it("a foreign negation of the operator's registration retires nothing", () => {
+    const registration = register(OPERATOR, 2);
+    const reactor = world(
+      define(PLANT, OPERATOR, 1),
+      registration,
+      makeDelta(makeNegationClaims(MALLORY, 3, registration.id)), // Mallory's, roots in nobody
+    );
+    expect(readRegistrations(reactor, OPERATOR)).toHaveLength(1);
+  });
+
   it("foreign law is inert: a newer non-operator definition cannot reshape a governed surface", () => {
     const reactor = world(
       define(PLANT, OPERATOR, 1),

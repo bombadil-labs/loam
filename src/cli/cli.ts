@@ -151,7 +151,7 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
     io.err(`register: cannot read ${file}: ${err instanceof Error ? err.message : String(err)}`);
     return 1;
   }
-  const spec = JSON.parse(raw) as {
+  let spec: {
     name?: unknown;
     alg?: unknown;
     body?: unknown;
@@ -159,6 +159,12 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
     roots?: unknown;
     entity?: unknown;
   };
+  try {
+    spec = JSON.parse(raw) as typeof spec;
+  } catch (err) {
+    io.err(`register: ${file} is not JSON: ${err instanceof Error ? err.message : String(err)}`);
+    return 2;
+  }
   if (typeof spec.name !== "string" || spec.name.length === 0) {
     io.err("register: the file must name the schema (a non-empty `name`)");
     return 2;
@@ -171,12 +177,19 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
     io.err("register: `entity` must be a string when given");
     return 2;
   }
-  const schema: HyperSchema = {
-    name: spec.name,
-    alg: typeof spec.alg === "number" ? spec.alg : 1,
-    body: parseTerm(spec.body),
-  };
-  const policy = parsePolicy(spec.policy);
+  let schema: HyperSchema;
+  let policy: ReturnType<typeof parsePolicy>;
+  try {
+    schema = {
+      name: spec.name,
+      alg: typeof spec.alg === "number" ? spec.alg : 1,
+      body: parseTerm(spec.body),
+    };
+    policy = parsePolicy(spec.policy);
+  } catch (err) {
+    io.err(`register: ${file}: ${err instanceof Error ? err.message : String(err)}`);
+    return 2;
+  }
 
   const home = parsed.flags.get("home") ?? defaultHome();
   const init = initHome(home);
@@ -193,9 +206,11 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
       undefined,
       spec.entity,
     );
-  } finally {
-    await gateway.close();
+  } catch (err) {
+    await gateway.close().catch(() => {}); // never let a close failure mask the real refusal
+    throw err;
   }
+  await gateway.close();
   io.out(
     `loam: registered ${spec.name} at ${schemaEntityFor(schema, spec.entity)}\n` +
       `  the definition is deltas now — the next serve grows the surface from it`,

@@ -10,6 +10,7 @@
 // exposes.
 
 import {
+  DeltaSet,
   Reactor,
   SchemaRegistry,
   authorForSeed,
@@ -193,12 +194,40 @@ export class Gateway {
     };
   }
 
-  // Re-derive the store's slice of the surface and rebind if it moved. The desired set is the
-  // manual registrations (this process's own) plus every store registration whose schema
-  // GENERATES from surviving definitions — so an evolved definition reshapes the surface, and
-  // a negated one retires its type. Store registrations install in fixpoint rounds: a schema
-  // that refs another must validate after it, and timestamp order is not enough (ties, same
-  // millisecond). One that never resolves is left unbound rather than crashing the boot.
+  // A body must MATERIALIZE (yield an HView): SchemaRegistry and buildGqlSchema never evaluate
+  // it, and reactor.register throws for anything else — after state has begun to change. The
+  // sort of a term is content-independent (the offeredLens trick), so trial-eval it empty and
+  // refuse a dset-sort body before it can persist, half-bind, or poison a boot.
+  private static assertMaterializable(schema: HyperSchema, registry: SchemaRegistry): void {
+    const trial = evalTerm(schema.body, DeltaSet.from([]), "loam:trial", registry);
+    if (trial.sort !== "hview") {
+      throw new Error(
+        `schema ${schema.name}: its body must yield a hyperview (a group over the gathered ` +
+          `deltas), not a ${trial.sort}`,
+      );
+    }
+  }
+
+  // Everything that shapes the surface, as one comparable key.
+  private static boundKey(r: Bound): string {
+    return [
+      r.schema.name,
+      termHash(r.schema.body),
+      JSON.stringify(policyToJson(r.policy)),
+      JSON.stringify(r.roots),
+      r.entity ?? "",
+      r.origin,
+    ].join(NUL);
+  }
+
+  // Re-derive the store's slice of the surface and follow it. The desired set is the manual
+  // registrations (this process's own) plus every store registration whose schema GENERATES
+  // from surviving definitions — so an evolved definition reshapes the surface, and a negated
+  // one retires its type. Store registrations install in fixpoint rounds: a schema that refs
+  // another must validate after it, and timestamp order is not enough (ties, same
+  // millisecond). One that never resolves — or whose body cannot materialize — is left
+  // unbound rather than crashing the boot. A purely-additive change binds incrementally under
+  // the current generation; only a change or a retirement pays for a rebind.
   private replayRegistrations(): void {
     const manual = this.registered.filter((r) => r.origin === "manual");
     const accepted: Bound[] = [...manual];
@@ -212,7 +241,8 @@ export class Gateway {
       for (const reg of pending) {
         const trial = [...accepted, reg];
         try {
-          SchemaRegistry.build(trial.map((r) => r.schema)); // dups, refs, cycles
+          const registry = SchemaRegistry.build(trial.map((r) => r.schema)); // dups, refs, cycles
+          Gateway.assertMaterializable(reg.schema, registry); // reactor.register would throw
           buildGqlSchema(trial, this.gqlHooks()); // GraphQL name collisions
           accepted.push(reg);
           progressed = true;
@@ -223,28 +253,36 @@ export class Gateway {
       if (!progressed || stillPending.length === 0) break;
       pending = stillPending;
     }
-    if (!this.sameBound(accepted)) this.rebind(accepted);
-  }
 
-  // Is the desired set exactly what is already bound? Compared by everything that shapes the
-  // surface — name, body hash, policy, roots, entity, origin — order-blind.
-  private sameBound(next: readonly Bound[]): boolean {
-    const key = (r: Bound): string =>
-      [
-        r.schema.name,
-        termHash(r.schema.body),
-        JSON.stringify(policyToJson(r.policy)),
-        JSON.stringify(r.roots),
-        r.entity ?? "",
-        r.origin,
-      ].join(NUL);
-    if (next.length !== this.registered.length) return false;
-    const current = new Set(this.registered.map(key));
-    return next.every((r) => current.has(key(r)));
+    const currentKeys = new Set(this.registered.map((r) => Gateway.boundKey(r)));
+    const acceptedKeys = new Set(accepted.map((r) => Gateway.boundKey(r)));
+    if (
+      acceptedKeys.size === currentKeys.size &&
+      [...currentKeys].every((k) => acceptedKeys.has(k))
+    ) {
+      return; // nothing moved
+    }
+    if ([...currentKeys].every((k) => acceptedKeys.has(k))) {
+      // Purely additive: bind just the newcomers under the current generation — no rebind, no
+      // abandoned materializations. (The same registry-visibility semantics as register().)
+      const additions = accepted.filter((r) => !currentKeys.has(Gateway.boundKey(r)));
+      const registry = SchemaRegistry.build(accepted.map((r) => r.schema));
+      const gql = buildGqlSchema(accepted, this.gqlHooks());
+      for (const reg of additions) {
+        this.reactor.register(this.matName(reg.schema.name), reg.schema.body, reg.roots, registry);
+      }
+      this.registered = accepted;
+      this.registry = registry;
+      this.gql = gql;
+      return;
+    }
+    this.rebind(accepted);
   }
 
   // Bind a whole desired set at once, under a fresh generation of materializations. The set was
-  // validated by the caller (fixpoint or register()), so nothing here can half-apply.
+  // validated by the caller (the fixpoint), so nothing here can half-apply. Superseded
+  // materializations stay behind (the reactor has no deregister); superseded lazy watches stop
+  // counting against the cap.
   private rebind(next: Bound[]): void {
     const registry = SchemaRegistry.build(next.map((r) => r.schema));
     const gql = buildGqlSchema(next, this.gqlHooks());
@@ -252,6 +290,7 @@ export class Gateway {
     for (const reg of next) {
       this.reactor.register(this.matName(reg.schema.name), reg.schema.body, reg.roots, registry);
     }
+    this.lazyMats.clear(); // generation-stale by construction — new watches re-create their own
     this.registered = next;
     this.registry = registry;
     this.gql = gql;
@@ -331,6 +370,7 @@ export class Gateway {
     }
     const next: Bound[] = [...this.registered, { schema, policy, roots, origin: "manual" }];
     const registry = SchemaRegistry.build(next.map((r) => r.schema)); // refuses dups + bad refs
+    Gateway.assertMaterializable(schema, registry); // refuses a body that yields no hyperview
     const gql = buildGqlSchema(next, this.gqlHooks()); // refuses collisions
     // Incremental: only the NEW materialization registers, under the current generation.
     this.reactor.register(this.matName(schema.name), schema.body, roots, registry);
@@ -362,6 +402,18 @@ export class Gateway {
     if (this.operatorAuthor !== undefined && authorForSeed(seed) !== this.operatorAuthor) {
       throw new Error("append rejected: only the operator may publish a registration");
     }
+    if (schema.name.includes(NUL)) {
+      throw new Error("a schema name may not contain NUL — that alphabet is the gateway's own");
+    }
+    // Prove the WHOLE registration before anything persists: the refs must resolve against
+    // what is bound (minus the same name, which this publish may be evolving), and the body
+    // must materialize — a poisoned definition on append-only ground cannot be taken back.
+    const trialRegistry = SchemaRegistry.build([
+      ...this.registered.filter((r) => r.schema.name !== schema.name).map((r) => r.schema),
+      schema,
+    ]);
+    Gateway.assertMaterializable(schema, trialRegistry);
+
     const author = authorForSeed(seed);
     const schemaEntity = schemaEntityFor(schema, entity);
     const definition = signClaims(
@@ -375,6 +427,15 @@ export class Gateway {
     );
     await this.append([reference]);
     this.replayRegistrations();
+    // Success must mean BOUND. The deltas are down either way (append-only ground), but a
+    // publish the replay could not bind — a name already answered for by another entity, a
+    // collision with a manual registration — is not to be reported as a served surface.
+    if (!this.registered.some((r) => r.origin === "store" && r.entity === schemaEntity)) {
+      throw new Error(
+        `the registration persisted but did not bind: another schema already answers to ` +
+          `"${schema.name}" — negate the old definition first, or choose a different name`,
+      );
+    }
   }
 
   // Animate the gateway: route ingest through a runner's DerivationHost so bindings fire.
@@ -580,8 +641,24 @@ export class Gateway {
   // cannot re-resolve fails ITS OWN stream and detaches — it never aborts the fan-out or the
   // writer whose ingest triggered it. A change that leaves the resolved view identical (same
   // hex) is no patch at all.
+  //
+  // The stream CAPTURES its shape at subscribe time — the policy and the materialization it
+  // was born watching. An evolution rebinds the query surface, but this stream keeps resolving
+  // the shape it promised its reader (triggered by, and reading from, the same superseded
+  // materialization) until the reader resubscribes. Trigger and resolution must agree: the
+  // current def would re-resolve through the NEW materialization while the OLD one decides
+  // when to fire — silently missing what only the new shape gathers.
   private watchEntity(name: string, entity: string): AsyncGenerator<PatchNode, void, unknown> {
+    const bound = this.def(name);
     const matName = this.matFor(name, entity);
+    const resolveCaptured = (): ResolvedNode => {
+      const hview = this.reactor.materializedView(matName, entity);
+      if (hview === undefined) {
+        throw new Error(`the materialization backing this stream is gone — resubscribe`);
+      }
+      const view = resolveView(bound.policy, hview) as Record<string, View>;
+      return { entity, view, hex: viewCanonicalHex(view) };
+    };
     let sinks = this.sinks.get(matName);
     if (sinks === undefined) {
       const set = new Set<(c: MaterializationChange) => void>();
@@ -596,7 +673,7 @@ export class Gateway {
     const sink = (c: MaterializationChange): void => {
       if (c.root !== entity) return;
       try {
-        const node = this.resolvedNode(name, entity);
+        const node = resolveCaptured();
         if (node.hex === lastHex) return; // the view did not move: silence, not a no-op patch
         channel.push({ ...node, fromHex: lastHex, changed: [...c.changedProps] });
         lastHex = node.hex;
@@ -619,7 +696,7 @@ export class Gateway {
             },
     );
 
-    const initial = this.resolvedNode(name, entity);
+    const initial = resolveCaptured();
     let lastHex = initial.hex;
     liveSinks.add(sink);
     this.channels.add(channel);

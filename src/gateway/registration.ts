@@ -95,8 +95,20 @@ const primitive = (claims: Claims, role: string): string | number | boolean | un
 export function readRegistrations(reactor: Reactor, operator?: string): Registration[] {
   const lawful = lawfulSnapshot(reactor, operator);
   const lawfulIds = new Set([...lawful].map((d) => d.id));
-  const negated = (id: string): boolean =>
-    reactor.negationsOf(id).some((negation) => lawfulIds.has(negation));
+  // The substrate's negation algebra, over the lawful slice: a negation retires its target
+  // only while it survives itself — negating the negation revives, exactly as loadSchema's
+  // mask does for definitions. Content addressing keeps the chain acyclic; memoized anyway.
+  const negationMemo = new Map<string, boolean>();
+  const negated = (id: string): boolean => {
+    const memoed = negationMemo.get(id);
+    if (memoed !== undefined) return memoed;
+    negationMemo.set(id, false); // in-progress: treat as surviving (acyclic by construction)
+    const verdict = reactor
+      .negationsOf(id)
+      .some((negation) => lawfulIds.has(negation) && !negated(negation));
+    negationMemo.set(id, verdict);
+    return verdict;
+  };
 
   interface Candidate {
     schemaEntity: string;
@@ -107,10 +119,14 @@ export function readRegistrations(reactor: Reactor, operator?: string): Registra
   }
   const latest = new Map<string, Candidate>();
   for (const delta of lawful) {
-    const files = delta.claims.pointers.find(
-      (p) => p.target.kind === "entity" && p.target.entity.context === CTX_REGISTRATION,
-    );
-    if (files === undefined) continue;
+    let key: string | undefined; // the registration entity this delta files under
+    for (const p of delta.claims.pointers) {
+      if (p.target.kind === "entity" && p.target.entity.context === CTX_REGISTRATION) {
+        key = p.target.entity.id;
+        break;
+      }
+    }
+    if (key === undefined) continue;
     if (negated(delta.id)) continue;
 
     const schemaRef = delta.claims.pointers.find(
@@ -134,7 +150,6 @@ export function readRegistrations(reactor: Reactor, operator?: string): Registra
       continue;
     }
     const schemaEntity = schemaRef.target.entity.id;
-    const key = files.target.kind === "entity" ? files.target.entity.id : schemaEntity;
     const candidate: Candidate = {
       schemaEntity,
       policy,
@@ -158,6 +173,10 @@ export function readRegistrations(reactor: Reactor, operator?: string): Registra
   for (const cand of [...latest.values()].sort((a, b) => a.timestamp - b.timestamp)) {
     try {
       const schema = loadSchema(lawful, cand.schemaEntity);
+      // NUL is the gateway's own alphabet (internal materialization names): a definition whose
+      // name carries it — plantable only by hand, never through publishRegistration — binds
+      // nothing rather than colliding with that namespace.
+      if (schema.name.includes("\u0000")) continue;
       out.push({ schema, policy: cand.policy, roots: cand.roots, entity: cand.schemaEntity });
     } catch {
       // no surviving (or a malformed) definition: the registration is unbound, not fatal

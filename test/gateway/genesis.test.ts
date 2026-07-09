@@ -214,6 +214,141 @@ describe("evolution is append: the surface follows the surviving definitions", (
     await reopened.close();
   });
 
+  it("an identical republish binds nothing new: same generation, same materialization", async () => {
+    const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
+    await gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+    const before = gateway.materializationFor("Plant");
+    await gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN]); // same shape, new deltas
+    expect(gateway.materializationFor("Plant")).toBe(before); // no rebind
+    await gateway.publishRegistration(PLANT_V2, PLANT_POLICY, [FERN]); // a REAL evolution
+    expect(gateway.materializationFor("Plant")).not.toBe(before); // rebinds
+    await gateway.close();
+  });
+
+  it("policy-and-roots evolution: same body, a republished reference reshapes the fields", async () => {
+    const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
+    await seedGarden(gateway);
+    const heightOnly = { props: new Map([["height", pickLatest]]), default: pickLatest };
+    await gateway.publishRegistration(PLANT, heightOnly, [FERN]);
+    const narrow = await gateway.query(`{ plant(entity: "${FERN}") { tag } }`);
+    expect(narrow.errors?.join(" ")).toMatch(/Cannot query/); // no tag field yet
+
+    await gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN]); // same body, wider policy
+    const wide = await gateway.query(`{ plant(entity: "${FERN}") { tag } }`);
+    expect(wide.errors).toBeUndefined();
+    expect((wide.data as { plant: { tag: string[] } }).plant.tag).toEqual(["shade"]);
+    await gateway.close();
+  });
+
+  it("a live stream keeps the shape it subscribed to; a new reader sees the evolution", async () => {
+    const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
+    await seedGarden(gateway);
+    await gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+    const stream = await gateway.subscribe(
+      `subscription { plant(entity: "${FERN}") { height tag } }`,
+    );
+    const snapshot = (await stream.next()).value as { plant: { height: number; tag: string[] } };
+    expect(snapshot.plant).toMatchObject({ height: 30, tag: ["shade"] });
+
+    await gateway.publishRegistration(PLANT_V2, PLANT_POLICY, [FERN]); // evolve: heights only
+    const evolved = await gateway.query(`{ plant(entity: "${FERN}") { height tag } }`);
+    expect((evolved.data as { plant: { tag: string[] | null } }).plant.tag ?? []).toEqual([]);
+
+    // the OLD stream still fires, and still gathers tags — the shape it promised its reader
+    await gateway.query(`mutation { plant(entity: "${FERN}", height: 44) { height } }`);
+    const patch = (await stream.next()).value as { plant: { height: number; tag: string[] } };
+    expect(patch.plant.height).toBe(44);
+    expect(patch.plant.tag).toEqual(["shade"]);
+    await stream.return(undefined);
+    await gateway.close();
+  });
+
+  it("a store registration colliding with a manual name persists but does not bind — and says so", async () => {
+    const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
+    gateway.register(PLANT, PLANT_POLICY, [FERN]); // manual, this process's own
+    await expect(gateway.publishRegistration(PLANT_V2, PLANT_POLICY, [FERN])).rejects.toThrow(
+      /did not bind/,
+    );
+    await gateway.close();
+  });
+
+  it("a seedless gateway cannot publish; an ungoverned one binds any actor's registration", async () => {
+    const seedless = await Gateway.open(new MemoryBackend());
+    await expect(seedless.publishRegistration(PLANT, PLANT_POLICY, [FERN])).rejects.toThrow(
+      /no signing seed/,
+    );
+    await seedless.close();
+
+    const ungoverned = await Gateway.open(new MemoryBackend());
+    await ungoverned.publishRegistration(PLANT, PLANT_POLICY, [FERN], { actor: GARDENER_SEED });
+    const answer = await ungoverned.query(`{ plant(entity: "${FERN}") { height } }`);
+    expect(answer.errors).toBeUndefined();
+    await ungoverned.close();
+  });
+
+  it("a body that cannot materialize is refused BEFORE anything persists", async () => {
+    const backend = new MemoryBackend();
+    const gateway = await Gateway.open(backend, { seed: OPERATOR_SEED });
+    const dsetSort: HyperSchema = {
+      name: "Poison",
+      alg: 1,
+      // canonical and loadable — but select yields a delta set, not a hyperview
+      body: parseTerm({ op: "mask", policy: "drop", in: "input" }),
+    };
+    await gateway.flush();
+    const before = (await backend.deltasSince(new Set())).length;
+    await expect(gateway.publishRegistration(dsetSort, PLANT_POLICY, [FERN])).rejects.toThrow(
+      /hyperview/,
+    );
+    await gateway.flush();
+    expect((await backend.deltasSince(new Set())).length).toBe(before); // nothing landed
+    await gateway.close();
+  });
+
+  it("a hand-planted unmaterializable definition leaves its type unbound, never a crashed boot", async () => {
+    const backend = new MemoryBackend();
+    const gateway = await Gateway.open(backend, { seed: OPERATOR_SEED });
+    // the operator plants the poison by hand, past publishRegistration's guard
+    const { publishSchemaClaims } = await import("@bombadil/rhizomatic");
+    const { registrationClaims } = await import("../../src/gateway/registration.js");
+    const dsetBody = parseTerm({ op: "mask", policy: "drop", in: "input" });
+    await gateway.append([
+      signClaims(
+        publishSchemaClaims(
+          { name: "Poison", alg: 1, body: dsetBody },
+          "schema:Poison",
+          OPERATOR,
+          1,
+        ),
+        OPERATOR_SEED,
+      ),
+      signClaims(
+        registrationClaims("schema:Poison", PLANT_POLICY, [FERN], OPERATOR, 2),
+        OPERATOR_SEED,
+      ),
+    ]);
+    await gateway.flush();
+
+    const reopened = await Gateway.open(backend, { seed: OPERATOR_SEED }); // boots — the poison is unbound
+    await expect(reopened.query(`{ poison(entity: "x") { _hex } }`)).rejects.toThrow(
+      /nothing is registered/,
+    );
+    await gateway.close();
+    await reopened.close();
+  });
+
+  it("a NUL in a schema name is refused at publish", async () => {
+    const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
+    await expect(
+      gateway.publishRegistration(
+        { ...PLANT, name: `Plant${String.fromCharCode(0)}x` },
+        PLANT_POLICY,
+        [FERN],
+      ),
+    ).rejects.toThrow(/NUL/);
+    await gateway.close();
+  });
+
   it("a schema that refs another registers through the replay fixpoint, whatever the order", async () => {
     const BED = "bed:shade";
     const BED_SCHEMA: HyperSchema = {
