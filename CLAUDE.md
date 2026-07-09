@@ -12,8 +12,6 @@ note. If it is empty, start the first unchecked step in the plan below, at cycle
 
 - **rhizomatic is frozen/normative** — never edit it from here. Most of Loam's core lives there
   already (SPEC §2); a genuine substrate need is a PR in that repo + a conversation with Myk.
-- **Never touch Chorus's live data.** Publishing, repo visibility, and anything outward beyond this
-  repo's GitHub are Myk's call.
 
 ## The loop — one step at a time (a `/loop` runs this until the plan is done)
 
