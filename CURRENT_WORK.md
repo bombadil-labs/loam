@@ -35,7 +35,14 @@ branch).
 - [x] `_testing` harness migration (constitute = standing grants only; ritual code deleted)
 - [x] Gate: 188/188, format+lint+typecheck+build green (`_testing` now ignored by the gate —
       it is the ephemeral playground)
-- [ ] PR → review (one agent, neutral register) → resolve → merge → JOURNAL ← **left off here**
+- [x] PR [#14](https://github.com/bombadil-labs/loam/pull/14) → review (one agent) → resolved:
+      the probe-confirmed runner hole (ANY negation retired binding definitions — lawful
+      algebra now shared from registration.ts), audit/enforcement divergence pinned as interim
+      (second concrete case for rhizomatic#2), transitive revocation + admin self-revocation +
+      local rival-definition + local data-negation all pinned, SPEC §7 documents the pre-strike
+      hazard and mint/strike asymmetry. Gate: 193/193.
+- [ ] **Merge is Myk's button** → then JOURNAL entry on main's branch flow → open step 12
+      ← **left off here**
 
 ## Step 12 — Writes become claims (queued; SPEC §5 addendum drafted)
 
