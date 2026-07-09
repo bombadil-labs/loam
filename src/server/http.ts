@@ -6,6 +6,13 @@
 //
 // Bind 127.0.0.1 and terminate TLS in front; token comparison is timing-safe; a token maps to
 // an explicit identity ({ actor } or { operator: true }) — never a default.
+//
+// Custody, stated plainly: a token maps to an ACTOR SEED, so this process signs on behalf of
+// its actors and is a custodian of their signing authority — a heap dump or leaked config
+// discloses keys, not just replayable tokens. That is the price of server-side convenience
+// mutations. The non-custodial path is the CRDT's own: a client signs its deltas itself and
+// presents them; each is authorized by its own verified author (Gateway.append), and the
+// server never holds the key. A future raw-append endpoint exposes that path over HTTP.
 
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -21,7 +28,12 @@ export interface ServeOptions {
   readonly tokens: Record<string, TokenIdentity>;
   readonly port?: number; // 0 (default) = ephemeral
   readonly host?: string; // default 127.0.0.1
+  readonly maxBodyBytes?: number; // reject a request body larger than this (default 4 MiB)
+  readonly maxStreams?: number; // refuse a new SSE stream past this many live (default 1024)
 }
+
+const DEFAULT_MAX_BODY = 4 * 1024 * 1024;
+const DEFAULT_MAX_STREAMS = 1024;
 
 export interface ServerHandle {
   readonly server: Server;
@@ -32,11 +44,34 @@ export interface ServerHandle {
 
 const sha = (s: string): Buffer => createHash("sha256").update(s).digest();
 
-const readBody = (req: IncomingMessage): Promise<string> =>
+class BodyTooLarge extends Error {
+  constructor() {
+    super("request body too large");
+  }
+}
+
+// Read the body as bytes (so a chunk boundary never splits a multibyte character), refusing
+// anything past the cap before it can exhaust memory. On overflow we stop buffering and reject,
+// but let the request keep draining so the handler can answer with a clean response instead of
+// resetting the socket under the client.
+const readBody = (req: IncomingMessage, limit: number): Promise<string> =>
   new Promise((resolve, reject) => {
-    let body = "";
-    req.on("data", (c: Buffer) => (body += c.toString()));
-    req.on("end", () => resolve(body));
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let overflowed = false;
+    req.on("data", (c: Buffer) => {
+      if (overflowed) return;
+      size += c.length;
+      if (size > limit) {
+        overflowed = true;
+        reject(new BodyTooLarge());
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on("end", () => {
+      if (!overflowed) resolve(Buffer.concat(chunks).toString("utf8"));
+    });
     req.on("error", reject);
   });
 
@@ -48,6 +83,11 @@ const json = (res: ServerResponse, status: number, body: unknown): void => {
 
 export async function serve(options: ServeOptions): Promise<ServerHandle> {
   const host = options.host ?? "127.0.0.1";
+  const maxBody = options.maxBodyBytes ?? DEFAULT_MAX_BODY;
+  const maxStreams = options.maxStreams ?? DEFAULT_MAX_STREAMS;
+  // Own-property lookup only: an attacker-supplied mount name can never resolve a prototype
+  // member (`__proto__`, `constructor`) into a phantom gateway.
+  const mounts = new Map(Object.entries(options.mounts));
   const tokenEntries = Object.entries(options.tokens).map(
     ([token, identity]) => [sha(token), identity] as const,
   );
@@ -83,21 +123,35 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
   ): Promise<void> => {
     let parsed: { query?: string; variables?: Record<string, unknown> };
     try {
-      parsed = JSON.parse(await readBody(req)) as typeof parsed;
-    } catch {
-      json(res, 400, { errors: ["the body must be JSON: { query, variables? }"] });
+      parsed = JSON.parse(await readBody(req, maxBody)) as typeof parsed;
+    } catch (err) {
+      if (err instanceof BodyTooLarge) {
+        json(res, 413, { errors: ["request body too large"] });
+        return;
+      }
+      json(res, 400, {
+        errors: ["the body must be JSON: { query, variables? }"],
+      });
       return;
     }
-    if (typeof parsed.query !== "string") {
+    if (typeof parsed?.query !== "string") {
       json(res, 400, { errors: ["the body must carry a query string"] });
       return;
     }
-    const result = await gateway.query(parsed.query, parsed.variables, contextFor(identity));
+    // A gateway failure (nothing registered, an internal throw) is the caller's structured
+    // { errors }, not a 500 leaking an internal message.
+    let result: QueryResult;
+    try {
+      result = await gateway.query(parsed.query, parsed.variables, contextFor(identity));
+    } catch (err) {
+      result = { errors: [err instanceof Error ? err.message : "the gateway could not answer"] };
+    }
     json(res, 200, result);
   };
 
   const handleSubscribe = async (
     gateway: Gateway,
+    identity: TokenIdentity,
     req: IncomingMessage,
     res: ServerResponse,
     search: URLSearchParams,
@@ -107,7 +161,20 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       json(res, 400, { errors: ["subscribe wants ?query=<subscription>"] });
       return;
     }
-    const events = await gateway.subscribe(source);
+    if (streams.size >= maxStreams) {
+      json(res, 503, { errors: ["this server is holding all the live streams it can"] });
+      return;
+    }
+    // The actor rides through even though today's subscriptions are reads (unauthorized as
+    // reads still are) — when read policy arrives it keys on this, not on a retrofit.
+    void contextFor(identity);
+    let events: AsyncGenerator<Record<string, unknown>>;
+    try {
+      events = await gateway.subscribe(source);
+    } catch (err) {
+      json(res, 400, { errors: [err instanceof Error ? err.message : "not a subscription"] });
+      return;
+    }
     res.writeHead(200, {
       "content-type": "text/event-stream",
       "cache-control": "no-cache",
@@ -120,10 +187,12 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     });
     try {
       for await (const event of events) {
+        // JSON.stringify never emits a raw newline, so no payload can break the SSE framing.
         res.write(`data: ${JSON.stringify(event)}\n\n`);
       }
     } catch (err) {
-      res.write(`event: error\ndata: ${JSON.stringify({ message: String(err) })}\n\n`);
+      const message = err instanceof Error ? err.message : "the stream failed";
+      res.write(`event: error\ndata: ${JSON.stringify({ message })}\n\n`);
     } finally {
       streams.delete(stream);
       res.end();
@@ -162,15 +231,32 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
   ): Promise<void> => {
     let rpc: { id?: unknown; method?: string; params?: Record<string, unknown> };
     try {
-      rpc = JSON.parse(await readBody(req)) as typeof rpc;
-    } catch {
-      json(res, 400, {
+      const parsed: unknown = JSON.parse(await readBody(req, maxBody));
+      if (Array.isArray(parsed)) {
+        json(res, 400, {
+          jsonrpc: "2.0",
+          id: null,
+          error: { code: -32600, message: "batch requests are not supported" },
+        });
+        return;
+      }
+      if (parsed === null || typeof parsed !== "object") {
+        throw new Error("not an object");
+      }
+      rpc = parsed;
+    } catch (err) {
+      json(res, err instanceof BodyTooLarge ? 413 : 400, {
         jsonrpc: "2.0",
         id: null,
-        error: { code: -32700, message: "parse error" },
+        error:
+          err instanceof BodyTooLarge
+            ? { code: -32600, message: "request body too large" }
+            : { code: -32700, message: "parse error" },
       });
       return;
     }
+    // A notification (a request with no id) demands silence, not a reply.
+    const isNotification = rpc.id === undefined || rpc.id === null;
     const reply = (result: unknown): void =>
       json(res, 200, { jsonrpc: "2.0", id: rpc.id ?? null, result });
 
@@ -218,6 +304,12 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         return;
       }
       default:
+        // A notification we don't handle gets silence (JSON-RPC forbids replying to one);
+        // an unknown request gets method-not-found.
+        if (isNotification) {
+          res.writeHead(202).end();
+          return;
+        }
         json(res, 200, {
           jsonrpc: "2.0",
           id: rpc.id ?? null,
@@ -228,17 +320,19 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
 
   const server = createServer((req, res) => {
     void (async () => {
-      const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-      const [, mountName, verb] = url.pathname.split("/");
-      const gateway =
-        mountName === undefined ? undefined : options.mounts[decodeURIComponent(mountName)];
-      if (gateway === undefined) {
-        json(res, 404, { errors: [`no such mount: ${mountName ?? ""}`] });
-        return;
-      }
+      // Authenticate BEFORE resolving the mount: an unauthenticated caller learns nothing
+      // about which mounts exist (no 404-vs-401 mount-name oracle).
       const identity = identify(req);
       if (identity === undefined) {
         json(res, 401, { errors: ["a bearer token is required, and this one opens nothing"] });
+        return;
+      }
+      const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+      const [, mountName, verb] = url.pathname.split("/");
+      const gateway =
+        mountName === undefined ? undefined : mounts.get(decodeURIComponent(mountName));
+      if (gateway === undefined) {
+        json(res, 404, { errors: ["no such mount"] });
         return;
       }
       switch (verb) {
@@ -246,13 +340,13 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           await handleGraphql(gateway, identity, req, res);
           return;
         case "subscribe":
-          await handleSubscribe(gateway, req, res, url.searchParams);
+          await handleSubscribe(gateway, identity, req, res, url.searchParams);
           return;
         case "mcp":
           await handleMcp(gateway, identity, req, res);
           return;
         default:
-          json(res, 404, { errors: [`no such surface: ${verb ?? ""}`] });
+          json(res, 404, { errors: ["no such surface"] });
       }
     })().catch((err: unknown) => {
       if (!res.headersSent) {

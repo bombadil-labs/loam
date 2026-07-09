@@ -102,14 +102,40 @@ describe("HTTP: the gateway behind a bearer token", () => {
     );
     const deniedBody = (await denied.json()) as { errors: string[] };
     expect(deniedBody.errors.join(" ")).toMatch(/not permitted/);
+    // and the refusal actually refused: the value is not mallory's 99
+    const after = await gql("garden", "alice-token", `{ plant(entity: "${FERN}") { height } }`);
+    expect(
+      ((await after.json()) as { data: { plant: { height: number } } }).data.plant.height,
+    ).not.toBe(99);
   });
 
-  it("an unknown mount is 404; mounts are separate worlds", async () => {
+  it("an unknown mount is 404 — but only to the authenticated; prototype keys are not mounts", async () => {
     expect((await gql("orchard", "alice-token", `{ __typename }`)).status).toBe(404);
+    // a prototype-member name resolves no phantom gateway
+    expect((await gql("__proto__", "alice-token", `{ __typename }`)).status).toBe(404);
+    expect((await gql("constructor", "alice-token", `{ __typename }`)).status).toBe(404);
+    // and an unauthenticated caller cannot tell a real mount from a missing one: both 401
+    const realNoToken = await gql("garden", undefined, `{ __typename }`);
+    const fakeNoToken = await gql("orchard", undefined, `{ __typename }`);
+    expect(realNoToken.status).toBe(401);
+    expect(fakeNoToken.status).toBe(401);
+  });
+
+  it("mounts are separate worlds", async () => {
     // the meadow has no fern claims: its plant view is silent about the garden's data
     const meadow = await gql("meadow", "op-token", `{ plant(entity: "${FERN}") { height } }`);
     const body = (await meadow.json()) as { data: { plant: { height: number | null } } };
     expect(body.data.plant.height).toBeNull();
+  });
+
+  it("an oversized body is refused, not swallowed", async () => {
+    const huge = "x".repeat(6 * 1024 * 1024);
+    const res = await fetch(`${base}/garden/graphql`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer alice-token" },
+      body: JSON.stringify({ query: `{ plant(entity: "${huge}") { height } }` }),
+    });
+    expect(res.status).toBe(413);
   });
 
   it("subscribe over SSE: the snapshot arrives, then the patch", async () => {
@@ -225,7 +251,7 @@ describe("MCP: the same gateway as JSON-RPC tools", () => {
       method: "tools/call",
       params: {
         name: "loam_mutate",
-        arguments: { mutation: `mutation { plant(entity: "${FERN}", height: 1) { height } }` },
+        arguments: { mutation: `mutation { plant(entity: "${FERN}", height: 7) { height } }` },
       },
     });
     const deniedBody = (await denied.json()) as {
@@ -233,6 +259,28 @@ describe("MCP: the same gateway as JSON-RPC tools", () => {
     };
     expect(deniedBody.result.isError).toBe(true);
     expect(deniedBody.result.content[0]!.text).toMatch(/not permitted/);
+    // the denial refused: mallory's 7 did not land
+    const check = await rpc("alice-token", {
+      method: "tools/call",
+      params: {
+        name: "loam_query",
+        arguments: { query: `{ plant(entity: "${FERN}") { height } }` },
+      },
+    });
+    const checkBody = (await check.json()) as { result: { content: Array<{ text: string }> } };
+    const height = (
+      JSON.parse(checkBody.result.content[0]!.text) as { data: { plant: { height: number } } }
+    ).data.plant.height;
+    expect(height).not.toBe(7);
+  });
+
+  it("a notification (no id) is answered with silence", async () => {
+    const res = await fetch(`${base}/garden/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer alice-token" },
+      body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized", params: {} }),
+    });
+    expect(res.status).toBe(202);
   });
 
   it("a junk token cannot even say hello", async () => {
