@@ -5,31 +5,30 @@ _The live checklist for the step in progress: its success criteria, the sub-task
 **Success criteria (the gate):**
 
 - Tests against the **real** `@bombadil/rhizomatic` dependency pass for each SPEC §2 claim Loam
-  will stand on:
-  - `loadSchema(deltas) → HyperSchema` — schemas are data; publish → load round-trips.
-  - `resolveView(Policy, HView) → View` across `pick` / `all` / `conflicts` `PropPolicy`s
-    (latest-wins, set-union, contested-kept).
-  - A reactor materialization stays current on `ingest`, and `subscribe` fires with a
-    `MaterializationChange` naming the changed props.
-  - A `DerivationHost` binding fires on ingest and emits deltas (definition → application →
-    execution).
-- `JOURNAL.md` records what is confirmed vs. what differs from SPEC §2; SPEC is corrected where
-  reality differs.
+  will stand on: `loadSchema` round-trips; `resolveView` across pick/all/conflicts (+merge);
+  reactor materialization + `subscribe`; `DerivationHost` binding firing, emitting, replaying.
+- `JOURNAL.md` records what is confirmed vs. what differs from SPEC §2; SPEC corrected.
 - `npm run check` green (all stages, all tests).
 
 **Sub-tasks:**
 
-- [ ] Read rhizomatic's own tests for schema-deltas, policy, reactor, derivation — learn the
-      real call shapes before writing ours
-- [ ] `test/spike/schema.test.ts` — publishSchemaClaims → loadSchema round-trip
-- [ ] `test/spike/resolve.test.ts` — eval a HyperSchema to HView; resolveView under
-      pick/all/conflicts; snapshot hashes stable (`viewCanonicalHex`)
-- [ ] `test/spike/reactor.test.ts` — register a materialization; ingest; subscribe fires;
-      materializedHex changes
-- [ ] `test/spike/derivation.test.ts` — install a DerivedFn + BindingSpec; ingest; outputs
-      emitted; pure replay verifies (`verifyPureDerivation`)
-- [ ] SPEC §2 corrections (if any) + JOURNAL entry (confirmed vs. differs)
-- [ ] Feature branch → PR → adversarial review → resolve → merge
+- [x] Read rhizomatic's own tests — learned the real call shapes (terms via `parseTerm` JSON
+      profile; `register(name, term, roots)`; `DerivationHost.install(spec, fn, seed) → author`)
+- [x] `test/spike/garden.ts` — shared world (two signing authors, one fern)
+- [x] `test/spike/schema.test.ts` — publish→load, evolution, negation, the metacircular seed
+- [x] `test/spike/resolve.test.ts` — pick/all/conflicts/merge, pluralism, stable snapshots
+- [x] `test/spike/reactor.test.ts` — materializations, subscribe, dispatch, convergence, forgery
+- [x] `test/spike/derivation.test.ts` — fire+emit+provenance, supersede, pure replay, budget
+- [x] SPEC §2 corrections (MaterializationChange shape, subscribeRaw, unsigned-ingest note,
+      conflicts nuance) + JOURNAL entry
+- [x] Feature branch → PR #2 → adversarial review (4 angles: test honesty, missing coverage,
+      docs accuracy, quality) → resolved 21 findings: falsifiable evolution + order tests,
+      exact provenance/suspension targets, ground-truth newHex, the resolveView-over-
+      materialization gateway seam, negation through the live read, subscribeRaw contract,
+      late registration, multiple subscribers, schema-ref expansion + collectRefs, absentAs +
+      byPred, honest narrowing (no casts), shared plantReactor, journal factually corrected
+      (rhizomatic. prefix, scoped re-evaluation claim, supersede semantics, parseTerm grammar)
+- [ ] CI green on the resolved PR → merge by PR number
 
-**Left off here:** plan written; next is reading rhizomatic's tests (stage 2 prep), then the
-spike tests.
+**Left off here:** review resolved, gate green (30/30); awaiting CI on PR #2, then merge +
+re-plan (stages 6-8).
