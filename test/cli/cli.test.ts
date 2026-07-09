@@ -3,7 +3,7 @@
 // hand-rolled, and every subcommand is exercised against real files and, for serve, a real
 // listening server.
 
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -163,6 +163,64 @@ describe("loam serve", () => {
   });
 });
 
+describe("loam register", () => {
+  const PICK = { pick: { order: { byTimestamp: "desc" } } };
+  const plantFile = () => {
+    const path = join(home, "plant.json");
+    writeFileSync(
+      path,
+      JSON.stringify({
+        name: "Plant",
+        alg: 1,
+        body: {
+          op: "group",
+          key: "byTargetContext",
+          in: {
+            op: "select",
+            pred: { hasPointer: { targetEntity: { var: "root" } } },
+            in: { op: "mask", policy: "drop", in: "input" },
+          },
+        },
+        policy: { props: { height: PICK }, default: PICK },
+        roots: ["plant:fern"],
+      }),
+    );
+    return path;
+  };
+
+  it("registers a schema from a file; a later serve answers through it", async () => {
+    await run(["init", "--home", home], io());
+    const code = await run(["register", plantFile(), "--home", home], io());
+    expect(code).toBe(0);
+    expect(out.join("\n")).toMatch(/registered.*Plant/i);
+
+    // the registration is deltas on disk: a fresh serve reads them and serves the type
+    const handle = await serveDetached(["--home", home, "--port", "0", "--token", "t"]);
+    const res = await fetch(`${handle.url}/default/graphql`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer t" },
+      body: JSON.stringify({ query: `{ plant(entity: "plant:fern") { height } }` }),
+    });
+    const body = (await res.json()) as { errors?: string[] };
+    expect(body.errors).toBeUndefined();
+    await handle.close();
+  });
+
+  it("a missing file is a plain error, not a stack trace", async () => {
+    await run(["init", "--home", home], io());
+    const code = await run(["register", join(home, "nope.json"), "--home", home], io());
+    expect(code).not.toBe(0);
+    expect(err.join("\n")).toMatch(/no such|missing|cannot read|not found/i);
+  });
+
+  it("register without a file argument says what it wants", async () => {
+    await run(["init", "--home", home], io());
+    const code = await run(["register", "--home", home], io());
+    expect(code).not.toBe(0);
+    expect(err.join("\n")).toMatch(/file/i);
+  });
+});
+
 describe("loam store", () => {
   it("reports on a store: its delta count", async () => {
     await run(["init", "--home", home], io());
@@ -177,7 +235,7 @@ describe("loam help and version", () => {
     const code = await run(["--help"], io());
     expect(code).toBe(0);
     const printed = out.join("\n");
-    for (const cmd of ["init", "serve", "store"]) expect(printed).toContain(cmd);
+    for (const cmd of ["init", "serve", "store", "register"]) expect(printed).toContain(cmd);
   });
 
   it("prints a version", async () => {

@@ -171,9 +171,9 @@ describe("subscribe: an initial snapshot, then patches", () => {
     const events = await gateway.subscribe(SUBSCRIPTION);
     await nextPatch(events); // drain the snapshot; the reader parks next
     const parked = events.next();
-    // Sabotage re-resolution: gather() throws for every future sink invocation.
-    const broken = gateway as unknown as { gather: () => never };
-    broken.gather = () => {
+    // Sabotage re-resolution: the stream's captured materialization read throws from now on.
+    const broken = gateway.reactor as unknown as { materializedView: () => never };
+    broken.materializedView = () => {
       throw new Error("the ground gave way");
     };
     await gateway.query(`mutation { plant(entity: "${FERN}", height: 41) { height } }`);
