@@ -6,8 +6,6 @@
   "description": "Loam — a general database grown on rhizomatic: signed, content-addressed deltas beneath; GraphQL query, mutation, and subscription above.",
   "license": "MIT OR Apache-2.0",
   "author": "Mykola Bilokonsky",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -15,7 +13,7 @@
     }
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -25,7 +23,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "npm run format:check && npm run lint && npm run typecheck && npm test"
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm run build && npm test"
   },
   "dependencies": {
     "@bombadil/rhizomatic": "^0.1.0"

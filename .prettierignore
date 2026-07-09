@@ -1,5 +1,4 @@
-dist
-node_modules
+# .gitignore already excludes dist/ and node_modules/; prettier 3 respects it.
 package-lock.json
 # Markdown docs are hand-formatted; leave them to the author.
 *.md
