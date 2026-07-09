@@ -3,9 +3,10 @@
 Beneath everything that grows, there is ground.
 
 Loam is intended to be a database application built using the affordances exposed via the capabilities
-of the [rhizomatic](https://github.com/bombadil-labs/rhizomatic) portable data format. `Rhizomatic` is 
-just a way to encode information, it's not an application - `Loam` is the first attempt to build something
-with it. `Rhizomatic` approaches data a bit differently than many systems are used to, and packs a *lot* of
+of [rhizomatic](https://github.com/bombadil-labs/rhizomatic). `Rhizomatic` is a portable data format
+*and* a typed reactive core (resolution, a self-hosting schema-schema, a reactor, a function
+substrate) — but it's not an application; `Loam` is the first attempt to build something with it.
+`Rhizomatic` approaches data a bit differently than many systems are used to, and packs a *lot* of
 moving parts into a very small footprint.
 
 Loam is intended to allow users to rapidly stand up a rhizomatic store, expose an interface for query, mutation

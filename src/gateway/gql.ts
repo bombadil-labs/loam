@@ -208,7 +208,8 @@ export function buildGqlSchema(defs: readonly Registered[], hooks: GqlHooks): Gr
     });
 
     const fieldName = typeName.replace(/^[A-Z]/, (c) => c.toLowerCase());
-    if (fieldName in queryFields) {
+    // Own properties only: a schema named "toString" collides with nothing but itself.
+    if (Object.hasOwn(queryFields, fieldName)) {
       throw new Error(
         `schema ${def.schema.name}: its query field "${fieldName}" collides with an earlier schema`,
       );

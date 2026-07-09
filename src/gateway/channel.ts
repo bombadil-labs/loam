@@ -2,16 +2,24 @@
 // promise cannot process return() until that promise settles — so a subscription built on one
 // would hang whoever tries to leave it. This channel implements the AsyncGenerator protocol
 // directly: push() feeds it, next() drains it (or parks), and return() resolves immediately —
-// waking any parked reader with done — no matter what is or is not flowing.
+// waking every parked reader with done — no matter what is or is not flowing.
 //
 // Backpressure is coalescence, not growth: when a coalesce function is given, a push landing on
 // an undrained value merges into it instead of queueing behind it — a slow reader holds at most
 // one pending value, and the merge preserves whatever continuity the payload carries.
+//
+// Concurrent readers park in FIFO order (native generators queue concurrent next() calls; so
+// does this). fail() rejects every parked reader with the error — a stream that died of
+// something must say so, not just end.
+
+interface Waiter<T> {
+  readonly resolve: (r: IteratorResult<T, void>) => void;
+  readonly reject: (e: Error) => void;
+}
 
 export class Channel<T> implements AsyncGenerator<T, void, unknown> {
   private readonly queue: T[] = [];
-  private parked:
-    { resolve: (r: IteratorResult<T, void>) => void; reject: (e: Error) => void } | undefined;
+  private readonly waiters: Waiter<T>[] = [];
   private closed = false;
   private failure: Error | undefined;
 
@@ -24,10 +32,9 @@ export class Channel<T> implements AsyncGenerator<T, void, unknown> {
 
   push(value: T): void {
     if (this.closed) return;
-    if (this.parked !== undefined) {
-      const { resolve } = this.parked;
-      this.parked = undefined;
-      resolve({ value, done: false });
+    const waiter = this.waiters.shift();
+    if (waiter !== undefined) {
+      waiter.resolve({ value, done: false });
       return;
     }
     if (this.coalesce !== undefined && this.queue.length > 0) {
@@ -37,13 +44,14 @@ export class Channel<T> implements AsyncGenerator<T, void, unknown> {
     }
   }
 
-  // End the stream with an error: the parked (or next) reader gets a rejection, then done.
+  // End the stream with an error: every parked reader is rejected with it, and the next unparked
+  // read rejects once; after that the stream is simply done.
   fail(error: Error): void {
     if (this.closed) return;
-    this.failure = error;
-    const parked = this.parked;
+    const parked = this.waiters.splice(0);
+    this.failure = parked.length > 0 ? undefined : error;
     this.close();
-    parked?.reject(error);
+    for (const waiter of parked) waiter.reject(error);
   }
 
   next(): Promise<IteratorResult<T, void>> {
@@ -57,7 +65,7 @@ export class Channel<T> implements AsyncGenerator<T, void, unknown> {
     }
     if (this.closed) return Promise.resolve({ value: undefined, done: true });
     return new Promise((resolve, reject) => {
-      this.parked = { resolve, reject };
+      this.waiters.push({ resolve, reject });
     });
   }
 
@@ -74,8 +82,7 @@ export class Channel<T> implements AsyncGenerator<T, void, unknown> {
   private close(): void {
     if (this.closed) return;
     this.closed = true;
-    this.parked?.resolve({ value: undefined, done: true });
-    this.parked = undefined;
+    for (const waiter of this.waiters.splice(0)) waiter.resolve({ value: undefined, done: true });
     this.onClose?.();
   }
 

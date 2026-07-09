@@ -67,7 +67,7 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Policy)", () => {
     expect(plant.height).toBe(34); // pick byTimestamp desc
     expect(plant.tag).toEqual(["shade", "fronds"]); // all → list
     expect(plant.watered).toBe(false); // absentAs speaks for silence
-    expect(plant.readings).toBe(1); // merge count → number
+    expect(plant.readings).toBe(2); // merge count → the COUNT (the values are 7 and 9)
     expect(plant._hex).toMatch(/^[0-9a-f]+$/);
     await gateway.close();
   });
@@ -107,7 +107,10 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Policy)", () => {
 
   it("loadSchema: schema-defining deltas meta-resolve through SCHEMA_SCHEMA into a HyperSchema", async () => {
     const gateway = await Gateway.open(new MemoryBackend());
-    const published = makeDelta(publishSchemaClaims(PLANT, "schema:Plant", GARDENER, 1000));
+    const published = signClaims(
+      publishSchemaClaims(PLANT, "schema:Plant", GARDENER, 1000),
+      GARDENER_SEED,
+    );
     const loaded = await gateway.loadSchema([published], "schema:Plant");
     expect(loaded.name).toBe("Plant");
     expect(termHash(loaded.body)).toBe(termHash(PLANT.body));
@@ -171,7 +174,7 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Policy)", () => {
 
   it("append receipts are exact: accepted counts, duplicates count, dupes persist once", async () => {
     const gateway = await Gateway.open(new MemoryBackend());
-    expect(await gateway.append(garden)).toEqual({ accepted: 5, duplicates: 0 });
+    expect(await gateway.append(garden)).toEqual({ accepted: 6, duplicates: 0 });
     expect(await gateway.append(garden.slice(0, 2))).toEqual({ accepted: 0, duplicates: 2 });
     await gateway.close();
   });
@@ -271,7 +274,7 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Policy)", () => {
     await gateway.close();
   });
 
-  it("a write-through failure is surfaced, further appends refuse, close still releases", async () => {
+  it("a failed write means nothing happened: not ingested, not served, retry welcome", async () => {
     class FailingBackend extends MemoryBackend {
       failNow = false;
       override append(deltas: Iterable<Delta>): Promise<number> {
@@ -280,14 +283,38 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Policy)", () => {
       }
     }
     const backend = new FailingBackend();
-    const gateway = await Gateway.open(backend);
-    await gateway.append(garden.slice(0, 2)); // healthy writes land
+    const gateway = await Gateway.open(backend, { seed: "c3".repeat(32) });
+    await gateway.append(garden);
+    gateway.register(PLANT, PLANT_POLICY, [FERN]);
+    const before = await queryPlant(gateway);
+
     backend.failNow = true;
-    await expect(gateway.append([garden[2]!])).rejects.toThrow(/disk on fire/);
-    // degraded: new work is refused BEFORE ingest, so the divergence stops growing
-    await expect(gateway.append([garden[3]!])).rejects.toThrow(/no longer persist/);
-    // close surfaces the failure AND releases the backend
-    await expect(gateway.close()).rejects.toThrow(/disk on fire/);
-    await expect(backend.deltasSince(new Set())).rejects.toThrow(/closed/);
+    const failed = await gateway.query(
+      `mutation { plant(entity: "${FERN}", height: 99) { height } }`,
+    );
+    expect(failed.errors?.join(" ")).toMatch(/disk on fire/);
+    // the mutation that failed is NOT being served: no phantom state
+    expect((await queryPlant(gateway)).height).toBe(before.height);
+    expect((await queryPlant(gateway))._hex).toBe(before._hex);
+
+    // the disk heals; the same write simply works — a failed append is retryable, not fatal
+    backend.failNow = false;
+    const retried = await gateway.query(
+      `mutation { plant(entity: "${FERN}", height: 99) { height } }`,
+    );
+    expect(retried.errors).toBeUndefined();
+    expect((await queryPlant(gateway)).height).toBe(99);
+    await gateway.close();
+  });
+
+  it("the gateway refuses unsigned deltas — authority is always attested here", async () => {
+    const gateway = await Gateway.open(new MemoryBackend());
+    const unsigned = makeDelta({
+      timestamp: 1,
+      author: "did:key:zAnyoneAtAll",
+      pointers: [{ role: "note", target: { kind: "primitive", value: "trust me" } }],
+    });
+    await expect(gateway.append([unsigned])).rejects.toThrow(/unsigned/);
+    await gateway.close();
   });
 });

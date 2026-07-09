@@ -12,11 +12,17 @@
 import type { Delta } from "@bombadil/rhizomatic";
 
 // Failure semantics, uniform across drivers: every failure is a REJECTED PROMISE, never a
-// synchronous throw. A delta whose id does not recompute from its claims is refused (rejection;
-// nothing stored). A stored row that no longer recomputes is corruption: reads reject rather
-// than laundering it into a differently-addressed delta. After `close()`, every method rejects.
-// What a store returns is the canonical form of what went in (the JSON profile's fixed point) —
-// so any two drivers return byte-identical deltas.
+// synchronous throw. A delta whose id does not recompute from its claims — or that carries a
+// lone surrogate, whose bytes and identity disagree — is refused, and one refusal refuses its
+// whole batch, atomically. A stored row that no longer recomputes, or whose signature no longer
+// verifies, is corruption: reads reject rather than laundering. After `close()`, every method
+// rejects. What a store returns is the canonical form of what went in (the JSON profile's fixed
+// point) — so any two drivers return byte-identical deltas.
+//
+// Concurrency: the durable drivers keep the DISK convergent across handles (union by id), but a
+// reader holds no live view of other writers — whoever fronts a store (the Gateway) reads it
+// once at open. One writing gateway per store; cross-process liveness is federation's job, not
+// a file's.
 
 export interface StoreBackend {
   // Durably store every supplied delta not already held. Idempotent by id, deduped within the

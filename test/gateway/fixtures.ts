@@ -17,10 +17,13 @@ export const PLANT_POLICY: Policy = {
   default: pickLatest,
 };
 
+// Two readings whose VALUES (7, 9) differ from their COUNT (2): an assertion on the count can
+// never be satisfied by a picked value.
 export const garden = [
   observed(FERN, "height", 30, 1000, GARDENER_SEED),
   observed(FERN, "height", 34, 2000, SURVEYOR_SEED),
   observed(FERN, "tag", "shade", 1500, GARDENER_SEED),
   observed(FERN, "tag", "fronds", 1600, SURVEYOR_SEED),
-  observed(FERN, "readings", 1, 1700, GARDENER_SEED),
+  observed(FERN, "readings", 7, 1700, GARDENER_SEED),
+  observed(FERN, "readings", 9, 1800, SURVEYOR_SEED),
 ];

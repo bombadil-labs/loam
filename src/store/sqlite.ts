@@ -14,7 +14,14 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import Database from "better-sqlite3";
-import { claimsToJson, computeId, makeDelta, parseClaims, type Delta } from "@bombadil/rhizomatic";
+import {
+  claimsToJson,
+  computeId,
+  makeDelta,
+  parseClaims,
+  verifyDelta,
+  type Delta,
+} from "@bombadil/rhizomatic";
 import type { StoreBackend } from "./backend.js";
 import { canonicalDelta } from "./canon.js";
 
@@ -64,9 +71,12 @@ export class SqliteBackend implements StoreBackend {
     const fresh: Delta[] = [];
     const seen = new Set<string>();
     for (const d of deltas) {
-      if (this.onDisk.has(d.id) || seen.has(d.id)) continue;
-      seen.add(d.id);
-      fresh.push(canonicalDelta(d)); // refuses a forged id before anything touches the disk
+      // The gate runs on EVERY delta, before the dedup fast-path: a forgery wearing a known id
+      // is still a forgery, and it refuses the whole batch — never a silent skip.
+      const canon = canonicalDelta(d);
+      if (this.onDisk.has(canon.id) || seen.has(canon.id)) continue;
+      seen.add(canon.id);
+      fresh.push(canon);
     }
     if (fresh.length === 0) return 0;
 
@@ -106,9 +116,17 @@ export class SqliteBackend implements StoreBackend {
           `store corruption: row ${row.id} does not recompute from its claims — refusing to read`,
         );
       }
+      const delta = makeDelta(claims, row.sig ?? undefined);
+      // The signature column is part of the row's integrity: a sig that does not verify is
+      // corruption, refused like any other — never handed onward as healthy data.
+      if (verifyDelta(delta) === "invalid") {
+        throw new Error(
+          `store corruption: row ${row.id} carries a signature that does not verify — refusing to read`,
+        );
+      }
       this.onDisk.add(row.id);
       if (knownIds.has(row.id)) continue;
-      out.push(makeDelta(claims, row.sig ?? undefined));
+      out.push(delta);
     }
     return out;
   }

@@ -5,11 +5,11 @@
 // to write: unsigned authority does not exist here.
 
 import { describe, expect, it } from "vitest";
-import { authorForSeed, verifyDelta } from "@bombadil/rhizomatic";
+import { authorForSeed, verifyDelta, type Policy, type PropPolicy } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
-import { FERN } from "../spike/garden.js";
-import { PLANT, PLANT_POLICY, garden } from "./fixtures.js";
+import { FERN, GARDENER } from "../spike/garden.js";
+import { PLANT, PLANT_POLICY, garden, pickLatest } from "./fixtures.js";
 
 const KEEPER_SEED = "c3".repeat(32);
 const KEEPER = authorForSeed(KEEPER_SEED);
@@ -122,8 +122,51 @@ describe("mutate: the deltas survive like any others", () => {
   it("gateway authorship is real authorship: byAuthorRank can prefer or distrust it", async () => {
     const gateway = await keeperGateway();
     await gateway.query(`mutation { plant(entity: "${FERN}", height: 50) { height } }`);
-    const result = await gateway.query(`{ plant(entity: "${FERN}") { _view } }`);
-    expect(result.errors).toBeUndefined(); // the keeper's claim resolves like anyone's
+    // Two lenses over the same ground: one trusts the keeper, one trusts the gardener.
+    const trusting = (author: string): Policy => ({
+      props: new Map<string, PropPolicy>([
+        ["height", { kind: "pick", order: { kind: "byAuthorRank", authors: [author] } }],
+      ]),
+      default: pickLatest,
+    });
+    gateway.register({ name: "TrustKeeper", alg: 1, body: PLANT.body }, trusting(KEEPER), [FERN]);
+    gateway.register({ name: "TrustGardener", alg: 1, body: PLANT.body }, trusting(GARDENER), [
+      FERN,
+    ]);
+    const result = await gateway.query(`{
+      trustKeeper(entity: "${FERN}") { height }
+      trustGardener(entity: "${FERN}") { height }
+    }`);
+    expect(result.errors).toBeUndefined();
+    const data = result.data as {
+      trustKeeper: { height: number };
+      trustGardener: { height: number };
+    };
+    expect(data.trustKeeper.height).toBe(50); // the keeper's mutation, preferred by rank
+    expect(data.trustGardener.height).toBe(30); // the gardener's old measurement, still winning
+    await gateway.close();
+  });
+
+  it("a store-native name survives GraphQL mangling: write and read through legal()", async () => {
+    const backend = new MemoryBackend();
+    const gateway = await Gateway.open(backend, { seed: KEEPER_SEED });
+    gateway.register(
+      { name: "Plant", alg: 1, body: PLANT.body },
+      {
+        props: new Map<string, PropPolicy>([["leaf-count", pickLatest]]),
+        default: pickLatest,
+      },
+      [FERN],
+    );
+    // The GraphQL field is leaf_count; the claim context stays the store-native "leaf-count".
+    const result = await gateway.query(`mutation {
+      plant(entity: "${FERN}", leaf_count: 12) { leaf_count }
+    }`);
+    expect(result.errors).toBeUndefined();
+    expect((result.data as { plant: { leaf_count: number } }).plant.leaf_count).toBe(12);
+    const persisted = await backend.deltasSince(new Set());
+    const subject = persisted[0]!.claims.pointers.find((p) => p.role === "subject");
+    expect(subject?.target.kind === "entity" && subject.target.entity.context).toBe("leaf-count");
     await gateway.close();
   });
 });

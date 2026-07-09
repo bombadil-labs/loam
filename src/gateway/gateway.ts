@@ -68,6 +68,11 @@ export class Gateway {
   private readonly sinks = new Map<string, Set<(c: MaterializationChange) => void>>();
   private readonly lazyMats = new Set<string>();
   private readonly channels = new Set<Channel<PatchNode>>();
+  // Ids append() has already persisted this tick: the raw-stream subscriber skips them, so a
+  // direct append is written exactly once (the raw stream still catches every OTHER emitter —
+  // a future DerivationHost's emissions ride it into the ground).
+  private readonly justPersisted = new Set<string>();
+  private lastMutationTs = 0;
 
   private constructor(
     private readonly backend: StoreBackend,
@@ -75,6 +80,7 @@ export class Gateway {
     private readonly options: GatewayOptions,
   ) {
     reactor.subscribeRaw((d) => {
+      if (this.justPersisted.delete(d.id)) return;
       this.writes = this.writes
         .then(() => this.backend.append([d]))
         .then(
@@ -99,18 +105,26 @@ export class Gateway {
     return new Gateway(backend, reactor, options);
   }
 
-  // Ingest a batch and write it through. The batch is validated WHOLE before anything is
-  // ingested — one bad delta refuses the lot, so a caller never lands half a write.
+  // Persist a batch, THEN serve it. The batch is validated whole (one bad delta refuses the
+  // lot); it lands in the backend before the reactor sees it, so nothing a query or a
+  // subscriber can observe is ever less durable than the ground — a failed write means nothing
+  // happened, and the caller may simply retry. Only verified signatures pass: the substrate
+  // accepts unsigned deltas, the gateway does not (authority is always attested here).
   async append(deltas: Iterable<Delta>): Promise<AppendReceipt> {
     if (this.writeFailure !== undefined) {
       throw new Error(`this gateway can no longer persist: ${this.writeFailure.message}`);
     }
     const batch = [...deltas];
     for (const d of batch) {
-      if (computeId(d.claims) !== d.id || verifyDelta(d) === "invalid") {
-        throw new Error(`append rejected: delta ${d.id} is not what it claims to be`);
+      if (computeId(d.claims) !== d.id || verifyDelta(d) !== "verified") {
+        throw new Error(
+          `append rejected: delta ${d.id} is unsigned or not what it claims to be — ` +
+            `the gateway accepts only verified authorship`,
+        );
       }
     }
+    await this.backend.append(batch); // a throw here means NOTHING was ingested or served
+    for (const d of batch) this.justPersisted.add(d.id);
     let accepted = 0;
     let duplicates = 0;
     for (const d of batch) {
@@ -118,7 +132,7 @@ export class Gateway {
       if (result.status === "accepted") accepted += 1;
       else duplicates += 1; // "rejected" is unreachable: the batch was validated above
     }
-    await this.flush();
+    for (const d of batch) this.justPersisted.delete(d.id); // duplicates never hit the raw stream
     return { accepted, duplicates };
   }
 
@@ -171,11 +185,22 @@ export class Gateway {
     return `\u0000${name}\u0000${entity}`;
   }
 
+  private static readonly MAX_LAZY_MATS = 1024;
+
   private matFor(name: string, entity: string): string {
     const def = this.def(name);
     if (def.roots.includes(entity)) return name;
     const matName = this.lazyMatName(name, entity);
     if (!this.lazyMats.has(matName)) {
+      // The reactor has no deregister, so every watched entity costs memory and per-ingest CPU
+      // for the gateway's lifetime. The cap keeps an unauthenticated reader from growing the
+      // reactor without bound; raising it is a deploy decision, not a default.
+      if (this.lazyMats.size >= Gateway.MAX_LAZY_MATS) {
+        throw new Error(
+          `this gateway already watches ${Gateway.MAX_LAZY_MATS} unregistered entities — ` +
+            `register the roots you mean to hold live`,
+        );
+      }
       this.reactor.register(matName, def.schema.body, [entity], this.registry);
       this.lazyMats.add(matName);
     }
@@ -222,7 +247,10 @@ export class Gateway {
       throw new Error(`mutation of ${entity} names no properties to claim`);
     }
     const author = authorForSeed(seed);
-    const timestamp = Date.now();
+    // Strictly monotonic: two mutations from this gateway never tie on timestamp, so
+    // pick-byTimestamp between them is an ordering, not a coin flip on delta-id hashes.
+    this.lastMutationTs = Math.max(Date.now(), this.lastMutationTs + 1);
+    const timestamp = this.lastMutationTs;
     const deltas = entries.map(([prop, value]) =>
       signClaims(
         {
@@ -278,11 +306,14 @@ export class Gateway {
         liveSinks.delete(sink);
         this.channels.delete(channel);
       },
-      (pending, incoming) => ({
-        ...incoming,
-        fromHex: pending.fromHex,
-        changed: [...new Set([...(pending.changed ?? []), ...(incoming.changed ?? [])])],
-      }),
+      (pending, incoming) =>
+        pending.fromHex === null && pending.changed === null
+          ? { ...incoming, fromHex: null, changed: null } // still the snapshot — just a newer one
+          : {
+              ...incoming,
+              fromHex: pending.fromHex,
+              changed: [...new Set([...(pending.changed ?? []), ...(incoming.changed ?? [])])],
+            },
     );
 
     const initial = this.resolvedNode(name, entity);
