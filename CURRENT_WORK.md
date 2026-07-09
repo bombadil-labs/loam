@@ -1,34 +1,26 @@
-# Current work — Step 1: Confirm the rhizomatic surface (the spike)
+# Current work — Step 2: Persistence tier
 
 _The live checklist for the step in progress: its success criteria, the sub-tasks (checked as they complete), and a "left off here" note so any model can resume mid-step. Replaced at the start of each step; cleared when a step merges._
 
 **Success criteria (the gate):**
 
-- Tests against the **real** `@bombadil/rhizomatic` dependency pass for each SPEC §2 claim Loam
-  will stand on: `loadSchema` round-trips; `resolveView` across pick/all/conflicts (+merge);
-  reactor materialization + `subscribe`; `DerivationHost` binding firing, emitting, replaying.
-- `JOURNAL.md` records what is confirmed vs. what differs from SPEC §2; SPEC corrected.
-- `npm run check` green (all stages, all tests).
+- An **async** `StoreBackend` seam: `append(deltas) → count`, `deltasSince(knownIds) → Delta[]`,
+  `close()`. Delta-level only — no agent coupling (that was Chorus's shape, not Loam's).
+- An in-memory driver and a durable sqlite driver (better-sqlite3 behind the async seam — local
+  node 22.0.0 predates `node:sqlite`; the driver seam keeps libSQL/node:sqlite additive later).
+- `append` is idempotent by id; `deltasSince(known)` returns exactly the complement; signed and
+  unsigned deltas rehydrate identically (signatures still verify).
+- Durable state survives close/reopen; a second handle on the same file sees the union.
+- One **contract test suite parameterized over both drivers** — the interface is the asset.
+- `npm run check` green.
 
 **Sub-tasks:**
 
-- [x] Read rhizomatic's own tests — learned the real call shapes (terms via `parseTerm` JSON
-      profile; `register(name, term, roots)`; `DerivationHost.install(spec, fn, seed) → author`)
-- [x] `test/spike/garden.ts` — shared world (two signing authors, one fern)
-- [x] `test/spike/schema.test.ts` — publish→load, evolution, negation, the metacircular seed
-- [x] `test/spike/resolve.test.ts` — pick/all/conflicts/merge, pluralism, stable snapshots
-- [x] `test/spike/reactor.test.ts` — materializations, subscribe, dispatch, convergence, forgery
-- [x] `test/spike/derivation.test.ts` — fire+emit+provenance, supersede, pure replay, budget
-- [x] SPEC §2 corrections (MaterializationChange shape, subscribeRaw, unsigned-ingest note,
-      conflicts nuance) + JOURNAL entry
-- [x] Feature branch → PR #2 → adversarial review (4 angles: test honesty, missing coverage,
-      docs accuracy, quality) → resolved 21 findings: falsifiable evolution + order tests,
-      exact provenance/suspension targets, ground-truth newHex, the resolveView-over-
-      materialization gateway seam, negation through the live read, subscribeRaw contract,
-      late registration, multiple subscribers, schema-ref expansion + collectRefs, absentAs +
-      byPred, honest narrowing (no casts), shared plantReactor, journal factually corrected
-      (rhizomatic. prefix, scoped re-evaluation claim, supersede semantics, parseTerm grammar)
-- [ ] CI green on the resolved PR → merge by PR number
+- [ ] `test/store/contract.test.ts` — the parameterized contract (tests first)
+- [ ] `src/store/backend.ts` — the `StoreBackend` interface
+- [ ] `src/store/memory.ts` — in-memory driver
+- [ ] `src/store/sqlite.ts` — durable driver (WAL, one txn per batch, mark-durable-after-commit)
+- [ ] `src/index.ts` — export the seam + drivers
+- [ ] Gate green → branch → PR → **one** review agent → resolve → merge → journal
 
-**Left off here:** review resolved, gate green (30/30); awaiting CI on PR #2, then merge +
-re-plan (stages 6-8).
+**Left off here:** plan written; next is the contract test.

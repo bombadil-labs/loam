@@ -64,16 +64,9 @@ then remove these items from `CLAUDE.md` when they are accounted for.
 Ordered; re-evaluated after each merge (cycle stage 7). Adopt rhizomatic's core; build the wrapper.
 
 0. **Scaffold.** _Done — merged as PR #1 (2026-07-09); see `JOURNAL.md`._
-1. **Confirm the rhizomatic surface** (the spike, SPEC §2). Tests that exercise the real dependency:
-   `loadSchema(deltas) → HyperSchema`; `resolveView(Policy, HView) → View` across a few `PropPolicy`s
-   (pick/all/conflicts); a reactor materialization + `subscribe` firing on ingest; a `DerivationHost`
-   binding firing and emitting.
-   _Success:_ those pass; `JOURNAL.md` records what's confirmed vs. differs from SPEC §2, and SPEC is
-   corrected if reality differs.
-   _Flag:_ if `rhizomatic` itself needs to be changed, surface this need immediately. If this is a long-
-   running loop and the user is away, you MAY create a local mutation to `rhizomatic` to unblock yourself,
-   but *be sure to create a matching PR it into `rhizomatic` too* and be sure to flag this for the user!
-   Ideally, `rhizomatic` is frozen and will not need updates, but let's be intentional!
+1. **Confirm the rhizomatic surface.** _Done — merged as PR #2 (2026-07-09); the substrate is what
+   SPEC §2 says it is (see `JOURNAL.md` for the confirmed surface + refinements). No rhizomatic
+   changes were needed._
 2. **Persistence tier.** An **async** `StoreBackend` seam + an in-memory driver + one durable driver
    (sqlite or libSQL). Chorus's tier (SPEC §10) is the design reference; write Loam's clean.
    _Success:_ append; `deltasSince(known)` returns the complement; state survives close/reopen;
