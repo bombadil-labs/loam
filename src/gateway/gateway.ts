@@ -124,15 +124,20 @@ export class Gateway {
       }
     }
     await this.backend.append(batch); // a throw here means NOTHING was ingested or served
-    for (const d of batch) this.justPersisted.add(d.id);
     let accepted = 0;
     let duplicates = 0;
-    for (const d of batch) {
-      const result = this.reactor.ingest(d);
-      if (result.status === "accepted") accepted += 1;
-      else duplicates += 1; // "rejected" is unreachable: the batch was validated above
+    for (const d of batch) this.justPersisted.add(d.id);
+    try {
+      for (const d of batch) {
+        const result = this.reactor.ingest(d);
+        if (result.status === "accepted") accepted += 1;
+        else duplicates += 1; // "rejected" is unreachable: the batch was validated above
+      }
+    } finally {
+      // Always cleared — duplicates never hit the raw stream, and a mid-ingest throw must not
+      // leave stale ids silently exempting future raw-stream writes.
+      for (const d of batch) this.justPersisted.delete(d.id);
     }
-    for (const d of batch) this.justPersisted.delete(d.id); // duplicates never hit the raw stream
     return { accepted, duplicates };
   }
 
@@ -231,8 +236,7 @@ export class Gateway {
   // --- the write seam --------------------------------------------------------------------------
 
   // One signed property-claim delta per provided property, appended through the same validated
-  // write-through path as everything else. (Identical claims in the same millisecond are the
-  // same delta — the CRDT's idempotence, not a bug.)
+  // write-through path as everything else.
   private async mutateEntity(
     name: string,
     entity: string,
@@ -247,8 +251,9 @@ export class Gateway {
       throw new Error(`mutation of ${entity} names no properties to claim`);
     }
     const author = authorForSeed(seed);
-    // Strictly monotonic: two mutations from this gateway never tie on timestamp, so
-    // pick-byTimestamp between them is an ordering, not a coin flip on delta-id hashes.
+    // Strictly monotonic WITHIN THIS INSTANCE: two mutations from one running gateway never tie
+    // on timestamp, so pick-byTimestamp between them is an ordering, not a coin flip on
+    // delta-id hashes. Across restarts (or gateways) the wall clock is the only witness.
     this.lastMutationTs = Math.max(Date.now(), this.lastMutationTs + 1);
     const timestamp = this.lastMutationTs;
     const deltas = entries.map(([prop, value]) =>

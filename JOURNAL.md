@@ -195,7 +195,9 @@ sharpest catches, all fixed in the audit-1 PR:
   Authority is always attested at the gate; store-level archaeology stays permissive.
 - **`Channel.fail()` delivered silence** (close resolved the parked reader with `done` before
   the rejection could land) and one channel could not hold two parked readers. Both fixed;
-  mutation timestamps are now strictly monotonic (no same-millisecond coin flips); a patch
+  mutation timestamps are now strictly monotonic within a gateway instance (no
+  same-millisecond coin flips from one writer; across restarts the wall clock is the only
+  witness); a patch
   coalescing into an undrained snapshot stays a snapshot; lazy materializations are capped
   (pure-read DoS); prototype-member schema names no longer falsely collide.
 - **Three tests were lying politely** (a byAuthorRank test that never used byAuthorRank, a

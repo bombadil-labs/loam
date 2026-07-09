@@ -44,8 +44,8 @@ export class Channel<T> implements AsyncGenerator<T, void, unknown> {
     }
   }
 
-  // End the stream with an error: every parked reader is rejected with it, and the next unparked
-  // read rejects once; after that the stream is simply done.
+  // End the stream with an error, delivered exactly once: to every reader parked right now, or
+  // — if nobody is parked — to the next read. After that the stream is simply done.
   fail(error: Error): void {
     if (this.closed) return;
     const parked = this.waiters.splice(0);
