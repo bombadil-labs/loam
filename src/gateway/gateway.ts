@@ -177,9 +177,14 @@ export class Gateway {
 
   // Boot a fresh (or existing) store from a genesis delta-set: open governed by the genesis
   // operator, land the bundle (idempotent — content-addressed deltas dedup), and register what
-  // the genesis declares. The store is born answering and enforcing.
-  static async boot(backend: StoreBackend, genesis: Genesis): Promise<Gateway> {
-    const gateway = await Gateway.open(backend, { seed: genesis.operatorSeed });
+  // the genesis declares. The store is born answering and enforcing. Options beyond the seed
+  // (an offeredLens, say) pass through to open().
+  static async boot(
+    backend: StoreBackend,
+    genesis: Genesis,
+    options: Omit<GatewayOptions, "seed"> = {},
+  ): Promise<Gateway> {
+    const gateway = await Gateway.open(backend, { ...options, seed: genesis.operatorSeed });
     if (genesis.deltas.length > 0) await gateway.append(genesis.deltas);
     gateway.replayRegistrations();
     return gateway;
@@ -301,8 +306,9 @@ export class Gateway {
   // subscriber can observe is ever less durable than the ground — a failed write means nothing
   // happened, and the caller may simply retry. Only verified signatures pass: the substrate
   // accepts unsigned deltas, the gateway does not (authority is always attested here). And each
-  // delta must be PERMITTED: its verified author holds a surviving grant covering everything
-  // the delta touches, or is the operator. Authorization reads the state as it stands before
+  // delta's author must hold STANDING — the operator, or a surviving operator-rooted write
+  // grant on this store; what the delta points at is not authorization's business (entities
+  // are unowned — trust is the reader's). Authorization reads the state as it stands before
   // the batch — a batch cannot bootstrap its own permissions.
   async append(deltas: Iterable<Delta>): Promise<AppendReceipt> {
     if (this.writeFailure !== undefined) {
@@ -383,8 +389,9 @@ export class Gateway {
   // reopen with no code. Two deltas: the DEFINITION (schema-schema claims at the schema
   // entity — proven by loadSchema before anything lands) and the REFERENCE that registers it.
   // Republishing at the same entity is evolution: the running surface rebinds to the latest
-  // surviving definition. Both deltas file on ungoverned ground, so append authorizes them for
-  // the operator only — the store's shape is the operator's to shape.
+  // surviving definition. Any granted author could APPEND such deltas (writes are open), but
+  // only the operator's ever bind — so this method refuses non-operators up front rather than
+  // persist deltas that would look registered while shaping nothing.
   async publishRegistration(
     schema: HyperSchema,
     policy: Policy,

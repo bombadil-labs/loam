@@ -12,8 +12,8 @@ import {
   signClaims,
   type HyperSchema,
 } from "@bombadil/rhizomatic";
-import { assembleGenesis } from "../../src/gateway/genesis.js";
-import { grantClaims, membershipClaims } from "../../src/gateway/accounts.js";
+import { STORE_ENTITY, assembleGenesis } from "../../src/gateway/genesis.js";
+import { grantClaims } from "../../src/gateway/accounts.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
@@ -21,7 +21,6 @@ import { PLANT, PLANT_POLICY, pickLatest } from "./fixtures.js";
 
 const OPERATOR_SEED = "0e".repeat(32);
 const OPERATOR = authorForSeed(OPERATOR_SEED);
-const GARDEN = "tenant:garden";
 
 describe("registrations as deltas: the surface is a function of the store", () => {
   it("publishRegistration persists the registration; a reopened store serves it uncoded", async () => {
@@ -56,10 +55,7 @@ describe("genesis: a fresh store, born governed and registered", () => {
     const genesis = assembleGenesis({
       operatorSeed: OPERATOR_SEED,
       registrations: [{ schema: PLANT, policy: PLANT_POLICY, roots: [FERN] }],
-      grants: [
-        membershipClaims(GARDEN, FERN, OPERATOR, 1),
-        grantClaims(GARDEN, GARDENER, "write", OPERATOR, 2),
-      ],
+      grants: [grantClaims(STORE_ENTITY, GARDENER, "write", OPERATOR, 2)],
     });
     const gateway = await Gateway.boot(backend, genesis);
 
@@ -107,6 +103,39 @@ describe("genesis: a fresh store, born governed and registered", () => {
     expect(JSON.stringify(registration!.claims)).not.toContain('"group"');
   });
 
+  it("boot passes options through: a lensed store can be born with one call", async () => {
+    const lens = parseTerm({
+      op: "select",
+      pred: { not: { hasPointer: { context: { exact: "grumbles" } } } },
+      in: { op: "mask", policy: "drop", in: "input" },
+    });
+    const gateway = await Gateway.boot(
+      new MemoryBackend(),
+      assembleGenesis({ operatorSeed: OPERATOR_SEED }),
+      { offeredLens: lens },
+    );
+    await gateway.append([
+      signClaims(
+        {
+          timestamp: 1,
+          author: OPERATOR,
+          pointers: [
+            {
+              role: "subject",
+              target: { kind: "entity", entity: { id: "colony:1", context: "grumbles" } },
+            },
+            { role: "value", target: { kind: "primitive", value: "kept home" } },
+          ],
+        },
+        OPERATOR_SEED,
+      ),
+    ]);
+    const offered = gateway.offeredDeltas();
+    expect(offered.some((d) => JSON.stringify(d.claims).includes("grumbles"))).toBe(false);
+    expect(offered.length).toBeGreaterThan(0); // the marker still crosses
+    await gateway.close();
+  });
+
   it("boot is idempotent: booting the same genesis onto a live store adds nothing", async () => {
     const backend = new MemoryBackend();
     const genesis = assembleGenesis({
@@ -145,10 +174,9 @@ const PLANT_V2: HyperSchema = { name: "Plant", alg: 1, body: HEIGHTS_ONLY };
 
 describe("evolution is append: the surface follows the surviving definitions", () => {
   const seedGarden = async (gateway: Gateway): Promise<void> => {
-    // Constitution first, writes second: a batch cannot bootstrap its own permissions.
+    // Standing first, writes second: a batch cannot bootstrap its own permissions.
     await gateway.append([
-      signClaims(membershipClaims(GARDEN, FERN, OPERATOR, 1), OPERATOR_SEED),
-      signClaims(grantClaims(GARDEN, GARDENER, "write", OPERATOR, 2), OPERATOR_SEED),
+      signClaims(grantClaims(STORE_ENTITY, GARDENER, "write", OPERATOR, 2), OPERATOR_SEED),
     ]);
     await gateway.append([
       observed(FERN, "height", 30, 1000, GARDENER_SEED),
@@ -347,6 +375,30 @@ describe("evolution is append: the surface follows the surviving definitions", (
       ),
     ).rejects.toThrow(/NUL/);
     await gateway.close();
+  });
+
+  it("a granted writer's rival definition LANDS (writes are open) and reshapes nothing", async () => {
+    const backend = new MemoryBackend();
+    const gateway = await Gateway.open(backend, { seed: OPERATOR_SEED });
+    await seedGarden(gateway); // the gardener holds write standing
+    await gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+
+    // the gardener publishes a NEWER definition at the operator's own schema entity — under
+    // open writes it lands as data; under operator-filtered reads it binds nothing
+    const { publishSchemaClaims } = await import("@bombadil/rhizomatic");
+    const rival = signClaims(
+      publishSchemaClaims(PLANT_V2, "schema:Plant", GARDENER, Date.now() + 9_000_000),
+      GARDENER_SEED,
+    );
+    await expect(gateway.append([rival])).resolves.toMatchObject({ accepted: 1 });
+    await gateway.flush();
+
+    const reopened = await Gateway.open(backend, { seed: OPERATOR_SEED });
+    const result = await reopened.query(`{ plant(entity: "${FERN}") { tag } }`);
+    // the operator's v1 body still gathers tags — the gardener's heights-only rival never bound
+    expect((result.data as { plant: { tag: string[] } }).plant.tag).toEqual(["shade"]);
+    await gateway.close();
+    await reopened.close();
   });
 
   it("a schema that refs another registers through the replay fixpoint, whatever the order", async () => {

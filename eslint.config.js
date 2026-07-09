@@ -7,7 +7,9 @@ import eslintConfigPrettier from "eslint-config-prettier";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist/**"] },
+  // _testing is the ephemeral field-test playground (see _testing/PLAN.md): never committed,
+  // never part of the gate.
+  { ignores: ["dist/**", "_testing/**"] },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
   {

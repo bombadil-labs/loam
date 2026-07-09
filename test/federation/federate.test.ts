@@ -10,7 +10,8 @@ import { authorForSeed, makeDelta, parseTerm, signClaims, type Delta } from "@bo
 // Each test boots multiple real servers; a generous hang-guard keeps machine load from blowing
 // the default per-test timeout.
 vi.setConfig({ testTimeout: 15000 });
-import { grantClaims, membershipClaims } from "../../src/gateway/accounts.js";
+import { grantClaims } from "../../src/gateway/accounts.js";
+import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { pullFrom } from "../../src/federation/pull.js";
 import { serve, type ServerHandle } from "../../src/server/http.js";
@@ -41,8 +42,7 @@ async function instance(
     ...(opts.lens === undefined ? {} : { offeredLens: opts.lens }),
   });
   await gateway.append([
-    signClaims(membershipClaims("tenant:garden", FERN, operator, 1), operatorSeed),
-    signClaims(grantClaims("tenant:garden", GARDENER, "write", operator, 2), operatorSeed),
+    signClaims(grantClaims(STORE_ENTITY, GARDENER, "write", operator, 2), operatorSeed),
   ]);
   gateway.register(PLANT, PLANT_POLICY, [FERN]);
   const token = `tok-${operatorSeed.slice(0, 4)}`;
@@ -162,11 +162,11 @@ describe("federation: two instances meet and merge", () => {
   it("foreign law is inert: a peer's self-signed grant binds nothing on the victim", async () => {
     const a = await instance(OP_A);
     const b = await instance(OP_B);
-    // Mallory (an author with no standing on B) signs a grant making HERSELF admin of B's tenant
+    // Mallory (an author with no standing on B) signs a grant making HERSELF admin of B's STORE
     const MALLORY_SEED = "ee".repeat(32);
     const MALLORY = authorForSeed(MALLORY_SEED);
     const hostileGrant = signClaims(
-      grantClaims("tenant:garden", MALLORY, "admin", MALLORY, 5),
+      grantClaims(STORE_ENTITY, MALLORY, "admin", MALLORY, 5),
       MALLORY_SEED,
     );
     // it verifies, so federate ADMITS it (union is union) — but it must not GOVERN
@@ -181,6 +181,37 @@ describe("federation: two instances meet and merge", () => {
     );
     expect(denied.errors?.join(" ")).toMatch(/not permitted/);
     void a;
+  });
+
+  it("the interim negation boundary: an admit predicate keeps a hostile strike out at the pull", async () => {
+    // Under open writes a federated negation would mask honest data at read time (the
+    // heckler's veto — principled fix awaits reflective predicates, rhizomatic#2). The interim
+    // boundary is the pull's admit predicate: refuse foreign negations from unknown authors.
+    const a = await instance(OP_A);
+    const b = await instance(OP_B);
+    const honest = observed(FERN, "height", 42, 1000, GARDENER_SEED);
+    await a.gateway.append([honest]);
+    // Mallory's strike against the honest delta somehow reaches A's store (A is ungoverned
+    // toward federation: union is union)
+    const MALLORY_SEED = "ee".repeat(32);
+    const strike = signClaims(
+      {
+        timestamp: 2000,
+        author: authorForSeed(MALLORY_SEED),
+        pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: honest.id } } }],
+      },
+      MALLORY_SEED,
+    );
+    await a.gateway.federate([strike]);
+
+    // B pulls WITH a trust boundary: only authors B knows may carry negations across
+    const known = new Set([authorForSeed(OP_A), GARDENER]);
+    await pullFrom(b.gateway, a.url, a.token, {
+      admit: (d) =>
+        !d.claims.pointers.some((p) => p.target.kind === "delta" && p.role === "negates") ||
+        known.has(d.claims.author),
+    });
+    expect(await height(b.gateway)).toBe(42); // the strike stayed on the far shore
   });
 
   it("a peer's schema definition merges as data but never reshapes the local surface", async () => {

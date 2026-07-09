@@ -1,13 +1,15 @@
-// Accounts & capabilities: no ambient authority, anywhere. A tenant is an entity; membership
-// and grants are signed deltas filed at it; revocation is negation; audit is a query. The
-// gateway enforces — a write is authorized iff a surviving grant permits it — but the POLICY
-// is entirely data: every permission in force is a delta someone signed, someone can query,
-// and someone with standing can negate.
+// Accounts & capabilities: no ambient authority, anywhere — and no OWNERSHIP of ids, anywhere
+// (revised 2026-07-09, "authors, not owners"). Entities are unowned: pointer resolution is
+// string matching, a delta is an assertion from a perspective, and anyone with standing may
+// point at anything. What the gateway enforces is the AUTHOR'S STANDING ON THIS INSTANCE — a
+// publishing relationship, one surviving operator-rooted `write` grant at the store entity —
+// never the tenancy of whatever the delta touches. Whether anyone LISTENS to a claim is the
+// reader's business: lenses, author ranks, admission predicates, operator-filtered
+// constitutional reads. Revocation is negation; audit is a query; the POLICY is entirely data.
 //
-// The reserved contexts (`loam.tenant`, `loam.members`, `loam.grants`) are the constitution's
-// alphabet: writing them takes `admin` standing on every tenant involved; everything else takes
-// `write` on the entity's tenant; an entity with no tenant is the operator's alone; and the
-// operator — the gateway's own identity — roots the whole chain, needing no grant.
+// Tenant vocabulary (`loam.tenant` / `loam.members` / `loam.grants`) survives as data for
+// author-communities and read lenses — memberships still resolve (tenantOf), grants still
+// chain — but `authorize` consults exactly one thing: standing at `loam:store`.
 
 import {
   parseTerm,
@@ -17,12 +19,11 @@ import {
   type Policy,
   type Reactor,
 } from "@bombadil/rhizomatic";
+import { STORE_ENTITY } from "./genesis.js";
 
 export const CTX_TENANT = "loam.tenant";
 export const CTX_MEMBERS = "loam.members";
 export const CTX_GRANTS = "loam.grants";
-const CONSTITUTIONAL = new Set([CTX_TENANT, CTX_MEMBERS, CTX_GRANTS]);
-
 export type Verb = "write" | "admin";
 
 // --- the claims vocabulary ----------------------------------------------------------------------
@@ -123,14 +124,13 @@ function struck(ctx: Ctx, id: string, visited: ReadonlySet<string>): boolean {
   return false;
 }
 
-// Does this delta's author meet every requirement the delta carries (or is the operator)?
+// May this negation RETIRE what it strikes? Constitutional resolution honors a strike only
+// from the operator or an effective store admin — a mere writer (or a federated stranger) may
+// assert a negation, but the constitution does not bend to it. (Whether DATA bends to a
+// negation is the reader's mask policy, not decided here.)
 function standsFor(ctx: Ctx, delta: Delta, visited: ReadonlySet<string>): boolean {
   if (delta.claims.author === ctx.operator) return true;
-  for (const req of requirementsWith(ctx, delta, visited)) {
-    if (req.tenant === undefined) return false;
-    if (!grantHeld(ctx, req.tenant, delta.claims.author, req.verb, visited)) return false;
-  }
-  return true;
+  return grantHeld(ctx, STORE_ENTITY, delta.claims.author, "admin", visited);
 }
 
 // The surviving deltas filed at `entity` under `context`.
@@ -234,81 +234,11 @@ export function holdsGrant(
 }
 
 // --- enforcement: the one question the gateway asks -----------------------------------------------
-
-// Everything `delta` needs standing for. Ordinary entity targets need `write` on their tenant;
-// constitutional contexts need `admin` on every tenant the delta references (and on the current
-// tenant of any entity whose allegiance it would change); a negation needs whatever the delta it
-// strikes needed. A requirement with no tenant is unmeetable except by the operator.
-export interface Requirement {
-  readonly tenant: string | undefined;
-  readonly verb: Verb;
-  readonly reason: string;
-}
-
-function requirementsWith(ctx: Ctx, delta: Delta, visited: ReadonlySet<string>): Requirement[] {
-  const requirements: Requirement[] = [];
-  const constitutional = delta.claims.pointers.some(
-    (p) => p.target.kind === "entity" && CONSTITUTIONAL.has(p.target.entity.context ?? ""),
-  );
-
-  for (const p of delta.claims.pointers) {
-    if (p.target.kind === "entity") {
-      const { id, context } = p.target.entity;
-      if (constitutional && (context === CTX_GRANTS || context === CTX_MEMBERS)) {
-        requirements.push({ tenant: id, verb: "admin", reason: `governs ${id}` });
-      } else if (constitutional && context === CTX_TENANT) {
-        const current = tenantOfWith(ctx, id, visited);
-        if (current !== undefined) {
-          requirements.push({
-            tenant: current,
-            verb: "admin",
-            reason: `re-tenants ${id} away from ${current}`,
-          });
-        } else {
-          // First allegiance of an untenanted entity: the operator's to give.
-          requirements.push({ tenant: undefined, verb: "admin", reason: `adopts ${id}` });
-        }
-      } else {
-        requirements.push({
-          tenant: tenantOfWith(ctx, id, visited),
-          verb: "write",
-          reason: `writes ${id}`,
-        });
-      }
-    } else if (p.target.kind === "delta") {
-      if (p.role === "negates") {
-        const target = ctx.reactor.get(p.target.deltaRef.delta);
-        if (target === undefined) {
-          requirements.push({
-            tenant: undefined,
-            verb: "admin",
-            reason: `negates an unknown delta ${p.target.deltaRef.delta}`,
-          });
-        } else {
-          requirements.push(...requirementsWith(ctx, target, visited));
-        }
-      } else {
-        // A delta-ref under any other role is an ungoverned reference channel — a future schema
-        // could resolve it. Nothing but the operator writes what nothing governs.
-        requirements.push({
-          tenant: undefined,
-          verb: "write",
-          reason: `references delta ${p.target.deltaRef.delta} under ungoverned role "${p.role}"`,
-        });
-      }
-    }
-  }
-
-  if (requirements.length === 0) {
-    // A delta touching no entity and striking nothing files nowhere anyone governs.
-    requirements.push({ tenant: undefined, verb: "write", reason: "touches no governed ground" });
-  }
-  return requirements;
-}
-
-export function requirementsOf(reactor: Reactor, delta: Delta, operator?: string): Requirement[] {
-  return requirementsWith({ reactor, operator }, delta, new Set());
-}
+//
+// Standing: may this author publish through this instance at all? One surviving,
+// operator-rooted `write` grant at the store entity answers it — for every delta the author
+// signs, whatever it points at. Pointing is free; ids are unowned; the fences are the
+// reader's. (`admin` covers `write` and additionally mints grants and retires constitution.)
 
 // A constitutional delta must be exactly what its context claims: a grant carries a tenant, a
 // string subject, and a known verb; a membership carries one member roll and one allegiance.
@@ -350,9 +280,9 @@ export function constitutionalDefect(delta: Delta): string | undefined {
   return undefined;
 }
 
-// The verdict. Malformation is refused for everyone; past that, the operator needs no grant, and
-// everyone else meets every requirement — through chains that themselves root in the operator —
-// or is refused.
+// The verdict. Malformed law is refused for everyone (a grant-shaped delta that could never
+// bind would sit in the audit lying); past that, the operator needs no grant, an ungoverned
+// store welcomes any verified author, and everyone else holds standing — or is refused.
 export function authorize(
   reactor: Reactor,
   delta: Delta,
@@ -363,18 +293,14 @@ export function authorize(
     return { ok: false, refusal: `delta ${delta.id} is malformed law: ${defect}` };
   }
   const author = delta.claims.author;
-  if (operator !== undefined && author === operator) return { ok: true };
-  const ctx: Ctx = { reactor, operator };
-  for (const req of requirementsWith(ctx, delta, new Set())) {
-    if (req.tenant === undefined || !grantHeld(ctx, req.tenant, author, req.verb, new Set())) {
-      const scope = req.tenant === undefined ? "unclaimed ground" : req.tenant;
-      return {
-        ok: false,
-        refusal:
-          `${author} is not permitted: ${req.reason} requires ${req.verb} on ${scope}, ` +
-          `and no surviving grant says so`,
-      };
-    }
+  if (operator === undefined || author === operator) return { ok: true };
+  if (grantHeld({ reactor, operator }, STORE_ENTITY, author, "write", new Set())) {
+    return { ok: true };
   }
-  return { ok: true };
+  return {
+    ok: false,
+    refusal:
+      `${author} is not permitted: publishing through this store requires write standing ` +
+      `(a surviving grant at ${STORE_ENTITY}), and no surviving grant says so`,
+  };
 }
