@@ -1,67 +1,92 @@
-# Step 11 — Authors, not owners: the write gate moves to the author's standing
+# The large unit: the reader's republic (steps 11–14 + the gauntlet)
 
-Myk's correction (2026-07-09, from the village field test): **entities are unowned.** The step-5
-model gated writes on the tenancy of every entity a delta touched — an ownership model of ids
-that forced the "re-tenanting ritual" (field note #5) and conflated "may this author publish
-here" with "may this author speak about this entity." The second question was never ours: it is
-answered read-side, by lenses — exactly as foreign grants/registrations/definitions are already
-handled. SPEC §7 is rewritten (rides this branch); step 12 (writes-become-claims: templates,
-`_claim`, raw-append, `_hviewHex` — SPEC §5 addendum) is QUEUED behind this step.
+One arc, four steps, each its own PR through the full loop, in dependency order. The thesis:
+**anyone may write; the reader decides everything.** Standing gates publishing (step 11); the
+schema is a protocol whose write shapes are declared and guaranteed (step 12); what a store
+admits is a live view over its own deltas (step 13); what arrives in a foreign dialect is
+normalized by more deltas, never mutated (step 14). Then the village puts it all through its
+paces (the gauntlet). Substrate dependency: reflective predicates are FILED
+([rhizomatic#2](https://github.com/bombadil-labs/rhizomatic/issues/2), Myk's option 2) — the
+negation-mask half waits for Myk's rhizomatic iteration; everything below is Loam-side.
 
-## Success criteria
+## Step 11 — Authors, not owners (IN FLIGHT, branch `authors-not-owners`)
 
-1. **`authorize()` gates on standing, not targets**: a delta is permitted iff its verified
-   author is the operator OR holds a surviving, operator-rooted `write` grant at the store
-   entity (`loam:store`). What the delta points at is irrelevant to authorization.
-2. **The village ritual is dead**: a granted author's multi-pointer delta touching arbitrary
-   entities (incl. "foreign vocabulary" like `person:wren`) lands with NO membership setup.
-   Pinned by a test that would have failed under step-5 rules.
-3. **Effectiveness chains survive untouched**: a non-operator's grant-shaped, registration-
-   shaped, or binding-shaped delta may now LAND (open writes) but still GOVERNS nothing
-   (read-side operator filters — existing tests keep passing, some negative tests move from
-   "refused at append" to "landed but inert").
-4. **Negation interim discipline**: appending a negation needs the same standing as any claim;
-   a federated hostile negation is stoppable by a pull-side `admit` predicate (test + docs);
-   the mask-drop heckler's-veto hazard is documented plainly in README until the substrate
-   grows dynamic trust predicates (flag raised with Myk).
-5. **Grant vocabulary migrates**: standing grants root at `loam:store`; `grantClaims` /
-   `holdsGrant` / genesis / README updated. Tenant machinery survives as vocabulary (memberships
-   still writable, meaningful to read lenses), no longer consulted by `authorize`.
-6. **`Gateway.boot` gains an options passthrough** (offeredLens et al) — the small API gap.
-7. **Docs**: SPEC §7 rewritten (done, on branch); README capabilities section rewritten;
-   the cross-vocabulary re-tenanting note replaced by the new model.
-8. `npm run check` green; feature branch `authors-not-owners`; PR; one review agent (neutral
-   register); resolve; merge; JOURNAL.
+The write gate moves to the author's standing; entities are unowned. SPEC §7 rewritten (on
+branch).
 
-## Sub-tasks
+1. `authorize()` = operator, OR surviving operator-rooted `write` grant at `loam:store`.
+   Targets irrelevant.
+2. The ritual-is-dead test: a granted author's multi-pointer delta touching arbitrary entities
+   lands with no membership setup.
+3. Effectiveness chains untouched: non-operator constitutional deltas now LAND but still bind
+   nothing (rework door-refusal tests to landed-but-inert).
+4. Negation interim: standing to append; pull-side `admit` blocks hostile federated negations;
+   heckler's-veto hazard documented until rhizomatic#2.
+5. Grants migrate to `loam:store`; genesis/fixtures/README updated; tenants remain vocabulary.
+6. `Gateway.boot` options passthrough.
 
-- [x] Branch; SPEC §7 rewrite + §5 writes-become-claims addendum (step-12 design, marked queued)
-- [ ] Tests first:
-  - [ ] accounts: standing = operator | surviving store-rooted write grant; revocation by
-        negation still bites; admin can mint standing; chain effectiveness (non-operator-rooted
-        grant confers nothing)
-  - [ ] gateway: multi-pointer delta at arbitrary entities from a granted author lands (the
-        ritual-is-dead test); ungranted verified author refused with a standing refusal;
-        ungoverned store still welcomes all
-  - [ ] constitutional inertness: granted author lands a registration-shaped delta → binds
-        nothing (was: refused at door); same for binding definitions — rework existing tests
-        that asserted door-refusal
-  - [ ] negation: granted author may negate; federated hostile negation suppressed by admit
-        predicate at pullFrom (the interim boundary)
-  - [ ] boot options passthrough (lens via `Gateway.boot`)
-- [ ] Implement: accounts.ts `authorize` rewrite + standing helpers; genesis/README/fixtures
-      migration; boot options
-- [ ] Rework `_testing` harness constitution (drop entity memberships; store-rooted grants) —
-      keep the village runnable
-- [ ] Gate → PR → review → resolve → merge → JOURNAL → re-plan (open step 12)
+- [x] Stage 1: plan + SPEC §7/§5/§8 revisions committed
+- [x] Tests first: auth.test.ts rewritten as the standing contract (ritual-is-dead, citing-is-
+      provenance, grant-lands-inert, writer's-strike-retires-nothing, tenant-as-vocabulary);
+      federation gains the admit-predicate negation boundary; genesis gains boot-options
+- [x] Implement: accounts.ts rewrite (authorize = standing at loam:store; strikes bind only
+      from operator/admin; requirements machinery deleted); boot options; comments; README
+      capabilities section rewritten with the negation caveat stated plainly
+- [x] `_testing` harness migration (constitute = standing grants only; ritual code deleted)
+- [x] Gate: 188/188, format+lint+typecheck+build green (`_testing` now ignored by the gate —
+      it is the ephemeral playground)
+- [ ] PR → review (one agent, neutral register) → resolve → merge → JOURNAL ← **left off here**
 
-**Left off here:** stage 1 done (plan + SPEC on branch `authors-not-owners`). Next: tests
-first, starting with accounts standing semantics. NOTE for resumption: a substrate flag is open
-with Myk — dynamic trust predicates for negation masks (see SPEC §7 bullet) — discussion may
-adjust criterion 4, but the interim (admit predicates) is self-contained and implementable now.
+## Step 12 — Writes become claims (queued; SPEC §5 addendum drafted)
 
-## Queued next (step 12 — writes become claims, SPEC §5 addendum already drafted)
+The schema as protocol: read program + write discipline, both data, both traveling.
 
-Claim templates in registrations (trial-proven at registration), the generic `_claim` mutation,
-`POST /:mount/append` (raw, non-custodial), `_hviewHex` beside `_hex`. Depends on step 11's
-standing model.
+1. **Claim templates** in registrations: named pointer skeletons with arg holes; GraphQL
+   mutations derived from holes; one call → one signed multi-pointer delta (the
+   host/film/guests/date screening is ONE delta). Trial-proven against the schema's own body at
+   registration (specimen → gather → refuse invisible templates).
+2. **`_claim`** generic mutation (pointer list in, one delta out) for unanticipated shapes.
+3. **`POST /:mount/append`**: pre-signed wire deltas, verified, standing-gated — non-custodial.
+4. **`_hviewHex`** beside `_hex` (same-evidence vs same-answer).
+5. Primitive-prop mutations remain as the auto-derived degenerate template.
+
+## Step 13 — Trust is data (queued; SPEC §8)
+
+1. `loam.trust` policy: operator-authored mode (`open` | `roster` | `closed`) + optional shape
+   requirements; resolved as a live view (constitutional read, operator-filtered).
+2. `pullFrom`/gateway build `admit` from the RESOLVED policy per pull — roster edits are deltas;
+   the next pulse obeys them. No restart, no config file.
+3. Aggregator mode: `open` admits every verified delta (the hackernews scenario); `roster`
+   admits named authors; shape requirements compose with either.
+4. Surfaced in `serve`/CLI so a turnkey aggregator is `loam init` + one trust delta + `serve`.
+
+## Step 14 — Normalization: divergent dialects, more deltas (queued; SPEC §8)
+
+1. **Translation specs as data**: operator-blessed deltas pairing a recognizer (pred over
+   foreign deltas) with an emit template (step 12 shapes), holes bound from recognized pointers.
+2. A **generic translator** (one DerivedFn implementation, specs as data) runs as a runner
+   binding; emissions are canonical-dialect deltas signed by the translator identity, each
+   CITING its source delta id (`translates` pointer — provenance, §9).
+3. Originals persist untouched; re-translation is another pass over immortal sources; the
+   canonical views light up for data that arrived speaking another tongue.
+4. Idempotence: content-addressed emissions keyed on source ids (re-running translates nothing
+   twice).
+
+## The gauntlet — the village rides again (after 14)
+
+Extend `_testing/PLAN.md` with phase 8+: a FIFTH store (`cinelog`, somebody else's screening
+app with an alien dialect — different roles/contexts for the same ideas) federates into the
+almanac running in `open` trust mode; a translation spec normalizes cinelog screenings into the
+village dialect; Wren's dossier gains screenings she attended that were RECORDED BY A STRANGER'S
+APP; the roster flips mid-run and the next pulse refuses the stranger; flips back and the
+backlog normalizes. Plus: multi-pointer claim templates driving the dashboard's events, raw
+append from a "client-held key" identity, `_hviewHex` agreement across lenses.
+
+## Standing decisions for this arc
+
+- Reflective predicates = rhizomatic#2 (Myk to iterate substrate; option 2 chosen). Loam does
+  admission-side dynamic trust NOW; eval-side negation trust lands when the substrate does.
+- Normalization NEVER mutates: foreign deltas are immortal; translations are additional deltas
+  with provenance.
+- Each step is its own PR through the full loop (tests first, one review agent, neutral
+  register, JOURNAL entry).

@@ -39,14 +39,14 @@ near-synonyms (that is how you get two colliding "schema" concepts).
   `SchemaRegistry`; recursion via schema-refs (`collectRefs`). A hyperschema is a named term that
   scopes and shapes the relevant deltas.
 - **Hyperview** (the gathered, arborescent, bucketed tree) — `HView { id, props: Map<string,
-  HVEntry[]> }`, `HVEntry { delta, negated, expanded?: Map<number, HView> }` (the recursion + the
+HVEntry[]> }`, `HVEntry { delta, negated, expanded?: Map<number, HView> }` (the recursion + the
   negation-awareness), content-addressed via `hviewCanonicalHex`.
 - **Resolution & policy** (the resolve stage) — `resolveView(Policy, HView) → View`. `View =
-  Primitive | View[] | { [k]: View }`. `Policy = { props: Map<string, PropPolicy>, default }`.
+Primitive | View[] | { [k]: View }`. `Policy = { props: Map<string, PropPolicy>, default }`.
   `PropPolicy` = `pick(order)` / `all(order)` / `merge(fn)` / `conflicts(order)` / `absentAs(const,
-  then)`. `Order` = `byTimestamp` / `byAuthorRank(authors)` / `byPred` / `lexById`. `MergeFn` =
+then)`. `Order` = `byTimestamp` / `byAuthorRank(authors)` / `byPred` / `lexById`. `MergeFn` =
   max/min/sum/count/and/or/concatSorted. **This is the reduction library** (latest = `pick
-  byTimestamp`; trusted-first = `byAuthorRank`; set-union = `all`; contested = `conflicts`).
+byTimestamp`; trusted-first = `byAuthorRank`; set-union = `all`; contested = `conflicts`).
   Confirmed nuance: `conflicts` surfaces a property **only when ≥ 2 distinct values contend** —
   an agreed single value resolves to absent (superposition is for the contested, not the settled);
   and every `Order` chain ends in an implicit `lexById` tiebreak, so resolution is total and
@@ -54,7 +54,7 @@ near-synonyms (that is how you get two colliding "schema" concepts).
 - **Snapshots** — a resolved `View` is content-addressed via `viewCanonicalHex`; a `HView` via
   `hviewCanonicalHex`. Static view = snapshot = a commit.
 - **Self-hosting schema-schema** — `SCHEMA_SCHEMA: HyperSchema`, `loadSchema(dset, entity) →
-  HyperSchema` (deltas → schema), `publishSchemaClaims(schema, …) → Claims` (schema → deltas),
+HyperSchema` (deltas → schema), `publishSchemaClaims(schema, …) → Claims` (schema → deltas),
   `definitionRoles()`. Schemas are data; the metacircular seed is already written.
 - **The reactor** — `ingest` (verifies content-addressing and any signature; unsigned deltas are
   accepted, ones whose id does not match their claims rejected without trace); live indexes
@@ -67,7 +67,7 @@ near-synonyms (that is how you get two colliding "schema" concepts).
   subscription = a branch.
 - **The function substrate** — `DerivedFn = (view: HView, root) => Pointer[][]` (a function is
   hyperview → deltas). `BindingSpec { name, fnId, materialization, pure, budget, emit:
-  append|supersede|{keyed} }` (the _application_: binds a function to a materialization, with purity,
+append|supersede|{keyed} }` (the _application_: binds a function to a materialization, with purity,
   a termination budget, and an output strategy). `DerivationHost` (install / ingest / trigger /
   drain / emitSigned — the execution engine). `derivedClaims(spec, author, substantive, inputHex)`
   (execution records keyed on input content). `verifyPureDerivation(...) → boolean` (pure replay).
@@ -145,7 +145,7 @@ and `loam register <file>` — an HTTP endpoint rather than a GraphQL mutation b
 store has no GraphQL surface to mutate through; the endpoint IS the schema-schema mutation
 mechanism, and GraphQL stays strictly derived-from-what-is-registered.
 
-**Writes become claims (decided 2026-07-09, step 12 — queued).** A schema is a *protocol*: the
+**Writes become claims (decided 2026-07-09, step 12 — queued).** A schema is a _protocol_: the
 read program (the hyperschema body) and the **write discipline**, both data, both traveling in
 the registration. The point of writing through a mutation is the SHAPE GUARANTEE — everyone who
 adopts a published schema emits byte-compatible facts — so the shape is declared, never
@@ -205,7 +205,7 @@ one mount = one store = one isolated world.
 **(revised 2026-07-09 — authors, not owners.)** The original step-5 model gated writes on the
 tenancy of every entity a delta touched — an ownership model of ids. That was wrong, and Myk
 called it: **entities are unowned.** Pointer resolution is string matching; nobody owns an id; a
-delta is never a free-floating fact about an entity but an assertion *from a perspective* — some
+delta is never a free-floating fact about an entity but an assertion _from a perspective_ — some
 author, originating on some instance. Anyone with standing may point at anything. The question is
 never "may this be said?" but "who listens?", and that question is answered on the
 **read/merge/accept side**, by composable policy — exactly as the constitutional slice already
@@ -223,10 +223,10 @@ works (foreign grants, registrations, and definitions merge freely and bind noth
   operator blessed it. Open writes make nothing governable that wasn't — they only stop
   pretending the store can fence what ids mean.
 - **Negations are assertions like any other.** Standing to append one is the same publishing
-  standing; *whose negations a reader honors* is lens policy. Interim discipline (see the
+  standing; _whose negations a reader honors_ is lens policy. Interim discipline (see the
   substrate note below): local appends are granted-author-only, so locally-planted negations are
   as trusted as the door they came through; federated ingest applies an `admit` predicate as its
-  trust boundary. A principled per-read negation lens (mask `trust` predicates over a *dynamic*
+  trust boundary. A principled per-read negation lens (mask `trust` predicates over a _dynamic_
   trusted-author set) needs eval-time parameters or reflective predicates in rhizomatic — an
   open substrate conversation, not yet an issue.
 - Tenant machinery (`loam.tenant` / `loam.members` / `loam.grants`) survives as **vocabulary for
@@ -253,6 +253,28 @@ works (foreign grants, registrations, and definitions merge freely and bind noth
   deliverable, the driver is a one-file addition when a deploy needs it.)
 - **Federation** — rhizomatic's `Peer`/`syncBoth` over the authed HTTP surface + a "subscribe to
   instance X's published lens" declaration. `deltasSince` is one primitive at every scale.
+- **Trust is data (decided 2026-07-09, step 13 — queued).** What a store admits at federation is
+  CONFIGURATION, and configuration — like everything else — is a derived view over deltas that
+  are always updating. An operator-authored **trust policy** lives in the store under
+  `loam.trust`: a mode (`open` — the aggregator welcoming the whole network; `roster` — named
+  authors/peers; `closed`) plus optional shape requirements (deltas must satisfy a predicate —
+  "conforms to the standard"). Every pull re-resolves the policy from the live store and builds
+  its `admit` function from the RESULT — change the roster with a delta, and the next pulse
+  behaves differently, no restart, no config file. (The same dynamic set reaching INSIDE
+  eval-time negation masks awaits reflective predicates —
+  [rhizomatic#2](https://github.com/bombadil-labs/rhizomatic/issues/2); admission is the
+  application-layer half we can have today.)
+- **Divergent dialects are normalized, never mutated (decided 2026-07-09, step 14 — queued).**
+  There are no global standards; a peer's deltas may express the same ideas in another shape.
+  The wrong moves are rejection (union is union) and mutation (nothing is ever edited). The
+  right move is MORE DELTAS: a **translation** is data — an operator-blessed spec pairing a
+  recognizer (a predicate over foreign deltas) with an emit template (step 12's claim shapes,
+  holes bound from the recognized delta's pointers) — executed by a generic translator running
+  as a runner binding. Each emitted delta is canonical in the local dialect, signed by the
+  translator identity, and CITES its source delta by id (a `translates` pointer — the §9
+  provenance discipline). The foreign originals persist untouched beside their normalizations;
+  the local standard views light up; a better translation later is just another pass over the
+  same immortal sources.
 
 ## 9. Constraints & invariants
 

@@ -2,3 +2,5 @@
 package-lock.json
 # Markdown docs are hand-formatted; leave them to the author.
 *.md
+# The ephemeral field-test playground (never committed).
+_testing/

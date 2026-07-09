@@ -10,7 +10,8 @@ import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 // Real listening server + SSE; a generous hang-guard so machine load can't blow the default
 // per-test timeout. Only ever matters when something is genuinely stuck.
 vi.setConfig({ testTimeout: 15000 });
-import { grantClaims, membershipClaims } from "../../src/gateway/accounts.js";
+import { grantClaims } from "../../src/gateway/accounts.js";
+import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { serve, type ServerHandle } from "../../src/server/http.js";
 import { MemoryBackend } from "../../src/store/memory.js";
@@ -22,7 +23,6 @@ const ALICE_SEED = "a1".repeat(32); // the gardener
 const MALLORY_SEED = "e4".repeat(32);
 const OPERATOR = authorForSeed(OPERATOR_SEED);
 
-const GARDEN = "tenant:garden";
 const SURVEYOR = authorForSeed("b2".repeat(32));
 
 let handle: ServerHandle;
@@ -31,9 +31,8 @@ let base: string;
 async function governedGarden(): Promise<Gateway> {
   const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
   await gateway.append([
-    signClaims(membershipClaims(GARDEN, FERN, OPERATOR, 9001), OPERATOR_SEED),
-    signClaims(grantClaims(GARDEN, GARDENER, "write", OPERATOR, 9002), OPERATOR_SEED),
-    signClaims(grantClaims(GARDEN, SURVEYOR, "write", OPERATOR, 9003), OPERATOR_SEED),
+    signClaims(grantClaims(STORE_ENTITY, GARDENER, "write", OPERATOR, 9002), OPERATOR_SEED),
+    signClaims(grantClaims(STORE_ENTITY, SURVEYOR, "write", OPERATOR, 9003), OPERATOR_SEED),
   ]);
   await gateway.append(garden);
   gateway.register(PLANT, PLANT_POLICY, [FERN]);
