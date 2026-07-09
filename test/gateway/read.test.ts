@@ -21,7 +21,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
 import { FERN, GARDENER, GARDENER_SEED, PLANT_BODY, observed } from "../spike/garden.js";
-import { PLANT, PLANT_POLICY, garden, pickLatest } from "./fixtures.js";
+import { PLANT, PLANT_POLICY, garden, governedBootstrap, pickLatest } from "./fixtures.js";
 
 const QUERY = `{
   plant(entity: "${FERN}") {
@@ -284,6 +284,7 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Policy)", () => {
     }
     const backend = new FailingBackend();
     const gateway = await Gateway.open(backend, { seed: "c3".repeat(32) });
+    await gateway.append(governedBootstrap("c3".repeat(32)));
     await gateway.append(garden);
     gateway.register(PLANT, PLANT_POLICY, [FERN]);
     const before = await queryPlant(gateway);

@@ -29,6 +29,7 @@ import {
 } from "@bombadil/rhizomatic";
 import { graphql, parse, subscribe, type ExecutionResult, type GraphQLSchema } from "graphql";
 import type { StoreBackend } from "../store/backend.js";
+import { authorize } from "./accounts.js";
 import { Channel } from "./channel.js";
 import { buildGqlSchema, type PatchNode, type Registered, type ResolvedNode } from "./gql.js";
 
@@ -43,9 +44,16 @@ export interface QueryResult {
 }
 
 export interface GatewayOptions {
-  // The gateway's signing identity. Mutations construct claims and sign them as this author;
-  // without a seed the gateway is read-only — unsigned authority does not exist here.
+  // The OPERATOR's signing identity — the root of the capability chain (SPEC §7). It needs no
+  // grant, plants the first tenants and grants, and signs mutations that name no actor. Without
+  // a seed the gateway is read-only — unsigned authority does not exist here.
   readonly seed?: string;
+}
+
+export interface RequestContext {
+  // The acting identity for this request: mutations are signed as this seed's author and
+  // authorized as them. Absent, the operator acts.
+  readonly actor?: string;
 }
 
 const toError = (e: unknown): Error => (e instanceof Error ? e : new Error(String(e)));
@@ -73,12 +81,14 @@ export class Gateway {
   // a future DerivationHost's emissions ride it into the ground).
   private readonly justPersisted = new Set<string>();
   private lastMutationTs = 0;
+  private readonly operatorAuthor: string | undefined;
 
   private constructor(
     private readonly backend: StoreBackend,
     readonly reactor: Reactor,
     private readonly options: GatewayOptions,
   ) {
+    this.operatorAuthor = options.seed === undefined ? undefined : authorForSeed(options.seed);
     reactor.subscribeRaw((d) => {
       if (this.justPersisted.delete(d.id)) return;
       this.writes = this.writes
@@ -109,7 +119,10 @@ export class Gateway {
   // lot); it lands in the backend before the reactor sees it, so nothing a query or a
   // subscriber can observe is ever less durable than the ground — a failed write means nothing
   // happened, and the caller may simply retry. Only verified signatures pass: the substrate
-  // accepts unsigned deltas, the gateway does not (authority is always attested here).
+  // accepts unsigned deltas, the gateway does not (authority is always attested here). And each
+  // delta must be PERMITTED: its verified author holds a surviving grant covering everything
+  // the delta touches, or is the operator. Authorization reads the state as it stands before
+  // the batch — a batch cannot bootstrap its own permissions.
   async append(deltas: Iterable<Delta>): Promise<AppendReceipt> {
     if (this.writeFailure !== undefined) {
       throw new Error(`this gateway can no longer persist: ${this.writeFailure.message}`);
@@ -121,6 +134,16 @@ export class Gateway {
           `append rejected: delta ${d.id} is unsigned or not what it claims to be — ` +
             `the gateway accepts only verified authorship`,
         );
+      }
+      // Governance begins with the operator: a gateway holding no operator identity is an
+      // ungoverned local store (any verified delta is welcome); one holding an operator
+      // enforces capabilities on everyone but the operator. Deployed gateways (step 6) are
+      // always governed.
+      if (this.operatorAuthor !== undefined) {
+        const verdict = authorize(this.reactor, d, this.operatorAuthor);
+        if (!verdict.ok) {
+          throw new Error(`append rejected: ${verdict.refusal}`);
+        }
       }
     }
     await this.backend.append(batch); // a throw here means NOTHING was ingested or served
@@ -166,7 +189,7 @@ export class Gateway {
     const registry = SchemaRegistry.build(next.map((r) => r.schema)); // refuses dups + bad refs
     const gql = buildGqlSchema(next, {
       resolve: (name, entity) => this.resolvedNode(name, entity),
-      mutate: (name, entity, props) => this.mutateEntity(name, entity, props),
+      mutate: (name, entity, props, actorSeed) => this.mutateEntity(name, entity, props, actorSeed),
       watch: (name, entity) => this.watchEntity(name, entity),
     }); // refuses collisions
     this.reactor.register(schema.name, schema.body, roots, registry);
@@ -235,14 +258,16 @@ export class Gateway {
 
   // --- the write seam --------------------------------------------------------------------------
 
-  // One signed property-claim delta per provided property, appended through the same validated
-  // write-through path as everything else.
+  // One signed property-claim delta per provided property, signed as the ACTOR (or the
+  // operator when no actor is named), appended through the same validated, capability-enforced
+  // path as everything else.
   private async mutateEntity(
     name: string,
     entity: string,
     props: Record<string, Primitive>,
+    actorSeed?: string,
   ): Promise<ResolvedNode> {
-    const seed = this.options.seed;
+    const seed = actorSeed ?? this.options.seed;
     if (seed === undefined) {
       throw new Error("this gateway holds no signing seed and cannot write");
     }
@@ -338,10 +363,15 @@ export class Gateway {
     return this.gql;
   }
 
-  async query(source: string, variables?: Record<string, unknown>): Promise<QueryResult> {
+  async query(
+    source: string,
+    variables?: Record<string, unknown>,
+    context?: RequestContext,
+  ): Promise<QueryResult> {
     const result = await graphql({
       schema: this.schemaOrThrow(),
       source,
+      contextValue: context,
       ...(variables === undefined ? {} : { variableValues: variables }),
     });
     return {

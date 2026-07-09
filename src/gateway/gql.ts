@@ -56,6 +56,7 @@ export interface GqlHooks {
     schemaName: string,
     entity: string,
     props: Record<string, Primitive>,
+    actorSeed?: string,
   ): Promise<ResolvedNode>;
   watch(schemaName: string, entity: string): AsyncGenerator<PatchNode>;
 }
@@ -232,14 +233,15 @@ export function buildGqlSchema(defs: readonly Registered[], hooks: GqlHooks): Gr
         `Claim properties of an entity under ${def.schema.name}: every provided argument ` +
         `becomes one signed delta. Returns the re-resolved view.`,
       args: { ...entityArg, ...propArgs },
-      resolve: (_src, args: Record<string, unknown>) => {
+      resolve: (_src, args: Record<string, unknown>, ctx: unknown) => {
+        const actor = (ctx as { actor?: string } | undefined)?.actor;
         // A null prototype: no store-named property can ever reach a real Object.prototype key.
         const props: Record<string, Primitive> = Object.create(null) as Record<string, Primitive>;
         for (const [prop] of def.policy.props) {
           const v = args[legal(prop)];
           if (v !== undefined && v !== null) props[prop] = v as Primitive;
         }
-        return hooks.mutate(def.schema.name, args["entity"] as string, props);
+        return hooks.mutate(def.schema.name, args["entity"] as string, props, actor);
       },
     };
 

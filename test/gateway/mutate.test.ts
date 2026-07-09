@@ -9,13 +9,14 @@ import { authorForSeed, verifyDelta, type Policy, type PropPolicy } from "@bomba
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER } from "../spike/garden.js";
-import { PLANT, PLANT_POLICY, garden, pickLatest } from "./fixtures.js";
+import { PLANT, PLANT_POLICY, garden, governedBootstrap, pickLatest } from "./fixtures.js";
 
 const KEEPER_SEED = "c3".repeat(32);
 const KEEPER = authorForSeed(KEEPER_SEED);
 
 async function keeperGateway(backend = new MemoryBackend()): Promise<Gateway> {
   const gateway = await Gateway.open(backend, { seed: KEEPER_SEED });
+  await gateway.append(governedBootstrap(KEEPER_SEED)); // the keeper governs; the authors may write
   await gateway.append(garden);
   gateway.register(PLANT, PLANT_POLICY, [FERN]);
   return gateway;
@@ -34,7 +35,8 @@ describe("mutate: args → signed deltas → append", () => {
 
     // the delta itself: signed by the gateway's keeper, shaped as a property claim, persisted
     await gateway.flush();
-    const persisted = await backend.deltasSince(new Set(garden.map((d) => d.id)));
+    const settled = [...garden, ...governedBootstrap(KEEPER_SEED)].map((d) => d.id);
+    const persisted = await backend.deltasSince(new Set(settled));
     expect(persisted).toHaveLength(1);
     const written = persisted[0]!;
     expect(verifyDelta(written)).toBe("verified");
@@ -66,7 +68,8 @@ describe("mutate: args → signed deltas → append", () => {
     expect(plant.watered).toBe(true); // absentAs no longer speaks: a real claim exists
     expect(plant.tag).toEqual(["shade", "fronds"]); // untouched props stay resolved
     await gateway.flush();
-    const fresh = await backend.deltasSince(new Set(garden.map((d) => d.id)));
+    const settled = [...garden, ...governedBootstrap(KEEPER_SEED)].map((d) => d.id);
+    const fresh = await backend.deltasSince(new Set(settled));
     expect(fresh).toHaveLength(2);
     await gateway.close();
   });
