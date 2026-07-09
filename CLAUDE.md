@@ -79,10 +79,8 @@ Ordered; re-evaluated after each merge (cycle stage 7). Adopt rhizomatic's core;
 4. **Mutations + subscriptions.** _Done — merged as PR #5 (2026-07-09); GraphQL mutate + subscribe
    over leavable, coalescing channels (see `JOURNAL.md`). First 5-PR audit panel run after this
    merge._
-5. **Accounts & capabilities.** Users / ownership / capability-grants as genesis schemas; gateway
-   enforces (authorize iff a resolved grant permits); an operator root bootstraps grants.
-   _Success:_ unauthorized mutation rejected; a grant permits it; revocation re-denies; grants are
-   auditable via query.
+5. **Accounts & capabilities.** _Done — merged as PR #7 (2026-07-09); full multi-tenant capability
+   grants with operator-rooted authority chains (see `JOURNAL.md` and SPEC §7)._
 6. **Gateway transport.** MCP + HTTP serving the gateway (chorus `mcp-http` as reference): token
    auth, multi-store mounts.
    _Success:_ a real HTTP/MCP client runs query/mutate/subscribe end-to-end with a bearer token; a

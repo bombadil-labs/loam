@@ -1,35 +1,30 @@
-# Current work — Step 5: Accounts & capabilities (full multi-tenant)
+# Current work — Step 6: Gateway transport
 
 _The live checklist for the step in progress: its success criteria, the sub-tasks (checked as they complete), and a "left off here" note so any model can resume mid-step. Replaced at the start of each step; cleared when a step merges._
 
-**The model (SPEC §7, no ambient authority):**
+**The design:**
 
-- A **tenant** is an entity. An entity belongs to a tenant via a membership delta (filed at both
-  the tenant under `loam.members` and the entity under `loam.tenant`); latest claim wins.
-- A **grant** is a signed delta filed at a tenant under `loam.grants`: subject (an author
-  string), verb (`write` | `admin`). **Revocation is negation** — rhizomatic-native, auditable.
-- **Enforcement is gateway code over resolved data**: a write to entity E is authorized iff the
-  delta's verified author holds a surviving `write`/`admin` grant on E's tenant. Writes to a
-  tenant's own `loam.grants`/`loam.members` require `admin` on it. An entity with no tenant is
-  the operator's alone. The **operator** (the gateway's seed) roots the chain: it creates
-  tenants, plants the first grants, and is always authorized.
-- **Callers act as themselves**: `query(source, vars, { actor: seed })` signs mutations as the
-  actor, not the gateway — grants finally have something authentic to key on (audit-1's
-  deferral). Raw `append` is enforced by each delta's own verified author.
-- **Full multi-tenant** (Myk's decision): a grant on tenant A permits nothing on tenant B.
+- One `node:http` server, no framework: `serve({ mounts, tokens, port, host })` where `mounts`
+  maps names to `Gateway`s and `tokens` maps bearer tokens to identities (`{ actor: seed }` or
+  `{ operator: true }` — explicit, never a default). Token comparison is timing-safe.
+- **HTTP**: `POST /:mount/graphql` (query + mutate, actor from the token);
+  `GET /:mount/subscribe?query=…` (SSE: one `data:` event per subscription payload; client
+  disconnect returns the iterator). Junk or missing token → 401; unknown mount → 404.
+- **MCP**: `POST /:mount/mcp` — minimal streamable-HTTP JSON-RPC (`initialize`, `tools/list`,
+  `tools/call`) exposing `loam_query` and `loam_mutate`, chorus `mcp-http.ts` as the reference.
+- The actor-per-request seam from step 5 is what tokens map onto — transport adds no new
+  authority concepts, only authentication.
 
-**Success criteria (from CLAUDE.md):** unauthorized mutation rejected; a grant permits it;
-revocation re-denies; grants are auditable via query; tenant isolation holds; the admin chain
-works (operator → admin → write); `npm run check` green.
+**Success criteria (from CLAUDE.md):** a real HTTP client runs query/mutate/subscribe end-to-end
+with a bearer token; a real MCP client (JSON-RPC over HTTP) runs query/mutate; a junk token is
+rejected; multi-store mounts isolate; `npm run check` green.
 
 **Sub-tasks:**
 
-- [ ] `test/gateway/auth.test.ts` — tests first: deny-by-default, grant→permit,
-      revoke→re-deny, audit query, tenant isolation, admin chain, raw-append enforcement,
-      operator bootstrap
-- [ ] `src/gateway/accounts.ts` — tenancy/grant claim builders + the authorization resolver
-- [ ] `src/gateway/gateway.ts` — actor context; enforcement in mutate + append
-- [ ] `src/gateway/gql.ts` — actor threading (context value)
-- [ ] Gate green → PR → one review agent → resolve → merge → journal
+- [ ] `test/server/http.test.ts` — tests first, real `fetch` against a listening server:
+      auth (valid/junk/missing), query, authorized + denied mutations, SSE subscribe
+      (initial + patch), mount isolation + unknown mount, MCP handshake/list/call
+- [ ] `src/server/http.ts` — the server
+- [ ] Exports; gate green → PR → one review agent → resolve → merge → journal
 
 **Left off here:** plan written; next: tests.
