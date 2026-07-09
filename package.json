@@ -26,10 +26,12 @@
     "check": "npm run format:check && npm run lint && npm run typecheck && npm run build && npm test"
   },
   "dependencies": {
-    "@bombadil/rhizomatic": "^0.1.0"
+    "@bombadil/rhizomatic": "^0.1.0",
+    "better-sqlite3": "^12.11.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.15.0",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.0.0",
     "eslint": "^9.15.0",
     "eslint-config-prettier": "^9.1.0",
