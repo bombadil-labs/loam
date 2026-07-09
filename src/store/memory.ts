@@ -18,8 +18,11 @@ export class MemoryBackend implements StoreBackend {
 
   async append(deltas: Iterable<Delta>): Promise<number> {
     this.assertOpen();
+    // Canonicalize the WHOLE batch before touching the set: one refused delta refuses the lot,
+    // atomically — the same all-or-nothing every driver must keep.
+    const batch = [...deltas].map(canonicalDelta);
     let stored = 0;
-    for (const d of deltas) if (this.set.add(canonicalDelta(d))) stored += 1;
+    for (const d of batch) if (this.set.add(d)) stored += 1;
     return stored;
   }
 

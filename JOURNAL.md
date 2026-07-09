@@ -170,3 +170,41 @@ Learnings worth keeping:
   and `${name}@${entity}` lazy-mat names colliding with legitimate schema names (lazy names now
   live in a NUL alphabet schemas are refused entry to; `__proto__` props are refused for the
   plain-object-setter trap).
+
+## 2026-07-09 — Audit 1 (after PR #5): 23 findings, one fixing PR
+
+Per Myk's cadence rule (one lean review per PR; a full multi-angle audit panel every 5 merges),
+a six-angle audit workflow ran over the whole codebase: 24 candidates, **23 survived
+adversarial verification** — the depth per-PR reviews trade away, recovered on schedule. The
+sharpest catches, all fixed in the audit-1 PR:
+
+- **The stores' gate had two gaps**: sqlite's dedup fast-path ran BEFORE the forged-id check
+  (a forgery wearing a known id was silently skipped, where memory rejected it), and memory
+  appended non-atomically (deltas before a forged one stayed stored). Now: every delta passes
+  `canonicalDelta` before dedup, and one refusal refuses the whole batch on every driver.
+- **The sig column was never fscked**: a tampered or stripped signature read back as healthy
+  data. Reads now refuse a signature that does not verify, like any other corruption.
+- **Lone surrogates break content addressing** (verified against the real dependency: canonical
+  CBOR hashes U+D800 as U+FFFD, so byte-different claims share one id, while the JSON round-trip
+  preserves the difference). Such deltas are refused outright — no honest canonical form exists.
+- **The gateway served phantom state**: append ingested into the reactor before persisting, so
+  a failed write left subscribers and queries confidently serving data the disk never held.
+  Now the batch persists FIRST — nothing observable is ever less durable than the ground, and a
+  failed append means nothing happened (retryable, not fatal).
+- **The gateway now refuses unsigned deltas** — the enforcement step 1's journal promised.
+  Authority is always attested at the gate; store-level archaeology stays permissive.
+- **`Channel.fail()` delivered silence** (close resolved the parked reader with `done` before
+  the rejection could land) and one channel could not hold two parked readers. Both fixed;
+  mutation timestamps are now strictly monotonic within a gateway instance (no
+  same-millisecond coin flips from one writer; across restarts the wall clock is the only
+  witness); a patch
+  coalescing into an undrained snapshot stays a snapshot; lazy materializations are capped
+  (pure-read DoS); prototype-member schema names no longer falsely collide.
+- **Three tests were lying politely** (a byAuthorRank test that never used byAuthorRank, a
+  count assertion satisfiable by a picked value, an untested `legal()` mangling path) — all
+  made falsifiable.
+
+Deferred with intent: per-caller identity for mutations (step 5 — grants need something
+authentic to key on); registrations-as-deltas + GraphQL-exposed `loadSchema` (folded into step
+7, so the surface becomes a function of the store); cross-process store liveness (federation's
+job; the single-writer rule is now documented in `backend.ts`). **Next audit due after PR #10.**

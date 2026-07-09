@@ -126,6 +126,41 @@ for (const makeHarness of harnesses) {
       await store.close();
     });
 
+    it("a forgery wearing a KNOWN id is still a forgery: refused, not silently skipped", async () => {
+      const h = makeHarness();
+      const store = h.open();
+      await store.append([signed1]);
+      const wolf: Delta = { id: signed1.id, claims: signed2.claims }; // familiar face, wrong soul
+      await expect(store.append([wolf])).rejects.toThrow(/does not match its claims/);
+      // and within one batch, riding behind its own honest original:
+      await expect(
+        store.append([signed2, { id: signed2.id, claims: signed1.claims }]),
+      ).rejects.toThrow(/does not match its claims/);
+      await store.close();
+    });
+
+    it("one refused delta refuses its whole batch, atomically, on every driver", async () => {
+      const h = makeHarness();
+      const store = h.open();
+      const forged: Delta = { ...signed2, id: `1e20${"00".repeat(32)}` };
+      await expect(store.append([signed1, forged])).rejects.toThrow(/does not match its claims/);
+      expect(await store.deltasSince(new Set())).toEqual([]); // signed1 did not slip in first
+      await store.close();
+    });
+
+    it("a lone surrogate is refused: its bytes and its identity disagree", async () => {
+      const torn = makeDelta({
+        timestamp: 6000,
+        author: "did:key:zAnon",
+        pointers: [{ role: "value", target: { kind: "primitive", value: "\ud800" } }],
+      });
+      const h = makeHarness();
+      const store = h.open();
+      await expect(store.append([torn])).rejects.toThrow(/lone surrogate/);
+      expect(await store.deltasSince(new Set())).toEqual([]);
+      await store.close();
+    });
+
     it("after close, every method rejects", async () => {
       const h = makeHarness();
       const store = h.open();
@@ -145,6 +180,19 @@ for (const makeHarness of harnesses) {
         expect(ids(await again.deltasSince(new Set()))).toEqual(ids(all));
         // and the reopened handle still dedups against what the first one wrote
         expect(await again.append([signed1])).toBe(0);
+        await again.close();
+      });
+
+      it("a tampered signature is corruption too: reads refuse it", async () => {
+        const h = makeHarness();
+        const store = h.open() as SqliteBackend;
+        await store.append([signed1]);
+        await store.close();
+        const raw = new Database(store.filePath);
+        raw.prepare("UPDATE deltas SET sig = ? WHERE id = ?").run("ab".repeat(64), signed1.id); // a well-shaped signature that verifies nothing
+        raw.close();
+        const again = h.reopen!();
+        await expect(again.deltasSince(new Set())).rejects.toThrow(/does not verify/);
         await again.close();
       });
 

@@ -119,6 +119,35 @@ describe("subscribe: an initial snapshot, then patches", () => {
     await gateway.close();
   });
 
+  it("a patch coalescing into an undrained snapshot stays a snapshot", async () => {
+    const gateway = await keeperGateway();
+    const events = await gateway.subscribe(SUBSCRIPTION);
+    // Nobody has read the initial snapshot yet; a mutation lands on top of it.
+    await gateway.query(`mutation { plant(entity: "${FERN}", height: 40) { height } }`);
+    const first = await nextPatch(events);
+    expect(first._fromHex).toBeNull(); // still a snapshot — just a newer one
+    expect(first._changed).toBeNull(); // both signals agree
+    expect(first.height).toBe(40);
+    await expectSilence(events); // and it was ONE event
+    await events.return(undefined);
+    await gateway.close();
+  });
+
+  it("a sink that cannot re-resolve fails its own stream with the error, even parked", async () => {
+    const gateway = await keeperGateway();
+    const events = await gateway.subscribe(SUBSCRIPTION);
+    await nextPatch(events); // drain the snapshot; the reader parks next
+    const parked = events.next();
+    // Sabotage re-resolution: gather() throws for every future sink invocation.
+    const broken = gateway as unknown as { gather: () => never };
+    broken.gather = () => {
+      throw new Error("the ground gave way");
+    };
+    await gateway.query(`mutation { plant(entity: "${FERN}", height: 41) { height } }`);
+    await expect(parked).rejects.toThrow(/ground gave way/);
+    await gateway.close();
+  });
+
   it("a live subscription survives a later registration", async () => {
     const gateway = await keeperGateway();
     const events = await gateway.subscribe(SUBSCRIPTION);
