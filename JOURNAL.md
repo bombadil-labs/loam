@@ -40,30 +40,42 @@ Learnings worth keeping:
 
 ## 2026-07-09 — Step 1: The rhizomatic spike (PR #2)
 
-Twenty-one tests against the real `@bombadil/rhizomatic@0.1.0`, one file per SPEC §2 claim
-cluster, all green on the first run. **The substrate is what the SPEC says it is.** Confirmed:
+Thirty tests (27 spike + 3 smoke) against the real `@bombadil/rhizomatic@0.1.0`, spanning four
+of SPEC §2's claim clusters. **The substrate is what the SPEC says it is.** Confirmed:
 
 - **Schemas are data.** `publishSchemaClaims → loadSchema` round-trips; evolution is append
-  (newest definition wins); deprecation is negation (`loadSchema` throws "no surviving schema
-  definition"); `SCHEMA_SCHEMA` round-trips through its own machinery — the metacircular seed
-  holds.
-- **Resolution is policy pluralism.** One gathered `HView`, many truths: `pick byTimestamp` vs
-  `pick byAuthorRank` legitimately disagree over the same deltas; `all` unions; `merge` reduces;
-  same policy + same deltas in any order → the same `viewCanonicalHex`.
-- **The reactor is honest.** Materializations stay current per ingest; `subscribe` pushes
-  `MaterializationChange` naming exactly what moved and which delta is responsible; irrelevant
-  deltas cause no event and no re-evaluation; forged content addresses are rejected without
-  trace; arrival order cannot change the materialized truth.
+  (newest definition wins, body and all); deprecation is negation (`loadSchema` throws "no
+  surviving schema definition"); `SCHEMA_SCHEMA` round-trips through its own machinery — the
+  metacircular seed holds. Schema refs recurse: `expand` nests a child `HView` per ref'd schema,
+  `collectRefs` returns typed refs (`{kind: "name", name}`), and `resolveView` recurses through
+  expansions — with the child view honestly showing the back-edge that led there.
+- **Resolution is policy pluralism.** One gathered `HView`, many truths: `pick byAuthorRank`
+  yields 30 or 34 depending on whom you trust; `all` unions; `merge` reduces; `absentAs` fills
+  silence with a constant; `byPred` ranks matching claims first; same policy + same deltas in
+  any order → the same `viewCanonicalHex`.
+- **The reactor is honest.** Materializations stay current per ingest and agree with batch
+  evaluation (the incremental-equivalence contract); `subscribe` pushes `MaterializationChange`
+  whose `newHex` matches independently computed ground truth; registration after ingest
+  backfills; multiple subscribers all hear; **for root-anchored terms** irrelevant deltas cause
+  no event and no re-evaluation (`evalCountOf` flat — note: non-anchored terms dispatch broadly,
+  over-match is allowed, so gateway materializations should stay root-anchored); forgeries are
+  rejected without trace; arrival order cannot change the materialized truth even within one
+  bucket; **negation flows through the live read** (the negated value vanishes from the resolved
+  view and subscribers are told).
 - **The function substrate is complete.** Install → fire → emit works; emissions are signed by
-  the derived author and carry `rdb.derived.by/from/under` provenance; `supersede` keeps exactly
-  one live claim; `verifyPureDerivation` reproduces the emission from the recorded input hex and
-  rejects a tampered function; a budget-exhausted binding suspends **observably** (a signed
-  suspension claim in the store) and stops emitting.
+  the derived author, ride the raw stream, and carry `rhizomatic.derived.by/from/under`
+  provenance naming the exact function and binding; `supersede` keeps exactly the **latest
+  emission set** live (one live claim per pointer-list the function returns — a multi-output
+  function leaves several); `verifyPureDerivation` reproduces the emission from the recorded
+  input hex and rejects a tampered function; a budget-exhausted binding suspends observably and
+  attributably (a signed suspension claim naming the binding) and stops emitting.
 
 Differences from SPEC §2 — refinements, no contradictions (SPEC corrected):
 
 - `MaterializationChange` also carries `materialization` (the name), not just root/props/ids/hex.
-- `subscribeRaw` exists alongside `subscribe` — the every-accepted-delta stream (federation/audit).
+- `subscribeRaw` exists alongside `subscribe` — the every-accepted-delta stream, firing exactly
+  once per accepted delta (not for duplicates or rejects) and including derivation emissions:
+  the natural write-through hook for step 2's persistence tier.
 - `ingest` accepts **unsigned** deltas (content-address verified; bad signatures rejected). Loam's
   gateway must therefore enforce its own signature requirements — the substrate won't.
 - `conflicts` surfaces a property only when ≥ 2 distinct values contend; an agreed single value
@@ -71,8 +83,8 @@ Differences from SPEC §2 — refinements, no contradictions (SPEC corrected):
   total and deterministic.
 - Exported type names confirmed: `HView`, `DerivedFn` (CLAUDE.md vocabulary note aligned).
 
-Novel learning: **terms are built via the JSON profile** (`parseTerm({op: "group"|"select"|
-"mask"|"fix"|"resolve", in: ...})` — the JSON key is `in`, the internal field is `of`), and
-policies via `parsePolicy` or direct typed construction. The gateway (step 3) can therefore
-accept policy/term JSON straight off the wire — the serialization layer Loam needs already
-exists and is conformance-vectored.
+Novel learning: **terms and policies are built via the JSON profile** (`parseTerm` /
+`parsePolicy` / `parsePred`), so the gateway (step 3) can accept them straight off the wire —
+the serialization layer Loam needs already exists and is conformance-vectored. Grammar caution:
+the nesting key is `in` for `select`/`mask`/`group`/`expand`/`resolve`/`prune`, but `fix` takes
+`schema`/`entity`(/`bindings`) and `union` takes `left`/`right` — `in` is not universal.

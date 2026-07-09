@@ -21,7 +21,14 @@ _The live checklist for the step in progress: its success criteria, the sub-task
 - [x] `test/spike/derivation.test.ts` — fire+emit+provenance, supersede, pure replay, budget
 - [x] SPEC §2 corrections (MaterializationChange shape, subscribeRaw, unsigned-ingest note,
       conflicts nuance) + JOURNAL entry
-- [ ] Feature branch → PR → adversarial review → resolve → merge
+- [x] Feature branch → PR #2 → adversarial review (4 angles: test honesty, missing coverage,
+      docs accuracy, quality) → resolved 21 findings: falsifiable evolution + order tests,
+      exact provenance/suspension targets, ground-truth newHex, the resolveView-over-
+      materialization gateway seam, negation through the live read, subscribeRaw contract,
+      late registration, multiple subscribers, schema-ref expansion + collectRefs, absentAs +
+      byPred, honest narrowing (no casts), shared plantReactor, journal factually corrected
+      (rhizomatic. prefix, scoped re-evaluation claim, supersede semantics, parseTerm grammar)
+- [ ] CI green on the resolved PR → merge by PR number
 
-**Left off here:** all spike tests green (24 total incl. smoke); docs updated; next is the full
-gate, then branch + PR (stage 4).
+**Left off here:** review resolved, gate green (30/30); awaiting CI on PR #2, then merge +
+re-plan (stages 6-8).

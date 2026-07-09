@@ -13,7 +13,15 @@ import {
   type PropPolicy,
   type View,
 } from "@bombadil/rhizomatic";
-import { FERN, GARDENER, GARDENER_SEED, PLANT_BODY, SURVEYOR_SEED, observed } from "./garden.js";
+import {
+  FERN,
+  GARDENER,
+  GARDENER_SEED,
+  PLANT_BODY,
+  SURVEYOR,
+  SURVEYOR_SEED,
+  observed,
+} from "./garden.js";
 
 // The contested garden: two authors measured the fern differently; tags accumulate; the kind
 // is agreed once.
@@ -49,11 +57,10 @@ describe("spike: resolveView(Policy, HView) → View", () => {
   });
 
   it("pick byAuthorRank: the trusted author wins — one HView, two truths (pluralism)", () => {
-    const trustGardener = policy({
-      height: { kind: "pick", order: { kind: "byAuthorRank", authors: [GARDENER] } },
-    });
-    expect(asObj(resolveView(trustGardener, hview))["height"]).toBe(30);
-    expect(asObj(resolveView(policy(), hview))["height"]).toBe(34); // same HView, other policy
+    const trusting = (author: string) =>
+      policy({ height: { kind: "pick", order: { kind: "byAuthorRank", authors: [author] } } });
+    expect(asObj(resolveView(trusting(GARDENER), hview))["height"]).toBe(30);
+    expect(asObj(resolveView(trusting(SURVEYOR), hview))["height"]).toBe(34); // same HView
   });
 
   it("all: set union, deterministically ordered", () => {
@@ -79,6 +86,31 @@ describe("spike: resolveView(Policy, HView) → View", () => {
     const view = asObj(resolveView(reduced, hview));
     expect(view["height"]).toBe(34);
     expect(view["tag"]).toBe(2);
+  });
+
+  it("absentAs: a constant stands in for silence", () => {
+    const defaulted = policy({
+      watered: { kind: "absentAs", constant: false, then: pickLatest },
+      height: { kind: "absentAs", constant: 0, then: pickLatest },
+    });
+    const view = asObj(resolveView(defaulted, hview));
+    expect(view["watered"]).toBe(false); // nobody has claimed watering
+    expect(view["height"]).toBe(34); // presence passes through to the inner policy
+  });
+
+  it("byPred: matching claims outrank the rest", () => {
+    const preferTallReadings: PropPolicy = {
+      kind: "pick",
+      order: {
+        kind: "byPred",
+        pred: {
+          kind: "hasPointer",
+          ppred: { targetValue: { kind: "vcmp", cmp: "gt", value: 31 } },
+        },
+        then: { kind: "lexById" },
+      },
+    };
+    expect(asObj(resolveView(policy({ height: preferTallReadings }), hview))["height"]).toBe(34);
   });
 
   it("snapshots: same policy + same deltas (any order) → the same content address", () => {
