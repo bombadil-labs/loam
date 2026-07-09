@@ -1,9 +1,11 @@
 // GraphQL derived from (HyperSchema, Policy) — not reflected from the data. The policy is the
 // contract: its props name the fields, and each PropPolicy's kind names the field's shape
-// (pick → one value; all/conflicts → a list; merge → its reduction's type; absentAs → its
-// inner shape, which the constant is guaranteed to satisfy). Values pass through the View
-// scalar untyped-but-faithful — a resolved View is already the policy's adjudicated answer,
-// and nested expansions ride through it as objects.
+// (pick → one value; all/conflicts → a list; merge → its reduction's type; absentAs → the
+// pass-through scalar, because its primitive constant and its inner policy's shape need not
+// agree). Values pass through the ViewValue scalar untyped-but-faithful — a resolved View is
+// already the policy's adjudicated answer, and nested expansions ride through it as objects.
+// A name that would collide — two schemas, two props, or a prop against a built-in — is
+// refused at build time, never silently shadowed.
 //
 // Every view type carries `_entity` (the root asked about) and `_hex` (the content address of
 // the resolved View — the snapshot: same policy + same deltas, in any order, on any machine,
@@ -84,7 +86,9 @@ function fieldTypeOf(pp: PropPolicy): GraphQLOutputType {
       }
       break;
     case "absentAs":
-      return fieldTypeOf(pp.then);
+      // The constant is a bare primitive; the inner policy may be list-shaped. The only type
+      // that honestly covers both outcomes is the pass-through.
+      return ViewValue;
   }
 }
 
@@ -95,6 +99,19 @@ export function buildGqlSchema(
   const queryFields: GraphQLFieldConfigMap<unknown, unknown> = {};
 
   for (const def of defs) {
+    // Refuse collisions NOW, at build time — a lazy fields thunk would only complain when the
+    // type is first used, long after register() reported success.
+    const seen = new Set(["_entity", "_hex", "_view"]);
+    for (const [prop] of def.policy.props) {
+      const name = legal(prop);
+      if (seen.has(name)) {
+        throw new Error(
+          `schema ${def.schema.name}: property "${prop}" collides with field "${name}"`,
+        );
+      }
+      seen.add(name);
+    }
+
     const typeName = `${legal(def.schema.name)}View`;
     const viewType = new GraphQLObjectType<ResolvedNode>({
       name: typeName,
@@ -128,6 +145,11 @@ export function buildGqlSchema(
     });
 
     const fieldName = legal(def.schema.name).replace(/^[A-Z]/, (c) => c.toLowerCase());
+    if (fieldName in queryFields) {
+      throw new Error(
+        `schema ${def.schema.name}: its query field "${fieldName}" collides with an earlier schema`,
+      );
+    }
     queryFields[fieldName] = {
       type: new GraphQLNonNull(viewType),
       description: `Resolve ${def.schema.name} at an entity. Absence is an answer, not an error.`,

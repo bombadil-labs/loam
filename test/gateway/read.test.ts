@@ -11,7 +11,9 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   makeDelta,
+  parseTerm,
   publishSchemaClaims,
+  signClaims,
   termHash,
   type Delta,
   type HyperSchema,
@@ -182,11 +184,140 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Policy)", () => {
 
   it("an entity nobody has spoken about resolves by policy: absence is an answer", async () => {
     const gateway = await openGateway();
-    const result = await gateway.query(`{ plant(entity: "plant:unheard-of") { watered height } }`);
+    const result = await gateway.query(
+      `{ plant(entity: "plant:unheard-of") { watered height readings } }`,
+    );
     expect(result.errors).toBeUndefined();
-    const ghost = (result.data as { plant: { watered: boolean; height: number | null } }).plant;
+    const ghost = (
+      result.data as {
+        plant: { watered: boolean; height: number | null; readings: number | null };
+      }
+    ).plant;
     expect(ghost.watered).toBe(false); // absentAs still speaks
     expect(ghost.height).toBeNull(); // pick over silence is null
+    expect(ghost.readings).toBeNull(); // and so is a count of nothing
     await gateway.close();
+  });
+
+  it("append receipts are exact: accepted counts, duplicates count, dupes persist once", async () => {
+    const gateway = await Gateway.open(new MemoryBackend());
+    expect(await gateway.append(garden)).toEqual({ accepted: 5, duplicates: 0 });
+    expect(await gateway.append(garden.slice(0, 2))).toEqual({ accepted: 0, duplicates: 2 });
+    await gateway.close();
+  });
+
+  it("query before anything is registered refuses plainly", async () => {
+    const gateway = await Gateway.open(new MemoryBackend());
+    await expect(gateway.query(`{ plant(entity: "x") { _hex } }`)).rejects.toThrow(
+      /nothing is registered/,
+    );
+    await gateway.close();
+  });
+
+  it("two schemas serve side by side; an expand ref nests the child view through ViewValue", async () => {
+    const BED = "bed:shade";
+    const bedBody = parseTerm({
+      op: "expand",
+      role: { exact: "plant" },
+      schema: "Plant",
+      in: {
+        op: "group",
+        key: "byTargetContext",
+        in: {
+          op: "select",
+          pred: { hasPointer: { targetEntity: { var: "root" } } },
+          in: { op: "mask", policy: "drop", in: "input" },
+        },
+      },
+    });
+    const planting = signClaims(
+      {
+        timestamp: 1100,
+        author: GARDENER,
+        pointers: [
+          { role: "bed", target: { kind: "entity", entity: { id: BED, context: "plants" } } },
+          { role: "plant", target: { kind: "entity", entity: { id: FERN, context: "planted" } } },
+        ],
+      },
+      GARDENER_SEED,
+    );
+    const gateway = await openGateway([...garden, planting]);
+    gateway.register(
+      { name: "BedWithPlants", alg: 1, body: bedBody },
+      { props: new Map([["plants", pickLatest]]), default: pickLatest },
+      [BED],
+    );
+    const result = await gateway.query(`{
+      plant(entity: "${FERN}") { height }
+      bedWithPlants(entity: "${BED}") { plants _view }
+    }`);
+    expect(result.errors).toBeUndefined();
+    const data = result.data as {
+      plant: { height: number };
+      bedWithPlants: { plants: Record<string, unknown>; _view: Record<string, unknown> };
+    };
+    expect(data.plant.height).toBe(34);
+    expect(data.bedWithPlants.plants).toMatchObject({ height: 34 }); // the nested child view
+    expect(data.bedWithPlants._view).toHaveProperty("plants");
+    await gateway.close();
+  });
+
+  it("_view carries dynamic properties the policy never named", async () => {
+    const gateway = await openGateway([
+      ...garden,
+      observed(FERN, "kind", "fern", 1200, GARDENER_SEED), // no policy prop for "kind"
+    ]);
+    const result = await gateway.query(`{ plant(entity: "${FERN}") { _view } }`);
+    const view = (result.data as { plant: { _view: Record<string, unknown> } }).plant._view;
+    expect(view["kind"]).toBe("fern");
+    await gateway.close();
+  });
+
+  it("a refused registration leaves the gateway exactly as it was", async () => {
+    const gateway = await openGateway();
+    // duplicate schema name → refused by the registry
+    expect(() => gateway.register(PLANT, PLANT_POLICY, [FERN])).toThrow();
+    // a colliding property name → refused by the gql builder
+    expect(() =>
+      gateway.register(
+        { name: "Plant2", alg: 1, body: PLANT_BODY },
+        { props: new Map([["_hex", pickLatest]]), default: pickLatest },
+        [FERN],
+      ),
+    ).toThrow(/collides/);
+    // and the gateway still answers as before
+    expect((await queryPlant(gateway)).height).toBe(34);
+    await gateway.close();
+  });
+
+  it("loadSchema proves the definition before anything lands: a bad batch persists nothing", async () => {
+    const backend = new MemoryBackend();
+    const gateway = await Gateway.open(backend);
+    const stray = observed(FERN, "height", 30, 1000, GARDENER_SEED); // defines no schema
+    await expect(gateway.loadSchema([stray], "schema:Nope")).rejects.toThrow(
+      /no surviving schema definition/,
+    );
+    expect(await backend.deltasSince(new Set())).toEqual([]); // append-only stores forgive nothing
+    await gateway.close();
+  });
+
+  it("a write-through failure is surfaced, further appends refuse, close still releases", async () => {
+    class FailingBackend extends MemoryBackend {
+      failNow = false;
+      override append(deltas: Iterable<Delta>): Promise<number> {
+        if (this.failNow) return Promise.reject(new Error("disk on fire"));
+        return super.append(deltas);
+      }
+    }
+    const backend = new FailingBackend();
+    const gateway = await Gateway.open(backend);
+    await gateway.append(garden.slice(0, 2)); // healthy writes land
+    backend.failNow = true;
+    await expect(gateway.append([garden[2]!])).rejects.toThrow(/disk on fire/);
+    // degraded: new work is refused BEFORE ingest, so the divergence stops growing
+    await expect(gateway.append([garden[3]!])).rejects.toThrow(/no longer persist/);
+    // close surfaces the failure AND releases the backend
+    await expect(gateway.close()).rejects.toThrow(/disk on fire/);
+    await expect(backend.deltasSince(new Set())).rejects.toThrow(/closed/);
   });
 });
