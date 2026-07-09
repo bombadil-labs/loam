@@ -47,16 +47,23 @@ near-synonyms (that is how you get two colliding "schema" concepts).
   then)`. `Order` = `byTimestamp` / `byAuthorRank(authors)` / `byPred` / `lexById`. `MergeFn` =
   max/min/sum/count/and/or/concatSorted. **This is the reduction library** (latest = `pick
   byTimestamp`; trusted-first = `byAuthorRank`; set-union = `all`; contested = `conflicts`).
+  Confirmed nuance: `conflicts` surfaces a property **only when ≥ 2 distinct values contend** —
+  an agreed single value resolves to absent (superposition is for the contested, not the settled);
+  and every `Order` chain ends in an implicit `lexById` tiebreak, so resolution is total and
+  deterministic.
 - **Snapshots** — a resolved `View` is content-addressed via `viewCanonicalHex`; a `HView` via
   `hviewCanonicalHex`. Static view = snapshot = a commit.
 - **Self-hosting schema-schema** — `SCHEMA_SCHEMA: HyperSchema`, `loadSchema(dset, entity) →
   HyperSchema` (deltas → schema), `publishSchemaClaims(schema, …) → Claims` (schema → deltas),
   `definitionRoles()`. Schemas are data; the metacircular seed is already written.
-- **The reactor** — `ingest`; live indexes (`byTarget`/`byValue`/`negationsOf`); `arrivalLog`;
-  `eval` over a `SchemaRegistry`; named, rooted **materializations** (`register` /
-  `materializedView` → `HView` / `materializedHex`) kept current on each ingest; **`subscribe`**
-  (push change-notification via `MaterializationChange { root, changedProps, responsibleDeltaIds,
-  newHex }`). Dynamic view = subscription = a branch.
+- **The reactor** — `ingest` (verifies content-addressing and any signature; unsigned deltas are
+  accepted, forged ones rejected without trace); live indexes (`byTarget`/`byValue`/`negationsOf`);
+  `arrivalLog`; `eval` over a `SchemaRegistry`; named, rooted **materializations**
+  (`register(name, term, roots, registry?)` / `materializedView` → `HView` / `materializedHex`)
+  kept current on each ingest; **`subscribe(name, cb)`** (push change-notification via
+  `MaterializationChange { materialization, root, changedProps, responsibleDeltaIds, newHex }`)
+  plus **`subscribeRaw(cb)`** (every accepted delta — the federation/audit stream). Dynamic view =
+  subscription = a branch.
 - **The function substrate** — `DerivedFn = (view: HView, root) => Pointer[][]` (a function is
   hyperview → deltas). `BindingSpec { name, fnId, materialization, pure, budget, emit:
   append|supersede|{keyed} }` (the _application_: binds a function to a materialization, with purity,

@@ -45,8 +45,10 @@ update `CURRENT_WORK.md`** so the next run resumes exactly here.
   ephemeral and evolving, PRs hold prior snapshots, don't be afraid to blow it away as necessary.
 - **Strict in PRs, creative and aggressive in execution.** Ship real vertical slices; don't gold-plate;
   don't reward-hack a green bar.
-- **Match rhizomatic's vocabulary** (`HyperSchema`, `HyperView`, `View`, `Policy`, `DerivedFunction`,
-  `BindingSpec`); don't parallel it with near-synonyms.
+- **Match rhizomatic's vocabulary** — the concepts are Hyperschema / Hyperview / View / Policy /
+  derived function / binding; the exported type names are `HyperSchema`, `HView`, `View`, `Policy`,
+  `DerivedFn`, `BindingSpec` (confirmed in the step-1 spike). Don't parallel either with
+  near-synonyms.
 - **The poetry is as important as the engineering** — errors, help text, commit messages, and docs are
   first-class craft.
 

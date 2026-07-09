@@ -37,3 +37,42 @@ Learnings worth keeping:
   npm warns; an upgrade would quiet it.
 - **A merge test with an empty set proves nothing.** Order-blindness is only falsifiable with
   two overlapping non-empty sets compared in both orders.
+
+## 2026-07-09 — Step 1: The rhizomatic spike (PR #2)
+
+Twenty-one tests against the real `@bombadil/rhizomatic@0.1.0`, one file per SPEC §2 claim
+cluster, all green on the first run. **The substrate is what the SPEC says it is.** Confirmed:
+
+- **Schemas are data.** `publishSchemaClaims → loadSchema` round-trips; evolution is append
+  (newest definition wins); deprecation is negation (`loadSchema` throws "no surviving schema
+  definition"); `SCHEMA_SCHEMA` round-trips through its own machinery — the metacircular seed
+  holds.
+- **Resolution is policy pluralism.** One gathered `HView`, many truths: `pick byTimestamp` vs
+  `pick byAuthorRank` legitimately disagree over the same deltas; `all` unions; `merge` reduces;
+  same policy + same deltas in any order → the same `viewCanonicalHex`.
+- **The reactor is honest.** Materializations stay current per ingest; `subscribe` pushes
+  `MaterializationChange` naming exactly what moved and which delta is responsible; irrelevant
+  deltas cause no event and no re-evaluation; forged content addresses are rejected without
+  trace; arrival order cannot change the materialized truth.
+- **The function substrate is complete.** Install → fire → emit works; emissions are signed by
+  the derived author and carry `rdb.derived.by/from/under` provenance; `supersede` keeps exactly
+  one live claim; `verifyPureDerivation` reproduces the emission from the recorded input hex and
+  rejects a tampered function; a budget-exhausted binding suspends **observably** (a signed
+  suspension claim in the store) and stops emitting.
+
+Differences from SPEC §2 — refinements, no contradictions (SPEC corrected):
+
+- `MaterializationChange` also carries `materialization` (the name), not just root/props/ids/hex.
+- `subscribeRaw` exists alongside `subscribe` — the every-accepted-delta stream (federation/audit).
+- `ingest` accepts **unsigned** deltas (content-address verified; bad signatures rejected). Loam's
+  gateway must therefore enforce its own signature requirements — the substrate won't.
+- `conflicts` surfaces a property only when ≥ 2 distinct values contend; an agreed single value
+  resolves to absent. Every `Order` chain ends in an implicit `lexById` tiebreak — resolution is
+  total and deterministic.
+- Exported type names confirmed: `HView`, `DerivedFn` (CLAUDE.md vocabulary note aligned).
+
+Novel learning: **terms are built via the JSON profile** (`parseTerm({op: "group"|"select"|
+"mask"|"fix"|"resolve", in: ...})` — the JSON key is `in`, the internal field is `of`), and
+policies via `parsePolicy` or direct typed construction. The gateway (step 3) can therefore
+accept policy/term JSON straight off the wire — the serialization layer Loam needs already
+exists and is conformance-vectored.
