@@ -16,6 +16,7 @@
 
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { toWire } from "../federation/wire.js";
 import type { Gateway, QueryResult, RequestContext } from "../gateway/gateway.js";
 
 export interface TokenIdentity {
@@ -344,6 +345,11 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           return;
         case "mcp":
           await handleMcp(gateway, identity, req, res);
+          return;
+        case "federate":
+          // The offer: this mount's published deltas as wire JSON. A peer pulls, verifies, and
+          // merges — union at the substrate; trust is the peer's read lens, not ours to impose.
+          json(res, 200, { deltas: gateway.offeredDeltas().map(toWire) });
           return;
         default:
           json(res, 404, { errors: ["no such surface"] });
