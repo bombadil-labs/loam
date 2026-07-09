@@ -4,8 +4,12 @@
 // Everything here talks to a real listening server with a real fetch — no shortcuts through
 // in-process calls.
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
+
+// Real listening server + SSE; a generous hang-guard so machine load can't blow the default
+// per-test timeout. Only ever matters when something is genuinely stuck.
+vi.setConfig({ testTimeout: 15000 });
 import { grantClaims, membershipClaims } from "../../src/gateway/accounts.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { serve, type ServerHandle } from "../../src/server/http.js";

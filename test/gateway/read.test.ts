@@ -57,7 +57,8 @@ async function queryPlant(gateway: Gateway): Promise<PlantRow> {
 }
 
 const tmp = mkdtempSync(join(tmpdir(), "loam-gateway-"));
-afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+// maxRetries rides out a Windows EBUSY if the OS hasn't released a just-closed sqlite handle.
+afterAll(() => rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
 
 describe("the read gateway: GraphQL derived from (HyperSchema, Policy)", () => {
   it("a query returns the resolved view, shaped by the policy", async () => {

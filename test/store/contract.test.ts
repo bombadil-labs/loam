@@ -50,7 +50,8 @@ interface Harness {
 }
 
 const tmp = mkdtempSync(join(tmpdir(), "loam-store-"));
-afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+// maxRetries rides out a Windows EBUSY if the OS hasn't released a just-closed sqlite handle.
+afterAll(() => rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
 
 let dbCount = 0;
 function sqliteHarness(): Harness {

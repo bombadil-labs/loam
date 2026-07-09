@@ -3,11 +3,16 @@
 // re-resolved. Backed by a lazily-created, cached materialization per (schema, entity);
 // irrelevant writes are silence; ending the iterator ends the delivery.
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, garden, governedBootstrap } from "./fixtures.js";
+
+// A generous hang-guard for genuine failures; the passing paths resolve in microseconds (patches
+// are queued synchronously by the awaited mutation), so this only ever matters if something is
+// actually broken, and it gives a loaded machine ample headroom over the default.
+vi.setConfig({ testTimeout: 15000 });
 
 const KEEPER_SEED = "c3".repeat(32);
 
@@ -30,20 +35,47 @@ async function keeperGateway(): Promise<Gateway> {
   return gateway;
 }
 
-async function nextPatch(
-  events: AsyncGenerator<Record<string, unknown>>,
-  ms = 500,
-): Promise<PlantPatch> {
-  const timeout = new Promise<never>((_res, rej) =>
-    setTimeout(() => rej(new Error(`no event within ${ms}ms`)), ms),
-  );
-  const item = await Promise.race([events.next(), timeout]);
+type Events = AsyncGenerator<Record<string, unknown>>;
+
+// One in-flight next() per stream, so `expectSilence` (which parks a read to prove nothing comes)
+// never leaks a pending promise or issues a concurrent next() — the graphql async iterator does
+// not tolerate overlapping next() calls, and a leaked one is a silent flake waiting to happen.
+const inflight = new WeakMap<Events, Promise<IteratorResult<Record<string, unknown>>>>();
+
+function take(events: Events): Promise<IteratorResult<Record<string, unknown>>> {
+  const held = inflight.get(events);
+  if (held !== undefined) {
+    inflight.delete(events);
+    return held;
+  }
+  return events.next();
+}
+
+// The next patch. No wall-clock race: the patch is pushed synchronously by the mutation we
+// already awaited, so this resolves at once; a genuine hang is caught by the per-test timeout.
+async function nextPatch(events: Events): Promise<PlantPatch> {
+  const item = await take(events);
   if (item.done === true) throw new Error("stream ended");
   return (item.value as { plant: PlantPatch }).plant;
 }
 
-async function expectSilence(events: AsyncGenerator<Record<string, unknown>>): Promise<void> {
-  await expect(nextPatch(events, 100)).rejects.toThrow(/no event/);
+// Assert no patch arrives within `ms`. Holds a single in-flight next() (reused by the next read),
+// so nothing leaks and no concurrent next() is issued; load-robust, because a correctly-silent
+// stream simply never resolves the held read.
+async function expectSilence(events: Events, ms = 200): Promise<void> {
+  const held = inflight.get(events) ?? events.next();
+  inflight.set(events, held);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const silent = new Promise<"silent">((resolve) => {
+    timer = setTimeout(() => resolve("silent"), ms);
+  });
+  const outcome = await Promise.race([held.then(() => "event" as const), silent]);
+  if (timer !== undefined) clearTimeout(timer);
+  if (outcome === "event") {
+    inflight.delete(events);
+    throw new Error("expected silence but a patch arrived");
+  }
+  // silence confirmed: the held read stays parked for whatever reads (or closes) the stream next.
 }
 
 describe("subscribe: an initial snapshot, then patches", () => {

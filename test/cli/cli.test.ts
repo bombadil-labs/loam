@@ -6,8 +6,12 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { run } from "../../src/cli/cli.js";
+
+// These boot real HTTP servers; a generous hang-guard keeps machine load from blowing the
+// default per-test timeout (it only ever matters when something is genuinely stuck).
+vi.setConfig({ testTimeout: 15000 });
 
 let home: string;
 const out: string[] = [];
@@ -20,7 +24,8 @@ beforeEach(() => {
   err.length = 0;
 });
 afterEach(() => {
-  rmSync(home, { recursive: true, force: true });
+  // maxRetries rides out a Windows EBUSY if the OS hasn't released a just-closed sqlite handle.
+  rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 describe("loam init", () => {

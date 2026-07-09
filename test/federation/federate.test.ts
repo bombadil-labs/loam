@@ -4,8 +4,12 @@
 // federation is union at the substrate, and trust is a read-time lens). A published lens
 // restricts what a store offers; a forgery is refused at the boundary.
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { authorForSeed, makeDelta, parseTerm, signClaims, type Delta } from "@bombadil/rhizomatic";
+
+// Each test boots multiple real servers; a generous hang-guard keeps machine load from blowing
+// the default per-test timeout.
+vi.setConfig({ testTimeout: 15000 });
 import { grantClaims, membershipClaims } from "../../src/gateway/accounts.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { pullFrom } from "../../src/federation/pull.js";
