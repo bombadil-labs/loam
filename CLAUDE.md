@@ -67,10 +67,8 @@ Ordered; re-evaluated after each merge (cycle stage 7). Adopt rhizomatic's core;
 1. **Confirm the rhizomatic surface.** _Done — merged as PR #2 (2026-07-09); the substrate is what
    SPEC §2 says it is (see `JOURNAL.md` for the confirmed surface + refinements). No rhizomatic
    changes were needed._
-2. **Persistence tier.** An **async** `StoreBackend` seam + an in-memory driver + one durable driver
-   (sqlite or libSQL). Chorus's tier (SPEC §10) is the design reference; write Loam's clean.
-   _Success:_ append; `deltasSince(known)` returns the complement; state survives close/reopen;
-   driver-substitution contract test; all green.
+2. **Persistence tier.** _Done — merged as PR #3 (2026-07-09); async `StoreBackend` + memory/sqlite
+   witnesses behind one contract (see `JOURNAL.md`)._
 3. **Read gateway.** GraphQL derived from a `HyperSchema` + `Policy`, exposing `query` + `loadSchema`,
    resolving via `resolveView` over reactor materializations, with content-addressed snapshots.
    _Success:_ load `SCHEMA_SCHEMA`; define a schema via `loadSchema`; append deltas; a GraphQL query
