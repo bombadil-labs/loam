@@ -44,8 +44,8 @@ update `CURRENT_WORK.md`** so the next run resumes exactly here.
 
 ## Standing rules
 
-- **Root holds exactly four docs** — `CLAUDE.md`, `SPEC.md`, `JOURNAL.md`, `CURRENT_WORK.md`. Do not
-  accumulate more markdown; fold, don't add.
+- **Root holds exactly five docs** — `README.md` (the vision), `CLAUDE.md`, `SPEC.md`, `JOURNAL.md`,
+  `CURRENT_WORK.md`. Do not accumulate more markdown; fold, don't add.
 - **Strict in PRs, creative and aggressive in execution.** Ship real vertical slices; don't gold-plate;
   don't reward-hack a green bar.
 - **Match rhizomatic's vocabulary** (`HyperSchema`, `HView`, `View`, `Policy`, `DerivedFn`,
