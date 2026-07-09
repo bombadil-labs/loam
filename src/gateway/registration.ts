@@ -92,23 +92,30 @@ const primitive = (claims: Claims, role: string): string | number | boolean | un
 // The latest registration per schema entity names the policy and roots; `loadSchema` over the
 // lawful slice yields the schema itself. A registration whose definition does not survive (or
 // never arrived, or is malformed) binds nothing — unbound, never a crash.
-export function readRegistrations(reactor: Reactor, operator?: string): Registration[] {
-  const lawful = lawfulSnapshot(reactor, operator);
-  const lawfulIds = new Set([...lawful].map((d) => d.id));
-  // The substrate's negation algebra, over the lawful slice: a negation retires its target
-  // only while it survives itself — negating the negation revives, exactly as loadSchema's
-  // mask does for definitions. Content addressing keeps the chain acyclic; memoized anyway.
-  const negationMemo = new Map<string, boolean>();
+// The substrate's negation algebra, over the lawful slice — shared by every constitutional
+// reader (registrations here, binding definitions in the runner): a negation retires its
+// target only while it survives itself (negating the negation revives), and only LAWFUL
+// negations count — a write-granted author's strike, or a federated stranger's, retires
+// nothing the operator planted. Content addressing keeps the chain acyclic; memoized anyway.
+export function lawfulNegated(reactor: Reactor, operator?: string): (id: string) => boolean {
+  const lawfulIds = new Set([...lawfulSnapshot(reactor, operator)].map((d) => d.id));
+  const memo = new Map<string, boolean>();
   const negated = (id: string): boolean => {
-    const memoed = negationMemo.get(id);
+    const memoed = memo.get(id);
     if (memoed !== undefined) return memoed;
-    negationMemo.set(id, false); // in-progress: treat as surviving (acyclic by construction)
+    memo.set(id, false); // in-progress: treat as surviving (acyclic by construction)
     const verdict = reactor
       .negationsOf(id)
       .some((negation) => lawfulIds.has(negation) && !negated(negation));
-    negationMemo.set(id, verdict);
+    memo.set(id, verdict);
     return verdict;
   };
+  return negated;
+}
+
+export function readRegistrations(reactor: Reactor, operator?: string): Registration[] {
+  const lawful = lawfulSnapshot(reactor, operator);
+  const negated = lawfulNegated(reactor, operator);
 
   interface Candidate {
     schemaEntity: string;

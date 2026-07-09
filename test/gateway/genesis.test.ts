@@ -377,6 +377,30 @@ describe("evolution is append: the surface follows the surviving definitions", (
     await gateway.close();
   });
 
+  it("a granted writer's rival definition LANDS (writes are open) and reshapes nothing", async () => {
+    const backend = new MemoryBackend();
+    const gateway = await Gateway.open(backend, { seed: OPERATOR_SEED });
+    await seedGarden(gateway); // the gardener holds write standing
+    await gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+
+    // the gardener publishes a NEWER definition at the operator's own schema entity — under
+    // open writes it lands as data; under operator-filtered reads it binds nothing
+    const { publishSchemaClaims } = await import("@bombadil/rhizomatic");
+    const rival = signClaims(
+      publishSchemaClaims(PLANT_V2, "schema:Plant", GARDENER, Date.now() + 9_000_000),
+      GARDENER_SEED,
+    );
+    await expect(gateway.append([rival])).resolves.toMatchObject({ accepted: 1 });
+    await gateway.flush();
+
+    const reopened = await Gateway.open(backend, { seed: OPERATOR_SEED });
+    const result = await reopened.query(`{ plant(entity: "${FERN}") { tag } }`);
+    // the operator's v1 body still gathers tags — the gardener's heights-only rival never bound
+    expect((result.data as { plant: { tag: string[] } }).plant.tag).toEqual(["shade"]);
+    await gateway.close();
+    await reopened.close();
+  });
+
   it("a schema that refs another registers through the replay fixpoint, whatever the order", async () => {
     const BED = "bed:shade";
     const BED_SCHEMA: HyperSchema = {

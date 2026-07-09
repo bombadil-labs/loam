@@ -223,12 +223,20 @@ works (foreign grants, registrations, and definitions merge freely and bind noth
   operator blessed it. Open writes make nothing governable that wasn't — they only stop
   pretending the store can fence what ids mean.
 - **Negations are assertions like any other.** Standing to append one is the same publishing
-  standing; _whose negations a reader honors_ is lens policy. Interim discipline (see the
-  substrate note below): local appends are granted-author-only, so locally-planted negations are
-  as trusted as the door they came through; federated ingest applies an `admit` predicate as its
-  trust boundary. A principled per-read negation lens (mask `trust` predicates over a _dynamic_
-  trusted-author set) needs eval-time parameters or reflective predicates in rhizomatic — an
-  open substrate conversation, not yet an issue.
+  standing; _whose negations a reader honors_ is lens policy. Constitutional readers
+  (`grantHeld`, `readRegistrations`, `readBindingDefinitions`) honor only lawful strikes — the
+  operator's, or an effective store admin's. Interim discipline for DATA (see the substrate
+  note below): local appends are granted-author-only, so locally-planted negations are as
+  trusted as the door they came through; federated ingest applies an `admit` predicate as its
+  trust boundary. Known consequences until reflective predicates land
+  ([rhizomatic#2](https://github.com/bombadil-labs/rhizomatic/issues/2)): (1) the default
+  TENANT **audit view** masks with `drop` and so undercounts under standing-less strikes —
+  enforcement is the truth, the audit lens needs the dynamic trusted set; (2) a granted writer
+  can **pre-strike** a delta id that has not arrived (content addressing makes future ids
+  knowable) — inert against the constitution, a data-mask hazard within the interim stance;
+  (3) per-tenant admin chains still MINT effective community-vocabulary grants while
+  constitutional strikes require store standing — a mint/strike asymmetry inside the surviving
+  tenant vocabulary, to revisit with trust-is-data (step 13).
 - Tenant machinery (`loam.tenant` / `loam.members` / `loam.grants`) survives as **vocabulary for
   author-communities and read lenses**, not as write fences.
 

@@ -225,6 +225,78 @@ describe("standing: deny is the default, permission is an artifact", () => {
     ).resolves.toMatchObject({ accepted: 1 });
     const surveyorWrite = observed(FERN, "height", 77, tick(), "b2".repeat(32));
     await expect(gateway.append([surveyorWrite])).resolves.toMatchObject({ accepted: 1 });
+
+    // KNOWN DIVERGENCE, pinned deliberately: the TENANT audit view masks with `drop`, which
+    // honors alice's standing-less strike — so the audit shows one grant while enforcement
+    // honors two. The audit lens needs "honor negations from the operator/admins", a DYNAMIC
+    // trusted set no static mask predicate can express — the second concrete case for
+    // reflective predicates (rhizomatic#2). Until then: enforcement is the truth; the default
+    // audit view undercounts under standing-less strikes.
+    const audited = await gateway.query(`{ tenant(entity: "${STORE_ENTITY}") { _view } }`);
+    const grants = ((audited.data as { tenant: { _view: Record<string, unknown> } }).tenant._view[
+      "loam.grants"
+    ] ?? []) as unknown[];
+    expect(grants).toHaveLength(1);
+    await gateway.close();
+  });
+
+  it("revocation is transitive: revoking the admin fells every grant they minted", async () => {
+    const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
+    const aliceAdmin = signClaims(
+      grantClaims(STORE_ENTITY, ALICE, "admin", OPERATOR, tick()),
+      OPERATOR_SEED,
+    );
+    await gateway.append([aliceAdmin]);
+    gateway.register(PLANT, PLANT_POLICY, [FERN]);
+    await gateway.append([
+      signClaims(grantClaims(STORE_ENTITY, BOB, "write", ALICE, tick()), ALICE_SEED),
+    ]);
+    expect((await mutateHeight(gateway, BOB_SEED, 80)).errors).toBeUndefined();
+
+    // the operator revokes ALICE — and bob's grant, which roots through her, dies with it
+    await gateway.append([
+      signClaims(revocationClaims(aliceAdmin.id, OPERATOR, tick()), OPERATOR_SEED),
+    ]);
+    expect((await mutateHeight(gateway, BOB_SEED, 81)).errors?.join(" ")).toMatch(/not permitted/);
+    await gateway.close();
+  });
+
+  it("an admin can revoke themselves — and the door stays shut behind them", async () => {
+    const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
+    const aliceAdmin = signClaims(
+      grantClaims(STORE_ENTITY, ALICE, "admin", OPERATOR, tick()),
+      OPERATOR_SEED,
+    );
+    await gateway.append([aliceAdmin]);
+    gateway.register(PLANT, PLANT_POLICY, [FERN]);
+    expect((await mutateHeight(gateway, ALICE_SEED, 82)).errors).toBeUndefined();
+
+    await gateway.append([signClaims(revocationClaims(aliceAdmin.id, ALICE, tick()), ALICE_SEED)]);
+    expect((await mutateHeight(gateway, ALICE_SEED, 83)).errors?.join(" ")).toMatch(
+      /not permitted/,
+    );
+    await gateway.close();
+  });
+
+  it("INTERIM, pinned: a granted writer's negation of DATA masks it for local reads", async () => {
+    const gateway = await grantedWorld();
+    // the surveyor's height claim (34, the current pick) — alice strikes it
+    const surveyorHeight = [...gateway.reactor.snapshot()].find(
+      (d) =>
+        d.claims.author === authorForSeed("b2".repeat(32)) &&
+        d.claims.pointers.some(
+          (p) => p.target.kind === "entity" && p.target.entity.context === "height",
+        ),
+    )!;
+    await gateway.append([
+      signClaims(revocationClaims(surveyorHeight.id, ALICE, tick()), ALICE_SEED),
+    ]);
+    const read = await gateway.query(`{ plant(entity: "${FERN}") { height } }`);
+    // mask-drop honors any present negation: the view falls back to the older claim (30).
+    // This is the documented heckler's-veto interim (README, SPEC §7) — local negations come
+    // only through the granted-author door, so this is alice's standing misused, not a
+    // stranger's; the principled per-reader negation lens awaits rhizomatic#2.
+    expect((read.data as { plant: { height: number } }).plant.height).toBe(30);
     await gateway.close();
   });
 

@@ -90,6 +90,41 @@ describe("the runner: definitions in the store, execution in a peer client", () 
     await gateway.close();
   });
 
+  it("a writer's strike cannot retire the operator's binding; the operator's own can", async () => {
+    const OPERATOR_SEED = "0e".repeat(32);
+    const OPERATOR = authorForSeed(OPERATOR_SEED);
+    const { grantClaims } = await import("../../src/gateway/accounts.js");
+    const { STORE_ENTITY } = await import("../../src/gateway/genesis.js");
+    const { makeNegationClaims } = await import("@bombadil/rhizomatic");
+    const ALICE_SEED = "a1".repeat(32);
+
+    const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
+    const definition = signClaims(bindingDefinitionClaims(SPEC, OPERATOR, 1), OPERATOR_SEED);
+    await gateway.append([
+      definition,
+      signClaims(
+        grantClaims(STORE_ENTITY, authorForSeed(ALICE_SEED), "write", OPERATOR, 2),
+        OPERATOR_SEED,
+      ),
+    ]);
+
+    // alice (write standing, no admin) strikes the definition: her negation LANDS — and the
+    // definition still installs, because a writer's strike retires nothing constitutional
+    await gateway.append([
+      signClaims(makeNegationClaims(authorForSeed(ALICE_SEED), 3, definition.id), ALICE_SEED),
+    ]);
+    expect(readBindingDefinitions(gateway.reactor, OPERATOR).map((s) => s.name)).toEqual([
+      "binding:avgHeight",
+    ]);
+
+    // the operator's strike, by contrast, retires it
+    await gateway.append([
+      signClaims(makeNegationClaims(OPERATOR, 4, definition.id), OPERATOR_SEED),
+    ]);
+    expect(readBindingDefinitions(gateway.reactor, OPERATOR)).toEqual([]);
+    await gateway.close();
+  });
+
   it("defense in depth: a definition planted while ungoverned does not install once governed", async () => {
     const OPERATOR_SEED = "0e".repeat(32);
     const backend = new MemoryBackend();

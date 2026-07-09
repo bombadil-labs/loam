@@ -14,6 +14,7 @@ import {
   type Reactor,
 } from "@bombadil/rhizomatic";
 import type { Gateway } from "../gateway/gateway.js";
+import { lawfulNegated } from "../gateway/registration.js";
 
 export const CTX_BINDING = "loam.binding";
 
@@ -58,11 +59,15 @@ const primitive = (claims: Claims, role: string): string | number | boolean | un
 // (Scans the whole set for a small constitutional slice — fine at this scale; indexable later.)
 export function readBindingDefinitions(reactor: Reactor, operator?: string): BindingSpec[] {
   const specs: BindingSpec[] = [];
+  // Retirement follows the same lawful negation algebra as registrations: only the operator's
+  // strikes retire the operator's definitions (a write-granted author's negation — or a
+  // federated stranger's — lands as data and unbinds nothing), and a struck strike revives.
+  const negated = lawfulNegated(reactor, operator);
   for (const delta of reactor.snapshot()) {
     const files = delta.claims.pointers.some(
       (p) => p.target.kind === "entity" && p.target.entity.context === CTX_BINDING,
     );
-    if (!files || reactor.negationsOf(delta.id).length > 0) continue;
+    if (!files || negated(delta.id)) continue;
     if (operator !== undefined && delta.claims.author !== operator) continue;
 
     const name = primitive(delta.claims, "name");
