@@ -83,15 +83,8 @@ Ordered; re-evaluated after each merge (cycle stage 7). Adopt rhizomatic's core;
    grants with operator-rooted authority chains (see `JOURNAL.md` and SPEC §7)._
 6. **Gateway transport.** _Done — merged as PR #8 (2026-07-09); node:http serving GraphQL + SSE +
    MCP behind timing-safe bearer tokens over isolated mounts (see `JOURNAL.md`)._
-7. **Runner + genesis assembly.** A peer-client runner over `DerivationHost` that installs
-   function-definitions from the store and executes them (pure in-process first); the genesis
-   delta-set (`SCHEMA_SCHEMA` + accounts + names + fn-schemas). **Includes closing the audit-1
-   gap:** registrations become deltas (schema + policy + roots stored, so the GraphQL surface is
-   a function of the store and survives reopen) and `loadSchema` is exposed through GraphQL,
-   honoring SPEC §5's "nothing is reachable except through GraphQL — including schema CRUD."
-   _Success:_ install a derived function via the store; on ingest it fires and emits; passive
-   (no runner) vs animate (runner attached) demonstrated; genesis boots a fresh store; a
-   reopened store serves its registered schemas without re-registration code.
+7. **Runner + genesis assembly.** _Done — merged as PR #9 (2026-07-09); registrations-as-deltas,
+   a peer-client runner (passive/animate), and genesis boot (see `JOURNAL.md`)._
 8. **CLI + deploy.** A `loam` CLI (init / serve / store) + a container with pluggable/hosted
    persistence (Turso/libSQL) + a turnkey deploy.
    _Success:_ `loam serve --http` answers a query; a container runs with durable persistence; an
