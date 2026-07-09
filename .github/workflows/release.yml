@@ -1,0 +1,50 @@
+# Release: push a tag `vX.Y.Z` and this publishes @bombadil/loam to npm — but only through the
+# same gate everything else passes (format + lint + typecheck + build + all tests), and only if
+# the tag agrees with package.json. The token lives in the NPM_TOKEN repository secret.
+#
+# The intended path is `npm run release -- patch|minor|major` locally (it runs the gate, bumps,
+# syncs the version constants, commits, tags, pushes); this workflow is the far end of it.
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # creates the GitHub release
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: install
+        run: npm ci
+
+      - name: the green gate
+        run: npm run check
+
+      - name: the tag must agree with package.json
+        run: |
+          PKG="$(node -p "require('./package.json').version")"
+          TAG="${GITHUB_REF_NAME#v}"
+          if [ "$PKG" != "$TAG" ]; then
+            echo "tag v$TAG disagrees with package.json ($PKG) — refuse to publish a lie"
+            exit 1
+          fi
+
+      - name: publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: GitHub release
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
+        env:
+          GH_TOKEN: ${{ github.token }}

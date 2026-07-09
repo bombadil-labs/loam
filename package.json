@@ -1,7 +1,6 @@
 {
   "name": "@bombadil/loam",
   "version": "0.0.0",
-  "private": true,
   "type": "module",
   "description": "Loam — a general database grown on rhizomatic: signed, content-addressed deltas beneath; GraphQL query, mutation, and subscription above.",
   "license": "MIT OR Apache-2.0",
@@ -49,6 +48,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm run build && npm test",
+    "release": "node scripts/release.mjs",
+    "version": "node scripts/sync-version.mjs",
     "prepublishOnly": "npm run check"
   },
   "dependencies": {

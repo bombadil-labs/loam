@@ -334,6 +334,18 @@ npm run check   # format + lint + typecheck + build + all tests — the green ga
 npm test        # tests only
 ```
 
+## Releasing
+
+```sh
+npm run release -- patch   # or minor / major
+```
+
+From a clean, up-to-date `main` only: runs the gate, bumps the version (syncing the in-source
+constants), commits, tags `vX.Y.Z`, and pushes. The `release` GitHub Actions workflow picks up
+the tag, runs the gate again, verifies the tag agrees with `package.json`, publishes
+`@bombadil/loam` to npm (the `NPM_TOKEN` repository secret), and cuts a GitHub release with
+generated notes. A tag that lies about the version refuses to publish.
+
 The process this repo runs by is in [CLAUDE.md](CLAUDE.md).
 
 ## License

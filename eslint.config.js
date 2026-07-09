@@ -8,8 +8,8 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   // _testing is the ephemeral field-test playground (see _testing/PLAN.md): never committed,
-  // never part of the gate.
-  { ignores: ["dist/**", "_testing/**"] },
+  // never part of the gate. scripts/ is release tooling — plain node, no project service.
+  { ignores: ["dist/**", "_testing/**", "scripts/**"] },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
   {
