@@ -38,7 +38,7 @@ describe("registrations as deltas: the surface is a function of the store", () =
     // a non-operator actor cannot register through the store
     await expect(
       gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN], { actor: GARDENER_SEED }),
-    ).rejects.toThrow(/not permitted/);
+    ).rejects.toThrow(/only the operator/);
     await gateway.close();
   });
 });

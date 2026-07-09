@@ -96,6 +96,11 @@ export class Gateway {
   ) {
     this.operatorAuthor = options.seed === undefined ? undefined : authorForSeed(options.seed);
     reactor.subscribeRaw((d) => {
+      // Every accepted delta — appends AND a runner's derived emissions — is written through
+      // here. Derived emissions do not pass authorize(): a governed store runs only the
+      // operator's blessed binding definitions (readBindingDefinitions gates on the operator),
+      // so a firing binding is the operator's own delegated authority. Confining UNTRUSTED
+      // (federated) function bodies is a runner-runtime concern SPEC §6 reserves for later.
       if (this.justPersisted.delete(d.id)) return;
       this.writes = this.writes
         .then(() => this.backend.append([d]))
@@ -135,12 +140,29 @@ export class Gateway {
 
   // Re-register from the registrations the store holds — the surface as a function of the store.
   // In a governed store only the operator's registrations bind (a hostile one roots nowhere).
+  // A schema that refs another must register after it; timestamp order is not enough (ties, same
+  // millisecond), so install in fixpoint rounds — each pass registers every pending schema whose
+  // refs now resolve, until a round adds nothing. A schema that never resolves is left unbound
+  // rather than crashing the boot.
   private replayRegistrations(): void {
     const known = new Set(this.registered.map((r) => r.schema.name));
-    for (const reg of readRegistrations(this.reactor, this.operatorAuthor)) {
-      if (known.has(reg.schema.name)) continue;
-      this.register(reg.schema, reg.policy, reg.roots);
-      known.add(reg.schema.name);
+    let pending = readRegistrations(this.reactor, this.operatorAuthor).filter(
+      (r) => !known.has(r.schema.name),
+    );
+    for (;;) {
+      const stillPending: Registration[] = [];
+      let progressed = false;
+      for (const reg of pending) {
+        try {
+          this.register(reg.schema, reg.policy, reg.roots);
+          known.add(reg.schema.name);
+          progressed = true;
+        } catch {
+          stillPending.push(reg); // its refs are not registered yet — try again next round
+        }
+      }
+      if (!progressed || stillPending.length === 0) break;
+      pending = stillPending;
     }
   }
 
@@ -240,6 +262,12 @@ export class Gateway {
     if (seed === undefined) {
       throw new Error("this gateway holds no signing seed and cannot publish a registration");
     }
+    // A governed store binds only the OPERATOR's registrations (replayRegistrations filters on
+    // it), so refuse a non-operator publish here rather than persist a delta that would look
+    // registered but silently never shape the surface.
+    if (this.operatorAuthor !== undefined && authorForSeed(seed) !== this.operatorAuthor) {
+      throw new Error("append rejected: only the operator may publish a registration");
+    }
     const reg: Registration = { schema, policy, roots };
     const claims = registrationClaims(reg, authorForSeed(seed), this.nextTimestamp());
     await this.append([signClaims(claims, seed)]);
@@ -249,6 +277,11 @@ export class Gateway {
   // Animate the gateway: route ingest through a runner's DerivationHost so bindings fire.
   animate(host: { ingest: (d: Delta) => IngestResult }): void {
     this.ingestVia = (d) => host.ingest(d);
+  }
+
+  // The operator's author, so a peer (the runner) can gate on it without holding the seed.
+  get operator(): string | undefined {
+    return this.operatorAuthor;
   }
 
   private nextTimestamp(): number {

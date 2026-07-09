@@ -6,7 +6,11 @@
 
 import { describe, expect, it } from "vitest";
 import type { DerivedFn, HView, Pointer } from "@bombadil/rhizomatic";
-import { bindingDefinitionClaims, Runner } from "../../src/runner/runner.js";
+import {
+  bindingDefinitionClaims,
+  readBindingDefinitions,
+  Runner,
+} from "../../src/runner/runner.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER_SEED, SURVEYOR_SEED, observed } from "../spike/garden.js";
@@ -61,12 +65,48 @@ const avgAt = (gateway: Gateway) =>
   gateway.reactor.materializedView("Plant", FERN)?.props.get("derived:avgHeight") ?? [];
 
 describe("the runner: definitions in the store, execution in a peer client", () => {
-  it("passive: a store with a definition but no runner computes nothing", async () => {
+  it("passive: a definition IS present in the store, yet without a runner computes nothing", async () => {
     const { gateway } = await plantStore();
+    // the definition is really there — inert, not absent
+    expect(readBindingDefinitions(gateway.reactor).map((s) => s.name)).toEqual([
+      "binding:avgHeight",
+    ]);
     await gateway.append([observed(FERN, "height", 30, 1000, GARDENER_SEED)]);
     await gateway.append([observed(FERN, "height", 34, 2000, SURVEYOR_SEED)]);
-    expect(avgAt(gateway)).toHaveLength(0); // the definition sits inert
+    expect(avgAt(gateway)).toHaveLength(0); // present but unrun
     await gateway.close();
+  });
+
+  it("a governed store refuses a non-operator's definition at the door", async () => {
+    const OPERATOR_SEED = "0e".repeat(32);
+    const backend = new MemoryBackend();
+    const gateway = await Gateway.open(backend, { seed: OPERATOR_SEED });
+    // a binding definition files on ungoverned ground: only the operator may plant one
+    await expect(
+      gateway.append([signClaims(bindingDefinitionClaims(SPEC, RUNNER, 1), RUNNER_SEED)]),
+    ).rejects.toThrow(/not permitted/);
+    await gateway.close();
+  });
+
+  it("defense in depth: a definition planted while ungoverned does not install once governed", async () => {
+    const OPERATOR_SEED = "0e".repeat(32);
+    const backend = new MemoryBackend();
+    // planted while ungoverned — welcomed, since there was no operator to answer to
+    const free = await Gateway.open(backend);
+    free.register(PLANT, PLANT_POLICY, [FERN]);
+    await free.append([signClaims(bindingDefinitionClaims(SPEC, RUNNER, 1), RUNNER_SEED)]);
+    await free.flush();
+
+    // an operator opens the same store and attaches a runner: the poison does not install
+    const governed = await Gateway.open(backend, { seed: OPERATOR_SEED });
+    governed.register(PLANT, PLANT_POLICY, [FERN]);
+    const runner = Runner.attach(governed, {
+      seed: RUNNER_SEED,
+      implementations: { "fn:avgHeight": avgHeight },
+    });
+    expect(runner.installed).toEqual([]); // the operator blessed nothing
+    await free.close();
+    await governed.close();
   });
 
   it("animate: attach a runner and the same ingest fires the binding", async () => {

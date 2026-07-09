@@ -286,3 +286,22 @@ Learning: the gateway's `animate` hook is a single settable ingest router (`inge
 passive/animate distinction cost one field and no fork — exactly the "roles, not layers" shape
 SPEC §6 wanted. And derived emissions persist for free: they were already riding the raw stream
 (step 4), so the runner needed no persistence code of its own.
+
+Review resolution (6 findings):
+
+- **The confused deputy, closed twice.** The review's sharpest: a binding definition the runner
+  installs makes it compute and sign under its own seed — so who may plant one is who may
+  command the runner. In a governed store that's now the operator alone, enforced at BOTH ends:
+  a non-operator's definition is refused at `append` (it files on ungoverned ground, which only
+  the operator may write), and `readBindingDefinitions` filters to operator-authored on install
+  (defense in depth for anything planted while the store was ungoverned). Derived emissions
+  therefore carry the operator's delegated authority by construction; confining untrusted
+  (federated) function bodies stays a runner-runtime concern SPEC §6 reserves for later — now
+  said plainly in the raw-subscriber comment.
+- **Registration replay is a fixpoint, not a sort.** Timestamp order can't guarantee a schema's
+  refs register first (ties, same millisecond); replay now installs in rounds until no progress,
+  and a schema whose refs never resolve is left unbound rather than crashing the boot.
+- **`publishRegistration` refuses a non-operator up front** rather than persisting a registration
+  that would look registered but never bind (the operator filter would drop it on replay).
+- Passive test now asserts the definition is *present* (not merely that nothing computed);
+  the O(store) scan for the constitutional slice is acknowledged as indexable-later.

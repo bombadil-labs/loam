@@ -49,14 +49,21 @@ const primitive = (claims: Claims, role: string): string | number | boolean | un
   return p?.target.kind === "primitive" ? p.target.value : undefined;
 };
 
-// Every surviving binding definition in the store.
-export function readBindingDefinitions(reactor: Reactor): BindingSpec[] {
+// Every surviving binding definition in the store. In a governed store (an operator is named)
+// only the operator's definitions are honored — otherwise a definition planted while the store
+// was ungoverned, or by any writer of `loam.binding`, would make the runner a confused deputy:
+// computing and signing emissions under its own authority for someone who never held it. This
+// is the same discipline registrations keep; the trust boundary is "the operator blessed this
+// function," and SPEC §6 reserves sandboxing of untrusted (federated) code for a later runtime.
+// (Scans the whole set for a small constitutional slice — fine at this scale; indexable later.)
+export function readBindingDefinitions(reactor: Reactor, operator?: string): BindingSpec[] {
   const specs: BindingSpec[] = [];
   for (const delta of reactor.snapshot()) {
     const files = delta.claims.pointers.some(
       (p) => p.target.kind === "entity" && p.target.entity.context === CTX_BINDING,
     );
     if (!files || reactor.negationsOf(delta.id).length > 0) continue;
+    if (operator !== undefined && delta.claims.author !== operator) continue;
 
     const name = primitive(delta.claims, "name");
     const fnId = primitive(delta.claims, "fnId");
@@ -102,7 +109,7 @@ export const Runner = {
     const host = new DerivationHost(gateway.reactor);
     const installed: string[] = [];
     const skipped: string[] = [];
-    for (const spec of readBindingDefinitions(gateway.reactor)) {
+    for (const spec of readBindingDefinitions(gateway.reactor, gateway.operator)) {
       const fn = options.implementations[spec.fnId];
       if (fn === undefined) {
         skipped.push(spec.name);
