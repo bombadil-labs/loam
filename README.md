@@ -2,17 +2,209 @@
 
 Beneath everything that grows, there is ground.
 
-Loam is intended to be a database application built using the affordances exposed via the capabilities
-of [rhizomatic](https://github.com/bombadil-labs/rhizomatic). `Rhizomatic` is a portable data format
-*and* a typed reactive core (resolution, a self-hosting schema-schema, a reactor, a function
-substrate) — but it's not an application; `Loam` is the first attempt to build something with it.
-`Rhizomatic` approaches data a bit differently than many systems are used to, and packs a *lot* of
-moving parts into a very small footprint.
+Loam is a general database built on [rhizomatic](https://github.com/bombadil-labs/rhizomatic) — a
+portable format for signed, content-addressed deltas whose merge is union: order-blind,
+idempotent, conflict-free. Rhizomatic is the format and the reactive core; Loam is the wrapper
+that makes it a deployable, GraphQL-fronted, persistent, multi-tenant, federatable server.
 
-Loam is intended to allow users to rapidly stand up a rhizomatic store, expose an interface for query, mutation
-and subscription, and enable any number of applications to be built on top of it.
+Its shapes are grown, not imposed — you declare a schema and a policy, and the medium resolves
+your data into views, maintains them live, and remembers everything. Nothing is deleted; the
+store only ever learns. Two Loam instances that meet simply merge. Trust is a lens the reader
+holds, not a verdict the ground hands down.
+
+The design is in [SPEC.md](SPEC.md); the working record in [JOURNAL.md](JOURNAL.md). This page is
+the manual.
 
 ---
 
-_The shape of the thing lives in [SPEC.md](SPEC.md); its tending in [CLAUDE.md](CLAUDE.md). This page
-is only the invitation._
+## Install
+
+Loam is a Node package (Node ≥ 22.13) that ships both a library and a `loam` CLI.
+
+```sh
+npm install @bombadil/loam
+```
+
+It depends on `@bombadil/rhizomatic` (the substrate), `graphql`, and `better-sqlite3` (the durable
+store driver — a native addon with prebuilt binaries for common platforms).
+
+## The model in one breath
+
+- A **delta** is a signed, content-addressed fact. A **store** is a grow-only set of them.
+- A **HyperSchema** gathers the deltas relevant to an entity into a **Hyperview**; a **Policy**
+  resolves that hyperview into a **View** — the answer. One schema, many policies; one policy,
+  many entities.
+- The **Gateway** fronts one store: it derives a GraphQL surface from the (schema, policy) pairs
+  you register, and serves `query`, `mutate`, and `subscribe` over it.
+- **Capabilities** govern writes: nothing is written except by a verified author a surviving
+  grant permits. The **operator** (the gateway's signing seed) roots the chain.
+- **Federation** is union at the substrate: peers exchange verified deltas; trust is the reader's
+  policy lens, never a write denial.
+
+## Quickstart — the CLI
+
+```sh
+# create a home directory and mint an operator identity (the seed is written 0600, never printed)
+loam init --home ./my-store
+
+# serve it over HTTP with a bearer token
+loam serve --http --home ./my-store --token "$(openssl rand -hex 16)" --port 4321
+
+# inspect a store
+loam store --home ./my-store
+```
+
+`loam serve` self-initializes: a fresh home mints (or, via `LOAM_SEED`, imports) an operator
+identity, so a container serves with nothing but a token. Configuration is by flag or environment:
+
+| flag            | env          | meaning                                              |
+| --------------- | ------------ | ---------------------------------------------------- |
+| `--home DIR`    | `LOAM_HOME`  | the store's home directory (default `.loam`)         |
+| `--token TOK`   | `LOAM_TOKEN` | the bearer token (required to serve)                 |
+| `--port N`      |              | HTTP port (default 4321; `0` for ephemeral)          |
+| `--store PATH`  |              | override the store file path                         |
+| `--seed HEX`    | `LOAM_SEED`  | import an operator seed instead of minting one       |
+
+## The HTTP API
+
+A served store exposes three surfaces per mount, behind a `Bearer` token:
+
+- **`POST /:mount/graphql`** — `{ query, variables? }` → `{ data, errors }`. Both queries and
+  mutations; the mutation acts as the token's identity.
+- **`GET /:mount/subscribe?query=…`** — a `text/event-stream` (SSE): an initial snapshot, then one
+  `data:` frame per change (`_fromHex → _hex`, `_changed`, and the fields).
+- **`POST /:mount/mcp`** — a minimal MCP JSON-RPC surface (`initialize`, `tools/list`,
+  `tools/call`) exposing `loam_query` and `loam_mutate`.
+- **`GET /:mount/federate`** — the store's published deltas as wire JSON (operator token only).
+
+A junk or missing token is `401`; an unknown mount is `404` (only to the authenticated — an
+unauthenticated caller cannot tell a real mount from a missing one).
+
+```sh
+curl -s localhost:4321/default/graphql \
+  -H "authorization: Bearer $TOKEN" -H "content-type: application/json" \
+  -d '{"query":"{ plant(entity: \"plant:fern\") { height _hex } }"}'
+```
+
+## Embedding the library
+
+Everything the CLI and server do is a small API you can drive directly.
+
+```ts
+import {
+  Gateway,
+  MemoryBackend,
+  SqliteBackend,
+  serve,
+} from "@bombadil/loam";
+import { parseTerm } from "@bombadil/rhizomatic";
+
+// A store, governed by an operator seed. Omit the seed for an ungoverned local store.
+const gateway = await Gateway.open(new SqliteBackend("./store.sqlite"), { seed: operatorSeedHex });
+
+// Register a (HyperSchema, Policy) over the roots you want held live. The schema's body is a
+// rhizomatic term; the policy's props name the GraphQL fields and their shapes.
+gateway.register(
+  { name: "Plant", alg: 1, body: parseTerm({ op: "group", key: "byTargetContext", in: {
+    op: "select", pred: { hasPointer: { targetEntity: { var: "root" } } },
+    in: { op: "mask", policy: "drop", in: "input" } } }) },
+  { props: new Map([["height", { kind: "pick", order: { kind: "byTimestamp", dir: "desc" } }]]),
+    default: { kind: "pick", order: { kind: "byTimestamp", dir: "desc" } } },
+  ["plant:fern"],
+);
+
+// Query returns a content-addressed snapshot: same deltas, any order, any machine → same _hex.
+const result = await gateway.query(`{ plant(entity: "plant:fern") { height _hex } }`);
+
+// Serve it (multiple mounts, each a separate store; tokens map to identities).
+const server = await serve({
+  mounts: { default: gateway },
+  tokens: { [tokenHex]: { operator: true } },
+  port: 4321,
+});
+```
+
+`Gateway.boot(backend, genesis)` opens a store already governed and registered from a genesis
+delta-set (`assembleGenesis({ operatorSeed, registrations, grants })`) — registrations are stored
+as deltas, so a reopened store serves its schemas with no re-registration code.
+
+## Capabilities
+
+No ambient authority, anywhere. A **tenant** is an entity; membership and grants are signed
+deltas; revocation is negation; audit is a query.
+
+- A write to an entity needs `write` on the entity's tenant; a delta signs as its author and is
+  authorized as them.
+- The **operator** (the gateway seed) needs no grant and roots the chain; an `admin` grant can
+  mint further grants.
+- A gateway opened without an operator seed is an **ungoverned local store** (any verified delta
+  is welcome); one with an operator enforces capabilities on everyone else.
+
+```ts
+import { grantClaims, membershipClaims } from "@bombadil/loam";
+import { signClaims } from "@bombadil/rhizomatic";
+
+await gateway.append([
+  signClaims(membershipClaims("tenant:garden", "plant:fern", operator, ts), operatorSeed),
+  signClaims(grantClaims("tenant:garden", aliceAuthor, "write", operator, ts), operatorSeed),
+]);
+// Alice may now write, acting as herself:
+await gateway.query(`mutation { plant(entity: "plant:fern", height: 40) { height } }`,
+  undefined, { actor: aliceSeedHex });
+```
+
+## Derived functions (the runner)
+
+Function *definitions* live in the store as data; a **runner** — a peer client — reads them,
+installs each into a derivation host with an implementation it holds, and animates the gateway so
+they fire on ingest. A store with definitions but no runner is passive; attach a runner and it
+computes. In a governed store, only the operator's blessed definitions run.
+
+```ts
+import { Runner } from "@bombadil/loam";
+Runner.attach(gateway, { seed: runnerSeedHex, implementations: { "fn:avgHeight": avgHeight } });
+```
+
+## Federation
+
+Two instances meet and merge — union, order-blind, conflict-free — over the authed HTTP surface.
+
+```ts
+import { pullFrom } from "@bombadil/loam";
+// pull a peer's published deltas into the local store; verify + merge, idempotent
+await pullFrom(localGateway, "https://peer.example/default", peerOperatorToken);
+```
+
+A store publishes everything, or what its `offeredLens` (a term) selects. **Federation is union,
+not a governed write:** a peer's deltas cross by signature verification alone, and whether they
+shape a local view is a read-time trust choice (a policy's `byAuthorRank`) — never a write denial.
+Foreign law stays inert: a peer's self-signed grant merges as a delta but governs nothing, because
+it roots in no operator you blessed. **Each instance must have its own operator seed** — two
+sharing one trust each other's constitution completely.
+
+## Deploy
+
+A `Dockerfile` builds and runs `loam serve --http` as a non-root user, the store on a `/data`
+volume:
+
+```sh
+docker build -t loam .
+docker run -e LOAM_TOKEN=<secret> -v loam-data:/data -p 4321:4321 loam
+```
+
+Bind `127.0.0.1` and terminate TLS in front. **Hosted persistence is a driver, not an image
+change**: the `StoreBackend` seam takes any async append/`deltasSince`/close, so a libSQL/Turso
+client drops in beside `SqliteBackend` with no other change.
+
+## Development
+
+```sh
+npm run check   # format + lint + typecheck + build + all tests — the green gate
+npm test        # tests only
+```
+
+The process this repo runs by is in [CLAUDE.md](CLAUDE.md).
+
+## License
+
+MIT OR Apache-2.0.

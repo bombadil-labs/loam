@@ -1,12 +1,14 @@
 # Loam — how we work
 
 Loam is a general database built on [rhizomatic](https://github.com/bombadil-labs/rhizomatic); the
-design is in **[SPEC.md](SPEC.md)** — read it before writing code. This file is the **process and the
-plan**. **[CURRENT_WORK.md](CURRENT_WORK.md)** is the live checklist for the step in progress.
-**[JOURNAL.md](JOURNAL.md)** is the append-only record.
+design is in **[SPEC.md](SPEC.md)** and the usage in **[README.md](README.md)** — read them before
+writing code. This file is the **process**. **[CURRENT_WORK.md](CURRENT_WORK.md)** is the live
+checklist for the work in progress. **[JOURNAL.md](JOURNAL.md)** is the append-only record.
 
-**To resume:** read `CURRENT_WORK.md`. If a step is in progress, continue from the "left off here"
-note. If it is empty, start the first unchecked step in the plan below, at cycle stage 1.
+The original v1 plan (build steps 0–9) is **complete** — all merged; the journal is its record.
+This file no longer carries a plan; it carries the loop any future work runs. **To resume:** read
+`CURRENT_WORK.md`. If work is in progress, continue from the "left off here" note. If it is empty,
+there is no work queued — ask Myk what to build next, then open it at cycle stage 1.
 
 ## Hard limits
 
@@ -60,47 +62,12 @@ update `CURRENT_WORK.md`** so the next run resumes exactly here.
 - **The poetry is as important as the engineering** — errors, help text, commit messages, and docs are
   first-class craft.
 
-## The plan — build steps (success criteria are the gate)
+## Standing decisions
 
-The following are the anticipated initial steps. If you are coming at this fresh, start here - use these
-to inform your initial plan (but verify that they're necessary, and use your own judgment about the process), 
-then remove these items from `CLAUDE.md` when they are accounted for.
-
-Ordered; re-evaluated after each merge (cycle stage 7). Adopt rhizomatic's core; build the wrapper.
-
-0. **Scaffold.** _Done — merged as PR #1 (2026-07-09); see `JOURNAL.md`._
-1. **Confirm the rhizomatic surface.** _Done — merged as PR #2 (2026-07-09); the substrate is what
-   SPEC §2 says it is (see `JOURNAL.md` for the confirmed surface + refinements). No rhizomatic
-   changes were needed._
-2. **Persistence tier.** _Done — merged as PR #3 (2026-07-09); async `StoreBackend` + memory/sqlite
-   witnesses behind one contract (see `JOURNAL.md`)._
-3. **Read gateway.** _Done — merged as PR #4 (2026-07-09); GraphQL derived from (HyperSchema,
-   Policy) over a boot-replaying, write-through Gateway (see `JOURNAL.md`)._
-4. **Mutations + subscriptions.** _Done — merged as PR #5 (2026-07-09); GraphQL mutate + subscribe
-   over leavable, coalescing channels (see `JOURNAL.md`). First 5-PR audit panel run after this
-   merge._
-5. **Accounts & capabilities.** _Done — merged as PR #7 (2026-07-09); full multi-tenant capability
-   grants with operator-rooted authority chains (see `JOURNAL.md` and SPEC §7)._
-6. **Gateway transport.** _Done — merged as PR #8 (2026-07-09); node:http serving GraphQL + SSE +
-   MCP behind timing-safe bearer tokens over isolated mounts (see `JOURNAL.md`)._
-7. **Runner + genesis assembly.** _Done — merged as PR #9 (2026-07-09); registrations-as-deltas,
-   a peer-client runner (passive/animate), and genesis boot (see `JOURNAL.md`)._
-8. **CLI + deploy.** _Done — merged as PR #10 (2026-07-09); the `loam` CLI (init/serve/store), a
-   turnkey container, and the npm surface (see `JOURNAL.md`)._
-9. **Federation.** Expose `Peer` sync over the authed HTTP + a "subscribe to instance X's published
-   lens" declaration.
-   _Success:_ two instances federate — a delta on A resolves on B; union-merge holds; no conflict.
-
-**Landing (after the steps above are all merged):**
-
-- **Remove this "plan — build steps" section from `CLAUDE.md`** — the journal is the record; the
-  plan section exists only while steps remain.
-- **Rewrite `README.md`** as full project documentation — installation, configuration, and usage,
-  grounded in the code actually shipped (not aspiration). The vision prose gives way to a manual.
-- **Ship `@bombadil/loam` to npm** for turnkey install: drop `"private": true`, verify the
-  `files`/`exports`/`bin` surface against a tarball smoke (step 8's), and hand Myk the
-  ready-to-run `npm publish` (the button itself is his).
-
-**Decisions (Myk, 2026-07-09):** v1 is **fully multi-tenant** (§7). Chorus is **reference-only** —
-read its plumbing as a design guide; write Loam's code clean, against Loam's tests (§10). Run
-autonomously until the plan's steps are secured, then regroup with Myk to plan future phases.
+- **v1 is fully multi-tenant** (SPEC §7) — tenant isolation is first-class in the genesis schemas
+  and gateway enforcement (Myk, 2026-07-09).
+- **Chorus is reference-only** (SPEC §10) — read its plumbing as a design guide; Loam's code is
+  written clean, against Loam's own tests.
+- **`@bombadil/loam` publishes to npm** for turnkey install. The package is kept `"private": true`
+  until Myk runs the publish; the `files`/`bin`/`exports` surface is pinned by `test/cli/pack.test.ts`.
+  The publish button is Myk's.

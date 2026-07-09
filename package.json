@@ -6,6 +6,23 @@
   "description": "Loam — a general database grown on rhizomatic: signed, content-addressed deltas beneath; GraphQL query, mutation, and subscription above.",
   "license": "MIT OR Apache-2.0",
   "author": "Mykola Bilokonsky",
+  "keywords": [
+    "database",
+    "crdt",
+    "graphql",
+    "content-addressed",
+    "capabilities",
+    "federation",
+    "rhizomatic"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bombadil-labs/loam.git"
+  },
+  "homepage": "https://github.com/bombadil-labs/loam#readme",
+  "bugs": {
+    "url": "https://github.com/bombadil-labs/loam/issues"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -31,7 +48,8 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "npm run format:check && npm run lint && npm run typecheck && npm run build && npm test"
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm run build && npm test",
+    "prepublishOnly": "npm run check"
   },
   "dependencies": {
     "@bombadil/rhizomatic": "^0.1.0",
