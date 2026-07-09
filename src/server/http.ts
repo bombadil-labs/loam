@@ -347,8 +347,14 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           await handleMcp(gateway, identity, req, res);
           return;
         case "federate":
-          // The offer: this mount's published deltas as wire JSON. A peer pulls, verifies, and
-          // merges — union at the substrate; trust is the peer's read lens, not ours to impose.
+          // Federation is an OPERATOR-level trust relationship: the offer hands a peer the raw
+          // signed deltas (grants, memberships, registrations included) that the GraphQL surface
+          // would never expose. So it is gated on operator identity, not mere authentication — a
+          // scoped read token is not a licence to the store's whole substrate.
+          if (identity.operator !== true) {
+            json(res, 403, { errors: ["federation requires an operator token"] });
+            return;
+          }
           json(res, 200, { deltas: gateway.offeredDeltas().map(toWire) });
           return;
         default:

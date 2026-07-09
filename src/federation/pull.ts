@@ -8,11 +8,34 @@ import type { Delta } from "@bombadil/rhizomatic";
 import type { FederationReport, Gateway } from "../gateway/gateway.js";
 import { fromWire, type WireDelta } from "./wire.js";
 
+const DEFAULT_MAX_OFFER = 64 * 1024 * 1024; // a peer's offer, capped so it cannot OOM the puller
+
 export interface PullOptions {
   // What this puller admits from the peer beyond signature verification — a trust boundary
   // (e.g. only deltas from known authors). Default: admit everything that verifies.
   readonly admit?: (d: Delta) => boolean;
+  readonly maxBytes?: number; // cap on the offer body (default 64 MiB)
   readonly fetch?: typeof fetch; // injectable for tests
+}
+
+// Read a response body with a hard byte cap — a peer we pull from is not trusted to be small.
+async function boundedText(res: Response, limit: number): Promise<string> {
+  const reader = res.body?.getReader();
+  if (reader === undefined) return "";
+  const decoder = new TextDecoder();
+  let text = "";
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.length;
+    if (size > limit) {
+      await reader.cancel();
+      throw new Error("federation: the peer's offer exceeds the size cap");
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+  return text + decoder.decode();
 }
 
 // Pull `peerUrl`/federate (a mount base like http://host:port/default) into `local`, presenting
@@ -30,7 +53,13 @@ export async function pullFrom(
   if (!res.ok) {
     throw new Error(`federation: peer refused the offer (${res.status})`);
   }
-  const body = (await res.json()) as { deltas?: WireDelta[] };
+  const text = await boundedText(res, opts.maxBytes ?? DEFAULT_MAX_OFFER);
+  let body: { deltas?: WireDelta[] };
+  try {
+    body = JSON.parse(text) as { deltas?: WireDelta[] };
+  } catch {
+    throw new Error("federation: the peer's offer was not the expected JSON");
+  }
   const deltas: Delta[] = [];
   for (const wire of body.deltas ?? []) {
     try {

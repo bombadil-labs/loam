@@ -378,5 +378,26 @@ The load-bearing decision, and the last piece of the authority model:
   boundary while honest deltas beside it land. `fromWire` recomputes every id and refuses one
   that does not match — a forgery cannot survive the crossing whatever id a peer stamps on it.
 
+Review resolution (7 findings): the agent confirmed the security model is sound but the
+load-bearing tests were missing, plus a real confidentiality default. Fixed:
+
+- **Foreign law's inertness is now PROVEN, not just argued.** The single most important test of
+  the step: Mallory signs a grant making herself admin of the victim's tenant and federates it
+  in — it verifies, so union admits it (accepted: 1), but she still cannot write, because her
+  grant roots in nobody the victim's operator blessed. The unsigned-refusal and forged-id
+  branches are exercised too (the old test only forged the id, never the signature path).
+- **The raw offer is operator-gated.** `/federate` handed the whole substrate — grants,
+  memberships, registrations — to any authenticated token, past the GraphQL read gateway. It
+  now requires an operator token (403 otherwise): federation is an operator-level trust
+  relationship, not a scoped reader's licence.
+- **The pull is bounded.** `pullFrom` read the peer's body with no cap (a trivial OOM DoS on the
+  puller) and threw a raw `SyntaxError` on non-JSON; now a 64 MiB cap and a clean error.
+- **A mis-shaped `offeredLens` fails fast** at `Gateway.open` (trial-eval → "must select a delta
+  set"), not as a 500 when a peer first pulls in production.
+- **The shared-seed invariant is documented** at the `federate` seam: the whole trust boundary
+  rests on distinct operator seeds across instances (two stores sharing one trust each other's
+  constitution completely). Nothing can enforce cross-instance uniqueness in code; it is stated
+  plainly instead.
+
 **The plan's build steps are complete** (0–9 all merged). Next: the landing — strip the plan
 section from CLAUDE.md, rewrite README as real documentation, and ready the npm ship.

@@ -107,6 +107,15 @@ export class Gateway {
     private readonly options: GatewayOptions,
   ) {
     this.operatorAuthor = options.seed === undefined ? undefined : authorForSeed(options.seed);
+    // Fail fast on a mis-shaped offered lens: a term that does not select a delta set would only
+    // blow up when a peer first pulls, in production. Trial-eval it now (empty store → empty
+    // dset; the SORT is what we're checking, and that is content-independent).
+    if (options.offeredLens !== undefined) {
+      const trial = evalTerm(options.offeredLens, reactor.snapshot());
+      if (trial.sort !== "dset") {
+        throw new Error("offeredLens must select a delta set (a mask/select term, not a group)");
+      }
+    }
     reactor.subscribeRaw((d) => {
       // Every accepted delta — appends AND a runner's derived emissions — is written through
       // here. Derived emissions do not pass authorize(): a governed store runs only the
@@ -298,6 +307,14 @@ export class Gateway {
   // signature, then an optional admission predicate). Whether a peer's facts shape a local view
   // is a read-time TRUST choice (a policy's `byAuthorRank`), never a write denial here — "no
   // authority deciding whose truth survives" (SPEC §8). So `federate` bypasses `authorize`.
+  //
+  // Foreign law stays inert by the SAME operator-rooting the local store uses: a federated
+  // grant / membership / registration / binding-definition authored by anyone but this store's
+  // operator binds nothing (grantHeld / readRegistrations / readBindingDefinitions all filter on
+  // the operator). This rests on one invariant the federation must keep: **distinct operator
+  // seeds across instances.** Two stores sharing an operator seed trust each other's
+  // constitution completely — a peer could then federate effective grants and code. Give every
+  // instance its own operator identity.
 
   // The surviving deltas this store offers a peer — everything, or what the offered lens selects.
   offeredDeltas(): Delta[] {

@@ -5,7 +5,7 @@
 // restricts what a store offers; a forgery is refused at the boundary.
 
 import { afterEach, describe, expect, it } from "vitest";
-import { authorForSeed, parseTerm, signClaims, type Delta } from "@bombadil/rhizomatic";
+import { authorForSeed, makeDelta, parseTerm, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { grantClaims, membershipClaims } from "../../src/gateway/accounts.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { pullFrom } from "../../src/federation/pull.js";
@@ -129,18 +129,91 @@ describe("federation: two instances meet and merge", () => {
     expect(plant.tag ?? []).toEqual([]); // the tag did not
   });
 
-  it("a forgery is refused at the boundary; honest deltas around it still land", async () => {
-    const a = await instance(OP_A);
+  it("a forged id is refused at federate; honest deltas around it still land", async () => {
     const b = await instance(OP_B);
     const honest = observed(FERN, "height", 42, 1000, GARDENER_SEED);
-    await a.gateway.append([honest]);
-    // inject a forgery directly into A's reactor via a lens that would offer it — simulate a
-    // hostile peer by pulling a hand-made bad delta straight into B's federate path
     const forged: Delta = { ...honest, id: `1e20${"00".repeat(32)}` };
     const report = await b.gateway.federate([forged, honest]);
     expect(report.rejected).toBe(1); // the forgery
     expect(report.accepted).toBeGreaterThan(0); // the honest delta
     expect(await height(b.gateway)).toBe(42);
+  });
+
+  it("an unsigned delta is refused at federate — a peer cannot inject anonymous authorship", async () => {
+    const b = await instance(OP_B);
+    // a delta whose id recomputes correctly but carries no signature
+    const unsigned = makeDelta({
+      timestamp: 1000,
+      author: "did:key:zNobody",
+      pointers: [
+        { role: "subject", target: { kind: "entity", entity: { id: FERN, context: "height" } } },
+        { role: "value", target: { kind: "primitive", value: 99 } },
+      ],
+    });
+    const report = await b.gateway.federate([unsigned]);
+    expect(report.accepted).toBe(0);
+    expect(report.rejected).toBe(1);
+  });
+
+  it("foreign law is inert: a peer's self-signed grant binds nothing on the victim", async () => {
+    const a = await instance(OP_A);
+    const b = await instance(OP_B);
+    // Mallory (an author with no standing on B) signs a grant making HERSELF admin of B's tenant
+    const MALLORY_SEED = "ee".repeat(32);
+    const MALLORY = authorForSeed(MALLORY_SEED);
+    const hostileGrant = signClaims(
+      grantClaims("tenant:garden", MALLORY, "admin", MALLORY, 5),
+      MALLORY_SEED,
+    );
+    // it verifies, so federate ADMITS it (union is union) — but it must not GOVERN
+    const report = await b.gateway.federate([hostileGrant]);
+    expect(report.accepted).toBe(1); // the delta crossed (it is signed and well-formed)
+
+    // yet Mallory still cannot write on B: her grant roots in nobody B's operator blessed
+    const denied = await b.gateway.query(
+      `mutation { plant(entity: "${FERN}", height: 66) { height } }`,
+      undefined,
+      { actor: MALLORY_SEED },
+    );
+    expect(denied.errors?.join(" ")).toMatch(/not permitted/);
+    void a;
+  });
+
+  it("the wire path refuses a tampered offer, and /federate demands an operator token", async () => {
+    const a = await instance(OP_A);
+    const b = await instance(OP_B);
+    await a.gateway.append([observed(FERN, "height", 42, 1000, GARDENER_SEED)]);
+
+    // a NON-operator token cannot pull the raw substrate
+    const scoped = await serve({
+      mounts: { default: a.gateway },
+      tokens: { "reader-tok": { actor: GARDENER_SEED } },
+      port: 0,
+    });
+    handles.push(scoped);
+    const forbidden = await fetch(`${scoped.url}/default/federate`, {
+      headers: { authorization: "Bearer reader-tok" },
+    });
+    expect(forbidden.status).toBe(403);
+
+    // a tampered offer over the real wire is dropped by fromWire (id recompute), not merged
+    const tampered = await pullFrom(b.gateway, a.url, a.token, {
+      fetch: () =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              deltas: [
+                {
+                  id: `1e20${"11".repeat(32)}`,
+                  claims: { timestamp: 1, author: "x", pointers: [] },
+                },
+              ],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        ),
+    });
+    expect(tampered.accepted).toBe(0);
     void OPERATOR_A;
   });
 });
