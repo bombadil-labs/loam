@@ -258,3 +258,31 @@ Learnings worth keeping:
   a raw-append HTTP endpoint to expose it is noted for a later slice.
 - **Denial tests must check state, not just the error string** — every "not permitted" case now
   re-queries to confirm the refused write did not land.
+
+## 2026-07-09 — Step 7: Runner + genesis + registrations-as-deltas (PR #9)
+
+Three pieces, one theme — the store describes itself. 126/126.
+
+- **Registrations are deltas.** A registration (schema + policy + roots) serializes into one
+  operator-signed delta (`termToJson`/`policyToJson` as JSON-string primitives); `Gateway.open`
+  replays them and re-registers, so a reopened store serves its schemas with **no
+  re-registration code** — the audit-1 gap closed. In a governed store only the operator's
+  registrations bind (a hostile one planted while ungoverned roots nowhere, same discipline as
+  the constitution).
+- **The runner is a peer client, not a tier.** Function DEFINITIONS live in the store (a
+  `BindingSpec` filed as a delta); `Runner.attach(gateway, { seed, implementations })` reads
+  them, installs each into a `DerivationHost` over the gateway's reactor with an in-process
+  implementation it holds (`fnId → DerivedFn`), and animates the gateway (ingest routes through
+  the host). **Passive** (definitions inert) vs **animate** (they compute) is that one call.
+  A definition whose `fnId` the runner lacks is skipped, not fatal — an orphan waits for a
+  runner that holds it. What a binding emits rides `subscribeRaw` into the backend and replays
+  like any other delta.
+- **Genesis boots a self-describing store.** `assembleGenesis({ operatorSeed, registrations,
+  grants })` → a content-addressed, operator-signed bundle; `Gateway.boot(backend, genesis)`
+  opens a fresh store already governed and registered, and is idempotent (the same genesis
+  twice is the same deltas by id).
+
+Learning: the gateway's `animate` hook is a single settable ingest router (`ingestVia`), so the
+passive/animate distinction cost one field and no fork — exactly the "roles, not layers" shape
+SPEC §6 wanted. And derived emissions persist for free: they were already riding the raw stream
+(step 4), so the runner needed no persistence code of its own.

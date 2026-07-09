@@ -22,6 +22,7 @@ import {
   type Delta,
   type HView,
   type HyperSchema,
+  type IngestResult,
   type MaterializationChange,
   type Policy,
   type Primitive,
@@ -31,7 +32,9 @@ import { graphql, parse, subscribe, type ExecutionResult, type GraphQLSchema } f
 import type { StoreBackend } from "../store/backend.js";
 import { authorize } from "./accounts.js";
 import { Channel } from "./channel.js";
+import type { Genesis } from "./genesis.js";
 import { buildGqlSchema, type PatchNode, type Registered, type ResolvedNode } from "./gql.js";
+import { readRegistrations, registrationClaims, type Registration } from "./registration.js";
 
 export interface AppendReceipt {
   readonly accepted: number;
@@ -82,6 +85,9 @@ export class Gateway {
   private readonly justPersisted = new Set<string>();
   private lastMutationTs = 0;
   private readonly operatorAuthor: string | undefined;
+  // When a runner animates the gateway, ingest routes through its DerivationHost (ingest + drain
+  // derivations); otherwise straight to the reactor. Passive vs animate is exactly this hook.
+  private ingestVia: (d: Delta) => IngestResult = (d) => this.reactor.ingest(d);
 
   private constructor(
     private readonly backend: StoreBackend,
@@ -112,7 +118,30 @@ export class Gateway {
         throw new Error(`replay: the store handed back an unacceptable delta ${d.id}`);
       }
     }
-    return new Gateway(backend, reactor, options);
+    const gateway = new Gateway(backend, reactor, options);
+    gateway.replayRegistrations();
+    return gateway;
+  }
+
+  // Boot a fresh (or existing) store from a genesis delta-set: open governed by the genesis
+  // operator, land the bundle (idempotent — content-addressed deltas dedup), and register what
+  // the genesis declares. The store is born answering and enforcing.
+  static async boot(backend: StoreBackend, genesis: Genesis): Promise<Gateway> {
+    const gateway = await Gateway.open(backend, { seed: genesis.operatorSeed });
+    if (genesis.deltas.length > 0) await gateway.append(genesis.deltas);
+    gateway.replayRegistrations();
+    return gateway;
+  }
+
+  // Re-register from the registrations the store holds — the surface as a function of the store.
+  // In a governed store only the operator's registrations bind (a hostile one roots nowhere).
+  private replayRegistrations(): void {
+    const known = new Set(this.registered.map((r) => r.schema.name));
+    for (const reg of readRegistrations(this.reactor, this.operatorAuthor)) {
+      if (known.has(reg.schema.name)) continue;
+      this.register(reg.schema, reg.policy, reg.roots);
+      known.add(reg.schema.name);
+    }
   }
 
   // Persist a batch, THEN serve it. The batch is validated whole (one bad delta refuses the
@@ -152,7 +181,7 @@ export class Gateway {
     for (const d of batch) this.justPersisted.add(d.id);
     try {
       for (const d of batch) {
-        const result = this.reactor.ingest(d);
+        const result = this.ingestVia(d);
         if (result.status === "accepted") accepted += 1;
         else duplicates += 1; // "rejected" is unreachable: the batch was validated above
       }
@@ -196,6 +225,35 @@ export class Gateway {
     this.registered.push({ schema, policy, roots });
     this.registry = registry;
     this.gql = gql;
+  }
+
+  // Persist a registration (schema + policy + roots) as data, then register it, so the surface
+  // survives reopen with no code. A registration files under an ungoverned-tenant entity, so
+  // append authorizes it for the operator only — it is the operator's to shape the store.
+  async publishRegistration(
+    schema: HyperSchema,
+    policy: Policy,
+    roots: readonly string[],
+    context?: RequestContext,
+  ): Promise<void> {
+    const seed = context?.actor ?? this.options.seed;
+    if (seed === undefined) {
+      throw new Error("this gateway holds no signing seed and cannot publish a registration");
+    }
+    const reg: Registration = { schema, policy, roots };
+    const claims = registrationClaims(reg, authorForSeed(seed), this.nextTimestamp());
+    await this.append([signClaims(claims, seed)]);
+    this.replayRegistrations();
+  }
+
+  // Animate the gateway: route ingest through a runner's DerivationHost so bindings fire.
+  animate(host: { ingest: (d: Delta) => IngestResult }): void {
+    this.ingestVia = (d) => host.ingest(d);
+  }
+
+  private nextTimestamp(): number {
+    this.lastMutationTs = Math.max(Date.now(), this.lastMutationTs + 1);
+    return this.lastMutationTs;
   }
 
   // --- the read seam ---------------------------------------------------------------------------
@@ -279,8 +337,7 @@ export class Gateway {
     // Strictly monotonic WITHIN THIS INSTANCE: two mutations from one running gateway never tie
     // on timestamp, so pick-byTimestamp between them is an ordering, not a coin flip on
     // delta-id hashes. Across restarts (or gateways) the wall clock is the only witness.
-    this.lastMutationTs = Math.max(Date.now(), this.lastMutationTs + 1);
-    const timestamp = this.lastMutationTs;
+    const timestamp = this.nextTimestamp();
     const deltas = entries.map(([prop, value]) =>
       signClaims(
         {

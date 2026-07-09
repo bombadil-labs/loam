@@ -81,10 +81,8 @@ Ordered; re-evaluated after each merge (cycle stage 7). Adopt rhizomatic's core;
    merge._
 5. **Accounts & capabilities.** _Done — merged as PR #7 (2026-07-09); full multi-tenant capability
    grants with operator-rooted authority chains (see `JOURNAL.md` and SPEC §7)._
-6. **Gateway transport.** MCP + HTTP serving the gateway (chorus `mcp-http` as reference): token
-   auth, multi-store mounts.
-   _Success:_ a real HTTP/MCP client runs query/mutate/subscribe end-to-end with a bearer token; a
-   junk token is rejected.
+6. **Gateway transport.** _Done — merged as PR #8 (2026-07-09); node:http serving GraphQL + SSE +
+   MCP behind timing-safe bearer tokens over isolated mounts (see `JOURNAL.md`)._
 7. **Runner + genesis assembly.** A peer-client runner over `DerivationHost` that installs
    function-definitions from the store and executes them (pure in-process first); the genesis
    delta-set (`SCHEMA_SCHEMA` + accounts + names + fn-schemas). **Includes closing the audit-1
