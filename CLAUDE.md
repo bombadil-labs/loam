@@ -3,8 +3,7 @@
 Loam is a general database built on [rhizomatic](https://github.com/bombadil-labs/rhizomatic); the
 design is in **[SPEC.md](SPEC.md)** — read it before writing code. This file is the **process and the
 plan**. **[CURRENT_WORK.md](CURRENT_WORK.md)** is the live checklist for the step in progress.
-**[JOURNAL.md](JOURNAL.md)** is the append-only record. Any model can run this; nothing here is
-addressed to a specific one.
+**[JOURNAL.md](JOURNAL.md)** is the append-only record.
 
 **To resume:** read `CURRENT_WORK.md`. If a step is in progress, continue from the "left off here"
 note. If it is empty, start the first unchecked step in the plan below, at cycle stage 1.
