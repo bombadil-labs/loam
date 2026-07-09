@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN } from "../spike/garden.js";
-import { PLANT, PLANT_POLICY, garden } from "./fixtures.js";
+import { PLANT, PLANT_POLICY, garden, governedBootstrap } from "./fixtures.js";
 
 const KEEPER_SEED = "c3".repeat(32);
 
@@ -24,6 +24,7 @@ const SUBSCRIPTION = `subscription {
 
 async function keeperGateway(): Promise<Gateway> {
   const gateway = await Gateway.open(new MemoryBackend(), { seed: KEEPER_SEED });
+  await gateway.append(governedBootstrap(KEEPER_SEED)); // the keeper governs; the authors may write
   await gateway.append(garden);
   gateway.register(PLANT, PLANT_POLICY, [FERN]);
   return gateway;

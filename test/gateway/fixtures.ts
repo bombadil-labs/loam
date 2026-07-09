@@ -1,7 +1,23 @@
 // The gateway suite's shared world: the Plant schema, its policy, and a small settled garden.
 
-import type { HyperSchema, Policy, PropPolicy } from "@bombadil/rhizomatic";
-import { FERN, GARDENER_SEED, PLANT_BODY, SURVEYOR_SEED, observed } from "../spike/garden.js";
+import {
+  authorForSeed,
+  signClaims,
+  type Delta,
+  type HyperSchema,
+  type Policy,
+  type PropPolicy,
+} from "@bombadil/rhizomatic";
+import { grantClaims, membershipClaims } from "../../src/gateway/accounts.js";
+import {
+  FERN,
+  GARDENER,
+  PLANT_BODY,
+  SURVEYOR,
+  GARDENER_SEED,
+  SURVEYOR_SEED,
+  observed,
+} from "../spike/garden.js";
 
 export const PLANT: HyperSchema = { name: "Plant", alg: 1, body: PLANT_BODY };
 
@@ -16,6 +32,17 @@ export const PLANT_POLICY: Policy = {
   ]),
   default: pickLatest,
 };
+
+// A governed gateway's constitution: the garden tenant owns the fern, and the garden fixture's
+// two authors hold write on it — signed by whatever operator the suite runs under.
+export function governedBootstrap(operatorSeed: string): Delta[] {
+  const operator = authorForSeed(operatorSeed);
+  return [
+    signClaims(membershipClaims("tenant:garden", FERN, operator, 9_001), operatorSeed),
+    signClaims(grantClaims("tenant:garden", GARDENER, "write", operator, 9_002), operatorSeed),
+    signClaims(grantClaims("tenant:garden", SURVEYOR, "write", operator, 9_003), operatorSeed),
+  ];
+}
 
 // Two readings whose VALUES (7, 9) differ from their COUNT (2): an assertion on the count can
 // never be satisfied by a picked value.

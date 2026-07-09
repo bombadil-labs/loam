@@ -156,6 +156,16 @@ construct: an explicit, signed, reified **capability grant** (a delta granting a
 auditable, time-traveled, revocable. **(decided 2026-07-09)** v1 is fully multi-tenant: tenant
 isolation is a first-class construct in the genesis schemas and gateway enforcement, not a deferment.
 
+Implemented (step 5): a **tenant** is an entity; membership and grants are deltas filed at it under
+the constitutional contexts `loam.tenant` / `loam.members` / `loam.grants`; **revocation is
+negation**; audit is a query. Enforcement: ordinary writes need `write` on the entity's tenant;
+constitutional writes need `admin` on every tenant involved (re-tenanting needs admin on the current
+tenant; first tenancy is the operator's to give); a negation needs the standing its target needed;
+an untenanted entity is the operator's alone. **Governance begins with the operator**: a gateway
+opened without an operator identity is an ungoverned local store; one with an operator enforces
+capabilities on everyone but the operator. Callers act as themselves (`{ actor }` per request);
+mutations are signed by the actor, so grants key on authentic authorship.
+
 ## 8. Persistence, deployment, federation
 
 - **Store ⟂ app.** The running app (gateway + resolution) is separate from the store (persisted
