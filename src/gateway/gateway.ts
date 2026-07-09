@@ -1,7 +1,9 @@
 // The Gateway: one live front over one StoreBackend. It boots by replaying the store into a
 // Reactor, writes every accepted delta through to the backend by way of the raw stream (so a
 // future DerivationHost's emissions persist by the same path as appends), meta-resolves
-// schema-defining deltas via SCHEMA_SCHEMA, and serves GraphQL derived from what is registered.
+// schema-defining deltas via SCHEMA_SCHEMA, and serves GraphQL derived from what is registered:
+// query (resolve once → snapshot), mutate (args → signed deltas → append → the re-resolved
+// view), and subscribe (a snapshot, then a patch per relevant change).
 //
 // The reactor is the living present tense; the backend is the ground it grows from and settles
 // back into. Nothing is reachable except through what a registered (HyperSchema, Policy) pair
@@ -10,17 +12,25 @@
 import {
   Reactor,
   SchemaRegistry,
+  authorForSeed,
   computeId,
   loadSchema,
+  resolveView,
+  signClaims,
   verifyDelta,
+  viewCanonicalHex,
   type Delta,
   type HView,
   type HyperSchema,
+  type MaterializationChange,
   type Policy,
+  type Primitive,
+  type View,
 } from "@bombadil/rhizomatic";
-import { graphql, type GraphQLSchema } from "graphql";
+import { graphql, parse, subscribe, type ExecutionResult, type GraphQLSchema } from "graphql";
 import type { StoreBackend } from "../store/backend.js";
-import { buildGqlSchema, type Registered } from "./gql.js";
+import { Channel } from "./channel.js";
+import { buildGqlSchema, type PatchNode, type Registered, type ResolvedNode } from "./gql.js";
 
 export interface AppendReceipt {
   readonly accepted: number;
@@ -30,6 +40,12 @@ export interface AppendReceipt {
 export interface QueryResult {
   data?: Record<string, unknown> | null;
   errors?: string[];
+}
+
+export interface GatewayOptions {
+  // The gateway's signing identity. Mutations construct claims and sign them as this author;
+  // without a seed the gateway is read-only — unsigned authority does not exist here.
+  readonly seed?: string;
 }
 
 const toError = (e: unknown): Error => (e instanceof Error ? e : new Error(String(e)));
@@ -45,10 +61,17 @@ export class Gateway {
   // must not quietly widen the gap between the live view and the ground.
   private writes: Promise<void> = Promise.resolve();
   private writeFailure: Error | undefined;
+  // Live subscriptions: one reactor subscription per materialization name, fanned out to any
+  // number of sinks (the reactor has no unsubscribe; the fan-out set is ours, so leaving a
+  // subscription only empties our set). Lazily-registered materializations — for entities not
+  // in any registered root list — are cached and reused for the gateway's lifetime.
+  private readonly sinks = new Map<string, Set<(c: MaterializationChange) => void>>();
+  private readonly lazyMats = new Set<string>();
 
   private constructor(
     private readonly backend: StoreBackend,
     readonly reactor: Reactor,
+    private readonly options: GatewayOptions,
   ) {
     reactor.subscribeRaw((d) => {
       this.writes = this.writes
@@ -64,7 +87,7 @@ export class Gateway {
 
   // Open a gateway over a backend: replay everything the store holds, then start listening.
   // The raw subscription attaches AFTER replay, so boot never writes the store back to itself.
-  static async open(backend: StoreBackend): Promise<Gateway> {
+  static async open(backend: StoreBackend, options: GatewayOptions = {}): Promise<Gateway> {
     const reactor = new Reactor();
     for (const d of await backend.deltasSince(new Set())) {
       const result = reactor.ingest(d);
@@ -72,7 +95,7 @@ export class Gateway {
         throw new Error(`replay: the store handed back an unacceptable delta ${d.id}`);
       }
     }
-    return new Gateway(backend, reactor);
+    return new Gateway(backend, reactor, options);
   }
 
   // Ingest a batch and write it through. The batch is validated WHOLE before anything is
@@ -118,31 +141,141 @@ export class Gateway {
   register(schema: HyperSchema, policy: Policy, roots: readonly string[]): void {
     const next = [...this.registered, { schema, policy, roots }];
     const registry = SchemaRegistry.build(next.map((r) => r.schema)); // refuses dups + bad refs
-    const gql = buildGqlSchema(next, (name, root) => this.gather(name, root)); // refuses collisions
+    const gql = buildGqlSchema(next, {
+      resolve: (name, entity) => this.resolvedNode(name, entity),
+      mutate: (name, entity, props) => this.mutateEntity(name, entity, props),
+      watch: (name, entity) => this.watchEntity(name, entity),
+    }); // refuses collisions
     this.reactor.register(schema.name, schema.body, roots, registry);
     this.registered.push({ schema, policy, roots });
     this.registry = registry;
     this.gql = gql;
   }
 
-  // The read seam GraphQL resolves through: the live materialization when the root is watched,
-  // batch evaluation otherwise — the spike proved the two are identical.
-  private gather(name: string, root: string): HView {
-    const live = this.reactor.materializedView(name, root);
-    if (live !== undefined) return live;
+  // --- the read seam ---------------------------------------------------------------------------
+
+  private def(name: string): Registered {
     const def = this.registered.find((r) => r.schema.name === name);
     if (def === undefined) throw new Error(`no registered schema named ${name}`);
-    const result = this.reactor.eval(def.schema.body, root, this.registry);
+    return def;
+  }
+
+  // The materialization watching (schema, entity) — the schema's own when the entity is a
+  // registered root, a lazily-created cached one otherwise.
+  private matFor(name: string, entity: string): string {
+    const def = this.def(name);
+    if (def.roots.includes(entity)) return name;
+    const matName = `${name}@${entity}`;
+    if (!this.lazyMats.has(matName)) {
+      this.reactor.register(matName, def.schema.body, [entity], this.registry);
+      this.lazyMats.add(matName);
+    }
+    return matName;
+  }
+
+  // Gather the HView for (schema, entity): the live materialization when one is watching —
+  // registered root or lazy — and batch evaluation otherwise (the spike proved them identical).
+  private gather(name: string, entity: string): HView {
+    const live =
+      this.reactor.materializedView(name, entity) ??
+      this.reactor.materializedView(`${name}@${entity}`, entity);
+    if (live !== undefined) return live;
+    const def = this.def(name);
+    const result = this.reactor.eval(def.schema.body, entity, this.registry);
     if (result.sort !== "hview") throw new Error(`schema ${name} does not evaluate to a hyperview`);
     return result.hview;
   }
 
-  async query(source: string, variables?: Record<string, unknown>): Promise<QueryResult> {
+  private resolvedNode(name: string, entity: string): ResolvedNode {
+    const view = resolveView(this.def(name).policy, this.gather(name, entity)) as Record<
+      string,
+      View
+    >;
+    return { entity, view, hex: viewCanonicalHex(view) };
+  }
+
+  // --- the write seam --------------------------------------------------------------------------
+
+  // One signed property-claim delta per provided property, appended through the same validated
+  // write-through path as everything else. (Identical claims in the same millisecond are the
+  // same delta — the CRDT's idempotence, not a bug.)
+  private async mutateEntity(
+    name: string,
+    entity: string,
+    props: Record<string, Primitive>,
+  ): Promise<ResolvedNode> {
+    const seed = this.options.seed;
+    if (seed === undefined) {
+      throw new Error("this gateway holds no signing seed and cannot write");
+    }
+    const entries = Object.entries(props);
+    if (entries.length === 0) {
+      throw new Error(`mutation of ${entity} names no properties to claim`);
+    }
+    const author = authorForSeed(seed);
+    const timestamp = Date.now();
+    const deltas = entries.map(([prop, value]) =>
+      signClaims(
+        {
+          timestamp,
+          author,
+          pointers: [
+            { role: "subject", target: { kind: "entity", entity: { id: entity, context: prop } } },
+            { role: "value", target: { kind: "primitive", value } },
+          ],
+        },
+        seed,
+      ),
+    );
+    await this.append(deltas);
+    return this.resolvedNode(name, entity);
+  }
+
+  // --- the live seam ---------------------------------------------------------------------------
+
+  // A dynamic view of (schema, entity): an initial snapshot, then a patch per relevant change.
+  // Built on a Channel, so leaving the stream (return/throw) detaches immediately — even while
+  // the reader is parked waiting for an event that never comes.
+  private watchEntity(name: string, entity: string): AsyncGenerator<PatchNode, void, unknown> {
+    const matName = this.matFor(name, entity);
+    let sinks = this.sinks.get(matName);
+    if (sinks === undefined) {
+      const set = new Set<(c: MaterializationChange) => void>();
+      this.sinks.set(matName, set);
+      this.reactor.subscribe(matName, (c) => {
+        for (const sink of [...set]) sink(c);
+      });
+      sinks = set;
+    }
+
+    const liveSinks = sinks;
+    const sink = (c: MaterializationChange): void => {
+      if (c.root !== entity) return;
+      const node = this.resolvedNode(name, entity);
+      channel.push({ ...node, fromHex: lastHex, changed: [...c.changedProps] });
+      lastHex = node.hex;
+    };
+    const channel = new Channel<PatchNode>(() => liveSinks.delete(sink));
+
+    const initial = this.resolvedNode(name, entity);
+    let lastHex = initial.hex;
+    liveSinks.add(sink);
+    channel.push({ ...initial, fromHex: null, changed: null });
+    return channel;
+  }
+
+  // --- the GraphQL surface ---------------------------------------------------------------------
+
+  private schemaOrThrow(): GraphQLSchema {
     if (this.gql === undefined) {
       throw new Error("nothing is registered: the gateway has no queryable surface yet");
     }
+    return this.gql;
+  }
+
+  async query(source: string, variables?: Record<string, unknown>): Promise<QueryResult> {
     const result = await graphql({
-      schema: this.gql,
+      schema: this.schemaOrThrow(),
       source,
       ...(variables === undefined ? {} : { variableValues: variables }),
     });
@@ -150,6 +283,51 @@ export class Gateway {
       ...(result.data === undefined ? {} : { data: result.data }),
       ...(result.errors === undefined ? {} : { errors: result.errors.map((e) => e.message) }),
     };
+  }
+
+  // Run a GraphQL subscription: an async stream of data payloads. Errors inside the stream
+  // surface as thrown errors; returning the iterator ends the underlying watch.
+  async subscribe(
+    source: string,
+    variables?: Record<string, unknown>,
+  ): Promise<AsyncGenerator<Record<string, unknown>>> {
+    const result = await subscribe({
+      schema: this.schemaOrThrow(),
+      document: parse(source),
+      ...(variables === undefined ? {} : { variableValues: variables }),
+    });
+    if (!(Symbol.asyncIterator in result)) {
+      throw new Error(
+        `subscription failed: ${(result.errors ?? []).map((e) => e.message).join("; ") || "unknown"}`,
+      );
+    }
+    // A pass-through, not a generator: return() must reach the source immediately, even while
+    // a read is parked (a suspended generator would hold the return until the next event).
+    const upstream = result as AsyncGenerator<ExecutionResult, void, unknown>;
+    const mapped: AsyncGenerator<Record<string, unknown>, void, unknown> = {
+      async next() {
+        const item = await upstream.next();
+        if (item.done === true) return { value: undefined, done: true };
+        const ev = item.value;
+        if (ev.errors !== undefined && ev.errors.length > 0) {
+          await upstream.return(undefined);
+          throw new Error(ev.errors.map((e) => e.message).join("; "));
+        }
+        return { value: ev.data as Record<string, unknown>, done: false };
+      },
+      async return() {
+        await upstream.return(undefined);
+        return { value: undefined, done: true };
+      },
+      async throw(error?: unknown) {
+        await upstream.return(undefined);
+        throw error instanceof Error ? error : new Error(String(error));
+      },
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+    };
+    return mapped;
   }
 
   // Await every write the raw stream has queued; surface the first write-through failure.
