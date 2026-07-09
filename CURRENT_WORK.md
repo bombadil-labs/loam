@@ -2,31 +2,23 @@
 
 _The live checklist for the step in progress: its success criteria, the sub-tasks (checked as they complete), and a "left off here" note so any model can resume mid-step. Replaced at the start of each step; cleared when a step merges._
 
-**Success criteria (the gate):**
-
-- **`mutate`**: GraphQL mutation fields derived per registered schema — one field per schema,
-  one argument per policy prop; each provided arg becomes a signed property-claim delta
-  (`subject → {entity, context: prop}` + `value → primitive`), appended through the same
-  validated write-through path. The mutation returns the re-resolved view, so the response IS
-  the re-query. A gateway without a signing seed refuses mutations.
-- **`subscribe`**: GraphQL subscription fields per schema — an initial snapshot event, then a
-  patch event per relevant change (`_fromHex → _hex`, `changedProps`, and the fields). Backed
-  by a lazily-created, cached materialization per (schema, entity) (the reactor has no
-  deregister; reuse is the design). Irrelevant mutations emit nothing.
-- _Success (from CLAUDE.md):_ a mutation appends the right deltas (verifiable, signed,
-  persisted) and a re-query reflects them; a subscription emits an initial snapshot then a
-  patch on a relevant mutation.
-- `npm run check` green.
+**Success criteria:** GraphQL `mutate` (args → signed deltas → append; response = re-resolved
+view; seedless refusal) and `subscribe` (initial snapshot + relevant patches; leavable streams);
+`npm run check` green.
 
 **Sub-tasks:**
 
-- [ ] `test/gateway/mutate.test.ts` — tests first: right deltas (pointers/signature/persistence),
-      re-query reflects, multi-prop mutation, seedless refusal, receipt
-- [ ] `test/gateway/subscribe.test.ts` — initial snapshot + patch; irrelevant silence;
-      two subscribers; unsubscribe stops delivery
-- [ ] `src/gateway/gateway.ts` — signing seed option; `mutate` path; subscription
-      materialization cache + fan-out
-- [ ] `src/gateway/gql.ts` — Mutation + Subscription types derived from the registered defs
-- [ ] Gate green → PR → one review agent → resolve → merge → journal
+- [x] `test/gateway/mutate.test.ts` + `test/gateway/subscribe.test.ts` (+ shared `fixtures.ts`)
+- [x] `src/gateway/channel.ts` — the always-leavable push-to-pull adapter (+ coalescence + fail)
+- [x] `src/gateway/gateway.ts` — seed option, mutate, watch (lazy cached materializations,
+      sink isolation, no-op suppression, close-ends-subscriptions)
+- [x] `src/gateway/gql.ts` — Mutation + Subscription derivation; PrimitiveValue input scalar;
+      `__proto__` refusal
+- [x] PR #5 → one review agent (7 findings: sink error isolation, close-stranded readers,
+      unbounded queue → coalescence, lazy-mat name collision → NUL alphabet, `__proto__`,
+      no-op patches, lifetime coverage) → all resolved
+- [ ] CI green on the resolved PR → merge by PR number → journal committed
 
-**Left off here:** plan written; next: tests.
+**Left off here:** review resolved, gate green (76/76); awaiting CI on PR #5, then merge +
+re-plan (stages 6–8). Step 5 (accounts & capabilities, full multi-tenant) is next — plan a
+small review panel for it per the budget rule.

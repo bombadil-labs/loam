@@ -16,42 +16,12 @@ import {
   signClaims,
   termHash,
   type Delta,
-  type HyperSchema,
-  type Policy,
-  type PropPolicy,
 } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
-import {
-  FERN,
-  GARDENER,
-  GARDENER_SEED,
-  PLANT_BODY,
-  SURVEYOR_SEED,
-  observed,
-} from "../spike/garden.js";
-
-const PLANT: HyperSchema = { name: "Plant", alg: 1, body: PLANT_BODY };
-
-const pickLatest: PropPolicy = { kind: "pick", order: { kind: "byTimestamp", dir: "desc" } };
-const PLANT_POLICY: Policy = {
-  props: new Map<string, PropPolicy>([
-    ["height", pickLatest],
-    ["tag", { kind: "all", order: { kind: "byTimestamp", dir: "asc" } }],
-    ["watered", { kind: "absentAs", constant: false, then: pickLatest }],
-    ["readings", { kind: "merge", fn: "count" }],
-  ]),
-  default: pickLatest,
-};
-
-const garden = [
-  observed(FERN, "height", 30, 1000, GARDENER_SEED),
-  observed(FERN, "height", 34, 2000, SURVEYOR_SEED),
-  observed(FERN, "tag", "shade", 1500, GARDENER_SEED),
-  observed(FERN, "tag", "fronds", 1600, SURVEYOR_SEED),
-  observed(FERN, "readings", 1, 1700, GARDENER_SEED),
-];
+import { FERN, GARDENER, GARDENER_SEED, PLANT_BODY, observed } from "../spike/garden.js";
+import { PLANT, PLANT_POLICY, garden, pickLatest } from "./fixtures.js";
 
 const QUERY = `{
   plant(entity: "${FERN}") {
