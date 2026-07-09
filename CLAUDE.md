@@ -1,80 +1,104 @@
-# Loam — Working Agreement & Orientation
+# Loam — how we work
 
-**You are Fable, in the Loam repo.** Read this, then **[claude_notes/DATABASE-SPEC.md](claude_notes/DATABASE-SPEC.md)**
-(the design spec — the _what_) and **[claude_notes/DECOMPOSITION.md](claude_notes/DECOMPOSITION.md)**
-(the brief — the _why_, the assignment, the open decisions, the sequencing). This file is _what this
-is_ and _how we work here_.
+Loam is a general database built on [rhizomatic](https://github.com/bombadil-labs/rhizomatic); the
+design is in **[SPEC.md](SPEC.md)** — read it before writing code. This file is the **process and the
+plan**. **[CURRENT_WORK.md](CURRENT_WORK.md)** is the live checklist for the step in progress.
+**[JOURNAL.md](JOURNAL.md)** is the append-only record. Any model can run this; nothing here is
+addressed to a specific one.
 
-## What this is
+**To resume:** read `CURRENT_WORK.md`. If a step is in progress, continue from the "left off here"
+note. If it is empty, start the first unchecked step in the plan below, at cycle stage 1.
 
-Loam is the general database beneath [Chorus](https://github.com/bombadil-labs/chorus) — Myk's
-long-running project; Chorus is one application of it. A reflective, homoiconic, content-addressed,
-signed, temporal, CRDT graph-substrate. The spec is the source of truth for the model; this repo is
-**greenfield** — you are building it from that spec. (Codename during design: Ithaca. The name is
-**Loam**.)
+## Hard limits
 
-## The layers, and the hard limits
+- **rhizomatic is frozen/normative** — never edit it from here. Most of Loam's core lives there
+  already (SPEC §2); a genuine substrate need is a PR in that repo + a conversation with Myk.
+- **Never touch Chorus's live data.** Publishing, repo visibility, and anything outward beyond this
+  repo's GitHub are Myk's call.
 
-- **[rhizomatic](https://github.com/bombadil-labs/rhizomatic)** (`@bombadil/rhizomatic`) is the
-  **frozen, normative** format below Loam. **Do not change it from here.** If Loam genuinely needs a
-  substrate change — the one live candidate is whether the evaluator can express every resolution
-  reduction (the spike, below) — that is a deliberate PR in the rhizomatic repo (conformance vectors
-  + version bump) and **a conversation with Myk, never an autonomous edit.** Default: don't touch it.
-- **Never touch Chorus's live data.** Chorus runs Myk's real memory store; nothing here reaches into
-  it. Loam is consumed by Chorus, not the reverse.
-- Anything irreversible or outward-facing beyond this repo's GitHub — publishing, repo-visibility,
-  history rewrites — is Myk's call.
+## The loop — one step at a time (a `/loop` runs this until the plan is done)
 
-## How we work
+For the current step, run this cycle. It may span several loop cycles; **before ending any cycle,
+update `CURRENT_WORK.md`** so the next run resumes exactly here.
 
-- **Race to a working spine, not to the whole spec.** The spec is large and marks the north-star;
-  build the tractable spine first (see Sequencing in the brief). Clarity over cleverness; the CRDT is
-  the safety net — lean on it.
-- **Spike first — map the substrate.** rhizomatic's reactor already ships `eval` + a `SchemaRegistry` + `HView` + maintained, subscribable materializations, so **first map its actual surface against the spec and re-draw the Loam/rhizomatic line** (Loam may be thinner than the spec implies; disambiguate rhizomatic's schema concept from our Schema/Hyperschema). Within that, the sizing question: _can
-  rhizomatic's evaluator + policies express the resolution reductions a schema field needs_
-  (latest / trusted-first / set-union / surface-all / custom)? It's the only likely source of a
-  rhizomatic change. Report what you find; it may reshape the plan.
-- **Feature branch + PR; green gate before every commit** once there's code to gate (`npm run check`
-  or the equivalent you establish — format + lint + typecheck + test). Verify the gate by reading the
-  counts, never by grepping for absence of errors.
-- **Adversarial self-review in place of PR approval** (per Myk's standing way of working on these
-  repos): review the diff independently; fix or explicitly disposition findings; store-format or
-  gateway-contract breakage is a show-stopper. **Merge PRs by NUMBER, never by current branch.** Note
-  a known gotcha on these repos: `gh pr checks` intermittently returns an empty list even when runs
-  passed — treat empty as "do not merge," and verify against `gh run list` before merging.
-- **Match the surrounding idiom; small, respectful footprint.** Root holds exactly **README.md +
-  CLAUDE.md**; every other note lives in [claude_notes/](claude_notes/README.md) with an index line.
-  Keep README.md + CLAUDE.md current with every PR that changes what they describe.
-- **The poetry is as important as the engineering** (Myk's standing directive). Prose surfaces —
-  help text, errors, docs, commit messages — are first-class craft. Name things like they matter.
-  Internal technical vocabulary stays precise/standard (Hyperschema, Schema, View, Snapshot,
-  Selector, …); the metaphor lives in the product name, not the load-bearing nouns.
+1. **Plan.** Replace `CURRENT_WORK.md` with a checklist for this step: its success criteria, then the
+   concrete sub-tasks. This is the contract for the step.
+2. **Tests first.** Write clean, honest tests that capture everything in the plan — the behavior the
+   step must exhibit, asserted against real outcomes, not against the shape of the implementation. No
+   reward-hacking: a test that can pass without the desired behavior is a bug.
+3. **Implement.** Write the code to make the tests pass. Concise, not cryptic — as small as it can be
+   **without dropping a desired behavior**. Keep `CURRENT_WORK.md` current as items complete.
+4. **Green → PR.** When the gate passes — `npm run check` (format + lint + typecheck + **all** tests;
+   read the counts, never trust a silent grep) — commit to a **new feature branch** and open a PR.
+5. **Adversarial review.** Run a strict review (the `code-review` skill or a review agent) against:
+   (a) is the code high-quality, concise, efficient — no dead weight, no cleverness that hides
+   behavior; (b) are any tests misaligned with the step's goals; (c) are there missing tests.
+6. **Resolve → merge.** Apply the review's findings; re-test; confirm the PR is genuinely good. Append
+   a record to `JOURNAL.md` (what was done + any novel learning). Merge **by PR number** — and note a
+   gotcha on these repos: `gh pr checks` sometimes returns an empty list even when runs passed; treat
+   empty as "do not merge" and verify via `gh run list`.
+7. **Re-plan.** With the step done, re-evaluate the **remaining** steps against what you just learned.
+   If a learning changes the plan, edit the step list below, log the change in `JOURNAL.md`, and
+   commit it.
+8. **Next step.** Clear `CURRENT_WORK.md` and begin the next unchecked step at stage 1.
 
-## Open decisions (pending Myk — ask; don't guess)
+## Standing rules
 
-- **Multi-tenant scope for v1** — plan the accounts/capability model fully; decide whether v1 ships
-  single-tenant (operator + bearer, schema present but simple) or multi-tenant. ("Have a plan, then
-  decide how to scope it.")
-- **Clean-room vs port** — the greenfield repo implies **clean-room the _model_, extract the
-  _plumbing_.** Build the schema/resolution/self-hosting/function core from the genesis set up
-  (schema-first, async-persistence-first) rather than inheriting Chorus's EAV assumptions — but
-  **roughly half of Loam is already shipped and tested in [chorus](https://github.com/bombadil-labs/chorus)**
-  and is worth _extracting_, not rebuilding: the persistence tier (`store-tier`/`sqlite-core`/drivers),
-  the store registry (`stores.ts`), the GraphQL lifecycle (`gql.ts`), the MCP/HTTP transport
-  (`mcp-http.ts`), the CLI scaffolding, and the measure-instruments. `agent.ts`/`decisions.ts` are
-  reference-only (they carry the EAV model). See the extraction inventory in the brief. Confirm the
-  clean-room-vs-extract line with Myk.
-- The remaining open questions live in the spec's §12.
+- **Root holds exactly four docs** — `CLAUDE.md`, `SPEC.md`, `JOURNAL.md`, `CURRENT_WORK.md`. Do not
+  accumulate more markdown; fold, don't add.
+- **Strict in PRs, creative and aggressive in execution.** Ship real vertical slices; don't gold-plate;
+  don't reward-hack a green bar.
+- **Match rhizomatic's vocabulary** (`HyperSchema`, `HView`, `View`, `Policy`, `DerivedFn`,
+  `BindingSpec`); don't parallel it with near-synonyms.
+- **The poetry is as important as the engineering** — errors, help text, commit messages, and docs are
+  first-class craft.
 
-## Pointers
+## The plan — build steps (success criteria are the gate)
 
-- [claude_notes/RHIZOMATIC-SURFACE.md](claude_notes/RHIZOMATIC-SURFACE.md) — **read-first.** What
-  rhizomatic already provides (most of the core) vs. what Loam adds. A type-level pass on the spike
-  is already done here; confirm its findings against rhizomatic's source.
-- [claude_notes/DATABASE-SPEC.md](claude_notes/DATABASE-SPEC.md) — the specification. Read after the
-  map above (§3/§6/§7 are pending reconciliation with it).
-- [claude_notes/DECOMPOSITION.md](claude_notes/DECOMPOSITION.md) — the brief / assignment / sequencing.
-- [Chorus](https://github.com/bombadil-labs/chorus) — the first application of Loam (and the
-  reference quarry). Its `claude_notes/` (CONSTELLATION.md, EPISTEME.md, JOURNAL.md) hold the fuller
-  design lineage.
-- [rhizomatic](https://github.com/bombadil-labs/rhizomatic) — the format Loam is built on.
+Ordered; re-evaluated after each merge (cycle stage 7). Adopt rhizomatic's core; build the wrapper.
+
+0. **Scaffold.** TS/ESM project depending on `@bombadil/rhizomatic`; vitest; prettier + eslint (flat);
+   an `npm run check` gate; CI (ubuntu + windows), `.gitattributes` `eol=lf`.
+   _Success:_ `npm run check` is green on a trivial test, and a smoke test round-trips a delta through
+   `DeltaSet` from the real dependency.
+1. **Confirm the rhizomatic surface** (the spike, SPEC §2). Tests that exercise the real dependency:
+   `loadSchema(deltas) → HyperSchema`; `resolveView(Policy, HView) → View` across a few `PropPolicy`s
+   (pick/all/conflicts); a reactor materialization + `subscribe` firing on ingest; a `DerivationHost`
+   binding firing and emitting.
+   _Success:_ those pass; `JOURNAL.md` records what's confirmed vs. differs from SPEC §2, and SPEC is
+   corrected if reality differs.
+2. **Persistence tier.** An **async** `StoreBackend` seam + an in-memory driver + one durable driver
+   (sqlite or libSQL). Adapt from chorus (SPEC §10), async-ified.
+   _Success:_ append; `deltasSince(known)` returns the complement; state survives close/reopen;
+   driver-substitution contract test; all green.
+3. **Read gateway.** GraphQL derived from a `HyperSchema` + `Policy`, exposing `query` + `loadSchema`,
+   resolving via `resolveView` over reactor materializations, with content-addressed snapshots.
+   _Success:_ load `SCHEMA_SCHEMA`; define a schema via `loadSchema`; append deltas; a GraphQL query
+   returns the resolved view; its snapshot hash is stable.
+4. **Mutations + subscriptions.** GraphQL `mutate` (args → deltas → append) and `subscribe`
+   (materialization → initial snapshot + patch stream).
+   _Success:_ a mutation appends the right deltas and a re-query reflects them; a subscription emits an
+   initial snapshot then a patch on a relevant mutation.
+5. **Accounts & capabilities.** Users / ownership / capability-grants as genesis schemas; gateway
+   enforces (authorize iff a resolved grant permits); an operator root bootstraps grants.
+   _Success:_ unauthorized mutation rejected; a grant permits it; revocation re-denies; grants are
+   auditable via query.
+6. **Gateway transport.** MCP + HTTP serving the gateway (extract chorus `mcp-http`): token auth,
+   multi-store mounts.
+   _Success:_ a real HTTP/MCP client runs query/mutate/subscribe end-to-end with a bearer token; a
+   junk token is rejected.
+7. **Runner + genesis assembly.** A peer-client runner over `DerivationHost` that installs
+   function-definitions from the store and executes them (pure in-process first); the genesis
+   delta-set (`SCHEMA_SCHEMA` + accounts + names + fn-schemas).
+   _Success:_ install a derived function via the store; on ingest it fires and emits; passive
+   (no runner) vs animate (runner attached) demonstrated; genesis boots a fresh store.
+8. **CLI + deploy.** A `loam` CLI (init / serve / store) + a container with pluggable/hosted
+   persistence (Turso/libSQL) + a turnkey deploy.
+   _Success:_ `loam serve --http` answers a query; a container runs with durable persistence; an
+   install/tarball smoke passes.
+9. **Federation.** Expose `Peer` sync over the authed HTTP + a "subscribe to instance X's published
+   lens" declaration.
+   _Success:_ two instances federate — a delta on A resolves on B; union-merge holds; no conflict.
+
+**Open decisions (ask Myk; don't guess):** multi-tenant scope for v1 (§7); confirm the clean-room
+(build the wrapper) vs. how heavily to lift chorus's plumbing (§10).
