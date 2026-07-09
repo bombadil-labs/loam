@@ -305,3 +305,29 @@ Review resolution (6 findings):
   that would look registered but never bind (the operator filter would drop it on replay).
 - Passive test now asserts the definition is *present* (not merely that nothing computed);
   the O(store) scan for the constitutional slice is acknowledged as indexable-later.
+
+## 2026-07-09 — Step 8: CLI + deploy (PR #10)
+
+The `loam` command (a tiny hand-rolled parser — a framework would be the package's heaviest
+dependency): `init` mints a home and an operator identity, `serve --http` boots a store from its
+genesis and serves it, `store` inspects. A `Dockerfile` (node 22-slim, non-root, store on a
+`/data` volume) and the npm-publish surface (`bin` + `files`, a `pack` smoke test). 139/139.
+
+Learnings worth keeping:
+
+- **The seed never touches an output stream.** `init` writes it to `operator.seed` (mode 0600),
+  keeps only the public author in `config.json`, and refuses a positional `loam init <seed>`
+  (the natural `--seed` typo) *without echoing the value* — a seed in a terminal is a seed in a
+  shell history. A test asserts the printed output never contains the secret.
+- **`run` returns an exit code, or (serve --detach) a live handle.** Testing a server CLI means
+  driving a real listening server; the detach seam lets a test boot, `fetch`, and close without
+  a subprocess. The handle's `close()` releases the server AND the gateway's backend file — one
+  shutdown, whole, so the Windows file lock clears before cleanup.
+- **Hosted persistence stayed a driver, not an image change.** The step-2 `StoreBackend` seam
+  means a libSQL/Turso driver is a one-file addition beside `SqliteBackend` — not vendored here
+  (it needs a live Turso account to exercise), but the seam is the deliverable and SPEC §8 now
+  says so.
+- **`npm pack --dry-run --json` is a real regression guard**: the smoke test pins that
+  `dist/index.js` and `dist/cli/bin.js` actually ship, so a `files`/`bin` slip can't publish a
+  package whose advertised `loam` command isn't in the tarball. (`shell: true` on windows — npm
+  is a `.cmd`.)

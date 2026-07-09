@@ -32,6 +32,8 @@ export {
   readBindingDefinitions,
   type RunnerOptions,
 } from "./runner/runner.js";
+export { run, main, type IO, type RunOptions } from "./cli/cli.js";
+export { initHome, readConfig, storePath, type LoamConfig } from "./cli/config.js";
 export { serve, type ServeOptions, type ServerHandle, type TokenIdentity } from "./server/http.js";
 export type { StoreBackend } from "./store/backend.js";
 export { canonicalDelta } from "./store/canon.js";

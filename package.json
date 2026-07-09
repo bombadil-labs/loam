@@ -12,6 +12,14 @@
       "default": "./dist/index.js"
     }
   },
+  "bin": {
+    "loam": "./dist/cli/bin.js"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
   "engines": {
     "node": ">=22.13"
   },
