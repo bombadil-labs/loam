@@ -15,15 +15,19 @@ export function parseArgs(args: readonly string[], booleanFlags: ReadonlySet<str
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i]!;
     if (arg.startsWith("--")) {
-      const name = arg.slice(2);
-      if (booleanFlags.has(name)) {
-        booleans.add(name);
+      const body = arg.slice(2);
+      const eq = body.indexOf("=");
+      if (eq >= 0) {
+        // `--name=value`, the near-universal form, kept whole.
+        flags.set(body.slice(0, eq), body.slice(eq + 1));
+      } else if (booleanFlags.has(body)) {
+        booleans.add(body);
       } else {
         const value = args[i + 1];
         if (value === undefined || value.startsWith("--")) {
-          throw new Error(`flag --${name} needs a value`);
+          throw new Error(`flag --${body} needs a value`);
         }
-        flags.set(name, value);
+        flags.set(body, value);
         i += 1;
       }
     } else {

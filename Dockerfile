@@ -1,29 +1,32 @@
-# Loam in a container: build the package, run `loam serve --http` as a non-root user. Persistence
-# is a mounted volume (a durable sqlite file) or a hosted libSQL URL — the StoreBackend seam makes
-# that a driver choice, not an image change.
+# Loam in a container. The build stage carries a toolchain (better-sqlite3 is a native addon that
+# may need to compile if no prebuild matches this arch/libc); the runtime stage is slim and gets
+# the ALREADY-COMPILED node_modules copied in, so it needs no compiler of its own. `loam serve`
+# self-bootstraps: it mints (or imports via LOAM_SEED) the operator identity on first run, so a
+# fresh container serves with nothing but a token.
+#
+#   docker run -e LOAM_TOKEN=<secret> -v loam-data:/data -p 4321:4321 loam
 
-FROM node:22-slim AS build
+FROM node:22 AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
-RUN npm run build
+RUN npm run build && npm prune --omit=dev
 
 FROM node:22-slim AS runtime
-WORKDIR /app
-ENV NODE_ENV=production
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force
-COPY --from=build /app/dist ./dist
-
-# The store lives on a volume so it survives the container.
+# The data volume, owned by the runtime user — created and chowned BEFORE the VOLUME line, so the
+# ownership survives into the image (a VOLUME declared first would discard later changes to it).
+RUN useradd --system --uid 10001 --create-home loam && mkdir -p /data && chown loam /data
 VOLUME /data
-ENV LOAM_HOME=/data
-RUN useradd --system --uid 10001 loam && chown -R loam /data 2>/dev/null || true
+WORKDIR /app
+ENV NODE_ENV=production LOAM_HOME=/data
+COPY package.json ./
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
 USER loam
 
-# Override the token and port at run time: `docker run -e LOAM_TOKEN=… -p 4321:4321 loam`.
+# Supply the token at run time: `docker run -e LOAM_TOKEN=… -p 4321:4321 loam`.
 EXPOSE 4321
 ENTRYPOINT ["node", "dist/cli/bin.js"]
 CMD ["serve", "--http", "--port", "4321"]

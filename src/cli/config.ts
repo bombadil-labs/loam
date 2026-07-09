@@ -1,6 +1,11 @@
 // The loam home: a directory holding the operator identity and config. The seed lives in its
 // own file (`operator.seed`), never in `config.json` and never on any output stream — the
 // public author string is the identity you can show around; the seed is the one you cannot.
+//
+// Caveat, stated plainly: the seed file is written mode 0600, which POSIX honors but Windows
+// does not — on Windows the file inherits the directory's ACLs. Deployments that must protect
+// the seed on Windows should place the home on an access-restricted directory (or supply the
+// seed via the environment and keep the home ephemeral).
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

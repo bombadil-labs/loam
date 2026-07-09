@@ -66,15 +66,24 @@ async function cmdServe(
     io.err("serve: only --http is supported today (pass --http)");
     return 2;
   }
-  const token = parsed.flags.get("token");
-  if (token === undefined) {
-    io.err("serve: a --token is required (an unlockable door is a wall)");
+  // The token comes from --token or the LOAM_TOKEN env (containers pass it that way).
+  const token = parsed.flags.get("token") ?? process.env["LOAM_TOKEN"];
+  if (token === undefined || token.length === 0) {
+    io.err("serve: a token is required (--token or LOAM_TOKEN) — an unlockable door is a wall");
+    return 2;
+  }
+  const port = parsePort(parsed.flags.get("port"));
+  if (port === undefined) {
+    io.err("serve: --port must be an integer in 0..65535");
     return 2;
   }
   const home = parsed.flags.get("home") ?? defaultHome();
+  // Boot is turnkey: an uninitialized home mints (or imports via LOAM_SEED) an operator identity
+  // now, so a fresh container serves without an out-of-band `loam init`. Idempotent.
+  const init = initHome(home, process.env["LOAM_SEED"]);
+  if (init.created) io.out(`loam: initialized ${home}\n  operator ${init.operator}`);
   const seed = readSeed(home);
   const path = storePath(home, parsed.flags.get("store"));
-  const port = parsed.flags.get("port") === undefined ? 4321 : Number(parsed.flags.get("port"));
 
   // Boot the store from its genesis (idempotent): a fresh store is born governed; an existing
   // one simply re-lands the same operator identity.
@@ -125,6 +134,15 @@ async function cmdStore(args: readonly string[], io: IO): Promise<number> {
 
 function defaultHome(): string {
   return process.env["LOAM_HOME"] ?? ".loam";
+}
+
+// A port is 0 (ephemeral) through 65535, an integer, or absent (the default). Anything else —
+// a typo'd letter, a negative, a float — is refused, never silently coerced to a random port.
+function parsePort(raw: string | undefined): number | undefined {
+  if (raw === undefined) return 4321;
+  if (!/^\d+$/.test(raw)) return undefined;
+  const n = Number(raw);
+  return n <= 65535 ? n : undefined;
 }
 
 // The entry point. Returns an exit code, or (serve --http --detach) a live ServerHandle.

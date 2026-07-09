@@ -62,24 +62,24 @@ describe("loam init", () => {
   });
 });
 
-describe("loam serve", () => {
-  it("boots a store and answers a real HTTP query, then shuts down", async () => {
-    await run(["init", "--home", home], io());
-    out.length = 0;
-    const handle = await run(
-      ["serve", "--http", "--home", home, "--port", "0", "--token", "s3cret"],
-      io(),
-      { detach: true },
-    );
-    if (typeof handle === "number") throw new Error("serve should return a running handle");
+async function serveDetached(
+  args: readonly string[],
+): Promise<{ url: string; close(): Promise<void> }> {
+  const handle = await run(["serve", "--http", ...args], io(), { detach: true });
+  if (typeof handle === "number") throw new Error("serve should return a running handle");
+  return handle;
+}
 
+describe("loam serve", () => {
+  it("self-initializes, boots a store, and answers a real HTTP query, then shuts down", async () => {
+    // no prior `init` — serve mints the identity itself (turnkey containers rely on this)
+    const handle = await serveDetached(["--home", home, "--port", "0", "--token", "s3cret"]);
     const res = await fetch(`${handle.url}/default/graphql`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: "Bearer s3cret" },
       body: JSON.stringify({ query: "{ __typename }" }),
     });
     expect(res.status).toBe(200);
-    // a junk token is refused
     const junk = await fetch(`${handle.url}/default/graphql`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: "Bearer nope" },
@@ -89,11 +89,72 @@ describe("loam serve", () => {
     await handle.close();
   });
 
+  it("takes the token from LOAM_TOKEN as well as --token", async () => {
+    process.env["LOAM_TOKEN"] = "from-env";
+    try {
+      const handle = await serveDetached(["--home", home, "--port", "0"]);
+      const res = await fetch(`${handle.url}/default/graphql`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer from-env" },
+        body: JSON.stringify({ query: "{ __typename }" }),
+      });
+      expect(res.status).toBe(200);
+      await handle.close();
+    } finally {
+      delete process.env["LOAM_TOKEN"];
+    }
+  });
+
+  it("persists across a restart: what one serve wrote, a later read finds on disk", async () => {
+    const seed = "22".repeat(32);
+    process.env["LOAM_SEED"] = seed;
+    try {
+      // first server boots (genesis lands on disk), answers, and shuts down
+      const first = await serveDetached(["--home", home, "--port", "0", "--token", "t"]);
+      const res = await fetch(`${first.url}/default/graphql`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer t" },
+        body: JSON.stringify({ query: "{ __typename }" }),
+      });
+      expect(res.status).toBe(200);
+      await first.close();
+
+      // a fresh process reads the store file: the genesis deltas are durably there
+      out.length = 0;
+      const code = await run(["store", "--home", home], io());
+      expect(code).toBe(0);
+      expect(out.join("\n")).not.toMatch(/\b0 deltas\b/); // the genesis persisted
+      // and the operator identity is stable (same seed → same home)
+      expect(readFileSync(join(home, "operator.seed"), "utf8").trim()).toBe(seed);
+    } finally {
+      delete process.env["LOAM_SEED"];
+    }
+  });
+
   it("refuses to serve without a token", async () => {
-    await run(["init", "--home", home], io());
     const code = await run(["serve", "--http", "--home", home, "--port", "0"], io());
     expect(code).not.toBe(0);
     expect(err.join("\n")).toMatch(/token/i);
+  });
+
+  it("refuses a nonsense port instead of coercing it to a random one", async () => {
+    const code = await run(
+      ["serve", "--http", "--home", home, "--port", "43x1", "--token", "t"],
+      io(),
+    );
+    expect(code).not.toBe(0);
+    expect(err.join("\n")).toMatch(/port/i);
+  });
+
+  it("accepts --home=DIR (the =-style flag)", async () => {
+    const handle = await serveDetached([`--home=${home}`, "--port=0", "--token=eq"]);
+    const res = await fetch(`${handle.url}/default/graphql`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer eq" },
+      body: JSON.stringify({ query: "{ __typename }" }),
+    });
+    expect(res.status).toBe(200);
+    await handle.close();
   });
 });
 
