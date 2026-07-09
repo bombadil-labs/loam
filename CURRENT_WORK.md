@@ -9,42 +9,9 @@ paces (the gauntlet). Substrate dependency: reflective predicates are FILED
 ([rhizomatic#2](https://github.com/bombadil-labs/rhizomatic/issues/2), Myk's option 2) — the
 negation-mask half waits for Myk's rhizomatic iteration; everything below is Loam-side.
 
-## Step 11 — Authors, not owners (IN FLIGHT, branch `authors-not-owners`)
+## Step 11 — Authors, not owners — ✅ MERGED (PR #14, journaled)
 
-The write gate moves to the author's standing; entities are unowned. SPEC §7 rewritten (on
-branch).
-
-1. `authorize()` = operator, OR surviving operator-rooted `write` grant at `loam:store`.
-   Targets irrelevant.
-2. The ritual-is-dead test: a granted author's multi-pointer delta touching arbitrary entities
-   lands with no membership setup.
-3. Effectiveness chains untouched: non-operator constitutional deltas now LAND but still bind
-   nothing (rework door-refusal tests to landed-but-inert).
-4. Negation interim: standing to append; pull-side `admit` blocks hostile federated negations;
-   heckler's-veto hazard documented until rhizomatic#2.
-5. Grants migrate to `loam:store`; genesis/fixtures/README updated; tenants remain vocabulary.
-6. `Gateway.boot` options passthrough.
-
-- [x] Stage 1: plan + SPEC §7/§5/§8 revisions committed
-- [x] Tests first: auth.test.ts rewritten as the standing contract (ritual-is-dead, citing-is-
-      provenance, grant-lands-inert, writer's-strike-retires-nothing, tenant-as-vocabulary);
-      federation gains the admit-predicate negation boundary; genesis gains boot-options
-- [x] Implement: accounts.ts rewrite (authorize = standing at loam:store; strikes bind only
-      from operator/admin; requirements machinery deleted); boot options; comments; README
-      capabilities section rewritten with the negation caveat stated plainly
-- [x] `_testing` harness migration (constitute = standing grants only; ritual code deleted)
-- [x] Gate: 188/188, format+lint+typecheck+build green (`_testing` now ignored by the gate —
-      it is the ephemeral playground)
-- [x] PR [#14](https://github.com/bombadil-labs/loam/pull/14) → review (one agent) → resolved:
-      the probe-confirmed runner hole (ANY negation retired binding definitions — lawful
-      algebra now shared from registration.ts), audit/enforcement divergence pinned as interim
-      (second concrete case for rhizomatic#2), transitive revocation + admin self-revocation +
-      local rival-definition + local data-negation all pinned, SPEC §7 documents the pre-strike
-      hazard and mint/strike asymmetry. Gate: 193/193.
-- [ ] **Merge is Myk's button** → then JOURNAL entry on main's branch flow → open step 12
-      ← **left off here**
-
-## Step 12 — Writes become claims (queued; SPEC §5 addendum drafted)
+## Step 12 — Writes become claims (IN FLIGHT, branch `writes-become-claims`)
 
 The schema as protocol: read program + write discipline, both data, both traveling.
 
@@ -53,9 +20,42 @@ The schema as protocol: read program + write discipline, both data, both traveli
    host/film/guests/date screening is ONE delta). Trial-proven against the schema's own body at
    registration (specimen → gather → refuse invisible templates).
 2. **`_claim`** generic mutation (pointer list in, one delta out) for unanticipated shapes.
-3. **`POST /:mount/append`**: pre-signed wire deltas, verified, standing-gated — non-custodial.
+3. **`POST /:mount/append`**: pre-signed wire deltas, verified; the TOKEN authenticates
+   transport, each delta's own verified author is what append authorizes — non-custodial.
 4. **`_hviewHex`** beside `_hex` (same-evidence vs same-answer).
-5. Primitive-prop mutations remain as the auto-derived degenerate template.
+5. Primitive-prop mutations remain as the auto-derived degenerate path.
+
+Design decisions (stage 1):
+
+- Template JSON (rides the registration delta under a `mutations` role):
+  `{ "<name>": { "pointers": [ { "role", "at"?: {"arg"}, "context"?, "value"?: {"arg"}|literal,
+  "each"?: true } ] } }`. `at`+`context` → entity pointer (arg: GraphQL ID, `each` → [ID!]);
+  `value` arg → PrimitiveValue; literal `value` → fixed. Exactly one of at/value per pointer.
+- Template mutations return a receipt `{ delta: ID! }` (one fact may serve many entities; no
+  single view is THE result). `_claim(pointers: [...])` returns the same receipt.
+- Trial-prove at publish: substitute sentinel ids/values for args, build the specimen delta,
+  evaluate the schema body at each entity-arg sentinel — refuse a template whose specimen no
+  entity it touches can see through this schema. At READ, a malformed template is dropped
+  (the schema still binds; the surface just lacks that mutation).
+- `_hviewHex` computed in resolvedNode from the same gathered hview (hviewCanonicalHex).
+
+Checklist:
+
+- [x] Stage 1: journal step 11; plan + design decisions here
+- [x] Tests first: test/gateway/claims.test.ts (8 tests: one-call-one-delta with `each`,
+      standing, invisible-template refusal, malformed-template-drops-quietly, template
+      evolution, `_claim` incl. shape validation, `_hviewHex` same-evidence/different-answer)
+      + POST /append trio in http.test.ts. Field note: at Wren's root the multi-pointer delta
+      resolves as the event FROM HER PERSPECTIVE (her anchor pointer elided) — lovely.
+- [x] Implement: registration.ts (ClaimTemplates types + parseClaimTemplates + serde in the
+      registration delta), gql.ts (template mutations + `_claim` + ClaimReceipt + PointerInput
+      + `_hviewHex` meta field), gateway.ts (claimEntity + assertTemplatesVisible + hviewHex in
+      resolvedNode/captured streams + boundKey includes templates + fixpoint binds a
+      bad-template registration WITHOUT its templates), http.ts (/append + register accepts
+      mutations), genesis passthrough, index exports, README (Writes are claims section)
+- [x] Gate: 204/204
+- [ ] PR → review (one agent, neutral register) → resolve → merge → JOURNAL → step 13
+      ← **left off here**
 
 ## Step 13 — Trust is data (queued; SPEC §8)
 

@@ -16,10 +16,14 @@
 
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { parsePolicy, parseTerm, type HyperSchema } from "@bombadil/rhizomatic";
-import { toWire } from "../federation/wire.js";
+import { parsePolicy, parseTerm, type Delta, type HyperSchema } from "@bombadil/rhizomatic";
+import { fromWire, toWire, type WireDelta } from "../federation/wire.js";
 import type { Gateway, QueryResult, RequestContext } from "../gateway/gateway.js";
-import { schemaEntityFor } from "../gateway/registration.js";
+import {
+  parseClaimTemplates,
+  schemaEntityFor,
+  type ClaimTemplates,
+} from "../gateway/registration.js";
 
 export interface TokenIdentity {
   readonly actor?: string; // a signing seed: requests act as this identity
@@ -97,6 +101,7 @@ async function performRegistration(
     policy?: unknown;
     roots?: unknown;
     entity?: unknown;
+    mutations?: unknown;
   } | null;
   if (o === null || typeof o !== "object" || o.schema === null || typeof o.schema !== "object") {
     throw new Error("register wants { schema: { name, alg?, body }, policy, roots, entity? }");
@@ -116,7 +121,16 @@ async function performRegistration(
   }
   const schema: HyperSchema = { name, alg: alg ?? 1, body: parseTerm(body) };
   const policy = parsePolicy(o.policy);
-  await gateway.publishRegistration(schema, policy, o.roots as string[], undefined, o.entity);
+  const mutations: ClaimTemplates | undefined =
+    o.mutations === undefined ? undefined : parseClaimTemplates(o.mutations);
+  await gateway.publishRegistration(
+    schema,
+    policy,
+    o.roots as string[],
+    undefined,
+    o.entity,
+    mutations,
+  );
   return { registered: name, entity: schemaEntityFor(schema, o.entity) };
 }
 
@@ -433,6 +447,48 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         case "mcp":
           await handleMcp(gateway, identity, req, res);
           return;
+        case "append": {
+          // The non-custodial door: a client signs its own deltas and presents them. The
+          // token authenticates TRANSPORT only — each delta is verified and authorized by its
+          // own author's standing, exactly as Gateway.append always does. The server never
+          // holds the key.
+          let parsed: { deltas?: WireDelta[] };
+          try {
+            parsed = JSON.parse(await readBody(req, maxBody)) as typeof parsed;
+          } catch (err) {
+            if (err instanceof BodyTooLarge) {
+              json(res, 413, { errors: ["request body too large"] });
+              return;
+            }
+            json(res, 400, { errors: ["the body must be JSON: { deltas: [...] }"] });
+            return;
+          }
+          if (!Array.isArray(parsed?.deltas) || parsed.deltas.length === 0) {
+            json(res, 400, { errors: ["append wants { deltas: [...] }, at least one"] });
+            return;
+          }
+          const batch: Delta[] = [];
+          for (const wire of parsed.deltas) {
+            try {
+              batch.push(fromWire(wire));
+            } catch (err) {
+              json(res, 400, {
+                errors: [
+                  `a delta would not reconstruct: ${err instanceof Error ? err.message : String(err)}`,
+                ],
+              });
+              return;
+            }
+          }
+          try {
+            const receipt = await gateway.append(batch);
+            json(res, 200, receipt);
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            json(res, /not permitted/.test(message) ? 403 : 400, { errors: [message] });
+          }
+          return;
+        }
         case "register": {
           // Registration is constitutional — the schema-schema mutation mechanism, served. An
           // HTTP endpoint rather than a GraphQL mutation because an empty store has no GraphQL

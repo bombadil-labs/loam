@@ -20,10 +20,27 @@ import {
   type Claims,
   type HyperSchema,
   type Policy,
+  type Primitive,
   type Reactor,
 } from "@bombadil/rhizomatic";
 
 export const CTX_REGISTRATION = "loam.registration";
+
+// The write discipline (step 12): a claim template is a pointer skeleton with argument holes.
+// `at` + `context` make an entity pointer (the hole takes an id; `each` takes a list of them);
+// `value` takes a primitive hole or a fixed literal. One template call emits ONE delta shaped
+// exactly as declared — the guarantee that makes a published schema a PROTOCOL.
+export interface ClaimPointerTemplate {
+  readonly role: string;
+  readonly at?: { readonly arg: string };
+  readonly context?: string;
+  readonly value?: { readonly arg: string } | Primitive;
+  readonly each?: boolean;
+}
+export interface ClaimTemplate {
+  readonly pointers: readonly ClaimPointerTemplate[];
+}
+export type ClaimTemplates = Readonly<Record<string, ClaimTemplate>>;
 
 export interface Registration {
   readonly schema: HyperSchema;
@@ -32,6 +49,77 @@ export interface Registration {
   // The schema entity the definition lives at. Identity is the ENTITY, not the name:
   // republishing here evolves; a different entity is a different schema.
   readonly entity?: string;
+  // The write discipline, traveling with the read program.
+  readonly mutations?: ClaimTemplates;
+}
+
+const isPrimitive = (v: unknown): v is Primitive =>
+  typeof v === "string" || typeof v === "number" || typeof v === "boolean";
+
+// Parse and validate the templates' JSON profile. Throws on anything malformed — the caller
+// decides whether that refuses a publish (loud) or drops the templates from a stored
+// registration (quiet: the schema still binds; the surface just lacks the mutation).
+export function parseClaimTemplates(raw: unknown): ClaimTemplates {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("mutations must be an object of named claim templates");
+  }
+  const out: Record<string, ClaimTemplate> = {};
+  for (const [name, tpl] of Object.entries(raw as Record<string, unknown>)) {
+    if (!/^[A-Za-z][A-Za-z0-9]*$/.test(name)) {
+      throw new Error(`template "${name}": not a usable mutation name`);
+    }
+    const t = tpl as { pointers?: unknown };
+    if (
+      t === null ||
+      typeof t !== "object" ||
+      !Array.isArray(t.pointers) ||
+      t.pointers.length === 0
+    ) {
+      throw new Error(`template "${name}": wants { pointers: [...] }, at least one`);
+    }
+    const pointers = t.pointers.map((p: unknown, i: number): ClaimPointerTemplate => {
+      const o = p as Record<string, unknown>;
+      if (
+        o === null ||
+        typeof o !== "object" ||
+        typeof o["role"] !== "string" ||
+        o["role"] === ""
+      ) {
+        throw new Error(`template "${name}" pointer ${i}: a pointer names a role`);
+      }
+      const at = o["at"] as { arg?: unknown } | undefined;
+      const hasAt = at !== undefined;
+      const hasValue = o["value"] !== undefined;
+      if (hasAt === hasValue) {
+        throw new Error(`template "${name}" pointer ${i}: exactly one of at/value`);
+      }
+      if (hasAt) {
+        if (typeof at?.arg !== "string" || typeof o["context"] !== "string") {
+          throw new Error(`template "${name}" pointer ${i}: at wants { arg } and a context`);
+        }
+        return {
+          role: o["role"],
+          at: { arg: at.arg },
+          context: o["context"],
+          ...(o["each"] === true ? { each: true } : {}),
+        };
+      }
+      const value = o["value"];
+      const hole = value as { arg?: unknown };
+      if (typeof hole === "object" && hole !== null) {
+        if (typeof hole.arg !== "string") {
+          throw new Error(`template "${name}" pointer ${i}: value hole wants { arg }`);
+        }
+        return { role: o["role"], value: { arg: hole.arg } };
+      }
+      if (!isPrimitive(value)) {
+        throw new Error(`template "${name}" pointer ${i}: a literal value must be a primitive`);
+      }
+      return { role: o["role"], value };
+    });
+    out[name] = { pointers };
+  }
+  return out;
 }
 
 export const schemaEntityFor = (schema: HyperSchema, entity?: string): string =>
@@ -49,11 +137,20 @@ export function registrationClaims(
   roots: readonly string[],
   author: string,
   timestamp: number,
+  mutations?: ClaimTemplates,
 ): Claims {
   return {
     timestamp,
     author,
     pointers: [
+      ...(mutations === undefined
+        ? []
+        : [
+            {
+              role: "mutations",
+              target: { kind: "primitive" as const, value: JSON.stringify(mutations) },
+            },
+          ]),
       {
         role: "registers",
         target: {
@@ -121,6 +218,7 @@ export function readRegistrations(reactor: Reactor, operator?: string): Registra
     schemaEntity: string;
     policy: Policy;
     roots: readonly string[];
+    mutations?: ClaimTemplates;
     timestamp: number;
     id: string;
   }
@@ -156,11 +254,23 @@ export function readRegistrations(reactor: Reactor, operator?: string): Registra
     } catch {
       continue;
     }
+    // A malformed template payload is dropped QUIETLY (the schema still binds; the surface
+    // just lacks the mutation) — the loud refusal belongs to publish, not replay.
+    let mutations: ClaimTemplates | undefined;
+    const mutationsJson = primitive(delta.claims, "mutations");
+    if (typeof mutationsJson === "string") {
+      try {
+        mutations = parseClaimTemplates(JSON.parse(mutationsJson));
+      } catch {
+        mutations = undefined;
+      }
+    }
     const schemaEntity = schemaRef.target.entity.id;
     const candidate: Candidate = {
       schemaEntity,
       policy,
       roots,
+      ...(mutations === undefined ? {} : { mutations }),
       timestamp: delta.claims.timestamp,
       id: delta.id,
     };
@@ -184,7 +294,13 @@ export function readRegistrations(reactor: Reactor, operator?: string): Registra
       // name carries it — plantable only by hand, never through publishRegistration — binds
       // nothing rather than colliding with that namespace.
       if (schema.name.includes("\u0000")) continue;
-      out.push({ schema, policy: cand.policy, roots: cand.roots, entity: cand.schemaEntity });
+      out.push({
+        schema,
+        policy: cand.policy,
+        roots: cand.roots,
+        entity: cand.schemaEntity,
+        ...(cand.mutations === undefined ? {} : { mutations: cand.mutations }),
+      });
     } catch {
       // no surviving (or a malformed) definition: the registration is unbound, not fatal
     }

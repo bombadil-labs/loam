@@ -62,7 +62,10 @@ export function assembleGenesis(spec: GenesisSpec): Genesis {
     const entity = schemaEntityFor(reg.schema, reg.entity);
     deltas.push(signClaims(publishSchemaClaims(reg.schema, entity, operator, clock++), seed));
     deltas.push(
-      signClaims(registrationClaims(entity, reg.policy, reg.roots, operator, clock++), seed),
+      signClaims(
+        registrationClaims(entity, reg.policy, reg.roots, operator, clock++, reg.mutations),
+        seed,
+      ),
     );
   }
   for (const claims of spec.grants ?? []) deltas.push(signClaims(claims, seed));

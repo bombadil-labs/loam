@@ -2,3 +2,7 @@ node_modules/
 dist/
 .DS_Store
 *.log
+
+# Ephemeral field-test playground and local harness config
+_testing/
+.claude/

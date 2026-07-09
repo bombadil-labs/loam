@@ -16,7 +16,9 @@ import {
   authorForSeed,
   computeId,
   evalTerm,
+  hviewCanonicalHex,
   loadSchema,
+  makeDelta,
   policyToJson,
   publishSchemaClaims,
   resolveView,
@@ -39,12 +41,19 @@ import type { StoreBackend } from "../store/backend.js";
 import { authorize } from "./accounts.js";
 import { Channel } from "./channel.js";
 import type { Genesis } from "./genesis.js";
-import { buildGqlSchema, type GqlHooks, type PatchNode, type ResolvedNode } from "./gql.js";
+import {
+  buildGqlSchema,
+  type ClaimPointerSpec,
+  type GqlHooks,
+  type PatchNode,
+  type ResolvedNode,
+} from "./gql.js";
 import {
   lawfulSnapshot,
   readRegistrations,
   registrationClaims,
   schemaEntityFor,
+  type ClaimTemplates,
   type Registration,
 } from "./registration.js";
 
@@ -196,7 +205,58 @@ export class Gateway {
       resolve: (name, entity) => this.resolvedNode(name, entity),
       mutate: (name, entity, props, actorSeed) => this.mutateEntity(name, entity, props, actorSeed),
       watch: (name, entity) => this.watchEntity(name, entity),
+      claim: (pointers, actorSeed) => this.claimEntity(pointers, actorSeed),
     };
+  }
+
+  // Every claim template must be VISIBLE to its own schema: substitute sentinels for the arg
+  // holes, build the specimen delta, and require that at least one entity the template touches
+  // can see it through this schema's gather. A mutation whose writes its own reads would never
+  // show is refused before it can mislead anyone.
+  private static assertTemplatesVisible(
+    schema: HyperSchema,
+    templates: ClaimTemplates | undefined,
+    registry: SchemaRegistry,
+  ): void {
+    for (const [name, template] of Object.entries(templates ?? {})) {
+      const pointers = template.pointers.map((p) => {
+        if (p.at !== undefined) {
+          return {
+            role: p.role,
+            target: {
+              kind: "entity" as const,
+              entity: { id: `loam:specimen:${p.at.arg}`, context: p.context ?? p.role },
+            },
+          };
+        }
+        const value =
+          typeof p.value === "object" && p.value !== null
+            ? "loam:specimen"
+            : (p.value as Primitive);
+        return { role: p.role, target: { kind: "primitive" as const, value } };
+      });
+      const specimen = makeDelta({ timestamp: 1, author: "loam:specimen", pointers });
+      const ground = DeltaSet.from([specimen]);
+      const sentinels = [
+        ...new Set(
+          pointers.flatMap((p) => (p.target.kind === "entity" ? [p.target.entity.id] : [])),
+        ),
+      ];
+      const seen = sentinels.some((root) => {
+        const result = evalTerm(schema.body, ground, root, registry);
+        if (result.sort !== "hview") return false;
+        for (const entries of result.hview.props.values()) {
+          if (entries.some((e) => e.delta.id === specimen.id)) return true;
+        }
+        return false;
+      });
+      if (!seen) {
+        throw new Error(
+          `schema ${schema.name}: template "${name}" emits a delta this schema cannot see ` +
+            `from any entity it touches — a write its own reads would never show`,
+        );
+      }
+    }
   }
 
   // A body must MATERIALIZE (yield an HView): SchemaRegistry and buildGqlSchema never evaluate
@@ -220,6 +280,7 @@ export class Gateway {
       termHash(r.schema.body),
       JSON.stringify(policyToJson(r.policy)),
       JSON.stringify(r.roots),
+      JSON.stringify(r.mutations ?? null),
       r.entity ?? "",
       r.origin,
     ].join(NUL);
@@ -244,14 +305,31 @@ export class Gateway {
       const stillPending: Bound[] = [];
       let progressed = false;
       for (const reg of pending) {
-        const trial = [...accepted, reg];
-        try {
-          const registry = SchemaRegistry.build(trial.map((r) => r.schema)); // dups, refs, cycles
-          Gateway.assertMaterializable(reg.schema, registry); // reactor.register would throw
-          buildGqlSchema(trial, this.gqlHooks()); // GraphQL name collisions
-          accepted.push(reg);
+        const attempt = (candidate: Bound): boolean => {
+          try {
+            const trial = [...accepted, candidate];
+            const registry = SchemaRegistry.build(trial.map((r) => r.schema)); // dups, refs, cycles
+            Gateway.assertMaterializable(candidate.schema, registry); // reactor.register would throw
+            Gateway.assertTemplatesVisible(candidate.schema, candidate.mutations, registry);
+            buildGqlSchema(trial, this.gqlHooks()); // GraphQL name collisions
+            accepted.push(candidate);
+            return true;
+          } catch {
+            return false;
+          }
+        };
+        // A stored registration whose TEMPLATES are the only problem binds without them —
+        // the schema still serves; the surface just lacks the mutation.
+        const templateless: Bound = {
+          schema: reg.schema,
+          policy: reg.policy,
+          roots: reg.roots,
+          origin: reg.origin,
+          ...(reg.entity === undefined ? {} : { entity: reg.entity }),
+        };
+        if (attempt(reg) || (reg.mutations !== undefined && attempt(templateless))) {
           progressed = true;
-        } catch {
+        } else {
           stillPending.push(reg); // its refs are not registered yet — try again next round
         }
       }
@@ -370,13 +448,22 @@ export class Gateway {
   // names, unresolved refs, GraphQL field collisions — refuses BEFORE any state changes, so a
   // failed registration leaves the gateway exactly as it was. Register dependencies first:
   // earlier schemas are visible to later refs.
-  register(schema: HyperSchema, policy: Policy, roots: readonly string[]): void {
+  register(
+    schema: HyperSchema,
+    policy: Policy,
+    roots: readonly string[],
+    mutations?: ClaimTemplates,
+  ): void {
     if (schema.name.includes(NUL)) {
       throw new Error("a schema name may not contain NUL — that alphabet is the gateway's own");
     }
-    const next: Bound[] = [...this.registered, { schema, policy, roots, origin: "manual" }];
+    const next: Bound[] = [
+      ...this.registered,
+      { schema, policy, roots, origin: "manual", ...(mutations ? { mutations } : {}) },
+    ];
     const registry = SchemaRegistry.build(next.map((r) => r.schema)); // refuses dups + bad refs
     Gateway.assertMaterializable(schema, registry); // refuses a body that yields no hyperview
+    Gateway.assertTemplatesVisible(schema, mutations, registry); // refuses invisible writes
     const gql = buildGqlSchema(next, this.gqlHooks()); // refuses collisions
     // Incremental: only the NEW materialization registers, under the current generation.
     this.reactor.register(this.matName(schema.name), schema.body, roots, registry);
@@ -398,6 +485,7 @@ export class Gateway {
     roots: readonly string[],
     context?: RequestContext,
     entity?: string,
+    mutations?: ClaimTemplates,
   ): Promise<void> {
     const seed = context?.actor ?? this.options.seed;
     if (seed === undefined) {
@@ -420,6 +508,7 @@ export class Gateway {
       schema,
     ]);
     Gateway.assertMaterializable(schema, trialRegistry);
+    Gateway.assertTemplatesVisible(schema, mutations, trialRegistry); // loud, before persisting
 
     const author = authorForSeed(seed);
     const schemaEntity = schemaEntityFor(schema, entity);
@@ -429,7 +518,7 @@ export class Gateway {
     );
     await this.loadSchema([definition], schemaEntity); // proves, then persists the definition
     const reference = signClaims(
-      registrationClaims(schemaEntity, policy, roots, author, this.nextTimestamp()),
+      registrationClaims(schemaEntity, policy, roots, author, this.nextTimestamp(), mutations),
       seed,
     );
     await this.append([reference]);
@@ -591,11 +680,14 @@ export class Gateway {
   }
 
   private resolvedNode(name: string, entity: string): ResolvedNode {
-    const view = resolveView(this.def(name).policy, this.gather(name, entity)) as Record<
-      string,
-      View
-    >;
-    return { entity, view, hex: viewCanonicalHex(view) };
+    const hview = this.gather(name, entity);
+    const view = resolveView(this.def(name).policy, hview) as Record<string, View>;
+    return {
+      entity,
+      view,
+      hex: viewCanonicalHex(view),
+      hviewHex: hviewCanonicalHex(hview),
+    };
   }
 
   // --- the write seam --------------------------------------------------------------------------
@@ -639,6 +731,45 @@ export class Gateway {
     return this.resolvedNode(name, entity);
   }
 
+  // One signed MULTI-POINTER delta from an explicit pointer list — what every claim template
+  // is sugar for. The actor signs (or the operator, when none is named); standing is asked by
+  // append like everywhere else. Returns the receipt: the delta id.
+  private async claimEntity(
+    pointers: readonly ClaimPointerSpec[],
+    actorSeed?: string,
+  ): Promise<{ delta: string }> {
+    const seed = actorSeed ?? this.options.seed;
+    if (seed === undefined) {
+      throw new Error("this gateway holds no signing seed and cannot write");
+    }
+    if (pointers.length === 0) {
+      throw new Error("a claim carries at least one pointer");
+    }
+    const mapped = pointers.map((p, i) => {
+      const hasAt = p.at !== undefined;
+      const hasValue = p.value !== undefined;
+      if (hasAt === hasValue) {
+        throw new Error(`claim pointer ${i} ("${p.role}"): exactly one of at/value`);
+      }
+      if (hasAt) {
+        if (p.context === undefined || p.context === "") {
+          throw new Error(`claim pointer ${i} ("${p.role}"): an entity pointer wants a context`);
+        }
+        return {
+          role: p.role,
+          target: { kind: "entity" as const, entity: { id: p.at, context: p.context } },
+        };
+      }
+      return { role: p.role, target: { kind: "primitive" as const, value: p.value as Primitive } };
+    });
+    const delta = signClaims(
+      { timestamp: this.nextTimestamp(), author: authorForSeed(seed), pointers: mapped },
+      seed,
+    );
+    await this.append([delta]);
+    return { delta: delta.id };
+  }
+
   // --- the live seam ---------------------------------------------------------------------------
 
   // A dynamic view of (schema, entity): an initial snapshot, then a patch per relevant change.
@@ -664,7 +795,12 @@ export class Gateway {
         throw new Error(`the materialization backing this stream is gone — resubscribe`);
       }
       const view = resolveView(bound.policy, hview) as Record<string, View>;
-      return { entity, view, hex: viewCanonicalHex(view) };
+      return {
+        entity,
+        view,
+        hex: viewCanonicalHex(view),
+        hviewHex: hviewCanonicalHex(hview),
+      };
     };
     let sinks = this.sinks.get(matName);
     if (sinks === undefined) {
