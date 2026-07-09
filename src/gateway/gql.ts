@@ -168,11 +168,13 @@ export function buildGqlSchema(defs: readonly Registered[], hooks: GqlHooks): Gr
 
   for (const def of defs) {
     // Refuse collisions NOW, at build time — a lazy fields thunk would only complain when the
-    // type is first used, long after register() reported success.
+    // type is first used, long after register() reported success. "__proto__" is refused too:
+    // plain-object assignment silently swallows it (the prototype setter), so a schema carrying
+    // it would build cleanly and then quietly lose every read and write of that property.
     const seen = new Set(["_entity", "_hex", "_view", "_fromHex", "_changed", "entity"]);
     for (const [prop] of def.policy.props) {
       const name = legal(prop);
-      if (seen.has(name)) {
+      if (seen.has(name) || name === "__proto__") {
         throw new Error(
           `schema ${def.schema.name}: property "${prop}" collides with field "${name}"`,
         );
@@ -230,7 +232,8 @@ export function buildGqlSchema(defs: readonly Registered[], hooks: GqlHooks): Gr
         `becomes one signed delta. Returns the re-resolved view.`,
       args: { ...entityArg, ...propArgs },
       resolve: (_src, args: Record<string, unknown>) => {
-        const props: Record<string, Primitive> = {};
+        // A null prototype: no store-named property can ever reach a real Object.prototype key.
+        const props: Record<string, Primitive> = Object.create(null) as Record<string, Primitive>;
         for (const [prop] of def.policy.props) {
           const v = args[legal(prop)];
           if (v !== undefined && v !== null) props[prop] = v as Primitive;

@@ -91,6 +91,58 @@ describe("subscribe: an initial snapshot, then patches", () => {
     await gateway.close();
   });
 
+  it("a change that leaves the view identical is silence, not a no-op patch", async () => {
+    const gateway = await keeperGateway();
+    const events = await gateway.subscribe(SUBSCRIPTION);
+    await nextPatch(events); // the snapshot (height 34, picked latest)
+    // A NEW delta (later timestamp) claiming the same height: the HView moves, the View doesn't.
+    await gateway.query(`mutation { plant(entity: "${FERN}", height: 34) { height } }`);
+    await expectSilence(events);
+    await events.return(undefined);
+    await gateway.close();
+  });
+
+  it("a slow reader coalesces: one pending patch, hex chain intact, changes unioned", async () => {
+    const gateway = await keeperGateway();
+    const events = await gateway.subscribe(SUBSCRIPTION);
+    const initial = await nextPatch(events);
+    // Three writes while nobody reads:
+    await gateway.query(`mutation { plant(entity: "${FERN}", height: 40) { height } }`);
+    await gateway.query(`mutation { plant(entity: "${FERN}", height: 41) { height } }`);
+    await gateway.query(`mutation { plant(entity: "${FERN}", tag: "tall") { tag } }`);
+    const patch = await nextPatch(events);
+    expect(patch._fromHex).toBe(initial._hex); // the chain starts where the reader left off
+    expect(patch.height).toBe(41); // and ends at the present
+    expect(patch._changed).toEqual(expect.arrayContaining(["height", "tag"]));
+    await expectSilence(events); // nothing else pending: the three writes were one patch
+    await events.return(undefined);
+    await gateway.close();
+  });
+
+  it("a live subscription survives a later registration", async () => {
+    const gateway = await keeperGateway();
+    const events = await gateway.subscribe(SUBSCRIPTION);
+    await nextPatch(events);
+    gateway.register(
+      { name: "Moss", alg: 1, body: PLANT.body },
+      { props: new Map(), default: { kind: "pick", order: { kind: "byTimestamp", dir: "desc" } } },
+      ["plant:moss"],
+    );
+    await gateway.query(`mutation { plant(entity: "${FERN}", height: 45) { height } }`);
+    expect((await nextPatch(events)).height).toBe(45);
+    await events.return(undefined);
+    await gateway.close();
+  });
+
+  it("closing the gateway ends every live subscription; parked readers wake with done", async () => {
+    const gateway = await keeperGateway();
+    const events = await gateway.subscribe(SUBSCRIPTION);
+    await nextPatch(events);
+    const parked = events.next(); // parked, waiting for an event that will never come
+    await gateway.close();
+    expect((await parked).done).toBe(true);
+  });
+
   it("an unwatched entity can be subscribed: the materialization grows on demand", async () => {
     const gateway = await keeperGateway();
     const events = await gateway.subscribe(`subscription {

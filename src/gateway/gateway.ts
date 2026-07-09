@@ -67,6 +67,7 @@ export class Gateway {
   // in any registered root list — are cached and reused for the gateway's lifetime.
   private readonly sinks = new Map<string, Set<(c: MaterializationChange) => void>>();
   private readonly lazyMats = new Set<string>();
+  private readonly channels = new Set<Channel<PatchNode>>();
 
   private constructor(
     private readonly backend: StoreBackend,
@@ -139,6 +140,9 @@ export class Gateway {
   // failed registration leaves the gateway exactly as it was. Register dependencies first:
   // earlier schemas are visible to later refs.
   register(schema: HyperSchema, policy: Policy, roots: readonly string[]): void {
+    if (schema.name.includes("\u0000")) {
+      throw new Error("a schema name may not contain NUL — that alphabet is the gateway's own");
+    }
     const next = [...this.registered, { schema, policy, roots }];
     const registry = SchemaRegistry.build(next.map((r) => r.schema)); // refuses dups + bad refs
     const gql = buildGqlSchema(next, {
@@ -161,11 +165,16 @@ export class Gateway {
   }
 
   // The materialization watching (schema, entity) — the schema's own when the entity is a
-  // registered root, a lazily-created cached one otherwise.
+  // registered root, a lazily-created cached one otherwise. Lazy names live in a NUL-separated
+  // namespace no schema name can enter (register() refuses NUL), so they can never collide.
+  private lazyMatName(name: string, entity: string): string {
+    return `\u0000${name}\u0000${entity}`;
+  }
+
   private matFor(name: string, entity: string): string {
     const def = this.def(name);
     if (def.roots.includes(entity)) return name;
-    const matName = `${name}@${entity}`;
+    const matName = this.lazyMatName(name, entity);
     if (!this.lazyMats.has(matName)) {
       this.reactor.register(matName, def.schema.body, [entity], this.registry);
       this.lazyMats.add(matName);
@@ -178,7 +187,7 @@ export class Gateway {
   private gather(name: string, entity: string): HView {
     const live =
       this.reactor.materializedView(name, entity) ??
-      this.reactor.materializedView(`${name}@${entity}`, entity);
+      this.reactor.materializedView(this.lazyMatName(name, entity), entity);
     if (live !== undefined) return live;
     const def = this.def(name);
     const result = this.reactor.eval(def.schema.body, entity, this.registry);
@@ -235,7 +244,11 @@ export class Gateway {
 
   // A dynamic view of (schema, entity): an initial snapshot, then a patch per relevant change.
   // Built on a Channel, so leaving the stream (return/throw) detaches immediately — even while
-  // the reader is parked waiting for an event that never comes.
+  // the reader is parked waiting for an event that never comes. A slow reader coalesces: at
+  // most one pending patch, its hex chain and changed-set kept honest by the merge. A sink that
+  // cannot re-resolve fails ITS OWN stream and detaches — it never aborts the fan-out or the
+  // writer whose ingest triggered it. A change that leaves the resolved view identical (same
+  // hex) is no patch at all.
   private watchEntity(name: string, entity: string): AsyncGenerator<PatchNode, void, unknown> {
     const matName = this.matFor(name, entity);
     let sinks = this.sinks.get(matName);
@@ -251,15 +264,31 @@ export class Gateway {
     const liveSinks = sinks;
     const sink = (c: MaterializationChange): void => {
       if (c.root !== entity) return;
-      const node = this.resolvedNode(name, entity);
-      channel.push({ ...node, fromHex: lastHex, changed: [...c.changedProps] });
-      lastHex = node.hex;
+      try {
+        const node = this.resolvedNode(name, entity);
+        if (node.hex === lastHex) return; // the view did not move: silence, not a no-op patch
+        channel.push({ ...node, fromHex: lastHex, changed: [...c.changedProps] });
+        lastHex = node.hex;
+      } catch (err) {
+        channel.fail(toError(err)); // onClose detaches this sink; others are untouched
+      }
     };
-    const channel = new Channel<PatchNode>(() => liveSinks.delete(sink));
+    const channel = new Channel<PatchNode>(
+      () => {
+        liveSinks.delete(sink);
+        this.channels.delete(channel);
+      },
+      (pending, incoming) => ({
+        ...incoming,
+        fromHex: pending.fromHex,
+        changed: [...new Set([...(pending.changed ?? []), ...(incoming.changed ?? [])])],
+      }),
+    );
 
     const initial = this.resolvedNode(name, entity);
     let lastHex = initial.hex;
     liveSinks.add(sink);
+    this.channels.add(channel);
     channel.push({ ...initial, fromHex: null, changed: null });
     return channel;
   }
@@ -338,8 +367,10 @@ export class Gateway {
     }
   }
 
-  // Close always releases the backend, even when a latched write failure has to be surfaced.
+  // Close ends every live subscription (a parked reader wakes with done, never hangs), then
+  // always releases the backend, even when a latched write failure has to be surfaced.
   async close(): Promise<void> {
+    for (const channel of [...this.channels]) await channel.return();
     try {
       await this.flush();
     } finally {
