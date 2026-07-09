@@ -177,7 +177,14 @@ mutations are signed by the actor, so grants key on authentic authorship.
   multi-connection).
 - **Passive or animate** — a deploy flag (§6), not an architecture.
 - **Cloud turnkey** — fastest-secure-persistent path (a container + hosted persistence + a deploy
-  button); replaces a tailscale-exposed box with a plain authed HTTPS endpoint.
+  button); replaces a tailscale-exposed box with a plain authed HTTPS endpoint. Implemented
+  (step 8): a `Dockerfile` (node 22-slim, non-root, `loam serve --http`, store on a `/data`
+  volume) and the `loam` CLI. **Hosted persistence is a driver, not an image change**: the
+  `StoreBackend` seam (step 2) is satisfied by any async append/`deltasSince`/close, so a libSQL
+  driver (`@libsql/client` against a Turso URL) drops in beside `SqliteBackend` with no gateway,
+  server, or CLI change — the same file format, hosted and replicated. (Not vendored here: it
+  adds a dependency for a path that needs a live Turso account to exercise; the seam is the
+  deliverable, the driver is a one-file addition when a deploy needs it.)
 - **Federation** — rhizomatic's `Peer`/`syncBoth` over the authed HTTP surface + a "subscribe to
   instance X's published lens" declaration. `deltasSince` is one primitive at every scale.
 

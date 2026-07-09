@@ -19,7 +19,14 @@ export {
   type QueryResult,
   type RequestContext,
 } from "./gateway/gateway.js";
-export { assembleGenesis, type Genesis, type GenesisSpec } from "./gateway/genesis.js";
+export {
+  assembleGenesis,
+  operatorMarkerClaims,
+  CTX_OPERATOR,
+  STORE_ENTITY,
+  type Genesis,
+  type GenesisSpec,
+} from "./gateway/genesis.js";
 export { buildGqlSchema, type Registered } from "./gateway/gql.js";
 export {
   readRegistrations,
@@ -32,6 +39,8 @@ export {
   readBindingDefinitions,
   type RunnerOptions,
 } from "./runner/runner.js";
+export { run, main, type IO, type RunOptions } from "./cli/cli.js";
+export { initHome, readConfig, storePath, type LoamConfig } from "./cli/config.js";
 export { serve, type ServeOptions, type ServerHandle, type TokenIdentity } from "./server/http.js";
 export type { StoreBackend } from "./store/backend.js";
 export { canonicalDelta } from "./store/canon.js";

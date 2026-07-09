@@ -22,12 +22,33 @@ export interface Genesis {
   readonly deltas: readonly Delta[];
 }
 
+export const STORE_ENTITY = "loam:store";
+export const CTX_OPERATOR = "loam.operator";
+
+// The genesis marker: an operator-signed delta recording who governs this store, filed at the
+// store entity. It makes every booted store non-empty from birth (a store always knows its own
+// operator), is idempotent (content-addressed — the same operator mints the same marker), and
+// is auditable like anything else.
+export function operatorMarkerClaims(operator: string): Claims {
+  return {
+    timestamp: 0, // fixed, so the marker is the same delta on every boot
+    author: operator,
+    pointers: [
+      {
+        role: "operator",
+        target: { kind: "entity", entity: { id: STORE_ENTITY, context: CTX_OPERATOR } },
+      },
+      { role: "author", target: { kind: "primitive", value: operator } },
+    ],
+  };
+}
+
 // Assemble the genesis: every claim signed by the operator, so the whole bundle is authorized
-// when it lands (the operator roots the capability chain).
+// when it lands (the operator roots the capability chain). Always leads with the operator marker.
 export function assembleGenesis(spec: GenesisSpec): Genesis {
   const seed = spec.operatorSeed;
   const operator = authorForSeed(seed);
-  const deltas: Delta[] = [];
+  const deltas: Delta[] = [signClaims(operatorMarkerClaims(operator), seed)];
   let clock = 1;
   for (const reg of spec.registrations ?? []) {
     deltas.push(signClaims(registrationClaims(reg, operator, clock++), seed));
