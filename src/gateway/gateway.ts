@@ -14,6 +14,7 @@ import {
   SchemaRegistry,
   authorForSeed,
   computeId,
+  evalTerm,
   loadSchema,
   resolveView,
   signClaims,
@@ -26,6 +27,7 @@ import {
   type MaterializationChange,
   type Policy,
   type Primitive,
+  type Term,
   type View,
 } from "@bombadil/rhizomatic";
 import { graphql, parse, subscribe, type ExecutionResult, type GraphQLSchema } from "graphql";
@@ -51,6 +53,16 @@ export interface GatewayOptions {
   // grant, plants the first tenants and grants, and signs mutations that name no actor. Without
   // a seed the gateway is read-only — unsigned authority does not exist here.
   readonly seed?: string;
+  // What this store OFFERS to federation peers: a term selecting the surviving deltas a puller
+  // may see. Default: everything. Trust is the peer's read lens, not this gateway's to decide;
+  // the offered lens is only what this store is willing to publish.
+  readonly offeredLens?: Term;
+}
+
+export interface FederationReport {
+  readonly offered: number;
+  readonly accepted: number;
+  readonly rejected: number; // failed verification or admission
 }
 
 export interface RequestContext {
@@ -95,6 +107,15 @@ export class Gateway {
     private readonly options: GatewayOptions,
   ) {
     this.operatorAuthor = options.seed === undefined ? undefined : authorForSeed(options.seed);
+    // Fail fast on a mis-shaped offered lens: a term that does not select a delta set would only
+    // blow up when a peer first pulls, in production. Trial-eval it now (empty store → empty
+    // dset; the SORT is what we're checking, and that is content-independent).
+    if (options.offeredLens !== undefined) {
+      const trial = evalTerm(options.offeredLens, reactor.snapshot());
+      if (trial.sort !== "dset") {
+        throw new Error("offeredLens must select a delta set (a mask/select term, not a group)");
+      }
+    }
     reactor.subscribeRaw((d) => {
       // Every accepted delta — appends AND a runner's derived emissions — is written through
       // here. Derived emissions do not pass authorize(): a governed store runs only the
@@ -277,6 +298,69 @@ export class Gateway {
   // Animate the gateway: route ingest through a runner's DerivationHost so bindings fire.
   animate(host: { ingest: (d: Delta) => IngestResult }): void {
     this.ingestVia = (d) => host.ingest(d);
+  }
+
+  // --- federation ------------------------------------------------------------------------------
+  //
+  // Federation is union at the substrate, NOT a governed mutation. Capabilities gate who may
+  // write via GraphQL; a peer's deltas cross by VERIFICATION alone (content address + a real
+  // signature, then an optional admission predicate). Whether a peer's facts shape a local view
+  // is a read-time TRUST choice (a policy's `byAuthorRank`), never a write denial here — "no
+  // authority deciding whose truth survives" (SPEC §8). So `federate` bypasses `authorize`.
+  //
+  // Foreign law stays inert by the SAME operator-rooting the local store uses: a federated
+  // grant / membership / registration / binding-definition authored by anyone but this store's
+  // operator binds nothing (grantHeld / readRegistrations / readBindingDefinitions all filter on
+  // the operator). This rests on one invariant the federation must keep: **distinct operator
+  // seeds across instances.** Two stores sharing an operator seed trust each other's
+  // constitution completely — a peer could then federate effective grants and code. Give every
+  // instance its own operator identity.
+
+  // The surviving deltas this store offers a peer — everything, or what the offered lens selects.
+  offeredDeltas(): Delta[] {
+    const lens = this.options.offeredLens;
+    if (lens === undefined) return [...this.reactor.snapshot()];
+    const result = evalTerm(lens, this.reactor.snapshot());
+    if (result.sort !== "dset") throw new Error("an offered lens must select a delta set");
+    return [...result.set];
+  }
+
+  // Admit a batch of peer deltas: verify each (a forgery or an unsigned delta is refused, and
+  // one bad delta does not poison the rest), apply the admission predicate, then ingest + write
+  // through. Idempotent — union dedups, so re-pulling accepts nothing new.
+  async federate(
+    deltas: Iterable<Delta>,
+    opts: { admit?: (d: Delta) => boolean } = {},
+  ): Promise<FederationReport> {
+    if (this.writeFailure !== undefined) {
+      throw new Error(`this gateway can no longer persist: ${this.writeFailure.message}`);
+    }
+    const all = [...deltas];
+    const admit = opts.admit ?? (() => true);
+    const admitted: Delta[] = [];
+    let rejected = 0;
+    for (const d of all) {
+      if (computeId(d.claims) !== d.id || verifyDelta(d) !== "verified" || !admit(d)) {
+        rejected += 1;
+        continue;
+      }
+      admitted.push(d);
+    }
+    let accepted = 0;
+    if (admitted.length > 0) {
+      await this.backend.append(admitted);
+      for (const d of admitted) this.justPersisted.add(d.id);
+      try {
+        for (const d of admitted) {
+          if (this.ingestVia(d).status === "accepted") accepted += 1;
+        }
+      } finally {
+        for (const d of admitted) this.justPersisted.delete(d.id);
+      }
+    }
+    // "accepted" counts deltas NEWLY ingested — a duplicate verified but merged into what was
+    // already there, so a re-pull accepts nothing (union is idempotent).
+    return { offered: all.length, accepted, rejected };
   }
 
   // The operator's author, so a peer (the runner) can gate on it without holding the seed.

@@ -15,10 +15,13 @@ export {
 export {
   Gateway,
   type AppendReceipt,
+  type FederationReport,
   type GatewayOptions,
   type QueryResult,
   type RequestContext,
 } from "./gateway/gateway.js";
+export { pullFrom, type PullOptions } from "./federation/pull.js";
+export { toWire, fromWire, type WireDelta } from "./federation/wire.js";
 export {
   assembleGenesis,
   operatorMarkerClaims,

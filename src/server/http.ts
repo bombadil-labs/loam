@@ -16,6 +16,7 @@
 
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { toWire } from "../federation/wire.js";
 import type { Gateway, QueryResult, RequestContext } from "../gateway/gateway.js";
 
 export interface TokenIdentity {
@@ -344,6 +345,17 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           return;
         case "mcp":
           await handleMcp(gateway, identity, req, res);
+          return;
+        case "federate":
+          // Federation is an OPERATOR-level trust relationship: the offer hands a peer the raw
+          // signed deltas (grants, memberships, registrations included) that the GraphQL surface
+          // would never expose. So it is gated on operator identity, not mere authentication — a
+          // scoped read token is not a licence to the store's whole substrate.
+          if (identity.operator !== true) {
+            json(res, 403, { errors: ["federation requires an operator token"] });
+            return;
+          }
+          json(res, 200, { deltas: gateway.offeredDeltas().map(toWire) });
           return;
         default:
           json(res, 404, { errors: ["no such surface"] });
