@@ -9,12 +9,12 @@
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
 import {
-  TENANT,
   TENANT_POLICY,
   grantClaims,
   membershipClaims,
   revocationClaims,
   tenantOf,
+  tenantSchemaFor,
 } from "../../src/gateway/accounts.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -44,7 +44,7 @@ async function grantedWorld(): Promise<Gateway> {
   ]);
   await gateway.append(garden);
   gateway.register(PLANT, PLANT_POLICY, [FERN]);
-  gateway.register(TENANT, TENANT_POLICY, [STORE_ENTITY]);
+  gateway.register(tenantSchemaFor(OPERATOR), TENANT_POLICY, [STORE_ENTITY]);
   return gateway;
 }
 
@@ -226,17 +226,15 @@ describe("standing: deny is the default, permission is an artifact", () => {
     const surveyorWrite = observed(FERN, "height", 77, tick(), "b2".repeat(32));
     await expect(gateway.append([surveyorWrite])).resolves.toMatchObject({ accepted: 1 });
 
-    // KNOWN DIVERGENCE, pinned deliberately: the TENANT audit view masks with `drop`, which
-    // honors alice's standing-less strike — so the audit shows one grant while enforcement
-    // honors two. The audit lens needs "honor negations from the operator/admins", a DYNAMIC
-    // trusted set no static mask predicate can express — the second concrete case for
-    // reflective predicates (rhizomatic#2). Until then: enforcement is the truth; the default
-    // audit view undercounts under standing-less strikes.
+    // THE DIVERGENCE IS DEAD (rhizomatic 0.2.0, rhizomatic#2 delivered): the governed audit
+    // view (tenantSchemaFor) masks with an inView trusted set — operator + operator-minted
+    // ADMINS, the same standing standsFor demands — so alice's standing-less strike moves the
+    // audit exactly as much as it moves enforcement: not at all. Audit agrees with the door.
     const audited = await gateway.query(`{ tenant(entity: "${STORE_ENTITY}") { _view } }`);
     const grants = ((audited.data as { tenant: { _view: Record<string, unknown> } }).tenant._view[
       "loam.grants"
     ] ?? []) as unknown[];
-    expect(grants).toHaveLength(1);
+    expect(grants).toHaveLength(2);
     await gateway.close();
   });
 
@@ -292,10 +290,10 @@ describe("standing: deny is the default, permission is an artifact", () => {
       signClaims(revocationClaims(surveyorHeight.id, ALICE, tick()), ALICE_SEED),
     ]);
     const read = await gateway.query(`{ plant(entity: "${FERN}") { height } }`);
-    // mask-drop honors any present negation: the view falls back to the older claim (30).
-    // This is the documented heckler's-veto interim (README, SPEC §7) — local negations come
-    // only through the granted-author door, so this is alice's standing misused, not a
-    // stranger's; the principled per-reader negation lens awaits rhizomatic#2.
+    // A drop-bodied schema honors any present negation BY CHOICE: the view falls back to the
+    // older claim. This is no longer an interim — trust-aware bodies exist
+    // (`governedGatherBody`, pinned in lenses.test.ts); `drop` remains the honest default for
+    // bodies that WANT community negations to bind unconditionally.
     expect((read.data as { plant: { height: number } }).plant.height).toBe(30);
     await gateway.close();
   });

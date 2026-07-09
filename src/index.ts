@@ -5,11 +5,13 @@ export {
   TENANT,
   TENANT_POLICY,
   authorize,
+  governedGatherBody,
   grantClaims,
   holdsGrant,
   membershipClaims,
   revocationClaims,
   tenantOf,
+  tenantSchemaFor,
   type Verb,
 } from "./gateway/accounts.js";
 export {

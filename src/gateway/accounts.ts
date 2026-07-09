@@ -18,6 +18,7 @@ import {
   type HyperSchema,
   type Policy,
   type Reactor,
+  type Term,
 } from "@bombadil/rhizomatic";
 import { STORE_ENTITY } from "./genesis.js";
 
@@ -75,7 +76,9 @@ export function revocationClaims(grantDeltaId: string, author: string, timestamp
 
 // --- the audit surface ----------------------------------------------------------------------------
 
-// A tenant, gathered: its grants, its members, anything filed at it.
+// A tenant, gathered: its grants, its members, anything filed at it. This UNGOVERNED form
+// masks with `drop` — every negation present binds. A governed store should audit through
+// `tenantSchemaFor(operator)` below, whose mask honors only lawful strikes.
 export const TENANT: HyperSchema = {
   name: "Tenant",
   alg: 1,
@@ -89,6 +92,86 @@ export const TENANT: HyperSchema = {
     },
   }),
 };
+
+// --- governed read lenses (rhizomatic 0.2.0: trust masks + inView) --------------------------------
+//
+// Under open writes, `mask drop` honors every negation present — a federated stranger's strike
+// becomes a heckler's veto. These lenses honor only LAWFUL strikers: the operator, plus the
+// authors the operator's surviving grants name (the community the door admitted). The trusted
+// set is an `inView` — a view over the same delta-set, always current: mint a grant and its
+// grantee's strikes bind on the next read; revoke it (operator-signed) and they stop. Depth-1
+// of the effectiveness chain, stated plainly: grants MINTED BY ADMINS (not the operator) do
+// not reach these lenses' trusted sets — enforcement's full recursion stays in grantHeld.
+function lawfulStrikersJson(operator: string, adminsOnly: boolean): unknown {
+  const operatorMinted = { match: { field: "author", cmp: "eq", const: operator } };
+  const grantShaped = {
+    hasPointer: { targetEntity: STORE_ENTITY, context: { exact: CTX_GRANTS } },
+  };
+  const adminVerbed = {
+    hasPointer: { role: { exact: "verb" }, targetValue: { vcmp: { cmp: "eq", value: "admin" } } },
+  };
+  return {
+    or: [
+      { match: { field: "author", cmp: "eq", const: operator } },
+      {
+        inView: {
+          term: {
+            op: "select",
+            pred: {
+              and: [
+                grantShaped,
+                adminsOnly ? { and: [operatorMinted, adminVerbed] } : operatorMinted,
+              ],
+            },
+            // The grants themselves survive only the OPERATOR's strikes — a stranger cannot
+            // shrink the trusted set by striking a grant delta.
+            in: {
+              op: "mask",
+              policy: { trust: { match: { field: "author", cmp: "eq", const: operator } } },
+              in: "input",
+            },
+          },
+          field: "author",
+          extract: { role: "subject" },
+        },
+      },
+    ],
+  };
+}
+
+// The canonical gather with a TRUST-AWARE negation mask: data negations bind only from the
+// operator and the operator's grantees. A federated stranger's strike is inert here — the
+// heckler's veto ends where this body begins.
+export function governedGatherBody(operator: string): Term {
+  return parseTerm({
+    op: "group",
+    key: "byTargetContext",
+    in: {
+      op: "select",
+      pred: { hasPointer: { targetEntity: { var: "root" } } },
+      in: { op: "mask", policy: { trust: lawfulStrikersJson(operator, false) }, in: "input" },
+    },
+  });
+}
+
+// The governed audit schema: like TENANT, but negations bind only from the operator and the
+// operator's ADMIN grantees — the same standing `standsFor` demands — so what the audit shows
+// agrees with what enforcement honors (to the chain's first link).
+export function tenantSchemaFor(operator: string): HyperSchema {
+  return {
+    name: "Tenant",
+    alg: 1,
+    body: parseTerm({
+      op: "group",
+      key: "byTargetContext",
+      in: {
+        op: "select",
+        pred: { hasPointer: { targetEntity: { var: "root" } } },
+        in: { op: "mask", policy: { trust: lawfulStrikersJson(operator, true) }, in: "input" },
+      },
+    }),
+  };
+}
 
 export const TENANT_POLICY: Policy = {
   props: new Map(),
