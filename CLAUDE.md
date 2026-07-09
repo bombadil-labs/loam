@@ -32,9 +32,12 @@ update `CURRENT_WORK.md`** so the next run resumes exactly here.
    with the step's goals; (c) are there missing tests. **Budget: one careful review agent per
    PR** (self-review directly for small mechanical diffs); a 2–3-angle panel only for the
    riskiest steps (capabilities/auth, federation). Token spend must last the whole plan.
-   **Every 5 merged PRs, run a full audit panel** (multi-angle finders + verify) over the
-   cumulative diff since the last audit — per-PR reviews are shallow by design; the audit is
-   where depth lives. Record each audit in `JOURNAL.md` (next audit due: after PR #10).
+   **Audits are paused** (Myk, 2026-07-09): audit 1 (after PR #5) cost ~5% of the total token
+   budget — no further audit panels until every queued step and the landing are done. Before any
+   future audit, apply audit 1's retro: the per-finding verify stage was ~80% of the cost and
+   refuted only 1 of 24 candidates (the finders were already precise), and three findings were
+   discovered by multiple overlapping angles. A future audit is 3–4 tightly-scoped finder angles,
+   NO verify stage (the fixer verifies while fixing), findings capped per angle.
 6. **Resolve → merge.** If step 5 generates feedback, take it into consideration and go back to step 1,
    and feed forward; confirm the PR is genuinely good. Append a record to `JOURNAL.md` (what was done +
    any novel learning).
