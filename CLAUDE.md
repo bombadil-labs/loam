@@ -85,10 +85,8 @@ Ordered; re-evaluated after each merge (cycle stage 7). Adopt rhizomatic's core;
    MCP behind timing-safe bearer tokens over isolated mounts (see `JOURNAL.md`)._
 7. **Runner + genesis assembly.** _Done — merged as PR #9 (2026-07-09); registrations-as-deltas,
    a peer-client runner (passive/animate), and genesis boot (see `JOURNAL.md`)._
-8. **CLI + deploy.** A `loam` CLI (init / serve / store) + a container with pluggable/hosted
-   persistence (Turso/libSQL) + a turnkey deploy.
-   _Success:_ `loam serve --http` answers a query; a container runs with durable persistence; an
-   install/tarball smoke passes.
+8. **CLI + deploy.** _Done — merged as PR #10 (2026-07-09); the `loam` CLI (init/serve/store), a
+   turnkey container, and the npm surface (see `JOURNAL.md`)._
 9. **Federation.** Expose `Peer` sync over the authed HTTP + a "subscribe to instance X's published
    lens" declaration.
    _Success:_ two instances federate — a delta on A resolves on B; union-merge holds; no conflict.
