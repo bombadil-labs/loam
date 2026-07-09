@@ -32,8 +32,15 @@ export {
 } from "./gateway/genesis.js";
 export { buildGqlSchema, type Registered } from "./gateway/gql.js";
 export {
+  lawfulNegated,
+  lawfulSnapshot,
+  parseClaimTemplates,
   readRegistrations,
   registrationClaims,
+  schemaEntityFor,
+  type ClaimPointerTemplate,
+  type ClaimTemplate,
+  type ClaimTemplates,
   type Registration,
 } from "./gateway/registration.js";
 export {

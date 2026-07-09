@@ -86,6 +86,10 @@ A served store exposes three surfaces per mount, behind a `Bearer` token:
   immediately. Republishing at the same entity evolves it. (An endpoint rather than a GraphQL
   mutation because an empty store has no GraphQL surface to mutate through — this is how it
   gains one.)
+- **`POST /:mount/append`** — `{ deltas: [wire deltas] }` → `{ accepted, duplicates }`. The
+  **non-custodial door**: a client signs its own deltas and presents them; the token
+  authenticates transport only, and each delta is authorized by its own verified author's
+  standing. The server never holds the key.
 - **`GET /:mount/federate`** — the store's published deltas as wire JSON (operator token only).
 
 A junk or missing token is `401`; an unknown mount is `404` (only to the authenticated — an
@@ -197,6 +201,47 @@ The `loam register` file (also the `POST /register` body, under a `schema` key):
 
 `loam register` writes to the home's store directly, so run it before `loam serve` (the store is
 single-writer); a running server takes the same registration over `POST /:mount/register`.
+
+## Writes are claims
+
+A relation is one delta with many pointers — "Miles hosted a screening of The Matrix with Wren
+and Sally on July 4" is ONE fact filing simultaneously into four entities' views. The schema
+declares its write shapes as **claim templates** (data, traveling in the registration beside
+the read program), and each template becomes a GraphQL mutation that emits exactly one signed
+delta:
+
+```jsonc
+// in the register file/body, beside body/policy/roots:
+"mutations": {
+  "hostScreening": {
+    "pointers": [
+      { "role": "host",  "at": { "arg": "host" },   "context": "events_hosted" },
+      { "role": "film",  "at": { "arg": "film" },   "context": "screenings" },
+      { "role": "guest", "at": { "arg": "guests" }, "context": "events_attended", "each": true },
+      { "role": "date",  "value": { "arg": "date" } }
+    ]
+  }
+}
+```
+
+```graphql
+mutation {
+  hostScreening(host: "person:miles", film: "film:the-matrix",
+                guests: ["person:wren", "person:sally"], date: "2026-07-04") { delta }
+}
+```
+
+Because templates travel with the schema, everyone who adopts a published schema **emits
+byte-compatible facts** — the schema is a protocol, not just a lens. Each template is
+trial-proven at registration: a mutation whose writes its own reads could never see is refused.
+For shapes no template anticipated there is the generic **`_claim(pointers: […]) { delta }`**;
+for clients that keep their own keys there is `POST /:mount/append`. The old primitive-prop
+mutations (`plant(entity:…, height: 4)`) remain as convenient sugar.
+
+Every view also carries two content addresses: **`_hex`** (the resolved view — the answer) and
+**`_hviewHex`** (the gathered hyperview — the evidence). Two lenses over the same body and root
+share `_hviewHex` while their `_hex` differs exactly when their policies adjudicate
+differently.
 
 ## Capabilities: authors, not owners
 

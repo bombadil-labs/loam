@@ -15,7 +15,8 @@ import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { serve, type ServerHandle } from "../../src/server/http.js";
 import { MemoryBackend } from "../../src/store/memory.js";
-import { FERN, GARDENER } from "../spike/garden.js";
+import { FERN, GARDENER, observed } from "../spike/garden.js";
+import { toWire } from "../../src/federation/wire.js";
 import { PLANT, PLANT_POLICY, garden } from "./../gateway/fixtures.js";
 
 const OPERATOR_SEED = "0e".repeat(32);
@@ -289,6 +290,56 @@ describe("MCP: the same gateway as JSON-RPC tools", () => {
   it("a junk token cannot even say hello", async () => {
     const res = await rpc("junk", { method: "initialize", params: {} });
     expect(res.status).toBe(401);
+  });
+});
+
+// The non-custodial door: a client signs its own deltas and presents them; the token merely
+// authenticates transport — each delta is authorized by its own verified author's standing.
+describe("POST /:mount/append", () => {
+  const post = (deltas: unknown[]) =>
+    fetch(`${base}/garden/append`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer mallory-token" },
+      body: JSON.stringify({ deltas }),
+    });
+
+  it("a pre-signed delta lands under its own author, whatever token carried it", async () => {
+    // signed by ALICE (who holds standing) — carried over MALLORY's token
+    const delta = observed(FERN, "note", "self-signed, hand-carried", Date.now(), ALICE_SEED);
+    const res = await post([toWire(delta)]);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { accepted: number; duplicates: number };
+    expect(body.accepted).toBe(1);
+    const read = await gql("garden", "alice-token", `{ plant(entity: "${FERN}") { _view } }`);
+    expect(JSON.stringify((await read.json()) as unknown)).toContain("hand-carried");
+  });
+
+  it("an author without standing is 403 — the token cannot lend authority", async () => {
+    const delta = observed(FERN, "note", "forgery", Date.now(), MALLORY_SEED);
+    const res = await post([toWire(delta)]);
+    expect(res.status).toBe(403);
+    expect(JSON.stringify(await res.json())).toMatch(/not permitted/);
+  });
+
+  it("a batch is all-or-nothing: one standing-less delta refuses the honest rest", async () => {
+    const honest = observed(FERN, "note", "should-not-land-alone", Date.now(), ALICE_SEED);
+    const stranger = observed(FERN, "note", "no standing", Date.now() + 1, MALLORY_SEED);
+    const res = await post([toWire(honest), toWire(stranger)]);
+    expect(res.status).toBe(403);
+    const read = await gql("garden", "alice-token", `{ plant(entity: "${FERN}") { _view } }`);
+    expect(JSON.stringify((await read.json()) as unknown)).not.toContain("should-not-land-alone");
+  });
+
+  it("a tampered delta is 400; a malformed body is 400", async () => {
+    const honest = observed(FERN, "note", "tamper-target", Date.now(), ALICE_SEED);
+    const res = await post([{ ...toWire(honest), id: `1e20${"00".repeat(32)}` }]);
+    expect(res.status).toBe(400);
+    const junk = await fetch(`${base}/garden/append`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer op-token" },
+      body: JSON.stringify({ nope: true }),
+    });
+    expect(junk.status).toBe(400);
   });
 });
 

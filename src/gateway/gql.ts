@@ -17,6 +17,7 @@ import {
   GraphQLBoolean,
   GraphQLFloat,
   GraphQLID,
+  GraphQLInputObjectType,
   GraphQLInt,
   GraphQLList,
   GraphQLNonNull,
@@ -26,14 +27,17 @@ import {
   GraphQLString,
   Kind,
   type GraphQLFieldConfigMap,
+  type GraphQLInputType,
   type GraphQLOutputType,
 } from "graphql";
 import type { HyperSchema, Policy, Primitive, PropPolicy, View } from "@bombadil/rhizomatic";
+import type { ClaimTemplates } from "./registration.js";
 
 export interface Registered {
   readonly schema: HyperSchema;
   readonly policy: Policy;
   readonly roots: readonly string[];
+  readonly mutations?: ClaimTemplates;
 }
 
 // What flows from the root resolver to the field resolvers: one resolution, many reads.
@@ -41,12 +45,22 @@ export interface ResolvedNode {
   readonly entity: string;
   readonly view: Record<string, View>;
   readonly hex: string;
+  readonly hviewHex: string;
 }
 
 // A subscription event: the re-resolved node plus where it came from and what moved.
 export interface PatchNode extends ResolvedNode {
   readonly fromHex: string | null; // null on the initial snapshot
   readonly changed: readonly string[] | null; // null on the initial snapshot
+}
+
+// One concrete pointer of a claim, as the gql layer hands it to the gateway: either an entity
+// pointer (at + context) or a primitive (value) — never both, never neither.
+export interface ClaimPointerSpec {
+  readonly role: string;
+  readonly at?: string;
+  readonly context?: string;
+  readonly value?: Primitive;
 }
 
 // The seams the gateway provides; gql.ts owns shape, the gateway owns state.
@@ -59,6 +73,7 @@ export interface GqlHooks {
     actorSeed?: string,
   ): Promise<ResolvedNode>;
   watch(schemaName: string, entity: string): AsyncGenerator<PatchNode>;
+  claim(pointers: readonly ClaimPointerSpec[], actorSeed?: string): Promise<{ delta: string }>;
 }
 
 // The pass-through output scalar: a resolved View value — primitive, list, or nested object —
@@ -140,8 +155,17 @@ function metaFields<N extends ResolvedNode>(): GraphQLFieldConfigMap<N, unknown>
     },
     _hex: {
       type: new GraphQLNonNull(GraphQLString),
-      description: "The content address of the resolved view — the snapshot.",
+      description: "The content address of the resolved view — the snapshot, the answer.",
       resolve: (node) => node.hex,
+    },
+    _hviewHex: {
+      type: new GraphQLNonNull(GraphQLString),
+      description:
+        "The content address of the gathered hyperview — the evidence before any policy. " +
+        "Two lenses over the same body and root share it while their _hex may differ. " +
+        "On live streams, frames are emitted when the ANSWER moves — between frames the " +
+        "evidence may have grown without changing it; query for the current value.",
+      resolve: (node) => node.hviewHex,
     },
     _view: {
       type: new GraphQLNonNull(ViewValue),
@@ -162,6 +186,54 @@ function propFields<N extends ResolvedNode>(def: Registered): GraphQLFieldConfig
   return fields;
 }
 
+// The receipt a claim mutation returns: one fact may serve many entities, so no single view is
+// THE result — the delta id is.
+const ClaimReceipt = new GraphQLObjectType<{ delta: string }>({
+  name: "ClaimReceipt",
+  description: "The signed delta a claim landed as.",
+  fields: {
+    delta: {
+      type: new GraphQLNonNull(GraphQLID),
+      resolve: (r: { delta: string }) => r.delta,
+    },
+  },
+});
+
+// The generic claim's pointer input: exactly one of at/value; at wants a context.
+const PointerInput = new GraphQLInputObjectType({
+  name: "PointerInput",
+  fields: {
+    role: { type: new GraphQLNonNull(GraphQLString) },
+    at: { type: GraphQLID, description: "entity pointer target id (wants context too)" },
+    context: { type: GraphQLString },
+    value: { type: PrimitiveValue },
+  },
+});
+
+// The argument holes a template declares, each with its kind and arity — conflicting reuse of
+// one name is refused at build.
+function templateArgs(
+  schemaName: string,
+  templateName: string,
+  template: { pointers: readonly ClaimTemplates[string]["pointers"][number][] },
+): Map<string, { kind: "entity" | "value"; each: boolean }> {
+  const args = new Map<string, { kind: "entity" | "value"; each: boolean }>();
+  const claimArg = (arg: string, kind: "entity" | "value", each: boolean): void => {
+    const prior = args.get(arg);
+    if (prior !== undefined && (prior.kind !== kind || prior.each !== each)) {
+      throw new Error(
+        `schema ${schemaName}: template "${templateName}" reuses arg "${arg}" with a different shape`,
+      );
+    }
+    args.set(arg, { kind, each });
+  };
+  for (const p of template.pointers) {
+    if (p.at !== undefined) claimArg(p.at.arg, "entity", p.each === true);
+    else if (typeof p.value === "object" && p.value !== null) claimArg(p.value.arg, "value", false);
+  }
+  return args;
+}
+
 export function buildGqlSchema(defs: readonly Registered[], hooks: GqlHooks): GraphQLSchema {
   const queryFields: GraphQLFieldConfigMap<unknown, unknown> = {};
   const mutationFields: GraphQLFieldConfigMap<unknown, unknown> = {};
@@ -172,7 +244,15 @@ export function buildGqlSchema(defs: readonly Registered[], hooks: GqlHooks): Gr
     // type is first used, long after register() reported success. "__proto__" is refused too:
     // plain-object assignment silently swallows it (the prototype setter), so a schema carrying
     // it would build cleanly and then quietly lose every read and write of that property.
-    const seen = new Set(["_entity", "_hex", "_view", "_fromHex", "_changed", "entity"]);
+    const seen = new Set([
+      "_entity",
+      "_hex",
+      "_hviewHex",
+      "_view",
+      "_fromHex",
+      "_changed",
+      "entity",
+    ]);
     for (const [prop] of def.policy.props) {
       const name = legal(prop);
       if (seen.has(name) || name === "__proto__") {
@@ -227,6 +307,14 @@ export function buildGqlSchema(defs: readonly Registered[], hooks: GqlHooks): Gr
 
     const propArgs: Record<string, { type: typeof PrimitiveValue }> = {};
     for (const [prop] of def.policy.props) propArgs[legal(prop)] = { type: PrimitiveValue };
+    // The mutation namespace is shared between per-prop fields and TEMPLATE fields of every
+    // schema — check it explicitly (queryFields' check does not cover an earlier schema's
+    // template landing on this schema's field name).
+    if (Object.hasOwn(mutationFields, fieldName)) {
+      throw new Error(
+        `schema ${def.schema.name}: its mutation field "${fieldName}" collides with an existing mutation`,
+      );
+    }
     mutationFields[fieldName] = {
       type: new GraphQLNonNull(viewType),
       description:
@@ -252,7 +340,75 @@ export function buildGqlSchema(defs: readonly Registered[], hooks: GqlHooks): Gr
       subscribe: (_src, args: { entity: string }) => hooks.watch(def.schema.name, args.entity),
       resolve: (payload: PatchNode) => payload,
     };
+
+    // The schema's declared write shapes: one mutation per template, one DELTA per call.
+    for (const [templateName, template] of Object.entries(def.mutations ?? {})) {
+      if (Object.hasOwn(mutationFields, templateName)) {
+        throw new Error(
+          `schema ${def.schema.name}: template "${templateName}" collides with an existing mutation`,
+        );
+      }
+      const argSpec = templateArgs(def.schema.name, templateName, template);
+      const gqlArgs: Record<string, { type: GraphQLInputType }> = {};
+      for (const [arg, meta] of argSpec) {
+        const base: GraphQLInputType = meta.kind === "entity" ? GraphQLID : PrimitiveValue;
+        gqlArgs[arg] = {
+          type: meta.each
+            ? new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(base)))
+            : new GraphQLNonNull(base),
+        };
+      }
+      mutationFields[templateName] = {
+        type: new GraphQLNonNull(ClaimReceipt),
+        description:
+          `${def.schema.name}'s "${templateName}" claim: one call, one signed delta, ` +
+          `exactly the declared shape.`,
+        args: gqlArgs,
+        resolve: (_src, args: Record<string, unknown>, ctx: unknown) => {
+          const actor = (ctx as { actor?: string } | undefined)?.actor;
+          const pointers: ClaimPointerSpec[] = [];
+          for (const p of template.pointers) {
+            if (p.at !== undefined) {
+              const supplied = args[p.at.arg];
+              const targets = p.each === true ? (supplied as string[]) : [supplied as string];
+              for (const id of targets) {
+                pointers.push({
+                  role: p.role,
+                  at: id,
+                  ...(p.context === undefined ? {} : { context: p.context }),
+                });
+              }
+            } else if (typeof p.value === "object" && p.value !== null) {
+              pointers.push({ role: p.role, value: args[p.value.arg] as Primitive });
+            } else {
+              pointers.push({ role: p.role, value: p.value as Primitive });
+            }
+          }
+          return hooks.claim(pointers, actor);
+        },
+      };
+    }
   }
+
+  // The generic claim: for shapes no template anticipated. Same signing, same standing.
+  if (Object.hasOwn(mutationFields, "_claim")) {
+    throw new Error(`a schema's mutation field collides with the built-in "_claim"`);
+  }
+  mutationFields["_claim"] = {
+    type: new GraphQLNonNull(ClaimReceipt),
+    description:
+      "Emit one signed delta from an explicit pointer list — the general form every " +
+      "template is sugar for. Each pointer is entity (at + context) or primitive (value).",
+    args: {
+      pointers: {
+        type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(PointerInput))),
+      },
+    },
+    resolve: (_src, args: { pointers: ClaimPointerSpec[] }, ctx: unknown) => {
+      const actor = (ctx as { actor?: string } | undefined)?.actor;
+      return hooks.claim(args.pointers, actor);
+    },
+  };
 
   return new GraphQLSchema({
     query: new GraphQLObjectType({ name: "Query", fields: queryFields }),
