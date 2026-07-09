@@ -20,6 +20,7 @@ export {
   type RequestContext,
 } from "./gateway/gateway.js";
 export { buildGqlSchema, type Registered } from "./gateway/gql.js";
+export { serve, type ServeOptions, type ServerHandle, type TokenIdentity } from "./server/http.js";
 export type { StoreBackend } from "./store/backend.js";
 export { canonicalDelta } from "./store/canon.js";
 export { MemoryBackend } from "./store/memory.js";
