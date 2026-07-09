@@ -95,6 +95,8 @@ describe("capabilities: deny is the default, permission is an artifact", () => {
 
     const denied = await mutateHeight(gateway, ALICE_SEED, 42);
     expect(denied.errors?.join(" ")).toMatch(/not permitted/);
+    const requery = await gateway.query(`{ plant(entity: "${FERN}") { height } }`);
+    expect((requery.data as { plant: { height: number } }).plant.height).toBe(41); // unmoved
     await gateway.close();
   });
 
@@ -135,6 +137,8 @@ describe("capabilities: deny is the default, permission is an artifact", () => {
       { actor: ALICE_SEED },
     );
     expect(denied.errors?.join(" ")).toMatch(/not permitted/);
+    const requery = await gateway.query(`{ plant(entity: "${MOSS}") { height } }`);
+    expect((requery.data as { plant: { height: number | null } }).plant.height).toBeNull();
     await gateway.close();
   });
 
@@ -193,6 +197,120 @@ describe("capabilities: deny is the default, permission is an artifact", () => {
     const gateway = await Gateway.open(new MemoryBackend()); // no seed: an ungoverned local store
     const anyone = observed(FERN, "height", 5, tick(), MALLORY_SEED);
     await expect(gateway.append([anyone])).resolves.toMatchObject({ accepted: 1 });
+    await gateway.close();
+  });
+
+  it("poisoned ground: grants planted while ungoverned root nowhere once an operator opens", async () => {
+    const backend = new MemoryBackend();
+    const free = await Gateway.open(backend); // ungoverned: mallory writes her own constitution
+    const MALLORY = authorForSeed(MALLORY_SEED);
+    await free.append([
+      signClaims(membershipClaims(GARDEN, FERN, MALLORY, tick()), MALLORY_SEED),
+      signClaims(grantClaims(GARDEN, MALLORY, "admin", MALLORY, tick()), MALLORY_SEED),
+    ]);
+    await free.flush();
+
+    const governed = await Gateway.open(backend, { seed: OPERATOR_SEED });
+    governed.register(PLANT, PLANT_POLICY, [FERN]);
+    // her self-signed admin chain roots in nobody: the constitution resolves to nothing hers
+    const denied = await governed.query(
+      `mutation { plant(entity: "${FERN}", height: 66) { height } }`,
+      undefined,
+      { actor: MALLORY_SEED },
+    );
+    expect(denied.errors?.join(" ")).toMatch(/not permitted/);
+    await governed.close();
+  });
+
+  it("a hostile strike from ungoverned days has no standing against the operator's grant", async () => {
+    const backend = new MemoryBackend();
+    const seedGateway = await Gateway.open(backend, { seed: OPERATOR_SEED });
+    await seedGateway.append([
+      signClaims(membershipClaims(GARDEN, FERN, OPERATOR, tick()), OPERATOR_SEED),
+      signClaims(grantClaims(GARDEN, ALICE, "write", OPERATOR, tick()), OPERATOR_SEED),
+    ]);
+    await seedGateway.flush();
+    const aliceGrant = [...seedGateway.reactor.snapshot()].find((d) =>
+      d.claims.pointers.some(
+        (p) => p.role === "subject" && p.target.kind === "primitive" && p.target.value === ALICE,
+      ),
+    )!;
+
+    const free = await Gateway.open(backend); // mallory strikes alice's grant, ungoverned
+    const MALLORY = authorForSeed(MALLORY_SEED);
+    await free.append([signClaims(revocationClaims(aliceGrant.id, MALLORY, tick()), MALLORY_SEED)]);
+    await free.flush();
+
+    const governed = await Gateway.open(backend, { seed: OPERATOR_SEED });
+    governed.register(PLANT, PLANT_POLICY, [FERN]);
+    const allowed = await governed.query(
+      `mutation { plant(entity: "${FERN}", height: 67) { height } }`,
+      undefined,
+      { actor: ALICE_SEED },
+    );
+    expect(allowed.errors).toBeUndefined(); // mallory's strike had no standing; the grant lives
+    await governed.close();
+  });
+
+  it("un-revocation works: striking the strike restores the grant", async () => {
+    const gateway = await grantedWorld();
+    const aliceGrant = [...gateway.reactor.snapshot()].find((d) =>
+      d.claims.pointers.some(
+        (p) => p.role === "subject" && p.target.kind === "primitive" && p.target.value === ALICE,
+      ),
+    )!;
+    const revocation = signClaims(revocationClaims(aliceGrant.id, OPERATOR, tick()), OPERATOR_SEED);
+    await gateway.append([revocation]);
+    expect((await mutateHeight(gateway, ALICE_SEED, 70)).errors?.join(" ")).toMatch(
+      /not permitted/,
+    );
+
+    await gateway.append([
+      signClaims(revocationClaims(revocation.id, OPERATOR, tick()), OPERATOR_SEED),
+    ]);
+    expect((await mutateHeight(gateway, ALICE_SEED, 71)).errors).toBeUndefined(); // the door reopens
+    await gateway.close();
+  });
+
+  it("malformed law is refused for everyone, the operator included", async () => {
+    const gateway = await grantedWorld();
+    const bogus = signClaims(
+      {
+        timestamp: tick(),
+        author: OPERATOR,
+        pointers: [
+          {
+            role: "tenant",
+            target: { kind: "entity", entity: { id: GARDEN, context: "loam.grants" } },
+          },
+          { role: "subject", target: { kind: "primitive", value: ALICE } },
+          { role: "verb", target: { kind: "primitive", value: "root" } }, // no such verb
+        ],
+      },
+      OPERATOR_SEED,
+    );
+    await expect(gateway.append([bogus])).rejects.toThrow(/malformed law/);
+    await gateway.close();
+  });
+
+  it("a delta-ref under any role but negates is ungoverned ground: refused for non-operators", async () => {
+    const gateway = await grantedWorld();
+    const someDelta = garden[0]!;
+    const citing = signClaims(
+      {
+        timestamp: tick(),
+        author: ALICE,
+        pointers: [
+          {
+            role: "subject",
+            target: { kind: "entity", entity: { id: FERN, context: "height" } },
+          },
+          { role: "cites", target: { kind: "delta", deltaRef: { delta: someDelta.id } } },
+        ],
+      },
+      ALICE_SEED,
+    );
+    await expect(gateway.append([citing])).rejects.toThrow(/ungoverned role/);
     await gateway.close();
   });
 
