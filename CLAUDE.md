@@ -97,6 +97,16 @@ Ordered; re-evaluated after each merge (cycle stage 7). Adopt rhizomatic's core;
    lens" declaration.
    _Success:_ two instances federate — a delta on A resolves on B; union-merge holds; no conflict.
 
+**Landing (after the steps above are all merged):**
+
+- **Remove this "plan — build steps" section from `CLAUDE.md`** — the journal is the record; the
+  plan section exists only while steps remain.
+- **Rewrite `README.md`** as full project documentation — installation, configuration, and usage,
+  grounded in the code actually shipped (not aspiration). The vision prose gives way to a manual.
+- **Ship `@bombadil/loam` to npm** for turnkey install: drop `"private": true`, verify the
+  `files`/`exports`/`bin` surface against a tarball smoke (step 8's), and hand Myk the
+  ready-to-run `npm publish` (the button itself is his).
+
 **Decisions (Myk, 2026-07-09):** v1 is **fully multi-tenant** (§7). Chorus is **reference-only** —
 read its plumbing as a design guide; write Loam's code clean, against Loam's tests (§10). Run
 autonomously until the plan's steps are secured, then regroup with Myk to plan future phases.
