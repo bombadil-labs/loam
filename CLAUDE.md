@@ -58,10 +58,7 @@ then remove these items from `CLAUDE.md` when they are accounted for.
 
 Ordered; re-evaluated after each merge (cycle stage 7). Adopt rhizomatic's core; build the wrapper.
 
-0. **Scaffold.** TS/ESM project depending on `@bombadil/rhizomatic`; vitest; prettier + eslint (flat);
-   an `npm run check` gate; CI (ubuntu + windows), `.gitattributes` `eol=lf`.
-   _Success:_ `npm run check` is green on a trivial test, and a smoke test round-trips a delta through
-   `DeltaSet` from the real dependency.
+0. **Scaffold.** _Done — merged as PR #1 (2026-07-09); see `JOURNAL.md`._
 1. **Confirm the rhizomatic surface** (the spike, SPEC §2). Tests that exercise the real dependency:
    `loadSchema(deltas) → HyperSchema`; `resolveView(Policy, HView) → View` across a few `PropPolicy`s
    (pick/all/conflicts); a reactor materialization + `subscribe` firing on ingest; a `DerivationHost`
