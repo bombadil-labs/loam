@@ -162,7 +162,9 @@ function metaFields<N extends ResolvedNode>(): GraphQLFieldConfigMap<N, unknown>
       type: new GraphQLNonNull(GraphQLString),
       description:
         "The content address of the gathered hyperview — the evidence before any policy. " +
-        "Two lenses over the same body and root share it while their _hex may differ.",
+        "Two lenses over the same body and root share it while their _hex may differ. " +
+        "On live streams, frames are emitted when the ANSWER moves — between frames the " +
+        "evidence may have grown without changing it; query for the current value.",
       resolve: (node) => node.hviewHex,
     },
     _view: {
@@ -305,6 +307,14 @@ export function buildGqlSchema(defs: readonly Registered[], hooks: GqlHooks): Gr
 
     const propArgs: Record<string, { type: typeof PrimitiveValue }> = {};
     for (const [prop] of def.policy.props) propArgs[legal(prop)] = { type: PrimitiveValue };
+    // The mutation namespace is shared between per-prop fields and TEMPLATE fields of every
+    // schema — check it explicitly (queryFields' check does not cover an earlier schema's
+    // template landing on this schema's field name).
+    if (Object.hasOwn(mutationFields, fieldName)) {
+      throw new Error(
+        `schema ${def.schema.name}: its mutation field "${fieldName}" collides with an existing mutation`,
+      );
+    }
     mutationFields[fieldName] = {
       type: new GraphQLNonNull(viewType),
       description:

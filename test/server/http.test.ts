@@ -321,6 +321,15 @@ describe("POST /:mount/append", () => {
     expect(JSON.stringify(await res.json())).toMatch(/not permitted/);
   });
 
+  it("a batch is all-or-nothing: one standing-less delta refuses the honest rest", async () => {
+    const honest = observed(FERN, "note", "should-not-land-alone", Date.now(), ALICE_SEED);
+    const stranger = observed(FERN, "note", "no standing", Date.now() + 1, MALLORY_SEED);
+    const res = await post([toWire(honest), toWire(stranger)]);
+    expect(res.status).toBe(403);
+    const read = await gql("garden", "alice-token", `{ plant(entity: "${FERN}") { _view } }`);
+    expect(JSON.stringify((await read.json()) as unknown)).not.toContain("should-not-land-alone");
+  });
+
   it("a tampered delta is 400; a malformed body is 400", async () => {
     const honest = observed(FERN, "note", "tamper-target", Date.now(), ALICE_SEED);
     const res = await post([{ ...toWire(honest), id: `1e20${"00".repeat(32)}` }]);

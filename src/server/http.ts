@@ -451,7 +451,10 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           // The non-custodial door: a client signs its own deltas and presents them. The
           // token authenticates TRANSPORT only — each delta is verified and authorized by its
           // own author's standing, exactly as Gateway.append always does. The server never
-          // holds the key.
+          // holds the key. Stated plainly: raw deltas carry the library's FULL power — their
+          // own timestamps, delta-ref pointers, negations. That is the same power standing
+          // always granted through the library; whether any of it BINDS a reader is, as
+          // everywhere, the reader's lens (and the documented negation interim).
           let parsed: { deltas?: WireDelta[] };
           try {
             parsed = JSON.parse(await readBody(req, maxBody)) as typeof parsed;
@@ -485,7 +488,13 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             json(res, 200, receipt);
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
-            json(res, /not permitted/.test(message) ? 403 : 400, { errors: [message] });
+            // A degraded gateway is the server's trouble, not the client's batch.
+            const status = /can no longer persist/.test(message)
+              ? 503
+              : /not permitted/.test(message)
+                ? 403
+                : 400;
+            json(res, status, { errors: [message] });
           }
           return;
         }

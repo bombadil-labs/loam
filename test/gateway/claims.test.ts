@@ -117,7 +117,94 @@ describe("claim templates: the write discipline travels with the schema", () => 
     await expect(
       gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN], undefined, undefined, blind),
     ).rejects.toThrow(/template/);
+
+    // and the SUBTLER case: an entity pointer whose context the schema's own gather excludes
+    const { parseTerm } = await import("@bombadil/rhizomatic");
+    const heightsOnly = {
+      name: "HeightsOnly",
+      alg: 1,
+      body: parseTerm({
+        op: "group",
+        key: "byTargetContext",
+        in: {
+          op: "select",
+          pred: { hasPointer: { context: { exact: "height" } } },
+          in: {
+            op: "select",
+            pred: { hasPointer: { targetEntity: { var: "root" } } },
+            in: { op: "mask", policy: "drop", in: "input" },
+          },
+        },
+      }),
+    };
+    const writesNotes: ClaimTemplates = {
+      annotate: {
+        pointers: [{ role: "subject", at: { arg: "plant" }, context: "note" }],
+      },
+    };
+    await expect(
+      gateway.publishRegistration(
+        heightsOnly,
+        PLANT_POLICY,
+        [FERN],
+        undefined,
+        undefined,
+        writesNotes,
+      ),
+    ).rejects.toThrow(/cannot see/);
     await gateway.close();
+  });
+
+  it("a bad ARGUMENT name is refused loudly at publish, never a silent missing mutation", async () => {
+    const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
+    const hyphenated: ClaimTemplates = {
+      noteHeight: {
+        pointers: [{ role: "subject", at: { arg: "the-plant" }, context: "height" }],
+      },
+    };
+    await expect(
+      gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN], undefined, undefined, hyphenated),
+    ).rejects.toThrow(/argument name/);
+    // and __proto__ can never become an arg (it would vanish into a plain object's prototype)
+    const proto: ClaimTemplates = {
+      sneak: { pointers: [{ role: "subject", at: { arg: "__proto__" }, context: "height" }] },
+    };
+    await expect(
+      gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN], undefined, undefined, proto),
+    ).rejects.toThrow(/argument name/);
+    await gateway.close();
+  });
+
+  it("templates survive a reopen: the write discipline replays from the store", async () => {
+    const backend = new MemoryBackend();
+    const first = await Gateway.open(backend, { seed: OPERATOR_SEED });
+    await first.append([
+      signClaims(grantClaims(STORE_ENTITY, MILES, "write", OPERATOR, 1), OPERATOR_SEED),
+    ]);
+    await first.publishRegistration(
+      { ...PLANT, name: "Evening" },
+      {
+        props: new Map([
+          ["events_hosted", ALL],
+          ["events_attended", ALL],
+        ]),
+        default: pickLatest,
+      },
+      ["person:miles"],
+      undefined,
+      undefined,
+      EVENING_TEMPLATES,
+    );
+    await first.flush();
+    const reopened = await Gateway.open(backend, { seed: OPERATOR_SEED });
+    const result = await reopened.query(
+      `mutation { hostScreening(host: "person:miles", film: "film:z", guests: [], date: "d") { delta } }`,
+      undefined,
+      { actor: MILES_SEED },
+    );
+    expect(result.errors).toBeUndefined();
+    await first.close();
+    await reopened.close();
   });
 
   it("a malformed template in a stored registration is dropped; the schema still binds", async () => {
@@ -132,7 +219,8 @@ describe("claim templates: the write discipline travels with the schema", () => 
           ...registrationClaims("schema:Plant", PLANT_POLICY, [FERN], OPERATOR, 2),
           pointers: [
             ...registrationClaims("schema:Plant", PLANT_POLICY, [FERN], OPERATOR, 2).pointers,
-            { role: "mutations", target: { kind: "primitive", value: "][ not json" } },
+            // JSON-valid but SHAPE-invalid: parseClaimTemplates throws, the drop is quiet
+            { role: "mutations", target: { kind: "primitive", value: '{"x":{"pointers":[]}}' } },
           ],
         },
         OPERATOR_SEED,
@@ -235,6 +323,14 @@ describe("_hviewHex: same evidence, many answers", () => {
       .data as { plantCount: { _hex: string; _hviewHex: string } };
     expect(a.plant._hviewHex).toBe(b.plantCount._hviewHex); // one gathered ground
     expect(a.plant._hex).not.toBe(b.plantCount._hex); // two adjudications (latest=34 vs count=2)
+
+    // and a live stream's frames carry both addresses too
+    const stream = await gateway.subscribe(
+      `subscription { plant(entity: "${FERN}") { _hex _hviewHex } }`,
+    );
+    const frame = (await stream.next()).value as { plant: { _hex: string; _hviewHex: string } };
+    expect(frame.plant._hviewHex).toBe(a.plant._hviewHex);
+    await stream.return(undefined);
     await gateway.close();
   });
 });

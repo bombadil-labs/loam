@@ -64,8 +64,12 @@ export function parseClaimTemplates(raw: unknown): ClaimTemplates {
     throw new Error("mutations must be an object of named claim templates");
   }
   const out: Record<string, ClaimTemplate> = {};
+  // GraphQL's own grammar for names, minus a leading underscore for templates (built-ins own
+  // that space) and minus double-underscore anywhere it leads for ARGS (introspection's, and
+  // "__proto__" would vanish into a plain object's prototype setter).
+  const argOk = (a: string): boolean => /^[A-Za-z_][A-Za-z0-9_]*$/.test(a) && !a.startsWith("__");
   for (const [name, tpl] of Object.entries(raw as Record<string, unknown>)) {
-    if (!/^[A-Za-z][A-Za-z0-9]*$/.test(name)) {
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(name)) {
       throw new Error(`template "${name}": not a usable mutation name`);
     }
     const t = tpl as { pointers?: unknown };
@@ -94,8 +98,16 @@ export function parseClaimTemplates(raw: unknown): ClaimTemplates {
         throw new Error(`template "${name}" pointer ${i}: exactly one of at/value`);
       }
       if (hasAt) {
-        if (typeof at?.arg !== "string" || typeof o["context"] !== "string") {
-          throw new Error(`template "${name}" pointer ${i}: at wants { arg } and a context`);
+        if (
+          typeof at?.arg !== "string" ||
+          !argOk(at.arg) ||
+          typeof o["context"] !== "string" ||
+          o["context"] === ""
+        ) {
+          throw new Error(
+            `template "${name}" pointer ${i}: at wants { arg } (a usable argument name) ` +
+              `and a non-empty context`,
+          );
         }
         return {
           role: o["role"],
@@ -104,11 +116,16 @@ export function parseClaimTemplates(raw: unknown): ClaimTemplates {
           ...(o["each"] === true ? { each: true } : {}),
         };
       }
+      if (o["each"] === true) {
+        throw new Error(`template "${name}" pointer ${i}: each belongs to entity pointers only`);
+      }
       const value = o["value"];
       const hole = value as { arg?: unknown };
       if (typeof hole === "object" && hole !== null) {
-        if (typeof hole.arg !== "string") {
-          throw new Error(`template "${name}" pointer ${i}: value hole wants { arg }`);
+        if (typeof hole.arg !== "string" || !argOk(hole.arg)) {
+          throw new Error(
+            `template "${name}" pointer ${i}: value hole wants { arg }, a usable argument name`,
+          );
         }
         return { role: o["role"], value: { arg: hole.arg } };
       }

@@ -50,6 +50,7 @@ import {
 } from "./gql.js";
 import {
   lawfulSnapshot,
+  parseClaimTemplates,
   readRegistrations,
   registrationClaims,
   schemaEntityFor,
@@ -212,11 +213,15 @@ export class Gateway {
   // Every claim template must be VISIBLE to its own schema: substitute sentinels for the arg
   // holes, build the specimen delta, and require that at least one entity the template touches
   // can see it through this schema's gather. A mutation whose writes its own reads would never
-  // show is refused before it can mislead anyone.
+  // show is refused before it can mislead anyone. Fidelity limits, stated plainly: the
+  // specimen is authored as the OPERATOR (so governed-store author lenses judge it honestly)
+  // with sentinel values — a body that predicates on facets the template cannot carry (exotic
+  // value ranges, exact timestamps) is judged best-effort.
   private static assertTemplatesVisible(
     schema: HyperSchema,
     templates: ClaimTemplates | undefined,
     registry: SchemaRegistry,
+    specimenAuthor: string,
   ): void {
     for (const [name, template] of Object.entries(templates ?? {})) {
       const pointers = template.pointers.map((p) => {
@@ -235,7 +240,7 @@ export class Gateway {
             : (p.value as Primitive);
         return { role: p.role, target: { kind: "primitive" as const, value } };
       });
-      const specimen = makeDelta({ timestamp: 1, author: "loam:specimen", pointers });
+      const specimen = makeDelta({ timestamp: 1, author: specimenAuthor, pointers });
       const ground = DeltaSet.from([specimen]);
       const sentinels = [
         ...new Set(
@@ -310,7 +315,12 @@ export class Gateway {
             const trial = [...accepted, candidate];
             const registry = SchemaRegistry.build(trial.map((r) => r.schema)); // dups, refs, cycles
             Gateway.assertMaterializable(candidate.schema, registry); // reactor.register would throw
-            Gateway.assertTemplatesVisible(candidate.schema, candidate.mutations, registry);
+            Gateway.assertTemplatesVisible(
+              candidate.schema,
+              candidate.mutations,
+              registry,
+              this.operatorAuthor ?? "loam:specimen",
+            );
             buildGqlSchema(trial, this.gqlHooks()); // GraphQL name collisions
             accepted.push(candidate);
             return true;
@@ -457,13 +467,21 @@ export class Gateway {
     if (schema.name.includes(NUL)) {
       throw new Error("a schema name may not contain NUL — that alphabet is the gateway's own");
     }
+    // Normalize through the parser so every invariant the wire form promises (usable names,
+    // contexts present, each on entities only) holds for hand-built templates too.
+    const templates = mutations === undefined ? undefined : parseClaimTemplates(mutations);
     const next: Bound[] = [
       ...this.registered,
-      { schema, policy, roots, origin: "manual", ...(mutations ? { mutations } : {}) },
+      { schema, policy, roots, origin: "manual", ...(templates ? { mutations: templates } : {}) },
     ];
     const registry = SchemaRegistry.build(next.map((r) => r.schema)); // refuses dups + bad refs
     Gateway.assertMaterializable(schema, registry); // refuses a body that yields no hyperview
-    Gateway.assertTemplatesVisible(schema, mutations, registry); // refuses invisible writes
+    Gateway.assertTemplatesVisible(
+      schema,
+      templates,
+      registry,
+      this.operatorAuthor ?? "loam:specimen",
+    ); // refuses invisible writes
     const gql = buildGqlSchema(next, this.gqlHooks()); // refuses collisions
     // Incremental: only the NEW materialization registers, under the current generation.
     this.reactor.register(this.matName(schema.name), schema.body, roots, registry);
@@ -500,15 +518,25 @@ export class Gateway {
     if (schema.name.includes(NUL)) {
       throw new Error("a schema name may not contain NUL — that alphabet is the gateway's own");
     }
-    // Prove the WHOLE registration before anything persists: the refs must resolve against
-    // what is bound (minus the same name, which this publish may be evolving), and the body
-    // must materialize — a poisoned definition on append-only ground cannot be taken back.
-    const trialRegistry = SchemaRegistry.build([
-      ...this.registered.filter((r) => r.schema.name !== schema.name).map((r) => r.schema),
-      schema,
-    ]);
+    // Prove the WHOLE registration before anything persists — the refs must resolve against
+    // what is bound (minus the same name, which this publish may be evolving), the body must
+    // materialize, the templates must be well-formed AND visible AND buildable into a GraphQL
+    // surface. Loud here, quiet on replay: a poisoned delta on append-only ground cannot be
+    // taken back, and "registered" must never mean "silently missing its mutations".
+    const templates = mutations === undefined ? undefined : parseClaimTemplates(mutations);
+    const survivors = this.registered.filter((r) => r.schema.name !== schema.name);
+    const trialRegistry = SchemaRegistry.build([...survivors.map((r) => r.schema), schema]);
     Gateway.assertMaterializable(schema, trialRegistry);
-    Gateway.assertTemplatesVisible(schema, mutations, trialRegistry); // loud, before persisting
+    Gateway.assertTemplatesVisible(
+      schema,
+      templates,
+      trialRegistry,
+      this.operatorAuthor ?? authorForSeed(seed),
+    );
+    buildGqlSchema(
+      [...survivors, { schema, policy, roots, ...(templates ? { mutations: templates } : {}) }],
+      this.gqlHooks(),
+    ); // arg names, field collisions — everything the replay would trip on, tripped NOW
 
     const author = authorForSeed(seed);
     const schemaEntity = schemaEntityFor(schema, entity);
@@ -518,7 +546,7 @@ export class Gateway {
     );
     await this.loadSchema([definition], schemaEntity); // proves, then persists the definition
     const reference = signClaims(
-      registrationClaims(schemaEntity, policy, roots, author, this.nextTimestamp(), mutations),
+      registrationClaims(schemaEntity, policy, roots, author, this.nextTimestamp(), templates),
       seed,
     );
     await this.append([reference]);
@@ -746,12 +774,18 @@ export class Gateway {
       throw new Error("a claim carries at least one pointer");
     }
     const mapped = pointers.map((p, i) => {
+      if (typeof p.role !== "string" || p.role === "") {
+        throw new Error(`claim pointer ${i}: a pointer names a role`);
+      }
       const hasAt = p.at !== undefined;
       const hasValue = p.value !== undefined;
       if (hasAt === hasValue) {
         throw new Error(`claim pointer ${i} ("${p.role}"): exactly one of at/value`);
       }
       if (hasAt) {
+        if (p.at === "") {
+          throw new Error(`claim pointer ${i} ("${p.role}"): an entity pointer wants an id`);
+        }
         if (p.context === undefined || p.context === "") {
           throw new Error(`claim pointer ${i} ("${p.role}"): an entity pointer wants a context`);
         }
