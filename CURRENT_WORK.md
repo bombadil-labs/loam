@@ -1,24 +1,18 @@
-# Current work — Step 4: Mutations + subscriptions
+# Current work — First 5-PR audit panel (then Step 5)
 
 _The live checklist for the step in progress: its success criteria, the sub-tasks (checked as they complete), and a "left off here" note so any model can resume mid-step. Replaced at the start of each step; cleared when a step merges._
 
-**Success criteria:** GraphQL `mutate` (args → signed deltas → append; response = re-resolved
-view; seedless refusal) and `subscribe` (initial snapshot + relevant patches; leavable streams);
-`npm run check` green.
+**What's happening:** PRs 1–5 are merged (scaffold, spike, persistence, read gateway,
+mutations+subscriptions; 76 tests green). Per the stage-5 cadence rule, the first **full audit
+panel** is running over the whole codebase: six finder angles (store correctness, gateway
+correctness, lifecycle/concurrency, test honesty, security/authority for step-5 readiness, docs
+truth), each finding adversarially verified.
 
 **Sub-tasks:**
 
-- [x] `test/gateway/mutate.test.ts` + `test/gateway/subscribe.test.ts` (+ shared `fixtures.ts`)
-- [x] `src/gateway/channel.ts` — the always-leavable push-to-pull adapter (+ coalescence + fail)
-- [x] `src/gateway/gateway.ts` — seed option, mutate, watch (lazy cached materializations,
-      sink isolation, no-op suppression, close-ends-subscriptions)
-- [x] `src/gateway/gql.ts` — Mutation + Subscription derivation; PrimitiveValue input scalar;
-      `__proto__` refusal
-- [x] PR #5 → one review agent (7 findings: sink error isolation, close-stranded readers,
-      unbounded queue → coalescence, lazy-mat name collision → NUL alphabet, `__proto__`,
-      no-op patches, lifetime coverage) → all resolved
-- [ ] CI green on the resolved PR → merge by PR number → journal committed
+- [ ] Audit panel completes → triage CONFIRMED/PLAUSIBLE findings
+- [ ] Fix the real ones in an `audit-1` PR (gate green → one review pass → merge)
+- [ ] Record the audit in `JOURNAL.md` (next audit due after PR #10)
+- [ ] Open Step 5 (accounts & capabilities, **full multi-tenant** per Myk's decision) at stage 1
 
-**Left off here:** review resolved, gate green (76/76); awaiting CI on PR #5, then merge +
-re-plan (stages 6–8). Step 5 (accounts & capabilities, full multi-tenant) is next — plan a
-small review panel for it per the budget rule.
+**Left off here:** audit workflow launched; awaiting its findings.

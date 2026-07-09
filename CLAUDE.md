@@ -73,10 +73,9 @@ Ordered; re-evaluated after each merge (cycle stage 7). Adopt rhizomatic's core;
    witnesses behind one contract (see `JOURNAL.md`)._
 3. **Read gateway.** _Done — merged as PR #4 (2026-07-09); GraphQL derived from (HyperSchema,
    Policy) over a boot-replaying, write-through Gateway (see `JOURNAL.md`)._
-4. **Mutations + subscriptions.** GraphQL `mutate` (args → deltas → append) and `subscribe`
-   (materialization → initial snapshot + patch stream).
-   _Success:_ a mutation appends the right deltas and a re-query reflects them; a subscription emits an
-   initial snapshot then a patch on a relevant mutation.
+4. **Mutations + subscriptions.** _Done — merged as PR #5 (2026-07-09); GraphQL mutate + subscribe
+   over leavable, coalescing channels (see `JOURNAL.md`). First 5-PR audit panel run after this
+   merge._
 5. **Accounts & capabilities.** Users / ownership / capability-grants as genesis schemas; gateway
    enforces (authorize iff a resolved grant permits); an operator root bootstraps grants.
    _Success:_ unauthorized mutation rejected; a grant permits it; revocation re-denies; grants are
