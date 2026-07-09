@@ -1,0 +1,323 @@
+// Step 3's contract: the read gateway. A Gateway fronts one StoreBackend — it boots by
+// replaying the store into a Reactor, writes every accepted delta through, and serves GraphQL
+// whose shape is DERIVED from (HyperSchema, Policy): field names from the policy's props,
+// field shapes from each PropPolicy's kind. A query resolves via resolveView over the live
+// materialization, and its `_hex` is the content-addressed snapshot — stable across arrival
+// order, stable across processes, changed only by relevant new deltas.
+
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
+import {
+  makeDelta,
+  parseTerm,
+  publishSchemaClaims,
+  signClaims,
+  termHash,
+  type Delta,
+  type HyperSchema,
+  type Policy,
+  type PropPolicy,
+} from "@bombadil/rhizomatic";
+import { Gateway } from "../../src/gateway/gateway.js";
+import { MemoryBackend } from "../../src/store/memory.js";
+import { SqliteBackend } from "../../src/store/sqlite.js";
+import {
+  FERN,
+  GARDENER,
+  GARDENER_SEED,
+  PLANT_BODY,
+  SURVEYOR_SEED,
+  observed,
+} from "../spike/garden.js";
+
+const PLANT: HyperSchema = { name: "Plant", alg: 1, body: PLANT_BODY };
+
+const pickLatest: PropPolicy = { kind: "pick", order: { kind: "byTimestamp", dir: "desc" } };
+const PLANT_POLICY: Policy = {
+  props: new Map<string, PropPolicy>([
+    ["height", pickLatest],
+    ["tag", { kind: "all", order: { kind: "byTimestamp", dir: "asc" } }],
+    ["watered", { kind: "absentAs", constant: false, then: pickLatest }],
+    ["readings", { kind: "merge", fn: "count" }],
+  ]),
+  default: pickLatest,
+};
+
+const garden = [
+  observed(FERN, "height", 30, 1000, GARDENER_SEED),
+  observed(FERN, "height", 34, 2000, SURVEYOR_SEED),
+  observed(FERN, "tag", "shade", 1500, GARDENER_SEED),
+  observed(FERN, "tag", "fronds", 1600, SURVEYOR_SEED),
+  observed(FERN, "readings", 1, 1700, GARDENER_SEED),
+];
+
+const QUERY = `{
+  plant(entity: "${FERN}") {
+    _entity
+    _hex
+    height
+    tag
+    watered
+    readings
+  }
+}`;
+
+type PlantRow = {
+  _entity: string;
+  _hex: string;
+  height: number;
+  tag: string[];
+  watered: boolean;
+  readings: number;
+};
+
+async function openGateway(deltas: readonly Delta[] = garden): Promise<Gateway> {
+  const gateway = await Gateway.open(new MemoryBackend());
+  await gateway.append(deltas);
+  gateway.register(PLANT, PLANT_POLICY, [FERN]);
+  return gateway;
+}
+
+async function queryPlant(gateway: Gateway): Promise<PlantRow> {
+  const result = await gateway.query(QUERY);
+  expect(result.errors).toBeUndefined();
+  return (result.data as { plant: PlantRow }).plant;
+}
+
+const tmp = mkdtempSync(join(tmpdir(), "loam-gateway-"));
+afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+
+describe("the read gateway: GraphQL derived from (HyperSchema, Policy)", () => {
+  it("a query returns the resolved view, shaped by the policy", async () => {
+    const gateway = await openGateway();
+    const plant = await queryPlant(gateway);
+    expect(plant._entity).toBe(FERN);
+    expect(plant.height).toBe(34); // pick byTimestamp desc
+    expect(plant.tag).toEqual(["shade", "fronds"]); // all → list
+    expect(plant.watered).toBe(false); // absentAs speaks for silence
+    expect(plant.readings).toBe(1); // merge count → number
+    expect(plant._hex).toMatch(/^[0-9a-f]+$/);
+    await gateway.close();
+  });
+
+  it("boots by replaying the backend: a store written yesterday answers today", async () => {
+    const backend = new MemoryBackend();
+    await backend.append(garden);
+    const gateway = await Gateway.open(backend);
+    gateway.register(PLANT, PLANT_POLICY, [FERN]);
+    expect((await queryPlant(gateway)).height).toBe(34);
+    await gateway.close();
+  });
+
+  it("append moves the view and the hex; an irrelevant delta moves neither", async () => {
+    const gateway = await openGateway();
+    const before = await queryPlant(gateway);
+    await gateway.append([observed("plant:moss", "height", 2, 2500, GARDENER_SEED)]);
+    const unmoved = await queryPlant(gateway);
+    expect(unmoved._hex).toBe(before._hex);
+    await gateway.append([observed(FERN, "height", 37, 3000, GARDENER_SEED)]);
+    const after = await queryPlant(gateway);
+    expect(after.height).toBe(37);
+    expect(after._hex).not.toBe(before._hex);
+    await gateway.close();
+  });
+
+  it("the snapshot hash is stable: same deltas, any arrival order, any process", async () => {
+    const forward = await openGateway(garden);
+    const backward = await openGateway([...garden].reverse());
+    const a = await queryPlant(forward);
+    const b = await queryPlant(backward);
+    expect(a._hex).toBe(b._hex);
+    expect((await queryPlant(forward))._hex).toBe(a._hex); // re-query: same pin
+    await forward.close();
+    await backward.close();
+  });
+
+  it("loadSchema: schema-defining deltas meta-resolve through SCHEMA_SCHEMA into a HyperSchema", async () => {
+    const gateway = await Gateway.open(new MemoryBackend());
+    const published = makeDelta(publishSchemaClaims(PLANT, "schema:Plant", GARDENER, 1000));
+    const loaded = await gateway.loadSchema([published], "schema:Plant");
+    expect(loaded.name).toBe("Plant");
+    expect(termHash(loaded.body)).toBe(termHash(PLANT.body));
+    // the loaded schema serves queries like the hand-built one
+    await gateway.append(garden);
+    gateway.register(loaded, PLANT_POLICY, [FERN]);
+    expect((await queryPlant(gateway)).height).toBe(34);
+    await gateway.close();
+  });
+
+  it("writes through: everything the gateway accepted is durably in the backend", async () => {
+    const backend = new MemoryBackend();
+    const gateway = await Gateway.open(backend);
+    await gateway.append(garden);
+    await gateway.flush();
+    const persisted = await backend.deltasSince(new Set());
+    expect(persisted.map((d) => d.id).sort()).toEqual(garden.map((d) => d.id).sort());
+    await gateway.close();
+  });
+
+  it("a forged delta is refused whole: nothing ingested, nothing persisted", async () => {
+    const backend = new MemoryBackend();
+    const gateway = await Gateway.open(backend);
+    const forged: Delta = { ...garden[0]!, id: `1e20${"00".repeat(32)}` };
+    await expect(gateway.append([forged])).rejects.toThrow(/rejected/);
+    expect(await backend.deltasSince(new Set())).toEqual([]);
+    await gateway.close();
+  });
+
+  it("the whole road survives a process death: sqlite → close → reopen → same view, same hex", async () => {
+    const path = join(tmp, "garden.sqlite");
+    const first = await Gateway.open(new SqliteBackend(path));
+    await first.append(garden);
+    first.register(PLANT, PLANT_POLICY, [FERN]);
+    const before = await queryPlant(first);
+    await first.close();
+
+    const second = await Gateway.open(new SqliteBackend(path));
+    second.register(PLANT, PLANT_POLICY, [FERN]);
+    const after = await queryPlant(second);
+    expect(after).toEqual(before);
+    await second.close();
+  });
+
+  it("an entity nobody has spoken about resolves by policy: absence is an answer", async () => {
+    const gateway = await openGateway();
+    const result = await gateway.query(
+      `{ plant(entity: "plant:unheard-of") { watered height readings } }`,
+    );
+    expect(result.errors).toBeUndefined();
+    const ghost = (
+      result.data as {
+        plant: { watered: boolean; height: number | null; readings: number | null };
+      }
+    ).plant;
+    expect(ghost.watered).toBe(false); // absentAs still speaks
+    expect(ghost.height).toBeNull(); // pick over silence is null
+    expect(ghost.readings).toBeNull(); // and so is a count of nothing
+    await gateway.close();
+  });
+
+  it("append receipts are exact: accepted counts, duplicates count, dupes persist once", async () => {
+    const gateway = await Gateway.open(new MemoryBackend());
+    expect(await gateway.append(garden)).toEqual({ accepted: 5, duplicates: 0 });
+    expect(await gateway.append(garden.slice(0, 2))).toEqual({ accepted: 0, duplicates: 2 });
+    await gateway.close();
+  });
+
+  it("query before anything is registered refuses plainly", async () => {
+    const gateway = await Gateway.open(new MemoryBackend());
+    await expect(gateway.query(`{ plant(entity: "x") { _hex } }`)).rejects.toThrow(
+      /nothing is registered/,
+    );
+    await gateway.close();
+  });
+
+  it("two schemas serve side by side; an expand ref nests the child view through ViewValue", async () => {
+    const BED = "bed:shade";
+    const bedBody = parseTerm({
+      op: "expand",
+      role: { exact: "plant" },
+      schema: "Plant",
+      in: {
+        op: "group",
+        key: "byTargetContext",
+        in: {
+          op: "select",
+          pred: { hasPointer: { targetEntity: { var: "root" } } },
+          in: { op: "mask", policy: "drop", in: "input" },
+        },
+      },
+    });
+    const planting = signClaims(
+      {
+        timestamp: 1100,
+        author: GARDENER,
+        pointers: [
+          { role: "bed", target: { kind: "entity", entity: { id: BED, context: "plants" } } },
+          { role: "plant", target: { kind: "entity", entity: { id: FERN, context: "planted" } } },
+        ],
+      },
+      GARDENER_SEED,
+    );
+    const gateway = await openGateway([...garden, planting]);
+    gateway.register(
+      { name: "BedWithPlants", alg: 1, body: bedBody },
+      { props: new Map([["plants", pickLatest]]), default: pickLatest },
+      [BED],
+    );
+    const result = await gateway.query(`{
+      plant(entity: "${FERN}") { height }
+      bedWithPlants(entity: "${BED}") { plants _view }
+    }`);
+    expect(result.errors).toBeUndefined();
+    const data = result.data as {
+      plant: { height: number };
+      bedWithPlants: { plants: Record<string, unknown>; _view: Record<string, unknown> };
+    };
+    expect(data.plant.height).toBe(34);
+    expect(data.bedWithPlants.plants).toMatchObject({ height: 34 }); // the nested child view
+    expect(data.bedWithPlants._view).toHaveProperty("plants");
+    await gateway.close();
+  });
+
+  it("_view carries dynamic properties the policy never named", async () => {
+    const gateway = await openGateway([
+      ...garden,
+      observed(FERN, "kind", "fern", 1200, GARDENER_SEED), // no policy prop for "kind"
+    ]);
+    const result = await gateway.query(`{ plant(entity: "${FERN}") { _view } }`);
+    const view = (result.data as { plant: { _view: Record<string, unknown> } }).plant._view;
+    expect(view["kind"]).toBe("fern");
+    await gateway.close();
+  });
+
+  it("a refused registration leaves the gateway exactly as it was", async () => {
+    const gateway = await openGateway();
+    // duplicate schema name → refused by the registry
+    expect(() => gateway.register(PLANT, PLANT_POLICY, [FERN])).toThrow();
+    // a colliding property name → refused by the gql builder
+    expect(() =>
+      gateway.register(
+        { name: "Plant2", alg: 1, body: PLANT_BODY },
+        { props: new Map([["_hex", pickLatest]]), default: pickLatest },
+        [FERN],
+      ),
+    ).toThrow(/collides/);
+    // and the gateway still answers as before
+    expect((await queryPlant(gateway)).height).toBe(34);
+    await gateway.close();
+  });
+
+  it("loadSchema proves the definition before anything lands: a bad batch persists nothing", async () => {
+    const backend = new MemoryBackend();
+    const gateway = await Gateway.open(backend);
+    const stray = observed(FERN, "height", 30, 1000, GARDENER_SEED); // defines no schema
+    await expect(gateway.loadSchema([stray], "schema:Nope")).rejects.toThrow(
+      /no surviving schema definition/,
+    );
+    expect(await backend.deltasSince(new Set())).toEqual([]); // append-only stores forgive nothing
+    await gateway.close();
+  });
+
+  it("a write-through failure is surfaced, further appends refuse, close still releases", async () => {
+    class FailingBackend extends MemoryBackend {
+      failNow = false;
+      override append(deltas: Iterable<Delta>): Promise<number> {
+        if (this.failNow) return Promise.reject(new Error("disk on fire"));
+        return super.append(deltas);
+      }
+    }
+    const backend = new FailingBackend();
+    const gateway = await Gateway.open(backend);
+    await gateway.append(garden.slice(0, 2)); // healthy writes land
+    backend.failNow = true;
+    await expect(gateway.append([garden[2]!])).rejects.toThrow(/disk on fire/);
+    // degraded: new work is refused BEFORE ingest, so the divergence stops growing
+    await expect(gateway.append([garden[3]!])).rejects.toThrow(/no longer persist/);
+    // close surfaces the failure AND releases the backend
+    await expect(gateway.close()).rejects.toThrow(/disk on fire/);
+    await expect(backend.deltasSince(new Set())).rejects.toThrow(/closed/);
+  });
+});
