@@ -73,15 +73,15 @@ near-synonyms (that is how you get two colliding "schema" concepts).
 - **The GraphQL interface** — GraphQL derived from `HyperSchema` + `Policy`, exposing `query` /
   `mutate` / `subscribe` / `loadSchema` over rhizomatic's `resolveView` and reactor. rhizomatic gives
   the resolution primitives; GraphQL-as-the-surface is Loam's. (Chorus's read-only `gql.ts` is the
-  starting point; generalize: hyperschema-sourced, plus mutations.)
+  design reference; Loam's is written clean: hyperschema-sourced, plus mutations.)
 - **Durable / pluggable persistence** — rhizomatic is in-memory `DeltaSet` + `pack`/`unpack`. Loam
   adds the **async** `StoreBackend` seam + drivers (in-memory, sqlite, and a hosted one — Turso /
-  libSQL is shaped right) + a store registry. Extract & async-ify chorus's persistence tier (§10).
+  libSQL is shaped right) + a store registry. Chorus's persistence tier is the reference (§10).
 - **Accounts & capabilities** — users / ownership / capability-grants as schemas in the genesis set;
   the gateway authorizes a mutation iff a resolved grant permits it; an operator identity roots the
   first grants. Policy-as-data, enforcement-as-gateway-code.
-- **The gateway transport** — MCP + HTTP serving the gateway (mounts, token auth). Extract chorus
-  `mcp-http.ts`.
+- **The gateway transport** — MCP + HTTP serving the gateway (mounts, token auth). Chorus
+  `mcp-http.ts` is the reference.
 - **Deployment & runtime variety** — CLI, containerization, turnkey hosted persistence; and function
   **runtimes beyond in-process `DerivedFn`** (HTTP, VM, human) plus the runner's peer-client
   deployment (§6).
@@ -146,8 +146,8 @@ No ambient authority, anywhere. A user's write permission and a function's effec
 construct: an explicit, signed, reified **capability grant** (a delta granting a reference). Accounts
 / capabilities are core genesis schemas; a mutation authorizes **iff a resolved grant permits it**
 (policy is data, enforcement is gateway code, rooted in an operator identity). Capabilities are thus
-auditable, time-traveled, revocable. **(open)** multi-tenant scope for v1 (plan fully; ship simple
-or full).
+auditable, time-traveled, revocable. **(decided 2026-07-09)** v1 is fully multi-tenant: tenant
+isolation is a first-class construct in the genesis schemas and gateway enforcement, not a deferment.
 
 ## 8. Persistence, deployment, federation
 
@@ -180,17 +180,20 @@ or full).
   opt-in streaming transform that **appends** typed deltas, signs as the migrator, cites the source
   deltas (provenance), and never re-signs as the original authors.
 
-## 10. Extraction inventory — what to lift from Chorus
+## 10. Reference inventory — what to learn from Chorus
 
-Roughly half of Loam's _plumbing_ is already shipped and tested in
-[chorus](https://github.com/bombadil-labs/chorus)'s `src/`. Extract & adapt (not rebuild): the
-**persistence tier** (`store-tier` / `sqlite-core` / drivers / content-sniffing — async-ify it), the
-**store registry** (`stores.ts`, incl. `adopt`), the **GraphQL lifecycle** (`gql.ts` — re-source from
-hyperschemas + add mutations), the **MCP/HTTP transport** (`mcp-http.ts`), the **CLI scaffolding**
-(`cli*.ts`, `config.ts`), and the **resolution-policy set** (`policies.ts`). Reference-only (they
-carry the EAV model): `agent.ts` (`beliefPointers`), `decisions.ts` (the pin-and-replay pattern), and
-the belief instruments/messages/briefing/librarian. The genuinely new code is the
-hyperschema-sourced GraphQL, accounts-as-schema, and the runner's runtime variety and deployment.
+Roughly half of Loam's _plumbing_ has a shipped, tested ancestor in
+[chorus](https://github.com/bombadil-labs/chorus)'s `src/`. **Decided (2026-07-09): chorus is
+reference-only** — read it as a design guide (its seams, its edge cases, its lessons), but write
+Loam's code clean, against Loam's tests; no EAV residue rides in. The reference map: the
+**persistence tier** (`store-tier` / `sqlite-core` / drivers / content-sniffing — Loam's is async
+from birth), the **store registry** (`stores.ts`, incl. `adopt`), the **GraphQL lifecycle** (`gql.ts`
+— Loam's is hyperschema-sourced, plus mutations), the **MCP/HTTP transport** (`mcp-http.ts`), the
+**CLI scaffolding** (`cli*.ts`, `config.ts`), and the **resolution-policy set** (`policies.ts`).
+Design-pattern references (they carry the EAV model): `agent.ts` (`beliefPointers`), `decisions.ts`
+(the pin-and-replay pattern), and the belief instruments/messages/briefing/librarian. The genuinely
+new code is the hyperschema-sourced GraphQL, accounts-as-schema, and the runner's runtime variety
+and deployment.
 
 ## 11. Glossary
 

@@ -73,7 +73,7 @@ Ordered; re-evaluated after each merge (cycle stage 7). Adopt rhizomatic's core;
    but *be sure to create a matching PR it into `rhizomatic` too* and be sure to flag this for the user!
    Ideally, `rhizomatic` is frozen and will not need updates, but let's be intentional!
 2. **Persistence tier.** An **async** `StoreBackend` seam + an in-memory driver + one durable driver
-   (sqlite or libSQL). Adapt from chorus (SPEC §10), async-ified.
+   (sqlite or libSQL). Chorus's tier (SPEC §10) is the design reference; write Loam's clean.
    _Success:_ append; `deltasSince(known)` returns the complement; state survives close/reopen;
    driver-substitution contract test; all green.
 3. **Read gateway.** GraphQL derived from a `HyperSchema` + `Policy`, exposing `query` + `loadSchema`,
@@ -88,8 +88,8 @@ Ordered; re-evaluated after each merge (cycle stage 7). Adopt rhizomatic's core;
    enforces (authorize iff a resolved grant permits); an operator root bootstraps grants.
    _Success:_ unauthorized mutation rejected; a grant permits it; revocation re-denies; grants are
    auditable via query.
-6. **Gateway transport.** MCP + HTTP serving the gateway (extract chorus `mcp-http`): token auth,
-   multi-store mounts.
+6. **Gateway transport.** MCP + HTTP serving the gateway (chorus `mcp-http` as reference): token
+   auth, multi-store mounts.
    _Success:_ a real HTTP/MCP client runs query/mutate/subscribe end-to-end with a bearer token; a
    junk token is rejected.
 7. **Runner + genesis assembly.** A peer-client runner over `DerivationHost` that installs
@@ -104,3 +104,7 @@ Ordered; re-evaluated after each merge (cycle stage 7). Adopt rhizomatic's core;
 9. **Federation.** Expose `Peer` sync over the authed HTTP + a "subscribe to instance X's published
    lens" declaration.
    _Success:_ two instances federate — a delta on A resolves on B; union-merge holds; no conflict.
+
+**Decisions (Myk, 2026-07-09):** v1 is **fully multi-tenant** (§7). Chorus is **reference-only** —
+read its plumbing as a design guide; write Loam's code clean, against Loam's tests (§10). Run
+autonomously until the plan's steps are secured, then regroup with Myk to plan future phases.
