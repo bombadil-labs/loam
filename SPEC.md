@@ -109,7 +109,7 @@ near-synonyms (that is how you get two colliding "schema" concepts).
 
 ## 5. The gateway (Loam's only surface)
 
-MCP + HTTP exposing GraphQL: **`query`** (resolve once → snapshot), **`subscribe`** (hold live →
+HTTP, CLI and MCP interfaces exposing GraphQL: **`query`** (resolve → snapshot), **`subscribe`** (live →
 snapshot + patches), **`mutate`** (a schema's write-resolvers turn field-args → deltas → append),
 **`loadSchema(deltas) → schema`** (append schema-defining deltas, meta-resolve via `SCHEMA_SCHEMA`,
 return it). Nothing is reachable except through GraphQL over a schema — including schema CRUD.
@@ -125,7 +125,7 @@ The reactive substrate is three **roles**, not three layers:
 - **Core** (rhizomatic + Loam's store) natively holds functions-as-data and signals readiness
   (`DerivationHost` + reactor materializations). It never runs foreign code beyond what a binding's
   `fn` is.
-- **The runner** — a **peer client / sibling app** (not a tier), reusable and domain-agnostic — plays
+- **The runner** — a **peer client / sibling app**, reusable and domain-agnostic — plays
   the **execution role**: subscribes to ready-to-fire bindings, executes the implementation in its
   runtime, appends outputs. Sandboxing (object-capability confinement — `isolated` bodies in a SES /
   Worker / wasm compartment, required for federated code), effect handling, and termination budgets
