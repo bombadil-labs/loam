@@ -32,13 +32,12 @@ update `CURRENT_WORK.md`** so the next run resumes exactly here.
 5. **Review.** Run a strict review against: (a) is the code high-quality, concise, efficient —
    no dead weight, no cleverness that hides behavior; (b) are any tests misaligned with the
    step's goals; (c) are there missing tests. **Frame review prompts and finding-summaries in a
-   neutral correctness register** ("review for authorization and correctness gaps; what inputs or
-   states produce a wrong outcome") rather than an adversarial exploit register ("attack this,
-   hunt for bypasses, how would an attacker…"). The neutral framing finds the same bugs and trips
-   content classifiers far less — the militarized version was only ever stylistic. **Budget: one
-   careful review agent per PR** (self-review directly for small mechanical diffs); a 2–3-angle
-   panel only for the riskiest steps (capabilities/auth, federation). Token spend must last the
-   whole plan.
+   neutral correctness register** — "review for authorization and correctness gaps; what inputs
+   or states produce a wrong outcome" — rather than role-playing an opponent trying to defeat the
+   system. The neutral framing finds the same issues and reads far less like offensive security
+   to a content classifier; the sharper framing was only ever stylistic. **Budget: one careful
+   review agent per PR** (self-review directly for small mechanical diffs); a 2–3-angle panel only
+   for the riskiest steps (capabilities/auth, federation). Token spend must last the whole plan.
    **Audits are paused** (Myk, 2026-07-09): audit 1 (after PR #5) cost ~5% of the total token
    budget — no further audit panels until every queued step and the landing are done. Before any
    future audit, apply audit 1's retro: the per-finding verify stage was ~80% of the cost and

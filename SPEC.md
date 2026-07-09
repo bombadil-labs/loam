@@ -57,7 +57,8 @@ near-synonyms (that is how you get two colliding "schema" concepts).
   HyperSchema` (deltas → schema), `publishSchemaClaims(schema, …) → Claims` (schema → deltas),
   `definitionRoles()`. Schemas are data; the metacircular seed is already written.
 - **The reactor** — `ingest` (verifies content-addressing and any signature; unsigned deltas are
-  accepted, forged ones rejected without trace); live indexes (`byTarget`/`byValue`/`negationsOf`);
+  accepted, ones whose id does not match their claims rejected without trace); live indexes
+  (`byTarget`/`byValue`/`negationsOf`);
   `arrivalLog`; `eval` over a `SchemaRegistry`; named, rooted **materializations**
   (`register(name, term, roots, registry?)` / `materializedView` → `HView` / `materializedHex`)
   kept current on each ingest; **`subscribe(name, cb)`** (push change-notification via

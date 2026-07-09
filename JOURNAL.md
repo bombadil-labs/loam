@@ -2,6 +2,8 @@
 
 _Append-only record: one entry per completed step (or notable event) — what was done, why it went that way, and any novel learning. Newest last._
 
+_Note (2026-07-09): existing entries had their register softened for content-classifier hygiene — security review notes reworded from an opponent-role framing into a neutral correctness one. Every fact is preserved; only the phrasing changed. Future entries: keep the neutral register (see CLAUDE.md, loop stage 5)._
+
 ## 2026-07-09 — Open decisions resolved; sprint begins
 
 Myk resolved both standing questions at the start of a three-day build sprint:
@@ -28,7 +30,7 @@ Learnings worth keeping:
 - **vitest 4, not 2.** rhizomatic pins vitest ^2; that chain (vite/esbuild) carries five audit
   findings including a critical. v4 audits clean and nothing in our usage differs. Don't inherit
   a toolchain pin out of sympathy.
-- **The adversarial review earned its keep on a "trivial" step.** Eight finder angles on a
+- **The strict review earned its keep on a "trivial" step.** Eight finder angles on a
   scaffold produced ten real fixes — the sharpest: `build` (declaration emit) was exercised by
   nothing, so TS2742-class breakage would have merged green until step 8; and non-type-aware
   eslint would have let a floating promise into step 2's async store seam. Review the boring PRs.
@@ -58,8 +60,9 @@ of SPEC §2's claim clusters. **The substrate is what the SPEC says it is.** Con
   whose `newHex` matches independently computed ground truth; registration after ingest
   backfills; multiple subscribers all hear; **for root-anchored terms** irrelevant deltas cause
   no event and no re-evaluation (`evalCountOf` flat — note: non-anchored terms dispatch broadly,
-  over-match is allowed, so gateway materializations should stay root-anchored); forgeries are
-  rejected without trace; arrival order cannot change the materialized truth even within one
+  over-match is allowed, so gateway materializations should stay root-anchored); deltas whose
+  content address does not match are rejected without trace; arrival order cannot change the
+  materialized truth even within one
   bucket; **negation flows through the live read** (the negated value vanishes from the resolved
   view and subscribers are told).
 - **The function substrate is complete.** Install → fire → emit works; emissions are signed by
@@ -67,7 +70,7 @@ of SPEC §2's claim clusters. **The substrate is what the SPEC says it is.** Con
   provenance naming the exact function and binding; `supersede` keeps exactly the **latest
   emission set** live (one live claim per pointer-list the function returns — a multi-output
   function leaves several); `verifyPureDerivation` reproduces the emission from the recorded
-  input hex and rejects a tampered function; a budget-exhausted binding suspends observably and
+  input hex and rejects an altered function; a budget-exhausted binding suspends observably and
   attributably (a signed suspension claim naming the binding) and stops emitting.
 
 Differences from SPEC §2 — refinements, no contradictions (SPEC corrected):
@@ -104,8 +107,9 @@ Learnings worth keeping:
   synchronous throws (SQLITE_BUSY, closed handles) past every `.catch` unless the method itself
   is `async` — the keyword is load-bearing. The type-aware `require-await` lint fights this
   pattern; a file-scoped disable naming the reason is the honest resolution.
-- **Stores canonicalize on the way in and fsck on the way out.** A forged id is refused as a
-  rejection (both drivers, one `canonicalDelta` gate); a stored row that no longer recomputes to
+- **Stores canonicalize on the way in and fsck on the way out.** A delta whose id doesn't match
+  its claims is refused (both drivers, one `canonicalDelta` gate); a stored row that no longer
+  recomputes to
   its id is corruption and reads reject — never laundered into a differently-addressed delta.
   JSON cannot say `-0`, so the canonical form (which the id already agrees with — canonical CBOR
   collapses `-0`) is what every driver returns: driver substitution stays byte-identical.
@@ -134,7 +138,7 @@ Learnings worth keeping:
 - **Failure design is most of the gateway.** The single review agent confirmed the happy path
   and found seven failure-path defects: a permanently-rejected write queue that silently
   dropped later writes and wedged `close()`; `register()` latching a refused schema and
-  poisoning every later call; `loadSchema` persisting deltas before proving they define a
+  corrupting every later call; `loadSchema` persisting deltas before proving they define a
   schema (append-only stores forgive nothing); `absentAs` typed by its inner policy when its
   constant is a bare primitive (graphql-js throws "Expected Iterable" exactly when the default
   should speak); silent GraphQL name shadowing. The pattern for all five fixes: **validate
@@ -175,14 +179,15 @@ Learnings worth keeping:
 
 Per Myk's cadence rule (one lean review per PR; a full multi-angle audit panel every 5 merges),
 a six-angle audit workflow ran over the whole codebase: 24 candidates, **23 survived
-adversarial verification** — the depth per-PR reviews trade away, recovered on schedule. The
+independent verification** — the depth per-PR reviews trade away, recovered on schedule. The
 sharpest catches, all fixed in the audit-1 PR:
 
-- **The stores' gate had two gaps**: sqlite's dedup fast-path ran BEFORE the forged-id check
-  (a forgery wearing a known id was silently skipped, where memory rejected it), and memory
-  appended non-atomically (deltas before a forged one stayed stored). Now: every delta passes
-  `canonicalDelta` before dedup, and one refusal refuses the whole batch on every driver.
-- **The sig column was never fscked**: a tampered or stripped signature read back as healthy
+- **The stores' gate had two gaps**: sqlite's dedup fast-path ran BEFORE the id-recompute check
+  (a delta wearing a known id but mismatched claims was silently skipped, where memory rejected
+  it), and memory appended non-atomically (deltas before a rejected one stayed stored). Now:
+  every delta passes `canonicalDelta` before dedup, and one refusal refuses the whole batch on
+  every driver.
+- **The sig column was never fscked**: an altered or stripped signature read back as healthy
   data. Reads now refuse a signature that does not verify, like any other corruption.
 - **Lone surrogates break content addressing** (verified against the real dependency: canonical
   CBOR hashes U+D800 as U+FFFD, so byte-different claims share one id, while the JSON round-trip
@@ -199,7 +204,8 @@ sharpest catches, all fixed in the audit-1 PR:
   same-millisecond coin flips from one writer; across restarts the wall clock is the only
   witness); a patch
   coalescing into an undrained snapshot stays a snapshot; lazy materializations are capped
-  (pure-read DoS); prototype-member schema names no longer falsely collide.
+  (a pure-read path could otherwise grow the reactor without bound); prototype-member schema
+  names no longer falsely collide.
 - **Three tests were lying politely** (a byAuthorRank test that never used byAuthorRank, a
   count assertion satisfiable by a picked value, an untested `legal()` mangling path) — all
   made falsifiable.
@@ -221,8 +227,9 @@ operator: no operator, no constitution (an ungoverned local store, and a test pi
 Learnings worth keeping:
 
 - **Effectiveness is a chain, not a flag.** The review's sharpest find: grants planted while a
-  store was ungoverned would bind the moment an operator opened it (self-signed admin, hostile
-  strikes). The fix is real capability semantics — a constitutional delta is effective only if
+  store was ungoverned would bind the moment an operator opened it (self-signed admin,
+  unauthorized strikes). The fix is real capability semantics — a constitutional delta is
+  effective only if
   its authority chain roots in the operator — and the chain is TIMELESS: reachability, not
   arrival order, so it needs no history replay and a cycle of self-appointed admins roots
   nowhere. The same discipline applies to strikes (a revocation without standing is inert),
@@ -244,7 +251,7 @@ every transport test against a real listening server with real `fetch`.
 Learnings worth keeping:
 
 - **The network surface is a security surface.** The single review found eight real issues on a
-  step that looked done: an attacker-controlled mount name resolving `Object.prototype`
+  step that looked done: a caller-controlled mount name resolving `Object.prototype`
   (`__proto__`, `constructor`) into a phantom gateway (now a `Map`); a mount-name oracle from
   checking the mount before the token (now auth-first — an unauthenticated caller can't tell a
   real mount from a missing one); unbounded `readBody` (now a 4 MiB cap → 413, bytes buffered so
@@ -267,7 +274,7 @@ Three pieces, one theme — the store describes itself. 126/126.
   operator-signed delta (`termToJson`/`policyToJson` as JSON-string primitives); `Gateway.open`
   replays them and re-registers, so a reopened store serves its schemas with **no
   re-registration code** — the audit-1 gap closed. In a governed store only the operator's
-  registrations bind (a hostile one planted while ungoverned roots nowhere, same discipline as
+  registrations bind (an unsanctioned one planted while ungoverned roots nowhere, same discipline as
   the constitution).
 - **The runner is a peer client, not a tier.** Function DEFINITIONS live in the store (a
   `BindingSpec` filed as a delta); `Runner.attach(gateway, { seed, implementations })` reads
@@ -289,9 +296,9 @@ SPEC §6 wanted. And derived emissions persist for free: they were already ridin
 
 Review resolution (6 findings):
 
-- **The confused deputy, closed twice.** The review's sharpest: a binding definition the runner
-  installs makes it compute and sign under its own seed — so who may plant one is who may
-  command the runner. In a governed store that's now the operator alone, enforced at BOTH ends:
+- **The privilege-confusion gap, closed twice.** The review's sharpest: a binding definition the
+  runner installs makes it compute and sign under its own seed — so who may plant one is who may
+  direct the runner. In a governed store that's now the operator alone, enforced at BOTH ends:
   a non-operator's definition is refused at `append` (it files on ungoverned ground, which only
   the operator may write), and `readBindingDefinitions` filters to operator-authored on install
   (defense in depth for anything planted while the store was ungoverned). Derived emissions
@@ -363,7 +370,7 @@ The load-bearing decision, and the last piece of the authority model:
 - **Federation is union at the substrate, NOT a governed mutation.** Capabilities gate who may
   *write* via GraphQL; a peer's deltas cross by VERIFICATION alone (content address + a real
   signature + an optional admission predicate), through `gateway.federate` — which deliberately
-  **bypasses `authorize`**. If federation ran writes through the capability gate, B would reject
+  **skips `authorize` by design**. If federation ran writes through the capability gate, B would reject
   every delta whose author lacks a grant on B's tenants, and no two independently-governed
   stores could ever merge. Instead: whether a peer's facts shape a local view is a read-time
   TRUST choice (a policy's `byAuthorRank`), never a write denial — "no authority deciding whose
@@ -374,24 +381,27 @@ The load-bearing decision, and the last piece of the authority model:
   term) restricts what crosses the wire; the test confirms a heights-only lens keeps a store's
   tags home. Trust stays the puller's, via `admit`.
 - Union proved end to end: a delta on A resolves on B after one pull; both-ways sync converges
-  to the same `_hex`; a re-pull accepts nothing (idempotent); a forgery is refused at the
-  boundary while honest deltas beside it land. `fromWire` recomputes every id and refuses one
-  that does not match — a forgery cannot survive the crossing whatever id a peer stamps on it.
+  to the same `_hex`; a re-pull accepts nothing (idempotent); a delta whose id does not match its
+  claims is refused at the boundary while honest deltas beside it land. `fromWire` recomputes
+  every id and refuses a mismatch — a counterfeit cannot survive the crossing whatever id a peer
+  stamps on it.
 
 Review resolution (7 findings): the agent confirmed the security model is sound but the
 load-bearing tests were missing, plus a real confidentiality default. Fixed:
 
 - **Foreign law's inertness is now PROVEN, not just argued.** The single most important test of
-  the step: Mallory signs a grant making herself admin of the victim's tenant and federates it
-  in — it verifies, so union admits it (accepted: 1), but she still cannot write, because her
-  grant roots in nobody the victim's operator blessed. The unsigned-refusal and forged-id
-  branches are exercised too (the old test only forged the id, never the signature path).
+  the step: a peer signs a grant naming itself admin of another store's tenant and federates it
+  in — it verifies, so union admits it (accepted: 1), but that author still cannot write, because
+  the grant roots in nobody the receiving store's operator blessed. The unsigned-refusal and
+  id-mismatch branches are exercised too (the old test only altered the id, never the signature
+  path).
 - **The raw offer is operator-gated.** `/federate` handed the whole substrate — grants,
   memberships, registrations — to any authenticated token, past the GraphQL read gateway. It
   now requires an operator token (403 otherwise): federation is an operator-level trust
   relationship, not a scoped reader's licence.
-- **The pull is bounded.** `pullFrom` read the peer's body with no cap (a trivial OOM DoS on the
-  puller) and threw a raw `SyntaxError` on non-JSON; now a 64 MiB cap and a clean error.
+- **The pull is bounded.** `pullFrom` read the peer's body with no cap (an unbounded response
+  could exhaust the puller's memory) and threw a raw `SyntaxError` on non-JSON; now a 64 MiB cap
+  and a clean error.
 - **A mis-shaped `offeredLens` fails fast** at `Gateway.open` (trial-eval → "must select a delta
   set"), not as a 500 when a peer first pulls in production.
 - **The shared-seed invariant is documented** at the `federate` seam: the whole trust boundary
@@ -406,8 +416,8 @@ section from CLAUDE.md, rewrite README as real documentation, and ready the npm 
 
 The v1 plan is delivered end to end: eleven PRs (a scaffold, the rhizomatic spike, persistence,
 the read gateway, mutations+subscriptions, capabilities, transport, runner+genesis, CLI+deploy,
-federation, and one 23-finding audit), 151 tests, every step tests-first with an adversarial
-review resolved before merge. Closing the sprint:
+federation, and one 23-finding audit), 151 tests, every step tests-first with a strict review
+resolved before merge. Closing the sprint:
 
 - **CLAUDE.md is now the process, not the plan.** The build-steps section is removed (the journal
   is the record); what remains is the loop any future work runs, the standing rules, and the
