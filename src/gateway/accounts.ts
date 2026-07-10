@@ -99,9 +99,14 @@ export const TENANT: HyperSchema = {
 // becomes a heckler's veto. These lenses honor only LAWFUL strikers: the operator, plus the
 // authors the operator's surviving grants name (the community the door admitted). The trusted
 // set is an `inView` — a view over the same delta-set, always current: mint a grant and its
-// grantee's strikes bind on the next read; revoke it (operator-signed) and they stop. Depth-1
-// of the effectiveness chain, stated plainly: grants MINTED BY ADMINS (not the operator) do
-// not reach these lenses' trusted sets — enforcement's full recursion stays in grantHeld.
+// grantee's strikes bind on the next read; revoke it and they stop. The sets reach ONE LINK
+// from the operator: subjects of grants the OPERATOR authored, surviving the OPERATOR's own
+// strikes (stratification bans inView inside the sub-term — the chain cannot recurse here).
+// Stated plainly: standing minted by an ADMIN binds enforcement but never enters these sets;
+// and an admin's revocation — honored by the door, and by these lenses' OUTER masks — does
+// not by itself remove the revoked author from a trusted set (only the operator's strike
+// does). grantHeld keeps the full recursion; the chain's second link is exactly where lens
+// and door can disagree.
 function lawfulStrikersJson(operator: string, adminsOnly: boolean): unknown {
   const operatorMinted = { match: { field: "author", cmp: "eq", const: operator } };
   const grantShaped = {
@@ -344,16 +349,24 @@ export function constitutionalDefect(delta: Delta): string | undefined {
     if (grants.length !== 1 || members.length + allegiances.length > 0) {
       return "a grant names exactly one tenant and nothing else constitutional";
     }
-    const subject = ptrs.find((p) => p.role === "subject" && p.target.kind === "primitive");
-    const verb = ptrs.find((p) => p.role === "verb" && p.target.kind === "primitive");
-    if (subject?.target.kind !== "primitive" || typeof subject.target.value !== "string") {
-      return "a grant carries a string subject";
+    // Exactly ONE subject and ONE verb: duplicates would read differently in enforcement
+    // (last wins), validation (first checked), and the inView lenses (any match) — a delta
+    // that means three things in three places is malformed law, whoever signed it.
+    const subjects = ptrs.filter((p) => p.role === "subject");
+    const verbs = ptrs.filter((p) => p.role === "verb");
+    if (
+      subjects.length !== 1 ||
+      subjects[0]!.target.kind !== "primitive" ||
+      typeof subjects[0]!.target.value !== "string"
+    ) {
+      return "a grant carries exactly one string subject";
     }
     if (
-      verb?.target.kind !== "primitive" ||
-      (verb.target.value !== "write" && verb.target.value !== "admin")
+      verbs.length !== 1 ||
+      verbs[0]!.target.kind !== "primitive" ||
+      (verbs[0]!.target.value !== "write" && verbs[0]!.target.value !== "admin")
     ) {
-      return 'a grant\'s verb is "write" or "admin"';
+      return 'a grant carries exactly one verb, "write" or "admin"';
     }
     return undefined;
   }

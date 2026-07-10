@@ -1,0 +1,47 @@
+{
+  "name": "Presence",
+  "alg": 1,
+  "body": {
+    "op": "group",
+    "key": "byTargetContext",
+    "in": {
+      "op": "select",
+      "pred": {
+        "hasPointer": {
+          "targetEntity": {
+            "var": "root"
+          }
+        }
+      },
+      "in": {
+        "op": "mask",
+        "policy": "drop",
+        "in": "input"
+      }
+    }
+  },
+  "policy": {
+    "props": {
+      "name": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      }
+    },
+    "default": {
+      "pick": {
+        "order": {
+          "byTimestamp": "desc"
+        }
+      }
+    }
+  },
+  "roots": [
+    "person:wren",
+    "person:miles",
+    "person:odile",
+    "person:petra"
+  ]
+}

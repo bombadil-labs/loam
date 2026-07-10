@@ -383,6 +383,72 @@ describe("standing: deny is the default, permission is an artifact", () => {
     await gateway.close();
   });
 
+  it("a grant with duplicate subjects or verbs is malformed law (it would read differently in three places)", async () => {
+    const gateway = await grantedWorld();
+    const twoVerbs = signClaims(
+      {
+        timestamp: tick(),
+        author: OPERATOR,
+        pointers: [
+          {
+            role: "tenant",
+            target: { kind: "entity", entity: { id: STORE_ENTITY, context: "loam.grants" } },
+          },
+          { role: "subject", target: { kind: "primitive", value: BOB } },
+          { role: "verb", target: { kind: "primitive", value: "admin" } },
+          { role: "verb", target: { kind: "primitive", value: "write" } },
+        ],
+      },
+      OPERATOR_SEED,
+    );
+    await expect(gateway.append([twoVerbs])).rejects.toThrow(/malformed law/);
+    await gateway.close();
+  });
+
+  it("the lenses reach ONE link: an operator-minted admin's strike binds them; a chain-minted admin's does not", async () => {
+    // Empiricism corrected the review here: an operator-minted admin IS in the lens's trusted
+    // set (she is the subject of an operator-authored admin grant), so her strikes move the
+    // audit. The divergence begins at the chain's SECOND link — standing minted by an admin.
+    const CAROL_SEED = "cc".repeat(32);
+    const CAROL = authorForSeed(CAROL_SEED);
+    const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
+    await gateway.append([
+      signClaims(grantClaims(STORE_ENTITY, ALICE, "admin", OPERATOR, tick()), OPERATOR_SEED),
+    ]);
+    const bobGrant = signClaims(
+      grantClaims(STORE_ENTITY, BOB, "write", OPERATOR, tick()),
+      OPERATOR_SEED,
+    );
+    await gateway.append([bobGrant]);
+    // carol's admin standing arrives through ALICE's mint — the second link
+    await gateway.append([
+      signClaims(grantClaims(STORE_ENTITY, CAROL, "admin", ALICE, tick()), ALICE_SEED),
+    ]);
+    gateway.register(PLANT, PLANT_POLICY, [FERN]);
+    gateway.register(tenantSchemaFor(OPERATOR), TENANT_POLICY, [STORE_ENTITY]);
+    const audit = async () =>
+      (
+        (
+          (await gateway.query(`{ tenant(entity: "${STORE_ENTITY}") { _view } }`)).data as {
+            tenant: { _view: Record<string, unknown> };
+          }
+        ).tenant._view["loam.grants"] as unknown[]
+      ).length;
+
+    // CAROL (effective admin via the chain) revokes bob: ENFORCEMENT honors it at once…
+    await gateway.append([signClaims(revocationClaims(bobGrant.id, CAROL, tick()), CAROL_SEED)]);
+    expect((await mutateHeight(gateway, BOB_SEED, 90)).errors?.join(" ")).toMatch(/not permitted/);
+    // …but the audit LENS trusts only the operator and the operator's DIRECT grantees
+    // (stratification bans inView inside the trusted-set sub-term), so bob's grant still
+    // shows: the second link is exactly where lens and door disagree — SPEC §7's residual.
+    expect(await audit()).toBe(3); // alice's, carol's, and bob's (door-dead, lens-visible)
+
+    // by contrast ALICE — operator-minted, the FIRST link — moves door AND lens together
+    await gateway.append([signClaims(revocationClaims(bobGrant.id, ALICE, tick()), ALICE_SEED)]);
+    expect(await audit()).toBe(2);
+    await gateway.close();
+  });
+
   it("malformed law is refused for everyone, the operator included", async () => {
     const gateway = await grantedWorld();
     const bogus = signClaims(

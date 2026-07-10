@@ -236,13 +236,18 @@ works (foreign grants, registrations, and definitions merge freely and bind noth
   plus the operator's grantees, resolved from the live delta-set — so a federated stranger's
   strike is inert while the community's bind, and revoking a grant un-binds its author's
   strikes on the very next read. `tenantSchemaFor(operator)` gives the AUDIT view the same
-  discipline (operator + operator-minted admins — what `standsFor` demands), so **audit agrees
-  with enforcement**. Residuals, stated plainly: the lens reaches depth-1 of the effectiveness
-  chain (admin-minted grants' grantees are enforcement's alone); plain `mask drop` bodies
-  still honor every present negation BY CHOICE (the honest default for bodies that want
-  community strikes unconditional — the pre-strike hazard lives only there); and per-tenant
-  admin chains still mint community-vocabulary grants while constitutional strikes require
-  store standing — revisit with trust-is-data (step 13).
+  discipline (operator + operator-minted admins — what `standsFor` demands), so **audit and
+  door move together through the chain's first link** (an operator-minted admin's strike binds
+  both — pinned by test). Residuals, stated plainly: the trusted sets reach ONE link — subjects
+  of OPERATOR-authored grants surviving OPERATOR-signed strikes (stratification bans
+  inView-in-inView, so the chain cannot recurse inside a lens) — therefore standing minted by
+  an admin binds enforcement but never enters a lens's trusted set, and an admin's revocation
+  bars the door without, by itself, removing the revoked author from the trusted sets; plain
+  `mask drop` bodies still honor every present negation BY CHOICE; pre-striking a
+  not-yet-arrived delta id remains possible for whomever a lens trusts (narrowed, not
+  confined, by governed bodies); and per-tenant admin chains still mint community-vocabulary
+  grants while constitutional strikes require store standing — revisit with trust-is-data
+  (step 13).
 - Tenant machinery (`loam.tenant` / `loam.members` / `loam.grants`) survives as **vocabulary for
   author-communities and read lenses**, not as write fences.
 

@@ -47,10 +47,17 @@ update `CURRENT_WORK.md`** so the next run resumes exactly here.
 6. **Resolve → merge.** If step 5 generates feedback, take it into consideration and go back to step 1,
    and feed forward; confirm the PR is genuinely good. Append a record to `JOURNAL.md` (what was done +
    any novel learning).
-7. **Re-plan.** With the step done, re-evaluate the **remaining** steps against anything you just learned.
+7. **The village.** Extend `_testing/` — the living demonstration, see `_testing/README.md` —
+   so the village *exercises the behavior this step added*, end-to-end and ambitiously: new
+   acts, new stores, new lenses, whatever makes the feature visible in a running federated
+   world. RUN what you added; update the demonstration ledger in `_testing/README.md` with what
+   changed and what it now shows (Myk, 2026-07-09: with each new PR, document how you've
+   updated the village). `_testing/homes/` stays untracked (stores and seeds are disposable);
+   the village's code and docs ride the step's PR.
+8. **Re-plan.** With the step done, re-evaluate the **remaining** steps against anything you just learned.
    If a learning changes the plan, edit SPEC.md to take it into consideration, log the change in 
    `JOURNAL.md`, and commit it.
-8. **Next step.** Clear `CURRENT_WORK.md` and begin the next unchecked step at stage 1.
+9. **Next step.** Clear `CURRENT_WORK.md` and begin the next unchecked step at stage 1.
 
 ## Standing rules
 
