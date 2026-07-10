@@ -15,21 +15,21 @@ system forget — precisely, provably, with a signed hole."
 
 Success criteria (from SPEC §11 — read it first):
 
-- [ ] Tombstone claims at `loam:erasure` (`eraseClaims` helper + defect validation like
+- [x] Tombstone claims at `loam:erasure` (`eraseClaims` helper + defect validation like
       trust's); authority = original author OR operator; lawful reads bind.
-- [ ] `StoreBackend.purge(ids)` on the seam — a named exception to grow-only; implemented by
+- [x] `StoreBackend.purge(ids)` on the seam — a named exception to grow-only; implemented by
       memory, sqlite, archive (delete the fan file), mirror (both sides).
-- [ ] `heal()` never resurrects a tombstoned id — the fire in reverse. Test this FIRST; it's
+- [x] `heal()` never resurrects a tombstoned id — the fire in reverse. Test this FIRST; it's
       where the bugs hide.
-- [ ] Admission (federate + append) refuses tombstoned ids forever.
-- [ ] `Gateway.erase(id)`: verify authority → manifest (blast radius: materializations touching
+- [x] Admission (federate + append) refuses tombstoned ids forever.
+- [x] `Gateway.erase(id)`: verify authority → manifest (blast radius: materializations touching
       the id, provenance citations) → purge all tiers → tombstone → re-materialize.
-- [ ] Degrees: full erasure; anonymous reassertion (request-carries-replacement, timestamp
+- [x] Degrees: full erasure; anonymous reassertion (request-carries-replacement, timestamp
       inheritance, NO on-record link); sealed authorship (`hash(salt‖author)` pointer); partial
       redaction. The ladder is purge + tombstone + reassert — never in-place mutation.
-- [ ] Federated: tombstones travel; a peer honoring the author's erasure authority purges on
+- [x] Federated: tombstones travel; a peer honoring the author's erasure authority purges on
       pull; compliance testable by asking for the id.
-- [ ] Village: **the unsaying** — a villager erases a claim; the network honors it; the
+- [x] Village: **the unsaying** — a villager erases a claim; the network honors it; the
       dossiers thin; the signed hole is visible in the event log.
 
 ## Unit 2 — The open door: public reads + browser client (SPEC §12)
@@ -102,16 +102,6 @@ nobody has to believe them.
 
 ## Left off here
 
-**Unit 1 (erasure) IN PROGRESS — the seam slice first** (started 2026-07-10 ~3am). The unit
-ships as two PRs: (1) the SEAM — `StoreBackend.purge(ids)` on all four drivers (mechanical,
-law-free; re-append after purge is ALLOWED at the backend — refusal-of-return is gateway law),
-`MirrorBackend.purge` (both sides), `heal(exclude?)` (skips excluded ids in both directions
-AND purges excluded stragglers found on either side — heal finishes the forgetting); (2) the
-LAW — tombstones at `loam:erasure`, `Gateway.erase` (authority → manifest → purge → tombstone
-→ reactor rebuild), admission composes tombstones, degrees (anonymous reassertion / sealed
-authorship / redaction), federation of erasure requests, the village's unsaying. SPEC §11 is
-the contract; read it first. LAW-SLICE DESIGN (decided): src/gateway/erase.ts modeled on trust.ts — ERASE_ENTITY loam:erasure, CTX_ERASE loam.erasure; eraseClaims(targetId, targetAuthor, author, ts) carries role erases → delta-kind ref + role spoken-by → primitive (the TARGET author, recorded at erase time BECAUSE the target will be purged and unverifiable later); eraseDefect validates shape at the door AND, when the target is still present, that spoken-by matches the target real author and the tombstone author is operator-or-that-author (authority verified while evidence exists); readTombstones(reactor, operator) → Set<id>: operator tombstones bind + self-erasures (tombstone.author === its spoken-by, trusted because the door verified it at append). admitFor composes readTombstones. Gateway.erase(id): authority → manifest (deltas citing the id + materializations holding it) → backend.purge (mirror reaches vault) → append tombstone → rebuild reactor from backend. cli.ts serve passes readTombstones to heal(exclude). Degrees (anonymous reassertion w/ embedded replacement, sealed authorship, redaction) are thin helpers over erase+append. Tests: test/gateway/erase.test.ts; trust.test.ts is the fixture pattern.
- SEAM SLICE DONE (PR #34, 302/302): purge on all four drivers, heal(exclude) with straggler-finishing, archive purge hunts every fan. NEXT: the LAW slice — tombstones at loam:erasure (trust-style claims+defect validation), Gateway.erase (authority → manifest → purge → tombstone → reactor rebuild), admission composes tombstones, degrees, federation, the village unsaying. Law-slice PR gets the review agent (seam was self-reviewed: contract-tested mechanical extension).
+**Unit 1 (erasure) COMPLETE** — seam (PR #34) + law (PR #36): tombstones verified at the door while evidence exists, Gateway.erase (manifest → purge → tombstone → re-seat), the door refuses erased ids past any admit override, forgiveness = striking the tombstone, degrees compose from erase+append, heal is tombstone-guarded on every path (cli, harness), phase12 4/4 twice, the unsaying live in the village. KNOWN ISSUE (recorded, not urgent): village act pacing has slowed (~25s/act) — the mill re-grinds a 400+-delta ground per ingest and the pulse presence query hauls the derived.from evidence hex; this is SPEC §13 vertical-scale honesty in miniature. Candidates: prune village homes, lighter pulse query, or an index tier someday.
 
-After Unit 1: Unit 2 (open door + browser client), Unit 3 (playable village; 3a theater is
-dependency-free). Hosted driver (libSQL) queued behind these.
+**NEXT: Unit 2 (the open door)** — SPIKE FIRST: does rhizomatic signing/hashing run in a browser? Then public-read claims at loam.public + `@bombadil/loam/client`. Then Unit 3 (playable village).

@@ -462,6 +462,34 @@ const acts = [
   },
 ];
 
+// ---- the unsaying -----------------------------------------------------------------------------
+// ERASURE (SPEC §11): Wren speaks in haste, regrets it, and UNSAYS it — the bytes burn on every
+// tier (the vault forgets too), the signed hole remains, and the door refuses its return. The
+// erase re-seats the almanac's reactor, so the mill wheel is rehung after (like the fire).
+async function theUnsaying() {
+  const regret = signClaims(
+    {
+      timestamp: Date.now(),
+      author: AUTHORS.wren,
+      pointers: [
+        { role: 'subject', target: { kind: 'entity', entity: { id: 'person:wren', context: 'bio' } } },
+        { role: 'value', target: { kind: 'primitive', value: 'keeper of the commons; and frankly, the hive smells' } },
+      ],
+    },
+    SEEDS.wren,
+  );
+  await almanac.gateway.append([regret]);
+  tell('🌿 Wren speaks in haste about the hive…', 'write');
+  await sleep(4000);
+  const report = await almanac.gateway.erase(regret.id, { actorSeed: SEEDS.wren, reason: 'unsaid by request' });
+  const { attachMill } = await import('./mill.mjs');
+  await attachMill(stores.almanac);
+  tell(
+    `🕳️ …and UNSAYS it — the bytes burn on every tier, the signed hole remains (${report.citations.length} citations), and the door will refuse its return`,
+    "patch",
+  );
+}
+
 // ---- the fire ---------------------------------------------------------------------------------
 // COLD STORAGE (PR #22): the almanac keeps a seed vault — every append lands hot and cold in
 // one motion. Every so often the sqlite burns to the ground mid-story, and the reopen heals
@@ -492,7 +520,13 @@ async function life() {
     try {
       // mostly the small stuff; the forgery drama every 8th act; the fire every 24th
       const act =
-        i % 24 === 15 ? theFire : i % 8 === 7 ? acts[acts.length - 1] : pick(acts.slice(0, -1));
+        i % 24 === 15
+          ? theFire
+          : i % 24 === 4
+            ? theUnsaying
+            : i % 8 === 3
+              ? acts[acts.length - 1]
+              : pick(acts.slice(0, -1));
       await act();
     } catch (err) {
       console.log(`  an act stumbled: ${err}`);

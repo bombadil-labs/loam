@@ -102,3 +102,11 @@ _(one entry per PR that grew the village; newest last)_
   along the way: `readBindingDefinitions` now resolves latest-per-binding (a re-blessed
   recipe crashed attach with a duplicate install), and the reference emit-mode lesson —
   wholesale `supersede` erases OTHER roots' flour; per-subject output wants `keyed`.
+- **PR #36 — THE UNSAYING (erasure, SPEC §11)** (phase12.mjs, 4/4 twice): Wren speaks in
+  haste and **unsays it** — her own authority, her own words. The bytes burn on every tier
+  (the vault's heal is tombstone-guarded on every path), the dossier reverts, the **signed
+  hole** remains (who asked, when, which id — never what), and the door refuses the id's
+  return even though the commons still holds the original and offers it back on every pulse
+  — sovereignty both ways, watched live: `🕳️ …and UNSAYS it — the bytes burn on every tier,
+  the signed hole remains, and the door will refuse its return`. The erase re-seats the
+  almanac's reactor; the mill wheel is rehung after, like the fire.

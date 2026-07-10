@@ -7,8 +7,9 @@
 // `serve` blocks until the process is signalled.
 
 import { readFileSync } from "node:fs";
-import { parsePolicy, parseTerm, type HyperSchema } from "@bombadil/rhizomatic";
+import { authorForSeed, parsePolicy, parseTerm, type HyperSchema } from "@bombadil/rhizomatic";
 import { Gateway } from "../gateway/gateway.js";
+import { tombstonesIn } from "../gateway/erase.js";
 import { assembleGenesis } from "../gateway/genesis.js";
 import { schemaEntityFor } from "../gateway/registration.js";
 import { serve, type ServerHandle } from "../server/http.js";
@@ -99,7 +100,8 @@ async function cmdServe(
   const vault = archivePath(home, parsed.flags.get("archive"));
   let backend: StoreBackend = new SqliteBackend(path);
   if (vault !== undefined) {
-    const mirror = new MirrorBackend(backend, new ArchiveBackend(vault), {
+    const archive = new ArchiveBackend(vault);
+    const mirror = new MirrorBackend(backend, archive, {
       onLag: (err) =>
         io.err(
           `loam: the archive is lagging — ${err instanceof Error ? err.message : String(err)} (the next serve heals it)`,
@@ -107,7 +109,14 @@ async function cmdServe(
     });
     let healed;
     try {
-      healed = await mirror.heal();
+      // The law reaches the vault (SPEC §11): tombstoned ids — read straight off BOTH tiers,
+      // before any reactor exists — are excluded from the union, so a cold copy can never
+      // replant what the operator erased.
+      const dead = tombstonesIn(
+        [...(await backend.deltasSince(new Set())), ...(await archive.deltasSince(new Set()))],
+        authorForSeed(seed),
+      );
+      healed = await mirror.heal(dead);
     } catch (err) {
       await mirror.close().catch(() => {}); // never let a close failure mask the real refusal
       throw err;

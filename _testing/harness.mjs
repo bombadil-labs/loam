@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   ArchiveBackend,
   Gateway,
+  tombstonesIn,
   MirrorBackend,
   SqliteBackend,
   assembleGenesis,
@@ -84,10 +85,16 @@ export async function openStore(name) {
   const vault = cfg.archive ? join(home, "vault") : undefined;
   let healed = { toMirror: 0, toPrimary: 0 };
   if (vault !== undefined) {
-    backend = new MirrorBackend(backend, new ArchiveBackend(vault), {
+    const archive = new ArchiveBackend(vault);
+    backend = new MirrorBackend(backend, archive, {
       onLag: (err) => console.log(`  ${name}'s vault is lagging: ${err}`),
     });
-    healed = await backend.heal();
+    // the law reaches the vault: tombstoned ids are never replanted by a heal (SPEC §11)
+    const dead = tombstonesIn(
+      [...(await backend.deltasSince(new Set())), ...(await archive.deltasSince(new Set()))],
+      authorForSeed(seed),
+    );
+    healed = await backend.heal(dead);
   }
   const gateway = await Gateway.open(backend, {
     seed,

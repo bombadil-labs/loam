@@ -348,7 +348,7 @@ Design-pattern references (they carry the EAV model): `agent.ts` (`beliefPointer
 new code is the hyperschema-sourced GraphQL, accounts-as-schema, and the runner's runtime variety
 and deployment.
 
-## 11. Erasure — degrees of forgetting (designed 2026-07-10; queued)
+## 11. Erasure — degrees of forgetting (designed 2026-07-10; LANDED: PRs #34 + #36)
 
 GDPR Art. 17 and plain conscience both demand that a store can truly forget. The architecture
 makes this cheaper than it sounds: **Loam's immutability is per-fact, not global** — the ground

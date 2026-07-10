@@ -39,6 +39,7 @@ import {
 import { graphql, parse, subscribe, type ExecutionResult, type GraphQLSchema } from "graphql";
 import type { StoreBackend } from "../store/backend.js";
 import { authorize } from "./accounts.js";
+import { ERASE_ENTITY, eraseClaims, readTombstones } from "./erase.js";
 import { Channel } from "./channel.js";
 import type { Genesis } from "./genesis.js";
 import {
@@ -138,11 +139,19 @@ export class Gateway {
   // derivations); otherwise straight to the reactor. Passive vs animate is exactly this hook.
   private ingestVia: (d: Delta) => IngestResult = (d) => this.reactor.ingest(d);
 
+  // Mutable behind a getter: erase() re-seats the gateway on a fresh reactor replayed from the
+  // post-purge backend (the substrate is grow-only; forgetting in-process is a rebuild).
+  private _reactor: Reactor;
+  get reactor(): Reactor {
+    return this._reactor;
+  }
+
   private constructor(
     private readonly backend: StoreBackend,
-    readonly reactor: Reactor,
+    reactor: Reactor,
     private readonly options: GatewayOptions,
   ) {
+    this._reactor = reactor;
     this.operatorAuthor = options.seed === undefined ? undefined : authorForSeed(options.seed);
     // Fail fast on a mis-shaped offered lens: a term that does not select a delta set would only
     // blow up when a peer first pulls, in production. Trial-eval it now (empty store → empty
@@ -153,12 +162,17 @@ export class Gateway {
         throw new Error("offeredLens must select a delta set (a mask/select term, not a group)");
       }
     }
+    this.attachPersistence(reactor);
+  }
+
+  // Every accepted delta — appends AND a runner's derived emissions — is written through here.
+  // Derived emissions do not pass authorize(): a governed store runs only the operator's
+  // blessed binding definitions (readBindingDefinitions gates on the operator), so a firing
+  // binding is the operator's own delegated authority. Confining UNTRUSTED (federated)
+  // function bodies is a runner-runtime concern SPEC §6 reserves for later. (Called once per
+  // reactor: at construction, and again by reseat() after an erase.)
+  private attachPersistence(reactor: Reactor): void {
     reactor.subscribeRaw((d) => {
-      // Every accepted delta — appends AND a runner's derived emissions — is written through
-      // here. Derived emissions do not pass authorize(): a governed store runs only the
-      // operator's blessed binding definitions (readBindingDefinitions gates on the operator),
-      // so a firing binding is the operator's own delegated authority. Confining UNTRUSTED
-      // (federated) function bodies is a runner-runtime concern SPEC §6 reserves for later.
       if (this.justPersisted.delete(d.id)) return;
       this.writes = this.writes
         .then(() => this.backend.append([d]))
@@ -404,11 +418,20 @@ export class Gateway {
       throw new Error(`this gateway can no longer persist: ${this.writeFailure.message}`);
     }
     const batch = [...deltas];
+    // The door remembers the hole (SPEC §11): an erased id is refused re-entry — through
+    // append as through federation — until its tombstone is lawfully struck (forgiveness).
+    const dead = readTombstones(this.reactor, this.operatorAuthor);
     for (const d of batch) {
       if (computeId(d.claims) !== d.id || verifyDelta(d) !== "verified") {
         throw new Error(
           `append rejected: delta ${d.id} is unsigned or not what it claims to be — ` +
             `the gateway accepts only verified authorship`,
+        );
+      }
+      if (dead.has(d.id)) {
+        throw new Error(
+          `append rejected: delta ${d.id} was erased — a tombstone at ${ERASE_ENTITY} refuses ` +
+            `its return (strike the tombstone to forgive it)`,
         );
       }
       // Governance begins with the operator: a gateway holding no operator identity is an
@@ -568,6 +591,64 @@ export class Gateway {
     this.ingestVia = (d) => host.ingest(d);
   }
 
+  // --- erasure (SPEC §11) ------------------------------------------------------------------------
+
+  // Erase one delta: verify authority WHILE THE TARGET EXISTS, show the blast radius, land the
+  // tombstone (through authorize — the door validates it against the live target), purge every
+  // tier, and re-seat the gateway on the post-purge ground. The store remembers THAT it forgot
+  // — never what. Live subscriptions re-attach exactly as they do after a schema evolution or
+  // the fire; an animated gateway's runner must be re-attached (the host holds the old
+  // reactor).
+  async erase(
+    id: string,
+    opts: { actorSeed?: string; reason?: string } = {},
+  ): Promise<{ erased: string; citations: string[] }> {
+    const target = this.reactor.get(id);
+    if (target === undefined) {
+      throw new Error(`nothing to erase: ${id} is not held here`);
+    }
+    const seed = opts.actorSeed ?? this.options.seed;
+    if (seed === undefined) {
+      throw new Error("erasure needs a signer: the original author or the operator");
+    }
+    const author = authorForSeed(seed);
+    if (author !== target.claims.author && author !== this.operatorAuthor) {
+      throw new Error("erasure authority is the original author or the operator, nobody else");
+    }
+    // The manifest: every delta citing the id (negations, provenance links) — the holes the
+    // cut will leave, enumerated before it is made. Cascade is the caller's choice.
+    const citations = [...this.reactor.snapshot()]
+      .filter((d) =>
+        d.claims.pointers.some((p) => p.target.kind === "delta" && p.target.deltaRef.delta === id),
+      )
+      .map((d) => d.id);
+    const tombstone = signClaims(
+      eraseClaims(id, target.claims.author, author, this.nextTimestamp(), opts.reason),
+      seed,
+    );
+    await this.append([tombstone]);
+    await this.flush(); // the tombstone must be ground before the target stops being ground
+    await this.backend.purge([id]);
+    await this.reseat();
+    return { erased: id, citations };
+  }
+
+  // A fresh reactor replayed from the backend as it stands NOW — how open() built the first
+  // one. Every registered schema rebinds under a new generation (rebind), persistence
+  // re-attaches, and any animating host is detached (it watched the old reactor).
+  private async reseat(): Promise<void> {
+    const reactor = new Reactor();
+    for (const d of await this.backend.deltasSince(new Set())) {
+      if (reactor.ingest(d).status === "rejected") {
+        throw new Error(`reseat: the store handed back an unacceptable delta ${d.id}`);
+      }
+    }
+    this._reactor = reactor;
+    this.ingestVia = (d) => this.reactor.ingest(d);
+    this.attachPersistence(reactor);
+    if (this.registered.length > 0) this.rebind(this.registered);
+  }
+
   // --- federation ------------------------------------------------------------------------------
   //
   // Federation is union at the substrate, NOT a governed mutation. Capabilities gate who may
@@ -617,10 +698,18 @@ export class Gateway {
     }
     const all = [...deltas];
     const admit = opts.admit ?? this.admitFor(); // the store's trust policy, unless overridden
+    // The door remembers the hole (SPEC §11): a tombstoned id is refused re-entry even past an
+    // explicit admit override — un-erasure is striking the tombstone, never a lucky re-send.
+    const dead = readTombstones(this.reactor, this.operatorAuthor);
     const admitted: Delta[] = [];
     let rejected = 0;
     for (const d of all) {
-      if (computeId(d.claims) !== d.id || verifyDelta(d) !== "verified" || !admit(d)) {
+      if (
+        computeId(d.claims) !== d.id ||
+        verifyDelta(d) !== "verified" ||
+        dead.has(d.id) ||
+        !admit(d)
+      ) {
         rejected += 1;
         continue;
       }
