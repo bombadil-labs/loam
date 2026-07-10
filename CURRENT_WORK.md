@@ -42,9 +42,40 @@ Success criteria (from SPEC §11 — read it first):
       query + SSE wrappers. Zero node-only deps.
 - [ ] Village: the dashboard reads the almanac through the public door (no token in the page).
 
-## Unit 3 — The Reader's Republic (the demo)
+## Unit 3 — The Village, playable (decided 2026-07-10, ~2:30am: the village outgrew the
+## dashboard)
 
-The village dressed as what it is: a federated social network. Script (15 min, no slides):
+**Myk's call:** the village renders as a 2D browser game — little characters moving around,
+doing what the simulator already does; the user controls a villager and PARTICIPATES; Loam
+holds all of it. The design decision that keeps it honest:
+
+**MOVEMENT IS THEATER; ACTS ARE GROUND.** Characters walking is client-side animation — no
+per-tick deltas, ever. Everything a character DOES is already a signed delta: Wren at the
+commons garden IS her bio mutation; Miles at the barn IS a screening claim; Odile's grumble
+visibly stays home (the offered lens as dramaturgy); arrival at a gathering is an attend
+claim — presence-as-testimony at human frequency. There is no separate game state: **the game
+is a lens over the ground** — the same deltas could back a terminal feed or a newspaper, and
+saying so on camera IS the demo.
+
+- **3a — the theater** (no library dependencies; buildable any time): a single-file,
+  no-build, no-CDN canvas client replacing/joining dashboard.html. Map: commons garden, reel
+  barn, hive, almanac hall (+ vault + mill wheel that turns when animate), cinelog hut beyond
+  the palisade. Act broadcasts gain `{actor, place}` so sprites walk BEFORE the event lands;
+  speech bubbles = event log lines; the fire renders as fire and the replanting as replanting;
+  Mallory is a visible skulker whose forgeries bounce AT THE GATE (`accepted: 0` as theater).
+  Click a villager → their dossier, three-lens duel and 🌾 presence included.
+- **3b — the player** (needs Unit 2, the open door + browser client): mint a villager
+  in-page (keys in localStorage, signed locally, written via `/append` — non-custodial). The
+  WELCOME FLOW IS THE CONSTITUTION AS GAMEPLAY: knock at the palisade gate → petition delta →
+  the operator grants standing → you may write. Walk to the commons and tend your bio; log a
+  film at the reel; attend a gathering by arriving. The mill grinds your presence like anyone
+  else's.
+- **3c — multiplayer is federation** (the sock-knocker): two browsers, two villagers, no game
+  server authority — claims federate, clients render the union. She takes the village home on
+  her laptop WITH HERSELF STILL IN IT. Stretch: as-of reads scrub the village's history like
+  a replay.
+
+The demo script, now IN-GAME (15 min, no slides):
 
 1. **The feed** — five sovereign stores, posts flowing, live dashboard.
 2. **The troll** — Mallory forges + strikes; three lenses disagree on screen; the roster
@@ -71,5 +102,8 @@ nobody has to believe them.
 
 ## Left off here
 
-Nothing started. Fresh session: read SPEC §11–§13, then open Unit 1 at loop stage 1 (plan →
-tests first). The hosted driver (libSQL) stays queued behind these three.
+Nothing started. Fresh session: read SPEC §11–§13, then open Unit 1 (erasure) at loop stage 1
+(plan → tests first). Order: Unit 1 (erasure — library), Unit 2 (open door + browser client —
+the player's prerequisite), Unit 3 (the playable village; 3a the theater has no library
+dependency and may be built in parallel with anything). The hosted driver (libSQL) stays
+queued behind these.
