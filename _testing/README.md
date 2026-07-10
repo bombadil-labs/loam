@@ -139,3 +139,18 @@ _(one entry per PR that grew the village; newest last)_
   on their own, dossiers intact. (Hygiene in passing: the homes were reset and re-baselined;
   gen-schemas now carries the presence field the mill's evolution promises; phase0's operator
   count follows the store roster; mixed-encoding narration strings repaired.)
+- **THE PLAYER (Unit 3b)** (phase14.mjs, 5/5): the welcome flow is the constitution as
+  gameplay. The page grows a **"write yourself in"** panel: name → a key minted in-page
+  (localStorage keeps it; it never travels) → a signed **petition delta** knocks at the
+  viewer's `/petition` gate. The knock is real — before the grant, the same claim is refused
+  at `/append` (the page's gate token is TRANSPORT, and transport lends nothing). The operator
+  grants standing, lands the petition as the record of asking, and — joining is
+  constitutional twice over — **evolves the Dossier registration's roots** (one append, data,
+  vault-durable) and rehangs the mill on the new generation, so the wheel grinds the newcomer
+  exactly as it grinds the founders. From there: tend your bio, attend the gathering by
+  arriving, join a screening — each act one signed delta through the non-custodial door, each
+  visible tokenless on your dossier card, your sprite walking the acts. Watched live: Isolde
+  knocked, wrote, attended; the crash act lost 172 deltas mid-session and the vault replanted
+  her whole life — grant, petition, bio, flour — and her NEXT write landed as if nothing had
+  happened. A returning visitor knocks again idempotently (same key, same author, same
+  dossier).

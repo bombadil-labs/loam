@@ -33,12 +33,18 @@ with Unit 2.
   the dashboard reads the almanac directly, tokenless, and survives the crash act on
   EventSource's own reconnect.
 
-## Unit 3b — The player (unblocked — everything it needs shipped with Unit 2)
+## Unit 3b — The player — DONE (pending PR merge)
 
-Mint a villager in-page (keys in localStorage, signed locally, written via `/append`). **The
-welcome flow is the constitution as gameplay:** knock at the palisade gate → petition delta →
-the operator grants standing → you may write. Walk to the commons and tend your bio; log a film;
-attend a gathering by arriving. The mill grinds your presence like anyone else's.
+The welcome flow is the constitution as gameplay, live: name → key minted in-page
+(localStorage; it never travels) → signed petition delta knocks at the viewer's `/petition`
+gate → the operator grants standing, lands the petition, **evolves the Dossier roll** (a
+newcomer must become a registered root for the mill to grind them — the found learning) and
+rehangs the wheel. The page's gate token is TRANSPORT only (phase14.1: before the grant, the
+same claim is refused at `/append`). Acts: tend bio / attend the gathering / join the
+screening — each one signed delta through the non-custodial door, visible tokenless.
+phase14 5/5; verified live (Isolde joined, wrote, attended; the crash replanted her whole
+life mid-session and her next write landed clean). No library changes — Unit 2's surface was
+sufficient, which was the point.
 
 ## Unit 3c — Multiplayer is federation (the sock-knocker)
 
@@ -59,8 +65,8 @@ scrub the village's history like a replay.
    contracts without execution risk — the contract is a lens, re-runnable to the byte." _(✓)_
 7. **Grow an app live** — mid-meeting, ask Claude to build a new store for whatever she names
    (schemas + renderer); it federates in before the coffee refills. _(needs a quick MCP/skill path)_
-8. **Write yourself in** — she mints a villager and walks into the world. _(needs 3b; the
-   client, the open door, and phase13's welcome-flow dry run are in)_
+8. **Write yourself in** — she mints a villager and walks into the world. _(3b ✓ — the
+   "write yourself in" panel: knock, grant, roll, flour)_
 9. **The kicker** — `npm i -g @bombadil/loam` on her laptop; one pull; the whole republic is
    hers, offline, through any lens she writes. _(✓ — it's published)_
 
