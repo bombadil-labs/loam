@@ -339,3 +339,13 @@ _(append-only, dated, newest last)_
   8. The GraphQL error for a retired schema is accidentally perfect: `Cannot query field
      "screeningClassic" … Did you mean "screening"?` — the surface itself suggests the
      migration.
+
+## Phase 10 — the fire (PR #22: cold storage) — ✅ 4/4
+
+The almanac keeps a seed vault: `MirrorBackend(SqliteBackend, ArchiveBackend)` in the harness,
+healed before every open. Checks: (10.1) the vault holds a cold copy of every delta the store
+holds — counted file-for-delta; (10.2) after burning the sqlite (+wal/shm), the reopen replants
+every delta from the vault BEFORE the gateway reads; (10.3) Wren's dossier answers the same bio
+word-for-word across the fire; (10.4) a post-fire write lands hot and cold in the same append.
+Field note: restore restored Mallory's old forgery too — the vault is a store of record, not a
+lens; judgment stays read-side, even through disaster.
