@@ -93,7 +93,7 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
     ).toEqual([]); // the foreign shape is invisible to the local lens
 
     const report = await translate(gateway, { seed: TRANSLATOR_SEED });
-    expect(report).toEqual({ emitted: 1, matched: 1 });
+    expect(report).toEqual({ emitted: 1, matched: 1, unbound: 0 });
 
     const emission = [...gateway.reactor.snapshot()].find(
       (d) =>
@@ -193,6 +193,166 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
       d.claims.pointers.some((p) => p.role === "smear"),
     );
     expect(smears).toHaveLength(0);
+    await gateway.close();
+  });
+
+  it("a recognizer evalPred cannot run is refused at publish and skipped at read", async () => {
+    const gateway = await normalizedWorld();
+    // inView, aliased, holes, {var:"root"}: parsePred accepts them all; a bare evalPred
+    // throws on each — one such spec would kill every future pass. Refused structurally.
+    expect(() =>
+      translationClaims(
+        "reflective",
+        { inView: { term: "input", field: "author", extract: { role: "x" } } },
+        { pointers: [{ role: "echo", value: "boom" }] },
+        OPERATOR,
+        9,
+      ),
+    ).toThrow(/runnable/);
+    expect(() =>
+      translationClaims(
+        "rooted",
+        { hasPointer: { targetEntity: { var: "root" } } },
+        { pointers: [{ role: "echo", value: "boom" }] },
+        OPERATOR,
+        9,
+      ),
+    ).toThrow(/runnable/);
+    // hand-planted past the guard: read-side defense drops it, the pass survives
+    await gateway.append([
+      signClaims(
+        {
+          timestamp: 9,
+          author: OPERATOR,
+          pointers: [
+            {
+              role: "defines",
+              target: {
+                kind: "entity",
+                entity: { id: "translation:poison", context: "loam.translation" },
+              },
+            },
+            { role: "name", target: { kind: "primitive", value: "poison" } },
+            {
+              role: "recognize",
+              target: {
+                kind: "primitive",
+                value: JSON.stringify({ hasPointer: { targetEntity: { var: "root" } } }),
+              },
+            },
+            {
+              role: "emit",
+              target: {
+                kind: "primitive",
+                value: JSON.stringify({ pointers: [{ role: "echo", value: "boom" }] }),
+              },
+            },
+          ],
+        },
+        OPERATOR_SEED,
+      ),
+    ]);
+    expect(readTranslations(gateway.reactor, OPERATOR).map((t) => t.name)).toEqual(["cinelog"]);
+    await gateway.federate([cinelogEntry("person:wren", "film:stalker", "2026-07-08", 5000)]);
+    await expect(translate(gateway, { seed: TRANSLATOR_SEED })).resolves.toMatchObject({
+      emitted: 1,
+    });
+    await gateway.close();
+  });
+
+  it("a source the operator struck is never re-rendered into the living dialect", async () => {
+    const gateway = await normalizedWorld();
+    const foreign = cinelogEntry("person:wren", "film:stalker", "2026-07-08", 5000);
+    await gateway.federate([foreign]);
+    const { makeNegationClaims } = await import("@bombadil/rhizomatic");
+    await gateway.append([
+      signClaims(makeNegationClaims(OPERATOR, 6000, foreign.id), OPERATOR_SEED),
+    ]);
+    const report = await translate(gateway, { seed: TRANSLATOR_SEED });
+    expect(report).toEqual({ emitted: 0, matched: 0, unbound: 0 }); // retired facts stay retired
+    await gateway.close();
+  });
+
+  it("an ambiguous hole refuses the whole emission (no half-translated facts)", async () => {
+    const gateway = await normalizedWorld();
+    const shared = signClaims(
+      {
+        timestamp: 5001,
+        author: CINELOG,
+        pointers: [
+          {
+            role: "film_watched",
+            target: { kind: "entity", entity: { id: "film:solaris", context: "log" } },
+          },
+          {
+            role: "viewer",
+            target: { kind: "entity", entity: { id: "person:wren", context: "watch_history" } },
+          },
+          {
+            role: "viewer", // TWO viewers: the template's single hole is ambiguous
+            target: { kind: "entity", entity: { id: "person:miles", context: "watch_history" } },
+          },
+          { role: "on", target: { kind: "primitive", value: "2026-07-09" } },
+        ],
+      },
+      CINELOG_SEED,
+    );
+    await gateway.federate([shared]);
+    const report = await translate(gateway, { seed: TRANSLATOR_SEED });
+    expect(report).toEqual({ emitted: 0, matched: 1, unbound: 1 }); // recognized, refused whole
+    await gateway.close();
+  });
+
+  it("spec evolution: a republished spec renders anew; the old renderings stand", async () => {
+    const gateway = await normalizedWorld();
+    await gateway.federate([cinelogEntry("person:wren", "film:stalker", "2026-07-08", 5000)]);
+    await translate(gateway, { seed: TRANSLATOR_SEED });
+
+    // the operator republishes the spec at the same entity — richer rendering
+    await gateway.append([
+      signClaims(
+        translationClaims(
+          "cinelog",
+          CINELOG_SPEC.recognize,
+          {
+            pointers: [...CINELOG_SPEC.emit.pointers, { role: "rendition", value: "v2" }],
+          },
+          OPERATOR,
+          10_000,
+        ),
+        OPERATOR_SEED,
+      ),
+    ]);
+    const report = await translate(gateway, { seed: TRANSLATOR_SEED });
+    expect(report.emitted).toBe(1); // the new rendering lands beside the old
+    const renderings = [...gateway.reactor.snapshot()].filter((d) =>
+      d.claims.pointers.some((p) => p.role === "translates"),
+    );
+    expect(renderings).toHaveLength(2); // both stand — a better spec later is another pass
+    await gateway.close();
+  });
+
+  it("a source that decorates itself with a translates ref opts out — by design", async () => {
+    const gateway = await normalizedWorld();
+    const evasive = signClaims(
+      {
+        timestamp: 5002,
+        author: CINELOG,
+        pointers: [
+          ...cinelogEntry("person:wren", "film:stalker", "2026-07-08", 5000).claims.pointers,
+          // the decorative self-exemption: translates pointing at any delta id
+          {
+            role: "translates",
+            target: { kind: "delta", deltaRef: { delta: `1e20${"77".repeat(32)}` } },
+          },
+        ],
+      },
+      CINELOG_SEED,
+    );
+    await gateway.federate([evasive]);
+    const report = await translate(gateway, { seed: TRANSLATOR_SEED });
+    // terminal means terminal: shape, not authorship — the reserved role opts the source out
+    expect(report).toEqual({ emitted: 0, matched: 0, unbound: 0 });
     await gateway.close();
   });
 

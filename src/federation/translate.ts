@@ -96,6 +96,30 @@ export function parseEmitTemplate(raw: unknown): EmitTemplate {
   return { pointers };
 }
 
+// A recognizer must be RUNNABLE by a bare evalPred: no inView (needs lowering), no aliased
+// matches (need expansion), no holes (need bindings), no {var: "root"} (there is no root
+// here) — parsePred accepts all four, evalPred THROWS on each, and one such spec would kill
+// every future translate() pass for every source. Refused structurally, on the JSON form:
+// those constructs only ever appear as object KEYS, so key-walking cannot false-positive on
+// constant strings.
+const UNRUNNABLE_KEYS = new Set(["inView", "aliased", "hole", "var"]);
+function assertRunnableRecognizer(raw: unknown, path = "recognize"): void {
+  if (Array.isArray(raw)) {
+    raw.forEach((v, i) => assertRunnableRecognizer(v, `${path}[${i}]`));
+    return;
+  }
+  if (raw === null || typeof raw !== "object") return;
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (UNRUNNABLE_KEYS.has(key)) {
+      throw new Error(
+        `a recognizer must be runnable against a bare delta: "${key}" (at ${path}) needs ` +
+          `machinery translate() does not carry`,
+      );
+    }
+    assertRunnableRecognizer(value, `${path}.${key}`);
+  }
+}
+
 // A translation spec, serialized as one delta at its translation entity. The recognizer and
 // template travel as their JSON profiles; both are validated here — loud at publish.
 export function translationClaims(
@@ -106,6 +130,7 @@ export function translationClaims(
   timestamp: number,
 ): Claims {
   parsePred(recognize); // throws on malformed — nothing unparseable rides a spec delta
+  assertRunnableRecognizer(recognize); // and nothing evalPred would throw on
   parseEmitTemplate(emit);
   return {
     timestamp,
@@ -153,9 +178,11 @@ export function readTranslations(reactor: Reactor, operator?: string): Translati
     }
     let t: Translation;
     try {
+      const recognizeRaw: unknown = JSON.parse(recognizeJson);
+      assertRunnableRecognizer(recognizeRaw); // defense for hand-planted specs past the door
       t = {
         name,
-        recognize: parsePred(JSON.parse(recognizeJson)),
+        recognize: parsePred(recognizeRaw),
         emit: parseEmitTemplate(JSON.parse(emitJson)),
       };
     } catch {
@@ -174,28 +201,30 @@ export function readTranslations(reactor: Reactor, operator?: string): Translati
   return [...latest.values()].map((v) => v.t);
 }
 
-// Bind the template's holes from the source delta. A hole whose source pointer is missing (or
-// of the wrong kind) yields NO emission — the recognizer should have been tighter, and a
-// half-translated fact would be worse than none.
+// Bind the template's holes from the source delta. A hole whose source pointer is missing, of
+// the wrong kind, OR AMBIGUOUS (multiple pointers share the from-role) yields NO emission —
+// the recognizer should have been tighter, and a half-translated fact (one viewer of two,
+// silently) would be worse than none.
 function applyTemplate(template: EmitTemplate, source: Delta): Pointer[] | undefined {
   const out: Pointer[] = [];
   for (const p of template.pointers) {
     if (p.at !== undefined) {
-      const src = source.claims.pointers.find(
+      const matches = source.claims.pointers.filter(
         (sp) => sp.role === p.at!.from.role && sp.target.kind === "entity",
       );
-      if (src === undefined || src.target.kind !== "entity") return undefined;
+      const src = matches[0];
+      if (matches.length !== 1 || src?.target.kind !== "entity") return undefined;
       out.push({
         role: p.role,
         target: { kind: "entity", entity: { id: src.target.entity.id, context: p.context! } },
       });
     } else if (typeof p.value === "object" && p.value !== null) {
-      const src = source.claims.pointers.find(
-        (sp) =>
-          sp.role === (p.value as { from: { role: string } }).from.role &&
-          sp.target.kind === "primitive",
+      const from = (p.value as { from: { role: string } }).from.role;
+      const matches = source.claims.pointers.filter(
+        (sp) => sp.role === from && sp.target.kind === "primitive",
       );
-      if (src === undefined || src.target.kind !== "primitive") return undefined;
+      const src = matches[0];
+      if (matches.length !== 1 || src?.target.kind !== "primitive") return undefined;
       out.push({ role: p.role, target: { kind: "primitive", value: src.target.value } });
     } else {
       out.push({ role: p.role, target: { kind: "primitive", value: p.value as Primitive } });
@@ -207,31 +236,46 @@ function applyTemplate(template: EmitTemplate, source: Delta): Pointer[] | undef
 export interface TranslateReport {
   readonly emitted: number; // newly landed this pass (union swallowed the rest)
   readonly matched: number; // (spec, source) pairs the recognizers claimed
+  readonly unbound: number; // recognized but untranslatable (a hole missing or ambiguous)
 }
 
-// One pass of the generic translator: apply every lawful spec to every surviving delta,
-// emit the canonical renderings, cite the sources, let union dedup the re-runs. The
-// translator signs as its own identity and needs its own standing — its emissions are ITS
-// assertions about what the foreign deltas mean.
+// One pass of the generic translator: apply every lawful spec to every surviving,
+// lawfully-un-struck delta, emit the canonical renderings, cite the sources, let union dedup
+// the re-runs. The translator signs as its own identity and needs its own standing — its
+// emissions are ITS assertions about what the foreign deltas mean.
+//
+// `translates` is a RESERVED ROLE: any delta carrying a translates delta-ref is terminal —
+// never itself translated (no chains, no loops). The rule keys on shape, not authorship: a
+// source that decorates itself with a translates pointer thereby OPTS OUT of translation.
+// That evasion is accepted by design — the alternative (author-scoped skipping) reopens
+// two-translator ping-pong, and a source that declares itself a rendering is, at worst,
+// telling readers where to look.
 export async function translate(
   gateway: Gateway,
   opts: { seed: string },
 ): Promise<TranslateReport> {
   const specs = readTranslations(gateway.reactor, gateway.operator);
   const author = authorForSeed(opts.seed);
+  // Sources the OPERATOR has lawfully struck are not re-rendered: translating a retired fact
+  // would resurrect it in the canonical dialect, past every negation that retired it.
+  const struck = lawfulNegated(gateway.reactor, gateway.operator);
   const emissions: Delta[] = [];
+  let matched = 0;
+  let unbound = 0;
   if (specs.length > 0) {
     for (const source of gateway.reactor.snapshot()) {
-      // Translations are terminal: a delta citing a source under `translates` is never
-      // itself translated — no chains, no loops, ever.
       const isTranslation = source.claims.pointers.some(
         (p) => p.role === "translates" && p.target.kind === "delta",
       );
-      if (isTranslation) continue;
+      if (isTranslation || struck(source.id)) continue;
       for (const spec of specs) {
         if (!evalPred(spec.recognize, source)) continue;
+        matched += 1;
         const pointers = applyTemplate(spec.emit, source);
-        if (pointers === undefined) continue;
+        if (pointers === undefined) {
+          unbound += 1;
+          continue;
+        }
         emissions.push(
           signClaims(
             {
@@ -250,5 +294,5 @@ export async function translate(
   }
   const receipt: AppendReceipt =
     emissions.length > 0 ? await gateway.append(emissions) : { accepted: 0, duplicates: 0 };
-  return { emitted: receipt.accepted, matched: emissions.length };
+  return { emitted: receipt.accepted, matched, unbound };
 }
