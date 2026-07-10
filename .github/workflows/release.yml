@@ -25,16 +25,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Node 24 BUNDLES an npm that speaks OIDC (>= 11.5.1) — no `npm install -g npm` step.
+      # We learned both halves the hard way: `npm@latest` pulled npm 12 mid-release (install
+      # scripts became opt-in — `allowScripts` in package.json is the durable answer), and
+      # npm overwriting itself in the toolcache left a mangled tree (publish died on a
+      # missing `sigstore`). The bundled npm is the one npm that is never half-installed.
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
-
-      # Node 22 bundles npm 10; the OIDC exchange needs npm >= 11.5.1. Major-PINNED, not
-      # `latest`: npm 12 arrived as latest mid-release and changed install semantics under us
-      # (install scripts became opt-in — see `allowScripts` in package.json, which is the fix).
-      # A major bump here should be a deliberate edit, not a surprise.
-      - name: npm that speaks OIDC
-        run: npm install -g npm@12
+          node-version: 24
 
       - name: install
         run: npm ci
