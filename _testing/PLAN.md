@@ -362,3 +362,15 @@ processes — a fresh attach sweeps its own stale flour with idempotent ts-0 neg
 `supersede` negates across ALL roots (keyed emission is the per-subject mode); the budget is a
 lifetime trigger count; and `readBindingDefinitions` now resolves latest-per-binding, found
 when a re-blessed recipe crashed attach.
+
+## Phase 12 — the unsaying (SPEC §11: erasure) — ✅ 4/4, twice
+
+A villager erases her own words. Checks: (12.1) the regret federates in and tops the dossier
+(future-dated past Mallory's forgeries — the lived-in home fights back); (12.2) erase burns
+the bytes, the dossier reverts, the signed hole remains; (12.3) sovereignty both ways — the
+commons still holds the original and offers it every pulse, the almanac's door refuses it
+(accepted 0, id not held); (12.4) the vault cannot replant the unsaid — heal is
+tombstone-guarded, reopen stays clean. Field note: village act pacing has slowed (~25s/act:
+the mill re-grinds a 400+-delta ground per ingest; the pulse presence query hauls the
+derived.from evidence hex) — SPEC §13's vertical-scale honesty in miniature; candidates
+recorded in CURRENT_WORK.

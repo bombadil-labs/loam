@@ -21,6 +21,7 @@ import {
   type Term,
 } from "@bombadil/rhizomatic";
 import { STORE_ENTITY } from "./genesis.js";
+import { eraseDefect } from "./erase.js";
 import { trustDefect } from "./trust.js";
 
 export const CTX_TENANT = "loam.tenant";
@@ -385,7 +386,10 @@ export function authorize(
   delta: Delta,
   operator: string | undefined,
 ): { ok: true } | { ok: false; refusal: string } {
-  const defect = constitutionalDefect(delta) ?? trustDefect(delta.claims);
+  const defect =
+    constitutionalDefect(delta) ??
+    trustDefect(delta.claims) ??
+    eraseDefect(delta, reactor, operator);
   if (defect !== undefined) {
     return { ok: false, refusal: `delta ${delta.id} is malformed law: ${defect}` };
   }
