@@ -147,6 +147,9 @@ const DOSSIER_PROPS = {
   circle: ALL,
   companioned: ALL,
   attended: ALL,
+  // The mill's flour (phase 11): ensurePresence re-registers THIS file to evolve the dossier,
+  // so the generator must know the field the evolution promises — regeneration is not regression.
+  presence: PICK,
 };
 write("dossier.json", {
   name: "Dossier",

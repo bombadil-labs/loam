@@ -575,6 +575,35 @@
         }
       });
 
+      // ---- the open door (Unit 2, SPEC §12) --------------------------------------------------
+      // Dossier data arrives STRAIGHT from the almanac's public surface: native EventSource,
+      // no token anywhere in this page, CORS-served cross-origin. The operator's loam:public
+      // declaration is the only key this door has — strike it and these streams go quiet.
+      // EventSource reconnects itself, which is exactly what the crash act needs.
+      const ALMANAC = "__ALMANAC_PUBLIC_DOOR__";
+      const VILLAGERS = ["person:wren", "person:miles", "person:odile", "person:petra"];
+      function openDossierStream(person) {
+        const q = encodeURIComponent(
+          `subscription { dossier(entity: "${person}") { name bio follows companioned attended presence } }`,
+        );
+        const src = new EventSource(`${ALMANAC}/subscribe?query=${q}`);
+        src.onmessage = (msg) => {
+          let d;
+          try {
+            d = JSON.parse(msg.data)?.dossier;
+          } catch {
+            return;
+          }
+          if (!d) return;
+          // presence resolves as the grind's value beside its provenance pointers
+          if (d.presence && typeof d.presence === "object") d.presence = d.presence.value ?? null;
+          state[person] = Object.assign(state[person] ?? {}, d);
+          if (selected === person) drawDossier();
+        };
+        src.onerror = () => {}; // mid-crash: EventSource retries on its own
+      }
+      if (!ALMANAC.startsWith("__")) for (const p of VILLAGERS) openDossierStream(p);
+
       // ---- the event stream (same protocol the dashboard always spoke) ----------------------
       function logLine(kind, text) {
         const log = document.getElementById("log");
@@ -602,11 +631,6 @@
             millActive = now() + 9000;
           if (low.includes("bounce") || low.includes("accepted: 0") || low.includes("refuse"))
             gateFlash = now() + 1400;
-        } else if (ev.kind === "dossier") {
-          state[ev.person] = Object.assign(state[ev.person] ?? {}, ev.data, {
-            name: ev.data?.name,
-          });
-          if (selected === ev.person) drawDossier();
         } else if (ev.kind === "trust") {
           state["person:wren"] = Object.assign(state["person:wren"] ?? {}, {
             bio: ev.plain,
