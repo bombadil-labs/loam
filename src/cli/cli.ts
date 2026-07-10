@@ -12,9 +12,12 @@ import { Gateway } from "../gateway/gateway.js";
 import { assembleGenesis } from "../gateway/genesis.js";
 import { schemaEntityFor } from "../gateway/registration.js";
 import { serve, type ServerHandle } from "../server/http.js";
+import type { StoreBackend } from "../store/backend.js";
+import { ArchiveBackend } from "../store/archive.js";
+import { MirrorBackend } from "../store/mirror.js";
 import { SqliteBackend } from "../store/sqlite.js";
 import { parseArgs, rejectUnknown } from "./args.js";
-import { initHome, readSeed, storePath } from "./config.js";
+import { archivePath, initHome, readSeed, storePath } from "./config.js";
 
 export interface IO {
   out(line: string): void;
@@ -65,7 +68,7 @@ async function cmdServe(
   options: RunOptions,
 ): Promise<number | ServerHandle> {
   const parsed = parseArgs(args, new Set(["http"]));
-  rejectUnknown(parsed, new Set(["home", "store", "port", "token", "http"]), "serve");
+  rejectUnknown(parsed, new Set(["home", "store", "port", "token", "http", "archive"]), "serve");
   if (!parsed.booleans.has("http")) {
     io.err("serve: only --http is supported today (pass --http)");
     return 2;
@@ -89,19 +92,46 @@ async function cmdServe(
   const seed = readSeed(home);
   const path = storePath(home, parsed.flags.get("store"));
 
+  // The optional cold store (--archive, or `archive` in config.json): the sqlite primary gains
+  // an archive mirror, healed BEFORE boot — boot reads the backend once, so a burned sqlite is
+  // replanted from the archive's memory before the gateway ever looks. Lag is safe (union) but
+  // never silent: it reaches the operator's log.
+  const vault = archivePath(home, parsed.flags.get("archive"));
+  let backend: StoreBackend = new SqliteBackend(path);
+  if (vault !== undefined) {
+    const mirror = new MirrorBackend(backend, new ArchiveBackend(vault), {
+      onLag: (err) =>
+        io.err(
+          `loam: the archive is lagging — ${err instanceof Error ? err.message : String(err)} (the next serve heals it)`,
+        ),
+    });
+    let healed;
+    try {
+      healed = await mirror.heal();
+    } catch (err) {
+      await mirror.close().catch(() => {}); // never let a close failure mask the real refusal
+      throw err;
+    }
+    if (healed.toPrimary > 0 || healed.toMirror > 0) {
+      io.out(
+        `loam: healed — ${healed.toPrimary} deltas replanted from the archive, ${healed.toMirror} newly archived`,
+      );
+    }
+    backend = mirror;
+  }
+
   // Boot the store from its genesis (idempotent): a fresh store is born governed; an existing
   // one simply re-lands the same operator identity.
-  const gateway = await Gateway.boot(
-    new SqliteBackend(path),
-    assembleGenesis({ operatorSeed: seed }),
-  );
+  const gateway = await Gateway.boot(backend, assembleGenesis({ operatorSeed: seed }));
   const server = await serve({
     mounts: { default: gateway },
     tokens: { [token]: { operator: true } },
     port,
     host: "127.0.0.1",
   });
-  io.out(`loam: serving ${path} at ${server.url}/default`);
+  io.out(
+    `loam: serving ${path} at ${server.url}/default${vault === undefined ? "" : `\n  archive ${vault}`}`,
+  );
 
   // Closing the server also releases the gateway (and its backend file) — one shutdown, whole.
   const handle: ServerHandle = {

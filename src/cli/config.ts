@@ -15,6 +15,7 @@ import { randomBytes } from "node:crypto";
 export interface LoamConfig {
   readonly operator: string; // the operator's public author — safe to display
   readonly store: string; // default store path, relative to the home
+  readonly archive?: string; // optional cold store: a directory of delta files, relative to the home, mirrored on serve
 }
 
 const configPath = (home: string): string => join(home, "config.json");
@@ -53,4 +54,11 @@ export function readConfig(home: string): LoamConfig {
 
 export function storePath(home: string, override?: string): string {
   return override ?? join(home, readConfig(home).store);
+}
+
+// The archive is opt-in: undefined means "no cold store" — serve runs the bare sqlite driver.
+export function archivePath(home: string, override?: string): string | undefined {
+  if (override !== undefined) return override;
+  const archive = readConfig(home).archive;
+  return archive === undefined ? undefined : join(home, archive);
 }

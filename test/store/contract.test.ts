@@ -4,7 +4,7 @@
 // in, signatures and all. Durable drivers additionally survive close/reopen and let a second
 // handle see the union.
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -17,7 +17,9 @@ import {
   type Delta,
 } from "@bombadil/rhizomatic";
 import type { StoreBackend } from "../../src/store/backend.js";
+import { ArchiveBackend } from "../../src/store/archive.js";
 import { MemoryBackend } from "../../src/store/memory.js";
+import { MirrorBackend } from "../../src/store/mirror.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
 import { FERN, GARDENER, GARDENER_SEED, SURVEYOR_SEED, observed } from "../spike/garden.js";
 
@@ -47,6 +49,11 @@ interface Harness {
   open(): StoreBackend;
   // Durable drivers only: a fresh handle over the same underlying storage.
   reopen?(): StoreBackend;
+  // Durable drivers only: reach BEHIND the seam and damage a stored row, so the contract can
+  // assert that reads refuse corruption rather than laundering it. Each driver knows its own
+  // storage; the contract only knows the promise.
+  corruptSig?(id: string): void;
+  corruptClaims?(id: string, claims: unknown): void;
 }
 
 const tmp = mkdtempSync(join(tmpdir(), "loam-store-"));
@@ -56,16 +63,69 @@ afterAll(() => rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryD
 let dbCount = 0;
 function sqliteHarness(): Harness {
   const path = join(tmp, `store-${dbCount++}.sqlite`);
+  const raw = (sql: string, ...params: unknown[]) => {
+    const db = new Database(path);
+    db.prepare(sql).run(...params);
+    db.close();
+  };
   return {
     name: "sqlite",
     open: () => new SqliteBackend(path),
     reopen: () => new SqliteBackend(path),
+    // a well-shaped signature that verifies nothing / another delta's well-formed claims
+    corruptSig: (id) => raw("UPDATE deltas SET sig = ? WHERE id = ?", "ab".repeat(64), id),
+    corruptClaims: (id, claims) =>
+      raw("UPDATE deltas SET claims = ? WHERE id = ?", JSON.stringify(claims), id),
+  };
+}
+
+let dirCount = 0;
+function archiveHarness(): Harness {
+  const root = join(tmp, `archive-${dirCount++}`);
+  const fileFor = (id: string) => join(root, id.slice(0, 2), `${id}.json`);
+  const rewrite = (id: string, patch: (row: { claims: unknown; sig?: string }) => void) => {
+    const row = JSON.parse(readFileSync(fileFor(id), "utf8")) as { claims: unknown; sig?: string };
+    patch(row);
+    writeFileSync(fileFor(id), JSON.stringify(row));
+  };
+  return {
+    name: "archive",
+    open: () => new ArchiveBackend(root),
+    reopen: () => new ArchiveBackend(root),
+    corruptSig: (id) => rewrite(id, (row) => (row.sig = "ab".repeat(64))),
+    corruptClaims: (id, claims) => rewrite(id, (row) => (row.claims = claims)),
+  };
+}
+
+// The combinator faces the same contract as the drivers it composes: once over ephemeral
+// sides, once over durable sides (where reads answer from the primary — so corrupting the
+// primary must refuse through the mirror too).
+function mirrorMemoryHarness(): Harness {
+  return {
+    name: "mirror(memory, memory)",
+    open: () => new MirrorBackend(new MemoryBackend(), new MemoryBackend()),
+  };
+}
+
+function mirrorDurableHarness(): Harness {
+  const sqlite = sqliteHarness();
+  const archive = archiveHarness();
+  const open = () => new MirrorBackend(sqlite.open(), archive.open());
+  return {
+    name: "mirror(sqlite, archive)",
+    open,
+    reopen: () => new MirrorBackend(sqlite.reopen!(), archive.reopen!()),
+    corruptSig: sqlite.corruptSig!.bind(sqlite),
+    corruptClaims: sqlite.corruptClaims!.bind(sqlite),
   };
 }
 
 const harnesses: (() => Harness)[] = [
   () => ({ name: "memory", open: () => new MemoryBackend() }),
   sqliteHarness,
+  archiveHarness,
+  mirrorMemoryHarness,
+  mirrorDurableHarness,
 ];
 
 for (const makeHarness of harnesses) {
@@ -184,35 +244,31 @@ for (const makeHarness of harnesses) {
         await again.close();
       });
 
-      it("a tampered signature is corruption too: reads refuse it", async () => {
-        const h = makeHarness();
-        const store = h.open() as SqliteBackend;
-        await store.append([signed1]);
-        await store.close();
-        const raw = new Database(store.filePath);
-        raw.prepare("UPDATE deltas SET sig = ? WHERE id = ?").run("ab".repeat(64), signed1.id); // a well-shaped signature that verifies nothing
-        raw.close();
-        const again = h.reopen!();
-        await expect(again.deltasSince(new Set())).rejects.toThrow(/does not verify/);
-        await again.close();
-      });
+      if (sample.corruptSig !== undefined) {
+        it("a tampered signature is corruption too: reads refuse it", async () => {
+          const h = makeHarness();
+          const store = h.open();
+          await store.append([signed1]);
+          await store.close();
+          h.corruptSig!(signed1.id); // a well-shaped signature that verifies nothing
+          const again = h.reopen!();
+          await expect(again.deltasSince(new Set())).rejects.toThrow(/does not verify/);
+          await again.close();
+        });
 
-      it("a tampered row is corruption: reads refuse, they do not launder", async () => {
-        const h = makeHarness();
-        const store = h.open() as SqliteBackend;
-        await store.append([signed1]);
-        await store.close();
-        // Swap in ANOTHER delta's (well-formed) claims behind the store's back — the row is
-        // valid in shape but no longer recomputes to its own id.
-        const raw = new Database(store.filePath);
-        raw
-          .prepare("UPDATE deltas SET claims = ? WHERE id = ?")
-          .run(JSON.stringify(claimsToJson(signed2.claims)), signed1.id);
-        raw.close();
-        const again = h.reopen!();
-        await expect(again.deltasSince(new Set())).rejects.toThrow(/corruption/);
-        await again.close();
-      });
+        it("a tampered row is corruption: reads refuse, they do not launder", async () => {
+          const h = makeHarness();
+          const store = h.open();
+          await store.append([signed1]);
+          await store.close();
+          // Swap in ANOTHER delta's (well-formed) claims behind the store's back — the row is
+          // valid in shape but no longer recomputes to its own id.
+          h.corruptClaims!(signed1.id, claimsToJson(signed2.claims));
+          const again = h.reopen!();
+          await expect(again.deltasSince(new Set())).rejects.toThrow(/corruption/);
+          await again.close();
+        });
+      }
 
       it("two handles on one store converge to the union", async () => {
         const h = makeHarness();
