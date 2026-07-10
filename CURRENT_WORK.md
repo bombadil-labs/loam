@@ -107,8 +107,24 @@ merged).** The law slice — tombstones verified at the door while evidence exis
 (manifest → purge → tombstone → re-seat), the door refuses erased ids past any admit override,
 forgiveness = striking the tombstone, degrees compose from erase+append, heal is
 tombstone-guarded — is at 313/313 with phase12 4/4 twice and the unsaying running in the
-village. A correctness review then surfaced follow-up items to resolve **before merge**, stated
-here in plain correctness terms:
+village. A correctness review surfaced follow-up items; **all resolved on the branch (320/320), NOT yet
+merged** (Myk's call — leave it staged). The resolution, for the record:
+
+- The tombstone validator (`eraseDefect`) now runs at **both** doors — append and federation —
+  so an unauthorized or mis-authored removal-order is refused before it is ever stored, while
+  its target can still be seen. The readers then trust any stored tombstone (they must: a valid
+  self-erasure's target is gone moments later). This closes the federated-mismatch and
+  pre-emptive cases. A record's own author's self-erasure propagates (their words, anywhere); an
+  operator's erasure stays local (each store's operator governs their own ground).
+- `tombstonesIn` (pre-boot) now builds a probe reactor and defers to `readTombstones`, so it
+  respects lawful negation: a forgiven (struck) record is no longer dropped by a boot heal. The
+  heal↔forgiveness case SPEC §11 flagged is pinned.
+- `Gateway.erase` refuses to erase a tombstone (the erasure log stays append-only); `reseat`
+  ends live subscriptions so a parked reader can't keep serving removed content (it reconnects,
+  as after a crash). Lesser deferred: serialize erase against concurrent append (embedder-only,
+  narrow window); cache the per-write tombstone scan.
+
+Original findings, kept for context:
 
 1. **Federated tombstone, wrong-author case (highest priority).** `readTombstones` /
    `tombstonesIn` currently bind any tombstone where `author === spoken-by`, without checking

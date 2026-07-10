@@ -29,6 +29,7 @@ export {
   ERASE_ENTITY,
   eraseClaims,
   eraseDefect,
+  isTombstone,
   readTombstones,
   sealCommitment,
   tombstonesIn,

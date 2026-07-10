@@ -18,6 +18,7 @@ import {
   eraseClaims,
   readTombstones,
   sealCommitment,
+  tombstonesIn,
 } from "../../src/gateway/erase.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -200,5 +201,98 @@ describe("erasure federates: the request travels, the refusal is testable", () =
     expect(again.accepted).toBe(0); // ask any store for the id and see what returns
     await source.close();
     await peer.close();
+  });
+});
+
+describe("tombstone readers verify authority, not just self-consistency", () => {
+  it("a federated tombstone that misnames itself the author is refused at the door", async () => {
+    // A held record authored by the gardener. A tombstone arrives by federation claiming
+    // author === spoken-by === SURVEYOR — a self-erasure of a record SURVEYOR did not write.
+    // The live target disagrees, so the federation door refuses it: it is never stored.
+    const { gateway, fact } = await grove();
+    const lie = signClaims(eraseClaims(fact.id, SURVEYOR, SURVEYOR, 2000), SURVEYOR_SEED);
+    const report = await gateway.federate([lie]);
+    expect(report.accepted).toBe(0);
+    expect(report.rejected).toBe(1);
+    expect(readTombstones(gateway.reactor, OPERATOR).has(fact.id)).toBe(false);
+    expect(gateway.reactor.get(fact.id)).toBeDefined(); // the record is untouched
+    await gateway.close();
+  });
+
+  it("a pre-emptive self-tombstone for an absent id (non-operator) is refused at the door", async () => {
+    const { gateway } = await grove();
+    const ghostId = `1e20${"cd".repeat(32)}`;
+    const preempt = signClaims(eraseClaims(ghostId, SURVEYOR, SURVEYOR, 2000), SURVEYOR_SEED);
+    const report = await gateway.federate([preempt]);
+    expect(report.rejected).toBe(1);
+    expect(readTombstones(gateway.reactor, OPERATOR).has(ghostId)).toBe(false);
+    await gateway.close();
+  });
+
+  it("a record author's self-erasure DOES federate and bind (their words, anywhere)", async () => {
+    // Distinguish from the refusals above: an honest self-erasure by the record's actual
+    // author, arriving where the target is present, is admitted and binds.
+    const { gateway, fact } = await grove();
+    const honest = signClaims(eraseClaims(fact.id, GARDENER, GARDENER, 2000), GARDENER_SEED);
+    const report = await gateway.federate([honest]);
+    expect(report.accepted).toBe(1);
+    expect(readTombstones(gateway.reactor, OPERATOR).has(fact.id)).toBe(true);
+    await gateway.close();
+  });
+
+  it("the operator may still erase, present target or not; that authority is real", async () => {
+    const { gateway, fact } = await grove();
+    const ghostId = `1e20${"ab".repeat(32)}`;
+    await gateway.append([
+      signClaims(eraseClaims(fact.id, GARDENER, OPERATOR, 2000), OP_SEED),
+      signClaims(eraseClaims(ghostId, "did:key:zAnon", OPERATOR, 2001), OP_SEED),
+    ]);
+    const dead = readTombstones(gateway.reactor, OPERATOR);
+    expect(dead.has(fact.id)).toBe(true);
+    expect(dead.has(ghostId)).toBe(true); // operator pre-emptive refusal is legitimate
+    await gateway.close();
+  });
+});
+
+describe("tombstonesIn (pre-boot) matches the running store's verdict", () => {
+  it("a lawfully struck tombstone is NOT dead pre-boot — heal will not drop the forgiven record", async () => {
+    // The exact heal-vs-forgiveness interaction SPEC §11 says to pin first.
+    const { gateway, fact } = await grove();
+    await gateway.erase(fact.id); // operator tombstone
+    const all1 = [...gateway.reactor.snapshot()];
+    expect(tombstonesIn(all1, OPERATOR).has(fact.id)).toBe(true); // dead while the tombstone stands
+    const tombstone = all1.find((d) =>
+      d.claims.pointers.some(
+        (p) => p.target.kind === "delta" && p.target.deltaRef.delta === fact.id,
+      ),
+    );
+    await gateway.append([signClaims(makeNegationClaims(OPERATOR, 9000, tombstone!.id), OP_SEED)]);
+    const all2 = [...gateway.reactor.snapshot()];
+    // forgiven: the pre-boot reader agrees, so a boot heal would carry (not drop) the record
+    expect(tombstonesIn(all2, OPERATOR).has(fact.id)).toBe(false);
+    await gateway.close();
+  });
+
+  it("does not drift from the running store's verdict (an operator erasure is dead both ways)", async () => {
+    const { gateway, fact } = await grove();
+    await gateway.erase(fact.id);
+    const all = [...gateway.reactor.snapshot()];
+    expect(tombstonesIn(all, OPERATOR)).toEqual(readTombstones(gateway.reactor, OPERATOR));
+    expect(tombstonesIn(all, OPERATOR).has(fact.id)).toBe(true);
+    await gateway.close();
+  });
+});
+
+describe("the erasure log stays append-only", () => {
+  it("a tombstone cannot itself be erased", async () => {
+    const { gateway, fact } = await grove();
+    await gateway.erase(fact.id);
+    const tombstone = [...gateway.reactor.snapshot()].find((d) =>
+      d.claims.pointers.some(
+        (p) => p.target.kind === "delta" && p.target.deltaRef.delta === fact.id,
+      ),
+    );
+    await expect(gateway.erase(tombstone!.id)).rejects.toThrow(/append-only/);
+    await gateway.close();
   });
 });
