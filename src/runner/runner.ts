@@ -90,10 +90,18 @@ export function readBindingDefinitions(reactor: Reactor, operator?: string): Bin
     ) {
       continue;
     }
-    const emit: BindingSpec["emit"] =
-      emitRaw === "append" || emitRaw === "supersede"
-        ? emitRaw
-        : (JSON.parse(emitRaw) as { keyed: string[] });
+    let emit: BindingSpec["emit"];
+    if (emitRaw === "append" || emitRaw === "supersede") {
+      emit = emitRaw;
+    } else {
+      // A hand-planted typo ("supercede") is a malformed definition like any other: dropped,
+      // never fatal to the attach of every OTHER binding in the store.
+      try {
+        emit = JSON.parse(emitRaw) as { keyed: string[] };
+      } catch {
+        continue;
+      }
+    }
     const { timestamp } = delta.claims;
     const prev = best.get(name);
     if (

@@ -182,9 +182,12 @@ describe("the runner: definitions in the store, execution in a peer client", () 
 
   it("a re-blessed recipe supersedes: the latest definition per binding wins, attach installs once", async () => {
     const { gateway } = await plantStore(); // holds SPEC (budget 10) at ts 1
-    // the recipe evolves: same binding name, new budget, later timestamp
+    // the recipe evolves: same binding name, new budget, LATER timestamp — appended between
+    // two older strays, so timestamp order and ingestion order disagree and latest-by-
+    // timestamp is what's actually pinned (not last-delta-seen)
     await gateway.append([
       signClaims(bindingDefinitionClaims({ ...SPEC, budget: 99 }, RUNNER, 5), RUNNER_SEED),
+      signClaims(bindingDefinitionClaims({ ...SPEC, budget: 7 }, RUNNER, 3), RUNNER_SEED),
     ]);
     const specs = readBindingDefinitions(gateway.reactor);
     expect(specs).toHaveLength(1); // one binding, not two definitions of it
