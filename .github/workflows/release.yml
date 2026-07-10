@@ -1,6 +1,11 @@
 # Release: push a tag `vX.Y.Z` and this publishes @bombadil/loam to npm — but only through the
 # same gate everything else passes (format + lint + typecheck + build + all tests), and only if
-# the tag agrees with package.json. The token lives in the NPM_TOKEN repository secret.
+# the tag agrees with package.json.
+#
+# Publishing is TOKENLESS: npm's trusted publishing (OIDC). The `id-token: write` permission
+# lets npm verify this exact repo + workflow minted the release, and provenance is generated
+# automatically. No secret to leak, rotate, or expire. (Bootstrap note: npm can only trust a
+# package that exists — the first publish was made locally; every one after flows through here.)
 #
 # The intended path is `npm run release -- patch|minor|major` locally (it runs the gate, bumps,
 # syncs the version constants, commits, tags, pushes); this workflow is the far end of it.
@@ -16,13 +21,17 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write # creates the GitHub release
+      id-token: write # trusted publishing: npm verifies the workflow identity via OIDC
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
+
+      # Node 22 bundles npm 10; the OIDC exchange needs npm >= 11.5.1.
+      - name: npm that speaks OIDC
+        run: npm install -g npm@latest
 
       - name: install
         run: npm ci
@@ -40,9 +49,7 @@ jobs:
           fi
 
       - name: publish to npm
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish
 
       - name: GitHub release
         run: gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
