@@ -348,6 +348,24 @@ Bind `127.0.0.1` and terminate TLS in front. **Hosted persistence is a driver, n
 change**: the `StoreBackend` seam takes any async append/`deltasSince`/close, so a libSQL/Turso
 client drops in beside `SqliteBackend` with no other change.
 
+### Cold storage
+
+A store can keep an **archive** — a cold mirror written in the same appends:
+
+```sh
+loam serve --http --archive /mnt/backup/vault    # or add "archive": "vault" to config.json
+```
+
+The archive is a directory of canonical delta files, one per delta, named by its content
+address (`<id[0..2)>/<id>.json`). Plain file tools are backup tools here: rsync it, tar it,
+copy it to a USB stick — copying files between two archives *is* replication, because merge is
+union and the id is the name. The CRDT is what keeps this honest: a lagging copy is merely
+behind, never wrong, so an unreachable archive never takes the store down (the lag is logged,
+loudly) and every serve heals the pair by two-way union before it boots. Which means restore
+after disaster is no procedure at all: delete the burned sqlite and serve again — the archive
+replants it. Embedders get the same pieces as values: `MirrorBackend(primary, mirror)` and
+`ArchiveBackend(root)`.
+
 ## Development
 
 ```sh

@@ -3,7 +3,7 @@
 // hand-rolled, and every subcommand is exercised against real files and, for serve, a real
 // listening server.
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -134,6 +134,66 @@ describe("loam serve", () => {
     } finally {
       delete process.env["LOAM_SEED"];
     }
+  });
+
+  it("an archive survives the fire: burn the sqlite, serve again, the store remembers", async () => {
+    const vault = join(home, "vault");
+    const first = await serveDetached([
+      "--home",
+      home,
+      "--port",
+      "0",
+      "--token",
+      "t",
+      "--archive",
+      vault,
+    ]);
+    await first.close();
+    out.length = 0;
+    await run(["store", "--home", home], io());
+    const before = Number(/(\d+) deltas/.exec(out.join("\n"))?.[1]);
+    expect(before).toBeGreaterThan(0); // genesis landed
+    // the vault holds cold copies: one file per delta, written in the same appends
+    const cold = (readdirSync(vault, { recursive: true }) as string[]).filter((f) =>
+      f.endsWith(".json"),
+    );
+    expect(cold.length).toBe(before);
+
+    // THE FIRE — the hot store is gone entirely
+    for (const f of ["store.sqlite", "store.sqlite-wal", "store.sqlite-shm"]) {
+      rmSync(join(home, f), { force: true, maxRetries: 5, retryDelay: 100 });
+    }
+
+    // the next serve heals from the archive BEFORE booting; nothing was lost
+    out.length = 0;
+    const second = await serveDetached([
+      "--home",
+      home,
+      "--port",
+      "0",
+      "--token",
+      "t",
+      "--archive",
+      vault,
+    ]);
+    expect(out.join("\n")).toMatch(/healed/i);
+    await second.close();
+    out.length = 0;
+    await run(["store", "--home", home], io());
+    expect(out.join("\n")).toContain(`${before} deltas`);
+  });
+
+  it("the archive can live in config.json: serve mirrors without a flag", async () => {
+    await run(["init", "--home", home], io());
+    const cfgPath = join(home, "config.json");
+    const cfg = JSON.parse(readFileSync(cfgPath, "utf8")) as Record<string, unknown>;
+    writeFileSync(cfgPath, JSON.stringify({ ...cfg, archive: "vault" }));
+    const handle = await serveDetached(["--home", home, "--port", "0", "--token", "t"]);
+    await handle.close();
+    const cold = (readdirSync(join(home, "vault"), { recursive: true }) as string[]).filter((f) =>
+      f.endsWith(".json"),
+    );
+    expect(cold.length).toBeGreaterThan(0);
   });
 
   it("refuses to serve without a token", async () => {
