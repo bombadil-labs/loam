@@ -59,13 +59,14 @@ describe("tombstones are law: validated at the door while the evidence exists", 
     await gateway.close();
   });
 
-  it("erasure authority is the author or the operator — a bystander with standing is refused", async () => {
+  it("erasure is the operator's alone — a bystander with write standing is refused", async () => {
     const { gateway, fact } = await grove();
     await gateway.append([
       signClaims(grantClaims(STORE_ENTITY, SURVEYOR, "write", OPERATOR, 3), OP_SEED),
     ]);
+    // write standing lets SURVEYOR publish; it does NOT let them order a record removed
     const overreach = signClaims(eraseClaims(fact.id, GARDENER, SURVEYOR, 2000), SURVEYOR_SEED);
-    await expect(gateway.append([overreach])).rejects.toThrow(/authority/);
+    await expect(gateway.append([overreach])).rejects.toThrow(/operator/);
     await gateway.close();
   });
 
@@ -110,10 +111,14 @@ describe("Gateway.erase: the manifest, the purge, the re-seat, the hole", () => 
     await gateway.close();
   });
 
-  it("the author may unsay their own words (actorSeed), a stranger may not", async () => {
+  it("only the operator may order erasure — even the record's own author cannot", async () => {
     const { gateway, fact } = await grove();
-    await expect(gateway.erase(fact.id, { actorSeed: SURVEYOR_SEED })).rejects.toThrow(/authority/);
-    await gateway.erase(fact.id, { actorSeed: GARDENER_SEED });
+    // a hand-built self-tombstone by the record's OWN author is refused at the door
+    const selfTomb = signClaims(eraseClaims(fact.id, GARDENER, GARDENER, 2000), GARDENER_SEED);
+    await expect(gateway.append([selfTomb])).rejects.toThrow(/operator/);
+    expect(readTombstones(gateway.reactor, OPERATOR).has(fact.id)).toBe(false);
+    // the operator honors the request and erases; that binds
+    await gateway.erase(fact.id, { reason: "honoring a subject's request" });
     expect(readTombstones(gateway.reactor, OPERATOR).has(fact.id)).toBe(true);
     await gateway.close();
   });
@@ -179,36 +184,40 @@ describe("degrees of forgetting compose from erase + append", () => {
   });
 });
 
-describe("erasure federates: the request travels, the refusal is testable", () => {
-  it("a peer that admits the author's tombstone refuses the id thereafter", async () => {
+describe("erasure is per-instance: each operator governs their own ground", () => {
+  it("one store's operator erasure does NOT compel a peer; the peer's own operator decides", async () => {
     const { gateway: source, fact } = await grove();
     const peer = await Gateway.open(new MemoryBackend(), { seed: "0f".repeat(32) });
-    // the fact crossed before the unsaying (open trust)
-    await peer.federate([fact]);
+    await peer.federate([fact]); // the fact crossed before the unsaying (open trust)
     expect(peer.reactor.get(fact.id)).toBeDefined();
-    // the author unsays at the source; the tombstone federates like any claim
-    await source.erase(fact.id, { actorSeed: GARDENER_SEED });
+
+    // the source operator erases on the source; that tombstone is the SOURCE operator's, so it
+    // is refused at the peer's door — a foreign removal-order cannot delete on the peer.
+    await source.erase(fact.id);
     const tombstone = [...source.reactor.snapshot()].find((d) =>
       d.claims.pointers.some(
         (p) => p.target.kind === "delta" && p.target.deltaRef.delta === fact.id,
       ),
     );
-    await peer.federate([tombstone!]);
-    // the peer's own operator finishes the forgetting (compliance is a choice, and testable)
+    const crossed = await peer.federate([tombstone!]);
+    expect(crossed.rejected).toBe(1); // the peer does not honor another operator's order
+    expect(peer.reactor.get(fact.id)).toBeDefined(); // the peer still remembers
+
+    // the peer's OWN operator chooses to honor the request; only that binds on the peer
     await peer.erase(fact.id);
     expect(peer.reactor.get(fact.id)).toBeUndefined();
     const again = await peer.federate([fact]);
-    expect(again.accepted).toBe(0); // ask any store for the id and see what returns
+    expect(again.accepted).toBe(0); // ask this store for the id and see what returns
     await source.close();
     await peer.close();
   });
 });
 
-describe("tombstone readers verify authority, not just self-consistency", () => {
-  it("a federated tombstone that misnames itself the author is refused at the door", async () => {
-    // A held record authored by the gardener. A tombstone arrives by federation claiming
-    // author === spoken-by === SURVEYOR — a self-erasure of a record SURVEYOR did not write.
-    // The live target disagrees, so the federation door refuses it: it is never stored.
+describe("the door admits only the operator's removal-orders", () => {
+  it("a federated tombstone by a non-operator is refused, whatever it claims", async () => {
+    // A tombstone arrives by federation authored by SURVEYOR (not this store's operator). It
+    // does not matter what it claims — a removal-order the operator did not sign is refused at
+    // the door and never stored.
     const { gateway, fact } = await grove();
     const lie = signClaims(eraseClaims(fact.id, SURVEYOR, SURVEYOR, 2000), SURVEYOR_SEED);
     const report = await gateway.federate([lie]);
@@ -219,7 +228,7 @@ describe("tombstone readers verify authority, not just self-consistency", () => 
     await gateway.close();
   });
 
-  it("a pre-emptive self-tombstone for an absent id (non-operator) is refused at the door", async () => {
+  it("a pre-emptive tombstone for an absent id (non-operator) is refused at the door", async () => {
     const { gateway } = await grove();
     const ghostId = `1e20${"cd".repeat(32)}`;
     const preempt = signClaims(eraseClaims(ghostId, SURVEYOR, SURVEYOR, 2000), SURVEYOR_SEED);
@@ -229,14 +238,15 @@ describe("tombstone readers verify authority, not just self-consistency", () => 
     await gateway.close();
   });
 
-  it("a record author's self-erasure DOES federate and bind (their words, anywhere)", async () => {
-    // Distinguish from the refusals above: an honest self-erasure by the record's actual
-    // author, arriving where the target is present, is admitted and binds.
+  it("a federated erasure delta from anyone but this store's operator is refused", async () => {
+    // Even a truthful self-erasure by the record's own author does not bind here: only THIS
+    // store's operator orders removal, so a federated removal-order is refused at the door.
     const { gateway, fact } = await grove();
     const honest = signClaims(eraseClaims(fact.id, GARDENER, GARDENER, 2000), GARDENER_SEED);
     const report = await gateway.federate([honest]);
-    expect(report.accepted).toBe(1);
-    expect(readTombstones(gateway.reactor, OPERATOR).has(fact.id)).toBe(true);
+    expect(report.rejected).toBe(1);
+    expect(readTombstones(gateway.reactor, OPERATOR).has(fact.id)).toBe(false);
+    expect(gateway.reactor.get(fact.id)).toBeDefined();
     await gateway.close();
   });
 

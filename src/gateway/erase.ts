@@ -4,19 +4,19 @@
 // #34); and admission composes the tombstone set so the id is refused re-entry forever.
 // Content addressing is what makes this honest: retaining a hash retains zero content.
 //
-// Authority is verified WHILE THE EVIDENCE EXISTS: a tombstone records the target's author
-// (`spoken-by`) at erase time, and the door checks it against the live target — because a
-// moment later the target is purged and unverifiable. Afterward the tombstone is trusted on
-// the door's word: operator tombstones bind, and so do self-erasures (tombstone author ===
-// its own spoken-by; the door refused any tombstone that lied about that while it could
-// still tell).
+// ONE erasure authority, nobody else: the INSTANCE OPERATOR. Erasure is destructive, so the
+// store is deliberately unforgiving about it — only the operator's own signature orders a
+// record removed, and every door (append AND federation) refuses a tombstone the operator did
+// not sign, so an unauthorized removal-order is never even stored. This is the GDPR shape: a
+// data subject asks; the operator, as the controller, executes; and the tombstone records the
+// target's author (`spoken-by`) as the compliance log, verified against the live target while
+// it can still be seen.
 //
-// Two erasure authorities, nobody else: the ORIGINAL AUTHOR (their words to unsay) and the
-// OPERATOR (their ground, their liability). Degrees of forgetting are compositions, never new
-// mutation machinery: anonymous reassertion = erase + append the content in another voice
-// (with NO on-record link — the old id would otherwise let anyone re-identify the author by trial);
-// sealed authorship = a `hash(salt‖author)` commitment pointer on the reassertion, reclaimable
-// by revealing the preimage; partial redaction = reassert with values replaced.
+// Degrees of forgetting are compositions the operator performs, never new mutation machinery:
+// anonymous reassertion = erase + append the content in another voice (with NO on-record link —
+// the old id would otherwise let anyone re-identify the author by trial); sealed authorship = a
+// `hash(salt‖author)` commitment pointer on the reassertion, reclaimable by revealing the
+// preimage; partial redaction = reassert with values replaced.
 
 import { createHash } from "node:crypto";
 import { Reactor } from "@bombadil/rhizomatic";
@@ -86,18 +86,16 @@ export function isTombstone(claims: Claims): boolean {
   );
 }
 
-// Is this delta a tombstone, and if so, is it WELL-FORMED, AUTHORIZED law? This runs at every
-// door that admits a tombstone — the append door (authorize) AND the federation door — so that
-// a tombstone is verified WHILE its target can still be seen, and only VALID tombstones are
-// ever stored. The readers downstream then trust any stored tombstone (they must: a valid
-// self-erasure's target is purged moments later, and cannot be re-verified after the fact).
+// Is this delta a tombstone, and if so, is it WELL-FORMED, AUTHORIZED law? Erasure is
+// DESTRUCTIVE, so this is the strictest gate in the system, run at EVERY door that could admit
+// a tombstone — the append door (authorize) AND the federation door — so that an unauthorized
+// removal-order is never even stored, let alone honored.
 //
-// Two authorities, and no others:
-//   - the OPERATOR governs their own ground: they may tombstone any id, present or not (an id
-//     they name is refused, which for an absent id is a deliberate pre-emptive refusal);
-//   - the record's OWN AUTHOR may unsay their words — but only against a PRESENT target that
-//     confirms them. A non-operator tombstone for an absent or mismatched target is refused,
-//     so a stranger cannot mark another author's record (or a not-yet-arrived id) for removal.
+// ONE authority, and no other: the INSTANCE OPERATOR. Only the operator's own signature orders
+// a record removed from this store. Not the record's author, not a grantee, not a peer — the
+// substrate cannot stop anyone from *minting* an erasure delta, so the store must be certain to
+// never *accept* one that its operator did not sign. (A data subject asks; the operator, as the
+// controller, executes. An ungoverned store has no operator and so honors no erasure at all.)
 export function eraseDefect(
   delta: Delta,
   reactor: Reactor,
@@ -111,20 +109,14 @@ export function eraseDefect(
   if (count.spokenBy !== 1 || spokenBy === undefined) {
     return "a tombstone carries exactly one string `spoken-by` (the erased delta's author)";
   }
-  const author = delta.claims.author;
+  if (operator === undefined || delta.claims.author !== operator) {
+    return "erasure is the instance operator's alone: only the operator may order a record removed";
+  }
+  // The operator's tombstone must still tell the truth about whose record it forgot, whenever
+  // the target can still be seen — an accurate compliance record.
   const target = reactor.get(targetId);
-  // `spoken-by` must be truthful whenever the target can still be seen — for anyone, the
-  // operator included; the erasure log should not record a false author for what it forgot.
   if (target !== undefined && target.claims.author !== spokenBy) {
     return "a tombstone's spoken-by must be the erased delta's actual author";
-  }
-  if (operator !== undefined && author === operator) return undefined; // the operator's own ground
-  // Otherwise only the record's author, unsaying their words against a present, matching target.
-  if (target === undefined) {
-    return "erasing a record not held here is the operator's to make, not another author's";
-  }
-  if (author !== spokenBy) {
-    return "erasure authority is the original author or the operator, nobody else";
   }
   return undefined;
 }
@@ -133,33 +125,21 @@ export function eraseDefect(
 // tombstones are the operator's, and self-erasures (author === spoken-by — the door verified
 // the claim while the target existed). A struck tombstone (lawful negation) is forgiveness:
 // the id may return.
-// The ids this ground refuses to hold: every surviving lawful tombstone's target. Every stored
-// tombstone was validated at its door (eraseDefect, at append AND federation), so the reader
-// trusts it: a tombstone binds when its author is the operator or the record's own author
-// (`spoken-by`). This must NOT re-verify against a live target — a valid self-erasure purges
-// its target moments after it lands, so re-verification would make the door forget the hole the
-// instant it was cut. The door's job was to keep an INVALID tombstone from ever being stored;
-// the reader's job is only to honor what stands and is not struck. A struck tombstone (lawful
-// negation) is forgiveness: the id may return.
+// The ids this ground refuses to hold: the target of every surviving, unstruck, OPERATOR-signed
+// tombstone. Only the operator's tombstones bind — the same authority the door enforces — so an
+// ungoverned store (no operator) honors no erasure, and a non-operator tombstone that somehow
+// sits in the ground binds nothing. A struck tombstone (lawful negation) is forgiveness: the id
+// may return.
 export function readTombstones(reactor: Reactor, operator: string | undefined): Set<string> {
+  if (operator === undefined) return new Set();
   const negated = lawfulNegated(reactor, operator);
   const dead = new Set<string>();
   for (const delta of reactor.snapshot()) {
     if (!isTombstone(delta.claims) || negated(delta.id)) continue;
-    const { targetId, spokenBy, count } = tombstoneParts(delta.claims);
-    // The same shape the door enforces (exactly one erased id, one spoken-by).
-    if (
-      targetId === undefined ||
-      spokenBy === undefined ||
-      count.erases !== 1 ||
-      count.spokenBy !== 1
-    ) {
-      continue;
-    }
-    const author = delta.claims.author;
-    if (author === spokenBy || (operator !== undefined && author === operator)) {
-      dead.add(targetId);
-    }
+    if (delta.claims.author !== operator) continue; // erasure is the operator's alone
+    const { targetId, count } = tombstoneParts(delta.claims);
+    if (targetId === undefined || count.erases !== 1) continue; // shape the door enforces
+    dead.add(targetId);
   }
   return dead;
 }

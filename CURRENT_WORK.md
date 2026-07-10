@@ -110,12 +110,14 @@ tombstone-guarded — is at 313/313 with phase12 4/4 twice and the unsaying runn
 village. A correctness review surfaced follow-up items; **all resolved on the branch (320/320), NOT yet
 merged** (Myk's call — leave it staged). The resolution, for the record:
 
-- The tombstone validator (`eraseDefect`) now runs at **both** doors — append and federation —
-  so an unauthorized or mis-authored removal-order is refused before it is ever stored, while
-  its target can still be seen. The readers then trust any stored tombstone (they must: a valid
-  self-erasure's target is gone moments later). This closes the federated-mismatch and
-  pre-emptive cases. A record's own author's self-erasure propagates (their words, anywhere); an
-  operator's erasure stays local (each store's operator governs their own ground).
+- **Erasure is the instance operator's alone** (Myk, 2026-07-10 — it is destructive, so be
+  maximally conservative). Only the operator's own signature orders a record removed: not the
+  record's author, not a grantee, not a peer. `eraseDefect` runs at **both** doors (append and
+  federation) and refuses any tombstone the operator did not sign, so an unauthorized
+  removal-order is never even stored; `readTombstones` binds only the operator's. A data subject
+  asks; the operator (the controller) executes (`Gateway.erase` has no actor override).
+  Erasure does not auto-propagate — each store's operator decides for their own ground, so a
+  forged order cannot cascade a deletion across the network. An ungoverned store honors none.
 - `tombstonesIn` (pre-boot) now builds a probe reactor and defers to `readTombstones`, so it
   respects lawful negation: a forgiven (struck) record is no longer dropped by a boot heal. The
   heal↔forgiveness case SPEC §11 flagged is pinned.

@@ -601,8 +601,15 @@ export class Gateway {
   // reactor).
   async erase(
     id: string,
-    opts: { actorSeed?: string; reason?: string } = {},
+    opts: { reason?: string } = {},
   ): Promise<{ erased: string; citations: string[] }> {
+    // Erasure is the operator's alone (SPEC §11): destructive, so the only signer is the store's
+    // own operator. A data subject's request is honored BY the operator, never by the subject
+    // directly — there is no actor override here on purpose.
+    const seed = this.options.seed;
+    if (seed === undefined || this.operatorAuthor === undefined) {
+      throw new Error("erasure is the instance operator's alone, and this store has no operator");
+    }
     const target = this.reactor.get(id);
     if (target === undefined) {
       throw new Error(`nothing to erase: ${id} is not held here`);
@@ -612,14 +619,6 @@ export class Gateway {
       // is striking the tombstone (forgiveness), never erasing it.
       throw new Error("the erasure log is append-only: a tombstone cannot itself be erased");
     }
-    const seed = opts.actorSeed ?? this.options.seed;
-    if (seed === undefined) {
-      throw new Error("erasure needs a signer: the original author or the operator");
-    }
-    const author = authorForSeed(seed);
-    if (author !== target.claims.author && author !== this.operatorAuthor) {
-      throw new Error("erasure authority is the original author or the operator, nobody else");
-    }
     // The manifest: every delta citing the id (negations, provenance links) — the holes the
     // cut will leave, enumerated before it is made. Cascade is the caller's choice.
     const citations = [...this.reactor.snapshot()]
@@ -628,7 +627,7 @@ export class Gateway {
       )
       .map((d) => d.id);
     const tombstone = signClaims(
-      eraseClaims(id, target.claims.author, author, this.nextTimestamp(), opts.reason),
+      eraseClaims(id, target.claims.author, this.operatorAuthor, this.nextTimestamp(), opts.reason),
       seed,
     );
     await this.append([tombstone]);
