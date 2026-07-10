@@ -334,6 +334,56 @@ Foreign law stays inert: a peer's self-signed grant merges as a delta but govern
 it roots in no operator you blessed. **Each instance must have its own operator seed** — two
 sharing one trust each other's constitution completely.
 
+## Forgetting — erasure, GDPR, and harmful content
+
+By default a store forgets nothing: revocation is negation, which _masks_ a delta from views but
+keeps it in the ground, so the audit — who said what, when, and what was later withdrawn —
+survives. That is the right default for a store of record. But grow-only cannot be the _only_
+answer. A data subject exercises their right to erasure; a delta is later judged unlawful or
+harmful; and the bytes must actually go.
+
+**Erasure is a real, destructive operation, and it is the instance operator's alone.** Only the
+operator — the data controller — may order a record removed: not its author, not a grantee, not a
+peer. The substrate cannot stop anyone from _minting_ a delta, so the store is careful never to
+_accept_ a removal-order it did not sign; the check runs at every door, append and federation
+alike.
+
+```ts
+// the operator honors a request: purge the bytes from every tier, leave a signed hole
+await gateway.erase(deltaId, { reason: "GDPR art. 17 request #4821" });
+```
+
+`erase` removes the delta from the live store **and every backing tier** — the sqlite, and the
+archive vault if one is configured (a later heal will not replant it) — then re-seats the store
+on what remains. What stays is a **tombstone**: a signed, append-only claim recording _that_ the
+id was forgotten, by whom, and when — never the content. The store remembers that it forgot. The
+door refuses the id's return thereafter (un-erasure is striking the tombstone). Content addressing
+is what makes this honest: retaining a hash retains zero bytes.
+
+**The boundary, stated plainly: erasure is instance-level — Loam cannot retroactively retract a
+delta that has already federated to another instance.** The physics is email you have already
+sent, or a file already downloaded. Once a peer has pulled a delta it lives on _their_ ground,
+under _their_ operator's authority; your erasure clears it from _your_ store and refuses its
+re-entry through _your_ door, but it does not reach across the network and delete other people's
+copies. Nor should it — a system where one signature could cascade a deletion everywhere would be
+a censorship weapon, not a store of record. So a forged or coerced erasure order cannot propagate
+a deletion: each operator decides for their own ground.
+
+What Loam gives you instead is precise, auditable, per-instance forgetting, plus the machinery to
+make erasure across a federation a _coordinated_ act rather than a magic one:
+
+- **The tombstone travels as a request.** It federates like any claim, so downstream operators
+  _learn_ that you erased — GDPR Art. 17(2)'s "inform downstream controllers," done as data. Each
+  peer's operator then chooses to honor it on their own store.
+- **Compliance is queryable.** Ask any store for the id and see what it returns — erased and
+  refused, or still held. No ambiguity to argue about.
+- **Bad actors are shut out going forward** by the trust roster (above): close the door, and the
+  next pulse stops admitting them.
+
+The honest limit: this is rigorous, controller-level erasure and severance — not the power to
+unsend. No federated system can promise network-wide recall. Loam makes the boundary crisp and the
+per-instance act exact, rather than pretending the boundary is not there.
+
 ## Deploy
 
 A `Dockerfile` builds and runs `loam serve --http` as a non-root user, the store on a `/data`
