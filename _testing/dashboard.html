@@ -217,17 +217,19 @@
         H = 620;
       function fit() {
         const r = cv.parentElement.getBoundingClientRect();
-        const dpr = window.devicePixelRatio || 1;
-        cv.width = r.width * dpr;
-        cv.height = r.height * dpr;
+        DPR = window.devicePixelRatio || 1;
+        cv.width = Math.round(r.width * DPR);
+        cv.height = Math.round(r.height * DPR);
+        // fill the width; if the panel is tall, sit the village in the upper third rather than
+        // floating dead-centre with a sea of empty grass below.
         scale = Math.min(r.width / W, r.height / H);
         ox = (r.width - W * scale) / 2;
-        oy = (r.height - H * scale) / 2;
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        oy = Math.min((r.height - H * scale) / 2, 30);
       }
       let scale = 1,
         ox = 0,
-        oy = 0;
+        oy = 0,
+        DPR = 1;
 
       // ---- the map --------------------------------------------------------------------------
       const PLACES = {
@@ -457,7 +459,11 @@
       }
 
       function frame(dt) {
-        ctx.clearRect(-ox / scale, -oy / scale, cv.width, cv.height);
+        // clear the whole device canvas cleanly each frame (no trails), then set up the
+        // world transform: DPR for crispness, then the fit offset + scale.
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, cv.width, cv.height);
+        ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
         ctx.save();
         ctx.translate(ox, oy);
         ctx.scale(scale, scale);

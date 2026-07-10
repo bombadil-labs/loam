@@ -374,3 +374,13 @@ tombstone-guarded, reopen stays clean. Field note: village act pacing has slowed
 the mill re-grinds a 400+-delta ground per ingest; the pulse presence query hauls the
 derived.from evidence hex) — SPEC §13's vertical-scale honesty in miniature; candidates
 recorded in CURRENT_WORK.
+
+## Unit 3a — the playable village (the theater) — ✅ built, verified live
+
+The village renders as a 2D canvas game (`dashboard.html`), consuming the unchanged event
+stream. Sprites walk to buildings on each act (actor+place inferred in `tell()`); speech
+bubbles, an event ticker, a beating federation pulse, a turning mill wheel, the crash shake,
+the gate-refusal flash. Click a villager → dossier with the three-lens duel + presence.
+Design law held: no per-tick deltas — the game is a lens over the ground. Remaining for the
+full "playable" arc: 3b the player (write yourself in — needs Unit 2's browser client), 3c
+multiplayer-is-federation.
