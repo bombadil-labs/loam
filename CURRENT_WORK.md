@@ -14,5 +14,7 @@ a hosted driver — libSQL/Turso drops in beside `SqliteBackend` (the Deploy sec
 README already promises the seam supports it). One writing gateway per store still holds;
 a hosted driver would want `deltasSince`'s watermark negotiated server-side eventually.
 
-**Still Myk's by design:** the first `npm run release`; trusted publishing for the release
-workflow (token flow deprecation — deferred by Myk, "we'll do this part later").
+**Shipped (2026-07-10):** `@bombadil/loam` is live on npm — v0.0.1 via the release workflow,
+tokenless (OIDC trusted publishing, SLSA provenance). The NPM_TOKEN secret is deleted and the
+token revoked. Releasing is `npm run release -- patch|minor|major` on clean main; the rest is
+CI.
