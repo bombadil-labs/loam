@@ -64,3 +64,9 @@ _(one entry per PR that grew the village; newest last)_
   veto, visible), while `GuardedDossier` keeps the bio (stranger strikes are inert under the
   governed lens). The village simulator gains the strike act; the dashboard's trust duel now
   distinguishes forged-value from erased-value attacks.
+- **PR #18 — trust is data**: Mallory's arc grows two acts. After Wren heals the record, the
+  almanac's operator **declares a roster with one delta** (the villagers and the three peer
+  operators) — and Mallory's very next forgery **bounces at the door** (`accepted: 0`,
+  narrated in the event log); then the almanac reopens, an aggregator by choice. The same
+  roster that gates the door is readable as an eval-side lens (`trustRosterPred`) — one
+  source of truth, demonstrated live.

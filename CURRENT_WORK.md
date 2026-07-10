@@ -101,10 +101,19 @@ Stage-1 decisions (carried from the earlier opening, upgraded post-0.2.0):
 Checklist:
 
 - [x] Stage 1: plan (this section); journal folded (step 12 + adoption entries in order)
-- [ ] Tests first ← **left off here**
-- [ ] Implement: trust.ts (claims/read/pred builder), gateway.admitFor + federate/pullFrom
-      defaults, exports, README federation section
-- [ ] Gate → PR → review → resolve → merge → JOURNAL → village stage → step 14
+- [x] Tests first: test/federation/trust.test.ts — default-open, roster admission with delta
+      accounting, closed, one-delta live flip, override precedence, stranger's strike refused
+      at door, foreign declarations inert, roster-lens one-source-of-truth
+- [x] Implement: trust.ts (trustClaims / trustDefect / readTrustPolicy / trustRosterPred),
+      gateway.admitFor + federate default, pullFrom docs, exports, README federation section
+- [x] Gate 221/221 → PR [#18](https://github.com/bombadil-labs/loam/pull/18) → review
+      resolved: malformed declarations are MALFORMED LAW at append (the lens can't validate
+      shape, so the door must — invariant restored provably); ungoverned stores ignore trust
+      declarations (no stranger lockout, pinned); closed-means-closed said deliberately;
+      removal-by-negation + closed-reopen + bogus/duplicate-mode pins. 224/224, CI CLEAN
+- [ ] Village stage 7: Mallory's arc grows the door acts (roster declared → forgery bounces →
+      reopen); ledger updated — VERIFYING LIVE now ← **left off here**
+- [ ] Merge → JOURNAL → step 14
 
 ## Step 14 — Normalization: divergent dialects, more deltas (queued; SPEC §8)
 
