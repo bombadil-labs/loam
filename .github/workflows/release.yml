@@ -29,9 +29,12 @@ jobs:
         with:
           node-version: 22
 
-      # Node 22 bundles npm 10; the OIDC exchange needs npm >= 11.5.1.
+      # Node 22 bundles npm 10; the OIDC exchange needs npm >= 11.5.1. Major-PINNED, not
+      # `latest`: npm 12 arrived as latest mid-release and changed install semantics under us
+      # (install scripts became opt-in — see `allowScripts` in package.json, which is the fix).
+      # A major bump here should be a deliberate edit, not a surprise.
       - name: npm that speaks OIDC
-        run: npm install -g npm@latest
+        run: npm install -g npm@12
 
       - name: install
         run: npm ci
