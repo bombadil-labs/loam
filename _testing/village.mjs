@@ -252,6 +252,38 @@ await almanac.gateway.append([
   ),
 ]);
 
+// The confluence is open-ended (demo item 7): homes/peers.json names EXTRA stores to pull —
+// a store grown mid-meeting (grow.mjs) adds itself there, and the next beat federates it in,
+// first contact narrated. Re-read every beat: joining the village is editing a file, not
+// restarting it.
+const seenPeers = new Set();
+async function pullPeers() {
+  let peers = [];
+  try {
+    peers = JSON.parse(readFileSync(join(ROOT, "homes", "peers.json"), "utf8"));
+  } catch {
+    return 0; // no newcomers yet
+  }
+  let accepted = 0;
+  for (const peer of peers) {
+    if (typeof peer?.base !== "string" || typeof peer?.token !== "string") continue;
+    try {
+      const report = await pullFrom(almanac.gateway, peer.base, peer.token);
+      accepted += report.accepted;
+      if (!seenPeers.has(peer.base)) {
+        seenPeers.add(peer.base);
+        tell(
+          `🌱 a new store joins the confluence: ${peer.name ?? peer.base} — the almanac renders it in`,
+          "patch",
+        );
+      }
+    } catch {
+      // a grown store may be mid-boot or gone — the confluence keeps its beat
+    }
+  }
+  return accepted;
+}
+
 async function pulse() {
   for (;;) {
     try {
@@ -260,6 +292,7 @@ async function pulse() {
       const c = await pullFrom(almanac.gateway, reel.base, opToken("reel"));
       const d = await pullFrom(almanac.gateway, hive.base, opToken("hive"));
       const e = await pullFrom(almanac.gateway, cinelog.base, opToken("cinelog"));
+      const f = await pullPeers();
       // every pulse ends with a translation pass: the stranger's tongue becomes the village's
       const rendered = await translate(almanac.gateway, { seed: almanac.seed });
       if (rendered.emitted > 0) {
@@ -270,7 +303,7 @@ async function pulse() {
       }
       broadcast({
         kind: "pulse",
-        accepted: a.accepted + b.accepted + c.accepted + d.accepted + e.accepted,
+        accepted: a.accepted + b.accepted + c.accepted + d.accepted + e.accepted + f,
       });
       // the trust duel, sampled each beat — three lenses over one ground
       const plain = (
