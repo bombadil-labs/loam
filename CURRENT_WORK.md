@@ -46,11 +46,16 @@ phase14 5/5; verified live (Isolde joined, wrote, attended; the crash replanted 
 life mid-session and her next write landed clean). No library changes — Unit 2's surface was
 sufficient, which was the point.
 
-## Unit 3c — Multiplayer is federation (the sock-knocker)
+## Unit 3c — Multiplayer is federation (the sock-knocker) — DONE (pending PR merge)
 
-Two browsers, two villagers, no game-server authority — claims federate, clients render the
-union. She takes the village home on her laptop with herself still in it. Stretch: as-of reads
-scrub the village's history like a replay.
+phase15 5/5, no library changes (the third unit in a row riding Unit 2's surface unchanged):
+two writers on two sovereign stores unify in one pulse and two independent tokenless readers
+agree `_hex` for `_hex`; the take-home pulls 200+ deltas onto a fresh store where the
+village's law binds nothing until she registers her own lens — through which the whole
+village, herself included, answers. Her door stays closed until she declares otherwise.
+Found: trust-as-data enforces itself across process lifetimes (the almanac arrived rostered
+from a previous run's drama — a phase states its own posture now). Stretch (as-of replay)
+deliberately not taken this cycle.
 
 ## The demo script (in-game; 15 min, no slides)
 

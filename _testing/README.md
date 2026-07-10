@@ -154,3 +154,16 @@ _(one entry per PR that grew the village; newest last)_
   her whole life — grant, petition, bio, flour — and her NEXT write landed as if nothing had
   happened. A returning visitor knocks again idempotently (same key, same author, same
   dossier).
+- **MULTIPLAYER IS FEDERATION (Unit 3c — the sock-knocker)** (phase15.mjs, 5/5): two
+  villagers, two DIFFERENT stores, no game-server authority — Ana writes on the almanac, Ben
+  on the commons; one pulse and the union holds them both, and two independent tokenless
+  readers render it identically, `_hex` for `_hex` (the content address IS the agreement).
+  Then THE TAKE-HOME: a fresh store, HER OWN operator, one pull — 200+ deltas arrive and the
+  village's law binds NOTHING on her machine (no surface at all, by the same lawful-reads
+  rule that keeps federation safe); she registers her own Dossier lens and the whole village
+  answers through HER law, her villager included. Sovereignty both ways, sharpened: the
+  almanac's open-door declaration rode the pull and sits in her ground as data — and her door
+  stays closed until she says otherwise. Found along the way: the living village's forgery
+  arc can leave the almanac ROSTERED between runs, and the phase's first pull obeyed it —
+  trust-as-data enforcing itself across process lifetimes; the phase now states its own
+  posture (one `open` declaration) instead of inheriting the last drama's.
