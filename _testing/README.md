@@ -73,6 +73,16 @@ node _testing/grow.mjs sightings --port 4406 \
 - `^C` stops the process; the data stays in its home, and the peers entry survives for the
   next run.
 
+`phase16.mjs` drives this whole path headless (spawning `grow.mjs` as a child, as the demo
+does) and asserts the three claims — schema answers live, peers.json entry written, one pull
+lands the facts in the almanac. Run it like any phase: `node _testing/phase16.mjs`.
+
+**The `grow-a-store` skill** (`_testing/skills/grow-a-store/SKILL.md`) is a short pointer at
+this section — the recipe demo-Claude follows when asked to "build a store for X" mid-meeting.
+It lives here because it belongs to the demo; to make it an active Claude Code skill on a
+machine, copy `_testing/skills/grow-a-store/` into that repo's `.claude/skills/` (which is
+gitignored, so the active copy stays local while this canonical one ships).
+
 ## What it demonstrates — the ledger
 
 _(one entry per PR that grew the village; newest last)_
@@ -194,10 +204,13 @@ _(one entry per PR that grew the village; newest last)_
   arc can leave the almanac ROSTERED between runs, and the phase's first pull obeyed it —
   trust-as-data enforcing itself across process lifetimes; the phase now states its own
   posture (one `open` declaration) instead of inheriting the last drama's.
-- **GROW AN APP LIVE (demo item 7)** (verified live; phase16 queued): the confluence is
-  open-ended now — the pulse re-reads `homes/peers.json` every beat, and `grow.mjs` puts a
-  whole new sovereign store on the map in one command (see "Growing a new store" above).
-  Watched live: `sightings` grew on :4406 with its own operator, registered `Sighting` over
-  its running surface, seeded five facts from a triples file, and the village narrated first
-  contact — `🌱 a new store joins the confluence: sightings` — with the grey heron in the
-  almanac's ground one beat later. Joining the village is editing a file, not restarting it.
+- **GROW AN APP LIVE (demo item 7)** (phase16.mjs, 3/3): the confluence is open-ended now —
+  the pulse re-reads `homes/peers.json` every beat, and `grow.mjs` puts a whole new sovereign
+  store on the map in one command (see "Growing a new store" above). Watched live: `sightings`
+  grew on :4406 with its own operator, registered `Sighting` over its running surface, seeded
+  five facts from a triples file, and the village narrated first contact — `🌱 a new store
+  joins the confluence: sightings` — with the grey heron in the almanac's ground one beat
+  later. phase16 drives the same path headless — spawning `grow.mjs` as a child, exactly as
+  the demo does — and confirms the grown store answers its own `Grove` schema immediately,
+  registers itself in `homes/peers.json`, and one pull lands its facts in the almanac's
+  ground. Joining the village is running a command, not editing the village.

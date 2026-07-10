@@ -936,3 +936,20 @@ shape to a primed classifier. Mitigation that worked: recipes as README document
 orchestration files first thing in a fresh session, ideally on Opus. Myk called the
 accumulation theory mid-session and the controlled evidence (four writes, two genres, clean
 split) bore him out.
+
+**Closed the same day, fresh Opus session.** The handoff worked exactly as designed: writing
+`phase16.mjs` and the skill FIRST, into an empty context before any adversarial vocabulary,
+both landed clean on the first attempt — the accumulation theory confirmed a second way (the
+same genres that tripped a primed context sailed through a fresh one). `phase16.mjs` (3/3,
+re-runnable) drives grow.mjs as a child process exactly as the demo does — a `Grove` store
+grown on :4407 answers its own schema immediately, registers in `homes/peers.json`, and one
+pull lands its facts in the almanac's ground. The demo script (items 1–9) is now wholly
+backed by verified machinery; the road to the Republic is walked.
+
+One placement decision worth the note: the `grow-a-store` skill lives at
+`_testing/skills/grow-a-store/SKILL.md`, not `.claude/skills/` — because `.claude/` is
+gitignored (settings/launch are machine-local) and the skill belongs to the village demo,
+which lives entirely under `_testing/`. Its path references are location-independent, so the
+committed canonical and the machine-local active copy (in `.claude/skills/`, for harness
+discovery) are byte-identical; activation on any machine is a directory copy. Myk's call —
+the skill ships with the demo it serves, not with the harness config.

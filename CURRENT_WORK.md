@@ -57,9 +57,9 @@ Found: trust-as-data enforces itself across process lifetimes (the almanac arriv
 from a previous run's drama — a phase states its own posture now). Stretch (as-of replay)
 deliberately not taken this cycle.
 
-## Demo item 7 — grow an app live — PR OPEN, two crumbs handed to a fresh session
+## Demo item 7 — grow an app live — DONE (pending PR merge)
 
-**Done and verified live on branch `grow-a-store` (PR open, deliberately unmerged):**
+The demo script's last gap, closed. On branch `grow-a-store` (PR #47):
 
 - [x] village.mjs pulse re-reads `_testing/homes/peers.json` every beat — extra `{ name,
       base, token }` pulls, first contact narrated ("🌱 a new store joins the confluence").
@@ -69,21 +69,17 @@ deliberately not taken this cycle.
       against the living village: `sightings` grew on :4406, answered its own schema, and its
       facts (grey heron, the mill pond) were in the almanac's ground one beat later.
 - [x] README recipe ("Growing a new store") + the worked example `schemas/sighting.json`.
+- [x] `_testing/phase16.mjs` (3/3, re-runnable) — drives grow.mjs as a child process exactly
+      as the demo does: the grown `Grove` store answers its own schema immediately, registers
+      in `homes/peers.json`, and one pull lands its facts in the almanac's ground.
+- [x] `_testing/skills/grow-a-store/SKILL.md` — a short pointer at the README recipe (written
+      first thing in a fresh Opus session per the classifier note; landed clean, no friction).
+      Lives under `_testing/` with the demo it serves (so it commits); activate on a machine
+      by copying into that repo's gitignored `.claude/skills/` (done on this one).
 
-**HANDOFF — for a fresh session (preferably Opus, per the classifier note below), start here:**
-
-- [ ] `_testing/phase16.mjs` — grow a store headless and check it: spawn
-      `grow.mjs phasegrove --port 4407` as a child process (wait for the "grows." stdout
-      line; write its schema + triples files under `homes/` first), then (16.1) the grown
-      store answers its own schema with `op-phasegrove`; (16.2) `homes/peers.json` carries
-      the entry; (16.3) one `pullFrom(almanac.gateway, base, "op-phasegrove")` lands the
-      facts in the almanac's ground; kill the child, `summary("phase 16 — grown live")`.
-      Model it on phase13–15's structure and register.
-- [ ] `.claude/skills/grow-a-store/SKILL.md` — a SHORT skill: frontmatter (name +
-      when-to-use), then "read `_testing/README.md` § Growing a new store and follow it;
-      the worked example is `schemas/sighting.json`; watch the village event log for 🌱".
-      Keep it a pointer — the full recipe already lives in the README.
-- [ ] Fold both into the open PR, re-run the gate, update the ledger line, merge.
+The whole demo script (items 1–9) now has working, verified machinery. **The road to the
+Republic is walked.** Next work is Myk's to name (as-of replay was the deferred stretch; a
+hosted StoreBackend driver waits behind a deploy need).
 
 ## The demo script (in-game; 15 min, no slides)
 
@@ -97,7 +93,8 @@ deliberately not taken this cycle.
 6. **The mill** — the almanac is animate; a blessed function grinds the ground into flour. "Smart
    contracts without execution risk — the contract is a lens, re-runnable to the byte." _(✓)_
 7. **Grow an app live** — mid-meeting, ask Claude to build a new store for whatever she names
-   (schemas + renderer); it federates in before the coffee refills. _(IN FLIGHT — the last gap)_
+   (schemas + renderer); it federates in before the coffee refills. _(✓ — grow.mjs + the
+   peers-aware pulse + the grow-a-store skill; phase16 3/3)_
 8. **Write yourself in** — she mints a villager and walks into the world. _(3b ✓ — the
    "write yourself in" panel: knock, grant, roll, flour)_
 9. **The kicker** — `npm i -g @bombadil/loam` on her laptop; one pull; the whole republic is
