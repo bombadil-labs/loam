@@ -39,7 +39,7 @@ import {
 import { graphql, parse, subscribe, type ExecutionResult, type GraphQLSchema } from "graphql";
 import type { StoreBackend } from "../store/backend.js";
 import { authorize } from "./accounts.js";
-import { ERASE_ENTITY, eraseClaims, readTombstones } from "./erase.js";
+import { ERASE_ENTITY, eraseClaims, eraseDefect, isTombstone, readTombstones } from "./erase.js";
 import { Channel } from "./channel.js";
 import type { Genesis } from "./genesis.js";
 import {
@@ -601,19 +601,23 @@ export class Gateway {
   // reactor).
   async erase(
     id: string,
-    opts: { actorSeed?: string; reason?: string } = {},
+    opts: { reason?: string } = {},
   ): Promise<{ erased: string; citations: string[] }> {
+    // Erasure is the operator's alone (SPEC §11): destructive, so the only signer is the store's
+    // own operator. A data subject's request is honored BY the operator, never by the subject
+    // directly — there is no actor override here on purpose.
+    const seed = this.options.seed;
+    if (seed === undefined || this.operatorAuthor === undefined) {
+      throw new Error("erasure is the instance operator's alone, and this store has no operator");
+    }
     const target = this.reactor.get(id);
     if (target === undefined) {
       throw new Error(`nothing to erase: ${id} is not held here`);
     }
-    const seed = opts.actorSeed ?? this.options.seed;
-    if (seed === undefined) {
-      throw new Error("erasure needs a signer: the original author or the operator");
-    }
-    const author = authorForSeed(seed);
-    if (author !== target.claims.author && author !== this.operatorAuthor) {
-      throw new Error("erasure authority is the original author or the operator, nobody else");
+    if (isTombstone(target.claims)) {
+      // The erasure log is the record of what was forgotten; it stays append-only. Un-erasure
+      // is striking the tombstone (forgiveness), never erasing it.
+      throw new Error("the erasure log is append-only: a tombstone cannot itself be erased");
     }
     // The manifest: every delta citing the id (negations, provenance links) — the holes the
     // cut will leave, enumerated before it is made. Cascade is the caller's choice.
@@ -623,7 +627,7 @@ export class Gateway {
       )
       .map((d) => d.id);
     const tombstone = signClaims(
-      eraseClaims(id, target.claims.author, author, this.nextTimestamp(), opts.reason),
+      eraseClaims(id, target.claims.author, this.operatorAuthor, this.nextTimestamp(), opts.reason),
       seed,
     );
     await this.append([tombstone]);
@@ -635,8 +639,16 @@ export class Gateway {
 
   // A fresh reactor replayed from the backend as it stands NOW — how open() built the first
   // one. Every registered schema rebinds under a new generation (rebind), persistence
-  // re-attaches, and any animating host is detached (it watched the old reactor).
+  // re-attaches, and any animating host is detached (it watched the old reactor — the caller
+  // re-attaches its runner, as the village does after the crash).
   private async reseat(): Promise<void> {
+    // End live subscriptions first: a parked reader must not keep serving a view built on the
+    // pre-erase ground (the removed record could still sit in its last snapshot). They wake
+    // with `done` and resubscribe against the fresh reactor — the same reconnect a crash
+    // reopen or a schema evolution asks of them. Their sinks watched the old reactor; drop them.
+    for (const channel of [...this.channels]) await channel.return();
+    this.sinks.clear();
+    this.lazyMats.clear();
     const reactor = new Reactor();
     for (const d of await this.backend.deltasSince(new Set())) {
       if (reactor.ingest(d).status === "rejected") {
@@ -704,10 +716,15 @@ export class Gateway {
     const admitted: Delta[] = [];
     let rejected = 0;
     for (const d of all) {
+      // A tombstone is a removal-order, not an inert claim — so it faces the same validator at
+      // this door as at the append door (eraseDefect), and an unauthorized or malformed one is
+      // refused rather than stored. Everything the readers trust downstream passed a door here.
       if (
         computeId(d.claims) !== d.id ||
         verifyDelta(d) !== "verified" ||
         dead.has(d.id) ||
+        (isTombstone(d.claims) &&
+          eraseDefect(d, this.reactor, this.operatorAuthor) !== undefined) ||
         !admit(d)
       ) {
         rejected += 1;

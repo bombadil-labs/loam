@@ -107,8 +107,26 @@ merged).** The law slice — tombstones verified at the door while evidence exis
 (manifest → purge → tombstone → re-seat), the door refuses erased ids past any admit override,
 forgiveness = striking the tombstone, degrees compose from erase+append, heal is
 tombstone-guarded — is at 313/313 with phase12 4/4 twice and the unsaying running in the
-village. A correctness review then surfaced follow-up items to resolve **before merge**, stated
-here in plain correctness terms:
+village. A correctness review surfaced follow-up items; **all resolved on the branch (320/320), NOT yet
+merged** (Myk's call — leave it staged). The resolution, for the record:
+
+- **Erasure is the instance operator's alone** (Myk, 2026-07-10 — it is destructive, so be
+  maximally conservative). Only the operator's own signature orders a record removed: not the
+  record's author, not a grantee, not a peer. `eraseDefect` runs at **both** doors (append and
+  federation) and refuses any tombstone the operator did not sign, so an unauthorized
+  removal-order is never even stored; `readTombstones` binds only the operator's. A data subject
+  asks; the operator (the controller) executes (`Gateway.erase` has no actor override).
+  Erasure does not auto-propagate — each store's operator decides for their own ground, so a
+  forged order cannot cascade a deletion across the network. An ungoverned store honors none.
+- `tombstonesIn` (pre-boot) now builds a probe reactor and defers to `readTombstones`, so it
+  respects lawful negation: a forgiven (struck) record is no longer dropped by a boot heal. The
+  heal↔forgiveness case SPEC §11 flagged is pinned.
+- `Gateway.erase` refuses to erase a tombstone (the erasure log stays append-only); `reseat`
+  ends live subscriptions so a parked reader can't keep serving removed content (it reconnects,
+  as after a crash). Lesser deferred: serialize erase against concurrent append (embedder-only,
+  narrow window); cache the per-write tombstone scan.
+
+Original findings, kept for context:
 
 1. **Federated tombstone, wrong-author case (highest priority).** `readTombstones` /
    `tombstonesIn` currently bind any tombstone where `author === spoken-by`, without checking

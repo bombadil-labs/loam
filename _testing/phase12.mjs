@@ -51,10 +51,10 @@ try {
   await pullFrom(almanac.gateway, commons.base, opToken("commons"));
   check("12.1", "the regret federates in and tops the dossier", (await bioOf(almanac.base)) === `regrettable-${ts}`);
 
-  // 12.2 — the unsaying: Wren erases HER OWN words on the almanac; the dossier reverts
+  // 12.2 — the unsaying: erasure is the OPERATOR's alone, so the almanac's operator honors
+  // Wren's request and erases; the dossier reverts
   const report = await almanac.gateway.erase(regret.id, {
-    actorSeed: SEEDS.wren,
-    reason: "unsaid by request",
+    reason: "unsaid at the subject's request",
   });
   const after = await bioOf(almanac.base);
   check(

@@ -74,9 +74,46 @@ function broadcast(obj) {
     }
   }
 }
+// The theater reads WHO and WHERE from each line so a sprite can walk there before the words
+// land (Unit 3a). Inferred here, server-side, so the acts stay untouched.
+const CAST = ["wren", "miles", "odile", "petra", "sasha", "mallory"];
+const inferActor = (t) => CAST.find((c) => t.toLowerCase().includes(c));
+const inferPlace = (t) => {
+  const s = t.toLowerCase();
+  if (s.includes("cinelog")) return "cinelog";
+  if (s.includes("reel") || s.includes("screening") || s.includes("reconsider")) return "reel";
+  if (
+    s.includes("hive") ||
+    s.includes("jars") ||
+    s.includes("grumble") ||
+    s.includes("harvest") ||
+    s.includes("turns up")
+  )
+    return "hive";
+  if (
+    s.includes("forge") ||
+    s.includes("strike") ||
+    s.includes("roster") ||
+    s.includes("door") ||
+    s.includes("bounce")
+  )
+    return "gate";
+  if (
+    s.includes("almanac") ||
+    s.includes("unsay") ||
+    s.includes("mill") ||
+    s.includes("disk") ||
+    s.includes("vault") ||
+    s.includes("render")
+  )
+    return "almanac";
+  if (s.includes("commons") || s.includes("bio") || s.includes("follow") || s.includes("speaks"))
+    return "commons";
+  return undefined;
+};
 const tell = (text, tone = "write") => {
   console.log(`  ${text}`);
-  broadcast({ kind: "event", text, tone });
+  broadcast({ kind: "event", text, tone, actor: inferActor(text), place: inferPlace(text) });
 };
 
 // ---- the viewer -------------------------------------------------------------------------------
@@ -463,9 +500,10 @@ const acts = [
 ];
 
 // ---- the unsaying -----------------------------------------------------------------------------
-// ERASURE (SPEC §11): Wren speaks in haste, regrets it, and UNSAYS it — the bytes are cleared from every
-// tier (the vault forgets too), the signed hole remains, and the door refuses its return. The
-// erase re-seats the almanac's reactor, so the mill wheel is rehung after (like the crash).
+// ERASURE (SPEC §11): Wren speaks in haste and asks the almanac to unsay it. Erasure is the
+// OPERATOR's alone — so the almanac's operator, as the controller, honors the request: the bytes
+// are cleared from every tier (the vault forgets too), the signed hole remains, and the door
+// refuses its return. The erase re-seats the almanac's reactor, so the mill wheel is rehung after.
 async function theUnsaying() {
   const regret = signClaims(
     {
@@ -479,13 +517,13 @@ async function theUnsaying() {
     SEEDS.wren,
   );
   await almanac.gateway.append([regret]);
-  tell('🌿 Wren speaks in haste about the hive…', 'write');
+  tell('🌿 Wren speaks in haste, then asks the almanac to unsay it…', 'write');
   await sleep(4000);
-  const report = await almanac.gateway.erase(regret.id, { actorSeed: SEEDS.wren, reason: 'unsaid by request' });
+  const report = await almanac.gateway.erase(regret.id, { reason: 'unsaid at the subject’s request' });
   const { attachMill } = await import('./mill.mjs');
   await attachMill(stores.almanac);
   tell(
-    `🕳️ …and UNSAYS it — the bytes are cleared from every tier, the signed hole remains (${report.citations.length} citations), and the door will refuse its return`,
+    `🕳️ the almanac's operator honors it — the bytes are cleared from every tier, the signed hole remains (${report.citations.length} citations), and the door will refuse its return`,
     "patch",
   );
 }

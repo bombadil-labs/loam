@@ -359,10 +359,15 @@ what.** Content addressing lets a store refuse a delta forever while retaining z
 its content.
 
 - **The tombstone.** An erasure is a signed claim at `loam:erasure` (context `loam.erasure`)
-  naming the delta id and the erasing authority. Authority: the **original author** (their
-  words) or the **store operator** (their ground, their liability); lawful reads bind, like
-  trust and translations. Tombstones are append-only forever — the erasure log is itself the
-  compliance record.
+  naming the delta id and its author (`spoken-by`, the compliance record). **Authority is the
+  INSTANCE OPERATOR's alone** (decided 2026-07-10): erasure is destructive, and the substrate
+  cannot stop anyone from *minting* a removal-order, so the store must be certain never to
+  *accept* one its operator did not sign. Not the record's author, not a grantee, not a peer —
+  a data subject asks, and the operator, as the controller, executes. Every door (append AND
+  federation) runs `eraseDefect` and refuses a tombstone the operator did not sign, so an
+  unauthorized removal-order is never even stored; the readers then bind only the operator's.
+  Tombstones are append-only forever — the erasure log is itself the compliance record — and a
+  tombstone cannot itself be erased. An ungoverned store (no operator) honors no erasure.
 - **The purge.** A new, loud seam operation — `StoreBackend.purge(ids)` — a NAMED exception to
   grow-only, exactly as mirror-lag is a named exception to every-failure-rejects. Purge must
   reach every tier: the sqlite row, the mirror, the archive's fan file. **`heal()` must consult
@@ -375,11 +380,14 @@ its content.
   materializations reference the id, which deltas cite it as provenance — and show it. Cascade
   to derived emissions (translations of the erased fact) is a per-store policy; GDPR usually
   wants cascade.
-- **Federated forgetting.** Erasure claims travel like any claim; peers honor erasure
-  authorities per their own trust config (the roster, again). This automates GDPR Art. 17(2) —
-  "inform downstream controllers" — with cryptographic precision, and compliance is TESTABLE:
-  ask any store for the id and see what returns. No recall of pre-request copies; precision
-  and auditability, not magic.
+- **Federated forgetting is per-instance.** A tombstone is one operator's order over one
+  store's ground; a peer refuses a foreign operator's removal-order at the door. So erasure
+  does NOT auto-propagate — each store's operator independently decides to honor a request (a
+  forged or malicious order can never cascade a deletion across the network). A request may
+  travel as ordinary data (an "erase me" claim a controller acts on), which is GDPR Art. 17(2)
+  — "inform downstream controllers" — done as data; compliance is TESTABLE per store: ask that
+  store for the id and see what returns. No recall of pre-request copies; precision and
+  auditability, not magic.
 - **Degrees — all built from purge + tombstone + reassert; NEVER in-place mutation.** The id
   hashes the claims (author included) and the signature binds them; an edited delta fails
   recomputation and is refused as corruption by every driver. That rigidity is load-bearing:
