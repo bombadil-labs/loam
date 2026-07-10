@@ -123,3 +123,19 @@ _(one entry per PR that grew the village; newest last)_
   three-lens trust duel (plain bio vs. trusted vs. guarded) and the mill's 🌾 presence line,
   live. Movement is theater; the acts are ground — the game is a lens over the same deltas, and
   nothing about the village changes to support it. (Verified live in the browser.)
+- **PR #43 — THE OPEN DOOR (Unit 2, SPEC §12)** (phase13.mjs, 6/6): the almanac becomes a
+  store a stranger's browser can simply read. One operator-signed declaration at
+  `loam:public` opens the three dossier lenses to tokenless query + subscribe; the dashboard
+  now reads the almanac **directly** — native EventSource against
+  `:4404/almanac/subscribe`, CORS-served, **no token anywhere in the page** and no proxy for
+  the data (the viewer keeps only the theater: events, pulse, trust duel, flour). The
+  anonymous surface is a smaller world with no Mutation type at all; a never-declared lens
+  (`Presence`) is invisible even to introspection; one negation closes the door and closed
+  reads exactly like absent. Phase 13 also walks the SHIPPED browser client
+  (`dist/client`, the bundle) through the non-custodial door: a new villager mints a seed
+  in-page, the operator grants standing, and the claim rides **Mallory's** transport token —
+  landing under the newcomer's own signature, readable back tokenless. Watched live: the
+  crash act replants the almanac and the page's EventSources reconnect through the open door
+  on their own, dossiers intact. (Hygiene in passing: the homes were reset and re-baselined;
+  gen-schemas now carries the presence field the mill's evolution promises; phase0's operator
+  count follows the store roster; mixed-encoding narration strings repaired.)

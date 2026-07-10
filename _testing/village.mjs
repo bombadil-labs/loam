@@ -3,8 +3,8 @@
 //
 // The browser talks ONLY to the viewer (same-origin SSE, no tokens in the page); the viewer
 // subscribes to the almanac over its real authed HTTP surface and re-broadcasts. Every
-// simulated write goes through the stores' real surfaces too â€” GraphQL mutations for
-// properties, hand-signed deltas for relations â€” then federates in on the next pulse.
+// simulated write goes through the stores' real surfaces too — GraphQL mutations for
+// properties, hand-signed deltas for relations — then federates in on the next pulse.
 
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
@@ -25,7 +25,6 @@ import {
   ROOT,
   signClaims,
   sleep,
-  sseOpen,
   tok,
 } from "./harness.mjs";
 
@@ -40,7 +39,7 @@ if (almanac.healed.toPrimary > 0) {
   console.log(`the seed vault replanted the almanac: ${almanac.healed.toPrimary} deltas restored`);
 }
 // The living village is self-sufficient: the whole cast holds standing from boot (fixed
-// timestamps â€” content addressing makes re-runs free).
+// timestamps — content addressing makes re-runs free).
 const { constitute } = await import("./harness.mjs");
 await constitute(commons, ["wren", "miles", "odile", "petra"], 1_000_000);
 await constitute(reel, ["miles"], 1_000_000);
@@ -58,12 +57,25 @@ await plantMill(almanac);
 await attachMill(almanac);
 console.log("the mill wheel turns: the almanac is animate (fn:grind, signed by the miller)");
 
+// THE OPEN DOOR (Unit 2, SPEC §12): one operator-signed declaration at loam:public, and the
+// dossier lenses answer any browser, tokenless — the dashboard reads the almanac DIRECTLY
+// from here on (no token in the page, no proxy for the data). Idempotent: fixed timestamp.
+const { publicClaims } = await import("../dist/index.js");
+await almanac.gateway.append([
+  signClaims(
+    publicClaims(["Dossier", "TrustedDossier", "GuardedDossier"], almanac.operator, 1_000_002),
+    almanac.seed,
+  ),
+]);
+console.log("the almanac's door stands open: dossiers readable tokenless, three lenses public");
+
 // ---- the broadcast ----------------------------------------------------------------------------
+// Theater only, from here on: events, the pulse, the trust duel, the mill's flour. Dossier
+// DATA no longer rides this channel — the page reads it straight from the almanac's open
+// door (Unit 2), and the viewer keeps no copy to replay.
 const clients = new Set();
-const latest = new Map(); // person â†’ last dossier frame, replayed to late-joining browsers
 let lastTrust;
 function broadcast(obj) {
-  if (obj.kind === "dossier") latest.set(obj.person, obj);
   if (obj.kind === "trust") lastTrust = obj;
   const line = `data: ${JSON.stringify(obj)}\n\n`;
   for (const res of [...clients]) {
@@ -117,7 +129,13 @@ const tell = (text, tone = "write") => {
 };
 
 // ---- the viewer -------------------------------------------------------------------------------
-const page = readFileSync(join(ROOT, "dashboard.html"));
+// The page learns the open door's address at serve time; its dossier subscriptions go straight
+// to the almanac's public surface (native EventSource — tokenless, CORS-served, and it
+// reconnects itself through the crash act).
+const page = readFileSync(join(ROOT, "dashboard.html"), "utf8").replace(
+  "__ALMANAC_PUBLIC_DOOR__",
+  almanac.base,
+);
 const viewer = createServer((req, res) => {
   if (req.url === "/events") {
     res.writeHead(200, {
@@ -126,8 +144,6 @@ const viewer = createServer((req, res) => {
       connection: "keep-alive",
     });
     res.write(":welcome to the village\n\n");
-    // catch the newcomer up: the latest known state of every dossier, then the live stream
-    for (const frame of latest.values()) res.write(`data: ${JSON.stringify(frame)}\n\n`);
     if (lastTrust) res.write(`data: ${JSON.stringify(lastTrust)}\n\n`);
     clients.add(res);
     req.on("close", () => clients.delete(res));
@@ -138,26 +154,6 @@ const viewer = createServer((req, res) => {
 });
 await new Promise((r) => viewer.listen(VIEWER_PORT, "127.0.0.1", r));
 console.log(`the almanac is readable at http://127.0.0.1:${VIEWER_PORT}`);
-
-// ---- watch the almanac's dossiers over its real SSE surface, forward every frame --------------
-async function watchDossier(person) {
-  for (;;) {
-    try {
-      const stream = await sseOpen(
-        almanac.base,
-        opToken("almanac"),
-        `subscription { dossier(entity: "${person}") { name bio follows companioned attended _hex _changed } }`,
-      );
-      for (;;) {
-        const frame = await stream.nextFrame(600_000);
-        broadcast({ kind: "dossier", person, data: frame.dossier });
-      }
-    } catch {
-      await sleep(2000); // the almanac may be mid-restart; resubscribe
-    }
-  }
-}
-for (const person of PEOPLE) void watchDossier(person);
 
 // ---- the pulse --------------------------------------------------------------------------------
 // The almanac publishes the cinelog translation ONCE (idempotent: fixed timestamp).
@@ -207,7 +203,7 @@ async function pulse() {
         kind: "pulse",
         accepted: a.accepted + b.accepted + c.accepted + d.accepted + e.accepted,
       });
-      // the trust duel, sampled each beat â€” three lenses over one ground
+      // the trust duel, sampled each beat — three lenses over one ground
       const plain = (
         await gql(almanac.base, opToken("almanac"), `{ dossier(entity: "person:wren") { bio } }`)
       ).body?.data?.dossier?.bio;
@@ -308,7 +304,7 @@ const acts = [
       tok("miles", "reel"),
       `mutation { screening(entity: "${s}", rating: ${rating}) { rating } }`,
     );
-    tell(`ðŸŽ¬ Miles reconsiders ${TITLES[s]}: â˜…${rating}`);
+    tell(`🎬 Miles reconsiders ${TITLES[s]}: ★${rating}`);
   },
   async () => {
     const who = pick(["wren", "miles", "petra"]);
@@ -319,7 +315,7 @@ const acts = [
       `mutation { person(entity: "person:${who}", bio: ${JSON.stringify(bio)}) { bio } }`,
     );
     tell(
-      `ðŸŒ¿ ${who[0].toUpperCase() + who.slice(1)} tends ${who === "miles" ? "his" : "her"} bio on the commons`,
+      `🌿 ${who[0].toUpperCase() + who.slice(1)} tends ${who === "miles" ? "his" : "her"} bio on the commons`,
     );
   },
   async () => {
@@ -349,7 +345,7 @@ const acts = [
       tok("odile", "hive"),
       `mutation { colony(entity: "colony:1", yield: ${jars}) { yield } }`,
     );
-    tell(`ðŸ Odile counts ${jars} jars from the west boxes`);
+    tell(`🐝 Odile counts ${jars} jars from the west boxes`);
   },
   async () => {
     await gql(
@@ -358,26 +354,26 @@ const acts = [
       `mutation { colony(entity: "colony:1", grumbles: "the swarm eyes the church eaves again") { queen } }`,
     );
     tell(
-      `ðŸ Odile grumbles into her journal (the lens keeps it home â€” the almanac will never know)`,
+      `🐝 Odile grumbles into her journal (the lens keeps it home — the almanac will never know)`,
     );
   },
   async () => {
     if (followPool.length === 0) return;
     const [who, whom] = followPool.shift();
     await appendAs(commons.gateway, who, [followClaims(`person:${who}`, whom, Date.now())]);
-    tell(`ðŸ¤ ${who[0].toUpperCase() + who.slice(1)} now follows ${whom.replace("person:", "")}`);
+    tell(`🤝 ${who[0].toUpperCase() + who.slice(1)} now follows ${whom.replace("person:", "")}`);
   },
   async () => {
     if (companionPool.length === 0) return;
     const [s, p] = companionPool.shift();
     await appendAs(reel.gateway, "miles", [companionClaims(s, p, Date.now())]);
-    tell(`ðŸŽ¬ ${p.replace("person:", "")} joins the ${TITLES[s]} screening on the reel`);
+    tell(`🎬 ${p.replace("person:", "")} joins the ${TITLES[s]} screening on the reel`);
   },
   async () => {
     if (attendPool.length === 0) return;
     const [g, p] = attendPool.shift();
     await appendAs(hive.gateway, "odile", [attendClaims(g, p, Date.now())]);
-    tell(`ðŸ ${p.replace("person:", "")} turns up for ${g.replace("gathering:", "")}`);
+    tell(`🐝 ${p.replace("person:", "")} turns up for ${g.replace("gathering:", "")}`);
   },
   async () => {
     if (forgeryOut === "struck") {
@@ -388,11 +384,11 @@ const acts = [
         `mutation { person(entity: "person:wren", bio: ${JSON.stringify(bio)}) { bio } }`,
       );
       forgeryOut = "healing";
-      tell(`ðŸŒ¿ Wren speaks again â€” new words outlive struck ones`, "patch");
+      tell(`🌿 Wren speaks again — new words outlive struck ones`, "patch");
       return;
     }
     if (forgeryOut === "healing") {
-      // TRUST IS DATA (step 13): the almanac's operator declares a roster â€” the villagers, no
+      // TRUST IS DATA (step 13): the almanac's operator declares a roster — the villagers, no
       // one else. One delta; the very next federate obeys it.
       const { trustClaims } = await import("../dist/index.js");
       await almanac.gateway.append([
@@ -421,7 +417,7 @@ const acts = [
       const report = await almanac.gateway.federate([bounced]);
       forgeryOut = "rostered";
       tell(
-        `ðŸšª The almanac declares its roster â€” one delta, and Mallory's next forgery bounces at the door (accepted: ${report.accepted})`,
+        `🚪 The almanac declares its roster — one delta, and Mallory's next forgery bounces at the door (accepted: ${report.accepted})`,
         "patch",
       );
       return;
@@ -432,7 +428,7 @@ const acts = [
         signClaims(trustClaims("open", [], almanac.operator, Date.now()), almanac.seed),
       ]);
       forgeryOut = false;
-      tell(`ðŸšª The almanac opens its door again â€” an aggregator by choice, not by default`, "write");
+      tell(`🚪 The almanac opens its door again — an aggregator by choice, not by default`, "write");
       return;
     }
     if (forgeryOut === true) {
@@ -455,7 +451,7 @@ const acts = [
           ),
         ]);
         tell(
-          `ðŸ¦ Mallory negates Wren's words in the record â€” the plain dossier forgets; the guarded lens does not`,
+          `🦝 Mallory negates Wren's words in the record — the plain dossier forgets; the guarded lens does not`,
           "forgery",
         );
       }
@@ -470,7 +466,7 @@ const acts = [
         `mutation { person(entity: "person:wren", bio: ${JSON.stringify(bio)}) { bio } }`,
       );
       forgeryOut = false;
-      tell(`ðŸŒ¿ Wren reclaims her own story â€” the newest honest word wins again`, "patch");
+      tell(`🌿 Wren reclaims her own story — the newest honest word wins again`, "patch");
     } else {
       const forgery = signClaims(
         {
@@ -492,7 +488,7 @@ const acts = [
       await almanac.gateway.federate([forgery]);
       forgeryOut = true;
       tell(
-        `ðŸ¦ Mallory federates a forged bio for Wren â€” pick-latest falls for it; byAuthorRank does not`,
+        `🦝 Mallory federates a forged bio for Wren — pick-latest falls for it; byAuthorRank does not`,
         "forgery",
       );
     }

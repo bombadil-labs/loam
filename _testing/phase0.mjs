@@ -29,13 +29,13 @@ try {
   );
   execFileSync("node", [join(ROOT, "gen-schemas.mjs")], { stdio: "inherit" });
 
-  // 0.2 — four homes, four DISTINCT operators
+  // 0.2 — one home per store, every operator DISTINCT (shared seeds would federate law)
   for (const name of Object.keys(STORES)) initHome(homeOf(name));
   const operators = Object.keys(STORES).map((n) => operatorOf(n));
   check(
     "0.2",
-    "four homes minted with four distinct operators",
-    new Set(operators).size === 4,
+    `${operators.length} homes minted with ${operators.length} distinct operators`,
+    new Set(operators).size === Object.keys(STORES).length,
     operators.map((o) => o.slice(0, 20)).join(" "),
   );
 
