@@ -3,6 +3,6 @@ dist/
 .DS_Store
 *.log
 
-# Ephemeral field-test playground and local harness config
-_testing/
+# The village's disposable stores and seeds (the code and docs are tracked; see _testing/README.md)
+_testing/homes/
 .claude/

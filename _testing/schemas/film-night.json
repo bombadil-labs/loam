@@ -1,0 +1,68 @@
+{
+  "name": "FilmNight",
+  "alg": 1,
+  "body": {
+    "op": "expand",
+    "role": {
+      "exact": "film"
+    },
+    "schema": "Film",
+    "in": {
+      "op": "group",
+      "key": "byTargetContext",
+      "in": {
+        "op": "select",
+        "pred": {
+          "hasPointer": {
+            "targetEntity": {
+              "var": "root"
+            }
+          }
+        },
+        "in": {
+          "op": "mask",
+          "policy": "drop",
+          "in": "input"
+        }
+      }
+    }
+  },
+  "policy": {
+    "props": {
+      "date": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      },
+      "venue": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      },
+      "film": {
+        "all": {
+          "order": {
+            "byTimestamp": "asc"
+          }
+        }
+      }
+    },
+    "default": {
+      "pick": {
+        "order": {
+          "byTimestamp": "desc"
+        }
+      }
+    }
+  },
+  "roots": [
+    "screening:s1",
+    "screening:s2",
+    "screening:s3",
+    "screening:s4"
+  ]
+}

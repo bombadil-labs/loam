@@ -1,0 +1,59 @@
+{
+  "name": "Gathering",
+  "alg": 1,
+  "body": {
+    "op": "group",
+    "key": "byTargetContext",
+    "in": {
+      "op": "select",
+      "pred": {
+        "hasPointer": {
+          "targetEntity": {
+            "var": "root"
+          }
+        }
+      },
+      "in": {
+        "op": "mask",
+        "policy": "drop",
+        "in": "input"
+      }
+    }
+  },
+  "policy": {
+    "props": {
+      "date": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      },
+      "honey": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      },
+      "attendee": {
+        "all": {
+          "order": {
+            "byTimestamp": "asc"
+          }
+        }
+      }
+    },
+    "default": {
+      "pick": {
+        "order": {
+          "byTimestamp": "desc"
+        }
+      }
+    }
+  },
+  "roots": [
+    "gathering:harvest-1",
+    "gathering:harvest-2"
+  ]
+}

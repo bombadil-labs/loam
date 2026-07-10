@@ -1,0 +1,60 @@
+{
+  "name": "Film",
+  "alg": 1,
+  "body": {
+    "op": "group",
+    "key": "byTargetContext",
+    "in": {
+      "op": "select",
+      "pred": {
+        "hasPointer": {
+          "targetEntity": {
+            "var": "root"
+          }
+        }
+      },
+      "in": {
+        "op": "mask",
+        "policy": "drop",
+        "in": "input"
+      }
+    }
+  },
+  "policy": {
+    "props": {
+      "title": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      },
+      "year": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      },
+      "director": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      }
+    },
+    "default": {
+      "pick": {
+        "order": {
+          "byTimestamp": "desc"
+        }
+      }
+    }
+  },
+  "roots": [
+    "film:the-secret-garden",
+    "film:solaris",
+    "film:local-hero"
+  ]
+}

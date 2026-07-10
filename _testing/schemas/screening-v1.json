@@ -1,0 +1,82 @@
+{
+  "name": "Screening",
+  "alg": 1,
+  "body": {
+    "op": "group",
+    "key": "byTargetContext",
+    "in": {
+      "op": "select",
+      "pred": {
+        "hasPointer": {
+          "targetEntity": {
+            "var": "root"
+          }
+        }
+      },
+      "in": {
+        "op": "mask",
+        "policy": "drop",
+        "in": "input"
+      }
+    }
+  },
+  "policy": {
+    "props": {
+      "film": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      },
+      "date": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      },
+      "venue": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      },
+      "rating": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      },
+      "note": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      },
+      "with": {
+        "all": {
+          "order": {
+            "byTimestamp": "asc"
+          }
+        }
+      }
+    },
+    "default": {
+      "pick": {
+        "order": {
+          "byTimestamp": "desc"
+        }
+      }
+    }
+  },
+  "roots": [
+    "screening:s1",
+    "screening:s2",
+    "screening:s3",
+    "screening:s4"
+  ]
+}

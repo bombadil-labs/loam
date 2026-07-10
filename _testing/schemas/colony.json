@@ -1,0 +1,65 @@
+{
+  "name": "Colony",
+  "alg": 1,
+  "body": {
+    "op": "group",
+    "key": "byTargetContext",
+    "in": {
+      "op": "select",
+      "pred": {
+        "hasPointer": {
+          "targetEntity": {
+            "var": "root"
+          }
+        }
+      },
+      "in": {
+        "op": "mask",
+        "policy": "drop",
+        "in": "input"
+      }
+    }
+  },
+  "policy": {
+    "props": {
+      "queen": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      },
+      "frames": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      },
+      "yield": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      },
+      "grumbles": {
+        "all": {
+          "order": {
+            "byTimestamp": "asc"
+          }
+        }
+      }
+    },
+    "default": {
+      "pick": {
+        "order": {
+          "byTimestamp": "desc"
+        }
+      }
+    }
+  },
+  "roots": [
+    "colony:1"
+  ]
+}

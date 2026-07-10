@@ -1,0 +1,82 @@
+{
+  "name": "Dossier",
+  "alg": 1,
+  "body": {
+    "op": "group",
+    "key": "byTargetContext",
+    "in": {
+      "op": "select",
+      "pred": {
+        "hasPointer": {
+          "targetEntity": {
+            "var": "root"
+          }
+        }
+      },
+      "in": {
+        "op": "mask",
+        "policy": "drop",
+        "in": "input"
+      }
+    }
+  },
+  "policy": {
+    "props": {
+      "name": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      },
+      "bio": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      },
+      "follows": {
+        "all": {
+          "order": {
+            "byTimestamp": "asc"
+          }
+        }
+      },
+      "circle": {
+        "all": {
+          "order": {
+            "byTimestamp": "asc"
+          }
+        }
+      },
+      "companioned": {
+        "all": {
+          "order": {
+            "byTimestamp": "asc"
+          }
+        }
+      },
+      "attended": {
+        "all": {
+          "order": {
+            "byTimestamp": "asc"
+          }
+        }
+      }
+    },
+    "default": {
+      "pick": {
+        "order": {
+          "byTimestamp": "desc"
+        }
+      }
+    }
+  },
+  "roots": [
+    "person:wren",
+    "person:miles",
+    "person:odile",
+    "person:petra"
+  ]
+}

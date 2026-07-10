@@ -9,12 +9,12 @@
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
 import {
-  TENANT,
   TENANT_POLICY,
   grantClaims,
   membershipClaims,
   revocationClaims,
   tenantOf,
+  tenantSchemaFor,
 } from "../../src/gateway/accounts.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -44,7 +44,7 @@ async function grantedWorld(): Promise<Gateway> {
   ]);
   await gateway.append(garden);
   gateway.register(PLANT, PLANT_POLICY, [FERN]);
-  gateway.register(TENANT, TENANT_POLICY, [STORE_ENTITY]);
+  gateway.register(tenantSchemaFor(OPERATOR), TENANT_POLICY, [STORE_ENTITY]);
   return gateway;
 }
 
@@ -226,17 +226,15 @@ describe("standing: deny is the default, permission is an artifact", () => {
     const surveyorWrite = observed(FERN, "height", 77, tick(), "b2".repeat(32));
     await expect(gateway.append([surveyorWrite])).resolves.toMatchObject({ accepted: 1 });
 
-    // KNOWN DIVERGENCE, pinned deliberately: the TENANT audit view masks with `drop`, which
-    // honors alice's standing-less strike — so the audit shows one grant while enforcement
-    // honors two. The audit lens needs "honor negations from the operator/admins", a DYNAMIC
-    // trusted set no static mask predicate can express — the second concrete case for
-    // reflective predicates (rhizomatic#2). Until then: enforcement is the truth; the default
-    // audit view undercounts under standing-less strikes.
+    // THE DIVERGENCE IS DEAD (rhizomatic 0.2.0, rhizomatic#2 delivered): the governed audit
+    // view (tenantSchemaFor) masks with an inView trusted set — operator + operator-minted
+    // ADMINS, the same standing standsFor demands — so alice's standing-less strike moves the
+    // audit exactly as much as it moves enforcement: not at all. Audit agrees with the door.
     const audited = await gateway.query(`{ tenant(entity: "${STORE_ENTITY}") { _view } }`);
     const grants = ((audited.data as { tenant: { _view: Record<string, unknown> } }).tenant._view[
       "loam.grants"
     ] ?? []) as unknown[];
-    expect(grants).toHaveLength(1);
+    expect(grants).toHaveLength(2);
     await gateway.close();
   });
 
@@ -292,10 +290,10 @@ describe("standing: deny is the default, permission is an artifact", () => {
       signClaims(revocationClaims(surveyorHeight.id, ALICE, tick()), ALICE_SEED),
     ]);
     const read = await gateway.query(`{ plant(entity: "${FERN}") { height } }`);
-    // mask-drop honors any present negation: the view falls back to the older claim (30).
-    // This is the documented heckler's-veto interim (README, SPEC §7) — local negations come
-    // only through the granted-author door, so this is alice's standing misused, not a
-    // stranger's; the principled per-reader negation lens awaits rhizomatic#2.
+    // A drop-bodied schema honors any present negation BY CHOICE: the view falls back to the
+    // older claim. This is no longer an interim — trust-aware bodies exist
+    // (`governedGatherBody`, pinned in lenses.test.ts); `drop` remains the honest default for
+    // bodies that WANT community negations to bind unconditionally.
     expect((read.data as { plant: { height: number } }).plant.height).toBe(30);
     await gateway.close();
   });
@@ -382,6 +380,72 @@ describe("standing: deny is the default, permission is an artifact", () => {
       signClaims(revocationClaims(revocation.id, OPERATOR, tick()), OPERATOR_SEED),
     ]);
     expect((await mutateHeight(gateway, ALICE_SEED, 71)).errors).toBeUndefined();
+    await gateway.close();
+  });
+
+  it("a grant with duplicate subjects or verbs is malformed law (it would read differently in three places)", async () => {
+    const gateway = await grantedWorld();
+    const twoVerbs = signClaims(
+      {
+        timestamp: tick(),
+        author: OPERATOR,
+        pointers: [
+          {
+            role: "tenant",
+            target: { kind: "entity", entity: { id: STORE_ENTITY, context: "loam.grants" } },
+          },
+          { role: "subject", target: { kind: "primitive", value: BOB } },
+          { role: "verb", target: { kind: "primitive", value: "admin" } },
+          { role: "verb", target: { kind: "primitive", value: "write" } },
+        ],
+      },
+      OPERATOR_SEED,
+    );
+    await expect(gateway.append([twoVerbs])).rejects.toThrow(/malformed law/);
+    await gateway.close();
+  });
+
+  it("the lenses reach ONE link: an operator-minted admin's strike binds them; a chain-minted admin's does not", async () => {
+    // Empiricism corrected the review here: an operator-minted admin IS in the lens's trusted
+    // set (she is the subject of an operator-authored admin grant), so her strikes move the
+    // audit. The divergence begins at the chain's SECOND link — standing minted by an admin.
+    const CAROL_SEED = "cc".repeat(32);
+    const CAROL = authorForSeed(CAROL_SEED);
+    const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
+    await gateway.append([
+      signClaims(grantClaims(STORE_ENTITY, ALICE, "admin", OPERATOR, tick()), OPERATOR_SEED),
+    ]);
+    const bobGrant = signClaims(
+      grantClaims(STORE_ENTITY, BOB, "write", OPERATOR, tick()),
+      OPERATOR_SEED,
+    );
+    await gateway.append([bobGrant]);
+    // carol's admin standing arrives through ALICE's mint — the second link
+    await gateway.append([
+      signClaims(grantClaims(STORE_ENTITY, CAROL, "admin", ALICE, tick()), ALICE_SEED),
+    ]);
+    gateway.register(PLANT, PLANT_POLICY, [FERN]);
+    gateway.register(tenantSchemaFor(OPERATOR), TENANT_POLICY, [STORE_ENTITY]);
+    const audit = async () =>
+      (
+        (
+          (await gateway.query(`{ tenant(entity: "${STORE_ENTITY}") { _view } }`)).data as {
+            tenant: { _view: Record<string, unknown> };
+          }
+        ).tenant._view["loam.grants"] as unknown[]
+      ).length;
+
+    // CAROL (effective admin via the chain) revokes bob: ENFORCEMENT honors it at once…
+    await gateway.append([signClaims(revocationClaims(bobGrant.id, CAROL, tick()), CAROL_SEED)]);
+    expect((await mutateHeight(gateway, BOB_SEED, 90)).errors?.join(" ")).toMatch(/not permitted/);
+    // …but the audit LENS trusts only the operator and the operator's DIRECT grantees
+    // (stratification bans inView inside the trusted-set sub-term), so bob's grant still
+    // shows: the second link is exactly where lens and door disagree — SPEC §7's residual.
+    expect(await audit()).toBe(3); // alice's, carol's, and bob's (door-dead, lens-visible)
+
+    // by contrast ALICE — operator-minted, the FIRST link — moves door AND lens together
+    await gateway.append([signClaims(revocationClaims(bobGrant.id, ALICE, tick()), ALICE_SEED)]);
+    expect(await audit()).toBe(2);
     await gateway.close();
   });
 

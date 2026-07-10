@@ -276,13 +276,18 @@ await gateway.query(`mutation { plant(entity: "plant:fern", height: 40) { height
 });
 ```
 
-**A caveat, stated plainly (negations).** Read-time masks currently honor every negation
-present in the gathered set — so a hostile _federated_ negation could suppress honest data for
-readers whose pulls admitted it. Until the substrate grows dynamic trust predicates
-([rhizomatic#2](https://github.com/bombadil-labs/rhizomatic/issues/2)), the boundary is the
-pull: local negations only enter through the granted-author door, and `pullFrom`'s `admit`
-predicate is the place to refuse foreign negations you don't trust (see the federation
-section).
+**Negations, governed.** A negation is an assertion like any other — _whose negations a reader
+honors_ is lens policy. A plain `mask drop` body honors every negation present (the honest
+default when community strikes should bind unconditionally). For a governed lens, use
+`governedGatherBody(operator)`: its mask trusts only the operator and the operator's direct
+grantees — resolved as a **live view over the grant deltas themselves** — so a federated
+stranger's strike is inert, a community member's binds, and revoking their grant un-binds
+their strikes on the very next read. `tenantSchemaFor(operator)` applies the same discipline
+to the audit view (operator + operator-minted admins). The trusted sets reach **one link** of
+the grant chain: standing minted by an admin binds enforcement (`holdsGrant` recurses fully)
+but never enters a lens's trusted set, and an admin's revocation bars the door without by
+itself shrinking the trusted sets — the operator's signature is what the lenses read.
+`pullFrom`'s `admit` predicate remains the coarse boundary at the federation door.
 
 ## Derived functions (the runner)
 

@@ -44,7 +44,9 @@ HVEntry[]> }`, `HVEntry { delta, negated, expanded?: Map<number, HView> }` (the 
 - **Resolution & policy** (the resolve stage) — `resolveView(Policy, HView) → View`. `View =
 Primitive | View[] | { [k]: View }`. `Policy = { props: Map<string, PropPolicy>, default }`.
   `PropPolicy` = `pick(order)` / `all(order)` / `merge(fn)` / `conflicts(order)` / `absentAs(const,
-then)`. `Order` = `byTimestamp` / `byAuthorRank(authors)` / `byPred` / `lexById`. `MergeFn` =
+then)`. `Order` = `byTimestamp` / `byAuthorRank(authors)` / `byPred` / `chain(orders…)` (0.2.0:
+  general composition — "trusted, then latest" is `chain[byAuthorRank, byTimestamp]`) /
+  `lexById`. `MergeFn` =
   max/min/sum/count/and/or/concatSorted. **This is the reduction library** (latest = `pick
 byTimestamp`; trusted-first = `byAuthorRank`; set-union = `all`; contested = `conflicts`).
   Confirmed nuance: `conflicts` surfaces a property **only when ≥ 2 distinct values contend** —
@@ -74,7 +76,10 @@ append|supersede|{keyed} }` (the _application_: binds a function to a materializ
   Definition / application / execution, pure-vs-effectful, termination, idempotent emit — all present.
 - **Federation** — `Peer`, `syncBoth`, `SyncReport`, `servePeer` / `offerFor` / `pullFromUrl`.
 - **Reflective plumbing** — terms, policies, and predicates are serializable (`term-io` / `term-json`)
-  → storable as data.
+  → storable as data. Since 0.2.0: **`inView` reflective predicates** (a predicate satisfied
+  when the candidate's author/id appears in a view extracted — by field or by ROLE — from a
+  DSet-sort sub-term over the same delta-set; stratified depth-1, enforced at parse), and
+  **`evalPred`** is exported (single-delta predicate evaluation — translation recognizers).
 
 ## 3. Loam's actual scope — what to build
 
@@ -225,18 +230,24 @@ works (foreign grants, registrations, and definitions merge freely and bind noth
 - **Negations are assertions like any other.** Standing to append one is the same publishing
   standing; _whose negations a reader honors_ is lens policy. Constitutional readers
   (`grantHeld`, `readRegistrations`, `readBindingDefinitions`) honor only lawful strikes — the
-  operator's, or an effective store admin's. Interim discipline for DATA (see the substrate
-  note below): local appends are granted-author-only, so locally-planted negations are as
-  trusted as the door they came through; federated ingest applies an `admit` predicate as its
-  trust boundary. Known consequences until reflective predicates land
-  ([rhizomatic#2](https://github.com/bombadil-labs/rhizomatic/issues/2)): (1) the default
-  TENANT **audit view** masks with `drop` and so undercounts under standing-less strikes —
-  enforcement is the truth, the audit lens needs the dynamic trusted set; (2) a granted writer
-  can **pre-strike** a delta id that has not arrived (content addressing makes future ids
-  knowable) — inert against the constitution, a data-mask hazard within the interim stance;
-  (3) per-tenant admin chains still MINT effective community-vocabulary grants while
-  constitutional strikes require store standing — a mint/strike asymmetry inside the surviving
-  tenant vocabulary, to revisit with trust-is-data (step 13).
+  operator's, or an effective store admin's. **For DATA, the principled lens landed with
+  rhizomatic 0.2.0** ([rhizomatic#2](https://github.com/bombadil-labs/rhizomatic/issues/2)
+  delivered): `governedGatherBody(operator)` masks with an `inView` trusted set — the operator
+  plus the operator's grantees, resolved from the live delta-set — so a federated stranger's
+  strike is inert while the community's bind, and revoking a grant un-binds its author's
+  strikes on the very next read. `tenantSchemaFor(operator)` gives the AUDIT view the same
+  discipline (operator + operator-minted admins — what `standsFor` demands), so **audit and
+  door move together through the chain's first link** (an operator-minted admin's strike binds
+  both — pinned by test). Residuals, stated plainly: the trusted sets reach ONE link — subjects
+  of OPERATOR-authored grants surviving OPERATOR-signed strikes (stratification bans
+  inView-in-inView, so the chain cannot recurse inside a lens) — therefore standing minted by
+  an admin binds enforcement but never enters a lens's trusted set, and an admin's revocation
+  bars the door without, by itself, removing the revoked author from the trusted sets; plain
+  `mask drop` bodies still honor every present negation BY CHOICE; pre-striking a
+  not-yet-arrived delta id remains possible for whomever a lens trusts (narrowed, not
+  confined, by governed bodies); and per-tenant admin chains still mint community-vocabulary
+  grants while constitutional strikes require store standing — revisit with trust-is-data
+  (step 13).
 - Tenant machinery (`loam.tenant` / `loam.members` / `loam.grants`) survives as **vocabulary for
   author-communities and read lenses**, not as write fences.
 
