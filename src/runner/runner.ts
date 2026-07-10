@@ -58,7 +58,11 @@ const primitive = (claims: Claims, role: string): string | number | boolean | un
 // function," and SPEC §6 reserves sandboxing of untrusted (federated) code for a later runtime.
 // (Scans the whole set for a small constitutional slice — fine at this scale; indexable later.)
 export function readBindingDefinitions(reactor: Reactor, operator?: string): BindingSpec[] {
-  const specs: BindingSpec[] = [];
+  // A recipe evolves: the LATEST surviving definition per binding name is the law (timestamp,
+  // then id, for a total order) — the same latest-per-entity discipline registrations and
+  // translations keep. Without it, a re-blessed binding would hand attach two definitions of
+  // one name, and the host refuses duplicate installs.
+  const best = new Map<string, { spec: BindingSpec; timestamp: number; id: string }>();
   // Retirement follows the same lawful negation algebra as registrations: only the operator's
   // strikes retire the operator's definitions (a write-granted author's negation — or a
   // federated stranger's — lands as data and unbinds nothing), and a struck strike revives.
@@ -86,13 +90,33 @@ export function readBindingDefinitions(reactor: Reactor, operator?: string): Bin
     ) {
       continue;
     }
-    const emit: BindingSpec["emit"] =
-      emitRaw === "append" || emitRaw === "supersede"
-        ? emitRaw
-        : (JSON.parse(emitRaw) as { keyed: string[] });
-    specs.push({ name, fnId, materialization, pure, budget, emit });
+    let emit: BindingSpec["emit"];
+    if (emitRaw === "append" || emitRaw === "supersede") {
+      emit = emitRaw;
+    } else {
+      // A hand-planted typo ("supercede") is a malformed definition like any other: dropped,
+      // never fatal to the attach of every OTHER binding in the store.
+      try {
+        emit = JSON.parse(emitRaw) as { keyed: string[] };
+      } catch {
+        continue;
+      }
+    }
+    const { timestamp } = delta.claims;
+    const prev = best.get(name);
+    if (
+      prev === undefined ||
+      timestamp > prev.timestamp ||
+      (timestamp === prev.timestamp && delta.id > prev.id)
+    ) {
+      best.set(name, {
+        spec: { name, fnId, materialization, pure, budget, emit },
+        timestamp,
+        id: delta.id,
+      });
+    }
   }
-  return specs;
+  return [...best.values()].map((b) => b.spec);
 }
 
 export interface RunnerOptions {

@@ -52,11 +52,10 @@ The village dressed as what it is: a federated social network. Script (15 min, n
 3. **The stranger** — cinelog's alien dialect rendered in with provenance visible.
 4. **The fire** — burn the almanac's sqlite mid-sentence; the vault replants it.
 5. **The unsaying** — erase a claim; the network honors it; the hole is signed (unit 1).
-6. **The mill** — the village's first ANIMATE store: a Runner attaches (the machinery shipped
-   in v1 — `Runner`/`bindingDefinitionClaims`; the village has never exercised it), and an
-   operator-blessed `DerivedFn` grinds the almanac's ground into flour — a living village
-   digest emitted as derived deltas, signed, cited, recomputed on every pulse. Passive store,
-   then the runner attaches, and the law wakes up on camera. The line: "smart contracts
+6. **The mill** — ✅ SHIPPED AHEAD (PR #32, phase11.mjs 4/4 twice): the almanac is the
+   village's first ANIMATE store — the operator blesses `fn:grind`, THE MILLER attaches a
+   Runner, and every dossier carries a live 🌾 presence line; the fire act rehangs the wheel.
+   SPEC §6 records the reference deployment pattern. The line stands: "smart contracts
    without execution risk — the contract is a lens, and anyone can re-run it to the byte."
 7. **Grow an app live** — mid-meeting, ask Claude to build a new store for whatever she
    names (schemas + renderer via MCP/skill); it federates in before the coffee refills.

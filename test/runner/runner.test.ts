@@ -180,6 +180,27 @@ describe("the runner: definitions in the store, execution in a peer client", () 
     await reopened.close();
   });
 
+  it("a re-blessed recipe supersedes: the latest definition per binding wins, attach installs once", async () => {
+    const { gateway } = await plantStore(); // holds SPEC (budget 10) at ts 1
+    // the recipe evolves: same binding name, new budget, LATER timestamp — appended between
+    // two older strays, so timestamp order and ingestion order disagree and latest-by-
+    // timestamp is what's actually pinned (not last-delta-seen)
+    await gateway.append([
+      signClaims(bindingDefinitionClaims({ ...SPEC, budget: 99 }, RUNNER, 5), RUNNER_SEED),
+      signClaims(bindingDefinitionClaims({ ...SPEC, budget: 7 }, RUNNER, 3), RUNNER_SEED),
+    ]);
+    const specs = readBindingDefinitions(gateway.reactor);
+    expect(specs).toHaveLength(1); // one binding, not two definitions of it
+    expect(specs[0]!.budget).toBe(99); // the later blessing is the law
+    // and attach does not die on a duplicate install
+    const runner = Runner.attach(gateway, {
+      seed: RUNNER_SEED,
+      implementations: { "fn:avgHeight": avgHeight },
+    });
+    expect(runner.installed).toEqual(["binding:avgHeight"]);
+    await gateway.close();
+  });
+
   it("a definition naming an implementation the runner lacks is skipped, not fatal", async () => {
     const { gateway } = await plantStore();
     await gateway.append([

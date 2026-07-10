@@ -46,7 +46,17 @@ await constitute(commons, ["wren", "miles", "odile", "petra"], 1_000_000);
 await constitute(reel, ["miles"], 1_000_000);
 await constitute(hive, ["odile"], 1_000_000);
 await constitute(cinelog, ["sasha"], 1_000_000);
+await constitute(almanac, ["wren", "miles", "odile", "petra", "miller"], 1_000_000);
 console.log("the village is up: commons 4401, reel 4402, hive 4403, almanac 4404");
+
+// THE MILL (phase 11): the almanac becomes the village's first ANIMATE store. The operator
+// blesses the grind recipe, the dossier learns the presence field (schema evolution), and the
+// MILLER attaches a Runner — from here, village life grinds into flour on every ingest.
+const { attachMill, ensurePresence, plantMill } = await import("./mill.mjs");
+await ensurePresence(almanac.base, opToken("almanac"));
+await plantMill(almanac);
+await attachMill(almanac);
+console.log("the mill wheel turns: the almanac is animate (fn:grind, signed by the miller)");
 
 // ---- the broadcast ----------------------------------------------------------------------------
 const clients = new Set();
@@ -179,6 +189,23 @@ async function pulse() {
         )
       ).body?.data?.guardedDossier?.bio;
       broadcast({ kind: "trust", plain, trusted, guarded });
+      // the mill's flour, sampled each beat: presence per villager (the .value beside the
+      // host's provenance pointers — the evidence hex stays server-side, off the wire)
+      const milled = (
+        await gql(
+          almanac.base,
+          opToken("almanac"),
+          `{ ${PEOPLE.map(
+            (p, i) => `m${i}: dossier(entity: "${p}") { presence }`,
+          ).join(" ")} }`,
+        )
+      ).body?.data;
+      broadcast({
+        kind: "mill",
+        flour: Object.fromEntries(
+          PEOPLE.map((p, i) => [p, milled?.[`m${i}`]?.presence?.value ?? null]),
+        ),
+      });
     } catch (err) {
       console.log(`  pulse stumbled: ${err}`);
     }
@@ -262,7 +289,7 @@ const acts = [
     // Sasha's app knows nothing of the village — it logs a watch in its own dialect, and the
     // pulse's translation pass renders it into Wren's (or a friend's) dossier.
     const films = ["film:stalker", "film:solaris", "film:mirror", "film:nostalghia"];
-    const viewers = ["person:wren", "person:miles", "person:sasha"];
+    const viewers = ["person:wren", "person:miles", "person:odile", "person:sasha"];
     const film = pick(films);
     const viewer = pick(viewers);
     await appendAs(cinelog.gateway, "sasha", [
@@ -451,6 +478,11 @@ async function theFire() {
     `🌱 the seed vault replants the almanac — ${almanac.healed.toPrimary} deltas restored, every dossier intact`,
     "patch",
   );
+  // a Runner is process machinery, not ground: the flour survived in the vault, but the
+  // wheel must be rehung on the reborn gateway
+  const { attachMill } = await import("./mill.mjs");
+  await attachMill(stores.almanac);
+  tell(`🌾 the mill wheel is rehung — the reborn almanac grinds on`, "patch");
 }
 
 async function life() {

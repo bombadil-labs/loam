@@ -31,6 +31,7 @@ export const SEEDS = {
   odile: "33".repeat(32),
   petra: "44".repeat(32),
   sasha: "55".repeat(32), // the stranger: cinelog's only resident
+  miller: "77".repeat(32), // the runner identity: grinds the almanac's ground into flour
   mallory: "ee".repeat(32),
 };
 export const AUTHORS = Object.fromEntries(

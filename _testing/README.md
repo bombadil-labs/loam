@@ -91,3 +91,14 @@ _(one entry per PR that grew the village; newest last)_
   quiet perfection: the bio that survived the fire word-for-word was Mallory's old forgery —
   the vault preserves *everything* and leaves judgment to the lenses, exactly as a store of
   record must.
+- **The mill — the village's first ANIMATE store** (phase11.mjs, 4/4 twice — re-runnable):
+  the v1 runner machinery, exercised in the open air at last. The almanac's operator blesses
+  ONE derived function (`fn:grind`); a new villager, **the miller**, attaches a Runner; and
+  village life grinds into flour — a 🌾 `presence` line on every dossier card, derived,
+  signed by the miller, superseding per villager (keyed emission), durable without the
+  runner. The fire act now REHANGS THE WHEEL after replanting (a Runner is process machinery,
+  not ground). Verified live in the browser: three cards carrying moving flour, and the
+  translated cinelog chips now show their provenance — `stalker ⇠ cinelog`. Found and fixed
+  along the way: `readBindingDefinitions` now resolves latest-per-binding (a re-blessed
+  recipe crashed attach with a duplicate install), and the reference emit-mode lesson —
+  wholesale `supersede` erases OTHER roots' flour; per-subject output wants `keyed`.
