@@ -14,6 +14,7 @@ import {
   SEEDS,
   appendAs,
   attendClaims,
+  burnStore,
   companionClaims,
   followClaims,
   gql,
@@ -31,7 +32,13 @@ import {
 const VIEWER_PORT = 4400;
 const stores = {};
 for (const name of ["commons", "reel", "hive", "almanac", "cinelog"]) stores[name] = await openStore(name);
-const { commons, reel, hive, almanac, cinelog } = stores;
+const { commons, reel, hive, cinelog } = stores;
+// `let`, not destructured: the fire act closes the almanac, burns its sqlite, and rebinds a
+// fresh one healed from the vault — every closure below reads this binding at call time.
+let almanac = stores.almanac;
+if (almanac.healed.toPrimary > 0) {
+  console.log(`the seed vault replanted the almanac: ${almanac.healed.toPrimary} deltas restored`);
+}
 // The living village is self-sufficient: the whole cast holds standing from boot (fixed
 // timestamps â€” content addressing makes re-runs free).
 const { constitute } = await import("./harness.mjs");
@@ -428,13 +435,32 @@ const acts = [
   },
 ];
 
+// ---- the fire ---------------------------------------------------------------------------------
+// COLD STORAGE (PR #22): the almanac keeps a seed vault — every append lands hot and cold in
+// one motion. Every so often the sqlite burns to the ground mid-story, and the reopen heals
+// from the vault BEFORE the gateway reads. The dashboard barely blinks: the dossier watchers
+// resubscribe, the pulse resumes, and every word is where it was.
+async function theFire() {
+  const before = [...almanac.gateway.reactor.snapshot()].length;
+  tell(`🔥 FIRE at the almanac — ${before} deltas of hot store, burning to the ground`, "forgery");
+  await stores.almanac.close();
+  burnStore("almanac");
+  stores.almanac = await openStore("almanac");
+  almanac = stores.almanac;
+  tell(
+    `🌱 the seed vault replants the almanac — ${almanac.healed.toPrimary} deltas restored, every dossier intact`,
+    "patch",
+  );
+}
+
 async function life() {
   await sleep(3000);
   let i = 0;
   for (;;) {
     try {
-      // mostly the small stuff; the forgery drama every 8th act
-      const act = i % 8 === 7 ? acts[acts.length - 1] : pick(acts.slice(0, -1));
+      // mostly the small stuff; the forgery drama every 8th act; the fire every 24th
+      const act =
+        i % 24 === 15 ? theFire : i % 8 === 7 ? acts[acts.length - 1] : pick(acts.slice(0, -1));
       await act();
     } catch (err) {
       console.log(`  an act stumbled: ${err}`);

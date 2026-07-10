@@ -80,3 +80,14 @@ _(one entry per PR that grew the village; newest last)_
   pulse now ends with a translation pass, narrated in the event log. The arc's thesis,
   demonstrated: anyone may write, in any tongue — the reader decides everything, and
   understands more than it was told.
+- **PR #22 — cold storage: THE FIRE** (phase10.mjs, 4/4): the almanac now keeps a **seed
+  vault** (`homes/almanac/vault` — an `ArchiveBackend` behind a `MirrorBackend`): every
+  append lands hot and cold in one motion, one file per delta, named by its content address.
+  The living village gains the fire act (every 24th beat): the almanac's sqlite **burns to
+  the ground mid-story** — and the reopen heals from the vault before the gateway reads.
+  Watched live: `🔥 FIRE at the almanac — 187 deltas of hot store, burning to the ground` →
+  `🌱 the seed vault replants the almanac — 187 deltas restored, every dossier intact`; the
+  dossier watchers resubscribe, the pulse resumes, the dashboard barely blinks. Phase 10's
+  quiet perfection: the bio that survived the fire word-for-word was Mallory's old forgery —
+  the vault preserves *everything* and leaves judgment to the lenses, exactly as a store of
+  record must.

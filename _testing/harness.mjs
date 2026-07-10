@@ -1,10 +1,12 @@
 ﻿// The Village harness â€” shared machinery for every phase. Ephemeral, never committed.
 
-import { copyFileSync, existsSync, readFileSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  ArchiveBackend,
   Gateway,
+  MirrorBackend,
   SqliteBackend,
   assembleGenesis,
   governedGatherBody,
@@ -53,7 +55,7 @@ export const STORES = {
   commons: { port: 4401 },
   reel: { port: 4402 },
   hive: { port: 4403, lens: GRUMBLE_LENS },
-  almanac: { port: 4404 },
+  almanac: { port: 4404, archive: true }, // the aggregator keeps a seed vault — cold copies of every delta
   cinelog: { port: 4405 }, // the stranger's app — an alien dialect, normalized by translation
 };
 
@@ -75,7 +77,17 @@ export async function openStore(name) {
   const home = homeOf(name);
   initHome(home);
   const seed = readSeed(home);
-  const backend = new SqliteBackend(join(home, "store.sqlite"));
+  let backend = new SqliteBackend(join(home, "store.sqlite"));
+  // A store with a vault mirrors every append into cold files and heals BEFORE the gateway
+  // reads — so a burned sqlite is replanted from the vault's memory (the fire act relies on it).
+  const vault = cfg.archive ? join(home, "vault") : undefined;
+  let healed = { toMirror: 0, toPrimary: 0 };
+  if (vault !== undefined) {
+    backend = new MirrorBackend(backend, new ArchiveBackend(vault), {
+      onLag: (err) => console.log(`  ${name}'s vault is lagging: ${err}`),
+    });
+    healed = await backend.heal();
+  }
   const gateway = await Gateway.open(backend, {
     seed,
     ...(cfg.lens === undefined ? {} : { offeredLens: cfg.lens }),
@@ -93,11 +105,21 @@ export async function openStore(name) {
     seed,
     operator: authorForSeed(seed),
     base: `${handle.url}/${name}`,
+    vault,
+    healed,
     async close() {
       await handle.close();
       await gateway.close();
     },
   };
+}
+
+// The fire: burn a store's sqlite to the ground (the vault, if any, is untouched).
+export function burnStore(name) {
+  const home = homeOf(name);
+  for (const f of ["store.sqlite", "store.sqlite-wal", "store.sqlite-shm"]) {
+    rmSync(join(home, f), { force: true, maxRetries: 5, retryDelay: 100 });
+  }
 }
 
 // ---- HTTP helpers -----------------------------------------------------------------------------
