@@ -131,6 +131,28 @@ export class SqliteBackend implements StoreBackend {
     return out;
   }
 
+  async purge(ids: Iterable<string>): Promise<number> {
+    this.assertOpen();
+    const remove = this.db.prepare("DELETE FROM deltas WHERE id = ?");
+    let removed = 0;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const id of ids) {
+        if (remove.run(id).changes > 0) removed += 1;
+        this.onDisk.delete(id); // and never mark a purged id durable
+      }
+      this.db.exec("COMMIT");
+    } catch (err) {
+      try {
+        this.db.exec("ROLLBACK");
+      } catch {
+        /* already rolled back */
+      }
+      throw err;
+    }
+    return removed;
+  }
+
   async close(): Promise<void> {
     this.db.close();
   }

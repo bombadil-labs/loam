@@ -66,17 +66,37 @@ export class MirrorBackend implements StoreBackend {
     return this.primary.deltasSince(knownIds);
   }
 
+  // Physical removal on BOTH sides — forgetting must be verified, so purge is loud where
+  // append was forgiving: a failure on either side rejects (after both were attempted), and
+  // a later heal(exclude) can finish what an unreachable side missed.
+  async purge(ids: Iterable<string>): Promise<number> {
+    const batch = [...ids];
+    const results = await Promise.allSettled([this.primary.purge(batch), this.mirror.purge(batch)]);
+    const failed = results.find((r) => r.status === "rejected");
+    if (failed !== undefined) throw failed.reason;
+    return (results[0] as PromiseFulfilledResult<number>).value;
+  }
+
   // Two-way union: each side receives what only the other holds. Idempotent — a whole pair
   // heals to { 0, 0 }. Both directions run even when nothing lagged: heal is how a fresh
   // primary is restored from the mirror's memory after the original is lost. Heal clears
   // `lagging` only when no append lagged WHILE it ran — a delta that landed after heal's
   // snapshot may still be missing from the mirror, and the flag must not say otherwise.
-  async heal(): Promise<HealReport> {
+  //
+  // `exclude` is the law reaching down (SPEC §11): ids the gateway has tombstoned are never
+  // carried in EITHER direction, and a straggler found on either side is purged — heal
+  // finishes the forgetting on whatever tier the purge originally missed.
+  async heal(exclude?: ReadonlySet<string>): Promise<HealReport> {
     const epoch = this.#lagEpoch;
+    const dead = exclude ?? new Set<string>();
     const all = await this.primary.deltasSince(new Set());
-    const toMirror = await this.mirror.append(all);
-    const fromMirror = await this.mirror.deltasSince(new Set(all.map((d) => d.id)));
-    const toPrimary = await this.primary.append(fromMirror);
+    const alive = all.filter((d) => !dead.has(d.id));
+    if (alive.length < all.length) await this.primary.purge([...dead]);
+    const toMirror = await this.mirror.append(alive);
+    const fromMirror = await this.mirror.deltasSince(new Set(alive.map((d) => d.id)));
+    const replant = fromMirror.filter((d) => !dead.has(d.id));
+    if (replant.length < fromMirror.length) await this.mirror.purge([...dead]);
+    const toPrimary = await this.primary.append(replant);
     if (this.#lagEpoch === epoch) this.#lagging = false;
     return { toMirror, toPrimary };
   }

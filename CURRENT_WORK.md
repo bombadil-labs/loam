@@ -102,8 +102,15 @@ nobody has to believe them.
 
 ## Left off here
 
-Nothing started. Fresh session: read SPEC §11–§13, then open Unit 1 (erasure) at loop stage 1
-(plan → tests first). Order: Unit 1 (erasure — library), Unit 2 (open door + browser client —
-the player's prerequisite), Unit 3 (the playable village; 3a the theater has no library
-dependency and may be built in parallel with anything). The hosted driver (libSQL) stays
-queued behind these.
+**Unit 1 (erasure) IN PROGRESS — the seam slice first** (started 2026-07-10 ~3am). The unit
+ships as two PRs: (1) the SEAM — `StoreBackend.purge(ids)` on all four drivers (mechanical,
+law-free; re-append after purge is ALLOWED at the backend — refusal-of-return is gateway law),
+`MirrorBackend.purge` (both sides), `heal(exclude?)` (skips excluded ids in both directions
+AND purges excluded stragglers found on either side — heal finishes the forgetting); (2) the
+LAW — tombstones at `loam:erasure`, `Gateway.erase` (authority → manifest → purge → tombstone
+→ reactor rebuild), admission composes tombstones, degrees (anonymous reassertion / sealed
+authorship / redaction), federation of erasure requests, the village's unsaying. SPEC §11 is
+the contract; read it first. SEAM SLICE DONE (PR #34, 302/302): purge on all four drivers, heal(exclude) with straggler-finishing, archive purge hunts every fan. NEXT: the LAW slice — tombstones at loam:erasure (trust-style claims+defect validation), Gateway.erase (authority → manifest → purge → tombstone → reactor rebuild), admission composes tombstones, degrees, federation, the village unsaying. Law-slice PR gets the review agent (seam was self-reviewed: contract-tested mechanical extension).
+
+After Unit 1: Unit 2 (open door + browser client), Unit 3 (playable village; 3a theater is
+dependency-free). Hosted driver (libSQL) queued behind these.

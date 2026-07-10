@@ -222,6 +222,28 @@ for (const makeHarness of harnesses) {
       await store.close();
     });
 
+    it("purge removes exactly the named ids and says how many; unknown ids are no-ops", async () => {
+      const h = makeHarness();
+      const store = h.open();
+      await store.append(all);
+      expect(await store.purge([signed1.id, unsigned.id, "1e20" + "77".repeat(32)])).toBe(2);
+      expect(ids(await store.deltasSince(new Set()))).toEqual(ids([signed2, negation, mixed]));
+      expect(await store.purge([signed1.id])).toBe(0); // already gone — idempotent
+      await store.close();
+    });
+
+    it("purge is mechanical, not law: the purged delta may be appended again", async () => {
+      // Refusal-of-return is the GATEWAY's job (tombstones at admission); a backend keeps
+      // "a set of deltas" and no memory of grudges.
+      const h = makeHarness();
+      const store = h.open();
+      await store.append([signed1]);
+      await store.purge([signed1.id]);
+      expect(await store.append([signed1])).toBe(1); // stored anew, counted anew
+      expect(ids(await store.deltasSince(new Set()))).toEqual(ids([signed1]));
+      await store.close();
+    });
+
     it("after close, every method rejects", async () => {
       const h = makeHarness();
       const store = h.open();
@@ -229,9 +251,23 @@ for (const makeHarness of harnesses) {
       await store.close();
       await expect(store.append([signed2])).rejects.toThrow(/closed/);
       await expect(store.deltasSince(new Set())).rejects.toThrow(/closed/);
+      await expect(store.purge([signed1.id])).rejects.toThrow(/closed/);
     });
 
     if (sample.reopen !== undefined) {
+      it("a purge is durable: the forgotten stay forgotten across reopen", async () => {
+        const h = makeHarness();
+        const store = h.open();
+        await store.append(all);
+        await store.purge([signed1.id]);
+        await store.close();
+        const again = h.reopen!();
+        expect(ids(await again.deltasSince(new Set()))).toEqual(
+          ids([signed2, unsigned, negation, mixed]),
+        );
+        await again.close();
+      });
+
       it("state survives close and reopen", async () => {
         const h = makeHarness();
         const store = h.open();

@@ -9,7 +9,7 @@ import type { StoreBackend } from "./backend.js";
 import { canonicalDelta } from "./canon.js";
 
 export class MemoryBackend implements StoreBackend {
-  private readonly set = new DeltaSet();
+  private set = new DeltaSet();
   private closed = false;
 
   private assertOpen(): void {
@@ -31,6 +31,20 @@ export class MemoryBackend implements StoreBackend {
     const out: Delta[] = [];
     for (const d of this.set) if (!knownIds.has(d.id)) out.push(d);
     return out;
+  }
+
+  async purge(ids: Iterable<string>): Promise<number> {
+    this.assertOpen();
+    // DeltaSet is grow-only by design; forgetting is a rebuild from the survivors.
+    const gone = new Set(ids);
+    const survivors = new DeltaSet();
+    let removed = 0;
+    for (const d of this.set) {
+      if (gone.has(d.id)) removed += 1;
+      else survivors.add(d);
+    }
+    this.set = survivors;
+    return removed;
   }
 
   async close(): Promise<void> {

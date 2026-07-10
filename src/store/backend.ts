@@ -32,6 +32,12 @@ export interface StoreBackend {
   // Every stored delta whose id is not in `knownIds` — the watermark read.
   deltasSince(knownIds: ReadonlySet<string>): Promise<Delta[]>;
 
+  // Physically remove the named ids — the deliberate, loud exception to grow-only (SPEC §11:
+  // erasure). MECHANICAL, not law: a purged delta may be appended again; refusing its return
+  // is the gateway's job (tombstones at admission), never a backend grudge. Unknown ids are
+  // no-ops. Resolves to the count actually removed.
+  purge(ids: Iterable<string>): Promise<number>;
+
   // Release held resources.
   close(): Promise<void>;
 }

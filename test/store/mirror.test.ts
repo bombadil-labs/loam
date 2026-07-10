@@ -29,6 +29,7 @@ afterAll(() => rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryD
 const unreachable = (): StoreBackend => ({
   append: () => Promise.reject(new Error("cold store unreachable")),
   deltasSince: () => Promise.reject(new Error("cold store unreachable")),
+  purge: () => Promise.reject(new Error("cold store unreachable")),
   close: () => Promise.reject(new Error("cold store unreachable")),
 });
 
@@ -40,6 +41,7 @@ function flaky(inner: StoreBackend): { backend: StoreBackend; repair(): void } {
     backend: {
       append: (d) => (broken ? refuse() : inner.append(d)),
       deltasSince: (k) => (broken ? refuse() : inner.deltasSince(k)),
+      purge: (ids) => (broken ? refuse() : inner.purge(ids)),
       close: () => inner.close(),
     },
     repair: () => {
@@ -134,11 +136,48 @@ describe("MirrorBackend", () => {
     expect(store.lagging).toBe(false);
   });
 
+  it("purge reaches both sides: the hot store and the vault forget together", async () => {
+    const primary = new MemoryBackend();
+    const vault = new MemoryBackend();
+    const store = new MirrorBackend(primary, vault);
+    await store.append([d1, d2]);
+    expect(await store.purge([d1.id])).toBe(1);
+    expect(ids(await primary.deltasSince(new Set()))).toEqual(ids([d2]));
+    expect(ids(await vault.deltasSince(new Set()))).toEqual(ids([d2]));
+  });
+
+  it("heal(exclude) never resurrects the excluded: the fire in reverse", async () => {
+    // The disaster shape: the vault still holds a delta the primary purged (the purge landed
+    // while the vault lagged, or the vault is an old cold copy). An unguarded heal would
+    // replant the very thing the operator erased.
+    const vault = new MemoryBackend();
+    await vault.append([d1, d2, d3]);
+    const primary = new MemoryBackend();
+    await primary.append([d2]);
+    const store = new MirrorBackend(primary, vault);
+    const report = await store.heal(new Set([d1.id]));
+    expect(report.toPrimary).toBe(1); // d3 replanted; d1 stayed dead
+    expect(ids(await primary.deltasSince(new Set()))).toEqual(ids([d2, d3]));
+    // and heal FINISHES the forgetting: the straggler is purged from the side that missed it
+    expect(ids(await vault.deltasSince(new Set()))).toEqual(ids([d2, d3]));
+  });
+
+  it("heal(exclude) also refuses to archive an excluded straggler from the primary", async () => {
+    const primary = new MemoryBackend();
+    await primary.append([d1, d2]); // d1 is tombstoned law-side but its purge missed this tier
+    const vault = new MemoryBackend();
+    const store = new MirrorBackend(primary, vault);
+    await store.heal(new Set([d1.id]));
+    expect(ids(await vault.deltasSince(new Set()))).toEqual(ids([d2])); // never archived
+    expect(ids(await primary.deltasSince(new Set()))).toEqual(ids([d2])); // purged here too
+  });
+
   it("close() closes both sides even when one refuses, then reports the refusal", async () => {
     const closed: string[] = [];
     const side = (name: string, fail: boolean): StoreBackend => ({
       append: () => Promise.resolve(0),
       deltasSince: () => Promise.resolve([]),
+      purge: () => Promise.resolve(0),
       close: () => {
         closed.push(name);
         return fail ? Promise.reject(new Error(`${name} refused to close`)) : Promise.resolve();
