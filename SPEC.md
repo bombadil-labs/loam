@@ -326,7 +326,114 @@ Design-pattern references (they carry the EAV model): `agent.ts` (`beliefPointer
 new code is the hyperschema-sourced GraphQL, accounts-as-schema, and the runner's runtime variety
 and deployment.
 
-## 11. Glossary
+## 11. Erasure — degrees of forgetting (designed 2026-07-10; queued)
+
+GDPR Art. 17 and plain conscience both demand that a store can truly forget. The architecture
+makes this cheaper than it sounds: **Loam's immutability is per-fact, not global** — the ground
+is a set, not a chain, so no delta's identity depends on another's existence. Erasing one fact
+costs one fact plus whatever cited it; nothing structural breaks. The design principle
+throughout: **the store remembers THAT it forgot — who asked, when, and which id — never
+what.** Content addressing lets a store refuse a delta forever while retaining zero bytes of
+its content.
+
+- **The tombstone.** An erasure is a signed claim at `loam:erasure` (context `loam.erasure`)
+  naming the delta id and the erasing authority. Authority: the **original author** (their
+  words) or the **store operator** (their ground, their liability); lawful reads bind, like
+  trust and translations. Tombstones are append-only forever — the erasure log is itself the
+  compliance record.
+- **The purge.** A new, loud seam operation — `StoreBackend.purge(ids)` — a NAMED exception to
+  grow-only, exactly as mirror-lag is a named exception to every-failure-rejects. Purge must
+  reach every tier: the sqlite row, the mirror, the archive's fan file. **`heal()` must consult
+  tombstones and never resurrect a purged id** (the fire in reverse — this interaction is where
+  the bugs will hide; test it first).
+- **The door remembers the hole.** Admission (federate AND append) composes the tombstone set:
+  a tombstoned id is refused re-entry forever — a hash-set check, cheap. Union normally lets
+  anything return; the tombstone is how forgetting sticks against the store's own gossip.
+- **The manifest.** Before purging, compute the blast radius — which registered
+  materializations reference the id, which deltas cite it as provenance — and show it. Cascade
+  to derived emissions (translations of the erased fact) is a per-store policy; GDPR usually
+  wants cascade.
+- **Federated forgetting.** Erasure claims travel like any claim; peers honor erasure
+  authorities per their own trust config (the roster, again). This automates GDPR Art. 17(2) —
+  "inform downstream controllers" — with cryptographic precision, and compliance is TESTABLE:
+  ask any store for the id and see what returns. No recall of pre-request copies; precision
+  and auditability, not magic.
+- **Degrees — all built from purge + tombstone + reassert; NEVER in-place mutation.** The id
+  hashes the claims (author included) and the signature binds them; an edited delta fails
+  recomputation and is refused as corruption by every driver. That rigidity is load-bearing:
+  erasure authority must never be forgery authority.
+  1. **Full erasure** — purge + tombstone. Gone; the hole is signed.
+  2. **Anonymous reassertion** — the operator re-speaks the content in the store's own voice,
+     then purges the original. **No on-record link between old and new** — content addressing
+     is a confirmation oracle (hash the preserved content + timestamp + each candidate author
+     against the old id; the roster is a small brute-force space). Author-derived lens weight
+     (byAuthorRank, trust masks) degrades BY DESIGN — "anonymize but keep my earned ranking"
+     is trust laundering.
+  3. **Sealed authorship** — the reasserted delta carries one pointer:
+     `hash(salt ‖ author)`. Anonymous today; reveal the preimage to reclaim your words
+     whenever you choose. Reversible anonymity, no new cryptography.
+  4. **Partial redaction** — reassert with specific pointer VALUES replaced by a redaction
+     marker; the fact survives, the sensitive field does not.
+- **The request carries its replacement.** An erasure request may embed the pre-signed
+  replacement delta; every honoring store appends the IDENTICAL delta and union dedups the
+  network onto one anonymous copy. Reassertions inherit the source timestamp (idempotence by
+  content address, the translation trick).
+- **Honest boundary.** This is rigorous severance/pseudonymization; true anonymity is a
+  property of the content itself (timestamps correlate, style fingerprints). Rung 4 is the
+  tool for content-side scrubbing; no substrate can do it for you.
+
+## 12. The open door — public reads & the browser client (designed 2026-07-10; queued)
+
+The aggregator dream needs a store a stranger's browser can simply read.
+
+- **Anonymous read as data.** An operator-signed claim (context `loam.public`) names which
+  registered schemas a mount serves WITHOUT a token — query + subscribe only; every write path
+  stays gated. Consistent with trust-is-data: the open door is a delta, revocable by one
+  negation, live on the next request. Serve adds CORS for public mounts.
+- **The browser client.** A subpath export (`@bombadil/loam/client`), zero node-only deps:
+  keygen in the page, claims signed locally, writes through `POST /append` (non-custodial —
+  the token authenticates transport; the delta's own verified author is the authority, which
+  is why this endpoint already exists), GraphQL query + SSE subscribe wrappers. **Spike first:**
+  confirm rhizomatic's signing/hashing runs in a browser (isomorphic crypto); if not, that is
+  a rhizomatic issue + conversation with Myk, not a Loam workaround.
+- **The notary pattern (optional, cheap).** An operator claim carrying the store's frontier
+  hash may be anchored to any external notary (a chain, a newspaper, RFC 3161). The chain
+  becomes a timestamp service for the vault; the world stays in Loam.
+
+## 13. Boundaries & posture — what Loam refuses to be (recorded 2026-07-10)
+
+Red-teamed 2026-07-10; these are the honest edges, stated proudly. Strong paradigms host
+their own opposition.
+
+- **No scarcity.** Pure union cannot express "exactly one, and Alice owns it" — no
+  double-spend answer, no inventory invariants, by design. Where ordering is genuinely the
+  point, a store may be the ORDERING AUTHORITY for its own narrow context (operator-signed
+  sequence claims): centralize exactly there, nowhere else. We did not beat CAP; we chose AP
+  and made peace.
+- **No write-time invariants.** "Balance never negative" is a lens-level judgment; two readers
+  may disagree about whether your invariant held. Loam is for facts and testimony, not state
+  machines.
+- **No causal order.** Timestamps are testimony, gameable by construction; trust-ordered
+  lenses (chain orders, rosters) are the mitigation, not a logical clock. We chose union over
+  happens-before.
+- **No network-wide recall.** Erasure (§11) is precise and auditable, never magic.
+- **Power migrates to defaults.** The reader decides everything — so in practice, whoever
+  ships the default lens, the winning registry, the schema-writing steward holds real power.
+  The only honest defense: the default layer stays inspectable data with one-delta switching
+  costs. Vigilance gets cheaper, never unnecessary.
+- **Patterns that answer the standard objections:**
+  - _Deprecation-by-rebirth_ (generational compaction): mark the old store read-only, query
+    out what matters, seed a new store with those SAME deltas — ids and signatures intact, so
+    compaction never launders provenance — and keep the old store as the cold audit trail.
+  - _Reassertion-as-endorsement_: re-signing identical content in your own voice is
+    endorsement with skin in it; convergent reassertion is a trust signal lenses can consume.
+    Deltas never belonged to stores; a dead store orphans nothing.
+  - _Coordination is an optimization, not a prerequisite_: a schema registry is just a store
+    whose crop is vocabulary — it federates, it has trust rosters, competitors coexist, the
+    reader picks. Failed coordination costs one translation delta, written after the fact,
+    with provenance.
+
+## 14. Glossary
 
 - **Delta** — the signed, content-addressed atom (rhizomatic).
 - **Hyperschema** — recursive gather definition; `HyperSchema { name, alg, body: Term }`.
