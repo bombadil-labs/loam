@@ -70,15 +70,41 @@ move lens+door together; chain-minted standing moves the door alone). The LOOP G
 the demonstration ledger; homes/ stays disposable). NOTE: repo now has a `green-gate` CI on
 PRs (ubuntu+windows).
 
-## Step 13 — Trust is data (queued; SPEC §8)
+## Step 13 — Trust is data (IN FLIGHT, branch `step-13-prep`)
 
-1. `loam.trust` policy: operator-authored mode (`open` | `roster` | `closed`) + optional shape
-   requirements; resolved as a live view (constitutional read, operator-filtered).
-2. `pullFrom`/gateway build `admit` from the RESOLVED policy per pull — roster edits are deltas;
-   the next pulse obeys them. No restart, no config file.
-3. Aggregator mode: `open` admits every verified delta (the hackernews scenario); `roster`
-   admits named authors; shape requirements compose with either.
-4. Surfaced in `serve`/CLI so a turnkey aggregator is `loam init` + one trust delta + `serve`.
+What a store admits at federation is a live view over its own deltas — and with 0.2.0 adopted,
+the SAME roster can reach eval-side masks (`inView` at `loam:trust`), one source of truth for
+admission and resolution alike.
+
+Stage-1 decisions (carried from the earlier opening, upgraded post-0.2.0):
+
+- **The trust policy lives at `loam:trust` under context `loam.trust`**, operator-authored to
+  bind (lawful reads): one delta shape, latest-lawful-wins — `declares` → entity(loam:trust,
+  loam.trust); `mode` → "open" | "roster" | "closed"; repeatable `admit-author` primitives for
+  roster mode. Helpers: `trustClaims(mode, authors, author, ts)` + `readTrustPolicy(reactor,
+  operator) → { mode, roster }`. **Default when no policy survives: `open`** (union is the
+  substrate's nature; the operator narrows deliberately). Document.
+- **`Gateway.admitFor(): (d: Delta) => boolean`** re-resolves the policy per call; `pullFrom`
+  and `federate` use it when no explicit `admit` is given (explicit override wins — existing
+  tests keep passing).
+- **0.2.0 bonus**: a `trustRosterPred()` builder so schema bodies/policies can reference the
+  SAME roster via `inView` at `loam:trust` (extract role of the admit-author pointers) —
+  admission and read lenses share one live source of truth.
+- Tests first (test/federation/trust.test.ts): default open; roster admits only listed
+  authors (delta accounting proves it); closed admits nothing; ONE roster delta flips the next
+  pull (live-ness); explicit admit override wins; roster + negation compose (a stranger's
+  strike refused at the door); the inView-roster lens reads the same set.
+- Village stage 7 (after merge): the almanac gets a trust-policy delta; the dashboard shows
+  the roster; an act flips the mode mid-run and the pulse obeys — groundwork for the gauntlet's
+  cinelog stranger.
+
+Checklist:
+
+- [x] Stage 1: plan (this section); journal folded (step 12 + adoption entries in order)
+- [ ] Tests first ← **left off here**
+- [ ] Implement: trust.ts (claims/read/pred builder), gateway.admitFor + federate/pullFrom
+      defaults, exports, README federation section
+- [ ] Gate → PR → review → resolve → merge → JOURNAL → village stage → step 14
 
 ## Step 14 — Normalization: divergent dialects, more deltas (queued; SPEC §8)
 
