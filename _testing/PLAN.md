@@ -349,3 +349,16 @@ every delta from the vault BEFORE the gateway reads; (10.3) Wren's dossier answe
 word-for-word across the fire; (10.4) a post-fire write lands hot and cold in the same append.
 Field note: restore restored Mallory's old forgery too — the vault is a store of record, not a
 lens; judgment stays read-side, even through disaster.
+
+## Phase 11 — the mill (the first animate store) — ✅ 4/4, twice
+
+`MirrorBackend` taught the vault; the mill teaches the wheel. Checks (re-runnable against a
+lived-in home — every assertion is about CHANGE, never absolute counts): (11.1) passive — the
+blessed recipe sits in the ground and new grist grinds nothing; (11.2) animate — one attach
+call and the same kind of ingest produces flour; (11.3) recompute supersedes per villager;
+(11.4) flour is ground — emissions persist through a passive reopen. Field notes of substance:
+pure emissions carry timestamp 0 (output = f(fn, input hash) only), so supersession ties across
+processes — a fresh attach sweeps its own stale flour with idempotent ts-0 negations; wholesale
+`supersede` negates across ALL roots (keyed emission is the per-subject mode); the budget is a
+lifetime trigger count; and `readBindingDefinitions` now resolves latest-per-binding, found
+when a re-blessed recipe crashed attach.

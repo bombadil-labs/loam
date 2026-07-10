@@ -199,6 +199,28 @@ content-addressing makes double-execution harmless (union dedups), an orphan bin
 a runner. Structurally it is the transactional-outbox / job-queue-and-worker pattern on a homoiconic
 store.
 
+**The mill (first animate deployment, 2026-07-10)** — the reference pattern, learned by running
+it in the village:
+
+- **Two authorities, deliberately separate**: the operator blesses the recipe (a governed store
+  honors only operator-authored definitions) AND grants the runner identity write standing —
+  the recipe and the key to the granary are different keys.
+- **The latest blessing per binding is the law**: `readBindingDefinitions` resolves
+  latest-per-name (timestamp, then id), the same discipline registrations and translations
+  keep — a re-blessed recipe supersedes, never duplicates an install.
+- **Choose the emit mode by shape**: `supersede` is WHOLESALE (each trigger negates every live
+  emission of the binding, across all roots); per-subject outputs want `keyed` supersession.
+- **Supersession's ledger is per-attach, in memory**: a prior process's surviving emissions tie
+  at timestamp 0 (pure emissions are functions of (fn, input hash) only) — a fresh attach
+  sweeps its own author's stale emissions with idempotent ts-0 negations.
+- **The budget is a lifetime trigger count** (a divergence guard, not a rate limit) — size it
+  to the deployment, and remember the wheel suspends itself when it runs out.
+- **A runner is process machinery, not ground**: emissions persist and survive restore (the
+  vault archives flour too), but the wheel must be rehung after any gateway rebirth.
+- **Derived output must not feed its own grist** (the reactor's own-trigger guard covers the
+  binding's author; the FUNCTION must also exclude its output contexts from its inputs, or a
+  second runner identity re-grinds the first's flour).
+
 ## 7. Object-capability & accounts
 
 No ambient authority, anywhere. A user's write permission and a function's effect access are the same

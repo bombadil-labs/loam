@@ -63,6 +63,13 @@
             "byTimestamp": "asc"
           }
         }
+      },
+      "presence": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
       }
     },
     "default": {

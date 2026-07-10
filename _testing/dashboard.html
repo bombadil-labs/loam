@@ -128,6 +128,11 @@
       .chip.hive {
         color: var(--honey);
       }
+      .card .mill {
+        color: #c9a86a;
+        font-size: 12.5px;
+        margin-top: 4px;
+      }
       .hex {
         color: var(--dim);
         font-size: 10.5px;
@@ -211,6 +216,7 @@
     <div class="row"><span class="k">follows</span><span class="v follows"></span></div>
     <div class="row"><span class="k">screenings</span><span class="v companioned"></span></div>
     <div class="row"><span class="k">gatherings</span><span class="v attended"></span></div>
+    <div class="mill"></div>
     <div class="changed"></div>
     <div class="hex"></div>`;
         cards.appendChild(el);
@@ -229,7 +235,12 @@
         for (const item of [...new Set(list ?? [])]) {
           const c = document.createElement("span");
           c.className = "chip" + (cls ? " " + cls : "");
-          c.textContent = String(item).replace(/^(screening|gathering|person):/, "");
+          // a translated entry is an object (film/date/origin/…): show the fact, honor the origin
+          const label =
+            item !== null && typeof item === "object"
+              ? `${String(item.film ?? item.value ?? "…").replace(/^film:/, "")}${item.origin ? " ⇠ " + item.origin : ""}`
+              : String(item);
+          c.textContent = label.replace(/^(screening|gathering|person):/, "");
           el.appendChild(c);
         }
         if (el.innerHTML === "")
@@ -287,7 +298,12 @@
       es.onmessage = (msg) => {
         const ev = JSON.parse(msg.data);
         if (ev.kind === "dossier") renderDossier(ev.person, ev.data);
-        else if (ev.kind === "event") log(ev.tone ?? "write", ev.text);
+        else if (ev.kind === "mill") {
+          for (const [person, flour] of Object.entries(ev.flour ?? {})) {
+            const el = document.getElementById(person.replace(":", "-"));
+            if (el) el.querySelector(".mill").textContent = flour ? "🌾 " + flour : "";
+          }
+        } else if (ev.kind === "event") log(ev.tone ?? "write", ev.text);
         else if (ev.kind === "trust") {
           state["person:wren"] = Object.assign(state["person:wren"] ?? {}, {
             trusted: ev.trusted,
