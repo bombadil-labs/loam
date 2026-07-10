@@ -1,4 +1,4 @@
-// The Village harness — shared machinery for every phase. Ephemeral, never committed.
+﻿// The Village harness â€” shared machinery for every phase. Ephemeral, never committed.
 
 import { copyFileSync, existsSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -28,6 +28,7 @@ export const SEEDS = {
   miles: "22".repeat(32),
   odile: "33".repeat(32),
   petra: "44".repeat(32),
+  sasha: "55".repeat(32), // the stranger: cinelog's only resident
   mallory: "ee".repeat(32),
 };
 export const AUTHORS = Object.fromEntries(
@@ -36,7 +37,7 @@ export const AUTHORS = Object.fromEntries(
 export const PEOPLE = ["person:wren", "person:miles", "person:odile", "person:petra"];
 
 // ---- the stores -------------------------------------------------------------------------------
-// The hive publishes everything EXCEPT Odile's frank grumbles — the offered lens.
+// The hive publishes everything EXCEPT Odile's frank grumbles â€” the offered lens.
 const GRUMBLE_LENS = parseTerm({
   op: "select",
   pred: { not: { hasPointer: { context: { exact: "grumbles" } } } },
@@ -53,6 +54,7 @@ export const STORES = {
   reel: { port: 4402 },
   hive: { port: 4403, lens: GRUMBLE_LENS },
   almanac: { port: 4404 },
+  cinelog: { port: 4405 }, // the stranger's app — an alien dialect, normalized by translation
 };
 
 export const opToken = (store) => `op-${store}`;
@@ -99,7 +101,7 @@ export async function openStore(name) {
 }
 
 // ---- HTTP helpers -----------------------------------------------------------------------------
-// Stores restart within a phase (close → copy → reopen on the same port), and undici's
+// Stores restart within a phase (close â†’ copy â†’ reopen on the same port), and undici's
 // keep-alive pool will happily hand back a socket the old server closed. Short requests say
 // connection: close; everything retries a reset once or twice.
 async function fetchRetry(url, opts, tries = 3) {
@@ -154,12 +156,12 @@ export async function mcp(base, token, method, params) {
 }
 
 // The GuardedDossier register body, built at runtime (its trust mask embeds the almanac's
-// operator): rhizomatic 0.2.0's governed lens — negations bind only from the operator and the
+// operator): rhizomatic 0.2.0's governed lens â€” negations bind only from the operator and the
 // operator's grantees, so a federated stranger's strike is inert here.
 export function guardedDossierSpec(operator) {
   const PICK = { pick: { order: { byTimestamp: "desc" } } };
   const ALL = { all: { order: { byTimestamp: "asc" } } };
-  // Both 0.2.0 lenses at once — they guard DIFFERENT attacks: the trust MASK makes a
+  // Both 0.2.0 lenses at once â€” they guard DIFFERENT attacks: the trust MASK makes a
   // stranger's strike inert (erasure), the chain ORDER outranks a stranger's forgery
   // (fabrication). A dossier wants both.
   const TRUSTED_LATEST = {
@@ -243,7 +245,7 @@ export async function sseOpen(base, token, subscription) {
 
 // ---- writes beyond primitives: signed multi-pointer edges -------------------------------------
 // GraphQL mutations write primitive property claims; RELATIONS are entity-pointer deltas an app
-// crafts and appends itself. Each edge files at BOTH ends — one delta, two views.
+// crafts and appends itself. Each edge files at BOTH ends â€” one delta, two views.
 const entityPtr = (role, id, context) => ({
   role,
   target: { kind: "entity", entity: { id, context } },
@@ -305,13 +307,13 @@ const results = [];
 export function check(id, label, ok, detail = "") {
   results.push({ id, ok });
   const flag = ok ? "  ok " : "  FAIL";
-  console.log(`${flag} ${id} ${label}${detail === "" ? "" : ` — ${detail}`}`);
+  console.log(`${flag} ${id} ${label}${detail === "" ? "" : ` â€” ${detail}`}`);
 }
 export function summary(phase) {
   const failed = results.filter((r) => !r.ok);
   console.log(
     `\n=== ${phase}: ${results.length - failed.length}/${results.length} passed` +
-      (failed.length > 0 ? ` — FAILED: ${failed.map((f) => f.id).join(", ")}` : " ==="),
+      (failed.length > 0 ? ` â€” FAILED: ${failed.map((f) => f.id).join(", ")}` : " ==="),
   );
   process.exitCode = failed.length > 0 ? 1 : 0;
 }
