@@ -234,7 +234,16 @@ function templateArgs(
   return args;
 }
 
-export function buildGqlSchema(defs: readonly Registered[], hooks: GqlHooks): GraphQLSchema {
+// `surface: "read"` builds the restricted schema the anonymous door serves: query +
+// subscription only, NO Mutation type at all. Structural, not policed — `hooks.mutate` with no
+// actor signs as the OPERATOR, so a write reachable anonymously would be an authority leak;
+// with no mutation root, a mutation operation is a validation impossibility, and introspection
+// honestly reveals a world in which writing does not exist.
+export function buildGqlSchema(
+  defs: readonly Registered[],
+  hooks: GqlHooks,
+  surface: "full" | "read" = "full",
+): GraphQLSchema {
   const queryFields: GraphQLFieldConfigMap<unknown, unknown> = {};
   const mutationFields: GraphQLFieldConfigMap<unknown, unknown> = {};
   const subscriptionFields: GraphQLFieldConfigMap<PatchNode, unknown> = {};
@@ -412,7 +421,9 @@ export function buildGqlSchema(defs: readonly Registered[], hooks: GqlHooks): Gr
 
   return new GraphQLSchema({
     query: new GraphQLObjectType({ name: "Query", fields: queryFields }),
-    mutation: new GraphQLObjectType({ name: "Mutation", fields: mutationFields }),
+    ...(surface === "read"
+      ? {}
+      : { mutation: new GraphQLObjectType({ name: "Mutation", fields: mutationFields }) }),
     subscription: new GraphQLObjectType({ name: "Subscription", fields: subscriptionFields }),
   });
 }

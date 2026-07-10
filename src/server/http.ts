@@ -5,7 +5,11 @@
 // /:mount/mcp (a minimal MCP JSON-RPC surface: initialize, tools/list, tools/call).
 //
 // Bind 127.0.0.1 and terminate TLS in front; token comparison is timing-safe; a token maps to
-// an explicit identity ({ actor } or { operator: true }) — never a default.
+// an explicit identity ({ actor } or { operator: true }) — never a default. The one tokenless
+// path is the OPEN DOOR (SPEC §12): query + subscribe against a mount's restricted public
+// surface, where the operator's surviving `loam:public` declaration opened one. CORS rides
+// every response — authority is an explicit bearer header, never ambient, so a wildcard
+// origin lends nothing.
 //
 // Custody, stated plainly: a token maps to an ACTOR SEED, so this process signs on behalf of
 // its actors and is a custodian of their signing authority — a heap dump or leaked config
@@ -82,9 +86,24 @@ const readBody = (req: IncomingMessage, limit: number): Promise<string> =>
     req.on("error", reject);
   });
 
+// CORS, everywhere and uniformly: authority here is a bearer header the caller must present
+// explicitly (never a cookie, never ambient), so a wildcard origin lends nothing — it only
+// lets a browser page ask, and lets it READ a refusal instead of a mute CORS error. The
+// preflight is knowledge-free by the same logic that keeps refusals uniform below.
+const CORS = { "access-control-allow-origin": "*" } as const;
+const preflight = (res: ServerResponse): void => {
+  res.writeHead(204, {
+    ...CORS,
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+    "access-control-allow-headers": "authorization, content-type",
+    "access-control-max-age": "86400",
+  });
+  res.end();
+};
+
 const json = (res: ServerResponse, status: number, body: unknown): void => {
   const text = JSON.stringify(body);
-  res.writeHead(status, { "content-type": "application/json" });
+  res.writeHead(status, { "content-type": "application/json", ...CORS });
   res.end(text);
 };
 
@@ -168,9 +187,10 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     res: ServerResponse;
   }>();
 
+  // Both doors share these handlers; WHICH surface answers — the full one as the token's
+  // identity, or the restricted public one as no identity at all — is the caller's `run`/`open`.
   const handleGraphql = async (
-    gateway: Gateway,
-    identity: TokenIdentity,
+    run: (source: string, variables?: Record<string, unknown>) => Promise<QueryResult>,
     req: IncomingMessage,
     res: ServerResponse,
   ): Promise<void> => {
@@ -195,7 +215,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     // { errors }, not a 500 leaking an internal message.
     let result: QueryResult;
     try {
-      result = await gateway.query(parsed.query, parsed.variables, contextFor(identity));
+      result = await run(parsed.query, parsed.variables);
     } catch (err) {
       result = { errors: [err instanceof Error ? err.message : "the gateway could not answer"] };
     }
@@ -203,8 +223,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
   };
 
   const handleSubscribe = async (
-    gateway: Gateway,
-    identity: TokenIdentity,
+    open: (source: string) => Promise<AsyncGenerator<Record<string, unknown>>>,
     req: IncomingMessage,
     res: ServerResponse,
     search: URLSearchParams,
@@ -218,12 +237,9 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       json(res, 503, { errors: ["this server is holding all the live streams it can"] });
       return;
     }
-    // The actor rides through even though today's subscriptions are reads (unauthorized as
-    // reads still are) — when read policy arrives it keys on this, not on a retrofit.
-    void contextFor(identity);
     let events: AsyncGenerator<Record<string, unknown>>;
     try {
-      events = await gateway.subscribe(source);
+      events = await open(source);
     } catch (err) {
       json(res, 400, { errors: [err instanceof Error ? err.message : "not a subscription"] });
       return;
@@ -232,6 +248,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       "content-type": "text/event-stream",
       "cache-control": "no-cache",
       connection: "keep-alive",
+      ...CORS,
     });
     const stream = { events, res };
     streams.add(stream);
@@ -346,7 +363,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         });
         return;
       case "notifications/initialized":
-        res.writeHead(202).end();
+        res.writeHead(202, CORS).end();
         return;
       case "tools/list":
         reply({ tools: MCP_TOOLS });
@@ -409,7 +426,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         // A notification we don't handle gets silence (JSON-RPC forbids replying to one);
         // an unknown request gets method-not-found.
         if (isNotification) {
-          res.writeHead(202).end();
+          res.writeHead(202, CORS).end();
           return;
         }
         json(res, 200, {
@@ -420,29 +437,58 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     }
   };
 
+  const refused = (res: ServerResponse): void =>
+    json(res, 401, { errors: ["a bearer token is required, and this one opens nothing"] });
+
   const server = createServer((req, res) => {
     void (async () => {
-      // Authenticate BEFORE resolving the mount: an unauthenticated caller learns nothing
-      // about which mounts exist (no 404-vs-401 mount-name oracle).
-      const identity = identify(req);
-      if (identity === undefined) {
-        json(res, 401, { errors: ["a bearer token is required, and this one opens nothing"] });
+      // The preflight answers before anything else: it is knowledge-free (fixed headers, no
+      // body, no mount resolution), and a browser cannot even present its token without it.
+      if (req.method === "OPTIONS") {
+        preflight(res);
         return;
       }
       const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
       const [, mountName, verb] = url.pathname.split("/");
       const gateway =
         mountName === undefined ? undefined : mounts.get(decodeURIComponent(mountName));
+      const identity = identify(req);
+      if (identity === undefined) {
+        // A presented-but-wrong token is refused outright — bad credentials never downgrade
+        // to anonymous. A caller with NO token reaches exactly one thing: the restricted read
+        // surface of a mount whose operator opened one (SPEC §12). Every other combination —
+        // absent mount, nothing public, a write-shaped verb — gets the SAME refusal, so an
+        // anonymous prober learns nothing about which mounts exist (no 404-vs-401 oracle).
+        if (
+          req.headers.authorization !== undefined ||
+          gateway === undefined ||
+          !gateway.hasPublicSurface()
+        ) {
+          refused(res);
+          return;
+        }
+        switch (verb) {
+          case "graphql":
+            await handleGraphql((s, v) => gateway.queryPublic(s, v), req, res);
+            return;
+          case "subscribe":
+            await handleSubscribe((s) => gateway.subscribePublic(s), req, res, url.searchParams);
+            return;
+          default:
+            refused(res);
+            return;
+        }
+      }
       if (gateway === undefined) {
         json(res, 404, { errors: ["no such mount"] });
         return;
       }
       switch (verb) {
         case "graphql":
-          await handleGraphql(gateway, identity, req, res);
+          await handleGraphql((s, v) => gateway.query(s, v, contextFor(identity)), req, res);
           return;
         case "subscribe":
-          await handleSubscribe(gateway, identity, req, res, url.searchParams);
+          await handleSubscribe((s) => gateway.subscribe(s), req, res, url.searchParams);
           return;
         case "mcp":
           await handleMcp(gateway, identity, req, res);

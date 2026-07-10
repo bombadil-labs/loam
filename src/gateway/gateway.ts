@@ -49,6 +49,7 @@ import {
   type PatchNode,
   type ResolvedNode,
 } from "./gql.js";
+import { readPublicSchemas } from "./public.js";
 import {
   lawfulSnapshot,
   parseClaimTemplates,
@@ -1009,6 +1010,63 @@ export class Gateway {
     return this.gql;
   }
 
+  // The restricted schema the anonymous door serves (SPEC §12): the query + subscription
+  // fields of every REGISTERED schema the operator's surviving `loam:public` declarations
+  // open, and no Mutation type at all — a tokenless write is a validation impossibility, not
+  // a policed string. Read fresh from the live deltas each call (the open set is data, like
+  // trust) and cached by what actually shapes it, so one negation closes the door on the next
+  // request without rebuilding on every read.
+  private publicCache: { key: string; schema: GraphQLSchema } | undefined;
+  private publicSurface(): GraphQLSchema | undefined {
+    const open = readPublicSchemas(this.reactor, this.operatorAuthor);
+    if (open.size === 0) return undefined;
+    const defs = this.registered.filter((r) => open.has(r.schema.name));
+    if (defs.length === 0) return undefined; // declared but not (yet) registered: nothing binds
+    const key = defs.map((r) => Gateway.boundKey(r)).join(NUL);
+    if (this.publicCache?.key !== key) {
+      this.publicCache = { key, schema: buildGqlSchema(defs, this.gqlHooks(), "read") };
+    }
+    return this.publicCache.schema;
+  }
+
+  private publicSurfaceOrThrow(): GraphQLSchema {
+    const surface = this.publicSurface();
+    if (surface === undefined) {
+      throw new Error(
+        "nothing here is public: no surviving operator declaration at loam:public opens a schema",
+      );
+    }
+    return surface;
+  }
+
+  // Is there anything to serve a tokenless caller? The transport asks this to keep its
+  // refusals uniform — a mount with nothing public must answer exactly like no mount at all.
+  hasPublicSurface(): boolean {
+    return this.publicSurface() !== undefined;
+  }
+
+  // A tokenless query: the restricted surface, and NEVER an acting identity — there is no one
+  // to sign as, and nothing to sign with.
+  async queryPublic(source: string, variables?: Record<string, unknown>): Promise<QueryResult> {
+    const result = await graphql({
+      schema: this.publicSurfaceOrThrow(),
+      source,
+      ...(variables === undefined ? {} : { variableValues: variables }),
+    });
+    return {
+      ...(result.data === undefined ? {} : { data: result.data }),
+      ...(result.errors === undefined ? {} : { errors: result.errors.map((e) => e.message) }),
+    };
+  }
+
+  // A tokenless subscription over the same restricted surface.
+  async subscribePublic(
+    source: string,
+    variables?: Record<string, unknown>,
+  ): Promise<AsyncGenerator<Record<string, unknown>>> {
+    return this.subscribeVia(this.publicSurfaceOrThrow(), source, variables);
+  }
+
   async query(
     source: string,
     variables?: Record<string, unknown>,
@@ -1032,8 +1090,16 @@ export class Gateway {
     source: string,
     variables?: Record<string, unknown>,
   ): Promise<AsyncGenerator<Record<string, unknown>>> {
+    return this.subscribeVia(this.schemaOrThrow(), source, variables);
+  }
+
+  private async subscribeVia(
+    schema: GraphQLSchema,
+    source: string,
+    variables?: Record<string, unknown>,
+  ): Promise<AsyncGenerator<Record<string, unknown>>> {
     const result = await subscribe({
-      schema: this.schemaOrThrow(),
+      schema,
       document: parse(source),
       ...(variables === undefined ? {} : { variableValues: variables }),
     });
