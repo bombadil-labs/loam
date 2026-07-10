@@ -362,7 +362,7 @@ copy it to a USB stick — copying files between two archives *is* replication, 
 union and the id is the name. The CRDT is what keeps this honest: a lagging copy is merely
 behind, never wrong, so an unreachable archive never takes the store down (the lag is logged,
 loudly) and every serve heals the pair by two-way union before it boots. Which means restore
-after disaster is no procedure at all: delete the burned sqlite and serve again — the archive
+after disaster is no procedure at all: delete the lost sqlite and serve again — the archive
 replants it. Embedders get the same pieces as values: `MirrorBackend(primary, mirror)` and
 `ArchiveBackend(root)`.
 

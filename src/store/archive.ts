@@ -9,7 +9,7 @@
 //   - Writes are idempotent for free: the same delta is the same filename is the same bytes.
 //
 // Stray files are tolerated where humans leave them (the root, non-.json clutter in the fan) —
-// a README in the vault should not poison the vault. But a `.json` file inside the fan claims
+// a README in the vault should not spoil the vault. But a `.json` file inside the fan claims
 // to be a delta, and one that cannot be read back is corruption, never skipped. Refused, never
 // repaired extends to never OVERWRITING: a corrupt file squatting on an id's name makes a
 // re-append of the genuine delta a skip (the name exists), so the operator's move is to delete

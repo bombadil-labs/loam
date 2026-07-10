@@ -103,7 +103,7 @@ describe("MirrorBackend", () => {
   it("heal() is also the restore: a mirror's memory replants an empty primary", async () => {
     const vault = new MemoryBackend();
     await vault.append([d1, d2, d3]);
-    const fresh = new MemoryBackend(); // the primary burned down; this is its replacement
+    const fresh = new MemoryBackend(); // the primary was lost; this is its replacement
     const store = new MirrorBackend(fresh, vault);
     // before healing, reads answer from the primary alone — the mirror is a shadow, not a read path
     expect(await store.deltasSince(new Set())).toEqual([]);
@@ -146,7 +146,7 @@ describe("MirrorBackend", () => {
     expect(ids(await vault.deltasSince(new Set()))).toEqual(ids([d2]));
   });
 
-  it("heal(exclude) never resurrects the excluded: the fire in reverse", async () => {
+  it("heal(exclude) never resurrects the excluded: the crash in reverse", async () => {
     // The disaster shape: the vault still holds a delta the primary purged (the purge landed
     // while the vault lagged, or the vault is an old cold copy). An unguarded heal would
     // replant the very thing the operator erased.

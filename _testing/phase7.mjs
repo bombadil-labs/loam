@@ -88,11 +88,11 @@ try {
   const dossierHexBefore = (
     await gql(almanac.base, opToken("almanac"), `{ dossier(entity: "person:wren") { _hex } }`)
   ).body?.data?.dossier?._hex;
-  const hostileDef = signClaims(
+  const rivalDef = signClaims(
     publishSchemaClaims(byRole, "schema:Dossier", AUTHORS.mallory, now + 10_000_000),
     SEEDS.mallory,
   );
-  await almanac.gateway.federate([hostileDef]);
+  await almanac.gateway.federate([rivalDef]);
   await almanac.gateway.flush();
   await stores.almanac.close();
   stores.almanac = await openStore("almanac"); // the definitive test: a full replay
@@ -105,18 +105,18 @@ try {
   ).body?.data?.dossier?._hex;
   check(
     "7.2",
-    "a hostile definition at schema:Dossier (newer!) reshapes nothing, even across a restart",
+    "a rival definition at schema:Dossier (newer!) reshapes nothing, even across a restart",
     dossierHexBefore === dossierHexAfter,
     `${dossierHexBefore?.slice(0, 24)}… held`,
   );
 
   // 7.3 — a foreign negation of the commons' own Person definition
   const personDef = findDefinition(commons.gateway, "schema:Person");
-  const hostileNegation = signClaims(
+  const rivalNegation = signClaims(
     makeNegationClaims(AUTHORS.mallory, now + 10_000_001, personDef.id),
     SEEDS.mallory,
   );
-  await commons.gateway.federate([hostileNegation]);
+  await commons.gateway.federate([rivalNegation]);
   await commons.gateway.flush();
   await stores.commons.close();
   stores.commons = await openStore("commons");
@@ -132,10 +132,10 @@ try {
     JSON.stringify(wrenStill.body?.data?.person),
   );
 
-  // 7.4 — poison refused at the served door, and nothing persists
+  // 7.4 — a broken schema refused at the served door, and nothing persists
   const before = [...hive.gateway.reactor.snapshot()].length;
-  const poison = await registerHttp(hive.base, opToken("hive"), {
-    schema: { name: "Poison", alg: 1, body: { op: "mask", policy: "drop", in: "input" } },
+  const broken = await registerHttp(hive.base, opToken("hive"), {
+    schema: { name: "Broken", alg: 1, body: { op: "mask", policy: "drop", in: "input" } },
     policy: { default: { pick: { order: { byTimestamp: "desc" } } } },
     roots: ["colony:1"],
   });
@@ -143,10 +143,10 @@ try {
   check(
     "7.4",
     "an unmaterializable registration is 400 with a reason; the store is untouched",
-    poison.status === 400 &&
+    broken.status === 400 &&
       before === after &&
-      /hyperview/.test((poison.body?.errors ?? []).join(" ")),
-    `${poison.status}: ${(poison.body?.errors ?? []).join(" ").slice(0, 80)}`,
+      /hyperview/.test((broken.body?.errors ?? []).join(" ")),
+    `${broken.status}: ${(broken.body?.errors ?? []).join(" ").slice(0, 80)}`,
   );
 
   // 7.5 — final reconciliation: pull once more, then subsets + spot-checks + the record

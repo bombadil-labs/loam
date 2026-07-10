@@ -1,10 +1,10 @@
-// Phase 10 (PR #22) — THE FIRE: the almanac keeps a seed vault (an archive mirror); its
-// sqlite burns to the ground mid-story; the next open heals from the vault BEFORE the gateway
+// Phase 10 (PR #22) — THE CRASH: the almanac keeps a seed vault (an archive mirror); its
+// sqlite is lost mid-story; the next open heals from the vault BEFORE the gateway
 // reads, and the dossiers hold as if nothing happened. Cold storage is a combinator over the
 // seam: a lagging copy is merely behind, and restore is union.
 
 import { readdirSync } from "node:fs";
-import { burnStore, check, constitute, gql, openStore, opToken, summary, tok } from "./harness.mjs";
+import { dropStore, check, constitute, gql, openStore, opToken, summary, tok } from "./harness.mjs";
 
 const coldCount = (vault) =>
   readdirSync(vault, { recursive: true }).filter((f) => f.toString().endsWith(".json")).length;
@@ -34,12 +34,12 @@ try {
   const bioBefore = await wrenBio(almanac.base);
   await almanac.close();
 
-  // 10.2 — THE FIRE: the sqlite is gone entirely; the next open replants from the vault
-  burnStore("almanac");
+  // 10.2 — THE CRASH: the sqlite is gone entirely; the next open replants from the vault
+  dropStore("almanac");
   almanac = await openStore("almanac");
   check(
     "10.2",
-    "the burned store heals from the vault before the gateway reads",
+    "the recovered store heals from the vault before the gateway reads",
     almanac.healed.toPrimary === hot &&
       [...almanac.gateway.reactor.snapshot()].length === hot,
     `${almanac.healed.toPrimary} replanted`,
@@ -49,12 +49,12 @@ try {
   const bioAfter = await wrenBio(almanac.base);
   check(
     "10.3",
-    "Wren's dossier survives the fire word for word",
+    "Wren's dossier survives the crash word for word",
     bioBefore !== undefined && bioAfter === bioBefore,
     `bio: ${JSON.stringify(bioAfter)}`,
   );
 
-  // 10.4 — life continues: a post-fire write reaches store and vault alike
+  // 10.4 — life continues: a post-crash write reaches store and vault alike
   await gql(
     almanac.base,
     tok("wren", "almanac"),
@@ -63,11 +63,11 @@ try {
   const hotNow = [...almanac.gateway.reactor.snapshot()].length;
   check(
     "10.4",
-    "a post-fire write lands hot and cold in the same append",
+    "a post-crash write lands hot and cold in the same append",
     hotNow === hot + 1 && coldCount(almanac.vault) === hotNow,
     `${hotNow} hot, ${coldCount(almanac.vault)} cold`,
   );
 } finally {
   await almanac?.close().catch(() => {});
 }
-summary("phase 10 — the fire");
+summary("phase 10 — the crash");

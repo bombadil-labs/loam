@@ -366,7 +366,7 @@ its content.
 - **The purge.** A new, loud seam operation — `StoreBackend.purge(ids)` — a NAMED exception to
   grow-only, exactly as mirror-lag is a named exception to every-failure-rejects. Purge must
   reach every tier: the sqlite row, the mirror, the archive's fan file. **`heal()` must consult
-  tombstones and never resurrect a purged id** (the fire in reverse — this interaction is where
+  tombstones and never resurrect a purged id** (the crash in reverse — this interaction is where
   the bugs will hide; test it first).
 - **The door remembers the hole.** Admission (federate AND append) composes the tombstone set:
   a tombstoned id is refused re-entry forever — a hash-set check, cheap. Union normally lets

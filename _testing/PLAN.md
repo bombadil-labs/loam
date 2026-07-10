@@ -245,7 +245,7 @@ All four stores up, the pulse running, subscribers parked on the almanac. The sa
       (newer timestamp): the almanac's surface is unmoved, now and across a restart
 - [x] 7.3 Foreign negation: Mallory negates the commons' Person definition delta (federated
       in): binds nothing; the commons still serves Person after a full replay
-- [x] 7.4 A poisoned registration (canonical but unmaterializable body) is refused at POST
+- [x] 7.4 A broken registration (canonical but unmaterializable body) is refused at POST
       /register with a plain reason and NOTHING persists (delta count unchanged)
 - [x] 7.5 Final reconciliation: subsets hold; every store still answers its whole prior life;
       the record: commons 32, reel 100, hive 25 (24 offered), almanac 139
@@ -257,7 +257,7 @@ All four stores up, the pulse running, subscribers parked on the almanac. The sa
       at runtime with the almanac's own operator in its trust mask
 - [x] 8.2 The founding field-note bug, fixed where it was found: TrustedDossier now shows the
       trusted author's LATEST word against a newer forgery
-- [x] 8.3 The heckler's veto ends at the governed lens: Mallory STRIKES Wren's bio delta by
+- [x] 8.3 The heckler's veto ends at the governed lens: Mallory negates Wren's bio delta by
       federation — the plain Dossier forgets; GuardedDossier holds the words (and out-ranks the
       forgery: mask and order guard DIFFERENT attacks — erasure vs fabrication)
 - [x] The living village gains the strike act (forge → strike → Wren speaks again) and the
@@ -340,13 +340,13 @@ _(append-only, dated, newest last)_
      "screeningClassic" … Did you mean "screening"?` — the surface itself suggests the
      migration.
 
-## Phase 10 — the fire (PR #22: cold storage) — ✅ 4/4
+## Phase 10 — the crash (PR #22: cold storage) — ✅ 4/4
 
 The almanac keeps a seed vault: `MirrorBackend(SqliteBackend, ArchiveBackend)` in the harness,
 healed before every open. Checks: (10.1) the vault holds a cold copy of every delta the store
-holds — counted file-for-delta; (10.2) after burning the sqlite (+wal/shm), the reopen replants
+holds — counted file-for-delta; (10.2) after dropping the sqlite (+wal/shm), the reopen replants
 every delta from the vault BEFORE the gateway reads; (10.3) Wren's dossier answers the same bio
-word-for-word across the fire; (10.4) a post-fire write lands hot and cold in the same append.
+word-for-word across the crash; (10.4) a post-crash write lands hot and cold in the same append.
 Field note: restore restored Mallory's old forgery too — the vault is a store of record, not a
 lens; judgment stays read-side, even through disaster.
 
@@ -366,7 +366,7 @@ when a re-blessed recipe crashed attach.
 ## Phase 12 — the unsaying (SPEC §11: erasure) — ✅ 4/4, twice
 
 A villager erases her own words. Checks: (12.1) the regret federates in and tops the dossier
-(future-dated past Mallory's forgeries — the lived-in home fights back); (12.2) erase burns
+(future-dated past Mallory's forgeries — the lived-in home fights back); (12.2) erase clears
 the bytes, the dossier reverts, the signed hole remains; (12.3) sovereignty both ways — the
 commons still holds the original and offers it every pulse, the almanac's door refuses it
 (accepted 0, id not held); (12.4) the vault cannot replant the unsaid — heal is

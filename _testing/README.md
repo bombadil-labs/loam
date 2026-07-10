@@ -80,15 +80,15 @@ _(one entry per PR that grew the village; newest last)_
   pulse now ends with a translation pass, narrated in the event log. The arc's thesis,
   demonstrated: anyone may write, in any tongue — the reader decides everything, and
   understands more than it was told.
-- **PR #22 — cold storage: THE FIRE** (phase10.mjs, 4/4): the almanac now keeps a **seed
+- **PR #22 — cold storage: THE CRASH** (phase10.mjs, 4/4): the almanac now keeps a **seed
   vault** (`homes/almanac/vault` — an `ArchiveBackend` behind a `MirrorBackend`): every
   append lands hot and cold in one motion, one file per delta, named by its content address.
-  The living village gains the fire act (every 24th beat): the almanac's sqlite **burns to
-  the ground mid-story** — and the reopen heals from the vault before the gateway reads.
-  Watched live: `🔥 FIRE at the almanac — 187 deltas of hot store, burning to the ground` →
+  The living village gains the crash act (every 24th beat): the almanac's sqlite **is lost
+  mid-story** — and the reopen heals from the vault before the gateway reads.
+  Watched live: `💥 the almanac's disk fails — 187 deltas of hot store, gone in an instant` →
   `🌱 the seed vault replants the almanac — 187 deltas restored, every dossier intact`; the
   dossier watchers resubscribe, the pulse resumes, the dashboard barely blinks. Phase 10's
-  quiet perfection: the bio that survived the fire word-for-word was Mallory's old forgery —
+  quiet perfection: the bio that survived the crash word-for-word was Mallory's old forgery —
   the vault preserves *everything* and leaves judgment to the lenses, exactly as a store of
   record must.
 - **The mill — the village's first ANIMATE store** (phase11.mjs, 4/4 twice — re-runnable):
@@ -96,17 +96,17 @@ _(one entry per PR that grew the village; newest last)_
   ONE derived function (`fn:grind`); a new villager, **the miller**, attaches a Runner; and
   village life grinds into flour — a 🌾 `presence` line on every dossier card, derived,
   signed by the miller, superseding per villager (keyed emission), durable without the
-  runner. The fire act now REHANGS THE WHEEL after replanting (a Runner is process machinery,
+  runner. The crash act now REHANGS THE WHEEL after replanting (a Runner is process machinery,
   not ground). Verified live in the browser: three cards carrying moving flour, and the
   translated cinelog chips now show their provenance — `stalker ⇠ cinelog`. Found and fixed
   along the way: `readBindingDefinitions` now resolves latest-per-binding (a re-blessed
   recipe crashed attach with a duplicate install), and the reference emit-mode lesson —
   wholesale `supersede` erases OTHER roots' flour; per-subject output wants `keyed`.
 - **PR #36 — THE UNSAYING (erasure, SPEC §11)** (phase12.mjs, 4/4 twice): Wren speaks in
-  haste and **unsays it** — her own authority, her own words. The bytes burn on every tier
+  haste and **unsays it** — her own authority, her own words. The bytes are cleared from every tier
   (the vault's heal is tombstone-guarded on every path), the dossier reverts, the **signed
   hole** remains (who asked, when, which id — never what), and the door refuses the id's
   return even though the commons still holds the original and offers it back on every pulse
-  — sovereignty both ways, watched live: `🕳️ …and UNSAYS it — the bytes burn on every tier,
+  — sovereignty both ways, watched live: `🕳️ …and UNSAYS it — the bytes are cleared from every tier,
   the signed hole remains, and the door will refuse its return`. The erase re-seats the
-  almanac's reactor; the mill wheel is rehung after, like the fire.
+  almanac's reactor; the mill wheel is rehung after, like the crash.

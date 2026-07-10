@@ -81,7 +81,7 @@ export async function openStore(name) {
   const seed = readSeed(home);
   let backend = new SqliteBackend(join(home, "store.sqlite"));
   // A store with a vault mirrors every append into cold files and heals BEFORE the gateway
-  // reads — so a burned sqlite is replanted from the vault's memory (the fire act relies on it).
+  // reads — so a lost sqlite is replanted from the vault's memory (the crash act relies on it).
   const vault = cfg.archive ? join(home, "vault") : undefined;
   let healed = { toMirror: 0, toPrimary: 0 };
   if (vault !== undefined) {
@@ -122,8 +122,8 @@ export async function openStore(name) {
   };
 }
 
-// The fire: burn a store's sqlite to the ground (the vault, if any, is untouched).
-export function burnStore(name) {
+// The crash: drop a store's sqlite files (the vault, if any, is untouched).
+export function dropStore(name) {
   const home = homeOf(name);
   for (const f of ["store.sqlite", "store.sqlite-wal", "store.sqlite-shm"]) {
     rmSync(join(home, f), { force: true, maxRetries: 5, retryDelay: 100 });

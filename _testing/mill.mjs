@@ -58,7 +58,7 @@ export async function plantMill(store) {
 }
 
 // The miller attaches: the store becomes animate. Re-attach after any gateway rebirth (the
-// fire) — a Runner is process machinery, not ground; only its emissions persist.
+// crash) — a Runner is process machinery, not ground; only its emissions persist.
 //
 // FIRST, sweep stale flour. Supersession's ledger lives in the host's memory, per attach:
 // a PRIOR process's surviving emission is invisible to this one, and since every pure

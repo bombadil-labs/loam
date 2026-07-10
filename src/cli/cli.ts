@@ -94,7 +94,7 @@ async function cmdServe(
   const path = storePath(home, parsed.flags.get("store"));
 
   // The optional cold store (--archive, or `archive` in config.json): the sqlite primary gains
-  // an archive mirror, healed BEFORE boot — boot reads the backend once, so a burned sqlite is
+  // an archive mirror, healed BEFORE boot — boot reads the backend once, so a lost sqlite is
   // replanted from the archive's memory before the gateway ever looks. Lag is safe (union) but
   // never silent: it reaches the operator's log.
   const vault = archivePath(home, parsed.flags.get("archive"));

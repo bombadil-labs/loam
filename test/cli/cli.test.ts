@@ -136,7 +136,7 @@ describe("loam serve", () => {
     }
   });
 
-  it("an archive survives the fire: burn the sqlite, serve again, the store remembers", async () => {
+  it("an archive survives a crash: drop the sqlite, serve again, the store remembers", async () => {
     const vault = join(home, "vault");
     const first = await serveDetached([
       "--home",
@@ -159,7 +159,7 @@ describe("loam serve", () => {
     );
     expect(cold.length).toBe(before);
 
-    // THE FIRE — the hot store is gone entirely
+    // THE CRASH — the hot store is gone entirely
     for (const f of ["store.sqlite", "store.sqlite-wal", "store.sqlite-shm"]) {
       rmSync(join(home, f), { force: true, maxRetries: 5, retryDelay: 100 });
     }

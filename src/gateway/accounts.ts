@@ -190,7 +190,7 @@ export const TENANT_POLICY: Policy = {
 // Everything here answers under one discipline: in a governed store (an operator is named), a
 // constitutional delta — a grant, a membership, or a strike against one — is EFFECTIVE only if
 // its authority chain roots in the operator. The chain is timeless: it needs no arrival order,
-// only reachability, so a store poisoned while ungoverned (self-signed grants, hostile strikes)
+// only reachability, so a store compromised while ungoverned (self-signed grants, unauthorized strikes)
 // resolves to nothing the moment an operator opens it — a cycle of self-appointed admins roots
 // nowhere. Ungoverned stores skip the discipline entirely: no operator, no constitution.
 

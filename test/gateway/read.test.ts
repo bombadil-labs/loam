@@ -279,7 +279,7 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Policy)", () => {
     class FailingBackend extends MemoryBackend {
       failNow = false;
       override append(deltas: Iterable<Delta>): Promise<number> {
-        if (this.failNow) return Promise.reject(new Error("disk on fire"));
+        if (this.failNow) return Promise.reject(new Error("disk failure"));
         return super.append(deltas);
       }
     }
@@ -294,7 +294,7 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Policy)", () => {
     const failed = await gateway.query(
       `mutation { plant(entity: "${FERN}", height: 99) { height } }`,
     );
-    expect(failed.errors?.join(" ")).toMatch(/disk on fire/);
+    expect(failed.errors?.join(" ")).toMatch(/disk failure/);
     // the mutation that failed is NOT being served: no phantom state
     expect((await queryPlant(gateway)).height).toBe(before.height);
     expect((await queryPlant(gateway))._hex).toBe(before._hex);
