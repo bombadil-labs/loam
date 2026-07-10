@@ -234,7 +234,16 @@ function templateArgs(
   return args;
 }
 
-export function buildGqlSchema(defs: readonly Registered[], hooks: GqlHooks): GraphQLSchema {
+// `surface: "read"` builds the restricted schema the anonymous door serves: query +
+// subscription only, NO Mutation type at all. Structural, not policed — `hooks.mutate` with no
+// actor signs as the OPERATOR, so a write reachable anonymously would be an authority leak;
+// with no mutation root, a mutation operation is a validation impossibility, and introspection
+// honestly reveals a world in which writing does not exist.
+export function buildGqlSchema(
+  defs: readonly Registered[],
+  hooks: GqlHooks,
+  surface: "full" | "read" = "full",
+): GraphQLSchema {
   const queryFields: GraphQLFieldConfigMap<unknown, unknown> = {};
   const mutationFields: GraphQLFieldConfigMap<unknown, unknown> = {};
   const subscriptionFields: GraphQLFieldConfigMap<PatchNode, unknown> = {};
@@ -305,6 +314,18 @@ export function buildGqlSchema(defs: readonly Registered[], hooks: GqlHooks): Gr
       resolve: (_src, args: { entity: string }) => hooks.resolve(def.schema.name, args.entity),
     };
 
+    subscriptionFields[fieldName] = {
+      type: new GraphQLNonNull(patchType),
+      description: `Hold ${def.schema.name} live at an entity: a snapshot, then patches.`,
+      args: entityArg,
+      subscribe: (_src, args: { entity: string }) => hooks.watch(def.schema.name, args.entity),
+      resolve: (payload: PatchNode) => payload,
+    };
+
+    // The read surface stops here: no mutation fields are even built — the definitions below
+    // were already validated when the FULL surface bound (the read set is a subset of it).
+    if (surface === "read") continue;
+
     const propArgs: Record<string, { type: typeof PrimitiveValue }> = {};
     for (const [prop] of def.policy.props) propArgs[legal(prop)] = { type: PrimitiveValue };
     // The mutation namespace is shared between per-prop fields and TEMPLATE fields of every
@@ -331,14 +352,6 @@ export function buildGqlSchema(defs: readonly Registered[], hooks: GqlHooks): Gr
         }
         return hooks.mutate(def.schema.name, args["entity"] as string, props, actor);
       },
-    };
-
-    subscriptionFields[fieldName] = {
-      type: new GraphQLNonNull(patchType),
-      description: `Hold ${def.schema.name} live at an entity: a snapshot, then patches.`,
-      args: entityArg,
-      subscribe: (_src, args: { entity: string }) => hooks.watch(def.schema.name, args.entity),
-      resolve: (payload: PatchNode) => payload,
     };
 
     // The schema's declared write shapes: one mutation per template, one DELTA per call.
@@ -388,6 +401,13 @@ export function buildGqlSchema(defs: readonly Registered[], hooks: GqlHooks): Gr
         },
       };
     }
+  }
+
+  if (surface === "read") {
+    return new GraphQLSchema({
+      query: new GraphQLObjectType({ name: "Query", fields: queryFields }),
+      subscription: new GraphQLObjectType({ name: "Subscription", fields: subscriptionFields }),
+    });
   }
 
   // The generic claim: for shapes no template anticipated. Same signing, same standing.
