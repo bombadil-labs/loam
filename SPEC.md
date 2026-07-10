@@ -272,7 +272,7 @@ works (foreign grants, registrations, and definitions merge freely and bind noth
   deliverable, the driver is a one-file addition when a deploy needs it.)
 - **Federation** — rhizomatic's `Peer`/`syncBoth` over the authed HTTP surface + a "subscribe to
   instance X's published lens" declaration. `deltasSince` is one primitive at every scale.
-- **Trust is data (decided 2026-07-09, step 13 — queued).** What a store admits at federation is
+- **Trust is data (decided 2026-07-09; LANDED as step 13).** What a store admits at federation is
   CONFIGURATION, and configuration — like everything else — is a derived view over deltas that
   are always updating. An operator-authored **trust policy** lives in the store under
   `loam.trust`: a mode (`open` — the aggregator welcoming the whole network; `roster` — named
@@ -283,7 +283,7 @@ works (foreign grants, registrations, and definitions merge freely and bind noth
   eval-time negation masks awaits reflective predicates —
   [rhizomatic#2](https://github.com/bombadil-labs/rhizomatic/issues/2); admission is the
   application-layer half we can have today.)
-- **Divergent dialects are normalized, never mutated (decided 2026-07-09, step 14 — queued).**
+- **Divergent dialects are normalized, never mutated (decided 2026-07-09; LANDED as step 14).**
   There are no global standards; a peer's deltas may express the same ideas in another shape.
   The wrong moves are rejection (union is union) and mutation (nothing is ever edited). The
   right move is MORE DELTAS: a **translation** is data — an operator-blessed spec pairing a

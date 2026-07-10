@@ -34,6 +34,17 @@ export {
   type TrustPolicy,
 } from "./gateway/trust.js";
 export {
+  CTX_TRANSLATION,
+  parseEmitTemplate,
+  readTranslations,
+  translate,
+  translationClaims,
+  type EmitPointerTemplate,
+  type EmitTemplate,
+  type TranslateReport,
+  type Translation,
+} from "./federation/translate.js";
+export {
   assembleGenesis,
   operatorMarkerClaims,
   CTX_OPERATOR,

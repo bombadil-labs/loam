@@ -111,9 +111,48 @@ Checklist:
       shape, so the door must — invariant restored provably); ungoverned stores ignore trust
       declarations (no stranger lockout, pinned); closed-means-closed said deliberately;
       removal-by-negation + closed-reopen + bogus/duplicate-mode pins. 224/224, CI CLEAN
-- [ ] Village stage 7: Mallory's arc grows the door acts (roster declared → forgery bounces →
-      reopen); ledger updated — VERIFYING LIVE now ← **left off here**
-- [ ] Merge → JOURNAL → step 14
+- [x] Village stage 7: the door acts VERIFIED LIVE (roster declared → Mallory's forgery
+      bounced, accepted 0 → reopened by choice); ledger updated
+- [x] MERGED (PR #18) → journaled
+
+## Step 14 — Normalization (IN FLIGHT, branch `step-14-normalization`)
+
+Divergent dialects are normalized, never mutated (SPEC §8): a TRANSLATION is data — an
+operator-blessed spec pairing a recognizer with an emit template — executed by ONE generic
+translator running as a runner binding; emissions are canonical-dialect deltas signed by the
+translator, each CITING its source (`translates` delta-ref pointer). Originals immortal;
+re-translation is another pass; idempotent by content-address on source ids.
+
+Stage-1 decisions:
+
+- **Translation spec as data** at `translation:<name>` under context `loam.translation`,
+  operator-authored to bind (lawful reads, like bindings/registrations): pointers —
+  `defines` → entity(translation:<name>, loam.translation); `recognize` → JSON pred (the
+  0.2.0 `Pred` grammar over a candidate delta, evaluated with exported `evalPred`); `emit` →
+  JSON template: pointer skeleton whose holes bind from the RECOGNIZED delta
+  (`{"from": {"role": "<srcRole>", "part": "id"|"context"|"value"}}` plus literals), same
+  shape family as step-12 claim templates.
+- **The generic translator**: `readTranslations(reactor, operator)` + a `Translator.attach`
+  companion (mirrors Runner.attach) OR a DerivedFn factory installed via the existing runner —
+  DECIDE while implementing; simplest honest v1: `translate(gateway, {seed})` — a peer-client
+  pass that scans surviving deltas, applies each spec's recognizer (skipping deltas that ARE
+  translations or already have one citing them — idempotence by provenance query), emits
+  one delta per (spec, source) signed by the translator seed with the `translates` citation +
+  fixed timestamp = source's timestamp (determinism → content-addressed idempotence).
+- Tests first (test/federation/normalize.test.ts): a foreign-dialect delta (cinelog shape)
+  translated into the village dialect; the canonical view lights up; the original untouched;
+  provenance pointer resolves to the source id; re-running translates nothing twice; a
+  non-operator's spec binds nothing; recognizer misses don't emit; translator needs standing.
+- Village/gauntlet stage after merge: the FIFTH store (`cinelog`) with an alien dialect
+  federates into the open almanac; a translation spec normalizes; Wren's dossier gains a
+  stranger-recorded screening; PLAN.md's gauntlet checks run.
+
+Checklist:
+
+- [x] Stage 1: journal step 13; this plan
+- [ ] Tests first ← **left off here**
+- [ ] Implement: translate.ts (spec claims/read/apply + the pass), exports, README/SPEC touch
+- [ ] Gate → PR → review → resolve → merge → JOURNAL → village/gauntlet stage → arc close
 
 ## Step 14 — Normalization: divergent dialects, more deltas (queued; SPEC §8)
 
