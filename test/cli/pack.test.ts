@@ -11,8 +11,11 @@ describe("npm pack: the turnkey surface", () => {
       encoding: "utf8",
       shell: process.platform === "win32", // npm is a .cmd on windows
     });
-    const [manifest] = JSON.parse(raw) as Array<{ files: Array<{ path: string }> }>;
-    const paths = new Set(manifest!.files.map((f) => f.path));
+    type Manifest = { files: Array<{ path: string }> };
+    // npm <= 11 emits a one-element array; npm 12 emits the manifest object itself.
+    const parsed = JSON.parse(raw) as Manifest | [Manifest];
+    const manifest = Array.isArray(parsed) ? parsed[0] : parsed;
+    const paths = new Set(manifest.files.map((f) => f.path));
     expect(paths).toContain("dist/index.js");
     expect(paths).toContain("dist/index.d.ts");
     expect(paths).toContain("dist/cli/bin.js"); // the bin package.json points at
