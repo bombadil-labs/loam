@@ -46,6 +46,43 @@ node _testing/village.mjs  # the living village: all stores + pulse + simulator 
 there (resolution eliding the anchor pointer, `_hex` covering the whole view, the byAuthorRank
 tie surprise) drove real Loam and rhizomatic changes.
 
+## Growing a new store (demo item 7)
+
+`grow.mjs` bootstraps a new sovereign store into the running village — its own home and
+operator, a schema registered over HTTP, a scribe with write standing, optional seed facts,
+and an entry in `homes/peers.json`. The village's pulse re-reads that file every beat, so the
+almanac pulls the newcomer on its next beat and narrates first contact in the event log.
+
+```sh
+node _testing/grow.mjs sightings --port 4406 \
+  --schema _testing/schemas/sighting.json --claims sightings-facts.json
+```
+
+- **The schema file** is the same shape `gen-schemas.mjs` emits (see any `schemas/*.json`):
+  a `name` (UpperCamel, singular), the canonical gather body (copy it verbatim — only the
+  policy and roots vary store to store), a `policy` whose `props` name the GraphQL fields
+  (`pick` latest resolves to a value; `all` to a list), and `roots` — the entity ids held
+  live.
+- **The claims file** is triples, each becoming one signed delta from the store's scribe:
+  `[{ "at": "sighting:1", "context": "species", "value": "heron" }]`. Timestamps are fixed,
+  so re-running dedups by content address.
+- The grown store is sovereign like the founders: its own operator, its own law, its own
+  port (default 4406; pick the next free one for a second store). What the village renders
+  of it is the almanac's lens choice, like everything else — to surface a foreign vocabulary
+  in the dossiers, add a translation (the cinelog pattern in `village.mjs`).
+- `^C` stops the process; the data stays in its home, and the peers entry survives for the
+  next run.
+
+`phase16.mjs` drives this whole path headless (spawning `grow.mjs` as a child, as the demo
+does) and asserts the three claims — schema answers live, peers.json entry written, one pull
+lands the facts in the almanac. Run it like any phase: `node _testing/phase16.mjs`.
+
+**The `grow-a-store` skill** (`_testing/skills/grow-a-store/SKILL.md`) is a short pointer at
+this section — the recipe demo-Claude follows when asked to "build a store for X" mid-meeting.
+It lives here because it belongs to the demo; to make it an active Claude Code skill on a
+machine, copy `_testing/skills/grow-a-store/` into that repo's `.claude/skills/` (which is
+gitignored, so the active copy stays local while this canonical one ships).
+
 ## What it demonstrates — the ledger
 
 _(one entry per PR that grew the village; newest last)_
@@ -167,3 +204,13 @@ _(one entry per PR that grew the village; newest last)_
   arc can leave the almanac ROSTERED between runs, and the phase's first pull obeyed it —
   trust-as-data enforcing itself across process lifetimes; the phase now states its own
   posture (one `open` declaration) instead of inheriting the last drama's.
+- **GROW AN APP LIVE (demo item 7)** (phase16.mjs, 3/3): the confluence is open-ended now —
+  the pulse re-reads `homes/peers.json` every beat, and `grow.mjs` puts a whole new sovereign
+  store on the map in one command (see "Growing a new store" above). Watched live: `sightings`
+  grew on :4406 with its own operator, registered `Sighting` over its running surface, seeded
+  five facts from a triples file, and the village narrated first contact — `🌱 a new store
+  joins the confluence: sightings` — with the grey heron in the almanac's ground one beat
+  later. phase16 drives the same path headless — spawning `grow.mjs` as a child, exactly as
+  the demo does — and confirms the grown store answers its own `Grove` schema immediately,
+  registers itself in `homes/peers.json`, and one pull lands its facts in the almanac's
+  ground. Joining the village is running a command, not editing the village.
