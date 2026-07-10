@@ -256,8 +256,52 @@ const acts = [
         tok("wren", "commons"),
         `mutation { person(entity: "person:wren", bio: ${JSON.stringify(bio)}) { bio } }`,
       );
-      forgeryOut = false;
+      forgeryOut = "healing";
       tell(`🌿 Wren speaks again — new words outlive struck ones`, "patch");
+      return;
+    }
+    if (forgeryOut === "healing") {
+      // TRUST IS DATA (step 13): the almanac's operator declares a roster — the villagers, no
+      // one else. One delta; the very next federate obeys it.
+      const { trustClaims } = await import("../dist/index.js");
+      await almanac.gateway.append([
+        signClaims(
+          trustClaims(
+            "roster",
+            [AUTHORS.wren, AUTHORS.miles, AUTHORS.odile, AUTHORS.petra,
+             commons.operator, reel.operator, hive.operator],
+            almanac.operator,
+            Date.now(),
+          ),
+          almanac.seed,
+        ),
+      ]);
+      const bounced = signClaims(
+        {
+          timestamp: Date.now() + 8_000_000,
+          author: AUTHORS.mallory,
+          pointers: [
+            { role: "subject", target: { kind: "entity", entity: { id: "person:wren", context: "bio" } } },
+            { role: "value", target: { kind: "primitive", value: "raccoon, I insist" } },
+          ],
+        },
+        SEEDS.mallory,
+      );
+      const report = await almanac.gateway.federate([bounced]);
+      forgeryOut = "rostered";
+      tell(
+        `🚪 The almanac declares its roster — one delta, and Mallory's next forgery bounces at the door (accepted: ${report.accepted})`,
+        "patch",
+      );
+      return;
+    }
+    if (forgeryOut === "rostered") {
+      const { trustClaims } = await import("../dist/index.js");
+      await almanac.gateway.append([
+        signClaims(trustClaims("open", [], almanac.operator, Date.now()), almanac.seed),
+      ]);
+      forgeryOut = false;
+      tell(`🚪 The almanac opens its door again — an aggregator by choice, not by default`, "write");
       return;
     }
     if (forgeryOut === true) {

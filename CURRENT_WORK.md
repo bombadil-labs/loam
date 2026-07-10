@@ -57,15 +57,63 @@ Checklist:
 - [ ] PR → review (one agent, neutral register) → resolve → merge → JOURNAL → step 13
       ← **left off here**
 
-## Step 13 — Trust is data (queued; SPEC §8)
+## Substrate adoption — rhizomatic 0.2.0 (PR #17, checks running, merge imminent)
 
-1. `loam.trust` policy: operator-authored mode (`open` | `roster` | `closed`) + optional shape
-   requirements; resolved as a live view (constitutional read, operator-filtered).
-2. `pullFrom`/gateway build `admit` from the RESOLVED policy per pull — roster edits are deltas;
-   the next pulse obeys them. No restart, no config file.
-3. Aggregator mode: `open` admits every verified delta (the hackernews scenario); `roster`
-   admits named authors; shape requirements compose with either.
-4. Surfaced in `serve`/CLI so a turnkey aggregator is `loam init` + one trust delta + `serve`.
+0.2.0 published and adopted: fully additive (207/207 untouched), then `governedGatherBody` +
+`tenantSchemaFor` (inView trusted sets — stranger strikes inert, community strikes bind,
+revocation un-binds LIVE) and chain-order trusted-then-latest, all pinned (212 tests + village
+phase 8, 3/3, watched live on the dashboard: three lenses disagreeing over one ground).
+Review resolved EMPIRICALLY — the reviewer's depth-1 claim was wrong one way, our docs wrong
+the other; the failing pin taught the truth (lenses reach ONE link: operator-minted admins
+move lens+door together; chain-minted standing moves the door alone). The LOOP GREW STAGE 7
+(Myk): every step now extends the village (`_testing/` is tracked; `_testing/README.md` keeps
+the demonstration ledger; homes/ stays disposable). NOTE: repo now has a `green-gate` CI on
+PRs (ubuntu+windows).
+
+## Step 13 — Trust is data (IN FLIGHT, branch `step-13-prep`)
+
+What a store admits at federation is a live view over its own deltas — and with 0.2.0 adopted,
+the SAME roster can reach eval-side masks (`inView` at `loam:trust`), one source of truth for
+admission and resolution alike.
+
+Stage-1 decisions (carried from the earlier opening, upgraded post-0.2.0):
+
+- **The trust policy lives at `loam:trust` under context `loam.trust`**, operator-authored to
+  bind (lawful reads): one delta shape, latest-lawful-wins — `declares` → entity(loam:trust,
+  loam.trust); `mode` → "open" | "roster" | "closed"; repeatable `admit-author` primitives for
+  roster mode. Helpers: `trustClaims(mode, authors, author, ts)` + `readTrustPolicy(reactor,
+  operator) → { mode, roster }`. **Default when no policy survives: `open`** (union is the
+  substrate's nature; the operator narrows deliberately). Document.
+- **`Gateway.admitFor(): (d: Delta) => boolean`** re-resolves the policy per call; `pullFrom`
+  and `federate` use it when no explicit `admit` is given (explicit override wins — existing
+  tests keep passing).
+- **0.2.0 bonus**: a `trustRosterPred()` builder so schema bodies/policies can reference the
+  SAME roster via `inView` at `loam:trust` (extract role of the admit-author pointers) —
+  admission and read lenses share one live source of truth.
+- Tests first (test/federation/trust.test.ts): default open; roster admits only listed
+  authors (delta accounting proves it); closed admits nothing; ONE roster delta flips the next
+  pull (live-ness); explicit admit override wins; roster + negation compose (a stranger's
+  strike refused at the door); the inView-roster lens reads the same set.
+- Village stage 7 (after merge): the almanac gets a trust-policy delta; the dashboard shows
+  the roster; an act flips the mode mid-run and the pulse obeys — groundwork for the gauntlet's
+  cinelog stranger.
+
+Checklist:
+
+- [x] Stage 1: plan (this section); journal folded (step 12 + adoption entries in order)
+- [x] Tests first: test/federation/trust.test.ts — default-open, roster admission with delta
+      accounting, closed, one-delta live flip, override precedence, stranger's strike refused
+      at door, foreign declarations inert, roster-lens one-source-of-truth
+- [x] Implement: trust.ts (trustClaims / trustDefect / readTrustPolicy / trustRosterPred),
+      gateway.admitFor + federate default, pullFrom docs, exports, README federation section
+- [x] Gate 221/221 → PR [#18](https://github.com/bombadil-labs/loam/pull/18) → review
+      resolved: malformed declarations are MALFORMED LAW at append (the lens can't validate
+      shape, so the door must — invariant restored provably); ungoverned stores ignore trust
+      declarations (no stranger lockout, pinned); closed-means-closed said deliberately;
+      removal-by-negation + closed-reopen + bogus/duplicate-mode pins. 224/224, CI CLEAN
+- [ ] Village stage 7: Mallory's arc grows the door acts (roster declared → forgery bounces →
+      reopen); ledger updated — VERIFYING LIVE now ← **left off here**
+- [ ] Merge → JOURNAL → step 14
 
 ## Step 14 — Normalization: divergent dialects, more deltas (queued; SPEC §8)
 

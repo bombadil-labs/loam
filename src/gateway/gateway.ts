@@ -57,6 +57,7 @@ import {
   type ClaimTemplates,
   type Registration,
 } from "./registration.js";
+import { readTrustPolicy } from "./trust.js";
 
 export interface AppendReceipt {
   readonly accepted: number;
@@ -583,6 +584,18 @@ export class Gateway {
   // constitution completely — a peer could then federate effective grants and code. Give every
   // instance its own operator identity.
 
+  // The admission function the store's own TRUST POLICY dictates, resolved fresh from the
+  // live deltas at loam:trust each call (trust is data — see trust.ts): open admits every
+  // verified delta, roster admits the operator and the named authors, closed admits nothing.
+  // `federate` and `pullFrom` use this when no explicit admit is given; an explicit predicate
+  // always wins.
+  admitFor(): (d: Delta) => boolean {
+    const policy = readTrustPolicy(this.reactor, this.operatorAuthor);
+    if (policy.mode === "open") return () => true;
+    if (policy.mode === "closed") return () => false;
+    return (d) => d.claims.author === this.operatorAuthor || policy.roster.has(d.claims.author);
+  }
+
   // The surviving deltas this store offers a peer — everything, or what the offered lens selects.
   offeredDeltas(): Delta[] {
     const lens = this.options.offeredLens;
@@ -603,7 +616,7 @@ export class Gateway {
       throw new Error(`this gateway can no longer persist: ${this.writeFailure.message}`);
     }
     const all = [...deltas];
-    const admit = opts.admit ?? (() => true);
+    const admit = opts.admit ?? this.admitFor(); // the store's trust policy, unless overridden
     const admitted: Delta[] = [];
     let rejected = 0;
     for (const d of all) {

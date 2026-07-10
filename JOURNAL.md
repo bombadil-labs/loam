@@ -514,3 +514,68 @@ Learnings worth keeping:
   inert against the constitution, a data-mask hazard inside the documented interim. And
   per-tenant admin chains still mint effective community-vocabulary grants while strikes need
   store standing — an asymmetry noted in SPEC §7, to revisit with trust-is-data (step 13).
+
+## 2026-07-09 — Step 12: Writes become claims (PR #15)
+
+The schema became a PROTOCOL: claim templates — pointer skeletons with argument holes — travel
+in the registration delta beside the read program, and each becomes a GraphQL mutation emitting
+exactly ONE signed multi-pointer delta (a hosted screening: host, film, guests, date — one fact
+filing into four entities' views). The generic `_claim` covers unanticipated shapes; `POST
+/:mount/append` is the non-custodial door (the token authenticates transport; each delta is
+authorized by its own verified author's standing); `_hviewHex` rides beside `_hex` — the
+evidence and the answer, separately addressable. 207/207.
+
+Learnings worth keeping:
+
+- **"Loud on publish, quiet on replay" is a CONTRACT, and the loud side must cover everything
+  the quiet side will trip on.** The review's sharpest find: an unvalidated argument name
+  persisted cleanly, then failed inside replay's buildGqlSchema, where the templateless
+  fallback bound the schema minus its mutation — publish reported success for a mutation that
+  didn't exist. The fix is structural: the publish trial now runs the FULL bind (registry,
+  materializability, template visibility, GraphQL build) before anything lands.
+- **A trial specimen must impersonate faithfully.** The visibility check's specimen was
+  authored "loam:specimen" — so any governed-store body with an author lens refused honest
+  templates. The specimen now signs as the operator; the residual infidelities (exotic value
+  or timestamp predicates) are documented rather than pretended away.
+- **Resolution elides the anchor.** At Wren's root, the five-pointer screening delta resolves
+  as the event FROM HER PERSPECTIVE — host, film, the OTHER guest, the date; her own anchoring
+  pointer dropped. Nobody designed that view; the substrate's resolution rules produced
+  exactly what a human would want. Field-test finds like this are why the village exists.
+- **Shared namespaces need symmetric guards** — the mutation root is fed by per-prop fields
+  AND templates from every schema; a collision check that only guards one insertion order is
+  half a check.
+- Raw append grants the library's full power over HTTP (own timestamps, delta-refs,
+  negations) — that is the POINT (non-custodial parity), and it is now stated plainly in the
+  code rather than discovered by surprise.
+
+## 2026-07-09 — Substrate adoption: rhizomatic 0.2.0 (PR #17)
+
+The substrate came back with both asks — `chain` orders (rhizomatic#1) and `inView`
+reflective predicates (rhizomatic#2) — and the whole gate ran green on 0.2.0 before a single
+Loam line changed. What Loam grew on it: `governedGatherBody(operator)` (a gather whose
+negation mask trusts the operator + the operator's grantees, resolved as a LIVE view over the
+grant deltas — stranger strikes inert, community strikes bind, revocation un-binds on the next
+read) and `tenantSchemaFor(operator)` (the audit view under the standing discipline). The
+founding village field-note bug — TrustedDossier showing an OLD bio on rank ties — is fixed
+where it was found, by the substrate change it motivated. 212 tests; village phase 8 (3/3);
+the dashboard now shows three lenses disagreeing over one ground, live.
+
+Learnings worth keeping:
+
+- **Run the pin before writing the prose.** The review claimed (probe-and-all) that an
+  operator-minted admin's revocation diverges lens from door; the test we wrote to pin that
+  FAILED — the admin is a subject of an operator-authored grant, so she IS in the trusted set.
+  The reviewer was wrong one way, our first docs wrong the other; the truth (lenses reach ONE
+  link; divergence begins at chain-minted standing) came from the red test. Empiricism over
+  authority, including the reviewer's and ours.
+- **Mask and order guard DIFFERENT attacks.** The trust mask stops ERASURE (a strike on the
+  record); the chain order stops FABRICATION (a newer forgery). The village made this vivid:
+  plain Dossier believed the raccoon; TrustedDossier resisted the forgery but lost the struck
+  bio; GuardedDossier (mask + chain) held through both. A dossier wants belt AND braces
+  because they are different garments.
+- **Constitutional shape rules must be total**: duplicate subject/verb pointers read
+  differently in enforcement (last wins), validation (first checked), and inView extraction
+  (all match) — now malformed law, refused for everyone.
+- **The loop grew stage 7** (Myk): the village is a LIVING demonstration — tracked, documented
+  (`_testing/README.md` with a per-PR ledger), extended with every step, homes disposable.
+  Its dashboard catching the three-lens divergence in real time is worth a hundred assertions.

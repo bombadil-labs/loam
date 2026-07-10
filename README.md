@@ -311,6 +311,22 @@ import { pullFrom } from "@bombadil/loam";
 await pullFrom(localGateway, "https://peer.example/default", peerOperatorToken);
 ```
 
+**What a store admits is data.** One operator-signed declaration at `loam:trust` sets the
+door's posture — `open` (admit everything that verifies; the default, and the aggregator's
+stance), `roster` (the operator plus named authors), or `closed`. `pullFrom` and `federate`
+resolve the policy **live from the store's own deltas on every pull**: a roster edit is a
+delta, the next pulse obeys it, and the history of who was trusted when is a query. A fresh
+declaration only _adds_ to the roster; removal is negation — strike the declaration that
+admitted them. The same roster reaches read-time masks via `trustRosterPred(operator)` (an
+`inView` over the very same declaration deltas), so admission and resolution share one source
+of truth. An explicit `admit` predicate always overrides.
+
+```ts
+import { trustClaims } from "@bombadil/loam";
+// the aggregator turns selective with one delta:
+await gateway.append([signClaims(trustClaims("roster", [alice, bob], operator, ts), seed)]);
+```
+
 A store publishes everything, or what its `offeredLens` (a term) selects. **Federation is union,
 not a governed write:** a peer's deltas cross by signature verification alone, and whether they
 shape a local view is a read-time trust choice (a policy's `byAuthorRank`) — never a write denial.
