@@ -57,6 +57,19 @@ Checklist:
 - [ ] PR → review (one agent, neutral register) → resolve → merge → JOURNAL → step 13
       ← **left off here**
 
+## Substrate adoption — rhizomatic 0.2.0 (PR #17, checks running, merge imminent)
+
+0.2.0 published and adopted: fully additive (207/207 untouched), then `governedGatherBody` +
+`tenantSchemaFor` (inView trusted sets — stranger strikes inert, community strikes bind,
+revocation un-binds LIVE) and chain-order trusted-then-latest, all pinned (212 tests + village
+phase 8, 3/3, watched live on the dashboard: three lenses disagreeing over one ground).
+Review resolved EMPIRICALLY — the reviewer's depth-1 claim was wrong one way, our docs wrong
+the other; the failing pin taught the truth (lenses reach ONE link: operator-minted admins
+move lens+door together; chain-minted standing moves the door alone). The LOOP GREW STAGE 7
+(Myk): every step now extends the village (`_testing/` is tracked; `_testing/README.md` keeps
+the demonstration ledger; homes/ stays disposable). NOTE: repo now has a `green-gate` CI on
+PRs (ubuntu+windows).
+
 ## Step 13 — Trust is data (queued; SPEC §8)
 
 1. `loam.trust` policy: operator-authored mode (`open` | `roster` | `closed`) + optional shape
