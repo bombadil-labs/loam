@@ -12,7 +12,8 @@ const DEFAULT_MAX_OFFER = 64 * 1024 * 1024; // a peer's offer, capped so it cann
 
 export interface PullOptions {
   // What this puller admits from the peer beyond signature verification — a trust boundary
-  // (e.g. only deltas from known authors). Default: admit everything that verifies.
+  // (e.g. only deltas from known authors). Default: the puller's OWN trust policy, resolved
+  // live from its deltas at loam:trust (open when none declared) — see gateway.admitFor().
   readonly admit?: (d: Delta) => boolean;
   readonly maxBytes?: number; // cap on the offer body (default 64 MiB)
   readonly fetch?: typeof fetch; // injectable for tests
@@ -68,5 +69,6 @@ export async function pullFrom(
       // A delta that will not reconstruct is dropped here; `federate` counts what it admits.
     }
   }
+  // No explicit admit → federate resolves the local trust policy itself (fresh per call).
   return local.federate(deltas, opts.admit === undefined ? {} : { admit: opts.admit });
 }

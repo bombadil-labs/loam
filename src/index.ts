@@ -25,6 +25,15 @@ export {
 export { pullFrom, type PullOptions } from "./federation/pull.js";
 export { toWire, fromWire, type WireDelta } from "./federation/wire.js";
 export {
+  CTX_TRUST,
+  TRUST_ENTITY,
+  readTrustPolicy,
+  trustClaims,
+  trustRosterPred,
+  type TrustMode,
+  type TrustPolicy,
+} from "./gateway/trust.js";
+export {
   assembleGenesis,
   operatorMarkerClaims,
   CTX_OPERATOR,
