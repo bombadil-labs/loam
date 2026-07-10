@@ -22,7 +22,12 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { parsePolicy, parseTerm, type Delta, type HyperSchema } from "@bombadil/rhizomatic";
 import { fromWire, toWire, type WireDelta } from "../federation/wire.js";
-import type { Gateway, QueryResult, RequestContext } from "../gateway/gateway.js";
+import {
+  NothingPublic,
+  type Gateway,
+  type QueryResult,
+  type RequestContext,
+} from "../gateway/gateway.js";
 import {
   parseClaimTemplates,
   schemaEntityFor,
@@ -41,10 +46,12 @@ export interface ServeOptions {
   readonly host?: string; // default 127.0.0.1
   readonly maxBodyBytes?: number; // reject a request body larger than this (default 4 MiB)
   readonly maxStreams?: number; // refuse a new SSE stream past this many live (default 1024)
+  readonly maxPublicStreams?: number; // the anonymous door's own smaller stream budget (default 256)
 }
 
 const DEFAULT_MAX_BODY = 4 * 1024 * 1024;
 const DEFAULT_MAX_STREAMS = 1024;
+const DEFAULT_MAX_PUBLIC_STREAMS = 256;
 
 export interface ServerHandle {
   readonly server: Server;
@@ -212,18 +219,31 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       return;
     }
     // A gateway failure (nothing registered, an internal throw) is the caller's structured
-    // { errors }, not a 500 leaking an internal message.
+    // { errors }, not a 500 leaking an internal message. The one exception: a public surface
+    // gone between the transport's check and this execution (a revocation landing in the
+    // window) folds back into the SAME uniform refusal every closed door answers with.
     let result: QueryResult;
     try {
       result = await run(parsed.query, parsed.variables);
     } catch (err) {
+      if (err instanceof NothingPublic) {
+        refused(res);
+        return;
+      }
       result = { errors: [err instanceof Error ? err.message : "the gateway could not answer"] };
     }
     json(res, 200, result);
   };
 
+  // Live anonymous streams, counted apart: the public door's budget is its own, smaller one,
+  // so a stranger holding streams open exhausts the stranger's allowance and never the
+  // authenticated surface's.
+  let publicStreams = 0;
+  const maxPublicStreams = options.maxPublicStreams ?? DEFAULT_MAX_PUBLIC_STREAMS;
+
   const handleSubscribe = async (
     open: (source: string) => Promise<AsyncGenerator<Record<string, unknown>>>,
+    door: "token" | "public",
     req: IncomingMessage,
     res: ServerResponse,
     search: URLSearchParams,
@@ -233,7 +253,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       json(res, 400, { errors: ["subscribe wants ?query=<subscription>"] });
       return;
     }
-    if (streams.size >= maxStreams) {
+    if (streams.size >= maxStreams || (door === "public" && publicStreams >= maxPublicStreams)) {
       json(res, 503, { errors: ["this server is holding all the live streams it can"] });
       return;
     }
@@ -241,6 +261,10 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     try {
       events = await open(source);
     } catch (err) {
+      if (err instanceof NothingPublic) {
+        refused(res);
+        return;
+      }
       json(res, 400, { errors: [err instanceof Error ? err.message : "not a subscription"] });
       return;
     }
@@ -252,6 +276,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     });
     const stream = { events, res };
     streams.add(stream);
+    if (door === "public") publicStreams += 1;
     req.on("close", () => {
       void events.return(undefined);
     });
@@ -264,6 +289,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       const message = err instanceof Error ? err.message : "the stream failed";
       res.write(`event: error\ndata: ${JSON.stringify({ message })}\n\n`);
     } finally {
+      if (door === "public") publicStreams -= 1;
       streams.delete(stream);
       res.end();
     }
@@ -450,8 +476,14 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       }
       const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
       const [, mountName, verb] = url.pathname.split("/");
-      const gateway =
-        mountName === undefined ? undefined : mounts.get(decodeURIComponent(mountName));
+      // A malformed percent-escape resolves no mount — it must fall into the same uniform
+      // refusal as any other unresolvable name, never a 500 that marks the input special.
+      let gateway: Gateway | undefined;
+      try {
+        gateway = mountName === undefined ? undefined : mounts.get(decodeURIComponent(mountName));
+      } catch {
+        gateway = undefined;
+      }
       const identity = identify(req);
       if (identity === undefined) {
         // A presented-but-wrong token is refused outright — bad credentials never downgrade
@@ -472,7 +504,13 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             await handleGraphql((s, v) => gateway.queryPublic(s, v), req, res);
             return;
           case "subscribe":
-            await handleSubscribe((s) => gateway.subscribePublic(s), req, res, url.searchParams);
+            await handleSubscribe(
+              (s) => gateway.subscribePublic(s),
+              "public",
+              req,
+              res,
+              url.searchParams,
+            );
             return;
           default:
             refused(res);
@@ -488,7 +526,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           await handleGraphql((s, v) => gateway.query(s, v, contextFor(identity)), req, res);
           return;
         case "subscribe":
-          await handleSubscribe((s) => gateway.subscribe(s), req, res, url.searchParams);
+          await handleSubscribe((s) => gateway.subscribe(s), "token", req, res, url.searchParams);
           return;
         case "mcp":
           await handleMcp(gateway, identity, req, res);

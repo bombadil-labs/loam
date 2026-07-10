@@ -83,10 +83,13 @@ export function readPublicSchemas(reactor: Reactor, operator?: string): Readonly
     );
     if (!declares || negated(delta.id)) continue;
     for (const p of delta.claims.pointers) {
+      // The same shape the door enforces (publicDefect): non-empty strings only, so a
+      // declaration that slipped past a door somewhere still reads exactly as the law says.
       if (
         p.role === "schema" &&
         p.target.kind === "primitive" &&
-        typeof p.target.value === "string"
+        typeof p.target.value === "string" &&
+        p.target.value !== ""
       ) {
         open.add(p.target.value);
       }

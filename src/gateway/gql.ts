@@ -314,6 +314,18 @@ export function buildGqlSchema(
       resolve: (_src, args: { entity: string }) => hooks.resolve(def.schema.name, args.entity),
     };
 
+    subscriptionFields[fieldName] = {
+      type: new GraphQLNonNull(patchType),
+      description: `Hold ${def.schema.name} live at an entity: a snapshot, then patches.`,
+      args: entityArg,
+      subscribe: (_src, args: { entity: string }) => hooks.watch(def.schema.name, args.entity),
+      resolve: (payload: PatchNode) => payload,
+    };
+
+    // The read surface stops here: no mutation fields are even built — the definitions below
+    // were already validated when the FULL surface bound (the read set is a subset of it).
+    if (surface === "read") continue;
+
     const propArgs: Record<string, { type: typeof PrimitiveValue }> = {};
     for (const [prop] of def.policy.props) propArgs[legal(prop)] = { type: PrimitiveValue };
     // The mutation namespace is shared between per-prop fields and TEMPLATE fields of every
@@ -340,14 +352,6 @@ export function buildGqlSchema(
         }
         return hooks.mutate(def.schema.name, args["entity"] as string, props, actor);
       },
-    };
-
-    subscriptionFields[fieldName] = {
-      type: new GraphQLNonNull(patchType),
-      description: `Hold ${def.schema.name} live at an entity: a snapshot, then patches.`,
-      args: entityArg,
-      subscribe: (_src, args: { entity: string }) => hooks.watch(def.schema.name, args.entity),
-      resolve: (payload: PatchNode) => payload,
     };
 
     // The schema's declared write shapes: one mutation per template, one DELTA per call.
@@ -399,6 +403,13 @@ export function buildGqlSchema(
     }
   }
 
+  if (surface === "read") {
+    return new GraphQLSchema({
+      query: new GraphQLObjectType({ name: "Query", fields: queryFields }),
+      subscription: new GraphQLObjectType({ name: "Subscription", fields: subscriptionFields }),
+    });
+  }
+
   // The generic claim: for shapes no template anticipated. Same signing, same standing.
   if (Object.hasOwn(mutationFields, "_claim")) {
     throw new Error(`a schema's mutation field collides with the built-in "_claim"`);
@@ -421,9 +432,7 @@ export function buildGqlSchema(
 
   return new GraphQLSchema({
     query: new GraphQLObjectType({ name: "Query", fields: queryFields }),
-    ...(surface === "read"
-      ? {}
-      : { mutation: new GraphQLObjectType({ name: "Mutation", fields: mutationFields }) }),
+    mutation: new GraphQLObjectType({ name: "Mutation", fields: mutationFields }),
     subscription: new GraphQLObjectType({ name: "Subscription", fields: subscriptionFields }),
   });
 }

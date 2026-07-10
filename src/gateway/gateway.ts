@@ -49,7 +49,7 @@ import {
   type PatchNode,
   type ResolvedNode,
 } from "./gql.js";
-import { readPublicSchemas } from "./public.js";
+import { publicDefect, readPublicSchemas } from "./public.js";
 import {
   lawfulSnapshot,
   parseClaimTemplates,
@@ -80,6 +80,10 @@ export interface GatewayOptions {
   // may see. Default: everything. Trust is the peer's read lens, not this gateway's to decide;
   // the offered lens is only what this store is willing to publish.
   readonly offeredLens?: Term;
+  // How many UNREGISTERED entities the public door may hold live (lazy materializations first
+  // created by tokenless subscriptions). A separate, smaller budget than MAX_LAZY_MATS, so a
+  // stranger can exhaust the stranger's allowance and never the authenticated surface's.
+  readonly maxPublicWatches?: number;
 }
 
 export interface FederationReport {
@@ -95,6 +99,17 @@ export interface RequestContext {
 }
 
 const toError = (e: unknown): Error => (e instanceof Error ? e : new Error(String(e)));
+
+// The typed refusal for a tokenless request where no public surface stands — the transport
+// matches on the CLASS (not a message) to keep its anonymous refusals uniform, even when a
+// revocation lands between its check and the execution.
+export class NothingPublic extends Error {
+  constructor() {
+    super(
+      "nothing here is public: no surviving operator declaration at loam:public opens a schema",
+    );
+  }
+}
 
 // The gateway's own alphabet: NUL separates the segments of internal materialization names and
 // comparison keys, and register() refuses it in schema names, so nothing user-supplied collides.
@@ -174,6 +189,9 @@ export class Gateway {
   // reactor: at construction, and again by reseat() after an erase.)
   private attachPersistence(reactor: Reactor): void {
     reactor.subscribeRaw((d) => {
+      // Any accepted delta may move the open set (a declaration, a negation) — drop the
+      // cached read; the next tokenless request recomputes. Once per WRITE, not per read.
+      this.publicOpen = undefined;
       if (this.justPersisted.delete(d.id)) return;
       this.writes = this.writes
         .then(() => this.backend.append([d]))
@@ -217,11 +235,13 @@ export class Gateway {
   }
 
   // The seams gql.ts resolves through — one object, shared by every (re)build of the surface.
-  private gqlHooks(): GqlHooks {
+  // The door rides the watch hook: lazy materializations first created through the public
+  // surface draw on their own, smaller budget (see matFor).
+  private gqlHooks(door: "full" | "public" = "full"): GqlHooks {
     return {
       resolve: (name, entity) => this.resolvedNode(name, entity),
       mutate: (name, entity, props, actorSeed) => this.mutateEntity(name, entity, props, actorSeed),
-      watch: (name, entity) => this.watchEntity(name, entity),
+      watch: (name, entity) => this.watchEntity(name, entity, door),
       claim: (pointers, actorSeed) => this.claimEntity(pointers, actorSeed),
     };
   }
@@ -400,6 +420,7 @@ export class Gateway {
       this.reactor.register(this.matName(reg.schema.name), reg.schema.body, reg.roots, registry);
     }
     this.lazyMats.clear(); // generation-stale by construction — new watches re-create their own
+    this.publicLazyMats.clear();
     this.registered = next;
     this.registry = registry;
     this.gql = gql;
@@ -650,6 +671,8 @@ export class Gateway {
     for (const channel of [...this.channels]) await channel.return();
     this.sinks.clear();
     this.lazyMats.clear();
+    this.publicLazyMats.clear();
+    this.publicOpen = undefined; // the ground changed out from under the cached read
     const reactor = new Reactor();
     for (const d of await this.backend.deltasSince(new Set())) {
       if (reactor.ingest(d).status === "rejected") {
@@ -719,11 +742,15 @@ export class Gateway {
     for (const d of all) {
       // A tombstone is a removal-order, not an inert claim — so it faces the same validator at
       // this door as at the append door (eraseDefect), and an unauthorized or malformed one is
-      // refused rather than stored. Everything the readers trust downstream passed a door here.
+      // refused rather than stored. Likewise a public-read declaration: it OPENS a door, so a
+      // malformed one is refused here exactly as at append (publicDefect) — the two doors must
+      // not disagree about what lawful loam:public data is. Everything the readers trust
+      // downstream passed a door here.
       if (
         computeId(d.claims) !== d.id ||
         verifyDelta(d) !== "verified" ||
         dead.has(d.id) ||
+        publicDefect(d.claims) !== undefined ||
         (isTombstone(d.claims) &&
           eraseDefect(d, this.reactor, this.operatorAuthor) !== undefined) ||
         !admit(d)
@@ -793,8 +820,13 @@ export class Gateway {
   }
 
   private static readonly MAX_LAZY_MATS = 1024;
+  private static readonly DEFAULT_MAX_PUBLIC_WATCHES = 256;
+  // Lazy materializations FIRST created through the public door — a stranger's subscriptions
+  // draw on this smaller budget, so exhausting it degrades only the stranger's own door,
+  // never the authenticated surface. Cleared wherever lazyMats is.
+  private readonly publicLazyMats = new Set<string>();
 
-  private matFor(name: string, entity: string): string {
+  private matFor(name: string, entity: string, door: "full" | "public" = "full"): string {
     const def = this.def(name);
     if (def.roots.includes(entity)) return this.matName(name);
     const matName = this.lazyMatName(name, entity);
@@ -807,6 +839,16 @@ export class Gateway {
           `this gateway already watches ${Gateway.MAX_LAZY_MATS} unregistered entities — ` +
             `register the roots you mean to hold live`,
         );
+      }
+      if (door === "public") {
+        const cap = this.options.maxPublicWatches ?? Gateway.DEFAULT_MAX_PUBLIC_WATCHES;
+        if (this.publicLazyMats.size >= cap) {
+          throw new Error(
+            `the public door already holds ${cap} unregistered entities live — ` +
+              `query instead, or ask the operator to register the roots that matter`,
+          );
+        }
+        this.publicLazyMats.add(matName);
       }
       this.reactor.register(matName, def.schema.body, [entity], this.registry);
       this.lazyMats.add(matName);
@@ -940,9 +982,13 @@ export class Gateway {
   // materialization) until the reader resubscribes. Trigger and resolution must agree: the
   // current def would re-resolve through the NEW materialization while the OLD one decides
   // when to fire — silently missing what only the new shape gathers.
-  private watchEntity(name: string, entity: string): AsyncGenerator<PatchNode, void, unknown> {
+  private watchEntity(
+    name: string,
+    entity: string,
+    door: "full" | "public" = "full",
+  ): AsyncGenerator<PatchNode, void, unknown> {
     const bound = this.def(name);
-    const matName = this.matFor(name, entity);
+    const matName = this.matFor(name, entity, door);
     const resolveCaptured = (): ResolvedNode => {
       const hview = this.reactor.materializedView(matName, entity);
       if (hview === undefined) {
@@ -1017,25 +1063,27 @@ export class Gateway {
   // trust) and cached by what actually shapes it, so one negation closes the door on the next
   // request without rebuilding on every read.
   private publicCache: { key: string; schema: GraphQLSchema } | undefined;
+  // The open set, read once per WRITE rather than once per read: any accepted delta drops it
+  // (attachPersistence), so a tokenless request costs O(registered), not O(store) — which
+  // also keeps a nothing-public mount's refusal as cheap as an absent mount's (no timing
+  // oracle where the status codes are uniform).
+  private publicOpen: ReadonlySet<string> | undefined;
   private publicSurface(): GraphQLSchema | undefined {
-    const open = readPublicSchemas(this.reactor, this.operatorAuthor);
+    this.publicOpen ??= readPublicSchemas(this.reactor, this.operatorAuthor);
+    const open = this.publicOpen;
     if (open.size === 0) return undefined;
     const defs = this.registered.filter((r) => open.has(r.schema.name));
     if (defs.length === 0) return undefined; // declared but not (yet) registered: nothing binds
     const key = defs.map((r) => Gateway.boundKey(r)).join(NUL);
     if (this.publicCache?.key !== key) {
-      this.publicCache = { key, schema: buildGqlSchema(defs, this.gqlHooks(), "read") };
+      this.publicCache = { key, schema: buildGqlSchema(defs, this.gqlHooks("public"), "read") };
     }
     return this.publicCache.schema;
   }
 
   private publicSurfaceOrThrow(): GraphQLSchema {
     const surface = this.publicSurface();
-    if (surface === undefined) {
-      throw new Error(
-        "nothing here is public: no surviving operator declaration at loam:public opens a schema",
-      );
-    }
+    if (surface === undefined) throw new NothingPublic();
     return surface;
   }
 

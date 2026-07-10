@@ -168,3 +168,45 @@ describe("the public read path", () => {
     await expect(stream.next()).rejects.toThrow(/not defined|Cannot query field|refus/i);
   });
 });
+
+describe("the SSE parser, against a hand-fed wire", () => {
+  const sse =
+    (chunks: string[]): typeof fetch =>
+    () =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              const encoder = new TextEncoder();
+              for (const c of chunks) controller.enqueue(encoder.encode(c));
+              controller.close();
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+
+  it("survives a frame split across chunks, and CRLF framing", async () => {
+    const client = loamClient({
+      url: "http://nowhere.invalid/m",
+      fetch: sse([`data: {"a":`, `1}\r\n\r\ndata: {"b":2}\n\n`]),
+    });
+    const stream = client.subscribe(`subscription { x }`);
+    expect((await stream.next()).value).toEqual({ a: 1 });
+    expect((await stream.next()).value).toEqual({ b: 2 });
+    expect((await stream.next()).done).toBe(true);
+  });
+
+  it("a mid-stream error frame throws with the server's reason", async () => {
+    const client = loamClient({
+      url: "http://nowhere.invalid/m",
+      fetch: sse([
+        `data: {"ok":true}\n\n`,
+        `event: error\ndata: {"message":"the stream failed loudly"}\n\n`,
+      ]),
+    });
+    const stream = client.subscribe(`subscription { x }`);
+    expect((await stream.next()).value).toEqual({ ok: true });
+    await expect(stream.next()).rejects.toThrow(/failed loudly/);
+  });
+});

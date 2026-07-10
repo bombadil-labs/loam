@@ -168,6 +168,44 @@ describe("the anonymous read path", () => {
     expect(await closed.text()).toBe(await absent.text());
   });
 
+  it("a malformed percent-escape in the mount is the same uniform 401, never a 500", async () => {
+    const mangled = await fetch(`${base}/%zz/graphql`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ query: "{ __typename }" }),
+    });
+    const absent = await anon("orchard", `{ __typename }`);
+    expect(mangled.status).toBe(401);
+    expect(await mangled.text()).toBe(await absent.text());
+  });
+
+  it("the public door's stream budget is its own — the token door stays open", async () => {
+    const gateway = await governed();
+    await openDoor(gateway, 10_000);
+    const small = await serve({
+      mounts: { grove: gateway },
+      tokens: { "alice-token": { actor: ALICE_SEED } },
+      port: 0,
+      host: "127.0.0.1",
+      maxPublicStreams: 1,
+    });
+    const query = encodeURIComponent(`subscription { plant(entity: "${FERN}") { _hex } }`);
+    try {
+      const first = await fetch(`${small.url}/grove/subscribe?query=${query}`);
+      expect(first.status).toBe(200);
+      const second = await fetch(`${small.url}/grove/subscribe?query=${query}`);
+      expect(second.status).toBe(503);
+      const tokend = await fetch(`${small.url}/grove/subscribe?query=${query}`, {
+        headers: { authorization: "Bearer alice-token" },
+      });
+      expect(tokend.status).toBe(200);
+      await first.body!.cancel();
+      await tokend.body!.cancel();
+    } finally {
+      await small.close();
+    }
+  });
+
   it("revocation is live at the transport: one negation, the next request refuses", async () => {
     const before = await anon("commons", `{ plant(entity: "${FERN}") { height } }`);
     expect(before.status).toBe(200);

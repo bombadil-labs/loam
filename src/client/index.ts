@@ -126,9 +126,11 @@ export function loamClient(options: LoamClientOptions): LoamClient {
       }
       return { role: p.role, target: { kind: "primitive" as const, value: p.value as Primitive } };
     });
-    return toWire(
-      signClaims({ timestamp: timestamp ?? nextTimestamp(), author, pointers: mapped }, seed),
-    );
+    // An explicit timestamp still advances the clock: monotonicity is a promise about EVERY
+    // delta this client signs, not only the auto-stamped ones.
+    const ts = timestamp ?? nextTimestamp();
+    lastTs = Math.max(lastTs, ts);
+    return toWire(signClaims({ timestamp: ts, author, pointers: mapped }, seed));
   };
 
   const append = async (deltas: readonly WireDelta[]): Promise<AppendReceipt> => {
@@ -176,15 +178,17 @@ export function loamClient(options: LoamClientOptions): LoamClient {
         const decoder = new TextDecoder();
         let buffer = "";
         for (;;) {
-          const boundary = buffer.indexOf("\n\n");
-          if (boundary >= 0) {
-            const frame = buffer.slice(0, boundary);
-            buffer = buffer.slice(boundary + 2);
+          // This server frames with bare LF, but an intermediary may normalize to CRLF —
+          // accept both, or a proxied stream would buffer forever instead of yielding.
+          const boundary = /\r?\n\r?\n/.exec(buffer);
+          if (boundary !== null) {
+            const frame = buffer.slice(0, boundary.index);
+            buffer = buffer.slice(boundary.index + boundary[0].length);
             const data = frame
-              .split("\n")
+              .split(/\r?\n/)
               .filter((l) => l.startsWith("data:"))
               .map((l) => l.slice(5).trim())
-              .join("");
+              .join("\n");
             if (data.length === 0) continue;
             if (/^event:\s*error$/m.test(frame)) {
               const reason = JSON.parse(data) as { message?: string };

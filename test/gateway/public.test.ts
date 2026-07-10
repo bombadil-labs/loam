@@ -144,6 +144,32 @@ describe("the loam.public law", () => {
     expect(publicDefect(garden[0]!.claims)).toBeUndefined();
     expect(publicDefect(publicClaims(["Plant"], OPERATOR, 1))).toBeUndefined();
   });
+
+  it("the federation door refuses a malformed declaration exactly as append does", async () => {
+    const gateway = await governedGarden();
+    const malformed = signClaims(
+      {
+        timestamp: 10_000,
+        author: OPERATOR,
+        pointers: [
+          {
+            role: "declares",
+            target: { kind: "entity", entity: { id: PUBLIC_ENTITY, context: CTX_PUBLIC } },
+          },
+        ],
+      },
+      OPERATOR_SEED,
+    );
+    const report = await gateway.federate([malformed]);
+    expect(report.rejected).toBe(1);
+    expect(report.accepted).toBe(0);
+    // and a WELL-FORMED one crosses (the store's trust policy is open by default)
+    const sound = signClaims(publicClaims(["Plant"], OPERATOR, 10_001), OPERATOR_SEED);
+    const crossed = await gateway.federate([sound]);
+    expect(crossed.accepted).toBe(1);
+    expect(readPublicSchemas(gateway.reactor, OPERATOR).has("Plant")).toBe(true);
+    await gateway.close();
+  });
 });
 
 describe("the restricted surface", () => {
@@ -233,6 +259,29 @@ describe("the restricted surface", () => {
     await expect(gateway.queryPublic(`{ plant(entity: "${FERN}") { height } }`)).rejects.toThrow(
       /public/,
     );
+    await gateway.close();
+  });
+
+  it("the public door's watch budget is its own — the full surface keeps watching", async () => {
+    const backend = new MemoryBackend();
+    const gateway = await Gateway.open(backend, { seed: OPERATOR_SEED, maxPublicWatches: 1 });
+    gateway.register(PLANT, PLANT_POLICY, [FERN]);
+    await declare(gateway, ["Plant"]);
+
+    // The first unregistered entity takes the public door's one slot...
+    const first = await gateway.subscribePublic(
+      `subscription { plant(entity: "plant:a") { _hex } }`,
+    );
+    expect((await first.next()).done).toBe(false);
+    // ...the second is refused at the public door...
+    await expect(
+      gateway.subscribePublic(`subscription { plant(entity: "plant:b") { _hex } }`),
+    ).rejects.toThrow(/public door/);
+    // ...and the authenticated surface still watches new entities, unbothered.
+    const full = await gateway.subscribe(`subscription { plant(entity: "plant:c") { _hex } }`);
+    expect((await full.next()).done).toBe(false);
+    await first.return(undefined);
+    await full.return(undefined);
     await gateway.close();
   });
 
