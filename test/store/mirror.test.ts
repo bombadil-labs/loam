@@ -5,9 +5,13 @@
 // serving two stories: catch-up (primary → mirror) and restore-after-disaster (mirror →
 // primary), because both are the same two-way union.
 
-import { describe, expect, it, vi } from "vitest";
-import type { Delta } from "@bombadil/rhizomatic";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, describe, expect, it, vi } from "vitest";
+import { claimsToJson, type Delta } from "@bombadil/rhizomatic";
 import type { StoreBackend } from "../../src/store/backend.js";
+import { ArchiveBackend } from "../../src/store/archive.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { MirrorBackend } from "../../src/store/mirror.js";
 import { FERN, GARDENER_SEED, SURVEYOR_SEED, observed } from "../spike/garden.js";
@@ -17,6 +21,9 @@ const d2 = observed(FERN, "height", 34, 2000, SURVEYOR_SEED);
 const d3 = observed(FERN, "height", 38, 3000, GARDENER_SEED);
 
 const ids = (deltas: readonly Delta[]) => deltas.map((d) => d.id).sort();
+
+const tmp = mkdtempSync(join(tmpdir(), "loam-mirror-"));
+afterAll(() => rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
 
 // A side that refuses every call — the unreachable cold store.
 const unreachable = (): StoreBackend => ({
@@ -100,6 +107,22 @@ describe("MirrorBackend", () => {
     expect(await store.deltasSince(new Set())).toEqual([]);
     expect(await store.heal()).toEqual({ toMirror: 0, toPrimary: 3 });
     expect(ids(await store.deltasSince(new Set()))).toEqual(ids([d1, d2, d3]));
+  });
+
+  it("a corrupt mirror refuses through heal(): damage is never replanted as health", async () => {
+    const root = join(tmp, "vault-corrupt");
+    const vault = new ArchiveBackend(root);
+    await vault.append([d1]);
+    // damage the vault behind the seam: swap in another delta's (well-formed) claims
+    const file = join(root, d1.id.slice(0, 2), `${d1.id}.json`);
+    const row = JSON.parse(readFileSync(file, "utf8")) as { claims: unknown };
+    row.claims = claimsToJson(d2.claims);
+    writeFileSync(file, JSON.stringify(row));
+    const primary = new MemoryBackend();
+    const store = new MirrorBackend(primary, vault);
+    // heal is the restore path — restoring from a damaged vault must refuse, not launder
+    await expect(store.heal()).rejects.toThrow(/corruption/);
+    expect(await primary.deltasSince(new Set())).toEqual([]);
   });
 
   it("a primary failure rejects the append, and the mirror is not written first", async () => {

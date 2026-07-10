@@ -10,7 +10,10 @@
 //
 // Stray files are tolerated where humans leave them (the root, non-.json clutter in the fan) —
 // a README in the vault should not poison the vault. But a `.json` file inside the fan claims
-// to be a delta, and one that cannot be read back is corruption, never skipped.
+// to be a delta, and one that cannot be read back is corruption, never skipped. Refused, never
+// repaired extends to never OVERWRITING: a corrupt file squatting on an id's name makes a
+// re-append of the genuine delta a skip (the name exists), so the operator's move is to delete
+// the bad file — the next heal rewrites it from the primary's healthy copy.
 //
 // Batch atomicity, honestly: VALIDATION is atomic (the whole batch is gated before any file is
 // written), matching the contract's refusal semantics. An IO failure mid-batch may leave a
@@ -19,12 +22,15 @@
 /* eslint-disable @typescript-eslint/require-await -- the async keyword is load-bearing: it
    turns every synchronous throw into the rejected promise the seam promises. */
 import {
+  closeSync,
   existsSync,
+  fsyncSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
   renameSync,
-  writeFileSync,
+  writeSync,
 } from "node:fs";
 import { join } from "node:path";
 import {
@@ -85,10 +91,20 @@ export class ArchiveBackend implements StoreBackend {
         claims: claimsToJson(d.claims),
         ...(d.sig !== undefined && { sig: d.sig }),
       };
-      // Write-then-rename: a crash mid-write leaves a `.tmp` straggler (ignored by reads),
-      // never a half-written delta wearing a real name.
+      // Write, FSYNC, then rename: the bytes are durable before the real name exists, so
+      // neither a process crash nor a power loss leaves a half-written delta wearing a real
+      // name — at worst a `.tmp` straggler, which reads ignore (and nothing yet collects).
+      // The rename's own directory entry rides the OS's rename durability, which is the same
+      // honesty sqlite's `synchronous = NORMAL` keeps: a crash can lose the newest delta, never
+      // corrupt an older one — and a lost newest is exactly what union tolerates.
       const tmp = `${target}.${process.pid}.tmp`;
-      writeFileSync(tmp, `${JSON.stringify(row)}\n`);
+      const fd = openSync(tmp, "w");
+      try {
+        writeSync(fd, `${JSON.stringify(row)}\n`);
+        fsyncSync(fd);
+      } finally {
+        closeSync(fd);
+      }
       renameSync(tmp, target);
       this.onDisk.add(d.id);
       stored += 1;
@@ -99,14 +115,21 @@ export class ArchiveBackend implements StoreBackend {
   async deltasSince(knownIds: ReadonlySet<string>): Promise<Delta[]> {
     this.assertOpen();
     const out: Delta[] = [];
+    // A misfiled copy (a delta file hand-placed in the wrong fan) is still the same delta —
+    // union tolerates it — but the read must stay a SET: first encounter wins, per id.
+    const seenIds = new Set<string>();
     // Only the fan holds deltas; the root is porch — a README or a stray file lives there
     // unbothered. Inside the fan, only `.json` is a delta claim.
-    for (const fan of readdirSync(this.root, { withFileTypes: true })) {
-      if (!fan.isDirectory()) continue;
-      for (const name of readdirSync(join(this.root, fan.name)).sort()) {
+    const fans = readdirSync(this.root, { withFileTypes: true })
+      .filter((f) => f.isDirectory())
+      .map((f) => f.name)
+      .sort();
+    for (const fan of fans) {
+      for (const name of readdirSync(join(this.root, fan)).sort()) {
         if (!name.endsWith(".json")) continue;
         const id = name.slice(0, -".json".length);
-        const path = join(this.root, fan.name, name);
+        if (seenIds.has(id)) continue;
+        const path = join(this.root, fan, name);
         let row: ArchiveRow;
         try {
           row = JSON.parse(readFileSync(path, "utf8")) as ArchiveRow;
@@ -137,6 +160,7 @@ export class ArchiveBackend implements StoreBackend {
             `archive corruption: ${path} carries a signature that does not verify — refusing to read`,
           );
         }
+        seenIds.add(id);
         this.onDisk.add(id);
         if (knownIds.has(id)) continue;
         out.push(delta);

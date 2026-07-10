@@ -34,6 +34,7 @@ export interface HealReport {
 
 export class MirrorBackend implements StoreBackend {
   #lagging = false;
+  #lagEpoch = 0; // counts lag events, so a heal only clears the lag it actually saw
 
   constructor(
     private readonly primary: StoreBackend,
@@ -55,6 +56,7 @@ export class MirrorBackend implements StoreBackend {
       await this.mirror.append(batch);
     } catch (err) {
       this.#lagging = true;
+      this.#lagEpoch += 1;
       this.opts.onLag?.(err);
     }
     return stored;
@@ -66,13 +68,16 @@ export class MirrorBackend implements StoreBackend {
 
   // Two-way union: each side receives what only the other holds. Idempotent — a whole pair
   // heals to { 0, 0 }. Both directions run even when nothing lagged: heal is how a fresh
-  // primary is restored from the mirror's memory after the original is lost.
+  // primary is restored from the mirror's memory after the original is lost. Heal clears
+  // `lagging` only when no append lagged WHILE it ran — a delta that landed after heal's
+  // snapshot may still be missing from the mirror, and the flag must not say otherwise.
   async heal(): Promise<HealReport> {
+    const epoch = this.#lagEpoch;
     const all = await this.primary.deltasSince(new Set());
     const toMirror = await this.mirror.append(all);
     const fromMirror = await this.mirror.deltasSince(new Set(all.map((d) => d.id)));
     const toPrimary = await this.primary.append(fromMirror);
-    this.#lagging = false;
+    if (this.#lagEpoch === epoch) this.#lagging = false;
     return { toMirror, toPrimary };
   }
 

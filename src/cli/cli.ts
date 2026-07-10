@@ -105,7 +105,13 @@ async function cmdServe(
           `loam: the archive is lagging — ${err instanceof Error ? err.message : String(err)} (the next serve heals it)`,
         ),
     });
-    const healed = await mirror.heal();
+    let healed;
+    try {
+      healed = await mirror.heal();
+    } catch (err) {
+      await mirror.close().catch(() => {}); // never let a close failure mask the real refusal
+      throw err;
+    }
     if (healed.toPrimary > 0 || healed.toMirror > 0) {
       io.out(
         `loam: healed — ${healed.toPrimary} deltas replanted from the archive, ${healed.toMirror} newly archived`,

@@ -75,11 +75,31 @@ describe("ArchiveBackend layout", () => {
     writeFileSync(join(root, ".DS_Store"), "junk");
     writeFileSync(join(root, "loose.json"), "{}"); // only the fan holds deltas; the root is porch
     writeFileSync(join(root, signed.id.slice(0, 2), "notes.txt"), "not a delta");
+    // the straggler a crash leaves behind — half-written, never renamed, ignored by reads
+    writeFileSync(join(root, signed.id.slice(0, 2), `${signed.id}.json.9999.tmp`), '{"claims');
     expect(ids(await store.deltasSince(new Set()))).toEqual(ids([signed]));
     // but a delta-shaped file that cannot be read back is corruption, refused loudly
     writeFileSync(join(root, signed.id.slice(0, 2), `${"0".repeat(64)}.json`), "not json {");
     await expect(store.deltasSince(new Set())).rejects.toThrow(/corruption/);
     await store.close();
+  });
+});
+
+describe("ArchiveBackend stays a set", () => {
+  it("a misfiled copy (wrong fan) is still one delta: reads dedupe by id", async () => {
+    const root = freshRoot();
+    const store = new ArchiveBackend(root);
+    await store.append([signed]);
+    // a human drags a copy into the wrong fan — union tolerates the file, reads stay a set
+    const wrongFan = join(root, "zz");
+    mkdirSync(wrongFan, { recursive: true });
+    cpSync(fileFor(root, signed.id), join(wrongFan, `${signed.id}.json`));
+    expect(ids(await store.deltasSince(new Set()))).toEqual(ids([signed]));
+    await store.close();
+    // a fresh handle (no memory of the write) also returns the set exactly once
+    const again = new ArchiveBackend(root);
+    expect(ids(await again.deltasSince(new Set()))).toEqual(ids([signed]));
+    await again.close();
   });
 });
 
