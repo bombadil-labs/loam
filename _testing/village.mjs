@@ -128,14 +128,73 @@ const tell = (text, tone = "write") => {
   broadcast({ kind: "event", text, tone, actor: inferActor(text), place: inferPlace(text) });
 };
 
+// ---- the palisade gate (Unit 3b) ---------------------------------------------------------------
+// The welcome flow is the constitution as gameplay. A stranger's browser mints its own key,
+// signs a PETITION, and knocks here. The gate verifies the signature and the shape, and the
+// operator — in the demo, immediately; in life, at the operator's judgment — grants write
+// standing, THEN appends the petition itself as the record of asking (the grant must come
+// first: an unstanding author's delta is refused at the door, which is exactly the point).
+const { fromWire, grantClaims } = await import("../dist/index.js");
+const { verifyDelta } = await import("@bombadil/rhizomatic");
+const { loadSpec, registerHttp } = await import("./harness.mjs");
+const players = new Set(); // person ids the gate has admitted this run (roots survive as data)
+const petitionShape = (delta) => {
+  const knocks = delta.claims.pointers.some(
+    (p) =>
+      p.target.kind === "entity" &&
+      p.target.entity.id === "loam:gate" &&
+      p.target.entity.context === "loam.petition",
+  );
+  const name = delta.claims.pointers.find((p) => p.role === "name")?.target;
+  return knocks && name?.kind === "primitive" && typeof name.value === "string"
+    ? name.value.slice(0, 24)
+    : undefined;
+};
+async function handlePetition(req, res) {
+  let body = "";
+  for await (const c of req) body += c;
+  try {
+    const delta = fromWire(JSON.parse(body).delta); // recomputes the id — forgeries stop here
+    if (verifyDelta(delta) !== "verified") throw new Error("the petition is unsigned");
+    const name = petitionShape(delta);
+    if (name === undefined) throw new Error("a petition names its bearer and knocks at loam:gate");
+    const author = delta.claims.author;
+    tell(`🚪 a stranger knocks at the palisade — ${name} petitions for standing`, "write");
+    await almanac.gateway.append([
+      signClaims(
+        grantClaims("loam:store", author, "write", almanac.operator, Date.now()),
+        almanac.seed,
+      ),
+    ]);
+    await almanac.gateway.append([delta]); // the record of asking, lawful now that standing holds
+    // Joining is constitutional twice over: standing at the door, AND a place on the dossier
+    // roll — evolve the Dossier registration's roots (one append; it survives as data) and
+    // rehang the wheel on the new generation, so the mill grinds the newcomer too.
+    players.add(`person:${name.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 16)}`);
+    const spec = loadSpec("dossier.json");
+    await registerHttp(almanac.base, opToken("almanac"), {
+      ...spec,
+      roots: [...spec.roots, ...players],
+    });
+    await attachMill(stores.almanac);
+    tell(`🏡 the operator opens the palisade for ${name} — standing granted, the roll grows, the mill grinds for them now`, "patch");
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ granted: author }));
+  } catch (err) {
+    res.writeHead(400, { "content-type": "application/json" });
+    res.end(JSON.stringify({ errors: [err instanceof Error ? err.message : String(err)] }));
+  }
+}
+
 // ---- the viewer -------------------------------------------------------------------------------
-// The page learns the open door's address at serve time; its dossier subscriptions go straight
-// to the almanac's public surface (native EventSource — tokenless, CORS-served, and it
-// reconnects itself through the crash act).
-const page = readFileSync(join(ROOT, "dashboard.html"), "utf8").replace(
-  "__ALMANAC_PUBLIC_DOOR__",
-  almanac.base,
-);
+// The page learns the open door's address and the gate's TRANSPORT token at serve time; its
+// dossier subscriptions go straight to the almanac's public surface (native EventSource —
+// tokenless, CORS-served, reconnects itself through the crash act), and its writes ride the
+// gate token through /append, signed by the page's own key.
+const page = readFileSync(join(ROOT, "dashboard.html"), "utf8")
+  .replace("__ALMANAC_PUBLIC_DOOR__", almanac.base)
+  .replace("__GATE_TOKEN__", tok("gate", "almanac"));
+const clientJs = readFileSync(join(ROOT, "..", "dist", "client", "index.js"));
 const viewer = createServer((req, res) => {
   if (req.url === "/events") {
     res.writeHead(200, {
@@ -147,6 +206,16 @@ const viewer = createServer((req, res) => {
     if (lastTrust) res.write(`data: ${JSON.stringify(lastTrust)}\n\n`);
     clients.add(res);
     req.on("close", () => clients.delete(res));
+    return;
+  }
+  if (req.url === "/client.js") {
+    // the SHIPPED browser client, served to the page that plays the villager
+    res.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
+    res.end(clientJs);
+    return;
+  }
+  if (req.url === "/petition" && req.method === "POST") {
+    void handlePetition(req, res);
     return;
   }
   res.writeHead(200, { "content-type": "text/html; charset=utf-8" });

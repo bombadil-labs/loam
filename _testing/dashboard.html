@@ -190,6 +190,38 @@
         padding: 3px 8px;
         border-radius: 6px;
       }
+      #join {
+        padding: 6px 14px 12px;
+        border-bottom: 1px solid var(--edge);
+        font-size: 13px;
+      }
+      #join input {
+        font: inherit;
+        border: 1px solid var(--edge);
+        border-radius: 6px;
+        padding: 3px 8px;
+        background: #fdf8e9;
+        width: 130px;
+      }
+      #join button {
+        font: inherit;
+        font-size: 12.5px;
+        border: 1px solid var(--edge);
+        border-radius: 8px;
+        padding: 3px 10px;
+        background: #e4d8b6;
+        cursor: pointer;
+        margin: 2px 3px 0 0;
+      }
+      #join button:hover {
+        background: #d9c99a;
+      }
+      #join-status {
+        margin-top: 5px;
+        font-size: 12px;
+        color: #8a7d5c;
+        font-style: italic;
+      }
     </style>
   </head>
   <body>
@@ -204,6 +236,17 @@
         <div id="hint">click a villager to read their dossier · watch them tend the ground</div>
       </div>
       <aside>
+        <h2>Write yourself in</h2>
+        <div id="join">
+          <div id="join-body">
+            <input id="join-name" placeholder="your name" maxlength="16" />
+            <button id="join-knock">knock at the gate</button>
+          </div>
+          <div id="join-status">
+            mint a key in this page, sign a petition, and the operator decides — the token in
+            this page is transport, never authority
+          </div>
+        </div>
         <h2>Dossier</h2>
         <div id="dossier"><div class="empty">no one selected — click a figure</div></div>
         <h2>The day's events</h2>
@@ -281,6 +324,30 @@
         gateFlash = 0,
         beat = 0;
       const now = () => performance.now();
+
+      // A villager born mid-game (Unit 3b): the player. They appear AT the gate — that is
+      // where one enters a palisaded village — and walk to the commons once standing is theirs.
+      function addVillager(id, displayName) {
+        if (figures[id]) return figures[id];
+        CAST[id] = { color: "#b0483f", home: "commons", ox: -8, oy: 52 };
+        NAMES[id] = displayName;
+        const g = PLACES.gate;
+        figures[id] = {
+          id,
+          color: CAST[id].color,
+          x: g.x + 10,
+          y: g.y,
+          hx: PLACES.commons.x + CAST[id].ox,
+          hy: PLACES.commons.y + CAST[id].oy,
+          tx: g.x + 10,
+          ty: g.y,
+          phase: Math.random() * 6,
+          bubble: null,
+          bubbleUntil: 0,
+          idleUntil: 0,
+        };
+        return figures[id];
+      }
 
       function goTo(id, placeKey, text) {
         const f = figures[id];
@@ -655,6 +722,147 @@
       window.addEventListener("resize", fit);
       fit();
       requestAnimationFrame(loop);
+    </script>
+    <script type="module">
+      // ---- the player (Unit 3b) -------------------------------------------------------------
+      // The SHIPPED browser client, served by the viewer from dist/client. The key is minted
+      // HERE and never leaves this page (localStorage keeps it between visits); the gate token
+      // below is TRANSPORT only — authority arrives when the operator grants standing, and the
+      // petition that asks for it is a delta signed by the player's own hand.
+      import { loamClient, mintSeed, authorForSeed } from "/client.js";
+
+      const GATE_TOKEN = "__GATE_TOKEN__";
+      const $ = (id) => document.getElementById(id);
+      const status = (t) => ($("join-status").textContent = t);
+      const RESERVED = new Set(["wren", "petra", "miles", "odile", "sasha", "mallory", "miller"]);
+      let me = null;
+
+      const slugOf = (name) =>
+        name
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, "")
+          .slice(0, 16);
+
+      function playerPanel() {
+        $("join-body").innerHTML =
+          `<div>you are <b>${escapeHtml(me.name)}</b> · <span style="font-size:11px">${escapeHtml(
+            me.author.slice(0, 28),
+          )}…</span></div>` +
+          `<input id="join-bio" placeholder="tend your bio" maxlength="80" />` +
+          `<button id="join-tend">tend bio</button>` +
+          `<button id="join-attend">attend the gathering</button>` +
+          `<button id="join-film">join the screening</button>` +
+          `<button id="join-leave" title="forget this page's key">leave</button>`;
+        const act = async (label, pointers, place, bubble) => {
+          try {
+            await me.client.claim(pointers);
+            goTo(me.slug, place, bubble);
+            status(label);
+          } catch (err) {
+            status(`the door refused: ${err.message}`);
+          }
+        };
+        $("join-tend").onclick = () => {
+          const bio = $("join-bio").value.trim();
+          if (!bio) return;
+          void act(
+            "your words are ground now — signed, content-addressed, yours",
+            [
+              { role: "subject", at: me.person, context: "bio" },
+              { role: "value", value: bio },
+            ],
+            "commons",
+            bio,
+          );
+        };
+        $("join-attend").onclick = () =>
+          void act(
+            "you attended by arriving — the mill will grind it into your presence",
+            [
+              { role: "gathering", at: "gathering:harvest-2", context: "attendee" },
+              { role: "attendee", at: me.person, context: "attended" },
+            ],
+            "hive",
+            "turns up for the harvest gathering",
+          );
+        $("join-film").onclick = () =>
+          void act(
+            "you joined the screening — one delta, two views",
+            [
+              { role: "screening", at: "screening:s1", context: "with" },
+              { role: "companion", at: me.person, context: "companioned" },
+            ],
+            "reel",
+            "slips into the screening",
+          );
+        $("join-leave").onclick = () => {
+          localStorage.removeItem("loam.villager");
+          location.reload();
+        };
+      }
+
+      function enter() {
+        addVillager(me.slug, me.name);
+        openDossierStream(me.person);
+        goTo(me.slug, "commons", `${me.name} has come to stay`);
+        selected = me.person;
+        drawDossier();
+        playerPanel();
+      }
+
+      async function knock(saved) {
+        const client = loamClient({ url: ALMANAC, token: GATE_TOKEN, seed: saved.seed });
+        me = {
+          ...saved,
+          person: `person:${saved.slug}`,
+          client,
+          author: authorForSeed(saved.seed),
+        };
+        status("you sign a petition with a key only this page holds…");
+        const petition = client.sign([
+          { role: "petitions", at: "loam:gate", context: "loam.petition" },
+          { role: "name", value: saved.name },
+        ]);
+        const res = await fetch("/petition", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ delta: petition }),
+        });
+        if (!res.ok) {
+          status(`the gate did not open (${res.status})`);
+          me = null;
+          return;
+        }
+        localStorage.setItem("loam.villager", JSON.stringify(saved));
+        // first words, so the dossier has something to say and the mill something to grind
+        await client
+          .append([
+            client.sign([
+              { role: "subject", at: me.person, context: "name" },
+              { role: "value", value: saved.name },
+            ]),
+            client.sign([
+              { role: "subject", at: me.person, context: "bio" },
+              { role: "value", value: `${saved.name}, newly arrived` },
+            ]),
+          ])
+          .catch(() => {});
+        enter();
+        status("the palisade opened — you write under your own name now");
+      }
+
+      $("join-knock").onclick = () => {
+        const name = $("join-name").value.trim();
+        const slug = slugOf(name);
+        if (!slug) return status("a villager needs a name");
+        if (RESERVED.has(slug)) return status("that name is already lived-in — pick your own");
+        void knock({ seed: mintSeed(), name, slug });
+      };
+
+      // a returning villager: same key, same author, same dossier — knock again (idempotent;
+      // it also re-establishes standing if the village was re-baselined since the last visit)
+      const saved = localStorage.getItem("loam.villager");
+      if (saved) void knock(JSON.parse(saved));
     </script>
   </body>
 </html>

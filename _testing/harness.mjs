@@ -33,6 +33,9 @@ export const SEEDS = {
   petra: "44".repeat(32),
   sasha: "55".repeat(32), // the stranger: cinelog's only resident
   miller: "77".repeat(32), // the runner identity: grinds the almanac's ground into flour
+  // the palisade gate: a TRANSPORT identity only (Unit 3b) — its token may sit in a public
+  // page because a token lends no authority; it signs nothing and holds no standing
+  gate: "99".repeat(32),
   mallory: "ee".repeat(32),
 };
 export const AUTHORS = Object.fromEntries(
