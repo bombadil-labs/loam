@@ -1,3 +1,22 @@
+# Current work
+
+_The live checklist for the work in progress; cleared when a unit merges._
+
+**Status: THE ARC IS COMPLETE.** The reader's republic — steps 11 (authors, not owners), 12
+(writes become claims), 13 (trust is data), 14 (normalization), the 0.2.0 substrate adoption,
+and the gauntlet — is fully merged and journaled (PRs #14, #15, #17, #18, #19). 235 tests;
+village phases 0–9 all green; the five-store living village translates a stranger's dialect on
+every pulse. Nothing is queued.
+
+**To resume:** ask Myk what to build next, then open it here at the loop's stage 1.
+
+**Still Myk's by design:** LICENSE files; the first `npm run release`; trusted publishing for
+the release workflow (token flow deprecation — deferred by Myk, "we'll do this part later").
+
+---
+
+# ARCHIVE — the completed arc's plan (kept for the record until the next unit replaces it)
+
 # The large unit: the reader's republic (steps 11–14 + the gauntlet)
 
 One arc, four steps, each its own PR through the full loop, in dependency order. The thesis:

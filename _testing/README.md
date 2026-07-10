@@ -70,3 +70,13 @@ _(one entry per PR that grew the village; newest last)_
   narrated in the event log); then the almanac reopens, an aggregator by choice. The same
   roster that gates the door is readable as an eval-side lens (`trustRosterPred`) — one
   source of truth, demonstrated live.
+- **PR #19 — normalization, and THE GAUNTLET**: the village gains its fifth store — `cinelog`
+  (:4405), Sasha's app, speaking a dialect no villager knows (`film_watched`/`viewer`/`on`).
+  The open almanac pulls it whole; one operator-signed **translation spec** renders every
+  entry into the village's tongue; and Wren's dossier now shows a screening **recorded by a
+  stranger's app**, provenance visible in the resolved view itself (`origin: cinelog`,
+  `translates: <source id>`). The roster flipped mid-run and the pulse refused the stranger;
+  flipped back and the backlog normalized (phase9.mjs, 4/4). In the living village, every
+  pulse now ends with a translation pass, narrated in the event log. The arc's thesis,
+  demonstrated: anyone may write, in any tongue — the reader decides everything, and
+  understands more than it was told.

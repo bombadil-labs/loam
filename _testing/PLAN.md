@@ -264,6 +264,19 @@ All four stores up, the pulse running, subscribers parked on the almanac. The sa
       dashboard's third trust line ("and the guarded record holds: …"); the cast's standing is
       self-constituted at boot (homes rebuilt under the authors-not-owners law)
 
+### Phase 9 — THE GAUNTLET (PR #19; the arc closes)
+
+- [x] 9.1 A FIFTH store: cinelog (:4405), Sasha's app, an alien dialect (film_watched /
+      viewer / on), its own operator, no village vocabulary anywhere
+- [x] 9.2 The OPEN almanac pulls the stranger whole; the translation spec is published as one
+      operator-signed delta; the local lens cannot yet see the foreign shape
+- [x] 9.3 One translate() pass: Wren's dossier gains a screening RECORDED BY A STRANGER'S APP —
+      the resolved view itself carries the provenance (origin: cinelog, translates: <source>)
+- [x] 9.4 The roster flips mid-run (pulse refuses the stranger, accepted 0); flips back
+      (backlog crosses); translation resumes. 4/4
+- [x] The living village gains cinelog + Sasha's acts; every pulse ends with a translation
+      pass, narrated in the event log
+
 ### Teardown
 
 - [ ] T.1 Kill all servers; delete `_testing/` (this file's last act is its own deletion)
