@@ -30,6 +30,7 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   writeSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -167,6 +168,30 @@ export class ArchiveBackend implements StoreBackend {
       }
     }
     return out;
+  }
+
+  async purge(ids: Iterable<string>): Promise<number> {
+    this.assertOpen();
+    // Purge hunts EVERY fan, not just the canonical one: a misfiled copy that stays readable
+    // means the delta was never forgotten. Purges are rare; the walk is cheap enough to be
+    // thorough.
+    const fans = readdirSync(this.root, { withFileTypes: true })
+      .filter((f) => f.isDirectory())
+      .map((f) => f.name);
+    let removed = 0;
+    for (const id of ids) {
+      let found = false;
+      for (const fan of fans) {
+        const target = join(this.root, fan, `${id}.json`);
+        if (existsSync(target)) {
+          rmSync(target, { force: true, maxRetries: 5, retryDelay: 100 });
+          found = true;
+        }
+      }
+      if (found) removed += 1;
+      this.onDisk.delete(id);
+    }
+    return removed;
   }
 
   async close(): Promise<void> {
