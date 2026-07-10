@@ -20,7 +20,7 @@ import {
 import { serve, type ServerHandle } from "../../src/server/http.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
-import { PLANT, PLANT_POLICY, pickLatest } from "../gateway/fixtures.js";
+import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
 
 vi.setConfig({ testTimeout: 15000 });
 
@@ -140,10 +140,13 @@ describe("the trust policy: one delta at loam:trust, latest lawful word wins", (
     expect(policy.roster.has(MALLORY)).toBe(false);
   });
 
-  it("a malformed policy delta binds nothing; the previous lawful word survives", async () => {
+  it("a malformed declaration is MALFORMED LAW, refused at append for everyone", async () => {
+    // The inView lens cannot validate shape, so the door must: a declaration with a bogus
+    // mode (or duplicate modes, or a non-string admit-author) never enters a governed store —
+    // which is exactly what keeps door and lens reading identical ground.
     const b = await puller();
     await declare(b, "roster", [GARDENER]);
-    const malformed = signClaims(
+    const bogusMode = signClaims(
       {
         timestamp: Date.now() + 10,
         author: OPERATOR_B,
@@ -153,12 +156,78 @@ describe("the trust policy: one delta at loam:trust, latest lawful word wins", (
             target: { kind: "entity", entity: { id: TRUST_ENTITY, context: "loam.trust" } },
           },
           { role: "mode", target: { kind: "primitive", value: "ajar" } }, // no such mode
+          { role: "admit-author", target: { kind: "primitive", value: MALLORY } }, // the smuggle
         ],
       },
       OP_B,
     );
-    await b.append([malformed]);
-    expect(readTrustPolicy(b.reactor, OPERATOR_B).mode).toBe("roster");
+    await expect(b.append([bogusMode])).rejects.toThrow(/malformed law/);
+    const twoModes = signClaims(
+      {
+        timestamp: Date.now() + 11,
+        author: OPERATOR_B,
+        pointers: [
+          {
+            role: "declares",
+            target: { kind: "entity", entity: { id: TRUST_ENTITY, context: "loam.trust" } },
+          },
+          { role: "mode", target: { kind: "primitive", value: "open" } },
+          { role: "mode", target: { kind: "primitive", value: "closed" } },
+        ],
+      },
+      OP_B,
+    );
+    await expect(b.append([twoModes])).rejects.toThrow(/malformed law/);
+    const policy = readTrustPolicy(b.reactor, OPERATOR_B);
+    expect(policy.mode).toBe("roster"); // the lawful word survives
+    expect(policy.roster.has(MALLORY)).toBe(false); // and the smuggle never reached the roster
+  });
+
+  it("removal is negation: strike the admitting declaration and the door closes to them", async () => {
+    const b = await puller();
+    const admitting = signClaims(
+      trustClaims("roster", [GARDENER, MALLORY], OPERATOR_B, Date.now()),
+      OP_B,
+    );
+    await b.append([admitting]);
+    const a = await mixedSource();
+    await pullFrom(b, a.url, a.token);
+    expect(holds(b, MALLORY)).toBe(true); // admitted while rostered
+
+    // remove Mallory: a FRESH declaration only adds, so the operator strikes the old one and
+    // declares the roster she should have had — negation is the eraser, here as everywhere
+    await b.append([
+      signClaims(makeNegationClaims(OPERATOR_B, Date.now() + 1, admitting.id), OP_B),
+      signClaims(trustClaims("roster", [GARDENER], OPERATOR_B, Date.now() + 2), OP_B),
+    ]);
+    const policy = readTrustPolicy(b.reactor, OPERATOR_B);
+    expect(policy.roster.has(MALLORY)).toBe(false); // the door agrees
+    expect(policy.roster.has(GARDENER)).toBe(true);
+    // her already-landed deltas remain (nothing is deleted) — but the door refuses NEW ones
+    const fresh = observed(FERN, "note", "late knock", Date.now() + 3, MALLORY_SEED);
+    const report = await b.federate([fresh]);
+    expect(report.accepted).toBe(0);
+  });
+
+  it("closed, then open again: two declarations, two postures, no restart", async () => {
+    const b = await puller();
+    await declare(b, "closed");
+    const a = await mixedSource();
+    expect((await pullFrom(b, a.url, a.token)).accepted).toBe(0);
+    await declare(b, "open");
+    expect((await pullFrom(b, a.url, a.token)).accepted).toBeGreaterThan(0);
+  });
+
+  it("an UNGOVERNED store ignores trust declarations and stays open — no stranger lockout", async () => {
+    const free = await Gateway.open(new MemoryBackend()); // no operator, no lawful voice
+    gateways.push(free);
+    // a stranger's max-timestamp "closed" arrives by federation; it must bind nothing
+    await free.federate([
+      signClaims(trustClaims("closed", [], MALLORY, Number.MAX_SAFE_INTEGER), MALLORY_SEED),
+    ]);
+    expect(readTrustPolicy(free.reactor).mode).toBe("open");
+    const report = await free.federate([observed(FERN, "height", 7, 1000, GARDENER_SEED)]);
+    expect(report.accepted).toBe(1); // the door never closed
   });
 });
 
@@ -210,6 +279,5 @@ describe("one source of truth: the roster reaches eval-side masks via inView", (
     ]);
     const afterRostered = await gateway.query(`{ plant: rostered(entity: "${FERN}") { height } }`);
     expect((afterRostered.data as { plant: { height: number } }).plant.height).toBe(30);
-    void pickLatest;
   });
 });

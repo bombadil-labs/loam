@@ -5,7 +5,8 @@
 //   open    admit every delta that verifies (the aggregator's posture — union is the
 //           substrate's nature, and the DEFAULT when no declaration survives)
 //   roster  admit the operator and the named authors, nobody else
-//   closed  admit nothing
+//   closed  admit nothing — DELIBERATELY including the operator's own deltas (closed means
+//           closed; recovery from a backup is an explicit admit override, or a local append)
 //
 // A roster edit is a delta; the next pull obeys it. No restart, no config file, and the full
 // history of who was trusted when is a query like any other. Lawful reads apply: in a governed
@@ -57,14 +58,50 @@ export function trustClaims(
   };
 }
 
+// Is this delta a trust declaration, and if so, is it WELL-FORMED law? A declaration carries
+// exactly one mode pointer naming a known mode, and only primitive-string admit-authors. The
+// inView lens cannot validate any of this (a predicate sees pointers, not shape rules) — so
+// the DOOR refuses malformed declarations at append, and door and lens read identical ground.
+export function trustDefect(claims: Claims): string | undefined {
+  const declares = claims.pointers.some(
+    (p) =>
+      p.target.kind === "entity" &&
+      p.target.entity.id === TRUST_ENTITY &&
+      p.target.entity.context === CTX_TRUST,
+  );
+  if (!declares) return undefined;
+  const modes = claims.pointers.filter((p) => p.role === "mode");
+  if (
+    modes.length !== 1 ||
+    modes[0]!.target.kind !== "primitive" ||
+    typeof modes[0]!.target.value !== "string" ||
+    !MODES.has(modes[0]!.target.value)
+  ) {
+    return 'a trust declaration carries exactly one mode: "open", "roster", or "closed"';
+  }
+  for (const p of claims.pointers) {
+    if (p.role !== "admit-author") continue;
+    if (p.target.kind !== "primitive" || typeof p.target.value !== "string") {
+      return "a trust declaration's admit-author entries are author strings";
+    }
+  }
+  return undefined;
+}
+
 // The policy in force. MODE is the latest surviving lawful declaration's word (a store is
 // open, rostered, or closed — one answer). The ROSTER is the UNION of `admit-author` pointers
-// across ALL surviving declarations — a fresh declaration only ADDS; removal is negation
-// (strike the declaration that admitted them), like everything else here. That union is
-// exactly what the inView lens (`trustRosterPred`) resolves, so the door and the masks can
-// never disagree about membership. A malformed declaration (unknown mode, non-string entry)
-// binds nothing — the previous lawful word survives it. No declaration at all means OPEN.
+// across ALL surviving lawful declarations — a fresh declaration only ADDS; removal is
+// negation (strike the declaration that admitted them). The harvest deliberately matches what
+// the inView lens extracts (every surviving declaration's admit-author strings, no mode veto):
+// malformed declarations are refused at APPEND (`trustDefect`, wired into authorize), so on
+// any store whose law arrived through the door, door and lens cannot disagree. A store that
+// hand-lands its own malformed declaration past the door owns the divergence it bought.
+//
+// UNGOVERNED stores ignore trust declarations entirely and stay OPEN: with no operator there
+// is no lawful voice to declare with, and honoring anyone's would let one federated stranger's
+// "closed" delta brick a pull-only aggregator. Govern the store to govern the door.
 export function readTrustPolicy(reactor: Reactor, operator?: string): TrustPolicy {
+  if (operator === undefined) return { mode: "open", roster: new Set() };
   const negated = lawfulNegated(reactor, operator);
   const roster = new Set<string>();
   let latest: { mode: TrustMode; timestamp: number; id: string } | undefined;
@@ -78,22 +115,15 @@ export function readTrustPolicy(reactor: Reactor, operator?: string): TrustPolic
     if (!declares || negated(delta.id)) continue;
 
     let mode: string | undefined;
-    const named = new Set<string>();
-    let malformed = false;
     for (const p of delta.claims.pointers) {
-      if (p.target.kind !== "primitive") continue;
-      if (p.role === "mode") {
-        if (mode !== undefined || typeof p.target.value !== "string") malformed = true;
-        else mode = p.target.value;
+      if (p.target.kind !== "primitive" || typeof p.target.value !== "string") continue;
+      if (p.role === "mode" && mode === undefined && MODES.has(p.target.value)) {
+        mode = p.target.value;
       }
-      if (p.role === "admit-author") {
-        if (typeof p.target.value !== "string") malformed = true;
-        else named.add(p.target.value);
-      }
+      if (p.role === "admit-author") roster.add(p.target.value);
     }
-    if (malformed || mode === undefined || !MODES.has(mode)) continue;
+    if (mode === undefined) continue; // roster still harvested — exactly as the lens sees it
 
-    for (const a of named) roster.add(a);
     if (
       latest === undefined ||
       delta.claims.timestamp > latest.timestamp ||
