@@ -52,9 +52,15 @@ The village dressed as what it is: a federated social network. Script (15 min, n
 3. **The stranger** — cinelog's alien dialect rendered in with provenance visible.
 4. **The fire** — burn the almanac's sqlite mid-sentence; the vault replants it.
 5. **The unsaying** — erase a claim; the network honors it; the hole is signed (unit 1).
-6. **Grow an app live** — mid-meeting, ask Claude to build a new store for whatever she
+6. **The mill** — the village's first ANIMATE store: a Runner attaches (the machinery shipped
+   in v1 — `Runner`/`bindingDefinitionClaims`; the village has never exercised it), and an
+   operator-blessed `DerivedFn` grinds the almanac's ground into flour — a living village
+   digest emitted as derived deltas, signed, cited, recomputed on every pulse. Passive store,
+   then the runner attaches, and the law wakes up on camera. The line: "smart contracts
+   without execution risk — the contract is a lens, and anyone can re-run it to the byte."
+7. **Grow an app live** — mid-meeting, ask Claude to build a new store for whatever she
    names (schemas + renderer via MCP/skill); it federates in before the coffee refills.
-7. **The kicker** — `npm i -g @bombadil/loam` on her laptop; one pull; the whole republic is
+8. **The kicker** — `npm i -g @bombadil/loam` on her laptop; one pull; the whole republic is
    hers, offline, through any lens she writes.
 
 Pitch spine (rehearsed answers live in SPEC §13 + the journal): consensus was the wrong
