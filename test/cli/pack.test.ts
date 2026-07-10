@@ -16,5 +16,7 @@ describe("npm pack: the turnkey surface", () => {
     expect(paths).toContain("dist/index.js");
     expect(paths).toContain("dist/index.d.ts");
     expect(paths).toContain("dist/cli/bin.js"); // the bin package.json points at
+    expect(paths).toContain("LICENSE-MIT"); // dual license: both texts ride the tarball
+    expect(paths).toContain("LICENSE-APACHE");
   });
 });
