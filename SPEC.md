@@ -348,7 +348,7 @@ Design-pattern references (they carry the EAV model): `agent.ts` (`beliefPointer
 new code is the hyperschema-sourced GraphQL, accounts-as-schema, and the runner's runtime variety
 and deployment.
 
-## 11. Erasure — degrees of forgetting (designed 2026-07-10; LANDED: PRs #34 + #36)
+## 11. Erasure — degrees of forgetting (designed 2026-07-10; LANDED, operator-only — seam #34, law + hardening + gating #36/#40/#38)
 
 GDPR Art. 17 and plain conscience both demand that a store can truly forget. The architecture
 makes this cheaper than it sounds: **Loam's immutability is per-fact, not global** — the ground
@@ -404,15 +404,17 @@ its content.
      whenever you choose. Reversible anonymity, no new cryptography.
   4. **Partial redaction** — reassert with specific pointer VALUES replaced by a redaction
      marker; the fact survives, the sensitive field does not.
-- **The request carries its replacement.** An erasure request may embed the pre-signed
-  replacement delta; every honoring store appends the IDENTICAL delta and union dedups the
-  network onto one anonymous copy. Reassertions inherit the source timestamp (idempotence by
-  content address, the translation trick).
+- **The replacement is the operator's to append.** Anonymous reassertion (rung 2) is the
+  operator re-speaking the content in the store's own voice — a normal append the operator
+  signs, not an auto-propagating order (erasure is per-instance, above). The reassertion
+  inherits the source timestamp, so it is content-addressed and idempotent (the translation
+  trick): two operators who independently honor the same request converge on one anonymous copy
+  without coordinating.
 - **Honest boundary.** This is rigorous severance/pseudonymization; true anonymity is a
   property of the content itself (timestamps correlate, style fingerprints). Rung 4 is the
   tool for content-side scrubbing; no substrate can do it for you.
 
-## 12. The open door — public reads & the browser client (designed 2026-07-10; queued)
+## 12. The open door — public reads & the browser client (designed 2026-07-10; queued — browser-crypto spike GREEN)
 
 The aggregator dream needs a store a stranger's browser can simply read.
 
@@ -423,9 +425,11 @@ The aggregator dream needs a store a stranger's browser can simply read.
 - **The browser client.** A subpath export (`@bombadil/loam/client`), zero node-only deps:
   keygen in the page, claims signed locally, writes through `POST /append` (non-custodial —
   the token authenticates transport; the delta's own verified author is the authority, which
-  is why this endpoint already exists), GraphQL query + SSE subscribe wrappers. **Spike first:**
-  confirm rhizomatic's signing/hashing runs in a browser (isomorphic crypto); if not, that is
-  a rhizomatic issue + conversation with Myk, not a Loam workaround.
+  is why this endpoint already exists), GraphQL query + SSE subscribe wrappers. **Spike done
+  (2026-07-10, GREEN):** rhizomatic's signing and hashing are pure JS (`@noble/curves`,
+  `@noble/hashes`) — browser-safe, no rhizomatic change needed. The one care point: bundle the
+  crypto primitives without pulling rhizomatic's `node:http` peer transport (import
+  `signClaims`/`makeDelta`/`authorForSeed`, not `Peer`/`servePeer`).
 - **The notary pattern (optional, cheap).** An operator claim carrying the store's frontier
   hash may be anchored to any external notary (a chain, a newspaper, RFC 3161). The chain
   becomes a timestamp service for the vault; the world stays in Loam.
