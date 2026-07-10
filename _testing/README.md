@@ -103,10 +103,23 @@ _(one entry per PR that grew the village; newest last)_
   recipe crashed attach with a duplicate install), and the reference emit-mode lesson —
   wholesale `supersede` erases OTHER roots' flour; per-subject output wants `keyed`.
 - **PR #36 — THE UNSAYING (erasure, SPEC §11)** (phase12.mjs, 4/4 twice): Wren speaks in
-  haste and **unsays it** — her own authority, her own words. The bytes are cleared from every tier
-  (the vault's heal is tombstone-guarded on every path), the dossier reverts, the **signed
-  hole** remains (who asked, when, which id — never what), and the door refuses the id's
-  return even though the commons still holds the original and offers it back on every pulse
-  — sovereignty both ways, watched live: `🕳️ …and UNSAYS it — the bytes are cleared from every tier,
-  the signed hole remains, and the door will refuse its return`. The erase re-seats the
+  haste and asks the almanac to unsay it — and because **erasure is the instance operator's
+  alone** (destructive, so maximally gated), the almanac's operator, as the controller, honors
+  the request. The bytes are cleared from every tier (the vault's heal is tombstone-guarded on
+  every path), the dossier reverts, the **signed hole** remains (who asked, when, which id —
+  never what), and the door refuses the id's return even though the commons still holds the
+  original and offers it back on every pulse — sovereignty both ways, watched live: `🕳️ the
+  almanac's operator honors it — the bytes are cleared from every tier, the signed hole
+  remains, and the door will refuse its return`. The erase re-seats the
   almanac's reactor; the mill wheel is rehung after, like the crash.
+- **THE PLAYABLE VILLAGE (Unit 3a — the theater)**: `dashboard.html` is now a 2D canvas
+  village game, driven entirely by the same SSE stream it always spoke. Buildings — the reel
+  barn, the hive, the commons garden, the almanac hall (with a mill wheel that turns when the
+  store is animate, and the seed vault beside it), and the cinelog hut beyond the palisade —
+  sit on a green field; villager sprites walk to a building when an act fires there (the actor
+  and place are inferred server-side in `tell()` and ride each event), speak the event in a
+  bubble, then drift home. The federation pulse beats in the header; the crash shakes the hall;
+  a refused crossing flashes the gate. **Click any villager** to open their dossier: the
+  three-lens trust duel (plain bio vs. trusted vs. guarded) and the mill's 🌾 presence line,
+  live. Movement is theater; the acts are ground — the game is a lens over the same deltas, and
+  nothing about the village changes to support it. (Verified live in the browser.)
