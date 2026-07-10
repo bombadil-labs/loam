@@ -29,7 +29,7 @@ export interface RunOptions {
   readonly version?: string; // override the reported version (tests)
 }
 
-const VERSION = "0.0.0";
+const VERSION = "0.0.1";
 
 const HELP = `loam — a general database grown on rhizomatic
 

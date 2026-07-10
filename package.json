@@ -1,6 +1,6 @@
 {
   "name": "@bombadil/loam",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "type": "module",
   "description": "Loam — a general database grown on rhizomatic: signed, content-addressed deltas beneath; GraphQL query, mutation, and subscription above.",
   "license": "MIT OR Apache-2.0",
