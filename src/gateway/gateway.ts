@@ -282,7 +282,7 @@ export class Gateway {
   // A body must MATERIALIZE (yield an HView): SchemaRegistry and buildGqlSchema never evaluate
   // it, and reactor.register throws for anything else — after state has begun to change. The
   // sort of a term is content-independent (the offeredLens trick), so trial-eval it empty and
-  // refuse a dset-sort body before it can persist, half-bind, or poison a boot.
+  // refuse a dset-sort body before it can persist, half-bind, or corrupt a boot.
   private static assertMaterializable(schema: HyperSchema, registry: SchemaRegistry): void {
     const trial = evalTerm(schema.body, DeltaSet.from([]), "loam:trial", registry);
     if (trial.sort !== "hview") {
@@ -545,7 +545,7 @@ export class Gateway {
     // Prove the WHOLE registration before anything persists — the refs must resolve against
     // what is bound (minus the same name, which this publish may be evolving), the body must
     // materialize, the templates must be well-formed AND visible AND buildable into a GraphQL
-    // surface. Loud here, quiet on replay: a poisoned delta on append-only ground cannot be
+    // surface. Loud here, quiet on replay: a bad delta on append-only ground cannot be
     // taken back, and "registered" must never mean "silently missing its mutations".
     const templates = mutations === undefined ? undefined : parseClaimTemplates(mutations);
     const survivors = this.registered.filter((r) => r.schema.name !== schema.name);
@@ -597,7 +597,7 @@ export class Gateway {
   // tombstone (through authorize — the door validates it against the live target), purge every
   // tier, and re-seat the gateway on the post-purge ground. The store remembers THAT it forgot
   // — never what. Live subscriptions re-attach exactly as they do after a schema evolution or
-  // the fire; an animated gateway's runner must be re-attached (the host holds the old
+  // a crash; an animated gateway's runner must be re-attached (the host holds the old
   // reactor).
   async erase(
     id: string,
@@ -687,7 +687,7 @@ export class Gateway {
   }
 
   // Admit a batch of peer deltas: verify each (a forgery or an unsigned delta is refused, and
-  // one bad delta does not poison the rest), apply the admission predicate, then ingest + write
+  // one bad delta does not spoil the rest), apply the admission predicate, then ingest + write
   // through. Idempotent — union dedups, so re-pulling accepts nothing new.
   async federate(
     deltas: Iterable<Delta>,

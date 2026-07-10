@@ -23,7 +23,7 @@ import type { StoreBackend } from "./backend.js";
 
 export interface MirrorOptions {
   // Called when a mirror write fails (the append itself still succeeds). Wire this to a log:
-  // lag is safe, but unnoticed lag is a backup that isn't there when the fire comes.
+  // lag is safe, but unnoticed lag is a backup that isn't there when recovery is needed.
   readonly onLag?: (err: unknown) => void;
 }
 

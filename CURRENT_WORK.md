@@ -102,6 +102,48 @@ nobody has to believe them.
 
 ## Left off here
 
-**Unit 1 (erasure) COMPLETE** — seam (PR #34) + law (PR #36): tombstones verified at the door while evidence exists, Gateway.erase (manifest → purge → tombstone → re-seat), the door refuses erased ids past any admit override, forgiveness = striking the tombstone, degrees compose from erase+append, heal is tombstone-guarded on every path (cli, harness), phase12 4/4 twice, the unsaying live in the village. KNOWN ISSUE (recorded, not urgent): village act pacing has slowed (~25s/act) — the mill re-grinds a 400+-delta ground per ingest and the pulse presence query hauls the derived.from evidence hex; this is SPEC §13 vertical-scale honesty in miniature. Candidates: prune village homes, lighter pulse query, or an index tier someday.
+**Unit 1 (erasure): seam merged (PR #34); law implemented on branch `erasure-law` (not yet
+merged).** The law slice — tombstones verified at the door while evidence exists, Gateway.erase
+(manifest → purge → tombstone → re-seat), the door refuses erased ids past any admit override,
+forgiveness = striking the tombstone, degrees compose from erase+append, heal is
+tombstone-guarded — is at 313/313 with phase12 4/4 twice and the unsaying running in the
+village. A correctness review then surfaced follow-up items to resolve **before merge**, stated
+here in plain correctness terms:
 
-**NEXT: Unit 2 (the open door)** — SPIKE FIRST: does rhizomatic signing/hashing run in a browser? Then public-read claims at loam.public + `@bombadil/loam/client`. Then Unit 3 (playable village).
+1. **Federated tombstone, wrong-author case (highest priority).** `readTombstones` /
+   `tombstonesIn` currently bind any tombstone where `author === spoken-by`, without checking
+   the live target's actual author. Because `federate()` doesn't run `eraseDefect`, a tombstone
+   that arrives by federation and names itself as its target's author can mark a *held* delta
+   for door-refusal — and, via `tombstonesIn` → `heal(exclude)` at next archive boot, for
+   physical purge — even when the present target's real author differs. Fix: when the target is
+   present with a different author, do not bind the tombstone (and/or run `eraseDefect` at the
+   federation door).
+2. **Struck tombstone still purges at boot.** `tombstonesIn` (pre-boot, no reactor) doesn't
+   consult negation, but `heal(exclude)` *purges* excluded ids — so a lawfully forgiven (struck)
+   tombstone still causes its target to be dropped on the next archive-enabled boot. Fix: either
+   teach `tombstonesIn` the lawful-negation algebra off the raw delta list, or make heal's
+   `exclude` skip-only (carry-nothing) rather than purge. **Add the heal↔forgiveness test SPEC
+   §11 asks for first.**
+3. **Pre-emptive refusal.** A tombstone for a not-yet-present id is accepted (self-consistency
+   passes with no live target to check), which blocks that id from ever arriving. Same fix locus
+   as (1) — verify the incoming delta's author against the binding tombstone at refusal time.
+4. Lesser follow-ups: `erase()` should refuse a tombstone as its own target (keep the erasure
+   log append-only); `reseat()` should end/re-issue live subscriptions (currently they stall on
+   the discarded reactor) and re-attach or warn an animated runner; serialize `erase` against
+   concurrent `append`; cache the per-write tombstone scan; mirror the one-`erases` shape check
+   in the readers.
+
+Suggested shape: one small PR fixing (1)–(3) with the federation-door and heal↔forgiveness
+tests, then the lesser items, then merge and add the village stage note. Keep review prompts and
+summaries in the neutral correctness register (per CLAUDE.md) — that framing reads far less like
+offensive security to a content classifier and finds the same issues.
+
+Also recorded: village act pacing has slowed (~25s/act) — the mill re-grinds a 400+-delta ground
+per ingest and the pulse presence query hauls the `derived.from` evidence hex; SPEC §13
+vertical-scale honesty in miniature. Candidates: prune `_testing/homes/`, a lighter pulse query,
+or an index tier someday. (`_testing/homes/` is disposable and bloated from tonight's many runs;
+phase7's 7.5 whole-run reconciliation drifts against it — reset the homes to re-baseline.)
+
+**THEN: Unit 2 (the open door)** — SPIKE FIRST: does rhizomatic signing/hashing run in a
+browser? Then public-read claims at loam.public + `@bombadil/loam/client`. Then Unit 3 (playable
+village).

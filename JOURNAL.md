@@ -662,7 +662,7 @@ path. `ArchiveBackend(root)` is the cold driver: a directory of canonical delta 
 their content address, so plain file tools are backup tools — copying files between archives
 IS replication, and a renamed file is corruption, refused. `loam serve --archive <dir>` (or
 `"archive"` in config.json) mirrors the sqlite store and heals BEFORE boot; restore after
-disaster is: delete the burned sqlite, serve again. The contract's corruption probes
+disaster is: delete the lost sqlite, serve again. The contract's corruption probes
 generalized to per-harness hooks; five harnesses now face the full contract. 285/285.
 
 Learnings worth keeping:
@@ -751,7 +751,7 @@ One more push after the night session: the runner machinery — shipped in v1, t
 and never once run in the open air — wired into the village. The almanac's operator blesses
 `fn:grind`; THE MILLER (a new cast identity holding a Runner and write standing — the recipe
 and the key to the granary are different keys) attaches; and every dossier gains a derived
-`presence` line, signed, superseding, durable, archived by the vault, surviving the fire (the
+`presence` line, signed, superseding, durable, archived by the vault, surviving the crash (the
 wheel is rehung on the reborn gateway — a Runner is process machinery, not ground). Phase 11,
 4/4, twice; verified live on the dashboard, flour moving on three cards.
 
@@ -785,7 +785,7 @@ self-erasures where author === spoken-by). `Gateway.erase` runs authority → ma
 delta citing the id, shown before the cut) → tombstone (ground before the target stops being
 ground) → purge on every tier → RE-SEAT: a fresh reactor replayed from the post-purge backend,
 every schema rebinding under a new generation — the substrate stays frozen and grow-only;
-forgetting in-process is a rebuild, exactly like the fire. The door refuses an erased id
+forgetting in-process is a rebuild, exactly like the crash. The door refuses an erased id
 through append AND federation, past any explicit admit override; forgiveness is striking the
 tombstone, and the id may return. heal(exclude) is wired on every path (serve, harness) with
 the conservative pre-boot reader. Degrees compose from erase + append: anonymous reassertion

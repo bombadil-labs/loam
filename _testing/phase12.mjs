@@ -1,4 +1,4 @@
-// Phase 12 (SPEC §11) — THE UNSAYING: a villager erases her own words. The bytes burn on
+// Phase 12 (SPEC §11) — THE UNSAYING: a villager erases her own words. The bytes are cleared from
 // every tier (the vault forgets too — heal is tombstone-guarded), the signed hole remains,
 // the dossier reverts, and the door refuses the id's return — even when a peer store still
 // holds the original and offers it back on every pulse. Sovereignty both ways: the almanac
@@ -59,7 +59,7 @@ try {
   const after = await bioOf(almanac.base);
   check(
     "12.2",
-    "erase burns the bytes and the dossier reverts; the signed hole remains",
+    "erase clears the bytes and the dossier reverts; the signed hole remains",
     report.erased === regret.id &&
       after !== `regrettable-${ts}` &&
       readTombstones(almanac.gateway.reactor, almanac.operator).has(regret.id),

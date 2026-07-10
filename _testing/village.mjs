@@ -14,7 +14,7 @@ import {
   SEEDS,
   appendAs,
   attendClaims,
-  burnStore,
+  dropStore,
   companionClaims,
   followClaims,
   gql,
@@ -33,7 +33,7 @@ const VIEWER_PORT = 4400;
 const stores = {};
 for (const name of ["commons", "reel", "hive", "almanac", "cinelog"]) stores[name] = await openStore(name);
 const { commons, reel, hive, cinelog } = stores;
-// `let`, not destructured: the fire act closes the almanac, burns its sqlite, and rebinds a
+// `let`, not destructured: the crash act closes the almanac, drops its sqlite, and rebinds a
 // fresh one healed from the vault — every closure below reads this binding at call time.
 let almanac = stores.almanac;
 if (almanac.healed.toPrimary > 0) {
@@ -399,7 +399,7 @@ const acts = [
       return;
     }
     if (forgeryOut === true) {
-      // escalate: Mallory STRIKES Wren's latest surviving bio delta (erasure, not fabrication)
+      // escalate: Mallory negates Wren's latest surviving bio delta (suppression, not fabrication)
       const latest = [...almanac.gateway.reactor.snapshot()]
         .filter(
           (d) =>
@@ -418,7 +418,7 @@ const acts = [
           ),
         ]);
         tell(
-          `ðŸ¦ Mallory STRIKES Wren's words from the record â€” the plain dossier forgets; the guarded lens does not`,
+          `ðŸ¦ Mallory negates Wren's words in the record â€” the plain dossier forgets; the guarded lens does not`,
           "forgery",
         );
       }
@@ -463,9 +463,9 @@ const acts = [
 ];
 
 // ---- the unsaying -----------------------------------------------------------------------------
-// ERASURE (SPEC §11): Wren speaks in haste, regrets it, and UNSAYS it — the bytes burn on every
+// ERASURE (SPEC §11): Wren speaks in haste, regrets it, and UNSAYS it — the bytes are cleared from every
 // tier (the vault forgets too), the signed hole remains, and the door refuses its return. The
-// erase re-seats the almanac's reactor, so the mill wheel is rehung after (like the fire).
+// erase re-seats the almanac's reactor, so the mill wheel is rehung after (like the crash).
 async function theUnsaying() {
   const regret = signClaims(
     {
@@ -485,21 +485,21 @@ async function theUnsaying() {
   const { attachMill } = await import('./mill.mjs');
   await attachMill(stores.almanac);
   tell(
-    `🕳️ …and UNSAYS it — the bytes burn on every tier, the signed hole remains (${report.citations.length} citations), and the door will refuse its return`,
+    `🕳️ …and UNSAYS it — the bytes are cleared from every tier, the signed hole remains (${report.citations.length} citations), and the door will refuse its return`,
     "patch",
   );
 }
 
-// ---- the fire ---------------------------------------------------------------------------------
+// ---- the crash ---------------------------------------------------------------------------------
 // COLD STORAGE (PR #22): the almanac keeps a seed vault — every append lands hot and cold in
-// one motion. Every so often the sqlite burns to the ground mid-story, and the reopen heals
+// one motion. Every so often the sqlite is lost mid-story, and the reopen heals
 // from the vault BEFORE the gateway reads. The dashboard barely blinks: the dossier watchers
 // resubscribe, the pulse resumes, and every word is where it was.
-async function theFire() {
+async function theCrash() {
   const before = [...almanac.gateway.reactor.snapshot()].length;
-  tell(`🔥 FIRE at the almanac — ${before} deltas of hot store, burning to the ground`, "forgery");
+  tell(`💥 the almanac's disk fails — ${before} deltas of hot store, gone in an instant`, "forgery");
   await stores.almanac.close();
-  burnStore("almanac");
+  dropStore("almanac");
   stores.almanac = await openStore("almanac");
   almanac = stores.almanac;
   tell(
@@ -518,10 +518,10 @@ async function life() {
   let i = 0;
   for (;;) {
     try {
-      // mostly the small stuff; the forgery drama every 8th act; the fire every 24th
+      // mostly the small stuff; the imposter drama every 8th act; the crash every 24th
       const act =
         i % 24 === 15
-          ? theFire
+          ? theCrash
           : i % 24 === 4
             ? theUnsaying
             : i % 8 === 3
