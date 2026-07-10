@@ -12,9 +12,10 @@ describe("npm pack: the turnkey surface", () => {
       shell: process.platform === "win32", // npm is a .cmd on windows
     });
     type Manifest = { files: Array<{ path: string }> };
-    // npm <= 11 emits a one-element array; npm 12 emits the manifest object itself.
-    const parsed = JSON.parse(raw) as Manifest | [Manifest];
-    const manifest = Array.isArray(parsed) ? parsed[0] : parsed;
+    // npm <= 11 emits a one-element array; npm 12 emits an object keyed by package name
+    // (lib/utils/tar.js: `output.buffer({ [key]: tarball })`). Take the manifest either way.
+    const parsed = JSON.parse(raw) as [Manifest] | Record<string, Manifest>;
+    const manifest = Array.isArray(parsed) ? parsed[0] : Object.values(parsed)[0]!;
     const paths = new Set(manifest.files.map((f) => f.path));
     expect(paths).toContain("dist/index.js");
     expect(paths).toContain("dist/index.d.ts");
