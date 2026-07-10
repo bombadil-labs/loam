@@ -382,8 +382,13 @@ npm run release -- patch   # or minor / major
 From a clean, up-to-date `main` only: runs the gate, bumps the version (syncing the in-source
 constants), commits, tags `vX.Y.Z`, and pushes. The `release` GitHub Actions workflow picks up
 the tag, runs the gate again, verifies the tag agrees with `package.json`, publishes
-`@bombadil/loam` to npm (the `NPM_TOKEN` repository secret), and cuts a GitHub release with
-generated notes. A tag that lies about the version refuses to publish.
+`@bombadil/loam` to npm, and cuts a GitHub release with generated notes. A tag that lies about
+the version refuses to publish.
+
+Publishing is tokenless — npm **trusted publishing** (OIDC): npm verifies that this repo's
+`release.yml` workflow minted the release, and provenance is generated automatically. There is
+no publish token to leak, rotate, or expire. (The one bootstrap exception: npm can only trust a
+package that exists, so the very first publish was made locally by the author.)
 
 The process this repo runs by is in [CLAUDE.md](CLAUDE.md).
 
