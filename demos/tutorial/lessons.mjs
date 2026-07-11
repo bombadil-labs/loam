@@ -64,7 +64,9 @@ const BOOK_POLICY = {
   },
   default: PICK,
 };
-const PERSON_POLICY = { props: { name: PICK, friends: ALL, guestAt: ALL }, default: PICK };
+// `follows` matches the circle packet's friendship context; `guestAt` gathers the guest note
+// lesson 5 files on Alice's side, so her card shows the film she was your guest at.
+const PERSON_POLICY = { props: { name: PICK, follows: ALL, guestAt: ALL }, default: PICK };
 
 // ---- small delta grammar --------------------------------------------------------------------
 
@@ -262,6 +264,9 @@ only newly said.)`,
           // film under `guests` (so a `guests` lens would gather it) and names Alice as the
           // entry. No lens gathers `guests` yet, so she is real but unseen.
           say(loam, ctx, [entity("subject", FILM, "guests"), entity("guest", ALICE, "at")]),
+          // the same occasion, filed on ALICE'S side too, so once you register a Person lens
+          // (lesson 10) her card shows the film she was your guest at.
+          say(loam, ctx, [entity("subject", ALICE, "guestAt"), entity("film", FILM, "screened")]),
         ]);
       },
       // Durable: the pen-written guest claim naming Alice is in the ground forever. (That the
@@ -426,8 +431,9 @@ holds the door.`,
       copy: `All this time your store has said "person:alice" the way you'd name a stranger —
 confidently, knowing nothing. Somewhere there's a store that DOES know her: the circle, kept by
 its own operator with its own key. We bundled its whole export. Pull it. Names and friendships
-flow into your ground and Alice lights up — a name, some friends, and there on her card, the
-screening you logged with her. Now the fine print, which is the entire point: the circle's own
+flow into your ground and Alice lights up — a name, the friends she keeps, and (because you
+logged a screening with her) the film she was your guest at. Now the fine print, which is the
+entire point: the circle's own
 SCHEMAS arrived too, and they do nothing here. Foreign law is inert — its registrations reshape
 nothing, because they aren't signed by YOUR key. You register your own Person lens; you decide
 what to believe. Data federates; authority never does.`,
@@ -440,7 +446,14 @@ what to believe. Data federates; authority never does.`,
         );
       },
       check: async (ctx) => {
-        const v = await view(ctx, `{ person(entity: "${ALICE}") { name } }`);
+        const v = await view(ctx, `{ person(entity: "${ALICE}") { name follows guestAt } }`);
+        // the copy's promise, made honest: her name AND her friends AND the film she guested at
+        const lit =
+          v.person?.name === "Alice Song" &&
+          Array.isArray(v.person?.follows) &&
+          v.person.follows.length >= 1 &&
+          Array.isArray(v.person?.guestAt) &&
+          v.person.guestAt.includes(FILM);
         const foreignArrived = has(
           ctx,
           (d) =>
@@ -452,7 +465,7 @@ what to believe. Data federates; authority never does.`,
         const foreignInert = !loam
           .readRegistrations(ctx.gateway.reactor, ctx.author)
           .some((r) => r.schema.name === "Friends");
-        return v.person?.name === "Alice Song" && foreignArrived && foreignInert;
+        return lit && foreignArrived && foreignInert;
       },
     },
 

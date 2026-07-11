@@ -1,9 +1,10 @@
-// The tutorial's anti-rot guarantee (SPEC §16): the whole arc, headless. This suite drives
-// the EXACT functions the page calls — site/lessons.mjs `buildArc(loam)` over the browser
-// barrel — through all eleven lessons IN ORDER, asserting every check green, that no check is
-// vacuously green before its lesson runs, that a revisit (reboot from the same origin)
-// re-verifies every green from the ground alone, and the finale's whole claim: export →
-// `loam init --seed` → `loam pull` → the served store answers `_hex` for `_hex`.
+// The tutorial's anti-rot guarantee (SPEC §19): the whole arc, headless. This suite drives
+// the EXACT functions the page calls — demos/tutorial/lessons.mjs `buildArc(loam)` over the
+// browser barrel — through all twelve lessons IN ORDER, asserting every check green, that no
+// check is vacuously green before its lesson runs, that a revisit (reboot from the same
+// origin) re-verifies every green from the ground alone, that lesson 6's evolution leaves an
+// already-open subscription's SHAPE untouched (a subscription is a pinned lens), and the
+// finale's whole claim: export → `loam init --seed` → `loam pull` → `_hex` for `_hex`.
 
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -18,6 +19,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { MemStorage } from "../store/mem-storage.js";
 // The page and this test share one arc — that identity IS the anti-rot guarantee.
 import {
+  ALICE,
   FILM,
   bootTutorialStore,
   buildArc,
@@ -165,5 +167,48 @@ describe("the tutorial arc, headless", () => {
       await ctx.gateway.close();
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
+  });
+
+  // SPEC §19's mandated lesson-6 pin: a subscription is a standing question against the lens
+  // as it was when you asked, and it can never sprout a field you never selected. Open one
+  // against the pre-guests Film, evolve the lens (lesson 6), and prove the open subscription
+  // keeps its OLD shape while a fresh query sees the new field.
+  it("lesson 6: an open subscription keeps its shape across the evolution", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    const arc = buildArc(loam);
+    for (const lesson of arc.filter((l) => l.id <= 5)) await lesson.perform(ctx);
+
+    // Film is at its pre-guests generation. Open a subscription selecting only what that lens
+    // offers, and collect every payload it emits.
+    const seen: Array<Record<string, unknown>> = [];
+    const sub = await ctx.gateway.subscribe(`subscription { film(entity: "${FILM}") { title } }`);
+    const pump = (async () => {
+      for await (const ev of sub) {
+        const film = (ev as { film?: Record<string, unknown> }).film;
+        if (film) seen.push(film);
+      }
+    })();
+    await new Promise((r) => setTimeout(r, 30)); // the initial snapshot
+    const before = seen.length;
+    expect(before).toBeGreaterThan(0);
+
+    // Lesson 6 evolves the lens (adds `guests`) and re-registers — a ground change the open
+    // subscription will re-resolve under its ORIGINAL shape.
+    await arc.find((l) => l.id === 6)!.perform(ctx);
+    await new Promise((r) => setTimeout(r, 30));
+
+    // The pinned lens never grew guests — every payload it ever emitted is title-only.
+    expect(seen.length).toBeGreaterThanOrEqual(before);
+    for (const film of seen) {
+      expect(Object.keys(film), "the old subscription must keep its shape").toEqual(["title"]);
+    }
+    // ...while a fresh query, asked with the new field, sees Alice.
+    const fresh = await ctx.gateway.query(`{ film(entity: "${FILM}") { guests } }`);
+    expect((fresh.data as { film: { guests: unknown[] } }).film.guests).toContain(ALICE);
+
+    await sub.return?.(undefined);
+    await pump.catch(() => {});
+    await ctx.gateway.close();
   });
 });
