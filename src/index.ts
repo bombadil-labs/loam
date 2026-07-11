@@ -31,6 +31,7 @@ export {
   readPublicSchemas,
 } from "./gateway/public.js";
 export { pullFrom, type PullOptions } from "./federation/pull.js";
+export { exportOffer, parseOffer } from "./federation/offer.js";
 export { toWire, fromWire, type WireDelta } from "./federation/wire.js";
 export {
   CTX_ERASE,

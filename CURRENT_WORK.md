@@ -20,9 +20,13 @@ is idempotent.
   - `test/cli/pull.test.ts` — same-operator law-binds (registration answers, grants gate);
     foreign law-inert; tombstone refused; URL idempotency (second pull accepts 0); the
     round-trip `_hex` match (browser store → export → CLI store answers hash-for-hash).
-- [ ] **Tests first** — write `test/cli/pull.test.ts` + an `exportOffer` byte-compat test.
-- [ ] **Implement** — barrel + CLI verb + help text (the poetry is first-class).
-- [ ] **Green** — `npm run check`, counts read.
+- [x] **Tests first** — `test/federation/offer.test.ts` (byte-compat against the served
+      /federate door as reference; round-trip; offered-lens shaping; refusals) +
+      `test/cli/pull.test.ts` (same-operator law-binds incl. the `_hex` match and imported
+      grants gating; foreign law-inert; tombstone refused from a file; URL idempotency).
+- [x] **Implement** — `src/federation/offer.ts` (`exportOffer` / `parseOffer`), `loam pull`
+      in cli.ts, exports on both barrels, help text.
+- [x] **Green** — `npm run check`: 33 files, 407 tests.
 - [ ] **PR → review (one careful agent) → resolve → merge.**
 - [ ] **Journal.**
 - [ ] **Village** — the take-home act completes: a tab's store exported and replanted as a
