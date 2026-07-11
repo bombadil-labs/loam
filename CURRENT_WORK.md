@@ -9,22 +9,22 @@ OLD subscription keeps streaming Alice-less (a pinned lens choice) while a NEW q
 the regenerated schema shows her. The MVP's lesson-6 copy overclaims this; v2b fixes it and
 the arc test pins the real semantics._
 
-## Sprint A — surfaces are materializations (SPEC §17; ships before tutorial v2)
+## Sprint A — surfaces are materializations — COMPLETE (PRs #59–#62, 2026-07-11)
 
-- [ ] **Myk reads SPEC §17** (drafted on branch `surfaces`) — the code waits on his read.
-- [ ] **The seam**: extract the `Registered`-set consumption behind a SurfaceGenerator seam;
+- [x] **Myk read SPEC §17** (drafted on branch `surfaces`) — the code waits on his read.
+- [x] **The seam** (PR #60): extract the `Registered`-set consumption behind a SurfaceGenerator seam;
       `buildGqlSchema` becomes the first implementation. Contract: GraphQL behavior
       byte-identical before/after (existing suites are the witness).
-- [ ] **REST/OpenAPI**: `buildOpenApi(registered)` → OpenAPI 3.1 served at
+- [x] **REST/OpenAPI** (PR #61 + auth-parity review resolved): `buildOpenApi(registered)` → OpenAPI 3.1 served at
       `/:mount/openapi.json`; dynamic router `GET /:mount/rest/v<N>/<schema>/<entity>` (the same
       view — `_hex` for `_hex` with GraphQL, contract-tested), `POST` through the same door
       discipline. REVIEW FOCUS: the doors must not disagree — tokens, public declarations,
       capability refusals, tombstones, all shared. Spec regenerates on evolution.
-- [ ] Tests first → green → PR → review (auth-parity is the riskiest angle this repo has
+- [x] Tests → review → merge → village phase19 (4/4 twice) → journal (auth-parity is the riskiest angle this repo has
       shipped since capabilities — one careful agent minimum) → merge → village act (the
       almanac answers REST beside GraphQL; dashboard or a phase19 hits both doors and
       compares `_hex`) → journal → re-plan.
-- [ ] **Versioning law (§17 amendment, Myk 2026-07-11)**: the REST door is BORN versioned —
+- [x] **Versioning law (§17 amendment, Myk 2026-07-11)**: the REST door is BORN versioned —
       `vN` aliases derived from surviving registrations in ground order, the registration
       hash as the canonical version name; withdrawing a version = the operator strikes its
       registration delta (existing grammar; test it). Version-pinned GraphQL access: QUEUED
@@ -204,35 +204,9 @@ archive/mirror drivers (copy note in ⑯), HTTP/MCP serving (finale touches serv
    enumerate the refusal matrix (no token, wrong token, no standing, tombstoned id, closed
    trust, undeclared-public) and test both doors against it.
 
-**Left off here (Sprint A, step 2 — the REST door; seam merged as PR #60):** design settled,
-build begins next cycle. The step's contract:
-
-- `readRegistrationVersions(reactor, operator)` in registration.ts: ALL surviving
-  (lawful, non-negated) registrations per registration entity, ascending (timestamp, id) →
-  v1..vN with each version's delta id (the hash = its true name). A struck version leaves the
-  list (aliases shift, per §17 — the hash never lies); hash-addressing a struck version
-  answers 410 Gone, withdrawn-by-the-operator.
-- `Gateway.surface(door)` public accessor: { registered, hooks } — the door-neutral twin
-  of the private gqlHooks(); 'public' filters registered to the declared-public set (reuse
-  the publicCache defs computation).
-- PINNED RESOLUTION: old versions stay ANSWERABLE (the law is not words). Implementation
-  candidates, decide in-build: (a) lazily register old-version materializations under
-  generation-qualified names (matName machinery exists), or (b) one-shot gather+resolve
-  under the pinned (schema, policy) via evalTerm + resolveView. Whichever, the _hex of a
-  pinned view is as real as the live one's.
-- `src/surface/rest.ts`: buildOpenApi(registered versions) → OpenAPI 3.1 (info, per-version
-  paths, components from policies; the doc names each version's hash); the router:
-  GET /:mount/openapi.json; GET /:mount/rest/v<N>/<schema>/<entity> → { entity, view, _hex,
-  _hviewHex }; GET /:mount/rest/@<regHash>/... (hash-addressed); POST /:mount/rest/v<N>/
-  <schema>/<entity> → mutate via hooks (same door discipline); public projection honors
-  declared-public only, read-only.
-- server/http.ts mounts the router beside GraphQL; same token identities; CORS as everywhere.
-- TESTS FIRST — test/surface/rest.test.ts: (1) _hex agreement GraphQL↔REST on the same
-  entity; (2) the REFUSAL-PARITY MATRIX — no token / wrong token / actor-without-standing
-  write / tombstoned-id re-entry / closed-trust federation posture (n/a REST? admission is
-  federate — swap for: undeclared-public anonymous read) / never-declared schema on the
-  public door — each row asserted through BOTH doors with matching outcomes; (3) versioning:
-  evolve Film → v1 and v2 both answer, v1 without the new prop; strike v1 → alias shifts,
-  hash answers 410; (4) OpenAPI doc regenerates on evolution and validates as 3.1 JSON.
-- Then: careful review agent (auth parity), merge, village phase19 (almanac REST beside
-  GraphQL, _hex compared live), journal, re-plan, then Tutorial v2a.
+**Left off here:** Sprint A closed (phase19 + journal + ledger ride the sprint-a-close PR).
+NEXT: Tutorial v2a — the instruments (see the v2a checklist above and SPEC §19): Ground
+renderer, CodeMirror GQL editor over live introspection, View browser with the Schemas
+meta-view, write-path chips — built against the MVP arc, browser-verified live, shippable
+alone. Then v2b (Acts I–II, incl. the corrected lesson-6 subscription beat and the
+default-policy learning from Sprint A), v2c, v2d.
