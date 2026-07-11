@@ -18,9 +18,11 @@ import {
 } from "@bombadil/rhizomatic";
 import type { StoreBackend } from "../../src/store/backend.js";
 import { ArchiveBackend } from "../../src/store/archive.js";
+import { LocalStorageBackend } from "../../src/store/local-storage.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { MirrorBackend } from "../../src/store/mirror.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
+import { MemStorage } from "./mem-storage.js";
 import { FERN, GARDENER, GARDENER_SEED, SURVEYOR_SEED, observed } from "../spike/garden.js";
 
 const signed1 = observed(FERN, "height", 30, 1000, GARDENER_SEED);
@@ -120,12 +122,37 @@ function mirrorDurableHarness(): Harness {
   };
 }
 
+// The browser driver: durable exactly as far as its Storage is. The shim IS the origin — a
+// reopen is a second handle on the same storage, and corruption is an edited row, exactly as a
+// devtools edit would be.
+function localStorageHarness(): Harness {
+  const origin = new MemStorage();
+  const keyFor = (id: string) => `loam:contract:${id}`;
+  const rewrite = (id: string, patch: (row: { claims: unknown; sig?: string }) => void) => {
+    const row = JSON.parse(origin.getItem(keyFor(id))!) as {
+      id: string;
+      claims: unknown;
+      sig?: string;
+    };
+    patch(row);
+    origin.setItem(keyFor(id), JSON.stringify(row));
+  };
+  return {
+    name: "localStorage",
+    open: () => new LocalStorageBackend("contract", origin),
+    reopen: () => new LocalStorageBackend("contract", origin),
+    corruptSig: (id) => rewrite(id, (row) => (row.sig = "ab".repeat(64))),
+    corruptClaims: (id, claims) => rewrite(id, (row) => (row.claims = claims)),
+  };
+}
+
 const harnesses: (() => Harness)[] = [
   () => ({ name: "memory", open: () => new MemoryBackend() }),
   sqliteHarness,
   archiveHarness,
   mirrorMemoryHarness,
   mirrorDurableHarness,
+  localStorageHarness,
 ];
 
 for (const makeHarness of harnesses) {

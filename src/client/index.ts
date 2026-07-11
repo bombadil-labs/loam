@@ -5,7 +5,7 @@
 // nothing at all.
 //
 // Ships as a self-contained browser bundle: rhizomatic's signing/hashing are pure JS
-// (`@noble/curves`, `@noble/hashes`) and are inlined by scripts/build-client.mjs, with the
+// (`@noble/curves`, `@noble/hashes`) and are inlined by scripts/build-bundles.mjs, with the
 // substrate's node-only peer transport aliased away (test/client/bundle.test.ts holds the
 // line: zero `node:` specifiers). Everything here speaks only `fetch` and
 // `globalThis.crypto` — present in every browser and in Node ≥ 18 alike.

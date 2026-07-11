@@ -95,6 +95,7 @@ export { serve, type ServeOptions, type ServerHandle, type TokenIdentity } from 
 export type { StoreBackend } from "./store/backend.js";
 export { canonicalDelta } from "./store/canon.js";
 export { ArchiveBackend } from "./store/archive.js";
+export { LocalStorageBackend, type StorageLike } from "./store/local-storage.js";
 export { MemoryBackend } from "./store/memory.js";
 export { MirrorBackend, type HealReport, type MirrorOptions } from "./store/mirror.js";
 export { SqliteBackend } from "./store/sqlite.js";
