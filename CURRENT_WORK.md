@@ -36,7 +36,23 @@ count ticks +1, not to 100) — revisit when §14 lands (SPEC §16 wants a footn
 re-plan); (3) GraphQL renders absence as `null`; (4) lesson checks must be MONOTONE in the
 ground or the revisit un-greens them.
 
-### 3b — the page
+### 3b — the page (built + verified live; PR pending)
+
+- [x] `site/index.html` + `site/app.mjs` + `site/style.css` — zero framework, three panes,
+      the inspector, the finale's localhost leg + paste-the-hash fallback; boots on real
+      localStorage. VERIFIED IN A REAL BROWSER: all 11 lessons driven to green through the
+      actual UI, including a true reload-persistence pass and the finale's genuine round trip
+      (page export → real `loam init/pull/serve` on :4321 → in-page Compare → homecoming
+      recorded → lesson 11 green). Found live: the inspector's byte-flip assumed a wire shape
+      that wasn't real (fixed shape-agnostically); prettier reformatting generated packets
+      breaks byte-identity (now prettier-ignored).
+- [x] `scripts/build-site.mjs` (aliases `@bombadil/loam/browser` → same-commit source) +
+      `scripts/serve-site.mjs` (dev-only static server; `.claude/launch.json` gains the
+      "tutorial" entry) + `test/site/build.test.ts` (artifact holds together, self-contained).
+- [x] Gate green — 35 files, 415 tests.
+- [ ] PR → review → merge.
+
+### 3b — the page (original checklist)
 
 - [ ] `site/index.html` + `site/app.mjs` + `site/style.css` — zero framework; the store is
       the state, the UI subscribes. Left: lesson copy + progress (re-verified from the ground
