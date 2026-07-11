@@ -24,7 +24,7 @@ interface ClientModule {
 }
 
 beforeAll(() => {
-  execFileSync(process.execPath, [join("scripts", "build-client.mjs")], {
+  execFileSync(process.execPath, [join("scripts", "build-bundles.mjs"), "client"], {
     cwd: process.cwd(),
     stdio: "pipe",
   });

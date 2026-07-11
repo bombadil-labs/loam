@@ -30,6 +30,10 @@
     "./client": {
       "types": "./dist/client/index.d.ts",
       "default": "./dist/client/index.js"
+    },
+    "./browser": {
+      "types": "./dist/browser/index.d.ts",
+      "default": "./dist/browser/index.js"
     }
   },
   "bin": {
@@ -53,7 +57,7 @@
     "esbuild@0.25.12": true
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node scripts/build-client.mjs",
+    "build": "tsc -p tsconfig.build.json && node scripts/build-bundles.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
@@ -67,6 +71,7 @@
   },
   "dependencies": {
     "@bombadil/rhizomatic": "^0.2.0",
+    "@noble/hashes": "^1.8.0",
     "better-sqlite3": "^12.11.1",
     "graphql": "^17.0.2"
   },

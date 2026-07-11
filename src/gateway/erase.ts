@@ -18,7 +18,8 @@
 // `hash(salt‖author)` commitment pointer on the reassertion, reclaimable by revealing the
 // preimage; partial redaction = reassert with values replaced.
 
-import { createHash } from "node:crypto";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex } from "@noble/hashes/utils.js";
 import { Reactor } from "@bombadil/rhizomatic";
 import type { Claims, Delta } from "@bombadil/rhizomatic";
 import { lawfulNegated } from "./registration.js";
@@ -162,5 +163,5 @@ export function tombstonesIn(deltas: Iterable<Delta>, operator: string | undefin
 // today; reveal (salt, author) and anyone can recompute the hash — provably yours whenever
 // you choose, no new cryptography.
 export function sealCommitment(salt: string, author: string): string {
-  return createHash("sha256").update(`${salt} ${author}`).digest("hex");
+  return bytesToHex(sha256(new TextEncoder().encode(`${salt}\u0000${author}`)));
 }

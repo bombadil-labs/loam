@@ -1,38 +1,35 @@
-# Current work
+# Current work — Sprint 1: the browser store (SPEC §15)
 
-_The live checklist. Empty means nothing is queued — the resume protocol (see `CLAUDE.md`) is
-then to ask Myk what to build next, and open it here at cycle stage 1._
+_Cycle stage: 5 (review). Branch: `browser-store`._
 
-**Nothing in flight (2026-07-11).** The v1 build (steps 0–9) and the Reader's Republic demo arc
-(Units 1–3c + demo item 7, "grow an app live") are complete and merged — the JOURNAL is their
-record, and `_testing/README.md`'s ledger maps each demo beat to its machinery. The demo script
-and pitch spine live in that ledger and in SPEC §13.
+**Success criteria.** A complete Loam boots in a page: `LocalStorageBackend` keeps the
+`StoreBackend` contract over an injectable `Storage`, `@bombadil/loam/browser` is a curated
+barrel shipped as a self-contained browser ESM bundle (zero `node:` specifiers) that BOOTS —
+genesis → register → claim → query — entirely inside the artifact.
 
-**The road to shipping (designed; the near-term arc).** SPEC §15 (the browser peer) + §16 (the
-interactive tutorial) are the plan for the public launch: a full store in the page, and a
-GitHub Pages site that teaches Loam by growing one, ending in `npm i -g @bombadil/loam` +
-`loam pull` to carry the store to the learner's machine. Three sprints, in order:
+## Checklist
 
-1. **The browser store (SPEC §15).** `src/store/local-storage.ts` (`LocalStorageBackend`,
-   one key per delta, quota→degradation; contract-tested via an injectable `Storage` shim —
-   no jsdom; reuse `canonicalDelta` + `MemoryBackend`'s batch-first atomicity),
-   `src/browser/index.ts` (the curated barrel), a second esbuild entry + `"./browser"` export,
-   `test/browser/bundle.test.ts` (zero `node:` + boots genesis→register→claim→query).
-2. **Continuity (SPEC §15).** `exportOffer(gateway)` in the browser barrel (byte-compatible
-   with the served `/federate` body), `loam pull <url|file>` in `src/cli/cli.ts` (boot/close
-   discipline from `cmdRegister`), `test/cli/pull.test.ts` (same-operator law-binds;
-   foreign law-inert; tombstone refused; URL idempotency; the round-trip `_hex` match).
-3. **The tutorial (SPEC §16).** `site/` + the packets generator + `scripts/build-site.mjs` +
-   `.github/workflows/pages.yml` + `test/site/arc.test.ts`, lesson by lesson over the two-store
-   media+circle domain. Stands alone — cold-apprehensible copy is the acceptance bar.
+- [x] **Tests first** — contract harness (localStorage over `MemStorage` shim), driver-edge
+      suite (key layout, quota atomicity, seed key, foreign keys, corruption), browser bundle
+      boot suite, pack surface extended with `"./browser"`.
+- [x] **Implement** — `src/store/local-storage.ts`, `src/browser/index.ts`,
+      `scripts/build-bundles.mjs` (replaces build-client.mjs; per-entry args so parallel test
+      workers never race), `"./browser"` export, root barrel exports `LocalStorageBackend`.
+      **Learnings en route:** (a) `gateway/erase.ts` imported `node:crypto` — now
+      `@noble/hashes` (direct dep; hash parity verified), so the whole law bundles for the
+      page; (b) that file carried a RAW NUL BYTE in the `sealCommitment` template literal,
+      making it invisible to grep/ripgrep — now the `backslash-u0000` escape, same bytes hashed;
+      (c) graphql v17 carries a guarded `getBuiltinModule("node:diagnostics_channel")` probe —
+      a runtime feature-detection, not a specifier; the bundle test allows exactly that;
+      (d) the browser barrel must also carry `parseTerm` / `parsePolicy` / `signClaims` —
+      without them a page could hold a schema but never say one.
+- [x] **Green** — `npm run check`: 31 files, 391 tests, all counts read.
+- [ ] **PR** — branch `browser-store`, open PR, one careful review agent, resolve, merge.
+- [ ] **Journal** — append the record.
+- [ ] **Village** — a browser-store act in `_testing/` (boot a store on a shimmed localStorage,
+      federate it with the village no-HTTP via direct `federate(offeredDeltas())`), ledger updated.
+- [ ] **Re-plan** — reread SPEC §15/§16 against learnings; open sprint 2 (continuity / `loam pull`).
 
-**Other designed candidates (not on the ship path):**
-
-- **Write semantics — policy-informed mutation (SPEC §14).** Make writing the dual of reading;
-  clearing = retraction → absence; fixes the silent null-drop bug. Pure Loam except the deferred
-  first-class-null-value question (a rhizomatic `Primitive` change).
-- **As-of replay** — a timestamp mask on the gather → scrub history like a replay. Substrate-ready.
-- **Hosted `StoreBackend` (libSQL/Turso)** — a persistent URL, not localhost.
-- **Renderer-generation for grown stores** — grow a *view* for a novel schema, not just data.
-
-Next sprint: sprint 1 above (the browser store) unless Myk redirects.
+**Left off here:** review findings resolved (`:`-in-store-name guard; degradation-latch,
+erasure-end-to-end, and in-page-federation tests; exemption pinned to the exact specifier);
+pushing to PR #51, then merge → journal → village.
