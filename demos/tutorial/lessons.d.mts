@@ -13,7 +13,7 @@ export interface LessonCtx {
   storage: LessonStorage;
   seed: string;
   author: string;
-  packets: { circle: unknown[]; adversary: unknown[] };
+  packets: { circle: unknown[]; adversary: unknown[]; dialect: unknown[] };
   ts(): number;
 }
 

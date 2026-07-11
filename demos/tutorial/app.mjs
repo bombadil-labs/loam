@@ -26,6 +26,7 @@ const ctx = {
   packets: {
     circle: (await (await fetch("./packets/circle.json")).json()).deltas,
     adversary: (await (await fetch("./packets/adversary.json")).json()).deltas,
+    dialect: (await (await fetch("./packets/dialect.json")).json()).deltas,
   },
   ts: () => (clock = Math.max(Date.now(), clock + 1)),
 };

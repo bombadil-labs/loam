@@ -73,6 +73,26 @@ describe("classifyDelta: every badge earns its name", () => {
     expect(kindOf(sign(makeNegationClaims(ME, 10, target.id, "retracted")))).toBe("negation");
   });
 
+  it("recognizes a derived record (a runner's emission)", () => {
+    // a derived delta carries the runner's provenance pointer `rhizomatic.derived.by`
+    expect(
+      kindOf(
+        sign({
+          timestamp: 11,
+          author: ME,
+          pointers: [
+            { role: "subject", target: { kind: "entity", entity: { id: FERN, context: "tally" } } },
+            { role: "value", target: { kind: "primitive", value: "2 screenings" } },
+            {
+              role: "rhizomatic.derived.by",
+              target: { kind: "entity", entity: { id: "fn:tally", context: "definition" } },
+            },
+          ],
+        }),
+      ),
+    ).toBe("derived");
+  });
+
   it("recognizes a schema definition", () => {
     expect(
       kindOf(
