@@ -51,7 +51,7 @@ GraphQL hints), and lesson 15's smaller-world beat applies to both doors. Design
 - **Total feature coverage.** By the finale the learner has touched every meaningful feature
   Loam ships (matrix below).
 
-## The instruments (v2a — built first, against the MVP arc, shippable alone)
+## The instruments (v2a — BUILT, PR pending; browser-verified live)
 
 1. **Ground pane v2** — newest FIRST. A real delta renderer: one-line summary per delta with
    a kind badge — `constitution` (the operator marker, annotated with what it does),
