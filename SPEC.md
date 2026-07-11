@@ -749,7 +749,64 @@ falls out of the domain rather than being staged.
   must expose the in-process anonymous read surface (`queryPublic` / `subscribePublic` /
   `NothingPublic` — already in the gateway) for lesson 10, and the `loam pull` verb for lesson 11.
 
-## 17. Glossary
+## 17. Surfaces are materializations (designed 2026-07-11; queued — ships before tutorial v2)
+
+GraphQL was never the surface. It was the FIRST surface. A registration — `(HyperSchema,
+Policy)`, a gather and a resolution discipline, filed as deltas — is interface-agnostic truth,
+and every interface a store answers through is a MATERIALIZATION of that truth, derived from
+it the way a view is derived from the ground. §8 made "where the deltas sleep" a driver's
+business; this section makes "how the answers are spoken" a generator's business. The
+registration is the source; adding an interface never touches it; N interfaces over one store
+answer the same ground, and two doors that disagree about lawful data are a bug by definition,
+not a version skew to manage.
+
+- **The seam — a surface generator.** What `gql.ts` consumes today (the gateway's `Registered`
+  set: schema, policy, roots, mutations, generation) becomes a published seam, exactly as
+  `StoreBackend` is one: every generator is an interchangeable witness to the registrations,
+  and `buildGqlSchema` becomes the first implementation rather than the only consumer. A
+  generator derives a DOOR — a queryable/writable projection — and doors share one law: the
+  same tokens, the same public declarations, the same capability refusals, the same
+  tombstones. A surface may never invent authority, widen admission, or answer with data
+  another surface would lawfully refuse. The contract test is agreement: one ground, one
+  registration, every door — the same view, `_hex` for `_hex`.
+
+- **REST / OpenAPI — the proving second.** A principle with one implementation is a comment.
+  `buildOpenApi(registered)` derives a real OpenAPI 3.1 document, served at
+  `/:mount/openapi.json`, and a dynamic router mounts beside GraphQL:
+  `GET /:mount/rest/<schema>/<entity>` answers the resolved view (the same view, the same
+  `_hex`), `POST` writes through the same door discipline (authorize, admission, tombstones —
+  the two doors must not disagree; that is the review focus, not a feature). The OpenAPI
+  document regenerates when registrations evolve, exactly as the GraphQL schema does — the
+  spec is a function of the store. An agent that speaks OpenAPI can use a Loam store without
+  ever hearing the word GraphQL; that is the point.
+
+- **Generated clients — designed, not yet queued.** `loam types` emits a typed client library
+  (TypeScript first; the language is a generator parameter) from the same registrations —
+  in-memory against an embedded store, or fronting GraphQL/REST; either way the types are
+  derived, never hand-kept. Codegen is its own project and ships as its own step; what this
+  section fixes is only that it is a GENERATOR, downstream of the same seam.
+
+- **The horizon — compiled surfaces, capability projections.** Nothing above requires a
+  server, or even a runtime that holds a store. A registration could COMPILE: firmware for a
+  sensor that carries only the claim grammar, a signing key, and the schema's write-shapes —
+  a WRITE-ONLY surface whose "persistence" is emitting signed deltas onto an output channel;
+  a monitor built from the READ-ONLY projection, resolving views and nothing else; an
+  orchestrator holding the full read/write door. Three artifacts, one registration snapshot,
+  compiled together — interoperable BY CONSTRUCTION, because the registration's content
+  address is the compatibility contract: if the sensor, the monitor, and the orchestrator
+  name the same registration hash, they cannot disagree about what a claim means. This is
+  stated as possible, not designed as an instance — the seams are ours to place, and the
+  delta grammar is small enough (signed canonical CBOR) that "surface" can mean anything from
+  a GraphQL endpoint to a few kilobytes on a microcontroller. When an instance is wanted, it
+  is a generator, not a fork.
+
+- **Boundaries, in the §13 register:** a surface generator derives doors, never law — it may
+  narrow a projection (write-only, read-only, one schema of many) but never widen one; a
+  projection that omits a capability is a smaller world, not a bypass; and the anonymous
+  surface discipline (§12) applies per-door — a lens is public because the operator declared
+  it, whatever language the asking arrives in.
+
+## 18. Glossary
 
 - **Delta** — the signed, content-addressed atom (rhizomatic).
 - **Hyperschema** — recursive gather definition; `HyperSchema { name, alg, body: Term }`.
@@ -773,3 +830,6 @@ falls out of the domain rather than being staged.
 - **Continuity / export** — a frozen `/federate` offer (`{ deltas }`, ids + signatures intact);
   `loam pull <url|file>` lands it, and a same-operator import (carrying the seed) makes the local
   store the same store, its law binding on arrival (§15).
+- **Surface / materialization** — a derived door over the registrations (§17): GraphQL, REST/
+  OpenAPI, a generated client, a compiled capability projection. Doors share one law and must
+  agree — one ground, one registration, the same view through every door.
