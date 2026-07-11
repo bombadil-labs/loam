@@ -41,6 +41,20 @@ window.tutorialCtx = ctx;
 
 $("#author-chip").textContent = author;
 
+// Start over: erase this origin's whole tutorial store — the seed, every delta, and the UI's
+// own memory (pinned queries) — then reboot from genesis at lesson 1. This is the browser's
+// "clear site data" scoped to us: an unceremonious full erasure, which is exactly why the
+// finale's export exists (SPEC §15). One confirm, because it cannot be taken back.
+$("#start-over").onclick = () => {
+  if (!window.confirm("Erase this store and begin again from lesson 1? This cannot be undone.")) {
+    return;
+  }
+  for (const key of Object.keys(storage)) {
+    if (key.startsWith("loam:tutorial:")) storage.removeItem(key);
+  }
+  window.location.reload();
+};
+
 // ---- rendering -------------------------------------------------------------------------------
 
 async function refreshGreens() {
