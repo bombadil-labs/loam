@@ -79,10 +79,28 @@ const prim = (v) => ({ role: "value", target: { kind: "primitive", value: v } })
 // ---- boot: the learner's store --------------------------------------------------------------
 
 export const SEED_KEY = "loam:tutorial:seed";
+const STORE_PREFIX = "loam:tutorial:";
+
+// The LocalStorageBackend owns every `loam:tutorial:<id>` key and reads anything under that
+// prefix as a delta. An earlier build wrote UI pins to `loam:tutorial:ui:pins`, which the
+// backend then tries to parse as a delta and refuses ("not a delta"), bricking boot before any
+// button can wire up. Recovery: purge any key under the prefix whose suffix is not a delta id
+// (hex) and is not the seed — so a store poked by an old build heals on the next load. The
+// current pins key lives outside the prefix entirely, so this never touches it.
+function healStrayKeys(storage) {
+  const strays = [];
+  for (let i = 0; i < storage.length; i++) {
+    const k = storage.key(i);
+    if (k === null || !k.startsWith(STORE_PREFIX) || k === SEED_KEY) continue;
+    if (!/^[0-9a-f]+$/.test(k.slice(STORE_PREFIX.length))) strays.push(k);
+  }
+  for (const k of strays) storage.removeItem(k);
+}
 
 // First visit mints a seed and boots from genesis; every later visit reopens the same store
 // from the same origin. The seed lives at its own key (SPEC §15) — it never rides an export.
 export async function bootTutorialStore(loam, storage) {
+  healStrayKeys(storage);
   let seed = storage.getItem(SEED_KEY);
   const backend = new loam.LocalStorageBackend("tutorial", storage);
   let gateway;
