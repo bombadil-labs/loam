@@ -227,19 +227,24 @@ export function lawfulNegated(reactor: Reactor, operator?: string): (id: string)
   return negated;
 }
 
-export function readRegistrations(reactor: Reactor, operator?: string): Registration[] {
+interface Candidate {
+  schemaEntity: string;
+  policy: Policy;
+  roots: readonly string[];
+  mutations?: ClaimTemplates;
+  timestamp: number;
+  id: string;
+}
+
+// The shared walk both readers stand on: every SURVIVING (lawful, non-negated) registration
+// delta, grouped by the registration entity it files under, each group ascending in ground
+// order — (timestamp, id), the same tie-break everywhere. readRegistrations takes the last of
+// each group (the live lens); readRegistrationVersions takes them all (§17: publishing is
+// append-only, and every survivor is an answerable version).
+function survivingCandidates(reactor: Reactor, operator?: string): Map<string, Candidate[]> {
   const lawful = lawfulSnapshot(reactor, operator);
   const negated = lawfulNegated(reactor, operator);
-
-  interface Candidate {
-    schemaEntity: string;
-    policy: Policy;
-    roots: readonly string[];
-    mutations?: ClaimTemplates;
-    timestamp: number;
-    id: string;
-  }
-  const latest = new Map<string, Candidate>();
+  const groups = new Map<string, Candidate[]>();
   for (const delta of lawful) {
     let key: string | undefined; // the registration entity this delta files under
     for (const p of delta.claims.pointers) {
@@ -291,15 +296,23 @@ export function readRegistrations(reactor: Reactor, operator?: string): Registra
       timestamp: delta.claims.timestamp,
       id: delta.id,
     };
-    const prior = latest.get(key);
-    if (
-      prior === undefined ||
-      candidate.timestamp > prior.timestamp ||
-      (candidate.timestamp === prior.timestamp && candidate.id > prior.id)
-    ) {
-      latest.set(key, candidate);
-    }
+    const group = groups.get(key);
+    if (group === undefined) groups.set(key, [candidate]);
+    else group.push(candidate);
   }
+  // Ground order within each group: (timestamp, id) ascending — the same tie-break the
+  // latest-wins reader has always used, so "last of the group" IS the historical answer.
+  for (const group of groups.values()) {
+    group.sort((a, b) => a.timestamp - b.timestamp || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  }
+  return groups;
+}
+
+export function readRegistrations(reactor: Reactor, operator?: string): Registration[] {
+  const lawful = lawfulSnapshot(reactor, operator);
+  const groups = survivingCandidates(reactor, operator);
+  const latest = new Map<string, Candidate>();
+  for (const [key, group] of groups) latest.set(key, group[group.length - 1]!);
 
   // Loosely dependency-ordered by timestamp so refs tend to resolve on replay; the gateway's
   // fixpoint handles what order cannot (ties, forward refs).
@@ -323,4 +336,53 @@ export function readRegistrations(reactor: Reactor, operator?: string): Registra
     }
   }
   return out;
+}
+
+// One answerable version of a registration (SPEC §17): the Nth surviving registration for its
+// entity, in ground order. `deltaId` is the version's TRUE NAME — the registration delta's
+// content address; the `version` number is the derived, human-friendly alias, and it SHIFTS
+// when an earlier version is withdrawn (struck): aliases are conveniences, the hash never lies.
+export interface RegistrationVersion extends Registration {
+  readonly version: number;
+  readonly deltaId: string;
+  readonly timestamp: number;
+}
+
+// Every answerable version of every registration, ascending per entity. A version pins the
+// REGISTRATION — policy and roots, the lens's resolution discipline. The schema definition
+// resolves as currently defined: its identity is the ENTITY (see Registration), and evolving
+// a definition in place is the same append-only story one level down.
+export function readRegistrationVersions(
+  reactor: Reactor,
+  operator?: string,
+): RegistrationVersion[] {
+  const lawful = lawfulSnapshot(reactor, operator);
+  const out: RegistrationVersion[] = [];
+  for (const group of survivingCandidates(reactor, operator).values()) {
+    let n = 0;
+    for (const cand of group) {
+      let schema: HyperSchema;
+      try {
+        // The SCHEMA entity the candidate references, not the registration entity it files
+        // under — the same resolution readRegistrations performs.
+        schema = loadSchema(lawful, cand.schemaEntity);
+        // NUL is the gateway's own alphabet (see readRegistrations) — it binds nothing.
+        if (schema.name.includes(String.fromCharCode(0))) continue;
+      } catch {
+        continue; // no surviving definition: this candidate is unbound, not fatal
+      }
+      n += 1;
+      out.push({
+        schema,
+        policy: cand.policy,
+        roots: cand.roots,
+        entity: cand.schemaEntity,
+        ...(cand.mutations === undefined ? {} : { mutations: cand.mutations }),
+        version: n,
+        deltaId: cand.id,
+        timestamp: cand.timestamp,
+      });
+    }
+  }
+  return out.sort((a, b) => a.timestamp - b.timestamp);
 }

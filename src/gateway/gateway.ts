@@ -47,6 +47,7 @@ import {
   type ClaimPointerSpec,
   type GqlHooks,
   type PatchNode,
+  type Registered,
   type ResolvedNode,
 } from "./gql.js";
 import { publicDefect, readPublicSchemas } from "./public.js";
@@ -54,10 +55,12 @@ import {
   lawfulSnapshot,
   parseClaimTemplates,
   readRegistrations,
+  readRegistrationVersions,
   registrationClaims,
   schemaEntityFor,
   type ClaimTemplates,
   type Registration,
+  type RegistrationVersion,
 } from "./registration.js";
 import { readTrustPolicy } from "./trust.js";
 
@@ -243,6 +246,48 @@ export class Gateway {
       mutate: (name, entity, props, actorSeed) => this.mutateEntity(name, entity, props, actorSeed),
       watch: (name, entity) => this.watchEntity(name, entity, door),
       claim: (pointers, actorSeed) => this.claimEntity(pointers, actorSeed),
+    };
+  }
+
+  // The door-neutral accessor (SPEC §17): what any surface generator needs — the registered
+  // set and the hooks — through the same discipline GraphQL gets. "public" narrows the set to
+  // the operator's declared-public lenses (and a generator given it must derive a READ door;
+  // narrowing is a generator's right, widening never is). Returns undefined for a public door
+  // with nothing public — the transport keeps its refusals uniform.
+  surface(
+    door: "full" | "public" = "full",
+  ): { registered: readonly Registered[]; hooks: GqlHooks } | undefined {
+    if (door === "public") {
+      this.publicOpen ??= readPublicSchemas(this.reactor, this.operatorAuthor);
+      const defs = this.registered.filter((r) => this.publicOpen!.has(r.schema.name));
+      if (defs.length === 0) return undefined;
+      return { registered: defs, hooks: this.gqlHooks("public") };
+    }
+    return { registered: this.registered, hooks: this.gqlHooks() };
+  }
+
+  // Every answerable version of every registration (SPEC §17): the append-only publication
+  // history, read live from the ground under this store's law.
+  registrationVersions(): RegistrationVersion[] {
+    return readRegistrationVersions(this.reactor, this.operatorAuthor);
+  }
+
+  // Pinned resolution (SPEC §17 versioning): answer under an ARBITRARY registration — an old
+  // version's policy over TODAY's ground — through the same gather the live lens uses when no
+  // materialization is warm (reactor.eval). The _hex of a pinned view is as real as the live
+  // one's: same ground, an older lens, an honest content address. Cross-schema refs resolve
+  // via the live registry (a version pins the named lens, not the whole world's).
+  resolvePinned(reg: Registered, entity: string): ResolvedNode {
+    const result = this.reactor.eval(reg.schema.body, entity, this.registry);
+    if (result.sort !== "hview") {
+      throw new Error(`schema ${reg.schema.name} does not evaluate to a hyperview`);
+    }
+    const view = resolveView(reg.policy, result.hview) as Record<string, View>;
+    return {
+      entity,
+      view,
+      hex: viewCanonicalHex(view),
+      hviewHex: hviewCanonicalHex(result.hview),
     };
   }
 
