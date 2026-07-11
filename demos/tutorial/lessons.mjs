@@ -191,6 +191,7 @@ same ground, and the store re-proves it all from those records every time it wak
     {
       id: 2,
       title: "Track your films",
+      action: "Define the Film schema (and Book)",
       copy: `Say you want to track the films you watch. You tell the store the SHAPE of a film —
 a title, a rating, some tags — and how to settle disagreement (for the title: keep the latest
 word). That's a schema and a policy, and registering them is the whole setup. The moment it
@@ -214,6 +215,7 @@ it. Register Book too — we'll want it later.`,
     {
       id: 3,
       title: "Write through the door",
+      action: "Set the title, rating, and a tag",
       copy: `Now fill it in: set the title to "Arrival", give it a 9, add a tag. These go through
 the GraphQL door — a mutation — and here is the thing worth slowing down for. Watch all three
 panes at once. The View updates. The Ground grows a new record, badged "fact". And that record
@@ -237,6 +239,7 @@ say it. (Expand the new Ground record to see exactly what got signed.)`,
     {
       id: 4,
       title: "Screenings are entities too",
+      action: "Add the Screening lens; log a screening",
       copy: `A film isn't just a title — it has screenings, and a screening is a thing in its own
 right: a date, later some guests. So give it its own lens (Screening), and teach Film to gather
 its screenings and show each one nested inside the film's view. That "show the nested thing" is
@@ -270,6 +273,7 @@ date and all. Two lenses, one film, composing.`,
     {
       id: 5,
       title: "The secret: it was claims all along",
+      action: "Write the next screening by hand — with Alice",
       copy: `Here's what those mutations were hiding. You never needed the door. Write the next
 screening BY HAND — a raw signed claim, straight to the ground (the ✍️ pen, not the 🚪 door) —
 and make it say something no schema of yours knows how to hear: that Alice was your guest. The
@@ -311,6 +315,7 @@ only newly said.)`,
     {
       id: 6,
       title: "Evolve the lens, keep every past",
+      action: "Add guests to the lens; keep the old one too",
       copy: `So teach the lens to see guests. Add a "guests" field to Film and re-register — an
 append, like everything else. Ask again and there's Alice. But notice what did NOT happen: any
 view you were already subscribed to kept its old shape. A subscription is a standing question
@@ -340,6 +345,7 @@ migrated away. It's still right there, still answerable.`,
     {
       id: 7,
       title: "Taking it back, and what silence means",
+      action: "Retract the rating; read the book",
       copy: `Change your mind about that 9. You can't unsay a record — its id is a hash, the past
 is fixed — but you can NEGATE your own word, and the view resolves your retraction to absence:
 the rating key just empties. Both records stay in the Ground, because a store that forgot what
@@ -387,6 +393,7 @@ records to add or take back.`,
     {
       id: 8,
       title: "A co-author",
+      action: "Invite your roommate: grant, land, revoke",
       copy: `Until now you've been the only voice. Invite another: your roommate keeps their own
 key (we minted one for the tutorial). Have them log a screening — and watch it BOUNCE. Anyone
 may write to their OWN store, but yours answers only to standing, and your roommate has none.
@@ -457,6 +464,7 @@ it; you decide whether it binds.`,
     {
       id: 9,
       title: "The adversary, and whose word wins",
+      action: "Let the forgery in; defend with a trust chain",
       copy: `A stranger's claim just arrived — we bundled one so you can meet it. Press the
 button and watch it land in the Ground, authored by someone who is NOT you: "the title of
 Arrival is ARRIVAL 2: TOTALLY REAL SEQUEL", signed with the stranger's own real key, stamped
@@ -494,6 +502,7 @@ visible, and powerless. Truth here is a policy you choose, and can always revisi
     {
       id: 10,
       title: "The door itself is policy",
+      action: "Declare a roster; watch a forgery bounce",
       copy: `Lesson 9 chose whose word wins AFTER it's in your ground — a reading policy. But you
 can also choose who gets IN. A trust ROSTER is one signed record naming the keys you'll admit
 across the wire: yourself, your roommate, the circle. Declare it, then let a fresh forgery
@@ -540,6 +549,7 @@ world isn't federating, it's hiding.`,
     {
       id: 11,
       title: "The right to be forgotten, honestly",
+      action: "File a private note, then erase it",
       copy: `You once jotted a private note about Alice, straight to the ground. She asks you to
 forget it. A retraction won't do — that resolves to absence but the bytes remain. ERASURE is
 the loud exception to a store that otherwise never forgets: as the operator, you (and only you)
@@ -570,6 +580,7 @@ holds the door.`,
     {
       id: 12,
       title: "Alice was just an id",
+      action: "Pull the circle; register a Person lens",
       copy: `All this time your store has said "person:alice" the way you'd name a stranger —
 confidently, knowing nothing. Somewhere there's a store that DOES know her: the circle, kept by
 its own operator with its own key. We bundled its whole export. Pull it. Names and friendships
@@ -614,6 +625,7 @@ what to believe. Data federates; authority never does.`,
     {
       id: 13,
       title: "Another tongue",
+      action: "Pull the dialect; teach a translation",
       copy: `The circle spoke your language. This next store doesn't. We bundled a stranger's
 film log written in a dialect your schemas can't read — it says "film_watched" where you say
 "screening", "on" where you say a date. Pull it and the records land, honest and signed, but
@@ -663,6 +675,7 @@ the writer to change.`,
     {
       id: 14,
       title: "An animate store",
+      action: "Bless a function; attach the runner",
       copy: `So far the store only knows what you tell it. Teach it to think. Bless ONE derived
 function — a little recipe that reads a film's screenings and writes back a running tally —
 then attach a Runner, and the tab comes alive: the recipe fires, and a derived record appears
@@ -735,6 +748,7 @@ outlives it.`,
     {
       id: 15,
       title: "The stranger at the window",
+      action: "Declare Film public",
       copy: `Everything so far went through YOUR door, signed or refused by standing. But a reader
 with no key at all — a stranger, a search engine, a friend you sent a link — has been knocking
 this whole time and getting the same answer: nothing here is public. Declare ONE lens public —
