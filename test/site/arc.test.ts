@@ -22,6 +22,7 @@ import {
   bootTutorialStore,
   buildArc,
   buildExport,
+  recordHomecoming,
   type LessonCtx,
 } from "../../site/lessons.mjs";
 
@@ -67,8 +68,8 @@ describe("the tutorial arc, headless", () => {
 
     for (const lesson of arc) {
       // No lesson may be green before it runs — a vacuous check teaches nothing and can lie.
-      // (Lessons 1 and 11 are read-only by design: boot performed 1; 11 IS the export.)
-      if (lesson.id !== 1 && lesson.id !== 11) {
+      // (Lesson 1 is exempt: boot itself performed it, and the check still reads the ground.)
+      if (lesson.id !== 1) {
         expect(await lesson.check(ctx), `lesson ${lesson.id} green before it ran`).toBe(false);
       }
       // The moment between lessons 2 and 3, pinned: the fact is real before any schema is.
@@ -84,6 +85,14 @@ describe("the tutorial arc, headless", () => {
         ).rejects.toThrow(loam.NothingPublic);
       }
       await lesson.perform(ctx);
+      if (lesson.id === 11) {
+        // The finale's green is earned OUTSIDE the tab: perform alone must not grant it. The
+        // page records the homecoming after a verified localhost match (the honest path is
+        // driven whole by the second test); here we take the side door the copy celebrates —
+        // the record itself is the check's subject, and it reads back from the ground.
+        expect(await lesson.check(ctx), "lesson 11 green without a homecoming").toBe(false);
+        await recordHomecoming(loam, ctx, "side-door");
+      }
       expect(await lesson.check(ctx), `lesson ${lesson.id} (${lesson.title})`).toBe(true);
     }
 
@@ -132,6 +141,13 @@ describe("the tutorial arc, headless", () => {
       expect(laptopView.film.title).toBe("Arrival");
       expect(laptopView.film._hex).toBe(tabView.film._hex);
       await laptop.close();
+
+      // The honest homecoming: the match verified, the page records it, and lesson 11's
+      // check reads it back from the ground — progress is the store, all the way to the end.
+      const finale = buildArc(loam).find((l) => l.id === 11)!;
+      expect(await finale.check(ctx)).toBe(false);
+      await recordHomecoming(loam, ctx, laptopView.film._hex);
+      expect(await finale.check(ctx)).toBe(true);
     } finally {
       await ctx.gateway.close();
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

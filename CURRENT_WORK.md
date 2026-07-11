@@ -42,6 +42,10 @@ ground or the revisit un-greens them.
       the state, the UI subscribes. Left: lesson copy + progress (re-verified from the ground
       on every boot). Right: View | Ground | GraphQL panes. Console = the GraphQL pane.
       Boots on REAL localStorage (`LocalStorageBackend("tutorial")`), seed at its own key.
+      MUST also include (copy-promised, review finding): the INSPECTOR one-byte-edit control
+      (lesson 2 — shatter an id live) and the finale's localhost leg — fetch the learner's
+      served store, compare `_hex`, then call `recordHomecoming` so lesson 11 earns its green
+      (with the paste-the-hash-by-hand fallback for PNA-blocked browsers, SPEC §16).
 - [ ] `scripts/build-site.mjs` — esbuild `site/app.mjs` (importing `src/browser/index.ts`
       same-commit), copy static + packets → `site-dist/` (never committed).
 - [ ] Verify in the Browser pane (preview_start against site-dist) — every lesson clickable

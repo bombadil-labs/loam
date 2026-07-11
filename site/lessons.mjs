@@ -205,8 +205,9 @@ we'll need it.`,
       copy: `Log a watch: last night, with Alice. In a table-shaped world that's an insert
 here, an update there, a join table somewhere else — three writes that can drift. Here it is
 ONE claim with several pointers: it files into the film's watch history, bumps the film's
-watch count, and lands on Alice's card — atomically, because it is one record and the
-"filings" are just the places a reader's lens will find it. Check the View: timesWatched
+watch count, and will land on Alice's card the day she has one — atomically, because it is
+one record and the "filings" are just the places a reader's lens will find it. Check the View:
+timesWatched
 became 1, and the watch entry itself carries its whole story — the date and the guest,
 together, because the entry IS the claim. Alice, though, is still just an id —
 "person:alice" — a name your store has heard but knows nothing about. Remember that; it
@@ -238,9 +239,14 @@ entirely. You cannot delete the record (its id is a hash; the past is content-ad
 you can NEGATE your own word, and the view resolves your retraction to ABSENCE: the rating key
 simply empties. Both records — the rating and the taking-back — sit in the Ground pane,
 because a store that forgets what was retracted couldn't prove the retraction happened. Now
-watch what happens when you try to SET timesWatched to 100: the count ticks up by exactly
-one. Your "set" was just one more claim, dutifully counted. An aggregate is an ANSWER, not a
-field — there is no lever behind it to grab, only records to add or take back.`,
+the book you registered: log two reading sessions, 120 pages and 90. pagesRead reads 210 —
+not the latest entry, their SUM, because that property's policy is a sum. And "finished",
+which you never said anything about, reads false rather than missing: its policy answers
+absence with a default. Same store, three flavors of "what does silence mean" — a retracted
+rating is absent, an unanswered question has a default, and an aggregate? Watch what happens
+when you try to SET timesWatched to 100: the count ticks up by exactly one. Your "set" was
+just one more claim, dutifully counted. An aggregate is an ANSWER, not a field — there is no
+lever behind it to grab, only records to add or take back.`,
       perform: async (ctx) => {
         const rating = say(loam, ctx, [entity("subject", FILM, "rating"), prim(9)]);
         await ctx.gateway.append([rating]);
@@ -249,6 +255,11 @@ field — there is no lever behind it to grab, only records to add or take back.
             loam.makeNegationClaims(ctx.author, ctx.ts(), rating.id, "changed my mind"),
             ctx.seed,
           ),
+        ]);
+        // Two reading sessions: the sum is the answer, and `finished` is never spoken.
+        await ctx.gateway.append([
+          say(loam, ctx, [entity("subject", "book:solaris", "pagesRead"), prim(120)]),
+          say(loam, ctx, [entity("subject", "book:solaris", "pagesRead"), prim(90)]),
         ]);
         // The set-that-isn't: one more claim in the counted bucket, and nothing else.
         await ctx.gateway.query(
@@ -260,8 +271,24 @@ field — there is no lever behind it to grab, only records to add or take back.
         if (v.film?.rating != null) return false; // retraction resolves to absence (GraphQL: null)
         // the "set" did not take: the count counts records, it was never a settable number
         if (v.film?.timesWatched === 100 || !(v.film?.timesWatched >= 2)) return false;
-        // and the taking-back is itself on record
-        return has(ctx, (d) => d.claims.pointers.some((p) => p.target.kind === "delta"));
+        // the taking-back is itself on record, and PRECISELY: a negation by you, of YOUR
+        // rating delta — not just any delta-pointing delta
+        const rating = ground(ctx).find(
+          (d) => d.claims.author === ctx.author && pointsAt(FILM, "rating")(d),
+        );
+        const retracted =
+          rating !== undefined &&
+          has(
+            ctx,
+            (d) =>
+              d.claims.author === ctx.author &&
+              d.claims.pointers.some(
+                (p) => p.target.kind === "delta" && p.target.deltaRef.delta === rating.id,
+              ),
+          );
+        // and the book: aggregates and defaults answer from the same ground
+        const b = await view(ctx, `{ book(entity: "book:solaris") { pagesRead finished } }`);
+        return retracted && b.book?.pagesRead === 210 && b.book?.finished === false;
       },
     },
 
@@ -320,8 +347,9 @@ asks you to forget it. A retraction isn't enough — retraction resolves to abse
 bytes remain. ERASURE is the loud exception to a store that otherwise never forgets: as the
 operator you (and only you) order the record removed, the bytes physically leave this
 browser's storage (watch the Ground pane shrink), and a signed TOMBSTONE remains — who asked,
-when, which id — never what it said. Try re-appending the erased record in the console: the
-door refuses it by id. The store remembers THAT it forgot, and holds the door.`,
+when, which id — never what it said. The tombstone is also a standing order: if the erased
+record's exact bytes ever try to come home — from a backup, from a peer who copied them — the
+door refuses them by id. The store remembers THAT it forgot, and holds the door.`,
       perform: async (ctx) => {
         const note = say(loam, ctx, [
           entity("about", ALICE, "note"),
@@ -362,15 +390,25 @@ what to believe about the data. Data federates; authority never does.`,
       },
       check: async (ctx) => {
         const v = await view(ctx, `{ person(entity: "${ALICE}") { name follows watchedWith } }`);
-        const foreignLawInert = (() => {
-          // The circle registered a "Friends" lens under ITS operator; here it binds nothing.
-          const regs = loam.readRegistrations(ctx.gateway.reactor, ctx.author);
-          return !regs.some((r) => r.schema.name === "Friends");
-        })();
+        // "Arrived AND stayed inert" — both halves, or the claim is untested: the circle's
+        // Friends registration delta IS in the ground (a foreign author's law arrived)...
+        const foreignLawArrived = has(
+          ctx,
+          (d) =>
+            d.claims.author !== ctx.author &&
+            d.claims.pointers.some(
+              (p) => p.target.kind === "entity" && p.target.entity.id === "schema:Friends",
+            ),
+        );
+        // ...and it binds nothing: the lawful registrations under YOUR operator don't know it.
+        const foreignLawInert = !loam
+          .readRegistrations(ctx.gateway.reactor, ctx.author)
+          .some((r) => r.schema.name === "Friends");
         return (
           v.person?.name === "Alice Song" &&
           Array.isArray(v.person?.watchedWith) &&
           v.person.watchedWith.length >= 1 &&
+          foreignLawArrived &&
           foreignLawInert
         );
       },
@@ -422,16 +460,15 @@ import that resembles it: THE SAME STORE, proven by content address — because 
 genesis, born from the same seed, is byte-for-byte the delta this tab was born from. Nothing
 was re-signed. Nothing was lost. It is yours, durable, and ready to federate.`,
       perform: async () => {}, // the export is read-only; buildExport below is the action
-      check: async (ctx) => {
-        const file = JSON.parse(buildExport(loam, ctx));
-        return (
-          file.version === 1 &&
-          file.seed === ctx.seed &&
-          file.operator === ctx.author &&
-          Array.isArray(file.deltas) &&
-          file.deltas.length > 0
-        );
-      },
+      // The finale's green is EARNED OUTSIDE THE TAB: when the page fetches your localhost
+      // store and the _hex matches, it records the homecoming as one more signed claim —
+      // and this check reads that record from the ground, like every other check. (Appending
+      // it by hand in the console is the curriculum entered by a side door; congratulations.)
+      check: async (ctx) =>
+        has(
+          ctx,
+          (d) => d.claims.author === ctx.author && pointsAt("tutorial:journey", "homecoming")(d),
+        ),
     },
   ];
 }
@@ -447,4 +484,16 @@ export function buildExport(loam, ctx) {
     seed: ctx.seed,
     deltas: offer.deltas,
   });
+}
+
+// The page calls this after the localhost fetch matches _hex for _hex: the homecoming becomes
+// one more signed claim in the learner's store, and lesson 11's check reads it back — because
+// progress is the store, all the way to the end.
+export async function recordHomecoming(loam, ctx, matchedHex) {
+  await ctx.gateway.append([
+    say(loam, ctx, [
+      entity("milestone", "tutorial:journey", "homecoming"),
+      prim(String(matchedHex)),
+    ]),
+  ]);
 }

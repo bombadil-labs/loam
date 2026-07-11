@@ -12,14 +12,8 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  authorForSeed,
-  claimsToJson,
-  parsePolicy,
-  parseTerm,
-  signClaims,
-} from "@bombadil/rhizomatic";
-import { Gateway, MemoryBackend, assembleGenesis, exportOffer } from "../dist/index.js";
+import { authorForSeed, parsePolicy, parseTerm, signClaims } from "@bombadil/rhizomatic";
+import { Gateway, MemoryBackend, assembleGenesis, exportOffer, toWire } from "../dist/index.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = join(root, "site", "packets");
@@ -124,15 +118,7 @@ function buildAdversary() {
     },
     ADVERSARY_SEED,
   );
-  return JSON.stringify({
-    deltas: [
-      {
-        id: forged.id,
-        claims: claimsToJson(forged.claims),
-        ...(forged.sig ? { sig: forged.sig } : {}),
-      },
-    ],
-  });
+  return JSON.stringify({ deltas: [toWire(forged)] });
 }
 
 const files = {};

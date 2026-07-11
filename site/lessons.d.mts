@@ -42,3 +42,9 @@ export declare function bootTutorialStore(
 export declare function buildArc(loam: unknown): Lesson[];
 
 export declare function buildExport(loam: unknown, ctx: LessonCtx): string;
+
+export declare function recordHomecoming(
+  loam: unknown,
+  ctx: LessonCtx,
+  matchedHex: string,
+): Promise<void>;
