@@ -210,6 +210,39 @@ The `loam register` file (also the `POST /register` body, under a `schema` key):
 }
 ```
 
+**Anatomy of a registration.** Five fields, and the whole read pipeline lives in them:
+
+- **`name`** — the GraphQL field this schema generates (`{ plant(entity: …) }`) and the default
+  schema entity (`schema:Plant`). Identity is the entity, not the name — rename freely by
+  republishing at the same entity.
+- **`alg`** — the L2 **algebra version** the `body` is written against (_not_ a signing algorithm).
+  It pins which rhizomatic operator semantics interpret the term. There is one algebra today, so
+  this is always `1`; it exists so a v1 body keeps its v1 meaning if the algebra ever grows a v2.
+- **`body`** — a rhizomatic **gather term**, evaluated once per root. It selects and buckets the
+  relevant deltas; it is a pure function of the ambient root, so it resolves the same on every
+  machine.
+- **`policy`** — a per-bucket **reduction**. Each prop names a GraphQL field and says how to fold
+  that bucket's deltas into one value.
+- **`roots`** — the entities held **live**: the gather runs for each, and its view stays current
+  as deltas arrive.
+
+The `body` reads inside-out, each stage feeding the next:
+
+1. **`mask` / `drop` over `input`** — `input` is the store's whole delta set; `drop` applies
+   retractions and passes on only the deltas still standing. (Nothing is erased — a retraction is
+   just another delta the mask honors.)
+2. **`select` … `hasPointer { targetEntity: { var: root } }`** — keep only deltas that carry a
+   pointer **at the current root** (`plant:fern`). `{ var: root }` is the ambient entity the gather
+   is running for.
+3. **`group` / `byTargetContext`** — for each surviving delta, file it under the **context** label
+   of the pointer that targets the root. A delta pointing at `plant:fern` with context `height`
+   lands in the `height` bucket. The result is a hyperview: one root, its buckets.
+
+Then the **policy** folds each bucket. `height` and the `default` both `pick` the entry with the
+newest timestamp (`order: byTimestamp desc`), so `plant(entity: "plant:fern") { height }` returns
+the latest recorded height and drops the rest. Add a `width` prop and you'd surface that bucket
+too; leave it out and the bucket stays gathered but unread.
+
 `loam register` writes to the home's store directly, so run it before `loam serve` (the store is
 single-writer); a running server takes the same registration over `POST /:mount/register`.
 
