@@ -435,6 +435,45 @@ nav .mark.todo {
   color: var(--danger);
 }
 
+/* ---- step-through + in-order gating ---- */
+
+/* One step per row: the button, and (once run) its look-line beneath. */
+.step {
+  margin: 0.45rem 0;
+}
+/* The frontier step is the only live one; earlier steps are done, later steps wait. */
+.act button:disabled {
+  cursor: not-allowed;
+}
+.act button:disabled:not(.step-done) {
+  opacity: 0.45;
+}
+.act button.step-done {
+  background: none;
+  color: var(--green);
+  border-color: var(--green);
+  opacity: 1;
+}
+.step-look {
+  max-width: 42rem;
+  margin: 0.3rem 0 0.2rem;
+  font-size: 0.82rem;
+  font-style: italic;
+  color: var(--muted);
+}
+
+/* Locked lessons in the nav: visible but unreachable until the earlier ones are green. */
+nav button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+nav button:disabled:hover {
+  background: none;
+}
+nav .mark.lock {
+  color: var(--muted);
+}
+
 #gql-editor {
   border: 1px solid var(--line);
   border-radius: 6px;

@@ -40,6 +40,15 @@ const packetFile = (name: string): unknown[] =>
 let clock = 1_753_000_000_000;
 const nextTs = (): number => ++clock;
 
+// A lesson is a SEQUENCE of steps now; running it end-to-end is running every step in order —
+// the exact walk the page drives one click at a time.
+async function runLesson(
+  lesson: { steps: { run(ctx: LessonCtx): Promise<void> }[] },
+  ctx: LessonCtx,
+): Promise<void> {
+  for (const step of lesson.steps) await step.run(ctx);
+}
+
 async function makeCtx(storage: MemStorage): Promise<LessonCtx> {
   const { gateway, seed, author } = await bootTutorialStore(loam, storage);
   return {
@@ -91,7 +100,7 @@ describe("the tutorial arc, headless", () => {
           ctx.gateway.queryPublic(`{ film(entity: "${FILM}") { title } }`),
         ).rejects.toThrow(loam.NothingPublic);
       }
-      await lesson.perform(ctx);
+      await runLesson(lesson, ctx);
       if (lesson.id === 16) {
         // The finale's green is earned OUTSIDE the tab: perform alone must not grant it. The
         // page records the homecoming after a verified localhost match (the honest path is
@@ -135,7 +144,7 @@ describe("the tutorial arc, headless", () => {
     const storage = new MemStorage();
     const ctx = await makeCtx(storage);
     for (const lesson of buildArc(loam)) {
-      await lesson.perform(ctx);
+      await runLesson(lesson, ctx);
     }
     const inTab = await ctx.gateway.query(`{ film(entity: "${FILM}") { title _hex } }`);
     const tabView = inTab.data as { film: { title: string; _hex: string } };
@@ -181,7 +190,7 @@ describe("the tutorial arc, headless", () => {
     const storage = new MemStorage();
     const ctx = await makeCtx(storage);
     const arc = buildArc(loam);
-    for (const lesson of arc.filter((l) => l.id <= 5)) await lesson.perform(ctx);
+    for (const lesson of arc.filter((l) => l.id <= 5)) await runLesson(lesson, ctx);
 
     // Film is at its pre-guests generation. Open a subscription selecting only what that lens
     // offers, and collect every payload it emits.
@@ -199,7 +208,10 @@ describe("the tutorial arc, headless", () => {
 
     // Lesson 6 evolves the lens (adds `guests`) and re-registers — a ground change the open
     // subscription will re-resolve under its ORIGINAL shape.
-    await arc.find((l) => l.id === 6)!.perform(ctx);
+    await runLesson(
+      arc.find((l) => l.id === 6)!,
+      ctx,
+    );
     await new Promise((r) => setTimeout(r, 30));
 
     // The pinned lens never grew guests — every payload it ever emitted is title-only.

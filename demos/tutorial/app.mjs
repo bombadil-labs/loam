@@ -34,6 +34,22 @@ const ctx = {
 const arc = buildArc(loam);
 let current = 1;
 const greens = new Map(); // lesson id -> boolean, recomputed from the ground
+// How many of a lesson's steps have been run THIS session — ephemeral UI state, never the
+// store's. A reload forgets it; that is fine, because re-running a step is idempotent by
+// content address, and the durable proof of progress is the green (recomputed from the ground).
+const stepProgress = new Map(); // lesson id -> number of steps run so far
+
+// A lesson is unlocked only when every lesson before it is green — the store's real progress
+// gates the walk, so a reader cannot skip ahead of what they have actually done. The running
+// prefix of greens plus the first not-yet-green lesson are open; everything after is locked.
+function unlockedIds() {
+  const open = new Set();
+  for (const lesson of arc) {
+    open.add(lesson.id);
+    if (!greens.get(lesson.id)) break; // this is the frontier; later lessons stay locked
+  }
+  return open;
+}
 
 // The console door for the curious — the copy invites it, so it is really there.
 window.loam = loam;
@@ -67,16 +83,26 @@ async function refreshGreens() {
 function renderNav() {
   const nav = $("#lesson-nav");
   nav.innerHTML = "";
+  const open = unlockedIds();
   for (const lesson of arc) {
+    const done = greens.get(lesson.id);
+    const locked = !open.has(lesson.id);
     const b = document.createElement("button");
     b.className = lesson.id === current ? "current" : "";
-    const mark = greens.get(lesson.id) ? "✓" : "○";
-    b.innerHTML = `<span class="mark ${greens.get(lesson.id) ? "" : "todo"}">${mark}</span> ${lesson.id}. ${lesson.title}`;
-    b.onclick = () => {
-      current = lesson.id;
-      renderNav();
-      renderLesson();
-    };
+    // ✓ done · ○ open-and-todo · 🔒 locked-until-you-finish-the-earlier-ones
+    const mark = done ? "✓" : locked ? "🔒" : "○";
+    const markClass = done ? "" : locked ? "lock" : "todo";
+    b.innerHTML = `<span class="mark ${markClass}">${mark}</span> ${lesson.id}. ${lesson.title}`;
+    if (locked) {
+      b.disabled = true;
+      b.title = "finish the earlier lessons first";
+    } else {
+      b.onclick = () => {
+        current = lesson.id;
+        renderNav();
+        renderLesson();
+      };
+    }
     nav.appendChild(b);
   }
 }
@@ -96,30 +122,15 @@ function renderLesson() {
   el.appendChild(actionsFor(lesson));
 }
 
-// Each lesson's stage directions: a Do-it button wired to the SAME perform the CI arc runs,
-// plus the controls its copy promises (the inspector, the export, the homecoming).
+// Each lesson's stage directions: a SEQUENCE of step buttons, only the next un-run one live, so
+// every intermediary state is actually seen. Each step, once run, shows its `look` — where to
+// look and what to notice. Progress within a lesson is ephemeral (stepProgress); the durable
+// truth is the green, recomputed from the ground. The finale carries its own machinery; lesson
+// 1 was performed by boot; lesson 5 also gets the inspector its copy invites.
 function actionsFor(lesson) {
   const box = document.createElement("div");
   box.className = "act";
   const done = greens.get(lesson.id);
-
-  const addDoIt = (label) => {
-    const b = document.createElement("button");
-    b.textContent = label;
-    b.onclick = async () => {
-      b.disabled = true;
-      try {
-        await lesson.perform(ctx);
-        await rerender();
-      } catch (err) {
-        // No rerender on refusal — it would rebuild this pane and wipe the message.
-        b.disabled = false;
-        note(box, `the store refused: ${err.message}`, false);
-      }
-    };
-    box.appendChild(b);
-    return b;
-  };
 
   if (done) {
     const n = document.createElement("div");
@@ -128,19 +139,53 @@ function actionsFor(lesson) {
     box.appendChild(n);
   }
 
-  // Data-driven off the lesson, never a hardcoded id map (which drifts the moment the arc is
-  // renumbered — the bug this replaced). The finale carries its own machinery; lesson 1 was
-  // performed by boot; every other lesson gets a button labelled from its own `action` field;
-  // lesson 2 also gets the inspector its copy promises.
   const isFinale = lesson.id === arc[arc.length - 1].id;
   if (isFinale) {
     box.appendChild(finale());
-  } else if (lesson.action === undefined) {
-    if (!done) box.append("The boot already did this — the check reads it off the ground.");
-  } else {
-    if (!done) addDoIt(lesson.action);
-    if (lesson.id === 2) box.appendChild(inspector());
+    return box;
   }
+  if (lesson.steps.length === 0) {
+    if (!done) box.append("The boot already did this — the check reads it off the ground.");
+    return box;
+  }
+
+  // A green lesson has, by definition, run all its steps; otherwise the frontier is however many
+  // this session has clicked. Steps before the frontier are done (and show their look); the one
+  // at the frontier is live; the rest are locked until you reach them.
+  const frontier = done ? lesson.steps.length : (stepProgress.get(lesson.id) ?? 0);
+  lesson.steps.forEach((step, i) => {
+    const row = document.createElement("div");
+    row.className = "step";
+    const b = document.createElement("button");
+    const runAlready = i < frontier;
+    b.textContent = runAlready ? `✓ ${step.label}` : step.label;
+    b.disabled = i !== frontier; // only the frontier step is clickable
+    if (runAlready) b.classList.add("step-done");
+    b.onclick = async () => {
+      b.disabled = true;
+      try {
+        await step.run(ctx);
+        stepProgress.set(lesson.id, Math.max(frontier, i + 1));
+        await rerender();
+      } catch (err) {
+        // No rerender on refusal — it would rebuild this pane and wipe the message.
+        b.disabled = false;
+        note(box, `the store refused: ${err.message}`, false);
+      }
+    };
+    row.appendChild(b);
+    // The look-line stays visible once its step has run — the guidance the copy promised.
+    if (runAlready) {
+      const look = document.createElement("div");
+      look.className = "step-look";
+      look.textContent = step.look;
+      row.appendChild(look);
+    }
+    box.appendChild(row);
+  });
+
+  // Lesson 5's copy invites the inspector, and by then a fact carrying "Arrival" exists to bend.
+  if (lesson.id === 5) box.appendChild(inspector());
   return box;
 }
 
