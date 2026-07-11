@@ -226,6 +226,16 @@ _(one entry per PR that grew the village; newest last)_
   from the laptop, the notebook answers through the imported law — no register() anywhere —
   and the view matches the tab **`_hex` for `_hex`**. A second pull accepts 0 of 4: union is
   union. A store born in a browser, served from a laptop; nothing re-signed, nothing lost.
+- **THE TUTORIAL (SPEC §16, PRs #54/#55/#56)** — not a village act but its public-facing
+  sibling, recorded here because the arc reprises what the village proves: `site/` ships a
+  GitHub Pages tutorial where a stranger boots a REAL governed store in their browser and
+  walks eleven lessons — sovereignty, facts-before-schema, lenses, the multi-pointer claim,
+  retraction/absence/aggregates, live evolution, the adversary and the trust chain, erasure,
+  federation (the bundled circle store, foreign law inert), the open door, and the take-home
+  finale (`loam pull` of the page's own export, `_hex` for `_hex`). Every lesson's completion
+  is a real read of the learner's store (`test/site/arc.test.ts` drives the whole arc headless
+  in CI); the page was walked end to end in a real browser, homecoming recorded. The village
+  stays the internal proving ground; the tutorial is the door strangers enter by.
 - **GROW AN APP LIVE (demo item 7)** (phase16.mjs, 3/3): the confluence is open-ended now —
   the pulse re-reads `homes/peers.json` every beat, and `grow.mjs` puts a whole new sovereign
   store on the map in one command (see "Growing a new store" above). Watched live: `sightings`
