@@ -9,7 +9,7 @@ import tseslint from "typescript-eslint";
 export default tseslint.config(
   // _testing is the ephemeral field-test playground (see _testing/PLAN.md): never committed,
   // never part of the gate. scripts/ is release tooling — plain node, no project service.
-  { ignores: ["dist/**", "_testing/**", "scripts/**"] },
+  { ignores: ["dist/**", "site-dist/**", "_testing/**", "scripts/**"] },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
   {
@@ -20,5 +20,21 @@ export default tseslint.config(
   // Plain-JS files (site/lessons.mjs is bundled into the page; the arc test types it via
   // site/lessons.d.mts) get syntax linting without the project service.
   { files: ["**/*.js", "**/*.mjs"], ...tseslint.configs.disableTypeChecked },
+  // The page itself runs in a browser; say so instead of silencing no-undef.
+  {
+    files: ["site/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        window: "readonly",
+        document: "readonly",
+        localStorage: "readonly",
+        fetch: "readonly",
+        setTimeout: "readonly",
+        Blob: "readonly",
+        URL: "readonly",
+        console: "readonly",
+      },
+    },
+  },
   eslintConfigPrettier,
 );

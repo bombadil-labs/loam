@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Loam — learn it by growing one</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>Loam</h1>
+        <p class="tagline">a database you grow — learn it by growing one</p>
+      </div>
+      <div class="identity">
+        <span class="identity-label">this store's operator (you):</span>
+        <code id="author-chip">booting…</code>
+      </div>
+    </header>
+    <main>
+      <nav id="lesson-nav" aria-label="lessons"></nav>
+      <section id="lesson"></section>
+      <section id="panes">
+        <div class="tabs" role="tablist">
+          <button data-pane="view" class="active">View</button>
+          <button data-pane="ground">Ground</button>
+          <button data-pane="gql">GraphQL</button>
+        </div>
+        <div id="pane-view" class="pane active">
+          <p class="pane-hint">
+            the store, RESOLVED: gather everything that points at each root, answer every property
+            by its policy — recomputed live as records land
+          </p>
+          <div id="view-cards"></div>
+        </div>
+        <div id="pane-ground" class="pane">
+          <p class="pane-hint">
+            the store, RAW: every signed record it holds, named by the hash of its own content —
+            this is all there is; everything else is reading
+          </p>
+          <div id="ground-rows"></div>
+        </div>
+        <div id="pane-gql" class="pane">
+          <p class="pane-hint">ask the store anything — this console speaks to the same door</p>
+          <textarea id="gql-src" spellcheck="false">
+{ film(entity: "film:arrival") { title rating tags timesWatched watches _hex } }</textarea>
+          <div class="gql-controls">
+            <label><input type="checkbox" id="gql-stranger" /> ask as the stranger (no key)</label>
+            <button id="gql-run">Run</button>
+          </div>
+          <pre id="gql-out"></pre>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

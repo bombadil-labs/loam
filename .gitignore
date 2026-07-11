@@ -6,3 +6,4 @@ dist/
 # The village's disposable stores and seeds (the code and docs are tracked; see _testing/README.md)
 _testing/homes/
 .claude/
+site-dist/
