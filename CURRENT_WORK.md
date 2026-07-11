@@ -30,4 +30,6 @@ genesis → register → claim → query — entirely inside the artifact.
       federate it with the village no-HTTP via direct `federate(offeredDeltas())`), ledger updated.
 - [ ] **Re-plan** — reread SPEC §15/§16 against learnings; open sprint 2 (continuity / `loam pull`).
 
-**Left off here:** plan written; about to write the tests.
+**Left off here:** review findings resolved (`:`-in-store-name guard; degradation-latch,
+erasure-end-to-end, and in-page-federation tests; exemption pinned to the exact specifier);
+pushing to PR #51, then merge → journal → village.

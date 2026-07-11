@@ -1,15 +1,20 @@
 // The browser driver's own edges (SPEC §15). The contract suite proves LocalStorageBackend is
 // an interchangeable witness to the seam; this file pins what is PARTICULAR to this driver:
 // one key per delta under `loam:<store>:` with the canonical wire JSON as the value, quota as
-// an atomic all-or-nothing refusal, the seed key structurally outside the delta set, and a
-// shared origin's foreign keys left untouched and unseen.
+// an atomic all-or-nothing refusal, the seed key structurally outside the delta set, a shared
+// origin's foreign keys left untouched and unseen — and the two §15 compositions the driver
+// exists for: quota latching the GATEWAY's degradation, and erasure reaching the origin.
 
 import { describe, expect, it } from "vitest";
-import { LocalStorageBackend } from "../../src/store/local-storage.js";
+import { LocalStorageBackend, type StorageLike } from "../../src/store/local-storage.js";
 import { toWire } from "../../src/federation/wire.js";
 import { canonicalDelta } from "../../src/store/canon.js";
+import { Gateway } from "../../src/gateway/gateway.js";
+import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
 import { FERN, GARDENER_SEED, SURVEYOR_SEED, observed } from "../spike/garden.js";
 import { MemStorage } from "./mem-storage.js";
+
+const OPERATOR_SEED = "0e".repeat(32);
 
 const d1 = observed(FERN, "height", 30, 1000, GARDENER_SEED);
 const d2 = observed(FERN, "height", 34, 2000, SURVEYOR_SEED);
@@ -62,6 +67,14 @@ describe("LocalStorageBackend: one key per delta", () => {
     expect(ids(await store.deltasSince(new Set()))).toEqual([d1.id]);
     expect(origin.getItem("someone-elses-app")).toBe("their business");
     await store.close();
+  });
+});
+
+describe("LocalStorageBackend: the store name cannot smuggle the separator", () => {
+  it('a store name containing ":" is refused at birth', () => {
+    // "app:v2" would sit inside store "app"'s prefix; each would read the other's rows as
+    // corruption — a valid sibling store must never brick its neighbor.
+    expect(() => new LocalStorageBackend("app:v2", new MemStorage())).toThrow(/separator/);
   });
 });
 
@@ -124,5 +137,109 @@ describe("LocalStorageBackend: a row edited in devtools is corruption", () => {
     origin.setItem(`loam:garden:${d2.id}`, origin.getItem(`loam:garden:${d1.id}`)!);
     await expect(store.deltasSince(new Set())).rejects.toThrow(/corruption/);
     await store.close();
+  });
+});
+
+// A Storage that can be told to start refusing — the deterministic stand-in for an origin
+// running out of room mid-life.
+function flakyOver(origin: MemStorage): { storage: StorageLike; fail: () => void } {
+  let failing = false;
+  return {
+    fail: () => (failing = true),
+    storage: {
+      get length() {
+        return origin.length;
+      },
+      key: (i) => origin.key(i),
+      getItem: (k) => origin.getItem(k),
+      setItem: (k, v) => {
+        if (failing) throw new DOMException("the quota has been exceeded", "QuotaExceededError");
+        origin.setItem(k, v);
+      },
+      removeItem: (k) => origin.removeItem(k),
+    },
+  };
+}
+
+describe("quota reaches the gateway (SPEC §15): the degradation latch", () => {
+  it("a direct append over quota rejects whole: nothing ingested, nothing served", async () => {
+    const { storage, fail } = flakyOver(new MemStorage());
+    const gateway = await Gateway.open(new LocalStorageBackend("tab", storage), {
+      seed: OPERATOR_SEED,
+    });
+    fail();
+    await expect(
+      gateway.append([observed(FERN, "height", 30, 1000, OPERATOR_SEED)]),
+    ).rejects.toThrow(/quota/i);
+    expect(gateway.offeredDeltas()).toEqual([]); // the refused delta never entered the view
+    await gateway.close();
+  });
+
+  it("a mutation over quota refuses loudly in its own answer; the view never tears", async () => {
+    const { storage, fail } = flakyOver(new MemStorage());
+    const gateway = await Gateway.open(new LocalStorageBackend("tab", storage), {
+      seed: OPERATOR_SEED,
+    });
+    await gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+    await gateway.query(`mutation { plant(entity: "${FERN}", height: 30) { height } }`);
+    await gateway.flush(); // durable before the storm
+
+    fail();
+    // The mutation writes durably BEFORE it serves (append-then-ingest), so quota surfaces
+    // in the mutation's own answer and the live view never shows an unpersisted fact.
+    const refused = await gateway.query(
+      `mutation { plant(entity: "${FERN}", height: 44) { height } }`,
+    );
+    expect(refused.errors?.join(" ")).toMatch(/quota/i);
+    const answer = await gateway.query(`{ plant(entity: "${FERN}") { height } }`);
+    expect((answer.data as { plant: { height: number } }).plant.height).toBe(30);
+    await gateway.close();
+  });
+
+  it("a raw-stream write failure latches the gateway: writes refuse, reads keep answering", async () => {
+    const { storage, fail } = flakyOver(new MemStorage());
+    const gateway = await Gateway.open(new LocalStorageBackend("tab", storage), {
+      seed: OPERATOR_SEED,
+    });
+    await gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+    await gateway.query(`mutation { plant(entity: "${FERN}", height: 30) { height } }`);
+    await gateway.flush(); // durable before the storm
+
+    fail();
+    // A raw-stream emitter (an animated tab's derivation, here spoken directly to the
+    // reactor) rides the write-through queue; its failure latches the degradation.
+    gateway.reactor.ingest(observed(FERN, "height", 44, 4000, OPERATOR_SEED));
+    await expect(gateway.flush()).rejects.toThrow(/quota/i); // the failure surfaces
+    // — and LATCHES: from here, writes refuse before ingesting
+    await expect(
+      gateway.append([observed(FERN, "height", 50, 5000, OPERATOR_SEED)]),
+    ).rejects.toThrow(/can no longer persist/);
+    // while reads keep answering (the remedy is export or a bigger driver)
+    const answer = await gateway.query(`{ plant(entity: "${FERN}") { height } }`);
+    expect(answer.errors).toBeUndefined();
+    await gateway.close().catch(() => {}); // close surfaces the same failure; already heard
+  });
+});
+
+describe("erasure reaches the page (SPEC §15): tombstone → purge → removeItem", () => {
+  it("the bytes leave the origin's storage and the door refuses the id's return", async () => {
+    const origin = new MemStorage();
+    const gateway = await Gateway.open(new LocalStorageBackend("tab", origin), {
+      seed: OPERATOR_SEED,
+    });
+    const fact = observed(FERN, "height", 30, 1000, OPERATOR_SEED);
+    await gateway.append([fact]);
+    await gateway.flush();
+    expect(origin.getItem(`loam:tab:${fact.id}`)).not.toBeNull();
+
+    await gateway.erase(fact.id, { reason: "asked and honored" });
+    expect(origin.getItem(`loam:tab:${fact.id}`)).toBeNull(); // physically gone
+    // the store remembers THAT it forgot: the tombstone rides the same origin
+    const survivors = await new LocalStorageBackend("tab", origin).deltasSince(new Set());
+    expect(survivors.some((d) => d.id === fact.id)).toBe(false);
+    expect(survivors.length).toBeGreaterThan(0); // the tombstone itself
+    // and the door refuses the id's return
+    await expect(gateway.append([fact])).rejects.toThrow(/was erased/);
+    await gateway.close();
   });
 });

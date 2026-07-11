@@ -29,6 +29,8 @@ interface BundleGateway {
     variables?: Record<string, unknown>,
     context?: { actor?: string },
   ): Promise<QueryResult>;
+  offeredDeltas(): unknown[];
+  federate(deltas: unknown[]): Promise<{ offered: number; accepted: number; rejected: number }>;
   close(): Promise<void>;
 }
 interface BrowserModule {
@@ -99,8 +101,10 @@ describe("the browser store bundle", () => {
     // Zero node: SPECIFIERS. graphql v17 carries one guarded runtime probe —
     // `process.getBuiltinModule("node:diagnostics_channel")` in a try/catch — which is a
     // feature detection, not an import: nothing for a bundler to resolve, inert in a page.
+    // The exemption is exactly that call and specifier; anything else node: fails the line.
     for (const m of text.matchAll(/["']node:/g)) {
-      expect(text.slice(Math.max(0, m.index - 30), m.index)).toMatch(/getBuiltinModule\($/);
+      const site = text.slice(Math.max(0, m.index - 30), m.index + 40);
+      expect(site).toMatch(/getBuiltinModule\(["']node:diagnostics_channel["']\)/);
     }
   });
 
@@ -159,6 +163,27 @@ describe("the browser store bundle", () => {
     expect(answer.errors).toBeUndefined();
     expect((answer.data as { plant: { height: number } }).plant.height).toBe(62);
     await second.close();
+  });
+
+  it("two stores in one page federate with no HTTP at all", async () => {
+    const b = (await import(pathToFileURL(BUNDLE).href)) as BrowserModule;
+    const teller = await b.Gateway.boot(new b.MemoryBackend(), plantGenesis(b));
+    const claimed = await teller.query(
+      `mutation { plant(entity: "${FERN}", height: 71) { height } }`,
+      undefined,
+      { actor: WRITER_SEED },
+    );
+    expect(claimed.errors).toBeUndefined();
+
+    // The HTTP pull was only ever the transport: a second store in the SAME page federates by
+    // a direct call, trust-admission and all (a fresh store's trust policy is open).
+    const listener = await b.Gateway.open(new b.MemoryBackend(), { seed: b.mintSeed() });
+    const report = await listener.federate(teller.offeredDeltas());
+    expect(report.accepted).toBeGreaterThan(0);
+    expect(report.rejected).toBe(0);
+    expect(report.offered).toBe(report.accepted);
+    await teller.close();
+    await listener.close();
   });
 
   it("mints and derives in the artifact: the client's key discipline rides along", async () => {

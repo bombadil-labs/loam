@@ -52,6 +52,11 @@ export class LocalStorageBackend implements StoreBackend {
     readonly store: string,
     storage?: StorageLike,
   ) {
+    // `:` is the key format's own separator — a store named "app:v2" would sit inside store
+    // "app"'s prefix, and each would read the other's rows as corruption. Refused at birth.
+    if (store.includes(":")) {
+      throw new Error(`store name "${store}" contains ":" — the key format's own separator`);
+    }
     const ambient = (globalThis as { localStorage?: StorageLike }).localStorage;
     const chosen = storage ?? ambient;
     if (chosen === undefined) {
