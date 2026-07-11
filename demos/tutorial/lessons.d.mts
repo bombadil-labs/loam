@@ -1,7 +1,7 @@
 // Types for site/lessons.mjs — the module stays plain JS (it is bundled into the page and
 // imported by the headless arc test alike); this declaration keeps the test typed.
 
-import type { Gateway } from "../src/gateway/gateway.js";
+import type { Gateway } from "../../src/gateway/gateway.js";
 
 export interface LessonStorage {
   getItem(key: string): string | null;

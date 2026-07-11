@@ -5,8 +5,8 @@
 // name, is readable back through the open door, and the mill grinds their presence like
 // anyone else's. The client is the SHIPPED bundle (dist/client), the same file the page loads.
 
-import { publicClaims } from "../dist/index.js";
-import { authorForSeed, loamClient, mintSeed } from "../dist/client/index.js";
+import { publicClaims } from "../../dist/index.js";
+import { authorForSeed, loamClient, mintSeed } from "../../dist/client/index.js";
 import {
   check,
   constitute,

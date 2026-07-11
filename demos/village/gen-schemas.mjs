@@ -1,4 +1,4 @@
-// Generate every register-file in _testing/schemas/. Deterministic; safe to re-run.
+// Generate every register-file in demos/village/schemas/. Deterministic; safe to re-run.
 
 import { writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";

@@ -13,8 +13,8 @@ import {
   publicClaims,
   readPublicSchemas,
   trustClaims,
-} from "../dist/index.js";
-import { authorForSeed, loamClient, mintSeed } from "../dist/client/index.js";
+} from "../../dist/index.js";
+import { authorForSeed, loamClient, mintSeed } from "../../dist/client/index.js";
 import { parsePolicy, parseTerm } from "@bombadil/rhizomatic";
 import { readFileSync } from "node:fs";
 import {

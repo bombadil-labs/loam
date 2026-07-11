@@ -2,7 +2,7 @@
 // deprecate → revive → and the old ground under old law answers exactly as it always did.
 
 import { makeNegationClaims, signClaims, VOCAB_PREFIX } from "@bombadil/rhizomatic";
-import { Gateway, SqliteBackend } from "../dist/index.js";
+import { Gateway, SqliteBackend } from "../../dist/index.js";
 import {
   appendAs,
   check,

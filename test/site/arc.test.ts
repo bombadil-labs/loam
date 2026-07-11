@@ -24,13 +24,13 @@ import {
   buildExport,
   recordHomecoming,
   type LessonCtx,
-} from "../../site/lessons.mjs";
+} from "../../demos/tutorial/lessons.mjs";
 
 vi.setConfig({ testTimeout: 20000 });
 
 const packetFile = (name: string): unknown[] =>
   (
-    JSON.parse(readFileSync(join(process.cwd(), "site", "packets", name), "utf8")) as {
+    JSON.parse(readFileSync(join(process.cwd(), "demos", "tutorial", "packets", name), "utf8")) as {
       deltas: unknown[];
     }
   ).deltas;

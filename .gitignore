@@ -3,7 +3,7 @@ dist/
 .DS_Store
 *.log
 
-# The village's disposable stores and seeds (the code and docs are tracked; see _testing/README.md)
-_testing/homes/
+# The village's disposable stores and seeds (the code and docs are tracked; see demos/village/README.md)
+demos/village/homes/
 .claude/
 site-dist/

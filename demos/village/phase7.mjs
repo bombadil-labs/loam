@@ -8,7 +8,7 @@ import {
   signClaims,
   VOCAB_PREFIX,
 } from "@bombadil/rhizomatic";
-import { registrationClaims } from "../dist/gateway/registration.js";
+import { registrationClaims } from "../../dist/gateway/registration.js";
 import {
   AUTHORS,
   SEEDS,

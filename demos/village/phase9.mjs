@@ -4,7 +4,7 @@
 // the pulse obeys; flips back and the backlog normalizes.
 
 import { signClaims } from "@bombadil/rhizomatic";
-import { translate, translationClaims, trustClaims } from "../dist/index.js";
+import { translate, translationClaims, trustClaims } from "../../dist/index.js";
 import {
   AUTHORS,
   SEEDS,

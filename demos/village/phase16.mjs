@@ -7,7 +7,7 @@
 
 import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
-import { trustClaims } from "../dist/index.js";
+import { trustClaims } from "../../dist/index.js";
 import {
   HOMES,
   check,

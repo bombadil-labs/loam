@@ -14,7 +14,7 @@
 // a derived function whose output feeds its own input grinds forever.
 
 import { authorForSeed, makeNegationClaims } from "@bombadil/rhizomatic";
-import { Runner, bindingDefinitionClaims } from "../dist/index.js";
+import { Runner, bindingDefinitionClaims } from "../../dist/index.js";
 import { SEEDS, gql, loadSpec, registerHttp, signClaims } from "./harness.mjs";
 
 export const MILL = {

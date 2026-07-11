@@ -5,7 +5,7 @@
 // Passive vs animate is one attach call; standing and blessing are separate authorities.
 // Re-runnable against a lived-in home: every check asserts CHANGE, never absolute counts.
 
-import { readBindingDefinitions } from "../dist/index.js";
+import { readBindingDefinitions } from "../../dist/index.js";
 import { attachMill, ensurePresence, plantMill } from "./mill.mjs";
 import {
   attendClaims,

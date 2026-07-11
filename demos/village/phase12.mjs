@@ -4,7 +4,7 @@
 // holds the original and offers it back on every pulse. Sovereignty both ways: the almanac
 // forgets; the commons remembers; neither can force the other.
 
-import { readTombstones, tombstonesIn } from "../dist/index.js";
+import { readTombstones, tombstonesIn } from "../../dist/index.js";
 import {
   AUTHORS,
   SEEDS,

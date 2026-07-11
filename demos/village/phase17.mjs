@@ -26,7 +26,7 @@ function origin() {
 }
 
 // The tab: the shipped artifact, imported as a page would import it.
-const tab = await import(pathToFileURL(join(ROOT, "..", "dist", "browser", "index.js")).href);
+const tab = await import(pathToFileURL(join(ROOT, "..", "..", "dist", "browser", "index.js")).href);
 
 const NOTE_BODY = {
   op: "group",

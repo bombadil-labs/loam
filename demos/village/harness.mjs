@@ -17,8 +17,8 @@ import {
   pullFrom,
   readConfig,
   serve,
-} from "../dist/index.js";
-import { readSeed } from "../dist/cli/config.js";
+} from "../../dist/index.js";
+import { readSeed } from "../../dist/cli/config.js";
 import { authorForSeed, parseTerm, signClaims, termToJson } from "@bombadil/rhizomatic";
 
 export const ROOT = dirname(fileURLToPath(import.meta.url));
