@@ -700,8 +700,11 @@ falls out of the domain rather than being staged.
   — the inspector shows `id = hash(claims)` and shatters it on a one-byte edit; (3) register a
   schema and the orphaned fact lights up as a View — nothing migrated, a lens was ground and the
   ground answered. The living record: (4) writes are claims — one multi-pointer watch files into a
-  film and every guest at once; (5) retraction resolves to absence and aggregates refuse "set"
-  (§14) — clearing a rating empties the key, "set timesWatched" is refused with a reason; (6)
+  film and every guest at once; (5) retraction resolves to absence and aggregates cannot be
+  set — clearing a rating empties the key, and a "set timesWatched" is shown for what it is
+  today: one more counted claim, the count ticking up by one (when §14's write semantics land,
+  this beat upgrades to a refusal with a reason — the lesson teaches whichever truth is
+  shipped); (6)
   evolution is append — add `tags` live under a watching subscription that never disconnects.
   Other people: (7) trust and the adversary — a bundled forged claim wins under `pick byTimestamp`
   and loses under a trust `chain`, the forgery still in the ground, `_hviewHex` equal and `_hex`

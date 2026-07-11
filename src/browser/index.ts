@@ -75,6 +75,7 @@ export { mintSeed } from "../client/index.js";
 // a schema but never say one: terms and policies parse from JSON, claims sign with the seed.
 export {
   authorForSeed,
+  makeNegationClaims,
   parsePolicy,
   parseTerm,
   signClaims,

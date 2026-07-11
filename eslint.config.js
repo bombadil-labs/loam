@@ -17,6 +17,8 @@ export default tseslint.config(
       parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
     },
   },
-  { files: ["**/*.js"], ...tseslint.configs.disableTypeChecked },
+  // Plain-JS files (site/lessons.mjs is bundled into the page; the arc test types it via
+  // site/lessons.d.mts) get syntax linting without the project service.
+  { files: ["**/*.js", "**/*.mjs"], ...tseslint.configs.disableTypeChecked },
   eslintConfigPrettier,
 );
