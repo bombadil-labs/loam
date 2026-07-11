@@ -580,8 +580,12 @@ pull the network. What it cannot be is a place the network calls — stated prou
   `membershipClaims`, `revocationClaims`, `trustClaims`, `publicClaims`, `eraseClaims`,
   `registrationClaims`, `translationClaims`), the readers (`readRegistrations`,
   `readTrustPolicy`, `readTombstones`, `holdsGrant`), federation (`pullFrom`, `toWire` /
-  `fromWire`), the `Runner` (an animate tab is a deploy choice too, §6), and `mintSeed` /
-  `authorForSeed`. Deliberately absent: `serve` (there is no port), `SqliteBackend` /
+  `fromWire`), the `Runner` (an animate tab is a deploy choice too, §6), `mintSeed` /
+  `authorForSeed` — and the substrate primitives the surface is SPOKEN in: `parseTerm`,
+  `parsePolicy`, `signClaims` (learned building it: without these a page could hold a schema
+  but never say one — the claim constructors return unsigned claims, and `assembleGenesis` /
+  `publishRegistration` take terms and policies the page must be able to parse from JSON).
+  Deliberately absent: `serve` (there is no port), `SqliteBackend` /
   `ArchiveBackend` / `MirrorBackend` (there is no fs), the CLI. Shipped exactly as `./client`
   is — a second esbuild entry (`src/browser/index.ts` → `dist/browser/index.js`), platform
   browser, the same `node:http` stub alias, one self-contained ESM file — pinned by the same
