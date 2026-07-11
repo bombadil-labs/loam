@@ -20,13 +20,22 @@ is idempotent.
   - `test/cli/pull.test.ts` — same-operator law-binds (registration answers, grants gate);
     foreign law-inert; tombstone refused; URL idempotency (second pull accepts 0); the
     round-trip `_hex` match (browser store → export → CLI store answers hash-for-hash).
-- [ ] **Tests first** — write `test/cli/pull.test.ts` + an `exportOffer` byte-compat test.
-- [ ] **Implement** — barrel + CLI verb + help text (the poetry is first-class).
-- [ ] **Green** — `npm run check`, counts read.
-- [ ] **PR → review (one careful agent) → resolve → merge.**
-- [ ] **Journal.**
-- [ ] **Village** — the take-home act completes: a tab's store exported and replanted as a
-      served store, same operator, law binding on arrival (extends phase17 or a phase18).
+- [x] **Tests first** — `test/federation/offer.test.ts` (byte-compat against the served
+      /federate door as reference; round-trip; offered-lens shaping; refusals) +
+      `test/cli/pull.test.ts` (same-operator law-binds incl. the `_hex` match and imported
+      grants gating; foreign law-inert; tombstone refused from a file; URL idempotency).
+- [x] **Implement** — `src/federation/offer.ts` (`exportOffer` / `parseOffer`), `loam pull`
+      in cli.ts, exports on both barrels, help text.
+- [x] **Green** — `npm run check`: 33 files, 407 tests.
+- [x] **PR #53 → review → resolved** (divergence documented as deliberate; trust door,
+      LOAM_TOKEN fallback, uninit-home fork, exit codes all pinned; report-before-close;
+      token refused up front). Merge pending CI.
+- [x] **Journal** — the sprint-2 record appended (rides PR #53).
+- [x] **Village** — phase18, THE TAKE-HOME (4/4 first run): tab → exportOffer → `loam init
+      --seed` + `loam pull` → served from a laptop, `_hex` for `_hex`; "3 accepted of 4
+      offered" shows the operator marker already present by content address. Ledger updated.
+- [ ] **Merge PR #53** when CI is green.
 - [ ] **Re-plan** — then sprint 3 (the tutorial, SPEC §16).
 
-**Left off here:** sprint 2 opened at stage 1; aftermath PR for sprint 1 in flight.
+**Left off here:** everything for sprint 2 rides PR #53; merge on green CI, then open
+sprint 3 at stage 1.

@@ -58,8 +58,11 @@ export {
 } from "../gateway/registration.js";
 export { translationClaims } from "../federation/translate.js";
 
-// Federation: a tab can pull the network and push to any served door.
+// Federation: a tab can pull the network and push to any served door. And walk out entirely:
+// exportOffer freezes the store as the exact bytes /federate would serve — `loam pull` on any
+// machine lands it, and under the same operator seed the law binds on arrival (SPEC §15).
 export { pullFrom, type PullOptions } from "../federation/pull.js";
+export { exportOffer, parseOffer } from "../federation/offer.js";
 export { toWire, fromWire, type WireDelta } from "../federation/wire.js";
 
 // An animate tab is a deploy choice too (§6).

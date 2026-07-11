@@ -8,7 +8,9 @@
 
 import { readFileSync } from "node:fs";
 import { authorForSeed, parsePolicy, parseTerm, type HyperSchema } from "@bombadil/rhizomatic";
-import { Gateway } from "../gateway/gateway.js";
+import { Gateway, type FederationReport } from "../gateway/gateway.js";
+import { parseOffer } from "../federation/offer.js";
+import { pullFrom } from "../federation/pull.js";
 import { tombstonesIn } from "../gateway/erase.js";
 import { assembleGenesis } from "../gateway/genesis.js";
 import { schemaEntityFor } from "../gateway/registration.js";
@@ -40,6 +42,7 @@ commands:
   init      create a home, mint or import the operator seed, write config
   serve     boot a store and serve it (GraphQL + SSE + MCP over HTTP)
   register  define a schema from a file and register it in the home's store
+  pull      land a peer's deltas — a live URL or a frozen offer file
   store     inspect a store
 
 run \`loam <command> --help\` for a command's options.`;
@@ -257,6 +260,86 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
   return 0;
 }
 
+// Land a peer's deltas in the home's store: one command, one door, two sources (SPEC §15).
+// A URL is a live peer (`pullFrom` — a single anti-entropy step); a file is a frozen offer
+// (the same body /federate serves, exported from a browser store or saved off the wire).
+// Both cross through Gateway.federate: verification, trust-admission, tombstones at the door.
+// No standing needed — union is union; whether the imported law BINDS is decided by whose
+// operator seed this home holds, never by this command.
+async function cmdPull(args: readonly string[], io: IO): Promise<number> {
+  const parsed = parseArgs(args, new Set());
+  rejectUnknown(parsed, new Set(["home", "store", "token"]), "pull");
+  const source = parsed.positionals[0];
+  if (source === undefined) {
+    io.err(
+      "pull wants a source: `loam pull <url|file>` — a live peer, or a frozen offer " +
+        "(the body of GET /federate, saved; a browser store's export)",
+    );
+    return 2;
+  }
+  if (parsed.positionals.length > 1) {
+    io.err("pull takes exactly one source");
+    return 2;
+  }
+  const isUrl = /^https?:\/\//i.test(source); // URI schemes are case-insensitive (RFC 3986)
+  const token = parsed.flags.get("token") ?? process.env["LOAM_TOKEN"];
+  if (isUrl && (token === undefined || token.length === 0)) {
+    io.err(
+      "pull: a live peer wants a token (--token or LOAM_TOKEN) — " +
+        "federation hands over the raw substrate, and that door is the operator's",
+    );
+    return 2;
+  }
+  let offered: ReturnType<typeof parseOffer> | undefined;
+  if (!isUrl) {
+    let raw: string;
+    try {
+      raw = readFileSync(source, "utf8");
+    } catch (err) {
+      io.err(`pull: cannot read ${source}: ${err instanceof Error ? err.message : String(err)}`);
+      return 1;
+    }
+    try {
+      offered = parseOffer(raw);
+    } catch (err) {
+      io.err(`pull: ${source}: ${err instanceof Error ? err.message : String(err)}`);
+      return 2;
+    }
+  }
+
+  const home = parsed.flags.get("home") ?? defaultHome();
+  const init = initHome(home);
+  if (init.created) io.out(`loam: initialized ${home}\n  operator ${init.operator}`);
+  const gateway = await Gateway.boot(
+    new SqliteBackend(storePath(home, parsed.flags.get("store"))),
+    assembleGenesis({ operatorSeed: readSeed(home) }),
+  );
+  let report: FederationReport;
+  try {
+    report = isUrl ? await pullFrom(gateway, source, token!) : await gateway.federate(offered!);
+  } catch (err) {
+    await gateway.close().catch(() => {}); // never let a close failure mask the real refusal
+    throw err;
+  }
+  // The report prints BEFORE close: the deltas are durable the moment federate returns, and
+  // a close failure must not swallow the news that they landed.
+  io.out(
+    `loam: pulled ${source}\n` +
+      `  ${report.accepted} accepted, ${report.rejected} refused, of ${report.offered} offered — ` +
+      `union is union; pulling again is safe`,
+  );
+  if (init.created) {
+    // The fork is the operator's (SPEC §15): a home minted THIS run holds a brand-new seed,
+    // so whatever law rode the offer is another operator's here — inert by design.
+    io.out(
+      "  this home minted its own operator just now, so the offer's law is another's here —\n" +
+        "  same-operator continuity wants `loam init --seed <hex>` before the pull",
+    );
+  }
+  await gateway.close();
+  return 0;
+}
+
 async function cmdStore(args: readonly string[], io: IO): Promise<number> {
   const parsed = parseArgs(args, new Set());
   rejectUnknown(parsed, new Set(["home", "store"]), "store");
@@ -305,6 +388,8 @@ export async function run(
         return await cmdServe(rest, io, options);
       case "register":
         return await cmdRegister(rest, io);
+      case "pull":
+        return await cmdPull(rest, io);
       case "store":
         return await cmdStore(rest, io);
       default:

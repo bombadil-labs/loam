@@ -216,6 +216,16 @@ _(one entry per PR that grew the village; newest last)_
   from the origin, the door refusing its return, the seed key (never a delta) untouched. The
   same Gateway the village runs on ports, on a different driver — a leaf or an aggregator,
   never a hub, exactly as §15 states proudly.
+- **THE TAKE-HOME COMPLETES (SPEC §15 continuity, PR #53)** (phase18.mjs, 4/4 on first run):
+  phase 17's wanderer takes her notebook home. The tab freezes itself with `exportOffer` —
+  the exact bytes `/federate` would serve — and `loam init --seed` + `loam pull` land the
+  file in a laptop home holding HER seed. The counters tell the §15 story by themselves:
+  the first pull reports **3 accepted, of 4 offered** — the fourth delta is the operator
+  marker, already present by content address, because the laptop's genesis and the tab's
+  genesis are THE SAME DELTA (genesis is pure; the CLI store IS the browser store). Served
+  from the laptop, the notebook answers through the imported law — no register() anywhere —
+  and the view matches the tab **`_hex` for `_hex`**. A second pull accepts 0 of 4: union is
+  union. A store born in a browser, served from a laptop; nothing re-signed, nothing lost.
 - **GROW AN APP LIVE (demo item 7)** (phase16.mjs, 3/3): the confluence is open-ended now —
   the pulse re-reads `homes/peers.json` every beat, and `grow.mjs` puts a whole new sovereign
   store on the map in one command (see "Growing a new store" above). Watched live: `sightings`
