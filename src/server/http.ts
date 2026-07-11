@@ -22,6 +22,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { parsePolicy, parseTerm, type Delta, type HyperSchema } from "@bombadil/rhizomatic";
 import { fromWire, toWire, type WireDelta } from "../federation/wire.js";
+import { buildOpenApi, handleRest } from "../surface/rest.js";
 import {
   NothingPublic,
   type Gateway,
@@ -512,6 +513,30 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
               url.searchParams,
             );
             return;
+          // The other doors (SPEC §17): the same smaller world, spoken in REST/OpenAPI.
+          case "openapi.json":
+            json(res, 200, buildOpenApi(gateway, "public", mountName ?? ""));
+            return;
+          case "rest": {
+            let body: string | undefined;
+            try {
+              body = req.method === "POST" ? await readBody(req, maxBody) : undefined;
+            } catch (err) {
+              json(res, err instanceof BodyTooLarge ? 413 : 400, {
+                errors: [err instanceof Error ? err.message : String(err)],
+              });
+              return;
+            }
+            const result = await handleRest(
+              gateway,
+              "public",
+              req.method ?? "GET",
+              url.pathname.split("/").slice(3),
+              body,
+            );
+            json(res, result.status, result.body);
+            return;
+          }
           default:
             refused(res);
             return;
@@ -531,6 +556,33 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         case "mcp":
           await handleMcp(gateway, identity, req, res);
           return;
+        // The other doors (SPEC §17): the same registrations, spoken in REST/OpenAPI. The
+        // token carries the SAME identity discipline — an actor token writes as that actor,
+        // an operator token as the operator; the hooks enforce standing, not the transport.
+        case "openapi.json":
+          json(res, 200, buildOpenApi(gateway, "full", mountName ?? ""));
+          return;
+        case "rest": {
+          let body: string | undefined;
+          try {
+            body = req.method === "POST" ? await readBody(req, maxBody) : undefined;
+          } catch (err) {
+            json(res, err instanceof BodyTooLarge ? 413 : 400, {
+              errors: [err instanceof Error ? err.message : String(err)],
+            });
+            return;
+          }
+          const result = await handleRest(
+            gateway,
+            "full",
+            req.method ?? "GET",
+            url.pathname.split("/").slice(3),
+            body,
+            contextFor(identity)?.actor,
+          );
+          json(res, result.status, result.body);
+          return;
+        }
         case "append": {
           // The non-custodial door: a client signs its own deltas and presents them. The
           // token authenticates TRANSPORT only — each delta is verified and authorized by its

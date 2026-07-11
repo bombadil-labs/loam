@@ -204,5 +204,35 @@ archive/mirror drivers (copy note in ⑯), HTTP/MCP serving (finale touches serv
    enumerate the refusal matrix (no token, wrong token, no standing, tombstoned id, closed
    trust, undeclared-public) and test both doors against it.
 
-**Left off here:** plan locked; SPEC §17 drafted on branch `surfaces` — Myk reads it, then
-the loop runs Sprint A (seam → REST/OpenAPI), then v2a instruments onward.
+**Left off here (Sprint A, step 2 — the REST door; seam merged as PR #60):** design settled,
+build begins next cycle. The step's contract:
+
+- `readRegistrationVersions(reactor, operator)` in registration.ts: ALL surviving
+  (lawful, non-negated) registrations per registration entity, ascending (timestamp, id) →
+  v1..vN with each version's delta id (the hash = its true name). A struck version leaves the
+  list (aliases shift, per §17 — the hash never lies); hash-addressing a struck version
+  answers 410 Gone, withdrawn-by-the-operator.
+- `Gateway.surface(door)` public accessor: { registered, hooks } — the door-neutral twin
+  of the private gqlHooks(); 'public' filters registered to the declared-public set (reuse
+  the publicCache defs computation).
+- PINNED RESOLUTION: old versions stay ANSWERABLE (the law is not words). Implementation
+  candidates, decide in-build: (a) lazily register old-version materializations under
+  generation-qualified names (matName machinery exists), or (b) one-shot gather+resolve
+  under the pinned (schema, policy) via evalTerm + resolveView. Whichever, the _hex of a
+  pinned view is as real as the live one's.
+- `src/surface/rest.ts`: buildOpenApi(registered versions) → OpenAPI 3.1 (info, per-version
+  paths, components from policies; the doc names each version's hash); the router:
+  GET /:mount/openapi.json; GET /:mount/rest/v<N>/<schema>/<entity> → { entity, view, _hex,
+  _hviewHex }; GET /:mount/rest/@<regHash>/... (hash-addressed); POST /:mount/rest/v<N>/
+  <schema>/<entity> → mutate via hooks (same door discipline); public projection honors
+  declared-public only, read-only.
+- server/http.ts mounts the router beside GraphQL; same token identities; CORS as everywhere.
+- TESTS FIRST — test/surface/rest.test.ts: (1) _hex agreement GraphQL↔REST on the same
+  entity; (2) the REFUSAL-PARITY MATRIX — no token / wrong token / actor-without-standing
+  write / tombstoned-id re-entry / closed-trust federation posture (n/a REST? admission is
+  federate — swap for: undeclared-public anonymous read) / never-declared schema on the
+  public door — each row asserted through BOTH doors with matching outcomes; (3) versioning:
+  evolve Film → v1 and v2 both answer, v1 without the new prop; strike v1 → alias shifts,
+  hash answers 410; (4) OpenAPI doc regenerates on evolution and validates as 3.1 JSON.
+- Then: careful review agent (auth parity), merge, village phase19 (almanac REST beside
+  GraphQL, _hex compared live), journal, re-plan, then Tutorial v2a.
