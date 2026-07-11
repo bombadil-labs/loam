@@ -3,7 +3,13 @@
 // files/bin/exports fields against silent regression.
 
 import { execFileSync } from "node:child_process";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// This spawns `npm pack` (npm is a .cmd through a shell on Windows) — the heaviest external
+// process in the suite, ~1s idle. Under `npm run check` load (a build plus a dozen parallel
+// workers running real HTTP servers) it can blow vitest's 5s default. The same generous
+// hang-guard every other heavy test file here carries, applied to the one that needed it most.
+vi.setConfig({ testTimeout: 15000 });
 
 describe("npm pack: the turnkey surface", () => {
   it("ships the library entry and the loam bin", () => {
