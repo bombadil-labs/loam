@@ -19,6 +19,7 @@ export interface DeltaClass {
 }
 
 export declare function classifyDelta(delta: Delta, selfAuthor?: string): DeltaClass;
+export declare function isReadOnlyDocument(source: string): boolean;
 export declare function summarizePointer(p: Delta["claims"]["pointers"][number]): string;
 export declare function renderGround(
   holder: unknown,

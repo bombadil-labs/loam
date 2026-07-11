@@ -13,7 +13,7 @@ import { registrationClaims } from "../../src/gateway/registration.js";
 import { trustClaims } from "../../src/gateway/trust.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
 // The page and this test share the classifier — same import discipline as the arc.
-import { classifyDelta } from "../../demos/tutorial/instruments.mjs";
+import { classifyDelta, isReadOnlyDocument } from "../../demos/tutorial/instruments.mjs";
 
 const SEED = "0e".repeat(32);
 const ME = authorForSeed(SEED);
@@ -21,6 +21,21 @@ const sign = (claims: Parameters<typeof signClaims>[0]) => signClaims(claims, SE
 
 const kindOf = (delta: Parameters<typeof classifyDelta>[0], self = ME) =>
   classifyDelta(delta, self).kind;
+
+describe("isReadOnlyDocument: only reads may re-run themselves", () => {
+  it("admits queries, refuses mutations, subscriptions, mixed documents, and garbage", () => {
+    expect(isReadOnlyDocument(`{ film(entity: "f") { title } }`)).toBe(true);
+    expect(isReadOnlyDocument(`query A { film(entity: "f") { title } }`)).toBe(true);
+    expect(isReadOnlyDocument(`mutation { film(entity: "f", rating: 9) { rating } }`)).toBe(false);
+    expect(isReadOnlyDocument(`subscription { film(entity: "f") { title } }`)).toBe(false);
+    expect(
+      isReadOnlyDocument(
+        `query A { film(entity: "f") { title } } mutation B { film(entity: "f", rating: 1) { rating } }`,
+      ),
+    ).toBe(false);
+    expect(isReadOnlyDocument(`not graphql at all`)).toBe(false);
+  });
+});
 
 describe("classifyDelta: every badge earns its name", () => {
   it("recognizes the constitution", () => {
@@ -56,6 +71,53 @@ describe("classifyDelta: every badge earns its name", () => {
   it("recognizes a negation (and a tombstone is NOT merely a negation)", () => {
     const target = observed(FERN, "height", 30, 1000, SEED);
     expect(kindOf(sign(makeNegationClaims(ME, 10, target.id, "retracted")))).toBe("negation");
+  });
+
+  it("recognizes a schema definition", () => {
+    expect(
+      kindOf(
+        sign({
+          timestamp: 3,
+          author: ME,
+          pointers: [
+            {
+              role: "rhizomatic.schema.defines",
+              target: { kind: "entity", entity: { id: "schema:Plant", context: "definition" } },
+            },
+          ],
+        }),
+      ),
+    ).toBe("schema");
+  });
+
+  it("a grant is recognized by the gateway's own grammar (context, not entity id)", () => {
+    // A non-default tenant's grant is still a grant...
+    expect(kindOf(sign(grantClaims("tenant:garden", GARDENER, "write", ME, 6)))).toBe("grant");
+    // ...and a delta that merely MENTIONS loam:store under some other context is a fact —
+    // badging it "standing changing hands" would teach a falsehood.
+    expect(
+      kindOf(
+        sign({
+          timestamp: 4,
+          author: ME,
+          pointers: [
+            {
+              role: "subject",
+              target: { kind: "entity", entity: { id: STORE_ENTITY, context: "note" } },
+            },
+            { role: "value", target: { kind: "primitive", value: "just talking about it" } },
+          ],
+        }),
+      ),
+    ).toBe("fact");
+  });
+
+  it("foreign constitutional records get the DATA note, not the sovereign one", () => {
+    const theirs = signClaims(operatorMarkerClaims(GARDENER), GARDENER_SEED);
+    const cls = classifyDelta(theirs, ME);
+    expect(cls.kind).toBe("constitution");
+    expect(cls.foreign).toBe(true);
+    expect(cls.note).toMatch(/binds nothing here/);
   });
 
   it("a plain claim is a fact, and someone else's is foreign", () => {

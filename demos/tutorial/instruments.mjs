@@ -5,6 +5,22 @@
 // hostile-claim lesson is exactly why. The GraphQL editor lives in app.mjs (it needs the
 // page's CodeMirror wiring); the classifier lives here because it is pure and CI can pin it.
 
+import { parse } from "graphql";
+
+// Only READS may re-run themselves. A pinned mutation would be executed on every render —
+// and a mutation that touches a subscribed view triggers a render, which is a self-
+// sustaining write loop wearing a bookmark's clothes. Refused at pin time and at render
+// time both; an unparseable document is refused too (never auto-run what you cannot read).
+export function isReadOnlyDocument(source) {
+  try {
+    return parse(source).definitions.every(
+      (d) => d.kind !== "OperationDefinition" || d.operation === "query",
+    );
+  } catch {
+    return false;
+  }
+}
+
 // ---- the classifier ----------------------------------------------------------------------------
 
 // What kind of record is this? Kinds are recognized by the constitutional contexts and
@@ -15,43 +31,54 @@ export function classifyDelta(delta, selfAuthor) {
     pointers.some((p) => p.target.kind === "entity" && p.target.entity.context === ctx);
   const hasDeltaRef = pointers.some((p) => p.target.kind === "delta");
 
+  const foreign = selfAuthor !== undefined && delta.claims.author !== selfAuthor;
+
   let kind = "fact";
   let note;
   if (hasEntityCtx("loam.operator")) {
     kind = "constitution";
-    note =
-      "the store's founding record: it names the operator — the one key whose word is law here";
+    // A FOREIGN constitutional record is data, not law — lesson 9's thesis must hold on
+    // the very row that shows it.
+    note = foreign
+      ? "another store's founding record — it arrived as data and binds nothing here"
+      : "the store's founding record: it names the operator — the one key whose word is law here";
   } else if (hasEntityCtx("loam.erasure")) {
     kind = "tombstone";
-    note = "an erasure order: who asked, when, which id — never what it said";
+    note = foreign
+      ? "another operator's erasure order — inert here; only your operator's word removes"
+      : "an erasure order: who asked, when, which id — never what it said";
   } else if (hasEntityCtx("loam.registration")) {
     kind = "registration";
-    note = "a lens taking effect: this record is why a schema answers";
+    note = foreign
+      ? "a foreign lens — it arrived as data and reshapes nothing here"
+      : "a lens taking effect: this record is why a schema answers";
   } else if (pointers.some((p) => p.role === "rhizomatic.schema.defines")) {
     kind = "schema";
-    note = "a schema definition: the gather program itself, filed as data";
+    note = foreign
+      ? "a foreign schema definition — held as data, binding nothing"
+      : "a schema definition: the gather program itself, filed as data";
   } else if (hasEntityCtx("loam.public")) {
     kind = "public";
-    note = "an open-door declaration: the named lenses answer strangers";
+    note = foreign
+      ? "another store's open-door declaration — it opens nothing here"
+      : "an open-door declaration: the named lenses answer strangers";
   } else if (hasEntityCtx("loam.trust")) {
     kind = "trust";
-    note = "a trust posture: who the federation door admits";
-  } else if (
-    pointers.some(
-      (p) =>
-        p.target.kind === "entity" &&
-        p.target.entity.id === "loam:store" &&
-        p.target.entity.context !== "loam.operator",
-    )
-  ) {
+    note = foreign
+      ? "another store's trust posture — your door keeps its own"
+      : "a trust posture: who the federation door admits";
+  } else if (hasEntityCtx("loam.grants")) {
+    // The SAME grammar the gateway's reader keys on (accounts.ts CTX_GRANTS) — a pointer
+    // that merely mentions loam:store under some other context is a fact, not standing.
     kind = "grant";
-    note = "standing changing hands: who may write here";
+    note = foreign
+      ? "standing granted in another store — it gates nothing here"
+      : "standing changing hands: who may write here";
   } else if (hasDeltaRef) {
     kind = "negation";
     note = "a taking-back: it strikes another record by id, and stays on the record itself";
   }
 
-  const foreign = selfAuthor !== undefined && delta.claims.author !== selfAuthor;
   return { kind, foreign, note };
 }
 
@@ -191,9 +218,9 @@ export async function renderViews(holder, ctx, ui) {
   }
 
   // -- the learner's pinned queries ----------------------------------------------------------
-  for (const [label, query] of Object.entries(ui.savedQueries)) {
+  for (const [label, query] of ui.savedQueries) {
     await renderQueryCard(holder, ctx, `📌 ${label}`, query, () => {
-      delete ui.savedQueries[label];
+      ui.savedQueries.delete(label);
       ui.persist();
       void renderViews(holder, ctx, ui);
     });
@@ -214,12 +241,18 @@ async function renderQueryCard(holder, ctx, label, query, onRemove) {
     card.appendChild(rm);
   }
   const pre = document.createElement("pre");
-  try {
-    const res = await ctx.gateway.query(query);
-    const data = res.data && Object.values(res.data)[0];
-    pre.textContent = data == null ? "(nothing resolves here yet)" : JSON.stringify(data, null, 2);
-  } catch (err) {
-    pre.textContent = `(${err.message})`;
+  if (!isReadOnlyDocument(query)) {
+    pre.textContent =
+      "(this pin is not a plain read — only queries re-run themselves; run writes from the editor, on purpose)";
+  } else {
+    try {
+      const res = await ctx.gateway.query(query);
+      const data = res.data && Object.values(res.data)[0];
+      pre.textContent =
+        data == null ? "(nothing resolves here yet)" : JSON.stringify(data, null, 2);
+    } catch (err) {
+      pre.textContent = `(${err.message})`;
+    }
   }
   card.appendChild(pre);
   holder.appendChild(card);
