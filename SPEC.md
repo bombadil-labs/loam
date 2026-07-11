@@ -660,7 +660,7 @@ pull the network. What it cannot be is a place the network calls — stated prou
   the door out; key custody is page custody; timestamps come from a clock the user owns
   (testimony, §13 — only more so); erasure-in-a-tab erases one replica.
 
-## 16. The interactive tutorial — learn Loam by growing one (designed 2026-07-11; queued)
+## 16. The interactive tutorial — learn Loam by growing one (SHIPPED as the MVP, PRs #54–#56; its arc is superseded by §19)
 
 The browser peer (§15) makes a real store cheap to hand a stranger, so the tutorial hands them
 one and gets out of the way. It ships as a GitHub Pages static site: no signup, no server, no
@@ -749,7 +749,64 @@ falls out of the domain rather than being staged.
   must expose the in-process anonymous read surface (`queryPublic` / `subscribePublic` /
   `NothingPublic` — already in the gateway) for lesson 10, and the `loam pull` verb for lesson 11.
 
-## 17. Glossary
+## 17. Surfaces are materializations (designed 2026-07-11; queued — ships before tutorial v2)
+
+GraphQL was never the surface. It was the FIRST surface. A registration — `(HyperSchema,
+Policy)`, a gather and a resolution discipline, filed as deltas — is interface-agnostic truth,
+and every interface a store answers through is a MATERIALIZATION of that truth, derived from
+it the way a view is derived from the ground. §8 made "where the deltas sleep" a driver's
+business; this section makes "how the answers are spoken" a generator's business. The
+registration is the source; adding an interface never touches it; N interfaces over one store
+answer the same ground, and two doors that disagree about lawful data are a bug by definition,
+not a version skew to manage.
+
+- **The seam — a surface generator.** What `gql.ts` consumes today (the gateway's `Registered`
+  set: schema, policy, roots, mutations, generation) becomes a published seam, exactly as
+  `StoreBackend` is one: every generator is an interchangeable witness to the registrations,
+  and `buildGqlSchema` becomes the first implementation rather than the only consumer. A
+  generator derives a DOOR — a queryable/writable projection — and doors share one law: the
+  same tokens, the same public declarations, the same capability refusals, the same
+  tombstones. A surface may never invent authority, widen admission, or answer with data
+  another surface would lawfully refuse. The contract test is agreement: one ground, one
+  registration, every door — the same view, `_hex` for `_hex`.
+
+- **REST / OpenAPI — the proving second.** A principle with one implementation is a comment.
+  `buildOpenApi(registered)` derives a real OpenAPI 3.1 document, served at
+  `/:mount/openapi.json`, and a dynamic router mounts beside GraphQL:
+  `GET /:mount/rest/<schema>/<entity>` answers the resolved view (the same view, the same
+  `_hex`), `POST` writes through the same door discipline (authorize, admission, tombstones —
+  the two doors must not disagree; that is the review focus, not a feature). The OpenAPI
+  document regenerates when registrations evolve, exactly as the GraphQL schema does — the
+  spec is a function of the store. An agent that speaks OpenAPI can use a Loam store without
+  ever hearing the word GraphQL; that is the point.
+
+- **Generated clients — designed, not yet queued.** `loam types` emits a typed client library
+  (TypeScript first; the language is a generator parameter) from the same registrations —
+  in-memory against an embedded store, or fronting GraphQL/REST; either way the types are
+  derived, never hand-kept. Codegen is its own project and ships as its own step; what this
+  section fixes is only that it is a GENERATOR, downstream of the same seam.
+
+- **The horizon — compiled surfaces, capability projections.** Nothing above requires a
+  server, or even a runtime that holds a store. A registration could COMPILE: firmware for a
+  sensor that carries only the claim grammar, a signing key, and the schema's write-shapes —
+  a WRITE-ONLY surface whose "persistence" is emitting signed deltas onto an output channel;
+  a monitor built from the READ-ONLY projection, resolving views and nothing else; an
+  orchestrator holding the full read/write door. Three artifacts, one registration snapshot,
+  compiled together — interoperable BY CONSTRUCTION, because the registration's content
+  address is the compatibility contract: if the sensor, the monitor, and the orchestrator
+  name the same registration hash, they cannot disagree about what a claim means. This is
+  stated as possible, not designed as an instance — the seams are ours to place, and the
+  delta grammar is small enough (signed canonical CBOR) that "surface" can mean anything from
+  a GraphQL endpoint to a few kilobytes on a microcontroller. When an instance is wanted, it
+  is a generator, not a fork.
+
+- **Boundaries, in the §13 register:** a surface generator derives doors, never law — it may
+  narrow a projection (write-only, read-only, one schema of many) but never widen one; a
+  projection that omits a capability is a smaller world, not a bypass; and the anonymous
+  surface discipline (§12) applies per-door — a lens is public because the operator declared
+  it, whatever language the asking arrives in.
+
+## 18. Glossary
 
 - **Delta** — the signed, content-addressed atom (rhizomatic).
 - **Hyperschema** — recursive gather definition; `HyperSchema { name, alg, body: Term }`.
@@ -773,3 +830,106 @@ falls out of the domain rather than being staged.
 - **Continuity / export** — a frozen `/federate` offer (`{ deltas }`, ids + signatures intact);
   `loam pull <url|file>` lands it, and a same-operator import (carrying the seed) makes the local
   store the same store, its law binding on arrival (§15).
+- **Surface / materialization** — a derived door over the registrations (§17): GraphQL, REST/
+  OpenAPI, a generated client, a compiled capability projection. Doors share one law and must
+  agree — one ground, one registration, the same view through every door.
+
+## 19. Tutorial v2 — needs before doctrine (designed 2026-07-11; queued after §17 ships)
+
+The MVP (§16) proved the machinery: a real store in the page, checks that read the ground,
+an arc that cannot rot ahead of the library. Walking it proved something else: the lessons
+taught Loam's doctrine in the order the SPEC states it, and a learner builds a cognitive
+model in the order their NEEDS arise. v2 keeps §16's foundations — progress is the store,
+every check a real read, the finale's hash-for-hash homecoming — and rebuilds the arc and the
+instruments on four principles from the walkthrough:
+
+- **Needs before doctrine.** Open where a person opens ("track the films you watch"), and let
+  the doctrine beats — data-first, a schema is a lens — arrive as EARNED REVEALS at the
+  moment the learner has a need only that truth explains. The reveal lands harder than the
+  cold open ever could.
+- **Instruments, not exhibits.** The panes are tools the learner drives, not displays the
+  lessons decorate. Every lesson ends with something new that the instruments can explore
+  off-script, and going off-script is the intended behavior.
+- **Explicit write paths.** Every act is labeled with how it reached the ground: the DOOR (a
+  GraphQL/REST mutation, compiled to a claim), the PEN (a raw signed claim), the WIRE
+  (federated), or DERIVED (a runner's emission). The learner always knows which pen wrote.
+- **Total coverage.** By the finale the learner has touched every meaningful feature the
+  library ships. The arc below carries the audit; a feature without a lesson is a gap, not
+  an elective.
+
+**The instruments.**
+
+- **Ground** — newest first; a delta renderer with kind badges (constitution, registration,
+  fact, negation, tombstone, trust, grant, public-declaration, foreign, derived), one-line
+  summaries, expand-to-wire-JSON, the operator delta annotated for what it is. Arrivals
+  highlight. Everything renders as text, never markup — the hostile-claim lesson is exactly
+  why.
+- **GraphQL** — a real editor (CodeMirror + cm6-graphql): autocomplete, docs, and lint driven
+  by the LIVE schema via introspection against the in-page gateway, re-derived on every
+  registration and on the ask-as-the-stranger toggle (the anonymous schema is a different,
+  smaller schema — the instrument itself proves §12). Discovery is the interface: after the
+  screenings lesson, typing `film {` OFFERS the watch history. Queries pin to the View pane.
+- **View** — a query-fed browser, no hardcoded cards. Seeded with the **Schemas meta-view**
+  (registrations read as data: name, generations, policy summary, roots), so registering Film
+  visibly ADDS FILM TO A VIEW before "schemas are data" is ever said. Select a schema → its
+  roots → the live resolved view (a subscription, and the pane says so). Lessons contribute
+  saved queries; so does the learner. After §17: the registration's OTHER door (the OpenAPI
+  document) is visible beside the GraphQL hints — one truth, two materializations, live.
+
+**The arc — five acts, sixteen lessons.** (Titles are working; the copy is the craft.)
+
+- **Act I — a store of your own.** (1) You are the operator: genesis, seed custody, the
+  constitution annotated in the Ground. (2) Track your films: motivate → define → register →
+  the GraphQL pane LIGHTS UP with hints and the Schemas view gains Film — and with §17
+  shipped, the OpenAPI document materializes beside it: two doors from one registration.
+  (3) Write through the door: mutations; one act seen three ways (View updates live, Ground
+  grows a badged delta, the copy says plainly the mutation COMPILED to a signed claim).
+  (4) Screenings are entities: a second schema, a film⇄screening reference, `expand` — the
+  film's view nests its history.
+- **Act II — the ground truth.** (5) The secret — it was claims all along: the next screening
+  written with the PEN, one multi-pointer claim that also names a guest (`person:alice`, a
+  role no schema knows); the old lens shows the screening BUT LEAVES ALICE OUT — a lens
+  drops what it doesn't gather; the inspector shatters an id on a one-byte edit. (6) Evolve
+  the lens, keep every past: add `guests`, re-register — a NEW query shows Alice; the OLD
+  subscription keeps streaming Alice-less, because a subscription is executed against the
+  generation that opened it and is a PINNED LENS CHOICE — nothing you were watching breaks;
+  you adopt the new shape by asking with it; then the pre-guests policy re-registered as
+  `FilmClassic`: two lenses, one ground, both live — nothing was mutated, ever. (7) Taking
+  it back, and what silence means: negation → absence; merge sum and absentAs on the book;
+  the aggregate that cannot be set (upgrades to §14's refusal when §14 ships).
+- **Act III — other people.** (8) A co-author: the roommate's seed minted in-page, their
+  write REFUSED, standing granted with one claim, their screening landing under THEIR
+  signature, then revoked — the full grant lifecycle. (9) The adversary, and whose word
+  wins: the forged title arrives on the wire; pick-latest falls; a trust chain (your word
+  first) defends; and a `conflicts` lens SURFACES the dispute instead of resolving it — the
+  forgery preserved, visible, impotent. (10) The door itself is policy: a roster declaration,
+  and the second forgery bounces at federate-time — admission trust and read-time trust,
+  distinguished. (11) The right to be forgotten: manifest → tombstone → purge; the bytes
+  leave the origin; the door holds; the degrees of forgetting named, not exercised.
+- **Act IV — the wider world.** (12) Alice was just an id: pull the circle; names and
+  friendships light up; the circle's own law arrives AND binds nothing. (13) Another tongue:
+  a stranger's log in an alien dialect, rendered into your vocabulary by one signed
+  translation spec, provenance visible in the view. (14) An animate store: one derived
+  function blessed, a Runner attached in the tab, a derived summary landing signed by the
+  runner and durable after it detaches — an animate tab is a deploy choice (§6).
+- **Act V — the door out.** (15) The stranger at the window: one public declaration; the
+  anonymous surface is a SMALLER WORLD through every door — the editor's hints shrink, the
+  OpenAPI document shrinks, a never-declared lens is invisible even to introspection.
+  (16) The same store, now on your machine: export (the seed rides, said plainly, tutorial
+  data only) → `npm i -g @bombadil/loam` → `loam init --seed` + `loam pull` + `loam serve` →
+  the page matches `_hex` hash for hash and records the homecoming IN the ground.
+
+**The audit.** genesis/operator ①; registrations-as-data ②; two doors from one registration
+②⑮ (§17); mutations ③; subscriptions-as-pinned-lenses ③⑥; expand/refs ④⑫; raw multi-pointer
+claims ⑤; content addressing ⑤⑯; evolution + concurrent generations ⑥; negation/absence,
+merge, absentAs ⑦; grants + revocation ⑧; chain/byAuthorRank + conflicts ⑨; trust
+roster/admission ⑩; erasure ⑪; federation/law-inert ⑫; translation ⑬; Runner/derived ⑭;
+public surfaces ⑮; continuity/CLI ⑯. Explicitly out until built: §14 write semantics (named
+in ⑦), as-of replay, server-side drivers (named in ⑯'s copy).
+
+**Acceptance bars, normative** (the MVP's review findings, promoted to law): every check is
+EARNED (false before its lesson runs), DURABLE (monotone in the ground — a later lesson can
+never un-green an earlier one), and SIDE-EFFECT-FREE (safe to re-verify on every boot);
+the copy is apprehensible cold; the arc test drives the page's own functions through all
+sixteen in order, the revisit, and the finale round trip — including the lesson-6 pin that a
+superseded generation's subscription keeps its shape.
