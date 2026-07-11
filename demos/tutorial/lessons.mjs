@@ -561,12 +561,17 @@ yours answers only to standing, and your roommate has none yet.`,
           look: `One signed record, from you the operator, says this key may write here. Look for a
 record badged "grant" in the Ground.`,
           run: async (ctx) => {
-            await ctx.gateway.append([
-              loam.signClaims(
-                loam.grantClaims("loam:store", roommate, "write", ctx.author, ctx.ts()),
-                ctx.seed,
-              ),
-            ]);
+            // Idempotent: a mid-lesson reload replays the steps from the start, and a second
+            // grant (fresh timestamp → new id) would survive the revoke below and quietly hold
+            // the door open. One grant is enough — only file it if the roommate has none yet.
+            if (findGrantTo(ctx, roommate) === undefined) {
+              await ctx.gateway.append([
+                loam.signClaims(
+                  loam.grantClaims("loam:store", roommate, "write", ctx.author, ctx.ts()),
+                  ctx.seed,
+                ),
+              ]);
+            }
           },
         },
         {
