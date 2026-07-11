@@ -204,6 +204,21 @@ archive/mirror drivers (copy note in ⑯), HTTP/MCP serving (finale touches serv
    enumerate the refusal matrix (no token, wrong token, no standing, tombstoned id, closed
    trust, undeclared-public) and test both doors against it.
 
+
+## v2b STATUS (2026-07-11): shipped as a coherent 12-lesson arc
+
+v2b delivers the new Acts I–II (lessons 1–7: operator, track films, write-door, screenings/
+expand, the pen/claims-all-along reveal, evolve-the-lens/FilmClassic, retract/aggregates) PLUS
+the MVP tail re-pointed to the screening/guest domain (8: adversary+conflicts, 9: erasure,
+10: federation/circle, 11: public, 12: finale). Coherent, no regression, 442 tests green,
+all 12 lessons driven to green live in the browser. Spikes done: expand nests, subscription
+keeps its shape, runner derives durably, translation renders — all confirmed buildable.
+
+**v2c REMAINING (insert to reach the full 16):** co-author (grant lifecycle), the trust DOOR
+(roster/admission vs read-time), translation (dialect packet — gen-packets grows it), the
+animate Runner (barrel already gains bindingDefinitionClaims/translate/readTranslations;
+classifier needs the derived-badge case). Then village phases + cold-reader polish + journal.
+
 **Left off here:** Sprint A closed (phase19 + journal + ledger ride the sprint-a-close PR).
 NEXT: Tutorial v2a — the instruments (see the v2a checklist above and SPEC §19): Ground
 renderer, CodeMirror GQL editor over live introspection, View browser with the Schemas

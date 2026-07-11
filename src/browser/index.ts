@@ -56,7 +56,13 @@ export {
   registrationClaims,
   type Registration,
 } from "../gateway/registration.js";
-export { translationClaims } from "../federation/translate.js";
+export {
+  translationClaims,
+  translate,
+  readTranslations,
+  type Translation,
+  type TranslateReport,
+} from "../federation/translate.js";
 
 // Federation: a tab can pull the network and push to any served door. And walk out entirely:
 // exportOffer freezes the store as the exact bytes /federate would serve — `loam pull` on any
@@ -65,8 +71,14 @@ export { pullFrom, type PullOptions } from "../federation/pull.js";
 export { exportOffer, parseOffer } from "../federation/offer.js";
 export { toWire, fromWire, type WireDelta } from "../federation/wire.js";
 
-// An animate tab is a deploy choice too (§6).
-export { Runner, type RunnerOptions } from "../runner/runner.js";
+// An animate tab is a deploy choice too (§6): bless a derived function, attach a Runner, and
+// the tab grinds the ground into derived facts — durable after the runner detaches.
+export {
+  Runner,
+  bindingDefinitionClaims,
+  readBindingDefinitions,
+  type RunnerOptions,
+} from "../runner/runner.js";
 
 // Key custody, page-side: mint where the seed will live; show the author around instead.
 export { mintSeed } from "../client/index.js";

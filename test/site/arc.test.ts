@@ -1,9 +1,10 @@
-// The tutorial's anti-rot guarantee (SPEC §16): the whole arc, headless. This suite drives
-// the EXACT functions the page calls — site/lessons.mjs `buildArc(loam)` over the browser
-// barrel — through all eleven lessons IN ORDER, asserting every check green, that no check is
-// vacuously green before its lesson runs, that a revisit (reboot from the same origin)
-// re-verifies every green from the ground alone, and the finale's whole claim: export →
-// `loam init --seed` → `loam pull` → the served store answers `_hex` for `_hex`.
+// The tutorial's anti-rot guarantee (SPEC §19): the whole arc, headless. This suite drives
+// the EXACT functions the page calls — demos/tutorial/lessons.mjs `buildArc(loam)` over the
+// browser barrel — through all twelve lessons IN ORDER, asserting every check green, that no
+// check is vacuously green before its lesson runs, that a revisit (reboot from the same
+// origin) re-verifies every green from the ground alone, that lesson 6's evolution leaves an
+// already-open subscription's SHAPE untouched (a subscription is a pinned lens), and the
+// finale's whole claim: export → `loam init --seed` → `loam pull` → `_hex` for `_hex`.
 
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -18,6 +19,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { MemStorage } from "../store/mem-storage.js";
 // The page and this test share one arc — that identity IS the anti-rot guarantee.
 import {
+  ALICE,
   FILM,
   bootTutorialStore,
   buildArc,
@@ -60,11 +62,11 @@ beforeAll(() => {
 });
 
 describe("the tutorial arc, headless", () => {
-  it("runs all eleven lessons in order; every check earns its green", async () => {
+  it("runs all twelve lessons in order; every check earns its green", async () => {
     const storage = new MemStorage();
     const ctx = await makeCtx(storage);
     const arc = buildArc(loam);
-    expect(arc).toHaveLength(11);
+    expect(arc).toHaveLength(12);
 
     for (const lesson of arc) {
       // No lesson may be green before it runs — a vacuous check teaches nothing and can lie.
@@ -72,31 +74,44 @@ describe("the tutorial arc, headless", () => {
       if (lesson.id !== 1) {
         expect(await lesson.check(ctx), `lesson ${lesson.id} green before it ran`).toBe(false);
       }
-      // The moment between lessons 2 and 3, pinned: the fact is real before any schema is.
-      if (lesson.id === 3) {
+      // Before lesson 2 registers anything, the store has no queryable surface at all — a fact
+      // can be real before any schema is (the reveal lesson 5 makes explicit).
+      if (lesson.id === 2) {
         await expect(ctx.gateway.query(`{ film(entity: "${FILM}") { title } }`)).rejects.toThrow(
           /nothing is registered/,
         );
       }
-      // Before lesson 10, the stranger at the window sees a store with nothing public.
-      if (lesson.id === 10) {
+      // Before lesson 11, the stranger at the window sees a store with nothing public.
+      if (lesson.id === 11) {
         await expect(
           ctx.gateway.queryPublic(`{ film(entity: "${FILM}") { title } }`),
         ).rejects.toThrow(loam.NothingPublic);
       }
       await lesson.perform(ctx);
-      if (lesson.id === 11) {
+      if (lesson.id === 12) {
         // The finale's green is earned OUTSIDE the tab: perform alone must not grant it. The
         // page records the homecoming after a verified localhost match (the honest path is
         // driven whole by the second test); here we take the side door the copy celebrates —
         // the record itself is the check's subject, and it reads back from the ground.
-        expect(await lesson.check(ctx), "lesson 11 green without a homecoming").toBe(false);
+        expect(await lesson.check(ctx), "lesson 12 green without a homecoming").toBe(false);
         await recordHomecoming(loam, ctx, "side-door");
       }
       expect(await lesson.check(ctx), `lesson ${lesson.id} (${lesson.title})`).toBe(true);
+
+      // The reveal at the heart of Act II, pinned: after lesson 5 writes Alice with the pen but
+      // before lesson 6 evolves the lens, the Film view has no `guests` field at all — a lens
+      // shows only what it gathers. This stops being true the moment lesson 6 runs, so it can
+      // only be an in-order pin, never a durable check.
+      if (lesson.id === 5) {
+        const res = await ctx.gateway.query(`{ film(entity: "${FILM}") { guests } }`);
+        expect(
+          (res.errors ?? []).join(" "),
+          "guests must be an unknown field before lesson 6",
+        ).toMatch(/guests/);
+      }
     }
 
-    // The adversary's forgery is still in the ground after lesson 7's defense — visible,
+    // The adversary's forgery is still in the ground after lesson 8's defense — visible,
     // preserved, and refusing to matter (the lesson's check asserted the defended title).
     const forged = ctx.packets.adversary[0] as { id: string };
     expect(ctx.gateway.offeredDeltas().some((d) => d.id === forged.id)).toBe(true);
@@ -142,9 +157,9 @@ describe("the tutorial arc, headless", () => {
       expect(laptopView.film._hex).toBe(tabView.film._hex);
       await laptop.close();
 
-      // The honest homecoming: the match verified, the page records it, and lesson 11's
+      // The honest homecoming: the match verified, the page records it, and lesson 12's
       // check reads it back from the ground — progress is the store, all the way to the end.
-      const finale = buildArc(loam).find((l) => l.id === 11)!;
+      const finale = buildArc(loam).find((l) => l.id === 12)!;
       expect(await finale.check(ctx)).toBe(false);
       await recordHomecoming(loam, ctx, laptopView.film._hex);
       expect(await finale.check(ctx)).toBe(true);
@@ -152,5 +167,48 @@ describe("the tutorial arc, headless", () => {
       await ctx.gateway.close();
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
+  });
+
+  // SPEC §19's mandated lesson-6 pin: a subscription is a standing question against the lens
+  // as it was when you asked, and it can never sprout a field you never selected. Open one
+  // against the pre-guests Film, evolve the lens (lesson 6), and prove the open subscription
+  // keeps its OLD shape while a fresh query sees the new field.
+  it("lesson 6: an open subscription keeps its shape across the evolution", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    const arc = buildArc(loam);
+    for (const lesson of arc.filter((l) => l.id <= 5)) await lesson.perform(ctx);
+
+    // Film is at its pre-guests generation. Open a subscription selecting only what that lens
+    // offers, and collect every payload it emits.
+    const seen: Array<Record<string, unknown>> = [];
+    const sub = await ctx.gateway.subscribe(`subscription { film(entity: "${FILM}") { title } }`);
+    const pump = (async () => {
+      for await (const ev of sub) {
+        const film = (ev as { film?: Record<string, unknown> }).film;
+        if (film) seen.push(film);
+      }
+    })();
+    await new Promise((r) => setTimeout(r, 30)); // the initial snapshot
+    const before = seen.length;
+    expect(before).toBeGreaterThan(0);
+
+    // Lesson 6 evolves the lens (adds `guests`) and re-registers — a ground change the open
+    // subscription will re-resolve under its ORIGINAL shape.
+    await arc.find((l) => l.id === 6)!.perform(ctx);
+    await new Promise((r) => setTimeout(r, 30));
+
+    // The pinned lens never grew guests — every payload it ever emitted is title-only.
+    expect(seen.length).toBeGreaterThanOrEqual(before);
+    for (const film of seen) {
+      expect(Object.keys(film), "the old subscription must keep its shape").toEqual(["title"]);
+    }
+    // ...while a fresh query, asked with the new field, sees Alice.
+    const fresh = await ctx.gateway.query(`{ film(entity: "${FILM}") { guests } }`);
+    expect((fresh.data as { film: { guests: unknown[] } }).film.guests).toContain(ALICE);
+
+    await sub.return?.(undefined);
+    await pump.catch(() => {});
+    await ctx.gateway.close();
   });
 });
