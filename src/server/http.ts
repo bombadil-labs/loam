@@ -385,7 +385,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         reply({
           protocolVersion: "2024-11-05",
           capabilities: { tools: {} },
-          serverInfo: { name: "loam", version: "0.0.1" },
+          serverInfo: { name: "loam", version: "0.1.0" },
         });
         return;
       case "notifications/initialized":
