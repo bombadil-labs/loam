@@ -562,7 +562,187 @@ local.)
   guarantee enforces it with a lens — e.g. a mask admitting only the deriving author for a
   derived context. Writability disciplines the surface; lenses discipline the truth.
 
-## 15. Glossary
+## 15. The browser peer — a full store in the page (designed 2026-07-11; queued)
+
+§12 gave the page a CLIENT — keys minted and claims signed in the browser, a served store's door
+on the other end. This section gives the page the STORE. A complete Loam — gateway, genesis,
+law, lenses, erasure, trust, federation — boots in a tab, persists in localStorage, and needs no
+server anywhere. It is not a lite mode and there is no fork: §8 already made "where the deltas
+sleep" a driver's business, so the browser peer is the same `Gateway` on a different driver. It
+is born governed, answers GraphQL, honors tombstones, resolves its trust policy live, and can
+pull the network. What it cannot be is a place the network calls — stated proudly below.
+
+- **The surface — `@bombadil/loam/browser`, a curated barrel.** The root barrel (`src/index.ts`)
+  re-exports `serve`, sqlite, the archive, and the CLI, so a browser entry must CHOOSE, not
+  filter. It exports: the whole `Gateway` (boot / query / subscribe / append / federate /
+  publishRegistration / erase), `assembleGenesis` + `operatorMarkerClaims`, `MemoryBackend` +
+  **`LocalStorageBackend`** + the `StoreBackend` type, the claim constructors (`grantClaims`,
+  `membershipClaims`, `revocationClaims`, `trustClaims`, `publicClaims`, `eraseClaims`,
+  `registrationClaims`, `translationClaims`), the readers (`readRegistrations`,
+  `readTrustPolicy`, `readTombstones`, `holdsGrant`), federation (`pullFrom`, `toWire` /
+  `fromWire`), the `Runner` (an animate tab is a deploy choice too, §6), and `mintSeed` /
+  `authorForSeed`. Deliberately absent: `serve` (there is no port), `SqliteBackend` /
+  `ArchiveBackend` / `MirrorBackend` (there is no fs), the CLI. Shipped exactly as `./client`
+  is — a second esbuild entry (`src/browser/index.ts` → `dist/browser/index.js`), platform
+  browser, the same `node:http` stub alias, one self-contained ESM file — pinned by the same
+  discipline: zero `node:` specifiers, and the bundle must BOOT (genesis → register → claim →
+  query, all inside the artifact). `graphql` rides along (pure JS); the bundle is store-sized,
+  not client-sized — said plainly, not hidden.
+
+- **`LocalStorageBackend` — one key per delta.** Key `loam:<store>:<id>`, value the delta's
+  canonical wire JSON. Chosen over a single blob because the seam chose it first: per-delta keys
+  make append O(batch) not O(store), make purge a `removeItem`, and make two handles on one
+  origin converge to the union by construction — a blob is last-writer-wins, which is data loss
+  wearing simplicity's clothes. (And in devtools the store reads as what it is: content-addressed
+  facts, one per row, the id in the key — the pedagogy is free.) Write-through, no snapshot tier:
+  localStorage is synchronous, so durability is the same instant as acceptance. Reads recompute
+  every id and verify every signature — a row edited in devtools is corruption, refused, exactly
+  as a tampered sqlite row is. Quota is this disk's edge: a `QuotaExceededError` mid-batch removes
+  the keys the batch already wrote, then rejects the whole batch — atomic, as the seam demands —
+  and the gateway latches its existing degradation ("this gateway can no longer persist"): reads
+  keep answering, writes refuse loudly, and the remedy is export (below) or a bigger driver.
+  IndexedDB is a later drop-in behind the same seam — capacity is a driver's property, never a
+  semantic change.
+
+- **The seed lives at its own key** (`loam:<store>:seed`), never under the delta prefix — so no
+  export of deltas can carry key material by accident, structurally. Custody in the same register
+  as §5's server-seed note: the key is page-resident, and anything that can run script on the
+  origin — XSS, a hostile extension, a shared machine — can sign as this store's operator. A
+  browser store's law is exactly as trustworthy as the page holding its pen. For a tutorial store
+  that is fine, and said so; for anything more, keep the operator seed in the user's own custody
+  and let the page be a granted author (§7), or a §12 client of a served store.
+
+- **One writing tab.** localStorage is shared per-origin, and per-delta keys keep the STORAGE
+  convergent (union by id — the same guarantee two sqlite handles keep), but a gateway reads its
+  backend once at boot and holds no live view of another writer (§8's stated posture). So: one
+  writing gateway per store; a second tab sees the union at its next boot; cross-tab liveness is
+  federation's job, not a driver's improvisation with storage events.
+
+- **Federation posture, honestly.** A browser store can PULL — `pullFrom` in a tab is an
+  aggregator with a URL bar (CORS on public mounts already serves this) — and can PUSH — sign
+  locally, `POST /append` at a served peer, the author-standing rule unchanged. It cannot BE
+  PULLED: a browser cannot listen, so no peer can ask it `deltasSince`. A browser store is a leaf
+  or an aggregator, never a hub. The compensations are already in the architecture: push what
+  matters to a served peer (which CAN be pulled — the relay pattern), or export. Two stores in
+  ONE page need no HTTP at all — federation is a direct `local.federate(other.offeredDeltas())`
+  call; the HTTP pull was only ever the transport. Deltas never belonged to stores (§13); a tab
+  closed forever orphans nothing anyone copied.
+
+- **Erasure reaches the page.** Tombstone → `purge` → `removeItem`: the bytes leave the origin's
+  storage, and the door refuses the id's return, same law as everywhere (§11). Per-instance as
+  ever — erasing here says nothing about copies already pushed or exported. And the browser's own
+  "clear site data" is an unceremonious full erasure — deltas, tombstones, and seed alike — which
+  is exactly why export exists.
+
+- **Continuity — the store walks out of the browser.** An export is a frozen federation offer:
+  `{ deltas: WireDelta[] }`, byte-identical to a `GET /federate` body, ids and signatures intact —
+  so migration never launders provenance (§13's rebirth pattern, verbatim). Landing it is one
+  command, one door, two sources: **`loam pull <url|file>`** — a live peer or a frozen offer, both
+  through `Gateway.federate` (trust-admission; no standing needed; tombstones still bar the door).
+  Then the fork, and the operator decides it:
+  - **Same operator** — `loam init --seed <hex>` with the browser's seed, then `loam pull
+    export.json`. Genesis is pure, so the CLI store IS the browser store — the operator marker is
+    the same delta by content address — and every registration, grant, trust claim, and tombstone
+    in the export is operator-authored here too, so THE LAW BINDS on arrival. A store born in a
+    tab, served from a laptop; nothing re-signed, nothing lost.
+  - **Foreign operator** — the deltas cross (union is union) and the testimony is all there; the
+    law stays inert, exactly as §5/§7/§14 promise: foreign registrations reshape nothing, foreign
+    grants gate nothing, foreign tombstones erase nothing. Re-register your own lenses over the
+    imported ground, translate its dialect if it differs (§8), reassert what you endorse (§13).
+    Data federates; authority never does.
+
+- **Boundaries, in the §13 register:** no listener — we did not smuggle WebRTC into a footnote;
+  ~5 MB and one origin — quota and same-origin policy are this deployment's walls, and the seam is
+  the door out; key custody is page custody; timestamps come from a clock the user owns
+  (testimony, §13 — only more so); erasure-in-a-tab erases one replica.
+
+## 16. The interactive tutorial — learn Loam by growing one (designed 2026-07-11; queued)
+
+The browser peer (§15) makes a real store cheap to hand a stranger, so the tutorial hands them
+one and gets out of the way. It ships as a GitHub Pages static site: no signup, no server, no
+install until the last step. The learner boots a live governed store in the page and performs
+real tasks against it; every lesson's completion is checked by a REAL READ of their store (a
+predicate over a query or the ground), never a quiz answer. The right-hand pane — **View |
+Ground | GraphQL** — teaches §4's gather/resolve split by simply existing: the same store shown
+as its resolved answer, its raw signed deltas, and a live console, side by side.
+
+**It stands alone.** A stranger arriving at the URL has never seen Loam, has run nothing locally,
+and knows none of this document. Every concept is taught from zero; the cast and narrative are
+the tutorial's own (Alice, Bob, a self-explanatory adversary); no lesson leans on another the
+learner skipped, and nothing is installed until the finale. The acceptance bar is that the
+writing is apprehensible cold — not only that the code runs. (Internally: the arc reprises
+patterns the `_testing` village already proves, so the mechanics are exercised and sound; the
+village is never named or assumed on the site.)
+
+**Two stores, because federation is the point.** The learner owns a **media log** (films and
+books; a watch is an event with a date, a rating, and GUESTS). A second, bundled store — **the
+circle** (Alice, Bob, and friends, pre-signed under their own operator) — describes people. A
+guest on a watch is a bare id (`person:alice`) that means nothing in the media store alone; it
+lights up with a name and relationships only once the learner federates the circle. "Alice was
+just an id until you pulled the store that knows her" is federation taught in one gesture, and it
+falls out of the domain rather than being staged.
+
+- **The domain, sketched.** `media` (learner is operator): `Film` (`title` — a `pick` that becomes
+  a trust-`chain` in the adversary lesson; `rating` — a `pick`, clearable to absence; `tags` — an
+  `all`, added mid-tutorial; `timesWatched` — a `merge count`; `lastWatched` — a `merge max`;
+  `watches` — an `expand` into the watch events); `Book` (`pagesRead` — a `merge sum`; `finished`
+  — `absentAs false`); `Watch` (a multi-pointer claim template filing into the film's history, the
+  timeline, and each guest's card at once). `circle` (bundled, foreign): `Person` with `name` and
+  `friends` (an `expand`). The learner may file a private `note` about a guest in their OWN store —
+  the target the erasure lesson later removes.
+
+- **The arc — four acts, eleven lessons.** Sovereignty: (1) mint a seed and boot a store — you are
+  the operator, no account asked; (2) a fact is a signed delta that lands before any schema exists
+  — the inspector shows `id = hash(claims)` and shatters it on a one-byte edit; (3) register a
+  schema and the orphaned fact lights up as a View — nothing migrated, a lens was ground and the
+  ground answered. The living record: (4) writes are claims — one multi-pointer watch files into a
+  film and every guest at once; (5) retraction resolves to absence and aggregates refuse "set"
+  (§14) — clearing a rating empties the key, "set timesWatched" is refused with a reason; (6)
+  evolution is append — add `tags` live under a watching subscription that never disconnects.
+  Other people: (7) trust and the adversary — a bundled forged claim wins under `pick byTimestamp`
+  and loses under a trust `chain`, the forgery still in the ground, `_hviewHex` equal and `_hex`
+  divergent; (8) erasure (§11) — a guest asks you to forget a private note; you walk manifest →
+  purge → signed tombstone, and the door refuses the id's return; (9) federation — pull the circle,
+  and your guests gain names and friendships while the circle's own law stays inert; (10) the open
+  door (§12) — a tokenless "stranger at the window", refused all along, reads your public
+  films-watched lens the moment you declare it, and only that. The door out: (11) the finale —
+  export, `npm i -g @bombadil/loam`, `loam init --seed` + `loam pull`, `loam serve`, and the page
+  fetches your localhost store and matches `_hex` hash-for-hash: not a copy, the same store, now
+  durable and yours to federate.
+
+- **The finale carries the seed, on purpose.** The export is `{ version, operator, seed, deltas }`
+  and the seed rides in the file — because this is disposable tutorial data and the point is to SEE
+  the store make the transit intact, the local store proving itself the same store by content
+  address (§15's same-operator path). The site says plainly what §15 says: real data keeps its seed
+  in the user's own custody; this convenience is the tutorial's alone. If a browser cannot reach
+  `http://127.0.0.1` from an https page (Chromium's Private Network Access may refuse), the learner
+  pastes the local `_hex` by hand and watches it match — carrying the hash across by hand is, if
+  anything, the better lesson.
+
+- **Progress is the store; the checks are real.** There is no progress database to drift: on every
+  visit the page reboots the store from localStorage and re-verifies each lesson from the ground
+  itself. The only way to "cheat" a check is to append the very deltas the lesson teaches, through
+  the console — which is the curriculum entered by a side door, and the copy celebrates it. It is a
+  tutorial, not an exam: a green mark never lies about the store's contents, and that is all it
+  promises.
+
+- **Architecture.** The site lives in this repo under `site/` (so it imports the same-commit
+  browser bundle — version skew is impossible, and CI runs the whole arc as a test), built by
+  esbuild like the client bundle and deployed by a `pages.yml` GitHub Actions workflow
+  (`upload-pages-artifact` → `deploy-pages`; nothing built is committed, but the bundled packets —
+  the circle, the adversary — are data and ARE committed, regenerated byte-identically from fixed
+  seeds and timestamps). Zero framework: the store is the state and the UI is a subscriber, so a
+  framework would plant a second source of truth precisely where the product's thesis is that there
+  is one. The anti-rot guarantee is a test — `test/site/arc.test.ts` boots a store headless, drives
+  each lesson through the same functions the UI calls, and asserts every check green in order,
+  including the export → `init --seed` → `pull` → `_hex`-match round trip, so the finale's
+  hash-for-hash claim is pinned in CI forever.
+
+- **Dependencies on §15 (called out so the sprints sequence right):** the `dist/browser` bundle
+  must expose the in-process anonymous read surface (`queryPublic` / `subscribePublic` /
+  `NothingPublic` — already in the gateway) for lesson 10, and the `loam pull` verb for lesson 11.
+
+## 17. Glossary
 
 - **Delta** — the signed, content-addressed atom (rhizomatic).
 - **Hyperschema** — recursive gather definition; `HyperSchema { name, alg, body: Term }`.
@@ -581,3 +761,8 @@ local.)
   parameterized by a field's policy.
 - **Write semantics** — the mutation discipline a policy kind induces; declared per-field in the
   registration, Loam-level, dual to resolution (§14).
+- **Browser peer** — a full `Gateway` on a `LocalStorageBackend`, bundled for the page as
+  `@bombadil/loam/browser` (§15); pull- and push-capable, never a hub (a browser cannot listen).
+- **Continuity / export** — a frozen `/federate` offer (`{ deltas }`, ids + signatures intact);
+  `loam pull <url|file>` lands it, and a same-operator import (carrying the seed) makes the local
+  store the same store, its law binding on arrival (§15).
