@@ -211,4 +211,26 @@ describe("the tutorial arc, headless", () => {
     await pump.catch(() => {});
     await ctx.gateway.close();
   });
+
+  // Regression: an earlier build wrote UI pins to `loam:tutorial:ui:pins`, which collides with
+  // the LocalStorageBackend's delta namespace and bricked boot ("row ui:pins is not a delta").
+  // Boot must heal a store already poisoned that way — the button that could clear it never
+  // wires up if boot throws, so recovery has to be automatic.
+  it("boot heals a store poisoned by the legacy pins key", async () => {
+    const storage = new MemStorage();
+    // a first clean boot, so the store holds a real seed and a genesis delta
+    const first = await bootTutorialStore(loam, storage);
+    await first.gateway.close();
+    // now poison it exactly as the old build did
+    storage.setItem("loam:tutorial:ui:pins", JSON.stringify([["a", "{ film { title } }"]]));
+
+    // the poisoned store must still open (the stray key is purged before the backend reads)
+    const healed = await bootTutorialStore(loam, storage);
+    expect(healed.gateway).toBeDefined();
+    expect(storage.getItem("loam:tutorial:ui:pins")).toBeNull();
+    // and the real seed and genesis survived the heal
+    expect(storage.getItem("loam:tutorial:seed")).toBe(first.seed);
+    expect(healed.gateway.offeredDeltas().length).toBeGreaterThan(0);
+    await healed.gateway.close();
+  });
 });

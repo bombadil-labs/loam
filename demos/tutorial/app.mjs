@@ -304,7 +304,10 @@ function note(parent, text, ok) {
 
 // UI state — the panes' own memory (open rows, pinned queries), never the store's.
 const groundState = { seen: new Set(), expanded: new Set() };
-const PINS_KEY = "loam:tutorial:ui:pins";
+// Pins live OUTSIDE the store's delta namespace. The LocalStorageBackend for store "tutorial"
+// owns every `loam:tutorial:<id>` key and treats anything under that prefix as a delta — so a
+// pins key under it bricks boot ("not a delta"). Dots, not colons: this cannot collide.
+const PINS_KEY = "loam.tutorial.ui.pins";
 // Pins live in a Map (no prototype tricks from a label like "__proto__") and load
 // defensively: pins are disposable UI memory, and a corrupt value must never kill the boot.
 function loadPins() {
