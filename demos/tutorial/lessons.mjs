@@ -1,12 +1,18 @@
 // The tutorial's arc (SPEC §19), UI-free: the lessons as data and functions. The page and the
-// headless test drive EXACTLY this module — `perform(ctx)` does what the lesson teaches,
-// `check(ctx)` verifies it with a REAL READ of the learner's store (a query or a ground
+// headless test drive EXACTLY this module — each lesson is a SEQUENCE of steps, and
+// `step.run(ctx)` does one separately-observable slice of what the lesson teaches, while
+// `check(ctx)` verifies the whole with a REAL READ of the learner's store (a query or a ground
 // predicate), never a quiz answer and never UI state. Progress is the store: re-run every
 // check from the ground on every boot and a green mark can never lie.
 //
-// §19's acceptance bars, normative: every check is EARNED (false before its lesson runs),
-// DURABLE (monotone in the ground — a later lesson can never un-green an earlier one), and
-// SIDE-EFFECT-FREE (safe to re-verify on every boot). The lesson TEACHES by need: you open
+// The STEPS exist so intermediary states are actually seen. A learner clicks one button at a
+// time; only the next un-run step is live; each step's `look` says which pane just changed and
+// what to notice. The steps are the PATH to green; the check is the destination, and it stays
+// ground-derived so a reload re-proves it.
+//
+// §19's acceptance bars, normative: every check is EARNED (false before its lesson's steps
+// run), DURABLE (monotone in the ground — a later lesson can never un-green an earlier one),
+// and SIDE-EFFECT-FREE (safe to re-verify on every boot). The lesson TEACHES by need: you open
 // wanting to track your films, and the doctrine beats — data-first, a schema is a lens —
 // arrive as earned reveals at the moment only that truth explains what you see.
 //
@@ -165,9 +171,23 @@ const registerFilm = (loam, ctx, policy, body = GATHER) =>
     [FILM],
   );
 
+// Find the operator's grant to a specific grantee (grantClaims files the grantee as a `subject`
+// primitive at loam.grants). Shared by lesson 8's revoke step and its check so the two agree.
+const findGrantTo = (ctx, grantee) =>
+  ground(ctx).find(
+    (d) =>
+      d.claims.author === ctx.author &&
+      pointsAt("loam:store", "loam.grants")(d) &&
+      d.claims.pointers.some(
+        (p) => p.role === "subject" && p.target.kind === "primitive" && p.target.value === grantee,
+      ),
+  );
+
 // ---- the arc ---------------------------------------------------------------------------------
 
 export function buildArc(loam) {
+  const roommate = loam.authorForSeed(ROOMMATE_SEED);
+  const miller = loam.authorForSeed(MILLER_SEED);
   return [
     // ============================ ACT I — a store of your own ============================
     {
@@ -179,7 +199,9 @@ key; look in the Ground pane, at the record badged "constitution" — that recor
 as this store's operator, and it is the only authority this store will ever bow to. Nothing was
 sent anywhere. There is no server. Everything you do from here lands as a signed record in that
 same ground, and the store re-proves it all from those records every time it wakes.`,
-      perform: async () => {},
+      // The boot already performed this one — there is nothing to click. The check reads the
+      // constitution off the ground, so the very first lesson is green the moment you arrive.
+      steps: [],
       check: async (ctx) =>
         ctx.storage.getItem(SEED_KEY) !== null &&
         has(
@@ -191,7 +213,6 @@ same ground, and the store re-proves it all from those records every time it wak
     {
       id: 2,
       title: "Track your films",
-      action: "Define the Film schema (and Book)",
       copy: `Say you want to track the films you watch. You tell the store the SHAPE of a film —
 a title, a rating, some tags — and how to settle disagreement (for the title: keep the latest
 word). That's a schema and a policy, and registering them is the whole setup. The moment it
@@ -199,70 +220,136 @@ lands, two things happen on the right: the GraphQL pane comes alive (open it and
 — it now offers you the fields you just declared), and the Schemas view gains a Film entry.
 You never described a film to anybody; you described a LENS, and the store will answer through
 it. Register Book too — we'll want it later.`,
-      perform: async (ctx) => {
-        await registerFilm(loam, ctx, FILM_POLICY_V1);
-        await ctx.gateway.publishRegistration(
-          { name: "Book", alg: 1, body: loam.parseTerm(GATHER) },
-          loam.parsePolicy(BOOK_POLICY),
-          ["book:solaris"],
-        );
-      },
+      steps: [
+        {
+          label: "Register the Film lens",
+          look: `The Views pane grew a "Film" entry under Schemas — your registration, read back as
+data. Open the GraphQL pane and type "film {": it now offers title, rating, tags. You described a
+lens, not a row.`,
+          run: async (ctx) => {
+            await registerFilm(loam, ctx, FILM_POLICY_V1);
+          },
+        },
+        {
+          label: "Register the Book lens too",
+          look: `A "Book" entry joins Film in the Schemas view. It does nothing yet — but a store
+holds as many lenses as you like, side by side. We fill this one in in lesson 7.`,
+          run: async (ctx) => {
+            await ctx.gateway.publishRegistration(
+              { name: "Book", alg: 1, body: loam.parseTerm(GATHER) },
+              loam.parsePolicy(BOOK_POLICY),
+              ["book:solaris"],
+            );
+          },
+        },
+      ],
+      // Green only once BOTH lenses exist — the second step is not optional flavour, it is what
+      // lesson 7's book reading needs, so it gates the green too.
       check: async (ctx) =>
         ctx.gateway.registrationVersions().some((v) => v.schema.name === "Film") &&
+        ctx.gateway.registrationVersions().some((v) => v.schema.name === "Book") &&
         (await view(ctx, `{ film(entity: "${FILM}") { title } }`)).__errors === undefined,
     },
 
     {
       id: 3,
       title: "Write through the door",
-      action: "Set the title, rating, and a tag",
       copy: `Now fill it in: set the title to "Arrival", give it a 9, add a tag. These go through
 the GraphQL door — a mutation — and here is the thing worth slowing down for. Watch all three
 panes at once. The View updates. The Ground grows a new record, badged "fact". And that record
 is a signed CLAIM — the mutation didn't change a cell in a table, it COMPILED to a claim and
 signed it with your key. The claim is what's real; the mutation was just a convenient way to
 say it. (Expand the new Ground record to see exactly what got signed.)`,
-      perform: async (ctx) => {
-        await ctx.gateway.query(`mutation { film(entity: "${FILM}", title: "Arrival") { title } }`);
-        await ctx.gateway.query(`mutation { film(entity: "${FILM}", rating: 9) { rating } }`);
-        await ctx.gateway.query(
-          `mutation { film(entity: "${FILM}", tags: "first-contact") { tags } }`,
-        );
-      },
+      steps: [
+        {
+          label: `Set the title to "Arrival"`,
+          look: `Three panes moved at once: the Film view shows the title, and the Ground grew a
+record badged "fact". Expand it — the mutation COMPILED to a signed claim. The claim is what's
+real; the mutation was just how you said it.`,
+          run: async (ctx) => {
+            await ctx.gateway.query(
+              `mutation { film(entity: "${FILM}", title: "Arrival") { title } }`,
+            );
+          },
+        },
+        {
+          label: "Give it a 9",
+          look: `A second "fact" joins the Ground and the rating appears in the view — another
+claim, signed with your key. Every write is one more record; nothing is ever overwritten in place.`,
+          run: async (ctx) => {
+            await ctx.gateway.query(`mutation { film(entity: "${FILM}", rating: 9) { rating } }`);
+          },
+        },
+        {
+          label: "Add a tag",
+          look: `One more claim. "tags" is an "all" field — it COLLECTS rather than replaces, so
+this joins any tags you add later instead of clobbering them.`,
+          run: async (ctx) => {
+            await ctx.gateway.query(
+              `mutation { film(entity: "${FILM}", tags: "first-contact") { tags } }`,
+            );
+          },
+        },
+      ],
       // Durable: the door-written facts are in the ground forever (later lessons retract the
-      // rating and contest the title, but the ORIGINAL claims never leave the ground).
+      // rating and contest the title, but the ORIGINAL claims never leave the ground). All
+      // three are required, so the green waits for the last step.
       check: async (ctx) =>
         has(ctx, (d) => d.claims.author === ctx.author && valueAt(FILM, "title", "Arrival")(d)) &&
-        has(ctx, (d) => d.claims.author === ctx.author && valueAt(FILM, "rating", 9)(d)),
+        has(ctx, (d) => d.claims.author === ctx.author && valueAt(FILM, "rating", 9)(d)) &&
+        has(
+          ctx,
+          (d) => d.claims.author === ctx.author && valueAt(FILM, "tags", "first-contact")(d),
+        ),
     },
 
     {
       id: 4,
       title: "Screenings are entities too",
-      action: "Add the Screening lens; log a screening",
       copy: `A film isn't just a title — it has screenings, and a screening is a thing in its own
 right: a date, later some guests. So give it its own lens (Screening), and teach Film to gather
 its screenings and show each one nested inside the film's view. That "show the nested thing" is
 a new move — an EXPAND — and Film's shape changes to use it, live, with no migration. Log last
 night's screening. Look at the Film view now: its screenings list holds a little Screening view,
 date and all. Two lenses, one film, composing.`,
-      perform: async (ctx) => {
-        await ctx.gateway.publishRegistration(
-          { name: "Screening", alg: 1, body: loam.parseTerm(GATHER) },
-          loam.parsePolicy(SCREENING_POLICY),
-          [SCREENING_1, SCREENING_2],
-        );
-        await registerFilm(loam, ctx, FILM_POLICY_V2, FILM_EXPAND_BODY);
-        // The screening: it files at the film (so the film gathers it) and names screening:1
-        // via the `screening` role (so the expand resolves it), and dates the screening itself.
-        await ctx.gateway.append([
-          say(loam, ctx, [
-            entity("subject", FILM, "screenings"),
-            entity("screening", SCREENING_1, "film"),
-          ]),
-          say(loam, ctx, [entity("subject", SCREENING_1, "date"), prim(20260710)]),
-        ]);
-      },
+      steps: [
+        {
+          label: "Add the Screening lens",
+          look: `A "Screening" entry joins the Schemas view. It's its own lens — a date now,
+guests later. Nothing references it yet.`,
+          run: async (ctx) => {
+            await ctx.gateway.publishRegistration(
+              { name: "Screening", alg: 1, body: loam.parseTerm(GATHER) },
+              loam.parsePolicy(SCREENING_POLICY),
+              [SCREENING_1, SCREENING_2],
+            );
+          },
+        },
+        {
+          label: "Teach Film to gather its screenings",
+          look: `Film's shape just changed — live, no migration. Its view now carries a
+"screenings" list (empty until you log one). That "show the nested thing" move is an EXPAND.`,
+          run: async (ctx) => {
+            await registerFilm(loam, ctx, FILM_POLICY_V2, FILM_EXPAND_BODY);
+          },
+        },
+        {
+          label: "Log last night's screening",
+          look: `Look at the Film view: its "screenings" list now holds a nested Screening view,
+date and all. Two lenses, one film, composing.`,
+          run: async (ctx) => {
+            // The screening: it files at the film (so the film gathers it) and names screening:1
+            // via the `screening` role (so the expand resolves it), and dates the screening.
+            await ctx.gateway.append([
+              say(loam, ctx, [
+                entity("subject", FILM, "screenings"),
+                entity("screening", SCREENING_1, "film"),
+              ]),
+              say(loam, ctx, [entity("subject", SCREENING_1, "date"), prim(20260710)]),
+            ]);
+          },
+        },
+      ],
       check: async (ctx) => {
         const v = await view(ctx, `{ film(entity: "${FILM}") { screenings } }`);
         return Array.isArray(v.film?.screenings) && v.film.screenings.length >= 1;
@@ -273,7 +360,6 @@ date and all. Two lenses, one film, composing.`,
     {
       id: 5,
       title: "The secret: it was claims all along",
-      action: "Write the next screening by hand — with Alice",
       copy: `Here's what those mutations were hiding. You never needed the door. Write the next
 screening BY HAND — a raw signed claim, straight to the ground (the ✍️ pen, not the 🚪 door) —
 and make it say something no schema of yours knows how to hear: that Alice was your guest. The
@@ -282,23 +368,42 @@ lens can only show what it was told to gather, and yours was never told about gu
 is in the world; your lens is just looking the other way. (Try the inspector: change one byte
 of any record and its id shatters — the id IS the content, so nothing can be quietly rewritten,
 only newly said.)`,
-      perform: async (ctx) => {
-        await ctx.gateway.append([
-          // the screening itself (nested via the film's expand)
-          say(loam, ctx, [
-            entity("subject", FILM, "screenings"),
-            entity("screening", SCREENING_2, "film"),
-          ]),
-          say(loam, ctx, [entity("subject", SCREENING_2, "date"), prim(20260711)]),
-          // and a SEPARATE claim naming Alice a guest of the film: its root pointer files the
-          // film under `guests` (so a `guests` lens would gather it) and names Alice as the
-          // entry. No lens gathers `guests` yet, so she is real but unseen.
-          say(loam, ctx, [entity("subject", FILM, "guests"), entity("guest", ALICE, "at")]),
-          // the same occasion, filed on ALICE'S side too, so once you register a Person lens
-          // (lesson 10) her card shows the film she was your guest at.
-          say(loam, ctx, [entity("subject", ALICE, "guestAt"), entity("film", FILM, "screened")]),
-        ]);
-      },
+      steps: [
+        {
+          label: "Log the next screening by hand",
+          look: `Straight to the Ground with the pen ✍️ — no door. Two "fact" records appear,
+signed by you. The door only ever made claims exactly like these.`,
+          run: async (ctx) => {
+            await ctx.gateway.append([
+              say(loam, ctx, [
+                entity("subject", FILM, "screenings"),
+                entity("screening", SCREENING_2, "film"),
+              ]),
+              say(loam, ctx, [entity("subject", SCREENING_2, "date"), prim(20260711)]),
+            ]);
+          },
+        },
+        {
+          label: "Name Alice your guest",
+          look: `The claim lands and the Ground shows it — but look at the Film view: Alice isn't
+there. Your lens was never told to gather guests. The fact is real; the lens is looking the other
+way. (Try the inspector below: flip one byte and the id shatters.)`,
+          run: async (ctx) => {
+            await ctx.gateway.append([
+              // a claim naming Alice a guest of the film: its root pointer files the film under
+              // `guests` (so a `guests` lens would gather it) and names Alice as the entry. No
+              // lens gathers `guests` yet, so she is real but unseen.
+              say(loam, ctx, [entity("subject", FILM, "guests"), entity("guest", ALICE, "at")]),
+              // the same occasion, filed on ALICE'S side too, so once you register a Person lens
+              // (lesson 12) her card shows the film she was your guest at.
+              say(loam, ctx, [
+                entity("subject", ALICE, "guestAt"),
+                entity("film", FILM, "screened"),
+              ]),
+            ]);
+          },
+        },
+      ],
       // Durable: the pen-written guest claim naming Alice is in the ground forever. (That the
       // OLD lens drops her is the between-lessons truth the arc test pins; it stops being true
       // the moment lesson 6 evolves the lens, so it cannot be a durable check here.)
@@ -315,7 +420,6 @@ only newly said.)`,
     {
       id: 6,
       title: "Evolve the lens, keep every past",
-      action: "Add guests to the lens; keep the old one too",
       copy: `So teach the lens to see guests. Add a "guests" field to Film and re-register — an
 append, like everything else. Ask again and there's Alice. But notice what did NOT happen: any
 view you were already subscribed to kept its old shape. A subscription is a standing question
@@ -324,14 +428,30 @@ you were watching broke — you just ask anew to see more. And to prove nothing 
 re-register the OLD policy under a new name, FilmClassic: now two lenses answer the same ground
 side by side, the new one showing Alice, the old one never having heard of her. The past isn't
 migrated away. It's still right there, still answerable.`,
-      perform: async (ctx) => {
-        await registerFilm(loam, ctx, FILM_POLICY_V3, FILM_EXPAND_BODY);
-        await ctx.gateway.publishRegistration(
-          { name: "FilmClassic", alg: 1, body: loam.parseTerm(FILM_EXPAND_BODY) },
-          loam.parsePolicy(FILM_POLICY_V2),
-          [FILM],
-        );
-      },
+      steps: [
+        {
+          label: "Add guests to the Film lens",
+          look: `Ask the Film view again and there's Alice. But any view you were already
+subscribed to kept its old shape — a subscription is a standing question against the lens as it
+was when you asked. Nothing you were watching broke.`,
+          run: async (ctx) => {
+            await registerFilm(loam, ctx, FILM_POLICY_V3, FILM_EXPAND_BODY);
+          },
+        },
+        {
+          label: "Re-register the old lens as FilmClassic",
+          look: `Two lenses now answer the same ground side by side: the new Film shows Alice,
+FilmClassic never heard of her. Nothing was overwritten — the past is still right there, still
+answerable.`,
+          run: async (ctx) => {
+            await ctx.gateway.publishRegistration(
+              { name: "FilmClassic", alg: 1, body: loam.parseTerm(FILM_EXPAND_BODY) },
+              loam.parsePolicy(FILM_POLICY_V2),
+              [FILM],
+            );
+          },
+        },
+      ],
       check: async (ctx) => {
         const v = await view(ctx, `{ film(entity: "${FILM}") { guests } }`);
         const hasAlice = Array.isArray(v.film?.guests) && v.film.guests.includes(ALICE);
@@ -345,7 +465,6 @@ migrated away. It's still right there, still answerable.`,
     {
       id: 7,
       title: "Taking it back, and what silence means",
-      action: "Retract the rating; read the book",
       copy: `Change your mind about that 9. You can't unsay a record — its id is a hash, the past
 is fixed — but you can NEGATE your own word, and the view resolves your retraction to absence:
 the rating key just empties. Both records stay in the Ground, because a store that forgot what
@@ -356,26 +475,42 @@ silence with a default. Three flavors of silence — a retracted value is absent
 question has a default, and an aggregate is an ANSWER, not a settable field: try to set
 timesRead and watch the number ignore you, because there's nothing behind it to grab, only
 records to add or take back.`,
-      perform: async (ctx) => {
-        // Retract the rating written in lesson 3 by negating THAT record (a negation names an
-        // id; a fresh identical rating would be a different id). It may already be retracted on
-        // a re-run — negation is idempotent by content address, so this is safe to repeat.
-        const first = ground(ctx).find(
-          (d) => d.claims.author === ctx.author && valueAt(FILM, "rating", 9)(d),
-        );
-        if (first !== undefined) {
-          await ctx.gateway.append([
-            loam.signClaims(
-              loam.makeNegationClaims(ctx.author, ctx.ts(), first.id, "changed my mind"),
-              ctx.seed,
-            ),
-          ]);
-        }
-        await ctx.gateway.append([
-          say(loam, ctx, [entity("subject", "book:solaris", "pagesRead"), prim(120)]),
-          say(loam, ctx, [entity("subject", "book:solaris", "pagesRead"), prim(90)]),
-        ]);
-      },
+      steps: [
+        {
+          label: "Retract the 9",
+          look: `The rating key just empties in the Film view — your retraction resolves to
+absence. Both records stay in the Ground; a store that forgot what it retracted couldn't prove
+the retraction happened.`,
+          run: async (ctx) => {
+            // Retract the rating written in lesson 3 by negating THAT record (a negation names an
+            // id; a fresh identical rating would be a different id). It may already be retracted
+            // on a re-run — negation is idempotent by content address, so this is safe to repeat.
+            const first = ground(ctx).find(
+              (d) => d.claims.author === ctx.author && valueAt(FILM, "rating", 9)(d),
+            );
+            if (first !== undefined) {
+              await ctx.gateway.append([
+                loam.signClaims(
+                  loam.makeNegationClaims(ctx.author, ctx.ts(), first.id, "changed my mind"),
+                  ctx.seed,
+                ),
+              ]);
+            }
+          },
+        },
+        {
+          label: "Log two reading sessions (120 + 90 pages)",
+          look: `Open the Book view: pagesRead reads 210, their SUM — that field's policy adds.
+And "finished", which you never set, reads false by default. Try setting a "timesRead" aggregate
+in the GraphQL pane and watch the number ignore you — there's nothing behind it to grab.`,
+          run: async (ctx) => {
+            await ctx.gateway.append([
+              say(loam, ctx, [entity("subject", "book:solaris", "pagesRead"), prim(120)]),
+              say(loam, ctx, [entity("subject", "book:solaris", "pagesRead"), prim(90)]),
+            ]);
+          },
+        },
+      ],
       check: async (ctx) => {
         // the retraction is on record: a negation by the learner of a rating fact
         const retracted = has(
@@ -393,7 +528,6 @@ records to add or take back.`,
     {
       id: 8,
       title: "A co-author",
-      action: "Invite your roommate: grant, land, revoke",
       copy: `Until now you've been the only voice. Invite another: your roommate keeps their own
 key (we minted one for the tutorial). Have them log a screening — and watch it BOUNCE. Anyone
 may write to their OWN store, but yours answers only to standing, and your roommate has none.
@@ -402,49 +536,78 @@ screening lands — under THEIR signature, not yours; the Ground shows a record 
 you (the "foreign" mark). Then change your mind and revoke it — another record, striking the
 grant — and the door closes again. Authorship and authority are different things: they authored
 it; you decide whether it binds.`,
-      perform: async (ctx) => {
-        const roommate = loam.authorForSeed(ROOMMATE_SEED);
-        const screening = say(
-          loam,
-          ctx,
-          [entity("subject", FILM, "screenings"), entity("screening", SCREENING_3, "film")],
-          ROOMMATE_SEED,
-        );
-        // before standing: the door refuses it (narrated; the grant below is what we pin)
-        try {
-          await ctx.gateway.append([screening]);
-        } catch {
-          /* no standing yet — expected */
-        }
-        // grant write standing, then the roommate's screening lands under their own signature
-        const grant = loam.signClaims(
-          loam.grantClaims("loam:store", roommate, "write", ctx.author, ctx.ts()),
-          ctx.seed,
-        );
-        await ctx.gateway.append([grant]);
-        await ctx.gateway.append([screening]);
-        // then revoke — the grant is struck, and the door closes again
-        await ctx.gateway.append([
-          loam.signClaims(loam.revocationClaims(grant.id, ctx.author, ctx.ts()), ctx.seed),
-        ]);
-      },
+      steps: [
+        {
+          label: "Roommate logs a screening — watch it bounce",
+          look: `It BOUNCED — the Ground didn't grow. Anyone may write to their OWN store, but
+yours answers only to standing, and your roommate has none yet.`,
+          run: async (ctx) => {
+            const screening = say(
+              loam,
+              ctx,
+              [entity("subject", FILM, "screenings"), entity("screening", SCREENING_3, "film")],
+              ROOMMATE_SEED,
+            );
+            // no standing yet — the door refuses it (nothing lands)
+            try {
+              await ctx.gateway.append([screening]);
+            } catch {
+              /* expected — no standing */
+            }
+          },
+        },
+        {
+          label: "Grant your roommate write standing",
+          look: `One signed record, from you the operator, says this key may write here. Look for a
+record badged "grant" in the Ground.`,
+          run: async (ctx) => {
+            // Idempotent: a mid-lesson reload replays the steps from the start, and a second
+            // grant (fresh timestamp → new id) would survive the revoke below and quietly hold
+            // the door open. One grant is enough — only file it if the roommate has none yet.
+            if (findGrantTo(ctx, roommate) === undefined) {
+              await ctx.gateway.append([
+                loam.signClaims(
+                  loam.grantClaims("loam:store", roommate, "write", ctx.author, ctx.ts()),
+                  ctx.seed,
+                ),
+              ]);
+            }
+          },
+        },
+        {
+          label: "Now their screening lands",
+          look: `It lands — under THEIR signature, not yours. The Ground shows a record whose
+author isn't you, carrying the amber "foreign" mark. Authorship and authority are different things.`,
+          run: async (ctx) => {
+            await ctx.gateway.append([
+              say(
+                loam,
+                ctx,
+                [entity("subject", FILM, "screenings"), entity("screening", SCREENING_3, "film")],
+                ROOMMATE_SEED,
+              ),
+            ]);
+          },
+        },
+        {
+          label: "Change your mind — revoke the grant",
+          look: `Another record strikes the grant by id, and the door closes again. They authored
+their screening; you decide whether it binds — and now it doesn't.`,
+          run: async (ctx) => {
+            const grant = findGrantTo(ctx, roommate);
+            if (grant !== undefined) {
+              await ctx.gateway.append([
+                loam.signClaims(loam.revocationClaims(grant.id, ctx.author, ctx.ts()), ctx.seed),
+              ]);
+            }
+          },
+        },
+      ],
       check: async (ctx) => {
-        const roommate = loam.authorForSeed(ROOMMATE_SEED);
         // Scope to the ROOMMATE's grant by its subject — lesson 14 mints a second operator
         // grant (to the miller) that is never revoked, so "any operator grant" would let the
-        // iteration order decide this check. grantClaims files the grantee as a `subject`
-        // primitive; match on it so monotonicity holds by construction, not by luck.
-        const grant = ground(ctx).find(
-          (d) =>
-            d.claims.author === ctx.author &&
-            pointsAt("loam:store", "loam.grants")(d) &&
-            d.claims.pointers.some(
-              (p) =>
-                p.role === "subject" &&
-                p.target.kind === "primitive" &&
-                p.target.value === roommate,
-            ),
-        );
+        // iteration order decide this check.
+        const grant = findGrantTo(ctx, roommate);
         const theirScreening = has(ctx, (d) => d.claims.author === roommate);
         // the revocation strikes THIS grant by id — not just any negation the learner made
         const revoked =
@@ -464,28 +627,49 @@ it; you decide whether it binds.`,
     {
       id: 9,
       title: "The adversary, and whose word wins",
-      action: "Let the forgery in; defend with a trust chain",
-      copy: `A stranger's claim just arrived — we bundled one so you can meet it. Press the
-button and watch it land in the Ground, authored by someone who is NOT you: "the title of
-Arrival is ARRIVAL 2: TOTALLY REAL SEQUEL", signed with the stranger's own real key, stamped
-far in the future. Let it in and your title flips — because your policy said "keep the latest
-word", and the stranger's word is latest. Nothing was hacked; anyone may write, and your READER
-was simply naive. So change the reader, not the writer: re-register the title to trust YOUR word
-first, recency second. Home it comes. And if you'd rather SEE the disagreement than settle it,
-a second lens with a "conflicts" policy shows both claims at once — the forgery preserved,
-visible, and powerless. Truth here is a policy you choose, and can always revisit.`,
-      perform: async (ctx) => {
-        await ctx.gateway.federate(ctx.packets.adversary.map((w) => loam.fromWire(w)));
-        await registerFilm(loam, ctx, filmPolicyTrusted(ctx.author), FILM_EXPAND_BODY);
-        await ctx.gateway.publishRegistration(
-          { name: "FilmDispute", alg: 1, body: loam.parseTerm(GATHER) },
-          loam.parsePolicy({
-            props: { title: { conflicts: { order: { byTimestamp: "desc" } } } },
-            default: PICK,
-          }),
-          [FILM],
-        );
-      },
+      copy: `A stranger's claim just arrived — we bundled one so you can meet it. Let it land in
+the Ground, authored by someone who is NOT you: "the title of Arrival is ARRIVAL 2: TOTALLY REAL
+SEQUEL", signed with the stranger's own real key, stamped far in the future. Let it in and your
+title flips — because your policy said "keep the latest word", and the stranger's word is latest.
+Nothing was hacked; anyone may write, and your READER was simply naive. So change the reader, not
+the writer: re-register the title to trust YOUR word first, recency second. Home it comes. And if
+you'd rather SEE the disagreement than settle it, a second lens with a "conflicts" policy shows
+both claims at once — the forgery preserved, visible, and powerless. Truth here is a policy you
+choose, and can always revisit.`,
+      steps: [
+        {
+          label: "Let the stranger's claim land",
+          look: `It lands in the Ground, authored by someone who is NOT you — and your Film title
+flips to "ARRIVAL 2: TOTALLY REAL SEQUEL". Nothing was hacked: your policy said "keep the latest
+word", and the stranger's word is latest.`,
+          run: async (ctx) => {
+            await ctx.gateway.federate(ctx.packets.adversary.map((w) => loam.fromWire(w)));
+          },
+        },
+        {
+          label: "Defend: trust your word first, recency second",
+          look: `Home it comes — the Film title reads "Arrival" again. You changed the READER, not
+the writer: your word first, recency second. The forgery is still in the Ground, just outvoted.`,
+          run: async (ctx) => {
+            await registerFilm(loam, ctx, filmPolicyTrusted(ctx.author), FILM_EXPAND_BODY);
+          },
+        },
+        {
+          label: "Add a lens that SHOWS the disagreement",
+          look: `The FilmDispute view shows both claims at once — the forgery preserved, visible,
+and powerless. Truth here is a policy you choose, and can always revisit.`,
+          run: async (ctx) => {
+            await ctx.gateway.publishRegistration(
+              { name: "FilmDispute", alg: 1, body: loam.parseTerm(GATHER) },
+              loam.parsePolicy({
+                props: { title: { conflicts: { order: { byTimestamp: "desc" } } } },
+                default: PICK,
+              }),
+              [FILM],
+            );
+          },
+        },
+      ],
       check: async (ctx) => {
         const v = await view(ctx, `{ film(entity: "${FILM}") { title } }`);
         const dispute = await view(ctx, `{ filmDispute(entity: "${FILM}") { title } }`);
@@ -502,7 +686,6 @@ visible, and powerless. Truth here is a policy you choose, and can always revisi
     {
       id: 10,
       title: "The door itself is policy",
-      action: "Declare a roster; watch a forgery bounce",
       copy: `Lesson 9 chose whose word wins AFTER it's in your ground — a reading policy. But you
 can also choose who gets IN. A trust ROSTER is one signed record naming the keys you'll admit
 across the wire: yourself, your roommate, the circle. Declare it, then let a fresh forgery
@@ -511,45 +694,67 @@ ground at all, because its key isn't on the roster. Two different powers, and yo
 admission trust decides what crosses your threshold; reading trust decides what matters once it
 has. Reopen the door when you're done (an "open" declaration) — a store that can't hear the
 world isn't federating, it's hiding.`,
-      perform: async (ctx) => {
-        const roommate = loam.authorForSeed(ROOMMATE_SEED);
-        // a fresh forgery, by a key we will NOT roster
-        const forgery = say(
-          loam,
-          ctx,
-          [entity("subject", FILM, "title"), prim("ARRIVAL 3: THE ROSTER STRIKES BACK")],
-          FORGER2_SEED,
-        );
-        // declare a roster admitting only known keys, then try to federate the forgery — it
-        // bounces at the door (federate honours the trust policy; the forger isn't listed)
-        await ctx.gateway.append([
-          loam.signClaims(
-            loam.trustClaims("roster", [ctx.author, roommate], ctx.author, ctx.ts()),
-            ctx.seed,
-          ),
-        ]);
-        await ctx.gateway.federate([forgery]).catch(() => {});
-        // reopen the door — an aggregator by choice
-        await ctx.gateway.append([
-          loam.signClaims(loam.trustClaims("open", [], ctx.author, ctx.ts()), ctx.seed),
-        ]);
-      },
+      steps: [
+        {
+          label: "Declare a roster of admitted keys",
+          look: `One signed record names the keys you'll admit across the wire — you and your
+roommate. Look for a record badged "trust" in the Ground.`,
+          run: async (ctx) => {
+            await ctx.gateway.append([
+              loam.signClaims(
+                loam.trustClaims("roster", [ctx.author, roommate], ctx.author, ctx.ts()),
+                ctx.seed,
+              ),
+            ]);
+          },
+        },
+        {
+          label: "Let a fresh forgery knock — watch it bounce",
+          look: `This forgery doesn't just lose the vote — it never enters the Ground at all,
+because its key isn't on the roster. Admission trust decides what crosses your threshold; reading
+trust decides what matters once it has.`,
+          run: async (ctx) => {
+            const forgery = say(
+              loam,
+              ctx,
+              [entity("subject", FILM, "title"), prim("ARRIVAL 3: THE ROSTER STRIKES BACK")],
+              FORGER2_SEED,
+            );
+            await ctx.gateway.federate([forgery]).catch(() => {});
+          },
+        },
+        {
+          label: "Reopen the door",
+          look: `An "open" declaration — a store that can't hear the world isn't federating, it's
+hiding. You'll need the door open for the wider world in the lessons ahead.`,
+          run: async (ctx) => {
+            await ctx.gateway.append([
+              loam.signClaims(loam.trustClaims("open", [], ctx.author, ctx.ts()), ctx.seed),
+            ]);
+          },
+        },
+      ],
       check: async (ctx) => {
-        // a trust declaration is on record...
-        const declared = has(
-          ctx,
-          (d) => d.claims.author === ctx.author && pointsAt("loam:trust", "loam.trust")(d),
-        );
-        // ...and the rostered forgery never entered the ground (it bounced at the door)
+        // A trust declaration of a given mode, on record by the operator. Both the roster and the
+        // reopen must be present: the reopen is required (lessons 12–13 federate the wider world,
+        // which a still-rostered door would bounce), so it gates the green.
+        const trustDecl = (mode) => (d) =>
+          d.claims.author === ctx.author &&
+          pointsAt("loam:trust", "loam.trust")(d) &&
+          d.claims.pointers.some(
+            (p) => p.role === "mode" && p.target.kind === "primitive" && p.target.value === mode,
+          );
+        const rostered = has(ctx, trustDecl("roster"));
+        const reopened = has(ctx, trustDecl("open"));
+        // the rostered forgery never entered the ground (it bounced at the door)
         const forgerLeft = !has(ctx, (d) => d.claims.author === loam.authorForSeed(FORGER2_SEED));
-        return declared && forgerLeft;
+        return rostered && reopened && forgerLeft;
       },
     },
 
     {
       id: 11,
       title: "The right to be forgotten, honestly",
-      action: "File a private note, then erase it",
       copy: `You once jotted a private note about Alice, straight to the ground. She asks you to
 forget it. A retraction won't do — that resolves to absence but the bytes remain. ERASURE is
 the loud exception to a store that otherwise never forgets: as the operator, you (and only you)
@@ -558,14 +763,33 @@ shrink — and a signed TOMBSTONE stays behind: who asked, when, which id, never
 tombstone is also a standing order: if those exact bytes ever try to come home, from a backup or
 a peer who copied them, the door refuses them by id. The store remembers THAT it forgot, and
 holds the door.`,
-      perform: async (ctx) => {
-        const note = say(loam, ctx, [
-          entity("about", ALICE, "note"),
-          prim("cried twice — don't tell her"),
-        ]);
-        await ctx.gateway.append([note]);
-        await ctx.gateway.erase(note.id, { reason: "Alice asked" });
-      },
+      steps: [
+        {
+          label: "File a private note about Alice",
+          look: `A plain "fact" lands in the Ground — a private jotting, straight to the store with
+the pen.`,
+          run: async (ctx) => {
+            await ctx.gateway.append([
+              say(loam, ctx, [
+                entity("about", ALICE, "note"),
+                prim("cried twice — don't tell her"),
+              ]),
+            ]);
+          },
+        },
+        {
+          label: "She asks you to forget it — erase it",
+          look: `Watch the Ground SHRINK: the bytes physically leave this browser. A signed
+TOMBSTONE stays behind — who asked, when, which id, never what it said — and it holds the door
+against those exact bytes ever coming home.`,
+          run: async (ctx) => {
+            const note = ground(ctx).find(
+              (d) => d.claims.author === ctx.author && pointsAt(ALICE, "note")(d),
+            );
+            if (note !== undefined) await ctx.gateway.erase(note.id, { reason: "Alice asked" });
+          },
+        },
+      ],
       check: async (ctx) => {
         const noteGone = !has(
           ctx,
@@ -580,7 +804,6 @@ holds the door.`,
     {
       id: 12,
       title: "Alice was just an id",
-      action: "Pull the circle; register a Person lens",
       copy: `All this time your store has said "person:alice" the way you'd name a stranger —
 confidently, knowing nothing. Somewhere there's a store that DOES know her: the circle, kept by
 its own operator with its own key. We bundled its whole export. Pull it. Names and friendships
@@ -590,14 +813,29 @@ entire point: the circle's own
 SCHEMAS arrived too, and they do nothing here. Foreign law is inert — its registrations reshape
 nothing, because they aren't signed by YOUR key. You register your own Person lens; you decide
 what to believe. Data federates; authority never does.`,
-      perform: async (ctx) => {
-        await ctx.gateway.federate(ctx.packets.circle.map((w) => loam.fromWire(w)));
-        await ctx.gateway.publishRegistration(
-          { name: "Person", alg: 1, body: loam.parseTerm(GATHER) },
-          loam.parsePolicy(PERSON_POLICY),
-          [ALICE, "person:bob", "person:carol"],
-        );
-      },
+      steps: [
+        {
+          label: "Pull the circle's whole export",
+          look: `Names and friendships flow into your Ground and Alice lights up. But the circle's
+own SCHEMAS arrived too — and they do nothing here. Foreign law is inert: it isn't signed by YOUR
+key.`,
+          run: async (ctx) => {
+            await ctx.gateway.federate(ctx.packets.circle.map((w) => loam.fromWire(w)));
+          },
+        },
+        {
+          label: "Register your own Person lens",
+          look: `You decide what to believe. Alice's card now shows her name, the friends she
+keeps, and the film she was your guest at. Data federates; authority never does.`,
+          run: async (ctx) => {
+            await ctx.gateway.publishRegistration(
+              { name: "Person", alg: 1, body: loam.parseTerm(GATHER) },
+              loam.parsePolicy(PERSON_POLICY),
+              [ALICE, "person:bob", "person:carol"],
+            );
+          },
+        },
+      ],
       check: async (ctx) => {
         const v = await view(ctx, `{ person(entity: "${ALICE}") { name follows guestAt } }`);
         // the copy's promise, made honest: her name AND her friends AND the film she guested at
@@ -625,7 +863,6 @@ what to believe. Data federates; authority never does.`,
     {
       id: 13,
       title: "Another tongue",
-      action: "Pull the dialect; teach a translation",
       copy: `The circle spoke your language. This next store doesn't. We bundled a stranger's
 film log written in a dialect your schemas can't read — it says "film_watched" where you say
 "screening", "on" where you say a date. Pull it and the records land, honest and signed, but
@@ -636,30 +873,49 @@ recorded by an app that never heard of your schema — with its provenance visib
 resolved view: this line was translated, and here's the record it came from. Anyone may write,
 in any tongue; the reader decides what it means, and can learn a new language without asking
 the writer to change.`,
-      perform: async (ctx) => {
-        await ctx.gateway.federate(ctx.packets.dialect.map((w) => loam.fromWire(w)));
-        // an operator-signed spec: recognize the dialect's `film_watched` role, render it into
-        // the film's `elsewhere` bucket with the date carried across and provenance attached
-        await ctx.gateway.append([
-          loam.signClaims(
-            loam.translationClaims(
-              "dialect",
-              { hasPointer: { role: { exact: "film_watched" } } },
-              {
-                pointers: [
-                  { role: "film", at: { from: { role: "film_watched" } }, context: "elsewhere" },
-                  { role: "note", value: { from: { role: "on" } } },
-                  { role: "origin", value: "a stranger's app" },
-                ],
-              },
-              ctx.author,
-              ctx.ts(),
-            ),
-            ctx.seed,
-          ),
-        ]);
-        await loam.translate(ctx.gateway, { seed: ctx.seed });
-      },
+      steps: [
+        {
+          label: "Pull the stranger's dialect log",
+          look: `The records land — honest and signed — but inert: no lens of yours gathers them.
+They say "film_watched" where you say "screening", "on" where you say a date.`,
+          run: async (ctx) => {
+            await ctx.gateway.federate(ctx.packets.dialect.map((w) => loam.fromWire(w)));
+          },
+        },
+        {
+          label: "Teach a translation, then run it",
+          look: `Your film's history grows an entry recorded by an app that never heard of your
+schema — with its provenance visible right in the resolved view. The reader decides what a record
+means, without asking the writer to change.`,
+          run: async (ctx) => {
+            // an operator-signed spec: recognize the dialect's `film_watched` role, render it into
+            // the film's `elsewhere` bucket with the date carried across and provenance attached
+            await ctx.gateway.append([
+              loam.signClaims(
+                loam.translationClaims(
+                  "dialect",
+                  { hasPointer: { role: { exact: "film_watched" } } },
+                  {
+                    pointers: [
+                      {
+                        role: "film",
+                        at: { from: { role: "film_watched" } },
+                        context: "elsewhere",
+                      },
+                      { role: "note", value: { from: { role: "on" } } },
+                      { role: "origin", value: "a stranger's app" },
+                    ],
+                  },
+                  ctx.author,
+                  ctx.ts(),
+                ),
+                ctx.seed,
+              ),
+            ]);
+            await loam.translate(ctx.gateway, { seed: ctx.seed });
+          },
+        },
+      ],
       check: async (ctx) => {
         // a translated record is on the ground, authored by you, carrying its provenance link
         const translated = has(
@@ -675,7 +931,6 @@ the writer to change.`,
     {
       id: 14,
       title: "An animate store",
-      action: "Bless a function; attach the runner",
       copy: `So far the store only knows what you tell it. Teach it to think. Bless ONE derived
 function — a little recipe that reads a film's screenings and writes back a running tally —
 then attach a Runner, and the tab comes alive: the recipe fires, and a derived record appears
@@ -684,56 +939,80 @@ same store, now with a heartbeat. And here's the quiet part: reload the page —
 running now — and the tally is still there. A derived fact is ground like any other; the runner
 made it, but it doesn't own it. An animate tab is just a deploy choice; the truth it grinds
 outlives it.`,
-      perform: async (ctx) => {
-        const miller = loam.authorForSeed(MILLER_SEED);
-        // the runner writes derived facts, so it needs standing
-        await ctx.gateway.append([
-          loam.signClaims(
-            loam.grantClaims("loam:store", miller, "write", ctx.author, ctx.ts()),
-            ctx.seed,
-          ),
-        ]);
-        // the operator blesses the recipe (a derived function bound to the Film lens)
-        const binding = {
-          name: "binding:tally",
-          fnId: "fn:tally",
-          materialization: "Film",
-          pure: true,
-          budget: 10_000,
-          emit: { keyed: ["tally"] },
-        };
-        await ctx.gateway.append([
-          loam.signClaims(loam.bindingDefinitionClaims(binding, ctx.author, ctx.ts()), ctx.seed),
-        ]);
-        const tally = (hview, root) => {
-          const n = (hview.props.get("screenings") ?? []).length;
-          return [
-            [
-              {
-                role: "subject",
-                target: { kind: "entity", entity: { id: root, context: "tally" } },
-              },
-              { role: "value", target: { kind: "primitive", value: `${n} screenings logged` } },
-            ],
-          ];
-        };
-        // the store becomes animate: ingest now drains derivations through the runner
-        loam.Runner.attach(ctx.gateway, {
-          seed: MILLER_SEED,
-          implementations: { "fn:tally": tally },
-        });
-        // nudge the wheel: a fresh screening triggers the derivation, and the runner grinds a
-        // `tally` line into the ground — durable, so a later reboot (no runner) still shows it
-        await ctx.gateway.append([
-          say(loam, ctx, [
-            entity("subject", FILM, "screenings"),
-            entity("screening", SCREENING_1, "film"),
-          ]),
-        ]);
-        await new Promise((r) => setTimeout(r, 40));
-      },
+      steps: [
+        {
+          label: "Grant the runner write standing",
+          look: `The runner will write derived facts, so it needs standing — one grant, exactly
+like your roommate's. A "grant" badge appears in the Ground.`,
+          run: async (ctx) => {
+            await ctx.gateway.append([
+              loam.signClaims(
+                loam.grantClaims("loam:store", miller, "write", ctx.author, ctx.ts()),
+                ctx.seed,
+              ),
+            ]);
+          },
+        },
+        {
+          label: "Bless a derived function",
+          look: `One signed record blesses a recipe — read a film's screenings, write back a
+running tally — bound to the Film lens. It doesn't run yet; it's just been made lawful.`,
+          run: async (ctx) => {
+            const binding = {
+              name: "binding:tally",
+              fnId: "fn:tally",
+              materialization: "Film",
+              pure: true,
+              budget: 10_000,
+              emit: { keyed: ["tally"] },
+            };
+            await ctx.gateway.append([
+              loam.signClaims(
+                loam.bindingDefinitionClaims(binding, ctx.author, ctx.ts()),
+                ctx.seed,
+              ),
+            ]);
+          },
+        },
+        {
+          label: "Attach the runner — the tab comes alive",
+          look: `A derived record appears in the Ground, badged "derived" and signed by the
+runner's own key, not yours. Reload the page later — no runner running — and the tally is still
+there. A derived fact is ground like any other.`,
+          run: async (ctx) => {
+            const tally = (hview, root) => {
+              const n = (hview.props.get("screenings") ?? []).length;
+              return [
+                [
+                  {
+                    role: "subject",
+                    target: { kind: "entity", entity: { id: root, context: "tally" } },
+                  },
+                  {
+                    role: "value",
+                    target: { kind: "primitive", value: `${n} screenings logged` },
+                  },
+                ],
+              ];
+            };
+            // the store becomes animate: ingest now drains derivations through the runner
+            loam.Runner.attach(ctx.gateway, {
+              seed: MILLER_SEED,
+              implementations: { "fn:tally": tally },
+            });
+            // nudge the wheel: a fresh screening triggers the derivation, and the runner grinds a
+            // `tally` line into the ground — durable, so a later reboot (no runner) still shows it
+            await ctx.gateway.append([
+              say(loam, ctx, [
+                entity("subject", FILM, "screenings"),
+                entity("screening", SCREENING_1, "film"),
+              ]),
+            ]);
+            await new Promise((r) => setTimeout(r, 40));
+          },
+        },
+      ],
       check: async (ctx) => {
-        const miller = loam.authorForSeed(MILLER_SEED);
         // a derived record, signed by the runner, sits in the ground — durable past detach
         return has(
           ctx,
@@ -748,7 +1027,6 @@ outlives it.`,
     {
       id: 15,
       title: "The stranger at the window",
-      action: "Declare Film public",
       copy: `Everything so far went through YOUR door, signed or refused by standing. But a reader
 with no key at all — a stranger, a search engine, a friend you sent a link — has been knocking
 this whole time and getting the same answer: nothing here is public. Declare ONE lens public —
@@ -757,11 +1035,19 @@ films, and only that. Toggle "ask as the stranger" in the GraphQL pane: the hint
 smaller world you declared. Ask for Person as the stranger and the window shows nothing — not
 "forbidden", just a world in which Person does not exist. The public surface is a smaller world,
 not a guarded copy of the big one.`,
-      perform: async (ctx) => {
-        await ctx.gateway.append([
-          loam.signClaims(loam.publicClaims(["Film"], ctx.author, ctx.ts()), ctx.seed),
-        ]);
-      },
+      steps: [
+        {
+          label: "Declare Film public",
+          look: `Toggle "ask as the stranger" in the GraphQL pane: the hints shrink to the smaller
+world you declared. Ask for Person as the stranger and the window shows nothing — not
+"forbidden", just a world in which Person does not exist.`,
+          run: async (ctx) => {
+            await ctx.gateway.append([
+              loam.signClaims(loam.publicClaims(["Film"], ctx.author, ctx.ts()), ctx.seed),
+            ]);
+          },
+        },
+      ],
       check: async (ctx) => {
         try {
           const open = await ctx.gateway.queryPublic(`{ film(entity: "${FILM}") { title } }`);
@@ -792,7 +1078,9 @@ of the whole answer. It matches, hash for hash. Not a copy that resembles your s
 STORE, proven by content address, because your laptop's genesis, born from the same seed, is
 byte-for-byte the record this tab was born from. Nothing re-signed, nothing lost. It is yours,
 durable, and ready to federate.`,
-      perform: async () => {},
+      // The finale is not a click-through: the export + homecoming controls are their own
+      // machinery (app.mjs), and the green is EARNED outside the tab by a verified _hex match.
+      steps: [],
       check: async (ctx) =>
         has(
           ctx,
@@ -810,7 +1098,7 @@ export function buildExport(loam, ctx) {
 }
 
 // The page calls this after the localhost fetch matches _hex for _hex: the homecoming becomes
-// one more signed claim, and lesson 12's check reads it back — progress is the store, all the
+// one more signed claim, and lesson 16's check reads it back — progress is the store, all the
 // way to the end.
 export async function recordHomecoming(loam, ctx, matchedHex) {
   await ctx.gateway.append([

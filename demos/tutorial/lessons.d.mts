@@ -17,12 +17,20 @@ export interface LessonCtx {
   ts(): number;
 }
 
+// One clickable step: a button label, the "where to look / what to notice" line shown once it
+// has run, and the slice of work it performs. The lessons are a SEQUENCE of these now — a
+// learner walks them one at a time so every intermediary state is actually seen.
+export interface LessonStep {
+  label: string;
+  look: string;
+  run(ctx: LessonCtx): Promise<void>;
+}
+
 export interface Lesson {
   id: number;
   title: string;
-  action?: string;
   copy: string;
-  perform(ctx: LessonCtx): Promise<void>;
+  steps: LessonStep[];
   check(ctx: LessonCtx): Promise<boolean>;
 }
 
