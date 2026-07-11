@@ -1,9 +1,15 @@
 // The frozen offer (SPEC §15, continuity): an export is a federation offer with the clock
 // stopped. exportOffer returns EXACTLY the bytes `GET /federate` serves — `{ deltas:
 // WireDelta[] }`, ids and signatures intact — so a store that walks out of a browser as a
-// file is indistinguishable from one pulled off the wire, and migration never launders
-// provenance. parseOffer is the reading half: reconstruction recomputes every id, so a
-// forgery cannot survive the crossing whatever the file claims.
+// file carries the same provenance as one pulled off the wire. parseOffer is the reading
+// half: reconstruction recomputes every id, so a forgery cannot survive the crossing
+// whatever the file claims.
+//
+// One DELIBERATE divergence from the wire path: pullFrom drops a delta that fails
+// reconstruction and lands the rest (a live peer's stream may be partially good, and the next
+// pull heals), while parseOffer refuses the WHOLE file on the first bad delta. A frozen offer
+// is a document — if any byte of it has rotted, the honest report is "this export is corrupt,
+// make a new one", not a quiet partial import the user believes was whole.
 
 import type { Delta } from "@bombadil/rhizomatic";
 import type { Gateway } from "../gateway/gateway.js";

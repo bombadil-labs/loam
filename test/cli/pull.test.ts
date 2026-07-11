@@ -17,7 +17,7 @@ import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { grantClaims } from "../../src/gateway/accounts.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
-import { authorForSeed } from "@bombadil/rhizomatic";
+import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
 
@@ -150,13 +150,46 @@ describe("loam pull <file>: the store walks out of the browser", () => {
     const file = join(dir, "not-an-offer.json");
     writeFileSync(file, `{"surprise": true}`);
     const code = await run(["pull", file, "--home", home], io());
-    expect(code).not.toBe(0);
+    expect(code).toBe(2); // a malformed offer is a usage-class refusal, distinct from read failure
     expect(err.join("\n")).toMatch(/deltas/);
   });
 
   it("wants exactly one source", async () => {
     expect(await run(["pull"], io())).toBe(2);
     expect(err.join("\n")).toMatch(/url\|file/);
+  });
+
+  it("the home's trust policy guards the door: a closed store admits nothing from a file", async () => {
+    const { file } = await tabExport();
+    const home = join(dir, "home");
+    await run(["init", "--home", home], io());
+    const { readSeed } = await import("../../src/cli/config.js");
+    const seed = readSeed(home);
+    const { trustClaims } = await import("../../src/gateway/trust.js");
+    const own = await Gateway.boot(
+      new SqliteBackend(storePath(home)),
+      assembleGenesis({ operatorSeed: seed }),
+    );
+    await own.append([signClaims(trustClaims("closed", [], authorForSeed(seed), 5000), seed)]);
+    await own.close();
+
+    out.length = 0;
+    const code = await run(["pull", file, "--home", home], io());
+    expect(code).toBe(0); // refusal at the door is a report, not a crash
+    expect(out.join("\n")).toMatch(/\b0 accepted/);
+    expect(out.join("\n")).toMatch(/[1-9]\d* refused/);
+  });
+
+  it("an uninitialized home mints its own operator — and says what that means for the law", async () => {
+    const { file } = await tabExport();
+    const home = join(dir, "fresh"); // no `loam init` ever ran here
+    const code = await run(["pull", file, "--home", home], io());
+    expect(code).toBe(0);
+    const printed = out.join("\n");
+    expect(printed).toMatch(/initialized/); // initHome-on-the-fly, like serve
+    expect(printed).toMatch(/[1-9]\d* accepted/); // the deltas crossed
+    // The fork stated plainly: a just-minted operator means the offer's law is foreign here.
+    expect(printed).toMatch(/loam init --seed/);
   });
 });
 
@@ -192,8 +225,27 @@ describe("loam pull <url>: a live peer through the same door", () => {
       );
       expect(second).toBe(0);
       expect(out.join("\n")).toMatch(/\b0 accepted/); // idempotent: double delivery is harmless
+
+      // The token may ride the environment instead of the flag (containers pass it that way).
+      const envHome = join(dir, "env-dest");
+      await run(["init", "--home", envHome], io());
+      process.env["LOAM_TOKEN"] = "tok";
+      try {
+        out.length = 0;
+        const viaEnv = await run(["pull", `${handle.url}/default`, "--home", envHome], io());
+        expect(viaEnv).toBe(0);
+        expect(out.join("\n")).toMatch(/[1-9]\d* accepted/);
+      } finally {
+        delete process.env["LOAM_TOKEN"];
+      }
     } finally {
       await handle.close();
     }
+  });
+
+  it("a live peer wants a token, said up front — not a 403 later", async () => {
+    const code = await run(["pull", "http://127.0.0.1:1/default", "--home", join(dir, "h")], io());
+    expect(code).toBe(2);
+    expect(err.join("\n")).toMatch(/token/);
   });
 });

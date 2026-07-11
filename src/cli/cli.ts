@@ -281,7 +281,15 @@ async function cmdPull(args: readonly string[], io: IO): Promise<number> {
     io.err("pull takes exactly one source");
     return 2;
   }
-  const isUrl = /^https?:\/\//.test(source);
+  const isUrl = /^https?:\/\//i.test(source); // URI schemes are case-insensitive (RFC 3986)
+  const token = parsed.flags.get("token") ?? process.env["LOAM_TOKEN"];
+  if (isUrl && (token === undefined || token.length === 0)) {
+    io.err(
+      "pull: a live peer wants a token (--token or LOAM_TOKEN) — " +
+        "federation hands over the raw substrate, and that door is the operator's",
+    );
+    return 2;
+  }
   let offered: ReturnType<typeof parseOffer> | undefined;
   if (!isUrl) {
     let raw: string;
@@ -308,22 +316,27 @@ async function cmdPull(args: readonly string[], io: IO): Promise<number> {
   );
   let report: FederationReport;
   try {
-    if (isUrl) {
-      const token = parsed.flags.get("token") ?? process.env["LOAM_TOKEN"] ?? "";
-      report = await pullFrom(gateway, source, token);
-    } else {
-      report = await gateway.federate(offered!);
-    }
+    report = isUrl ? await pullFrom(gateway, source, token!) : await gateway.federate(offered!);
   } catch (err) {
     await gateway.close().catch(() => {}); // never let a close failure mask the real refusal
     throw err;
   }
-  await gateway.close();
+  // The report prints BEFORE close: the deltas are durable the moment federate returns, and
+  // a close failure must not swallow the news that they landed.
   io.out(
     `loam: pulled ${source}\n` +
       `  ${report.accepted} accepted, ${report.rejected} refused, of ${report.offered} offered — ` +
       `union is union; pulling again is safe`,
   );
+  if (init.created) {
+    // The fork is the operator's (SPEC §15): a home minted THIS run holds a brand-new seed,
+    // so whatever law rode the offer is another operator's here — inert by design.
+    io.out(
+      "  this home minted its own operator just now, so the offer's law is another's here —\n" +
+        "  same-operator continuity wants `loam init --seed <hex>` before the pull",
+    );
+  }
+  await gateway.close();
   return 0;
 }
 
