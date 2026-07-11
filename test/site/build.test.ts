@@ -38,7 +38,7 @@ describe("the tutorial site build", () => {
     // No import STATEMENTS. The lesson copy legitimately wraps onto lines beginning with the
     // word "import", so match the statement grammar — a specifier or a from-clause — not the
     // word at a line start.
-    expect(text).not.toMatch(/^import\s*(?:[\w$*{,\s]+from\s*)?["']/m);
+    expect(text).not.toMatch(/^import\s*(?:[\w$*{},\s]+from\s*)?["']/m);
     expect(text).not.toMatch(/\brequire\(/);
     // Zero node: specifiers beyond graphql's guarded feature probe (same rule as the
     // browser-bundle suite).

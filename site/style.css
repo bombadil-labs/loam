@@ -137,10 +137,6 @@ nav .mark.todo {
   max-width: 46rem;
   white-space: pre-line;
 }
-#lesson .green {
-  color: var(--green);
-  font-weight: 700;
-}
 .act {
   margin-top: 1rem;
   padding: 1rem;

@@ -20,10 +20,20 @@ const TYPES = {
 };
 
 createServer((req, res) => {
-  // Dev-only escape hatch: the walkthrough verification POSTs the page's export here so the
-  // finale's CLI leg can run against the REAL in-browser store. GitHub Pages has no such
-  // endpoint — the shipped page only ever downloads the file to the learner's disk.
+  // Dev-only escape hatch, invoked BY HAND from the page's console during a walkthrough
+  // verification (there is deliberately no caller in the page itself):
+  //   fetch("/dev-export", { method: "POST", headers: { "x-loam-dev": "1" },
+  //          body: JSON.stringify({ version: 1, operator: tutorialCtx.author,
+  //                 seed: localStorage.getItem("loam:tutorial:seed"),
+  //                 deltas: JSON.parse(loam.exportOffer(store)).deltas }) })
+  // so the finale's CLI leg can run against the REAL in-browser store. The custom header
+  // forces a CORS preflight this server never answers, so a foreign page cannot POST here.
+  // GitHub Pages has no such endpoint — the shipped page only downloads to the learner's disk.
   if (req.method === "POST" && req.url === "/dev-export") {
+    if (req.headers["x-loam-dev"] !== "1") {
+      res.writeHead(403).end();
+      return;
+    }
     let body = "";
     req.on("data", (c) => (body += c));
     req.on("end", async () => {
@@ -33,10 +43,14 @@ createServer((req, res) => {
     });
     return;
   }
-  const path = normalize(decodeURIComponent(new URL(req.url, "http://x").pathname)).replace(
-    /^([/\\])+/,
-    "",
-  );
+  let decoded;
+  try {
+    decoded = decodeURIComponent(new URL(req.url, "http://x").pathname);
+  } catch {
+    res.writeHead(400).end("malformed path"); // a bad %-escape must not crash the server
+    return;
+  }
+  const path = normalize(decoded).replace(/^([/\\])+/, "");
   const file = join(root, path === "" ? "index.html" : path);
   if (!file.startsWith(root)) {
     res.writeHead(403).end();

@@ -49,7 +49,7 @@ $("#author-chip").textContent = author;
 async function refreshGreens() {
   for (const lesson of arc) greens.set(lesson.id, await lesson.check(ctx));
   // land on the first unfinished lesson at boot; never yank the reader around afterwards
-  return arc.find((l) => !greens.get(l.id))?.id ?? 11;
+  return arc.find((l) => !greens.get(l.id))?.id ?? arc[arc.length - 1].id;
 }
 
 function renderNav() {
@@ -98,10 +98,12 @@ function actionsFor(lesson) {
       b.disabled = true;
       try {
         await lesson.perform(ctx);
+        await rerender();
       } catch (err) {
+        // No rerender on refusal — it would rebuild this pane and wipe the message.
+        b.disabled = false;
         note(box, `the store refused: ${err.message}`, false);
       }
-      await rerender();
     };
     box.appendChild(b);
     return b;
@@ -242,8 +244,16 @@ function finale() {
   byHand.className = "secondary";
   byHand.textContent = "Compare pasted _hex";
   byHand.onclick = async () => {
-    const mine = await gateway.query(`{ film(entity: "${FILM}") { _hex } }`);
-    await settle(mine.data?.film?._hex, hex.value.trim(), wrap);
+    try {
+      const mine = await gateway.query(`{ film(entity: "${FILM}") { _hex } }`);
+      await settle(mine.data?.film?._hex, hex.value.trim(), wrap);
+    } catch (err) {
+      note(
+        wrap,
+        `this page's store cannot answer yet (${err.message}) — the film view needs lesson 3`,
+        false,
+      );
+    }
   };
   wrap.append(url, token, go, hex, byHand);
   return wrap;
@@ -252,12 +262,12 @@ function finale() {
 async function settle(mineHex, theirsHex, wrap) {
   if (typeof mineHex === "string" && mineHex.length > 0 && mineHex === theirsHex) {
     await recordHomecoming(loam, ctx, mineHex);
+    await rerender(); // rebuilds the lesson pane — so the note goes on the NEW act box
     note(
-      wrap,
+      document.querySelector("#lesson .act") ?? wrap,
       `hash for hash: ${mineHex.slice(0, 16)}… — the same store, there and here. Recorded in the ground, like everything else.`,
       true,
     );
-    await rerender();
   } else {
     note(
       wrap,
@@ -299,7 +309,13 @@ async function renderView() {
       anything = true;
       const card = document.createElement("div");
       card.className = "card";
-      card.innerHTML = `<h3>${label}</h3><pre>${JSON.stringify(data, null, 2)}</pre>`;
+      // textContent, never innerHTML: view values can carry ANY string — lesson 7's whole
+      // premise is a hostile foreign claim, and it must render as text, not as markup.
+      const h3 = document.createElement("h3");
+      h3.textContent = label;
+      const pre = document.createElement("pre");
+      pre.textContent = JSON.stringify(data, null, 2);
+      card.append(h3, pre);
       holder.appendChild(card);
     } catch {
       // no surface yet — the emptiness IS lesson 2's point
@@ -326,13 +342,19 @@ function renderGround() {
   head.textContent = `${deltas.length} records — each immutable, signed, named by its content`;
   holder.appendChild(head);
   for (const d of [...deltas].sort((a, b) => a.claims.timestamp - b.claims.timestamp)) {
-    const who = d.claims.author === author ? "you" : d.claims.author.slice(0, 20) + "…";
+    const mine = d.claims.author === author;
     const row = document.createElement("div");
     row.className = "delta";
-    row.innerHTML =
-      `<span class="id mono">${d.id.slice(0, 12)}…</span> ` +
-      `<span class="who ${d.claims.author === author ? "you" : "foreign"}">${who}</span>` +
-      `<pre>${d.claims.pointers.map(summarizePointer).join("  ·  ")}</pre>`;
+    // textContent throughout — a foreign author string or claim value is DATA, never markup.
+    const id = document.createElement("span");
+    id.className = "id mono";
+    id.textContent = `${d.id.slice(0, 12)}… `;
+    const who = document.createElement("span");
+    who.className = `who ${mine ? "you" : "foreign"}`;
+    who.textContent = mine ? "you" : d.claims.author.slice(0, 20) + "…";
+    const pointers = document.createElement("pre");
+    pointers.textContent = d.claims.pointers.map(summarizePointer).join("  ·  ");
+    row.append(id, who, pointers);
     holder.appendChild(row);
   }
 }
