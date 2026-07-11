@@ -56,11 +56,13 @@ import {
   parseClaimTemplates,
   readRegistrations,
   readRegistrationVersions,
+  readWithdrawnRegistrations,
   registrationClaims,
   schemaEntityFor,
   type ClaimTemplates,
   type Registration,
   type RegistrationVersion,
+  type WithdrawnRegistration,
 } from "./registration.js";
 import { readTrustPolicy } from "./trust.js";
 
@@ -270,6 +272,12 @@ export class Gateway {
   // history, read live from the ground under this store's law.
   registrationVersions(): RegistrationVersion[] {
     return readRegistrationVersions(this.reactor, this.operatorAuthor);
+  }
+
+  // The versions the operator lawfully struck (SPEC §17): served no longer, remembered
+  // forever — the 410 door's only witness.
+  withdrawnRegistrations(): WithdrawnRegistration[] {
+    return readWithdrawnRegistrations(this.reactor, this.operatorAuthor);
   }
 
   // Pinned resolution (SPEC §17 versioning): answer under an ARBITRARY registration — an old

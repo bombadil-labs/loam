@@ -813,7 +813,13 @@ not a version skew to manage.
   existed and that it was withdrawn, and nothing is erased. Concretely: the REST door is born
   versioned (`/rest/v<N>/…`, and addressable by registration hash; the OpenAPI document names
   the versions it describes); version-pinned access to GraphQL's older generations is
-  additive and QUEUED, not silently in Sprint A's scope.
+  additive and QUEUED, not silently in Sprint A's scope. Two boundaries the build's review
+  fixed (2026-07-11): the PUBLIC projection serves only the LATEST version of each declared
+  name — a declaration was made about the door that existed when it was signed, and history
+  is not anonymous (the withdrawn-vs-never-existed distinction, 410 vs 404, is likewise the
+  full door's alone; an anonymous hash probe learns nothing). And the REST door serves lenses
+  REGISTERED AS DATA: a process-lifetime `register()` call files no registration delta, has
+  no true name, and therefore no version — its door is GraphQL.
 
 - **Boundaries, in the §13 register:** a surface generator derives doors, never law — it may
   narrow a projection (write-only, read-only, one schema of many) but never widen one; a

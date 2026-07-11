@@ -241,7 +241,11 @@ interface Candidate {
 // order — (timestamp, id), the same tie-break everywhere. readRegistrations takes the last of
 // each group (the live lens); readRegistrationVersions takes them all (§17: publishing is
 // append-only, and every survivor is an answerable version).
-function survivingCandidates(reactor: Reactor, operator?: string): Map<string, Candidate[]> {
+function survivingCandidates(
+  reactor: Reactor,
+  operator?: string,
+  withdrawn?: Candidate[],
+): Map<string, Candidate[]> {
   const lawful = lawfulSnapshot(reactor, operator);
   const negated = lawfulNegated(reactor, operator);
   const groups = new Map<string, Candidate[]>();
@@ -254,7 +258,11 @@ function survivingCandidates(reactor: Reactor, operator?: string): Map<string, C
       }
     }
     if (key === undefined) continue;
-    if (negated(delta.id)) continue;
+    // A lawfully struck registration is WITHDRAWN, not unparseable: the caller who asked for
+    // the withdrawn list still gets its parsed shape (the 410 door needs the schema it named);
+    // everyone else skips it exactly as before.
+    const struck = negated(delta.id);
+    if (struck && withdrawn === undefined) continue;
 
     const schemaRef = delta.claims.pointers.find(
       (p) => p.role === "schema" && p.target.kind === "entity",
@@ -296,6 +304,10 @@ function survivingCandidates(reactor: Reactor, operator?: string): Map<string, C
       timestamp: delta.claims.timestamp,
       id: delta.id,
     };
+    if (struck) {
+      withdrawn?.push(candidate);
+      continue;
+    }
     const group = groups.get(key);
     if (group === undefined) groups.set(key, [candidate]);
     else group.push(candidate);
@@ -384,5 +396,37 @@ export function readRegistrationVersions(
       });
     }
   }
-  return out.sort((a, b) => a.timestamp - b.timestamp);
+  // Total order: (timestamp, deltaId) — boot-stable even when timestamps tie across entities,
+  // so vN aliasing downstream never rides Map iteration order.
+  return out.sort(
+    (a, b) =>
+      a.timestamp - b.timestamp || (a.deltaId < b.deltaId ? -1 : a.deltaId > b.deltaId ? 1 : 0),
+  );
+}
+
+// A WITHDRAWN registration: it was lawful, the operator struck it, the ground remembers. The
+// 410 door (SPEC §17) answers from this list and ONLY this list — a hash that was never a
+// lawful registration here is a plain 404, whatever bytes it names.
+export interface WithdrawnRegistration {
+  readonly deltaId: string;
+  readonly schemaName: string;
+}
+
+export function readWithdrawnRegistrations(
+  reactor: Reactor,
+  operator?: string,
+): WithdrawnRegistration[] {
+  const lawful = lawfulSnapshot(reactor, operator);
+  const withdrawn: Candidate[] = [];
+  survivingCandidates(reactor, operator, withdrawn);
+  const out: WithdrawnRegistration[] = [];
+  for (const cand of withdrawn) {
+    try {
+      const schema = loadSchema(lawful, cand.schemaEntity);
+      out.push({ deltaId: cand.id, schemaName: schema.name });
+    } catch {
+      // its definition is gone too: nothing nameable remains to say "withdrawn" about
+    }
+  }
+  return out;
 }

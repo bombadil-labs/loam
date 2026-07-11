@@ -15,8 +15,12 @@ import { publicClaims } from "../../src/gateway/public.js";
 import { readRegistrationVersions } from "../../src/gateway/registration.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { serve, type ServerHandle } from "../../src/server/http.js";
-import { FERN } from "../spike/garden.js";
+import { FERN, PLANT_BODY } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
+
+// A second, NEVER-DECLARED schema: the smaller-world assertions need a real thing to be
+// missing, and the oracle probes need a live undeclared registration hash to ask about.
+const BOOK = { name: "Book", alg: 1, body: PLANT_BODY };
 
 vi.setConfig({ testTimeout: 20000 }); // one real HTTP server carries the whole suite
 
@@ -60,6 +64,7 @@ beforeAll(async () => {
       grants: [grantClaims(STORE_ENTITY, authorForSeed(WRITER_SEED), "write", OPERATOR, 2)],
     }),
   );
+  await gateway.publishRegistration(BOOK, PLANT_POLICY, ["book:dune"]);
   await gateway.query(`mutation { plant(entity: "${FERN}", height: 30) { height } }`);
   server = await serve({
     mounts: { plants: gateway },
@@ -168,13 +173,41 @@ describe("parity: every refusal, both doors, the same posture", () => {
     expect(JSON.stringify(gqlWrite.body)).toMatch(/mutation|refused|denied|not/i);
     expect(restWrite.status).toBeGreaterThanOrEqual(400);
 
-    // ...and the anonymous OpenAPI document describes ONLY the declared world
+    // ...and the anonymous OpenAPI document describes ONLY the declared world — Book is a
+    // real, live, registered lens on this store, and the document must not know it
     const spec = await rest(`/openapi.json`);
     expect(spec.status).toBe(200);
     const doc = (await spec.json()) as { paths: Record<string, unknown> };
     const paths = Object.keys(doc.paths);
     expect(paths.some((p) => p.includes("/Plant/"))).toBe(true);
-    expect(paths.some((p) => p.toLowerCase().includes("book"))).toBe(false);
+    expect(paths.some((p) => p.includes("/Book/"))).toBe(false);
+    // ...and reaching Book by name anonymously is a plain 404, no oracle
+    const bookRest = await rest(`/rest/v1/Book/${encodeURIComponent("book:dune")}`);
+    expect(bookRest.status).toBe(404);
+  });
+
+  it("reads under an ACTOR token agree across doors too — identity is not just for writes", async () => {
+    const viaGql = await gql(`{ plant(entity: "${FERN}") { _hex } }`, "writer-token");
+    const viaRest = await rest(`/rest/v1/Plant/${encodeURIComponent(FERN)}`, {}, "writer-token");
+    expect(viaRest.status).toBe(200);
+    const restBody = (await viaRest.json()) as { _hex: string };
+    const gqlPlant = (viaGql.body as { data: { plant: { _hex: string } } }).data.plant;
+    expect(restBody._hex).toBe(gqlPlant._hex);
+  });
+
+  it("malformed writes refuse plainly: unknown prop 400, wrong verb 405", async () => {
+    const unknown = await rest(
+      `/rest/v1/Plant/${encodeURIComponent(FERN)}`,
+      { method: "POST", body: JSON.stringify({ nonesuch: 1 }) },
+      "op-token",
+    );
+    expect(unknown.status).toBe(400);
+    const put = await rest(
+      `/rest/v1/Plant/${encodeURIComponent(FERN)}`,
+      { method: "PUT", body: JSON.stringify({ height: 1 }) },
+      "op-token",
+    );
+    expect(put.status).toBe(405);
   });
 });
 
@@ -244,6 +277,39 @@ describe("versioning: publishing is append-only (SPEC §17 amendment)", () => {
     expect(JSON.stringify(doc)).toContain(v1Hash); // the true name travels in the doc
   });
 
+  it("the public door serves ONE version per name: the latest, aliased v1 — history is not anonymous", async () => {
+    // Plant is declared public and now has two versions. The anonymous world sees exactly
+    // one: the latest policy, at v1 — its version count is its own business.
+    const v1 = await rest(`/rest/v1/Plant/${encodeURIComponent(FERN)}`);
+    expect(v1.status).toBe(200);
+    const body = (await v1.json()) as { view: Record<string, unknown> };
+    expect(body.view["note"]).toEqual(["evolved and thriving"]); // the LATEST lens (all → list)
+    const v2 = await rest(`/rest/v2/Plant/${encodeURIComponent(FERN)}`);
+    expect(v2.status).toBe(404);
+    const spec = await rest(`/openapi.json`);
+    const paths = Object.keys(((await spec.json()) as { paths: Record<string, unknown> }).paths);
+    expect(paths.filter((p) => p.includes("/Plant/")).length).toBe(1);
+  });
+
+  it("an anonymous @hash probe learns nothing: uniform 404 for held, withdrawn, and imaginary hashes alike", async () => {
+    // A LIVE registration of an undeclared schema — the ground holds it; the stranger must
+    // not learn that.
+    const bookHash = readRegistrationVersions(gateway.reactor, OPERATOR).find(
+      (v) => v.schema.name === "Book",
+    )!.deltaId;
+    const probes = [
+      `/rest/@${bookHash}/Book/${encodeURIComponent("book:dune")}`,
+      `/rest/@${v1Hash}/Plant/${encodeURIComponent(FERN)}`, // still surviving at this point
+      `/rest/@${"ab".repeat(34)}/Plant/${encodeURIComponent(FERN)}`, // imaginary
+    ];
+    // (The Plant v1 hash is still surviving here, so it ANSWERS anonymously? No — the public
+    // door serves only the latest; a non-latest hash is outside its world: 404, same as all.)
+    for (const p of probes) {
+      const res = await rest(p);
+      expect(res.status, p).toBe(404);
+    }
+  });
+
   it("withdrawing a version is the operator striking its registration delta: served no longer, remembered forever", async () => {
     await gateway.append([
       signClaims(
@@ -251,9 +317,19 @@ describe("versioning: publishing is append-only (SPEC §17 amendment)", () => {
         OPERATOR_SEED,
       ),
     ]);
-    // The hash answers 410 Gone — withdrawn is not the same silence as never-existed.
+    // The hash answers 410 Gone — withdrawn is not the same silence as never-existed. The
+    // distinction is the FULL door's alone: anonymously the same probe is a uniform 404.
     const byHash = await rest(`/rest/@${v1Hash}/Plant/${encodeURIComponent(FERN)}`, {}, "op-token");
     expect(byHash.status).toBe(410);
+    const anonProbe = await rest(`/rest/@${v1Hash}/Plant/${encodeURIComponent(FERN)}`);
+    expect(anonProbe.status).toBe(404);
+    // And a surviving hash reached under the WRONG name is a 404, never a false 410.
+    const wrongName = await rest(
+      `/rest/@${v1Hash}/Book/${encodeURIComponent(FERN)}`,
+      {},
+      "op-token",
+    );
+    expect(wrongName.status).toBe(404);
     // Aliases shift: the surviving registration is now v1 (the Nth SURVIVING, in ground order).
     const versions = readRegistrationVersions(gateway.reactor, OPERATOR);
     const plants = versions.filter((v) => v.schema.name === "Plant");

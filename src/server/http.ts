@@ -518,12 +518,21 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             json(res, 200, buildOpenApi(gateway, "public", mountName ?? ""));
             return;
           case "rest": {
+            let body: string | undefined;
+            try {
+              body = req.method === "POST" ? await readBody(req, maxBody) : undefined;
+            } catch (err) {
+              json(res, err instanceof BodyTooLarge ? 413 : 400, {
+                errors: [err instanceof Error ? err.message : String(err)],
+              });
+              return;
+            }
             const result = await handleRest(
               gateway,
               "public",
               req.method ?? "GET",
               url.pathname.split("/").slice(3),
-              req.method === "POST" ? await readBody(req, maxBody) : undefined,
+              body,
             );
             json(res, result.status, result.body);
             return;
@@ -554,12 +563,21 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           json(res, 200, buildOpenApi(gateway, "full", mountName ?? ""));
           return;
         case "rest": {
+          let body: string | undefined;
+          try {
+            body = req.method === "POST" ? await readBody(req, maxBody) : undefined;
+          } catch (err) {
+            json(res, err instanceof BodyTooLarge ? 413 : 400, {
+              errors: [err instanceof Error ? err.message : String(err)],
+            });
+            return;
+          }
           const result = await handleRest(
             gateway,
             "full",
             req.method ?? "GET",
             url.pathname.split("/").slice(3),
-            req.method === "POST" ? await readBody(req, maxBody) : undefined,
+            body,
             contextFor(identity)?.actor,
           );
           json(res, result.status, result.body);

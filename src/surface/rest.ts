@@ -10,6 +10,12 @@
 // Transport-free on purpose: handleRest speaks (method, segments, body) → (status, body), and
 // the HTTP server adapts. A compiled surface (§17's horizon) would adapt the same function to
 // a very different wire.
+//
+// Two narrowings, stated plainly (narrowing is a generator's right): this door serves lenses
+// REGISTERED AS DATA — a process-lifetime register() call files no registration delta, has no
+// true name, and therefore no version here; its door is GraphQL. And the PUBLIC projection
+// serves only the LATEST version of each declared name — the anonymous world stays strictly
+// inside what public GraphQL answers, and its version history stays its own business.
 
 import type { Primitive } from "@bombadil/rhizomatic";
 import type { Gateway } from "../gateway/gateway.js";
@@ -26,14 +32,23 @@ const refuse = (status: number, ...errors: string[]): RestResult => ({
   body: { errors },
 });
 
-// The version families a door may see: every surviving version whose schema name the door's
-// registered set admits (the public door admits only declared lenses — narrowing, never
-// widening).
+// The version families a door may see. The full door sees every surviving version. The
+// public door sees ONLY THE LATEST version of each declared name: a public declaration was
+// made about the door that existed when it was signed, and retroactively publishing every
+// historical policy would widen the anonymous surface past what public GraphQL can answer —
+// a smaller world stays smaller through every door, and its version count stays its own
+// business. (Note the narrowing stated in the module header: the REST door serves lenses
+// REGISTERED AS DATA; a process-lifetime register() call has no registration delta, no true
+// name, and therefore no version here — its door is GraphQL.)
 function versionsFor(gateway: Gateway, door: "full" | "public"): RegistrationVersion[] {
   const surface = gateway.surface(door);
   if (surface === undefined) return [];
   const admitted = new Set(surface.registered.map((r) => r.schema.name));
-  return gateway.registrationVersions().filter((v) => admitted.has(v.schema.name));
+  const versions = gateway.registrationVersions().filter((v) => admitted.has(v.schema.name));
+  if (door === "full") return versions;
+  const latest = new Map<string, RegistrationVersion>();
+  for (const v of versions) latest.set(v.schema.name, v); // ascending order: last one wins
+  return [...latest.values()];
 }
 
 // vN aliases are PER SCHEMA NAME: Film v1 and Book v1 coexist. Ground order within a name.
@@ -57,7 +72,7 @@ function propSchema(kind: string): Record<string, unknown> {
     case "conflicts":
       return { type: "array", description: `resolved by policy kind "${kind}"` };
     case "merge":
-      return { description: 'resolved by a merge policy — its reduction"s type' };
+      return { description: "resolved by a merge policy — its reduction's type" };
     default:
       return { description: `resolved by policy kind "${kind}"` };
   }
@@ -73,10 +88,9 @@ export function buildOpenApi(
   for (const [name, versions] of byName) {
     versions.forEach((v, i) => {
       const alias = i + 1;
-      const viewProperties: Record<string, unknown> = {
-        _entity: { type: "string" },
-        _hex: { type: "string", description: "the content address of this resolved view" },
-      };
+      // The view object carries POLICY PROPS ONLY; entity and the content addresses live at
+      // the body's top level — the document must describe the body that actually answers.
+      const viewProperties: Record<string, unknown> = {};
       const writeProperties: Record<string, unknown> = {};
       for (const [prop, pp] of v.policy.props) {
         viewProperties[prop] = propSchema((pp as { kind: string }).kind);
@@ -99,7 +113,10 @@ export function buildOpenApi(
                   properties: {
                     entity: { type: "string" },
                     view: { type: "object", properties: viewProperties },
-                    _hex: { type: "string" },
+                    _hex: {
+                      type: "string",
+                      description: "the content address of this resolved view",
+                    },
                     _hviewHex: { type: "string" },
                   },
                 },
@@ -189,17 +206,21 @@ export async function handleRest(
     const hash = vTag.slice(1);
     pinned = versions.find((v) => v.deltaId === hash && v.schema.name === schemaName);
     if (pinned === undefined) {
-      // Withdrawn is not never-existed: if the ground still HOLDS that delta as a
-      // registration but it no longer survives, the honest answer is 410 Gone.
-      const held = gateway.reactor.get(hash);
-      const wasRegistration =
-        held !== undefined &&
-        held.claims.pointers.some(
-          (p) => p.target.kind === "entity" && p.target.entity.context === "loam.registration",
-        );
-      return wasRegistration
-        ? refuse(410, `that version was withdrawn by the operator — it is remembered, not served`)
-        : refuse(404, `no version @${hash.slice(0, 12)}… of ${schemaName} survives`);
+      // Withdrawn is not never-existed — but ONLY the full door is owed that distinction,
+      // and only for a hash that really was a LAWFUL registration of THIS schema, since
+      // struck by the operator (readWithdrawnRegistrations). The public door answers a
+      // uniform 404 for every unknown hash: an anonymous caller must learn nothing about
+      // what this ground holds beyond the declared world (§12's discipline, kept here).
+      if (door === "full") {
+        const withdrawn = gateway.withdrawnRegistrations();
+        if (withdrawn.some((w) => w.deltaId === hash && w.schemaName === schemaName)) {
+          return refuse(
+            410,
+            "that version was withdrawn by the operator — it is remembered, not served",
+          );
+        }
+      }
+      return refuse(404, `no version @${hash.slice(0, 12)}… of ${schemaName} survives`);
     }
     isLatest = family !== undefined && family[family.length - 1]?.deltaId === pinned.deltaId;
   } else {
@@ -213,18 +234,24 @@ export async function handleRest(
   if (method === "GET") {
     // The latest version answers through the warm path — the same resolve GraphQL uses, so
     // agreement is by construction; an older version answers through pinned resolution.
-    const node = isLatest
-      ? hooks.resolve(schemaName, entity)
-      : gateway.resolvePinned(pinned, entity);
-    return {
-      status: 200,
-      body: {
-        entity: node.entity,
-        view: node.view,
-        _hex: node.hex,
-        _hviewHex: node.hviewHex,
-      },
-    };
+    // Every gateway throw folds into a structured refusal, exactly as handleGraphql folds
+    // them: a resolver error must not become a 500 that leaks internals on any door.
+    try {
+      const node = isLatest
+        ? hooks.resolve(schemaName, entity)
+        : gateway.resolvePinned(pinned, entity);
+      return {
+        status: 200,
+        body: {
+          entity: node.entity,
+          view: node.view,
+          _hex: node.hex,
+          _hviewHex: node.hviewHex,
+        },
+      };
+    } catch (err) {
+      return refuse(400, err instanceof Error ? err.message : String(err));
+    }
   }
 
   if (method === "POST") {
@@ -268,7 +295,11 @@ export async function handleRest(
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return refuse(/not permitted|refused/.test(message) ? 403 : 400, message);
+      // The same outcomes the other doors map: standing and tombstone refusals are 403, a
+      // degraded gateway is the server's trouble (503, as /append answers), the rest 400.
+      if (/can no longer persist/.test(message)) return refuse(503, message);
+      if (/not permitted|was erased|refused/.test(message)) return refuse(403, message);
+      return refuse(400, message);
     }
   }
 
