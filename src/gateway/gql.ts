@@ -30,51 +30,29 @@ import {
   type GraphQLInputType,
   type GraphQLOutputType,
 } from "graphql";
-import type { HyperSchema, Policy, Primitive, PropPolicy, View } from "@bombadil/rhizomatic";
+import type { Primitive, PropPolicy } from "@bombadil/rhizomatic";
 import type { ClaimTemplates } from "./registration.js";
+import type {
+  ClaimPointerSpec,
+  PatchNode,
+  Registered,
+  ResolvedNode,
+  SurfaceGenerator,
+  SurfaceHooks,
+  SurfaceProjection,
+} from "../surface/surface.js";
 
-export interface Registered {
-  readonly schema: HyperSchema;
-  readonly policy: Policy;
-  readonly roots: readonly string[];
-  readonly mutations?: ClaimTemplates;
-}
-
-// What flows from the root resolver to the field resolvers: one resolution, many reads.
-export interface ResolvedNode {
-  readonly entity: string;
-  readonly view: Record<string, View>;
-  readonly hex: string;
-  readonly hviewHex: string;
-}
-
-// A subscription event: the re-resolved node plus where it came from and what moved.
-export interface PatchNode extends ResolvedNode {
-  readonly fromHex: string | null; // null on the initial snapshot
-  readonly changed: readonly string[] | null; // null on the initial snapshot
-}
-
-// One concrete pointer of a claim, as the gql layer hands it to the gateway: either an entity
-// pointer (at + context) or a primitive (value) — never both, never neither.
-export interface ClaimPointerSpec {
-  readonly role: string;
-  readonly at?: string;
-  readonly context?: string;
-  readonly value?: Primitive;
-}
-
-// The seams the gateway provides; gql.ts owns shape, the gateway owns state.
-export interface GqlHooks {
-  resolve(schemaName: string, entity: string): ResolvedNode;
-  mutate(
-    schemaName: string,
-    entity: string,
-    props: Record<string, Primitive>,
-    actorSeed?: string,
-  ): Promise<ResolvedNode>;
-  watch(schemaName: string, entity: string): AsyncGenerator<PatchNode>;
-  claim(pointers: readonly ClaimPointerSpec[], actorSeed?: string): Promise<{ delta: string }>;
-}
+// The shared surface vocabulary lives at the seam (SPEC §17, src/surface/surface.ts); this
+// module is the seam's FIRST WITNESS — GraphQL as one materialization among peers. The
+// re-exports keep every existing import path standing; `GqlHooks` stays as the historical
+// name of what the seam calls SurfaceHooks.
+export type {
+  ClaimPointerSpec,
+  PatchNode,
+  Registered,
+  ResolvedNode,
+  SurfaceHooks as GqlHooks,
+} from "../surface/surface.js";
 
 // The pass-through output scalar: a resolved View value — primitive, list, or nested object —
 // exactly as the policy adjudicated it.
@@ -241,8 +219,8 @@ function templateArgs(
 // honestly reveals a world in which writing does not exist.
 export function buildGqlSchema(
   defs: readonly Registered[],
-  hooks: GqlHooks,
-  surface: "full" | "read" = "full",
+  hooks: SurfaceHooks,
+  surface: SurfaceProjection = "full",
 ): GraphQLSchema {
   const queryFields: GraphQLFieldConfigMap<unknown, unknown> = {};
   const mutationFields: GraphQLFieldConfigMap<unknown, unknown> = {};
@@ -436,3 +414,7 @@ export function buildGqlSchema(
     subscription: new GraphQLObjectType({ name: "Subscription", fields: subscriptionFields }),
   });
 }
+
+// The seam witnessed (SPEC §17): GraphQL is one SurfaceGenerator among peers — this binding
+// is the compile-time proof, and the name new call sites should prefer.
+export const graphqlSurface: SurfaceGenerator<GraphQLSchema> = buildGqlSchema;

@@ -71,7 +71,15 @@ export {
   type Genesis,
   type GenesisSpec,
 } from "./gateway/genesis.js";
-export { buildGqlSchema, type Registered } from "./gateway/gql.js";
+export { buildGqlSchema, graphqlSurface, type Registered } from "./gateway/gql.js";
+export type {
+  ClaimPointerSpec,
+  PatchNode,
+  ResolvedNode,
+  SurfaceGenerator,
+  SurfaceHooks,
+  SurfaceProjection,
+} from "./surface/surface.js";
 export {
   lawfulNegated,
   lawfulSnapshot,
