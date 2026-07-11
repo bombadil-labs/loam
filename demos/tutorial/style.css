@@ -401,12 +401,34 @@ nav .mark.todo {
   top: 0.5rem;
   right: 0.6rem;
   font: inherit;
-  font-size: 0.7rem;
+  font-size: 0.72rem;
+  padding: 0.15rem 0.5rem;
   background: none;
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  color: var(--danger);
+  cursor: pointer;
+}
+.card .unpin:hover {
+  background: var(--danger);
+  color: var(--bg);
+}
+
+#start-over {
+  display: inline-block;
+  margin-top: 0.4rem;
+  font: inherit;
+  font-size: 0.72rem;
+  padding: 0.2rem 0.7rem;
   border: 1px solid var(--line);
   border-radius: 6px;
+  background: none;
   color: var(--muted);
   cursor: pointer;
+}
+#start-over:hover {
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 #gql-editor {

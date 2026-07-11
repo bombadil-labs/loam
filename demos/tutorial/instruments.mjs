@@ -236,7 +236,7 @@ async function renderQueryCard(holder, ctx, label, query, onRemove) {
   if (onRemove !== undefined) {
     const rm = document.createElement("button");
     rm.className = "unpin";
-    rm.textContent = "unpin";
+    rm.textContent = "✕ unpin";
     rm.onclick = onRemove;
     card.appendChild(rm);
   }
