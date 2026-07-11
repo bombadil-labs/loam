@@ -310,3 +310,134 @@ nav .mark.todo {
     border-bottom: 1px solid var(--line);
   }
 }
+
+/* ---- v2a instruments ---- */
+
+.badge {
+  display: inline-block;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.1rem 0.45rem;
+  border-radius: 99px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  margin-right: 0.5rem;
+}
+.badge-constitution {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.badge-registration,
+.badge-schema {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+.badge-negation,
+.badge-tombstone {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.badge-public,
+.badge-trust,
+.badge-grant {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.delta {
+  cursor: pointer;
+}
+.delta.fresh {
+  animation: settle 1.6s ease-out;
+}
+@keyframes settle {
+  from {
+    background: var(--code-bg);
+  }
+  to {
+    background: transparent;
+  }
+}
+.delta-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+.delta-summary {
+  margin: 0.15rem 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--muted);
+}
+.delta-note {
+  font-size: 0.75rem;
+  font-style: italic;
+  color: var(--accent);
+  margin-top: 0.15rem;
+}
+.delta-wire {
+  margin-top: 0.4rem;
+  background: var(--code-bg);
+  border-radius: 6px;
+  padding: 0.5rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 0.72rem;
+}
+
+.schema-row {
+  padding: 0.25rem 0;
+  border-top: 1px solid var(--line);
+}
+.schema-row:first-of-type {
+  border-top: 0;
+}
+.card {
+  position: relative;
+}
+.card .unpin {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.6rem;
+  font: inherit;
+  font-size: 0.7rem;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+#gql-editor {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  min-height: 7rem;
+  background: var(--card);
+}
+#gql-editor .cm-editor {
+  min-height: 7rem;
+  font-size: 0.82rem;
+}
+#gql-editor .cm-editor.cm-focused {
+  outline: 2px solid var(--accent);
+}
+.gql-pin-controls {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+.gql-pin-controls input {
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  width: 8rem;
+}
+.gql-controls button.secondary {
+  background: none;
+  color: var(--accent);
+}

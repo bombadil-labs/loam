@@ -4,14 +4,11 @@
 // lessons.mjs (shared verbatim with the headless CI arc); this file is only their theater.
 
 import * as loam from "@bombadil/loam/browser";
-import {
-  ALICE,
-  FILM,
-  buildArc,
-  buildExport,
-  bootTutorialStore,
-  recordHomecoming,
-} from "./lessons.mjs";
+import { EditorView, basicSetup } from "codemirror";
+import { graphql as graphqlLang, updateSchema } from "cm6-graphql";
+import { buildClientSchema, getIntrospectionQuery } from "graphql";
+import { FILM, buildArc, buildExport, bootTutorialStore, recordHomecoming } from "./lessons.mjs";
+import { isReadOnlyDocument, renderGround, renderViews } from "./instruments.mjs";
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -289,86 +286,115 @@ function note(parent, text, ok) {
   r.classList.toggle("bad", !ok);
 }
 
-// ---- the panes -------------------------------------------------------------------------------
+// ---- the panes (SPEC §19: instruments, not exhibits) -------------------------------------------
 
-const VIEW_QUERIES = [
-  ["film:arrival", `{ film(entity: "${FILM}") { title rating tags watches timesWatched _hex } }`],
-  ["book:solaris", `{ book(entity: "book:solaris") { title pagesRead finished } }`],
-  [ALICE, `{ person(entity: "${ALICE}") { name follows watchedWith } }`],
-];
+// UI state — the panes' own memory (open rows, pinned queries), never the store's.
+const groundState = { seen: new Set(), expanded: new Set() };
+const PINS_KEY = "loam:tutorial:ui:pins";
+// Pins live in a Map (no prototype tricks from a label like "__proto__") and load
+// defensively: pins are disposable UI memory, and a corrupt value must never kill the boot.
+function loadPins() {
+  try {
+    const raw = JSON.parse(storage.getItem(PINS_KEY) ?? "[]");
+    if (!Array.isArray(raw)) return new Map();
+    return new Map(
+      raw.filter((e) => Array.isArray(e) && typeof e[0] === "string" && typeof e[1] === "string"),
+    );
+  } catch {
+    return new Map();
+  }
+}
+const ui = {
+  savedQueries: loadPins(),
+  persist() {
+    storage.setItem(PINS_KEY, JSON.stringify([...this.savedQueries]));
+  },
+};
 
 async function renderView() {
-  const holder = $("#view-cards");
-  holder.innerHTML = "";
-  let anything = false;
-  for (const [label, q] of VIEW_QUERIES) {
-    try {
-      const res = await gateway.query(q);
-      const data = res.data && Object.values(res.data)[0];
-      if (data == null) continue;
-      anything = true;
-      const card = document.createElement("div");
-      card.className = "card";
-      // textContent, never innerHTML: view values can carry ANY string — lesson 7's whole
-      // premise is a hostile foreign claim, and it must render as text, not as markup.
-      const h3 = document.createElement("h3");
-      h3.textContent = label;
-      const pre = document.createElement("pre");
-      pre.textContent = JSON.stringify(data, null, 2);
-      card.append(h3, pre);
-      holder.appendChild(card);
-    } catch {
-      // no surface yet — the emptiness IS lesson 2's point
-    }
-  }
-  if (!anything) {
-    holder.innerHTML = `<p class="pane-hint">nothing resolves yet — the store may hold facts, but no lens has been ground (that is lesson 3)</p>`;
+  await renderViews($("#view-cards"), ctx, ui);
+}
+
+function renderGroundPane() {
+  renderGround($("#ground-rows"), gateway.offeredDeltas(), author, loam.toWire, groundState);
+}
+
+// ---- the editor: hints from the LIVE schema, re-derived as the store evolves ---------------
+
+// Introspection against the in-page gateway: the standard query, the standard builder — the
+// same door every tool would use. The stranger toggle asks the ANONYMOUS surface, which is a
+// different, smaller schema; the hints shrinking IS lesson 15's thesis, live.
+async function introspect(asStranger) {
+  try {
+    const q = getIntrospectionQuery();
+    const res = asStranger ? await gateway.queryPublic(q) : await gateway.query(q);
+    if (res.data == null) return null;
+    return buildClientSchema(res.data);
+  } catch {
+    return null; // no surface yet (or nothing public) — the pane says which lesson grows one
   }
 }
 
-function summarizePointer(p) {
-  if (p.target.kind === "entity")
-    return `${p.role}→${p.target.entity.id}#${p.target.entity.context}`;
-  if (p.target.kind === "delta") return `${p.role}→delta:${p.target.deltaRef.delta.slice(0, 10)}…`;
-  return `${p.role}=${JSON.stringify(p.target.value)}`;
-}
+const editor = new EditorView({
+  doc: `{ film(entity: "${FILM}") { title rating tags timesWatched _hex } }`,
+  extensions: [basicSetup, graphqlLang()],
+  parent: $("#gql-editor"),
+});
 
-function renderGround() {
-  const holder = $("#ground-rows");
-  holder.innerHTML = "";
-  const deltas = gateway.offeredDeltas();
-  const head = document.createElement("p");
-  head.className = "pane-hint";
-  head.textContent = `${deltas.length} records — each immutable, signed, named by its content`;
-  holder.appendChild(head);
-  for (const d of [...deltas].sort((a, b) => a.claims.timestamp - b.claims.timestamp)) {
-    const mine = d.claims.author === author;
-    const row = document.createElement("div");
-    row.className = "delta";
-    // textContent throughout — a foreign author string or claim value is DATA, never markup.
-    const id = document.createElement("span");
-    id.className = "id mono";
-    id.textContent = `${d.id.slice(0, 12)}… `;
-    const who = document.createElement("span");
-    who.className = `who ${mine ? "you" : "foreign"}`;
-    who.textContent = mine ? "you" : d.claims.author.slice(0, 20) + "…";
-    const pointers = document.createElement("pre");
-    pointers.textContent = d.claims.pointers.map(summarizePointer).join("  ·  ");
-    row.append(id, who, pointers);
-    holder.appendChild(row);
+// A call token keeps racing introspections honest: only the LATEST request may install its
+// schema and hint — a fast toggle mid-rerender must not leave the stranger's schema under
+// the operator's caption.
+let introspectionTurn = 0;
+async function refreshEditorSchema() {
+  const turn = ++introspectionTurn;
+  const asStranger = $("#gql-stranger").checked;
+  const schema = await introspect(asStranger);
+  if (turn !== introspectionTurn) return; // a newer request superseded this one
+  const hint = $("#gql-schema-state");
+  if (schema === null) {
+    hint.textContent = asStranger
+      ? "the stranger sees no surface — nothing here is public yet (lesson 10 opens a door)"
+      : "the store has no surface yet — lesson 3 grows one, and hints will appear here";
+  } else {
+    hint.textContent = asStranger
+      ? "hinting against the ANONYMOUS schema — a smaller world, by declaration"
+      : "hinting against the live schema — it re-derives every time a registration lands";
   }
+  updateSchema(editor, schema ?? undefined);
 }
 
 $("#gql-run").onclick = async () => {
-  const src = $("#gql-src").value;
+  const src = editor.state.doc.toString();
   const asStranger = $("#gql-stranger").checked;
   const out = $("#gql-out");
+  let text;
   try {
     const res = asStranger ? await gateway.queryPublic(src) : await gateway.query(src);
-    out.textContent = JSON.stringify(res, null, 2);
+    text = JSON.stringify(res, null, 2);
   } catch (err) {
-    out.textContent = String(err.message ?? err);
+    text = String(err.message ?? err);
   }
+  // A run may have been a WRITE (the console speaks to the same door) — the Ground and the
+  // greens must show it, not wait for the next lesson click. §19: one act, every pane.
+  await rerender();
+  out.textContent = text; // after the rerender, so the answer survives it
+};
+
+$("#gql-stranger").onchange = () => void refreshEditorSchema();
+
+$("#gql-pin").onclick = async () => {
+  const src = editor.state.doc.toString();
+  if (!isReadOnlyDocument(src)) {
+    $("#gql-out").textContent =
+      "only plain reads pin to Views — a pinned mutation would re-run itself on every render, which is a write loop wearing a bookmark's clothes";
+    return;
+  }
+  const label = $("#gql-pin-label").value.trim() || `query ${ui.savedQueries.size + 1}`;
+  ui.savedQueries.set(label, src);
+  ui.persist();
+  $("#gql-pin-label").value = "";
+  await renderView();
+  $("#gql-out").textContent = `pinned to Views as "${label}"`;
 };
 
 for (const tab of document.querySelectorAll(".tabs button")) {
@@ -407,12 +433,14 @@ async function rerender() {
   renderNav();
   renderLesson();
   await renderView();
-  renderGround();
+  renderGroundPane();
+  await refreshEditorSchema(); // a registration may have landed — the hints follow the store
 }
 
 current = await refreshGreens();
 renderNav();
 renderLesson();
 await renderView();
-renderGround();
+renderGroundPane();
+await refreshEditorSchema();
 void watchFilm();

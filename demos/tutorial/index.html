@@ -41,11 +41,18 @@
           <div id="ground-rows"></div>
         </div>
         <div id="pane-gql" class="pane">
-          <p class="pane-hint">ask the store anything — this console speaks to the same door</p>
-          <textarea id="gql-src" spellcheck="false">
-{ film(entity: "film:arrival") { title rating tags timesWatched watches _hex } }</textarea>
+          <p class="pane-hint">
+            ask the store anything — this console speaks to the same door, and its hints come from
+            the LIVE schema (try autocomplete inside the braces)
+          </p>
+          <p id="gql-schema-state" class="pane-hint"></p>
+          <div id="gql-editor"></div>
           <div class="gql-controls">
             <label><input type="checkbox" id="gql-stranger" /> ask as the stranger (no key)</label>
+            <span class="gql-pin-controls">
+              <input id="gql-pin-label" type="text" placeholder="label…" />
+              <button id="gql-pin" class="secondary">pin to Views</button>
+            </span>
             <button id="gql-run">Run</button>
           </div>
           <pre id="gql-out"></pre>
