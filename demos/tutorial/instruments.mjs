@@ -74,6 +74,9 @@ export function classifyDelta(delta, selfAuthor) {
     note = foreign
       ? "standing granted in another store — it gates nothing here"
       : "standing changing hands: who may write here";
+  } else if (pointers.some((p) => p.role === "rhizomatic.derived.by")) {
+    kind = "derived";
+    note = "a derived record: a blessed function ground this out of the store, signed by a runner";
   } else if (hasDeltaRef) {
     kind = "negation";
     note = "a taking-back: it strikes another record by id, and stays on the record itself";
@@ -102,6 +105,7 @@ const BADGE_LABELS = {
   public: "public",
   trust: "trust",
   grant: "grant",
+  derived: "derived",
 };
 
 // Render the ground newest-first: badge, author, one-line summary; click a row for the full

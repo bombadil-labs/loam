@@ -338,6 +338,10 @@ nav .mark.todo {
   border-color: var(--danger);
   color: var(--danger);
 }
+.badge-derived {
+  border-color: var(--accent);
+  color: var(--accent);
+}
 .badge-public,
 .badge-trust,
 .badge-grant {

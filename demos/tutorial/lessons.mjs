@@ -39,6 +39,14 @@ export const FILM = "film:arrival";
 export const ALICE = "person:alice";
 const SCREENING_1 = "screening:1";
 const SCREENING_2 = "screening:2";
+const SCREENING_3 = "screening:3";
+// Fixed identities so the Act-III/IV lessons' checks are stable across reboots (a fresh mint
+// each run would move the author). The roommate co-authors; the miller animates the store.
+const ROOMMATE_SEED = "5a".repeat(32);
+const MILLER_SEED = "71".repeat(32);
+// A second forger, distinct from the bundled adversary — its bounce at the trust door (lesson
+// 10) is the proof, so its author must be knowable and NOT on any roster we declare.
+const FORGER2_SEED = "f2".repeat(32);
 
 // Film, first registered (lesson 2). tags is an `all` list; rating and title are `pick` latest.
 const FILM_POLICY_V1 = { props: { title: PICK, rating: PICK, tags: ALL }, default: PICK };
@@ -378,6 +386,76 @@ records to add or take back.`,
     // ============================ ACT III — other people ============================
     {
       id: 8,
+      title: "A co-author",
+      copy: `Until now you've been the only voice. Invite another: your roommate keeps their own
+key (we minted one for the tutorial). Have them log a screening — and watch it BOUNCE. Anyone
+may write to their OWN store, but yours answers only to standing, and your roommate has none.
+So grant it: one signed record, from you the operator, saying this key may write here. Now their
+screening lands — under THEIR signature, not yours; the Ground shows a record whose author isn't
+you (the "foreign" mark). Then change your mind and revoke it — another record, striking the
+grant — and the door closes again. Authorship and authority are different things: they authored
+it; you decide whether it binds.`,
+      perform: async (ctx) => {
+        const roommate = loam.authorForSeed(ROOMMATE_SEED);
+        const screening = say(
+          loam,
+          ctx,
+          [entity("subject", FILM, "screenings"), entity("screening", SCREENING_3, "film")],
+          ROOMMATE_SEED,
+        );
+        // before standing: the door refuses it (narrated; the grant below is what we pin)
+        try {
+          await ctx.gateway.append([screening]);
+        } catch {
+          /* no standing yet — expected */
+        }
+        // grant write standing, then the roommate's screening lands under their own signature
+        const grant = loam.signClaims(
+          loam.grantClaims("loam:store", roommate, "write", ctx.author, ctx.ts()),
+          ctx.seed,
+        );
+        await ctx.gateway.append([grant]);
+        await ctx.gateway.append([screening]);
+        // then revoke — the grant is struck, and the door closes again
+        await ctx.gateway.append([
+          loam.signClaims(loam.revocationClaims(grant.id, ctx.author, ctx.ts()), ctx.seed),
+        ]);
+      },
+      check: async (ctx) => {
+        const roommate = loam.authorForSeed(ROOMMATE_SEED);
+        // Scope to the ROOMMATE's grant by its subject — lesson 14 mints a second operator
+        // grant (to the miller) that is never revoked, so "any operator grant" would let the
+        // iteration order decide this check. grantClaims files the grantee as a `subject`
+        // primitive; match on it so monotonicity holds by construction, not by luck.
+        const grant = ground(ctx).find(
+          (d) =>
+            d.claims.author === ctx.author &&
+            pointsAt("loam:store", "loam.grants")(d) &&
+            d.claims.pointers.some(
+              (p) =>
+                p.role === "subject" &&
+                p.target.kind === "primitive" &&
+                p.target.value === roommate,
+            ),
+        );
+        const theirScreening = has(ctx, (d) => d.claims.author === roommate);
+        // the revocation strikes THIS grant by id — not just any negation the learner made
+        const revoked =
+          grant !== undefined &&
+          has(
+            ctx,
+            (d) =>
+              d.claims.author === ctx.author &&
+              d.claims.pointers.some(
+                (p) => p.target.kind === "delta" && p.target.deltaRef.delta === grant.id,
+              ),
+          );
+        return grant !== undefined && theirScreening && revoked;
+      },
+    },
+
+    {
+      id: 9,
       title: "The adversary, and whose word wins",
       copy: `A stranger's claim just arrived — we bundled one so you can meet it. Press the
 button and watch it land in the Ground, authored by someone who is NOT you: "the title of
@@ -414,7 +492,53 @@ visible, and powerless. Truth here is a policy you choose, and can always revisi
     },
 
     {
-      id: 9,
+      id: 10,
+      title: "The door itself is policy",
+      copy: `Lesson 9 chose whose word wins AFTER it's in your ground — a reading policy. But you
+can also choose who gets IN. A trust ROSTER is one signed record naming the keys you'll admit
+across the wire: yourself, your roommate, the circle. Declare it, then let a fresh forgery
+knock. This time it doesn't just lose the vote — it BOUNCES at the door, never entering the
+ground at all, because its key isn't on the roster. Two different powers, and you hold both:
+admission trust decides what crosses your threshold; reading trust decides what matters once it
+has. Reopen the door when you're done (an "open" declaration) — a store that can't hear the
+world isn't federating, it's hiding.`,
+      perform: async (ctx) => {
+        const roommate = loam.authorForSeed(ROOMMATE_SEED);
+        // a fresh forgery, by a key we will NOT roster
+        const forgery = say(
+          loam,
+          ctx,
+          [entity("subject", FILM, "title"), prim("ARRIVAL 3: THE ROSTER STRIKES BACK")],
+          FORGER2_SEED,
+        );
+        // declare a roster admitting only known keys, then try to federate the forgery — it
+        // bounces at the door (federate honours the trust policy; the forger isn't listed)
+        await ctx.gateway.append([
+          loam.signClaims(
+            loam.trustClaims("roster", [ctx.author, roommate], ctx.author, ctx.ts()),
+            ctx.seed,
+          ),
+        ]);
+        await ctx.gateway.federate([forgery]).catch(() => {});
+        // reopen the door — an aggregator by choice
+        await ctx.gateway.append([
+          loam.signClaims(loam.trustClaims("open", [], ctx.author, ctx.ts()), ctx.seed),
+        ]);
+      },
+      check: async (ctx) => {
+        // a trust declaration is on record...
+        const declared = has(
+          ctx,
+          (d) => d.claims.author === ctx.author && pointsAt("loam:trust", "loam.trust")(d),
+        );
+        // ...and the rostered forgery never entered the ground (it bounced at the door)
+        const forgerLeft = !has(ctx, (d) => d.claims.author === loam.authorForSeed(FORGER2_SEED));
+        return declared && forgerLeft;
+      },
+    },
+
+    {
+      id: 11,
       title: "The right to be forgotten, honestly",
       copy: `You once jotted a private note about Alice, straight to the ground. She asks you to
 forget it. A retraction won't do — that resolves to absence but the bytes remain. ERASURE is
@@ -444,7 +568,7 @@ holds the door.`,
 
     // ============================ ACT IV — the wider world ============================
     {
-      id: 10,
+      id: 12,
       title: "Alice was just an id",
       copy: `All this time your store has said "person:alice" the way you'd name a stranger —
 confidently, knowing nothing. Somewhere there's a store that DOES know her: the circle, kept by
@@ -487,9 +611,129 @@ what to believe. Data federates; authority never does.`,
       },
     },
 
+    {
+      id: 13,
+      title: "Another tongue",
+      copy: `The circle spoke your language. This next store doesn't. We bundled a stranger's
+film log written in a dialect your schemas can't read — it says "film_watched" where you say
+"screening", "on" where you say a date. Pull it and the records land, honest and signed, but
+inert: no lens of yours gathers them. You don't rewrite the stranger's records (you can't —
+they're signed, content-addressed). Instead you teach a TRANSLATION: one operator-signed spec
+that reads the dialect and emits your vocabulary. Run it, and your film's history grows an entry
+recorded by an app that never heard of your schema — with its provenance visible right in the
+resolved view: this line was translated, and here's the record it came from. Anyone may write,
+in any tongue; the reader decides what it means, and can learn a new language without asking
+the writer to change.`,
+      perform: async (ctx) => {
+        await ctx.gateway.federate(ctx.packets.dialect.map((w) => loam.fromWire(w)));
+        // an operator-signed spec: recognize the dialect's `film_watched` role, render it into
+        // the film's `elsewhere` bucket with the date carried across and provenance attached
+        await ctx.gateway.append([
+          loam.signClaims(
+            loam.translationClaims(
+              "dialect",
+              { hasPointer: { role: { exact: "film_watched" } } },
+              {
+                pointers: [
+                  { role: "film", at: { from: { role: "film_watched" } }, context: "elsewhere" },
+                  { role: "note", value: { from: { role: "on" } } },
+                  { role: "origin", value: "a stranger's app" },
+                ],
+              },
+              ctx.author,
+              ctx.ts(),
+            ),
+            ctx.seed,
+          ),
+        ]);
+        await loam.translate(ctx.gateway, { seed: ctx.seed });
+      },
+      check: async (ctx) => {
+        // a translated record is on the ground, authored by you, carrying its provenance link
+        const translated = has(
+          ctx,
+          (d) =>
+            d.claims.author === ctx.author &&
+            d.claims.pointers.some((p) => p.role === "translates" && p.target.kind === "delta"),
+        );
+        return translated && loam.readTranslations(ctx.gateway.reactor, ctx.author).length >= 1;
+      },
+    },
+
+    {
+      id: 14,
+      title: "An animate store",
+      copy: `So far the store only knows what you tell it. Teach it to think. Bless ONE derived
+function — a little recipe that reads a film's screenings and writes back a running tally —
+then attach a Runner, and the tab comes alive: the recipe fires, and a derived record appears
+in the Ground, badged "derived" and signed not by you but by the runner's own key. It's the
+same store, now with a heartbeat. And here's the quiet part: reload the page — no runner
+running now — and the tally is still there. A derived fact is ground like any other; the runner
+made it, but it doesn't own it. An animate tab is just a deploy choice; the truth it grinds
+outlives it.`,
+      perform: async (ctx) => {
+        const miller = loam.authorForSeed(MILLER_SEED);
+        // the runner writes derived facts, so it needs standing
+        await ctx.gateway.append([
+          loam.signClaims(
+            loam.grantClaims("loam:store", miller, "write", ctx.author, ctx.ts()),
+            ctx.seed,
+          ),
+        ]);
+        // the operator blesses the recipe (a derived function bound to the Film lens)
+        const binding = {
+          name: "binding:tally",
+          fnId: "fn:tally",
+          materialization: "Film",
+          pure: true,
+          budget: 10_000,
+          emit: { keyed: ["tally"] },
+        };
+        await ctx.gateway.append([
+          loam.signClaims(loam.bindingDefinitionClaims(binding, ctx.author, ctx.ts()), ctx.seed),
+        ]);
+        const tally = (hview, root) => {
+          const n = (hview.props.get("screenings") ?? []).length;
+          return [
+            [
+              {
+                role: "subject",
+                target: { kind: "entity", entity: { id: root, context: "tally" } },
+              },
+              { role: "value", target: { kind: "primitive", value: `${n} screenings logged` } },
+            ],
+          ];
+        };
+        // the store becomes animate: ingest now drains derivations through the runner
+        loam.Runner.attach(ctx.gateway, {
+          seed: MILLER_SEED,
+          implementations: { "fn:tally": tally },
+        });
+        // nudge the wheel: a fresh screening triggers the derivation, and the runner grinds a
+        // `tally` line into the ground — durable, so a later reboot (no runner) still shows it
+        await ctx.gateway.append([
+          say(loam, ctx, [
+            entity("subject", FILM, "screenings"),
+            entity("screening", SCREENING_1, "film"),
+          ]),
+        ]);
+        await new Promise((r) => setTimeout(r, 40));
+      },
+      check: async (ctx) => {
+        const miller = loam.authorForSeed(MILLER_SEED);
+        // a derived record, signed by the runner, sits in the ground — durable past detach
+        return has(
+          ctx,
+          (d) =>
+            d.claims.author === miller &&
+            d.claims.pointers.some((p) => p.role === "rhizomatic.derived.by"),
+        );
+      },
+    },
+
     // ============================ ACT V — the door out ============================
     {
-      id: 11,
+      id: 15,
       title: "The stranger at the window",
       copy: `Everything so far went through YOUR door, signed or refused by standing. But a reader
 with no key at all — a stranger, a search engine, a friend you sent a link — has been knocking
@@ -517,7 +761,7 @@ not a guarded copy of the big one.`,
     },
 
     {
-      id: 12,
+      id: 16,
       title: "The same store, now on your machine",
       copy: `This store is real, but a browser is a small home: it can't listen for peers, and
 "clear site data" is an extinction event. So walk it out. Export writes one file — your records,

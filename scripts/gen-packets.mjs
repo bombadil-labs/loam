@@ -24,6 +24,9 @@ const CIRCLE_SEED = "c1".repeat(32);
 const CIRCLE_OP = authorForSeed(CIRCLE_SEED);
 const ADVERSARY_SEED = "ad".repeat(32);
 const ADVERSARY = authorForSeed(ADVERSARY_SEED);
+// A stranger's app that logs films in a dialect the learner's schemas can't read (lesson 13).
+const DIALECT_SEED = "d1".repeat(32);
+const DIALECT = authorForSeed(DIALECT_SEED);
 
 // Fixed clock: every delta's timestamp is BASE + a small offset. Content addresses depend on
 // these — change one and the packets change identity, which is the point of the --check gate.
@@ -121,9 +124,31 @@ function buildAdversary() {
   return JSON.stringify({ deltas: [toWire(forged)] });
 }
 
+function buildDialect() {
+  // A real signed record in an alien dialect: `film_watched` where the learner says a screening,
+  // `on` where they say a date. It gathers on nothing here until a translation teaches its shape.
+  const logged = signClaims(
+    {
+      timestamp: BASE + 42,
+      author: DIALECT,
+      pointers: [
+        entity("film_watched", "film:arrival", "elsewhere"),
+        // the dialect says `on` where the learner says a date — the role a translation reads
+        {
+          role: "on",
+          target: { kind: "primitive", value: "watched on a rainy Tuesday, logged in Reelboxd" },
+        },
+      ],
+    },
+    DIALECT_SEED,
+  );
+  return JSON.stringify({ deltas: [toWire(logged)] });
+}
+
 const files = {};
 files["circle.json"] = await buildCircle();
 files["adversary.json"] = buildAdversary();
+files["dialect.json"] = buildDialect();
 
 let failed = false;
 mkdirSync(OUT, { recursive: true });

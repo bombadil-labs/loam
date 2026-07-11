@@ -13,7 +13,8 @@ export interface DeltaClass {
     | "tombstone"
     | "public"
     | "trust"
-    | "grant";
+    | "grant"
+    | "derived";
   readonly foreign: boolean;
   readonly note?: string;
 }
