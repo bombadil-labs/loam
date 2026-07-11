@@ -26,7 +26,7 @@ the arc test pins the real semantics._
       compares `_hex`) → journal → re-plan.
 - [ ] Typed-client generation (`loam types`): designed in §17, NOT queued — do not build.
 
-# Tutorial v2 (follows Sprint A; the MVP grows up)
+# Tutorial v2 (follows Sprint A; the MVP grows up — design codified as SPEC §19)
 
 _The shipped tutorial (PRs #54–#56) is the MVP; v2 redesigns pedagogy and instruments per
 Myk's walkthrough feedback (2026-07-11). Sprint A upgrades two beats: lesson 2's payoff
