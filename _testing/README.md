@@ -37,7 +37,7 @@ Person entities are the only shared vocabulary; everything else composes by fede
 
 ```sh
 node _testing/phase0.mjs   # groundwork: homes, operators, registrations (all 3 surfaces)
-node _testing/phase1.mjs   # …through phase8.mjs — each phase is a runnable act with checks
+node _testing/phase1.mjs   # …through phase17.mjs — each phase is a runnable act with checks
 node _testing/village.mjs  # the living village: all stores + pulse + simulator + dashboard
                            #   → watch it at http://127.0.0.1:4400
 ```
@@ -204,6 +204,18 @@ _(one entry per PR that grew the village; newest last)_
   arc can leave the almanac ROSTERED between runs, and the phase's first pull obeyed it —
   trust-as-data enforcing itself across process lifetimes; the phase now states its own
   posture (one `open` declaration) instead of inheriting the last drama's.
+- **THE TAB (SPEC §15, PR #51)** (phase17.mjs, 5/5): a wanderer passes the village with no
+  server, no home directory, no port — a browser tab. The phase drives the SHIPPED store
+  artifact (`dist/browser/index.js`, `@bombadil/loam/browser`) against a localStorage origin:
+  a governed store boots inside the bundle (genesis → register → claim; Mallory refused at the
+  door, as everywhere); one `pullFrom` brings the commons over real HTTP — 34 deltas cross and
+  the village's law binds NOTHING (no Person surface until the wanderer registers her own lens,
+  and then the village answers through HER law); the tab closes and a second one on the same
+  origin remembers everything — notes, pulled ground, both lenses, no register() call anywhere;
+  and erasure reaches the page — tombstone → purge → removeItem, the note's key physically gone
+  from the origin, the door refusing its return, the seed key (never a delta) untouched. The
+  same Gateway the village runs on ports, on a different driver — a leaf or an aggregator,
+  never a hub, exactly as §15 states proudly.
 - **GROW AN APP LIVE (demo item 7)** (phase16.mjs, 3/3): the confluence is open-ended now —
   the pulse re-reads `homes/peers.json` every beat, and `grow.mjs` puts a whole new sovereign
   store on the map in one command (see "Growing a new store" above). Watched live: `sightings`

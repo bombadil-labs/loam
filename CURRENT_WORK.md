@@ -1,35 +1,32 @@
-# Current work — Sprint 1: the browser store (SPEC §15)
+# Current work — Sprint 2: continuity (SPEC §15 — the store walks out of the browser)
 
-_Cycle stage: 5 (review). Branch: `browser-store`._
+_Cycle stage: 1 (plan). Sprint 1 (the browser store, PR #51) is merged; its journal entry,
+village act (phase17 — the tab, 5/5), and SPEC §15 surface addendum ride the aftermath PR._
 
-**Success criteria.** A complete Loam boots in a page: `LocalStorageBackend` keeps the
-`StoreBackend` contract over an injectable `Storage`, `@bombadil/loam/browser` is a curated
-barrel shipped as a self-contained browser ESM bundle (zero `node:` specifiers) that BOOTS —
-genesis → register → claim → query — entirely inside the artifact.
+**Success criteria.** An export is a frozen federation offer — `{ deltas: WireDelta[] }`,
+byte-identical to a `GET /federate` body — and landing it is one command, one door, two
+sources: `loam pull <url|file>`, through `Gateway.federate`. Same operator → the law BINDS on
+arrival (the CLI store IS the browser store, operator marker identical by content address);
+foreign operator → the deltas cross, the law stays inert. Tombstones bar the door; re-pulling
+is idempotent.
 
 ## Checklist
 
-- [x] **Tests first** — contract harness (localStorage over `MemStorage` shim), driver-edge
-      suite (key layout, quota atomicity, seed key, foreign keys, corruption), browser bundle
-      boot suite, pack surface extended with `"./browser"`.
-- [x] **Implement** — `src/store/local-storage.ts`, `src/browser/index.ts`,
-      `scripts/build-bundles.mjs` (replaces build-client.mjs; per-entry args so parallel test
-      workers never race), `"./browser"` export, root barrel exports `LocalStorageBackend`.
-      **Learnings en route:** (a) `gateway/erase.ts` imported `node:crypto` — now
-      `@noble/hashes` (direct dep; hash parity verified), so the whole law bundles for the
-      page; (b) that file carried a RAW NUL BYTE in the `sealCommitment` template literal,
-      making it invisible to grep/ripgrep — now the `backslash-u0000` escape, same bytes hashed;
-      (c) graphql v17 carries a guarded `getBuiltinModule("node:diagnostics_channel")` probe —
-      a runtime feature-detection, not a specifier; the bundle test allows exactly that;
-      (d) the browser barrel must also carry `parseTerm` / `parsePolicy` / `signClaims` —
-      without them a page could hold a schema but never say one.
-- [x] **Green** — `npm run check`: 31 files, 391 tests, all counts read.
-- [ ] **PR** — branch `browser-store`, open PR, one careful review agent, resolve, merge.
-- [ ] **Journal** — append the record.
-- [ ] **Village** — a browser-store act in `_testing/` (boot a store on a shimmed localStorage,
-      federate it with the village no-HTTP via direct `federate(offeredDeltas())`), ledger updated.
-- [ ] **Re-plan** — reread SPEC §15/§16 against learnings; open sprint 2 (continuity / `loam pull`).
+- [ ] **Plan details** (this step):
+  - `exportOffer(gateway)` in the browser barrel — the frozen offer, byte-compatible with the
+    served `/federate` body (`{ deltas: WireDelta[] }` over `offeredDeltas()`).
+  - `loam pull <url|file>` in `src/cli/cli.ts` — boot/close discipline from `cmdRegister`;
+    a URL pulls via `pullFrom`; a file is a frozen offer landed via `Gateway.federate`.
+  - `test/cli/pull.test.ts` — same-operator law-binds (registration answers, grants gate);
+    foreign law-inert; tombstone refused; URL idempotency (second pull accepts 0); the
+    round-trip `_hex` match (browser store → export → CLI store answers hash-for-hash).
+- [ ] **Tests first** — write `test/cli/pull.test.ts` + an `exportOffer` byte-compat test.
+- [ ] **Implement** — barrel + CLI verb + help text (the poetry is first-class).
+- [ ] **Green** — `npm run check`, counts read.
+- [ ] **PR → review (one careful agent) → resolve → merge.**
+- [ ] **Journal.**
+- [ ] **Village** — the take-home act completes: a tab's store exported and replanted as a
+      served store, same operator, law binding on arrival (extends phase17 or a phase18).
+- [ ] **Re-plan** — then sprint 3 (the tutorial, SPEC §16).
 
-**Left off here:** review findings resolved (`:`-in-store-name guard; degradation-latch,
-erasure-end-to-end, and in-page-federation tests; exemption pinned to the exact specifier);
-pushing to PR #51, then merge → journal → village.
+**Left off here:** sprint 2 opened at stage 1; aftermath PR for sprint 1 in flight.
