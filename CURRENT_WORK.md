@@ -58,4 +58,29 @@ round trip.
   `NothingPublic`) — the barrel exports the Gateway whole, so they ride already; verify in 3a.
 - No jsdom anywhere: headless tests use the MemStorage shim; the page uses real localStorage.
 
-**Left off here:** sprint 3 opened; about to write gen-packets + lessons + arc test (3a).
+## Research notes (verified against rhizomatic 0.2 + the village, so 3a starts cold)
+
+- **Policy JSON grammar** (`parsePolicy`): pick `{"pick":{"order":{"byTimestamp":"desc"}}}`;
+  all `{"all":{"order":…}}`; merge `{"merge":"count"}` (fns incl. count/max/sum/and/or);
+  absentAs `{"absentAs":{"const":false,"then":{…}}}`; chain is an ORDER:
+  `{"order":{"chain":[{"byAuthorRank":["ed25519:…"]},{"byTimestamp":"desc"}]}}`.
+- **Body/term JSON**: the canonical gather is the village's
+  `group byTargetContext ∘ select hasPointer(targetEntity=root) ∘ mask drop` (see
+  `_testing/schemas/*.json`); expand is `{"op":"expand","role":{"exact":"friend"},
+  "schema":"Person","in":{…gather…}}` (`_testing/schemas/circle.json`).
+- **Authors are `ed25519:<hex>`** (not did:key). `assembleGenesis({operatorSeed,
+  registrations, grants})`; grants via `grantClaims(STORE_ENTITY, author, "write", op, ts)`.
+- **Multi-pointer watch (lesson 4)**: append a signed delta with several pointers directly
+  (signClaims) — no ClaimTemplates needed; "writes are claims" IS the lesson.
+- **Lesson 10**: `gateway.queryPublic` / `subscribePublic` confirmed on the Gateway class
+  (gateway.ts:1098/1111) — they ride the browser barrel via the class.
+- **Finale wrapper**: `{ version, operator, seed, deltas }` — `parseOffer` reads only
+  `.deltas`, so `loam pull` accepts it as-is (verified reading offer.ts).
+- **Packets determinism**: fixed seeds like the village's (`SEEDS` pattern), fixed
+  timestamps; `JSON.stringify` of `toWire` rows; regenerate must be byte-identical.
+- **arc.test.ts finale**: use `run()` from src/cli/cli.js in-process (pattern:
+  test/cli/pull.test.ts), tmp home, `init --seed` → `pull <file>` → `Gateway.open` over
+  `storePath(home)` → same query → `_hex` equality.
+
+**Left off here:** research done (grammar + surfaces verified). Next action: write
+`scripts/gen-packets.mjs`, then `site/lessons.mjs`, then `test/site/arc.test.ts` (3a).
