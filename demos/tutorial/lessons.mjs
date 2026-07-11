@@ -1,13 +1,19 @@
-// The tutorial's arc (SPEC §16), UI-free: eleven lessons as data and functions. The page and
-// the headless test drive EXACTLY this module — `perform(ctx)` does what the lesson teaches,
+// The tutorial's arc (SPEC §19), UI-free: the lessons as data and functions. The page and the
+// headless test drive EXACTLY this module — `perform(ctx)` does what the lesson teaches,
 // `check(ctx)` verifies it with a REAL READ of the learner's store (a query or a ground
 // predicate), never a quiz answer and never UI state. Progress is the store: re-run every
 // check from the ground on every boot and a green mark can never lie.
 //
+// §19's acceptance bars, normative: every check is EARNED (false before its lesson runs),
+// DURABLE (monotone in the ground — a later lesson can never un-green an earlier one), and
+// SIDE-EFFECT-FREE (safe to re-verify on every boot). The lesson TEACHES by need: you open
+// wanting to track your films, and the doctrine beats — data-first, a schema is a lens —
+// arrive as earned reveals at the moment only that truth explains what you see.
+//
 // The module takes the library as a parameter (`buildArc(loam)`): the page passes the shipped
 // browser bundle, the test passes src/browser/index.ts — same functions, same commit, no skew.
 
-// ---- the domain: the learner's media store ------------------------------------------------
+// ---- the domain: the learner's film log ----------------------------------------------------
 
 const GATHER = {
   op: "group",
@@ -18,42 +24,39 @@ const GATHER = {
     in: { op: "mask", policy: "drop", in: "input" },
   },
 };
+// Film-with-screenings (lesson 4): the gather, then EXPAND the `screening` role's targets
+// through the Screening lens — so a film's view nests its screenings, each a little view.
+const FILM_EXPAND_BODY = {
+  op: "expand",
+  role: { exact: "screening" },
+  schema: "Screening",
+  in: GATHER,
+};
 const PICK = { pick: { order: { byTimestamp: "desc" } } };
 const ALL = { all: { order: { byTimestamp: "asc" } } };
 
 export const FILM = "film:arrival";
 export const ALICE = "person:alice";
+const SCREENING_1 = "screening:1";
+const SCREENING_2 = "screening:2";
 
-// Film, as first registered (lesson 3). `tags` is deliberately absent — lesson 6 adds it.
-// (`watches` entries resolve to the whole claim record — guest and date together — because
-// a multi-pointer claim IS its record; `timesWatched` counts them.)
-export const FILM_POLICY_V1 = {
+// Film, first registered (lesson 2). tags is an `all` list; rating and title are `pick` latest.
+const FILM_POLICY_V1 = { props: { title: PICK, rating: PICK, tags: ALL }, default: PICK };
+// Lesson 4: the body becomes an expand and the policy gains `screenings`.
+const FILM_POLICY_V2 = { props: { ...FILM_POLICY_V1.props, screenings: ALL }, default: PICK };
+// Lesson 6: `guests` joins — a top-level field, so the evolution is visible and a subscription
+// opened against the pre-guests shape can never grow it.
+const FILM_POLICY_V3 = { props: { ...FILM_POLICY_V2.props, guests: ALL }, default: PICK };
+// Lesson 8: the title's order becomes a trust chain — the learner's word first, recency second.
+const filmPolicyTrusted = (author) => ({
+  ...FILM_POLICY_V3,
   props: {
-    title: PICK,
-    rating: PICK,
-    watches: ALL,
-    timesWatched: { merge: "count" },
-  },
-  default: PICK,
-};
-
-// Lesson 6: evolution is append — the same registration, one more prop.
-export const FILM_POLICY_V2 = {
-  ...FILM_POLICY_V1,
-  props: { ...FILM_POLICY_V1.props, tags: ALL },
-};
-
-// Lesson 7: the title's order becomes a trust chain — the learner's own word first, recency
-// second. Built per-learner because the rank names THEIR author.
-export const filmPolicyTrusted = (author) => ({
-  ...FILM_POLICY_V2,
-  props: {
-    ...FILM_POLICY_V2.props,
+    ...FILM_POLICY_V3.props,
     title: { pick: { order: { chain: [{ byAuthorRank: [author] }, { byTimestamp: "desc" }] } } },
   },
 });
-
-export const BOOK_POLICY = {
+const SCREENING_POLICY = { props: { date: PICK }, default: PICK };
+const BOOK_POLICY = {
   props: {
     title: PICK,
     pagesRead: { merge: "sum" },
@@ -61,11 +64,7 @@ export const BOOK_POLICY = {
   },
   default: PICK,
 };
-
-export const PERSON_POLICY = {
-  props: { name: PICK, follows: ALL, watchedWith: ALL, note: ALL },
-  default: PICK,
-};
+const PERSON_POLICY = { props: { name: PICK, friends: ALL, guestAt: ALL }, default: PICK };
 
 // ---- small delta grammar --------------------------------------------------------------------
 
@@ -80,8 +79,7 @@ const prim = (v) => ({ role: "value", target: { kind: "primitive", value: v } })
 export const SEED_KEY = "loam:tutorial:seed";
 
 // First visit mints a seed and boots from genesis; every later visit reopens the same store
-// from the same origin. The seed lives at its own key (SPEC §15) — it never rides an export
-// of deltas by accident.
+// from the same origin. The seed lives at its own key (SPEC §15) — it never rides an export.
 export async function bootTutorialStore(loam, storage) {
   let seed = storage.getItem(SEED_KEY);
   const backend = new loam.LocalStorageBackend("tutorial", storage);
@@ -98,11 +96,13 @@ export async function bootTutorialStore(loam, storage) {
 
 // ---- helpers the lessons share ----------------------------------------------------------------
 
-const say = (loam, ctx, pointers) =>
-  loam.signClaims({ timestamp: ctx.ts(), author: ctx.author, pointers }, ctx.seed);
+const say = (loam, ctx, pointers, seed) =>
+  loam.signClaims(
+    { timestamp: ctx.ts(), author: seed ? loam.authorForSeed(seed) : ctx.author, pointers },
+    seed ?? ctx.seed,
+  );
 
 const ground = (ctx) => ctx.gateway.offeredDeltas();
-
 const has = (ctx, pred) => ground(ctx).some(pred);
 
 const pointsAt = (id, context) => (d) =>
@@ -112,19 +112,27 @@ const pointsAt = (id, context) => (d) =>
       p.target.entity.id === id &&
       p.target.entity.context === context,
   );
+// A value claim by an author: a pointer at <id>#<context> plus a primitive value.
+const valueAt = (id, context, value) => (d) =>
+  d.claims.pointers.some(
+    (p) =>
+      p.target.kind === "entity" &&
+      p.target.entity.id === id &&
+      p.target.entity.context === context,
+  ) && d.claims.pointers.some((p) => p.target.kind === "primitive" && p.target.value === value);
 
 async function view(ctx, query) {
   try {
     const res = await ctx.gateway.query(query);
-    return res.data ?? {};
+    return res.errors === undefined ? (res.data ?? {}) : { __errors: res.errors };
   } catch {
     return {}; // no surface yet — every view-based check is simply not-yet-green
   }
 }
 
-const registerFilm = (loam, ctx, policy) =>
+const registerFilm = (loam, ctx, policy, body = GATHER) =>
   ctx.gateway.publishRegistration(
-    { name: "Film", alg: 1, body: loam.parseTerm(GATHER) },
+    { name: "Film", alg: 1, body: loam.parseTerm(body) },
     loam.parsePolicy(policy),
     [FILM],
   );
@@ -133,16 +141,16 @@ const registerFilm = (loam, ctx, policy) =>
 
 export function buildArc(loam) {
   return [
+    // ============================ ACT I — a store of your own ============================
     {
       id: 1,
       title: "You are the operator",
-      copy: `This page just made you a database. Not an account on someone's database — a whole
-one, running here in this tab, persisted in this browser's localStorage. When it was born, a
-cryptographic key was minted for you (look in the Ground pane: the very first record names its
-operator — that's you). Nothing was sent anywhere. There is no server. Close the tab and come
-back: the store reopens from where it slept, and re-proves everything you've done from its own
-records. That key is the only authority this store will ever answer to, and it lives with you.`,
-      // Boot already performed this; the check reads the constitution off the ground.
+      copy: `This page just made you a database — a whole one, running in this tab, persisted in
+this browser and answerable to nobody but you. When it was born it minted you a cryptographic
+key; look in the Ground pane, at the record badged "constitution" — that record names your key
+as this store's operator, and it is the only authority this store will ever bow to. Nothing was
+sent anywhere. There is no server. Everything you do from here lands as a signed record in that
+same ground, and the store re-proves it all from those records every time it wakes.`,
       perform: async () => {},
       check: async (ctx) =>
         ctx.storage.getItem(SEED_KEY) !== null &&
@@ -154,39 +162,14 @@ records. That key is the only authority this store will ever answer to, and it l
 
     {
       id: 2,
-      title: "A fact needs no permission slip",
-      copy: `Say something true: you watched Arrival. Press the button (or, if you speak
-JavaScript, open your browser's developer console — this page puts the store itself at
-window.store, and everything the buttons do you can do by hand) and watch the Ground pane —
-one new record. It has no table, no schema, no shape
-anyone approved. It is a CLAIM: a timestamp, your authorship, and pointers — "film:arrival's
-title is Arrival" — signed by your key and named by the hash of its own content. Try the
-inspector's one-byte edit: change anything and the id shatters. That id IS the fact's identity;
-a fact cannot be quietly rewritten, only newly said. Notice the View pane is still empty — the
-store holds your fact but no lens has been ground to look at it. That's next.`,
-      perform: async (ctx) => {
-        await ctx.gateway.append([
-          say(loam, ctx, [entity("subject", FILM, "title"), prim("Arrival")]),
-        ]);
-      },
-      // Durable predicate only: the fact is in the ground, said by you. (The "no surface
-      // yet" beat is real, but it is the MOMENT between lessons 2 and 3 — the arc test pins
-      // it there; a revisit after lesson 3 must not un-green this lesson.)
-      check: async (ctx) =>
-        has(ctx, (d) => d.claims.author === ctx.author && pointsAt(FILM, "title")(d)),
-    },
-
-    {
-      id: 3,
-      title: "A schema is a lens, not a mold",
-      copy: `Now register Film: which properties matter, and how disagreement resolves (for
-title: "pick the latest word"). The instant it lands, look at the View pane — your orphaned
-fact lit up as { title: "Arrival" }. Nothing migrated. No table was created and no row moved
-into it. The schema is itself just more records in your store (check the Ground pane), and the
-view is computed by READING: gather everything that points at the film, then resolve each
-property by its declared policy. Data first, shape later — and the shape can always change its
-mind, because it never owned the data to begin with. Register Book too while you're here;
-we'll need it.`,
+      title: "Track your films",
+      copy: `Say you want to track the films you watch. You tell the store the SHAPE of a film —
+a title, a rating, some tags — and how to settle disagreement (for the title: keep the latest
+word). That's a schema and a policy, and registering them is the whole setup. The moment it
+lands, two things happen on the right: the GraphQL pane comes alive (open it and type "film {"
+— it now offers you the fields you just declared), and the Schemas view gains a Film entry.
+You never described a film to anybody; you described a LENS, and the store will answer through
+it. Register Book too — we'll want it later.`,
       perform: async (ctx) => {
         await registerFilm(loam, ctx, FILM_POLICY_V1);
         await ctx.gateway.publishRegistration(
@@ -195,164 +178,229 @@ we'll need it.`,
           ["book:solaris"],
         );
       },
-      check: async (ctx) => {
-        const v = await view(ctx, `{ film(entity: "${FILM}") { title } }`);
-        return v.film?.title === "Arrival";
+      check: async (ctx) =>
+        ctx.gateway.registrationVersions().some((v) => v.schema.name === "Film") &&
+        (await view(ctx, `{ film(entity: "${FILM}") { title } }`)).__errors === undefined,
+    },
+
+    {
+      id: 3,
+      title: "Write through the door",
+      copy: `Now fill it in: set the title to "Arrival", give it a 9, add a tag. These go through
+the GraphQL door — a mutation — and here is the thing worth slowing down for. Watch all three
+panes at once. The View updates. The Ground grows a new record, badged "fact". And that record
+is a signed CLAIM — the mutation didn't change a cell in a table, it COMPILED to a claim and
+signed it with your key. The claim is what's real; the mutation was just a convenient way to
+say it. (Expand the new Ground record to see exactly what got signed.)`,
+      perform: async (ctx) => {
+        await ctx.gateway.query(`mutation { film(entity: "${FILM}", title: "Arrival") { title } }`);
+        await ctx.gateway.query(`mutation { film(entity: "${FILM}", rating: 9) { rating } }`);
+        await ctx.gateway.query(
+          `mutation { film(entity: "${FILM}", tags: "first-contact") { tags } }`,
+        );
       },
+      // Durable: the door-written facts are in the ground forever (later lessons retract the
+      // rating and contest the title, but the ORIGINAL claims never leave the ground).
+      check: async (ctx) =>
+        has(ctx, (d) => d.claims.author === ctx.author && valueAt(FILM, "title", "Arrival")(d)) &&
+        has(ctx, (d) => d.claims.author === ctx.author && valueAt(FILM, "rating", 9)(d)),
     },
 
     {
       id: 4,
-      title: "One claim, many filings",
-      copy: `Log a watch: last night, with Alice. In a table-shaped world that's an insert
-here, an update there, a join table somewhere else — three writes that can drift. Here it is
-ONE claim with several pointers: it files into the film's watch history, bumps the film's
-watch count, and will land on Alice's card the day she has one — atomically, because it is
-one record and the "filings" are just the places a reader's lens will find it. Check the View:
-timesWatched
-became 1, and the watch entry itself carries its whole story — the date and the guest,
-together, because the entry IS the claim. Alice, though, is still just an id —
-"person:alice" — a name your store has heard but knows nothing about. Remember that; it
-becomes interesting in lesson 9.`,
+      title: "Screenings are entities too",
+      copy: `A film isn't just a title — it has screenings, and a screening is a thing in its own
+right: a date, later some guests. So give it its own lens (Screening), and teach Film to gather
+its screenings and show each one nested inside the film's view. That "show the nested thing" is
+a new move — an EXPAND — and Film's shape changes to use it, live, with no migration. Log last
+night's screening. Look at the Film view now: its screenings list holds a little Screening view,
+date and all. Two lenses, one film, composing.`,
       perform: async (ctx) => {
+        await ctx.gateway.publishRegistration(
+          { name: "Screening", alg: 1, body: loam.parseTerm(GATHER) },
+          loam.parsePolicy(SCREENING_POLICY),
+          [SCREENING_1, SCREENING_2],
+        );
+        await registerFilm(loam, ctx, FILM_POLICY_V2, FILM_EXPAND_BODY);
+        // The screening: it files at the film (so the film gathers it) and names screening:1
+        // via the `screening` role (so the expand resolves it), and dates the screening itself.
         await ctx.gateway.append([
           say(loam, ctx, [
-            entity("watch", FILM, "watches"),
-            entity("watch", FILM, "timesWatched"),
-            entity("guest", ALICE, "watchedWith"),
-            prim(20260710),
+            entity("subject", FILM, "screenings"),
+            entity("screening", SCREENING_1, "film"),
           ]),
+          say(loam, ctx, [entity("subject", SCREENING_1, "date"), prim(20260710)]),
         ]);
       },
       check: async (ctx) => {
-        const v = await view(ctx, `{ film(entity: "${FILM}") { timesWatched watches } }`);
-        const entry = Array.isArray(v.film?.watches)
-          ? v.film.watches.find((w) => w?.guest === ALICE && w?.value === 20260710)
-          : undefined;
-        return v.film?.timesWatched >= 1 && entry !== undefined;
+        const v = await view(ctx, `{ film(entity: "${FILM}") { screenings } }`);
+        return Array.isArray(v.film?.screenings) && v.film.screenings.length >= 1;
       },
     },
 
+    // ============================ ACT II — the ground truth ============================
     {
       id: 5,
-      title: "Taking it back — and what cannot be set",
-      copy: `Rate the film a 9. Now change your mind — not to another number: take it back
-entirely. You cannot delete the record (its id is a hash; the past is content-addressed), but
-you can NEGATE your own word, and the view resolves your retraction to ABSENCE: the rating key
-simply empties. Both records — the rating and the taking-back — sit in the Ground pane,
-because a store that forgets what was retracted couldn't prove the retraction happened. Now
-the book you registered: log two reading sessions, 120 pages and 90. pagesRead reads 210 —
-not the latest entry, their SUM, because that property's policy is a sum. And "finished",
-which you never said anything about, reads false rather than missing: its policy answers
-absence with a default. Same store, three flavors of "what does silence mean" — a retracted
-rating is absent, an unanswered question has a default, and an aggregate? Watch what happens
-when you try to SET timesWatched to 100: the count ticks up by exactly one. Your "set" was
-just one more claim, dutifully counted. An aggregate is an ANSWER, not a field — there is no
-lever behind it to grab, only records to add or take back.`,
+      title: "The secret: it was claims all along",
+      copy: `Here's what those mutations were hiding. You never needed the door. Write the next
+screening BY HAND — a raw signed claim, straight to the ground (the ✍️ pen, not the 🚪 door) —
+and make it say something no schema of yours knows how to hear: that Alice was your guest. The
+claim lands; it's real; the Ground shows it. But look at the Film view: Alice isn't there. A
+lens can only show what it was told to gather, and yours was never told about guests. The fact
+is in the world; your lens is just looking the other way. (Try the inspector: change one byte
+of any record and its id shatters — the id IS the content, so nothing can be quietly rewritten,
+only newly said.)`,
       perform: async (ctx) => {
-        const rating = say(loam, ctx, [entity("subject", FILM, "rating"), prim(9)]);
-        await ctx.gateway.append([rating]);
         await ctx.gateway.append([
-          loam.signClaims(
-            loam.makeNegationClaims(ctx.author, ctx.ts(), rating.id, "changed my mind"),
-            ctx.seed,
-          ),
+          // the screening itself (nested via the film's expand)
+          say(loam, ctx, [
+            entity("subject", FILM, "screenings"),
+            entity("screening", SCREENING_2, "film"),
+          ]),
+          say(loam, ctx, [entity("subject", SCREENING_2, "date"), prim(20260711)]),
+          // and a SEPARATE claim naming Alice a guest of the film: its root pointer files the
+          // film under `guests` (so a `guests` lens would gather it) and names Alice as the
+          // entry. No lens gathers `guests` yet, so she is real but unseen.
+          say(loam, ctx, [entity("subject", FILM, "guests"), entity("guest", ALICE, "at")]),
         ]);
-        // Two reading sessions: the sum is the answer, and `finished` is never spoken.
-        await ctx.gateway.append([
-          say(loam, ctx, [entity("subject", "book:solaris", "pagesRead"), prim(120)]),
-          say(loam, ctx, [entity("subject", "book:solaris", "pagesRead"), prim(90)]),
-        ]);
-        // The set-that-isn't: one more claim in the counted bucket, and nothing else.
-        await ctx.gateway.query(
-          `mutation { film(entity: "${FILM}", timesWatched: 100) { timesWatched } }`,
-        );
       },
-      check: async (ctx) => {
-        const v = await view(ctx, `{ film(entity: "${FILM}") { rating timesWatched } }`);
-        if (v.film?.rating != null) return false; // retraction resolves to absence (GraphQL: null)
-        // the "set" did not take: the count counts records, it was never a settable number
-        if (v.film?.timesWatched === 100 || !(v.film?.timesWatched >= 2)) return false;
-        // the taking-back is itself on record, and PRECISELY: a negation by you, of YOUR
-        // rating delta — not just any delta-pointing delta
-        const rating = ground(ctx).find(
-          (d) => d.claims.author === ctx.author && pointsAt(FILM, "rating")(d),
-        );
-        const retracted =
-          rating !== undefined &&
-          has(
-            ctx,
-            (d) =>
-              d.claims.author === ctx.author &&
-              d.claims.pointers.some(
-                (p) => p.target.kind === "delta" && p.target.deltaRef.delta === rating.id,
-              ),
-          );
-        // and the book: aggregates and defaults answer from the same ground
-        const b = await view(ctx, `{ book(entity: "book:solaris") { pagesRead finished } }`);
-        return retracted && b.book?.pagesRead === 210 && b.book?.finished === false;
-      },
+      // Durable: the pen-written guest claim naming Alice is in the ground forever. (That the
+      // OLD lens drops her is the between-lessons truth the arc test pins; it stops being true
+      // the moment lesson 6 evolves the lens, so it cannot be a durable check here.)
+      check: async (ctx) =>
+        has(
+          ctx,
+          (d) =>
+            d.claims.author === ctx.author &&
+            pointsAt(FILM, "guests")(d) &&
+            pointsAt(ALICE, "at")(d),
+        ),
     },
 
     {
       id: 6,
-      title: "Evolution is an append",
-      copy: `Your store is live — the View pane is a SUBSCRIPTION, not a page you refresh. Now
-add a property that didn't exist a minute ago: tags. Registering the schema again with one
-more property is just another record landing in the store (evolution is an append, like
-everything else), and the running subscription never disconnects — the view simply grows a
-key. Tag the film "first-contact". No migration window, no version negotiation, no downtime:
-the old facts answer the new question the moment it's asked.`,
+      title: "Evolve the lens, keep every past",
+      copy: `So teach the lens to see guests. Add a "guests" field to Film and re-register — an
+append, like everything else. Ask again and there's Alice. But notice what did NOT happen: any
+view you were already subscribed to kept its old shape. A subscription is a standing question
+against the lens as it was when you asked; it can't sprout a field you never selected. Nothing
+you were watching broke — you just ask anew to see more. And to prove nothing was overwritten,
+re-register the OLD policy under a new name, FilmClassic: now two lenses answer the same ground
+side by side, the new one showing Alice, the old one never having heard of her. The past isn't
+migrated away. It's still right there, still answerable.`,
       perform: async (ctx) => {
-        await registerFilm(loam, ctx, FILM_POLICY_V2);
-        await ctx.gateway.append([
-          say(loam, ctx, [entity("subject", FILM, "tags"), prim("first-contact")]),
-        ]);
+        await registerFilm(loam, ctx, FILM_POLICY_V3, FILM_EXPAND_BODY);
+        await ctx.gateway.publishRegistration(
+          { name: "FilmClassic", alg: 1, body: loam.parseTerm(FILM_EXPAND_BODY) },
+          loam.parsePolicy(FILM_POLICY_V2),
+          [FILM],
+        );
       },
       check: async (ctx) => {
-        const v = await view(ctx, `{ film(entity: "${FILM}") { title tags } }`);
-        return Array.isArray(v.film?.tags) && v.film.tags.includes("first-contact");
+        const v = await view(ctx, `{ film(entity: "${FILM}") { guests } }`);
+        const hasAlice = Array.isArray(v.film?.guests) && v.film.guests.includes(ALICE);
+        const classic = ctx.gateway
+          .registrationVersions()
+          .some((r) => r.schema.name === "FilmClassic");
+        return hasAlice && classic;
       },
     },
 
     {
       id: 7,
+      title: "Taking it back, and what silence means",
+      copy: `Change your mind about that 9. You can't unsay a record — its id is a hash, the past
+is fixed — but you can NEGATE your own word, and the view resolves your retraction to absence:
+the rating key just empties. Both records stay in the Ground, because a store that forgot what
+was retracted couldn't prove the retraction happened. Now the book. Log two reading sessions,
+120 pages and 90: pagesRead reads 210 — their SUM, because that field's policy sums. And
+"finished", which you never set, reads false rather than missing, because its policy answers
+silence with a default. Three flavors of silence — a retracted value is absent, an unasked
+question has a default, and an aggregate is an ANSWER, not a settable field: try to set
+timesRead and watch the number ignore you, because there's nothing behind it to grab, only
+records to add or take back.`,
+      perform: async (ctx) => {
+        // Retract the rating written in lesson 3 by negating THAT record (a negation names an
+        // id; a fresh identical rating would be a different id). It may already be retracted on
+        // a re-run — negation is idempotent by content address, so this is safe to repeat.
+        const first = ground(ctx).find(
+          (d) => d.claims.author === ctx.author && valueAt(FILM, "rating", 9)(d),
+        );
+        if (first !== undefined) {
+          await ctx.gateway.append([
+            loam.signClaims(
+              loam.makeNegationClaims(ctx.author, ctx.ts(), first.id, "changed my mind"),
+              ctx.seed,
+            ),
+          ]);
+        }
+        await ctx.gateway.append([
+          say(loam, ctx, [entity("subject", "book:solaris", "pagesRead"), prim(120)]),
+          say(loam, ctx, [entity("subject", "book:solaris", "pagesRead"), prim(90)]),
+        ]);
+      },
+      check: async (ctx) => {
+        // the retraction is on record: a negation by the learner of a rating fact
+        const retracted = has(
+          ctx,
+          (d) =>
+            d.claims.author === ctx.author &&
+            d.claims.pointers.some((p) => p.target.kind === "delta"),
+        );
+        const b = await view(ctx, `{ book(entity: "book:solaris") { pagesRead finished } }`);
+        return retracted && b.book?.pagesRead === 210 && b.book?.finished === false;
+      },
+    },
+
+    // ============================ ACT III — other people ============================
+    {
+      id: 8,
       title: "The adversary, and whose word wins",
-      copy: `Time for trouble. We bundled a stranger's claim with this tutorial — press the
-button and it arrives like any federated record would: "film:arrival's title is ARRIVAL 2:
-TOTALLY REAL SEQUEL", signed with the stranger's own real key and stamped with a timestamp
-from the far future. Watch it land in the Ground pane, authored by someone who is not you. Your title flips — because
-your policy said "pick the latest word", and the stranger's word is latest. Here is the
-important part: NOTHING was hacked. Anyone may write; the signature is honest; your READING
-policy was simply naive. So change the reader, not the writer: re-register title to trust YOUR
-word first, recency second. The title comes home to "Arrival" — while the forged claim still
-sits in the ground, plainly visible, forever refusing to matter. Truth, here, is a policy you
-choose and can always revisit.`,
+      copy: `A stranger's claim just arrived — we bundled one so you can meet it. Press the
+button and watch it land in the Ground, authored by someone who is NOT you: "the title of
+Arrival is ARRIVAL 2: TOTALLY REAL SEQUEL", signed with the stranger's own real key, stamped
+far in the future. Let it in and your title flips — because your policy said "keep the latest
+word", and the stranger's word is latest. Nothing was hacked; anyone may write, and your READER
+was simply naive. So change the reader, not the writer: re-register the title to trust YOUR word
+first, recency second. Home it comes. And if you'd rather SEE the disagreement than settle it,
+a second lens with a "conflicts" policy shows both claims at once — the forgery preserved,
+visible, and powerless. Truth here is a policy you choose, and can always revisit.`,
       perform: async (ctx) => {
         await ctx.gateway.federate(ctx.packets.adversary.map((w) => loam.fromWire(w)));
-        await registerFilm(loam, ctx, filmPolicyTrusted(ctx.author));
+        await registerFilm(loam, ctx, filmPolicyTrusted(ctx.author), FILM_EXPAND_BODY);
+        await ctx.gateway.publishRegistration(
+          { name: "FilmDispute", alg: 1, body: loam.parseTerm(GATHER) },
+          loam.parsePolicy({
+            props: { title: { conflicts: { order: { byTimestamp: "desc" } } } },
+            default: PICK,
+          }),
+          [FILM],
+        );
       },
       check: async (ctx) => {
         const v = await view(ctx, `{ film(entity: "${FILM}") { title } }`);
-        const forgedStillInGround = has(
+        const dispute = await view(ctx, `{ filmDispute(entity: "${FILM}") { title } }`);
+        const forgedInGround = has(
           ctx,
           (d) => d.claims.author !== ctx.author && pointsAt(FILM, "title")(d),
         );
-        return v.film?.title === "Arrival" && forgedStillInGround;
+        const disputed =
+          Array.isArray(dispute.filmDispute?.title) && dispute.filmDispute.title.length >= 2;
+        return v.film?.title === "Arrival" && forgedInGround && disputed;
       },
     },
 
     {
-      id: 8,
+      id: 9,
       title: "The right to be forgotten, honestly",
-      copy: `You once filed a private note about Alice ("cried twice — don't tell her"). She
-asks you to forget it. A retraction isn't enough — retraction resolves to absence but the
-bytes remain. ERASURE is the loud exception to a store that otherwise never forgets: as the
-operator you (and only you) order the record removed, the bytes physically leave this
-browser's storage (watch the Ground pane shrink), and a signed TOMBSTONE remains — who asked,
-when, which id — never what it said. The tombstone is also a standing order: if the erased
-record's exact bytes ever try to come home — from a backup, from a peer who copied them — the
-door refuses them by id. The store remembers THAT it forgot, and holds the door.`,
+      copy: `You once jotted a private note about Alice, straight to the ground. She asks you to
+forget it. A retraction won't do — that resolves to absence but the bytes remain. ERASURE is
+the loud exception to a store that otherwise never forgets: as the operator, you (and only you)
+order the record removed, the bytes physically leave this browser's storage — watch the Ground
+shrink — and a signed TOMBSTONE stays behind: who asked, when, which id, never what it said. The
+tombstone is also a standing order: if those exact bytes ever try to come home, from a backup or
+a peer who copied them, the door refuses them by id. The store remembers THAT it forgot, and
+holds the door.`,
       perform: async (ctx) => {
         const note = say(loam, ctx, [
           entity("about", ALICE, "note"),
@@ -364,25 +412,25 @@ door refuses them by id. The store remembers THAT it forgot, and holds the door.
       check: async (ctx) => {
         const noteGone = !has(
           ctx,
-          (d) => pointsAt(ALICE, "note")(d) && d.claims.author === ctx.author,
+          (d) => d.claims.author === ctx.author && pointsAt(ALICE, "note")(d),
         );
         const tombstones = loam.readTombstones(ctx.gateway.reactor, ctx.author);
         return noteGone && tombstones.size >= 1;
       },
     },
 
+    // ============================ ACT IV — the wider world ============================
     {
-      id: 9,
+      id: 10,
       title: "Alice was just an id",
-      copy: `All this time your store has been saying "person:alice" the way you'd mention a
-stranger by name — confidently, knowing nothing. Somewhere else there is a store that DOES
-know her: the circle, kept by its own operator with its own key (we bundled it; it's a
-complete store, exported). Pull it. The circle's records — names, friendships — flow into
-your ground and Alice lights up: a name, friends, and there on her card, the watch you logged
-in lesson 4. Now the fine print, which is the whole point: the circle's SCHEMAS arrived too,
-and they do nothing. Foreign law is inert — its registrations reshape nothing here, because
-they aren't signed by YOUR operator key. You registered your own Person lens; you decided
-what to believe about the data. Data federates; authority never does.`,
+      copy: `All this time your store has said "person:alice" the way you'd name a stranger —
+confidently, knowing nothing. Somewhere there's a store that DOES know her: the circle, kept by
+its own operator with its own key. We bundled its whole export. Pull it. Names and friendships
+flow into your ground and Alice lights up — a name, some friends, and there on her card, the
+screening you logged with her. Now the fine print, which is the entire point: the circle's own
+SCHEMAS arrived too, and they do nothing here. Foreign law is inert — its registrations reshape
+nothing, because they aren't signed by YOUR key. You register your own Person lens; you decide
+what to believe. Data federates; authority never does.`,
       perform: async (ctx) => {
         await ctx.gateway.federate(ctx.packets.circle.map((w) => loam.fromWire(w)));
         await ctx.gateway.publishRegistration(
@@ -392,10 +440,8 @@ what to believe about the data. Data federates; authority never does.`,
         );
       },
       check: async (ctx) => {
-        const v = await view(ctx, `{ person(entity: "${ALICE}") { name follows watchedWith } }`);
-        // "Arrived AND stayed inert" — both halves, or the claim is untested: the circle's
-        // Friends registration delta IS in the ground (a foreign author's law arrived)...
-        const foreignLawArrived = has(
+        const v = await view(ctx, `{ person(entity: "${ALICE}") { name } }`);
+        const foreignArrived = has(
           ctx,
           (d) =>
             d.claims.author !== ctx.author &&
@@ -403,30 +449,25 @@ what to believe about the data. Data federates; authority never does.`,
               (p) => p.target.kind === "entity" && p.target.entity.id === "schema:Friends",
             ),
         );
-        // ...and it binds nothing: the lawful registrations under YOUR operator don't know it.
-        const foreignLawInert = !loam
+        const foreignInert = !loam
           .readRegistrations(ctx.gateway.reactor, ctx.author)
           .some((r) => r.schema.name === "Friends");
-        return (
-          v.person?.name === "Alice Song" &&
-          Array.isArray(v.person?.watchedWith) &&
-          v.person.watchedWith.length >= 1 &&
-          foreignLawArrived &&
-          foreignLawInert
-        );
+        return v.person?.name === "Alice Song" && foreignArrived && foreignInert;
       },
     },
 
+    // ============================ ACT V — the door out ============================
     {
-      id: 10,
+      id: 11,
       title: "The stranger at the window",
-      copy: `Everything so far went through YOUR door, signed or refused by standing. But a
-reader with no key at all — a stranger, a search engine, a friend you sent a link — has been
-knocking this whole time and getting the same answer: nothing here is public. Declare ONE lens
-public — Film — with a single signed record (openness is data too, in the ground like
-everything else). The stranger instantly reads your films... and only that. Ask for Person as
-the stranger and the window shows nothing: not "forbidden", just a world in which Person does
-not exist. The public surface is a smaller world, not a guarded copy of the big one.`,
+      copy: `Everything so far went through YOUR door, signed or refused by standing. But a reader
+with no key at all — a stranger, a search engine, a friend you sent a link — has been knocking
+this whole time and getting the same answer: nothing here is public. Declare ONE lens public —
+Film — with a single signed record (openness is data too). The stranger instantly reads your
+films, and only that. Toggle "ask as the stranger" in the GraphQL pane: the hints shrink to the
+smaller world you declared. Ask for Person as the stranger and the window shows nothing — not
+"forbidden", just a world in which Person does not exist. The public surface is a smaller world,
+not a guarded copy of the big one.`,
       perform: async (ctx) => {
         await ctx.gateway.append([
           loam.signClaims(loam.publicClaims(["Film"], ctx.author, ctx.ts()), ctx.seed),
@@ -436,37 +477,33 @@ not exist. The public surface is a smaller world, not a guarded copy of the big 
         try {
           const open = await ctx.gateway.queryPublic(`{ film(entity: "${FILM}") { title } }`);
           if (open.data?.film?.title !== "Arrival") return false;
-          const window = await ctx.gateway.queryPublic(`{ person(entity: "${ALICE}") { name } }`);
-          return Array.isArray(window.errors) && window.errors.length > 0; // a smaller world
+          const shut = await ctx.gateway.queryPublic(`{ person(entity: "${ALICE}") { name } }`);
+          return Array.isArray(shut.errors) && shut.errors.length > 0;
         } catch {
-          return false; // NothingPublic — the window is still dark
+          return false;
         }
       },
     },
 
     {
-      id: 11,
+      id: 12,
       title: "The same store, now on your machine",
-      copy: `The store in this tab is real, but a browser is a small home: it cannot listen for
-peers, and "clear site data" is an extinction event. So walk it out. Export writes one file —
-your deltas, ids and signatures intact, plus (for this tutorial only) your operator seed;
-real data keeps its seed in your own custody, always. Then, in a terminal:
+      copy: `This store is real, but a browser is a small home: it can't listen for peers, and
+"clear site data" is an extinction event. So walk it out. Export writes one file — your records,
+ids and signatures intact, plus (for this tutorial only) your operator seed; real data keeps its
+seed in your own custody, always. Then, in a terminal:
 
     npm i -g @bombadil/loam
     loam init --seed <the seed from the file>
     loam pull <the file>
     loam serve --http --token anything
 
-Ask the served store the same question this page asks, and compare the _hex — the content
-address of the whole answer. It matches, hash for hash. Not a copy of your store, not an
-import that resembles it: THE SAME STORE, proven by content address — because your laptop's
-genesis, born from the same seed, is byte-for-byte the delta this tab was born from. Nothing
-was re-signed. Nothing was lost. It is yours, durable, and ready to federate.`,
-      perform: async () => {}, // the export is read-only; buildExport below is the action
-      // The finale's green is EARNED OUTSIDE THE TAB: when the page fetches your localhost
-      // store and the _hex matches, it records the homecoming as one more signed claim —
-      // and this check reads that record from the ground, like every other check. (Appending
-      // it by hand in the console is the curriculum entered by a side door; congratulations.)
+Ask the served store the same question this page asks and compare the _hex — the content address
+of the whole answer. It matches, hash for hash. Not a copy that resembles your store: THE SAME
+STORE, proven by content address, because your laptop's genesis, born from the same seed, is
+byte-for-byte the record this tab was born from. Nothing re-signed, nothing lost. It is yours,
+durable, and ready to federate.`,
+      perform: async () => {},
       check: async (ctx) =>
         has(
           ctx,
@@ -476,22 +513,16 @@ was re-signed. Nothing was lost. It is yours, durable, and ready to federate.`,
   ];
 }
 
-// The finale's file: a frozen federation offer plus the identity that makes it THE SAME
-// store on arrival. The seed rides ON PURPOSE — disposable tutorial data (SPEC §16); the
-// page says so in the copy above.
+// The finale's file: a frozen federation offer plus the identity that makes it THE SAME store on
+// arrival. The seed rides ON PURPOSE — disposable tutorial data (SPEC §16); the copy says so.
 export function buildExport(loam, ctx) {
   const offer = JSON.parse(loam.exportOffer(ctx.gateway));
-  return JSON.stringify({
-    version: 1,
-    operator: ctx.author,
-    seed: ctx.seed,
-    deltas: offer.deltas,
-  });
+  return JSON.stringify({ version: 1, operator: ctx.author, seed: ctx.seed, deltas: offer.deltas });
 }
 
 // The page calls this after the localhost fetch matches _hex for _hex: the homecoming becomes
-// one more signed claim in the learner's store, and lesson 11's check reads it back — because
-// progress is the store, all the way to the end.
+// one more signed claim, and lesson 12's check reads it back — progress is the store, all the
+// way to the end.
 export async function recordHomecoming(loam, ctx, matchedHex) {
   await ctx.gateway.append([
     say(loam, ctx, [

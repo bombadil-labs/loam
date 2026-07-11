@@ -28,11 +28,6 @@ export interface Lesson {
 export declare const FILM: string;
 export declare const ALICE: string;
 export declare const SEED_KEY: string;
-export declare const FILM_POLICY_V1: unknown;
-export declare const FILM_POLICY_V2: unknown;
-export declare const BOOK_POLICY: unknown;
-export declare const PERSON_POLICY: unknown;
-export declare function filmPolicyTrusted(author: string): unknown;
 
 export declare function bootTutorialStore(
   loam: unknown,
