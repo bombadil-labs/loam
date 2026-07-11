@@ -8,7 +8,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import {
   claimsToJson,
   makeDelta,
@@ -24,6 +24,13 @@ import { MirrorBackend } from "../../src/store/mirror.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
 import { MemStorage } from "./mem-storage.js";
 import { FERN, GARDENER, GARDENER_SEED, SURVEYOR_SEED, observed } from "../spike/garden.js";
+
+// The durable harnesses do real filesystem and sqlite work — one file per delta for the
+// archive — and under a loaded CI runner (a build plus a dozen parallel workers) a single
+// batch can blow vitest's 5s default. The same generous hang-guard the other heavy suites
+// carry (see pack.test.ts, which learned this first): it only ever matters when something
+// is genuinely stuck.
+vi.setConfig({ testTimeout: 15000 });
 
 const signed1 = observed(FERN, "height", 30, 1000, GARDENER_SEED);
 const signed2 = observed(FERN, "height", 34, 2000, SURVEYOR_SEED);
