@@ -2,13 +2,23 @@
 
 Loam is a general database built on [rhizomatic](https://github.com/bombadil-labs/rhizomatic); the
 design is in **[SPEC.md](SPEC.md)** and the usage in **[README.md](README.md)** — read them before
-writing code. This file is the **process**. **[CURRENT_WORK.md](CURRENT_WORK.md)** is the live
-checklist for the work in progress. **[JOURNAL.md](JOURNAL.md)** is the append-only record.
+writing code. **Get up to speed on what Loam is and how it works from SPEC.md; take the next thing
+to build from [TODO.md](TODO.md)**, never from SPEC.md (SPEC.md is history, not a plan). This file is
+the **process**. `TODO.md` is the backlog of unbuilt spec steps;
+**[CURRENT_WORK.md](CURRENT_WORK.md)** is the live checklist for the one step in flight;
+**[JOURNAL.md](JOURNAL.md)** is the append-only record.
+
+**SPEC.md is the record of what IS.** It is only ever grown by a **landing PR**, and every section
+carries a `**Provenance.**` footer linking the PR(s) that landed it and naming the implementation —
+one long reliable history with links to the PRs that go deeper. Speculative, unbuilt, or partially
+designed work does **not** live in SPEC.md; it lives in `TODO.md` until it lands, and the landing PR
+**migrates it into SPEC.md** (with its Provenance footer) in the same change.
 
 The original v1 plan (build steps 0–9) is **complete** — all merged; the journal is its record.
 This file no longer carries a plan; it carries the loop any future work runs. **To resume:** read
 `CURRENT_WORK.md`. If work is in progress, continue from the "left off here" note. If it is empty,
-there is no work queued — ask Myk what to build next, then open it at cycle stage 1.
+read `TODO.md` for the queued steps; if that too is empty, ask Myk what to build next. Open the
+chosen step at cycle stage 1.
 
 ## Hard limits
 
@@ -20,8 +30,9 @@ there is no work queued — ask Myk what to build next, then open it at cycle st
 For the current step, run this cycle. It may span several loop cycles; **before ending any cycle,
 update `CURRENT_WORK.md`** so the next run resumes exactly here.
 
-1. **Plan.** Replace `CURRENT_WORK.md` with a checklist for this step: its success criteria, then the
-   concrete sub-tasks. This is the contract for the step.
+1. **Plan.** Pick the step (from `TODO.md`, or as Myk directs). Replace `CURRENT_WORK.md` with a
+   checklist for this step: its success criteria, then the concrete sub-tasks. This is the contract
+   for the step.
 2. **Tests first.** Write clean, honest tests that capture everything in the plan — the behavior the
    step must exhibit, asserted against real outcomes, not against the shape of the implementation. No
    reward-hacking: a test that can pass without the desired behavior is a bug.
@@ -29,6 +40,9 @@ update `CURRENT_WORK.md`** so the next run resumes exactly here.
    **without dropping a desired behavior**. Keep `CURRENT_WORK.md` current as items complete.
 4. **Green → PR.** When the gate passes — `npm run check` (format + lint + typecheck + **all** tests;
    read the counts, never trust a silent grep) — commit to a **new feature branch** and open a PR.
+   **If the step realizes a `TODO.md` item, the SAME PR migrates it into `SPEC.md`** — move the
+   design in, add its `**Provenance.**` footer (the PR link(s) + a short implementation note), and
+   delete the `TODO.md` entry. SPEC.md grows only here, never speculatively.
 5. **Review.** Run a strict review against: (a) is the code high-quality, concise, efficient —
    no dead weight, no cleverness that hides behavior; (b) are any tests misaligned with the
    step's goals; (c) are there missing tests. **Frame review prompts and finding-summaries in a
@@ -54,16 +68,19 @@ update `CURRENT_WORK.md`** so the next run resumes exactly here.
    changed and what it now shows (Myk, 2026-07-09: with each new PR, document how you've
    updated the village). `demos/village/homes/` stays untracked (stores and seeds are disposable);
    the village's code and docs ride the step's PR.
-8. **Re-plan.** With the step done, re-evaluate the **remaining** steps against anything you just learned.
-   If a learning changes the plan, edit SPEC.md to take it into consideration, log the change in 
-   `JOURNAL.md`, and commit it.
+8. **Re-plan.** With the step done, re-evaluate the **remaining** steps in `TODO.md` against anything
+   you just learned. If a learning changes the plan, edit the relevant `TODO.md` item (not SPEC.md —
+   SPEC.md is history, changed only by a landing), log the change in `JOURNAL.md`, and commit it.
 9. **Next step.** Clear `CURRENT_WORK.md` and begin the next unchecked step at stage 1.
 
 ## Standing rules
 
-- **Root holds exactly five markdown docs** — `README.md` (the vision), `CLAUDE.md`, `SPEC.md`, `JOURNAL.md`,
-  `CURRENT_WORK.md`. Do not accumulate more markdown; fold, don't add. `CURRENT_WORK.md` is intended to be 
-  ephemeral and evolving, PRs hold prior snapshots, don't be afraid to blow it away as necessary.
+- **Root holds exactly six markdown docs** — `README.md` (the vision), `CLAUDE.md` (the process),
+  `SPEC.md` (what IS — grown only by landings, each section footered with its provenance), `TODO.md`
+  (the backlog of unbuilt/partial design; items migrate into SPEC.md when they land), `JOURNAL.md`
+  (the append-only record), `CURRENT_WORK.md` (the one step in flight). Do not accumulate more
+  markdown; fold, don't add. `CURRENT_WORK.md` is intended to be ephemeral and evolving, PRs hold
+  prior snapshots, don't be afraid to blow it away as necessary.
 - **Strict in PRs, creative and aggressive in execution.** Ship real vertical slices; don't gold-plate;
   don't reward-hack a green bar.
 - **Match rhizomatic's vocabulary** — the concepts are Hyperschema / Hyperview / View / Policy /

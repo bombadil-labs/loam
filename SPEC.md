@@ -26,6 +26,9 @@ GraphQL-fronted, persistent, multi-tenant, federatable server. Do not reinvent t
    app ships its own server. Apps and runners are **peer clients** of Loam, coordinating only through
    the store (stigmergy).
 
+**Provenance.** Foundational framing — no single landing PR; the three-layer split is the invariant
+every later section obeys, realized across the whole build (steps 0–9, PRs [#1](https://github.com/bombadil-labs/loam/pull/1)–[#10](https://github.com/bombadil-labs/loam/pull/10)). Full narrative in the [Journal](JOURNAL.md).
+
 ## 2. The foundation — what rhizomatic already provides (build on these)
 
 Confirmed at the type level (`@bombadil/rhizomatic@0.1.0` `dist/*.d.ts`); **confirm semantics against
@@ -81,6 +84,9 @@ append|supersede|{keyed} }` (the _application_: binds a function to a materializ
   DSet-sort sub-term over the same delta-set; stratified depth-1, enforced at parse), and
   **`evalPred`** is exported (single-delta predicate evaluation — translation recognizers).
 
+**Provenance.** The substrate, not Loam code — `@bombadil/rhizomatic` (frozen/normative, §1). Verified
+name-for-name and semantics-for-semantics against the real package by the step-1 spike ([#2](https://github.com/bombadil-labs/loam/pull/2), 27 tests over four claim-clusters); the `inView`/`evalPred` additions arrived with the 0.2.0 bump the federation and trust work required. Refinements the spike found were folded back into this section, never worked around.
+
 ## 3. Loam's actual scope — what to build
 
 - **The GraphQL interface** — GraphQL derived from `HyperSchema` + `Policy`, exposing `query` /
@@ -101,6 +107,8 @@ append|supersede|{keyed} }` (the _application_: binds a function to a materializ
 - **The genesis assembly** — bundle `SCHEMA_SCHEMA` + accounts + names + function/trigger schemas
   into a shippable genesis every store is born from.
 
+**Provenance.** Foundational scope framing — no single landing PR; each bullet is realized section-by-section across the build: persistence (step 2, [#3](https://github.com/bombadil-labs/loam/pull/3)), the read/write gateway (steps 3–4, [#4](https://github.com/bombadil-labs/loam/pull/4)/[#5](https://github.com/bombadil-labs/loam/pull/5)), accounts & capabilities (step 5, [#7](https://github.com/bombadil-labs/loam/pull/7)), the transport (step 6, [#8](https://github.com/bombadil-labs/loam/pull/8)), the runner & genesis assembly (step 7, [#9](https://github.com/bombadil-labs/loam/pull/9)), and CLI/deployment (step 8, [#10](https://github.com/bombadil-labs/loam/pull/10)). Full narrative in the [Journal](JOURNAL.md).
+
 ## 4. The object model & flow
 
 `deltas —[Hyperschema: gather]→ Hyperview —[Policy: resolve]→ View`. Two stages, kept separate: one
@@ -119,6 +127,8 @@ append|supersede|{keyed} }` (the _application_: binds a function to a materializ
   `View`; superposition functions take a `HView`).
 - The raw **scan** is ground truth; a hyperschema is a named, cacheable, structured scan; a snapshot
   memoizes it.
+
+**Provenance.** Landed — the two-stage gather/resolve split rides the gateway's own verbs: [#4](https://github.com/bombadil-labs/loam/pull/4) (`query` → snapshot **View**) and [#5](https://github.com/bombadil-labs/loam/pull/5) (`subscribe` → live **dynamic view**, patch stream). Lives in `src/gateway/gateway.ts` (`Gateway.query`, `Gateway.subscribe`, the `Channel` patch stream) atop rhizomatic's `resolveView` and reactor materializations (§2). One `HView` really does back many resolutions in the code — gather and resolve stay two honestly separate steps all the way to the wire.
 
 ## 5. The gateway (Loam's only surface)
 
@@ -177,6 +187,8 @@ roots; one delta serves many views).
   their sources (the §9 provenance discipline). Standard shape by guarantee for your own
   writers; translation for everyone else's.
 
+**Provenance.** Landed — [#4](https://github.com/bombadil-labs/loam/pull/4) (the read gateway: `query`/`loadSchema`), [#5](https://github.com/bombadil-labs/loam/pull/5) (`mutate`/`subscribe`), [#13](https://github.com/bombadil-labs/loam/pull/13) (registrations-as-deltas: evolution is append, deprecation is negation), and [#15](https://github.com/bombadil-labs/loam/pull/15) (writes become claims: templates, the generic `_claim`, raw append, `_hviewHex`). Lives in `src/gateway/gateway.ts` (`Gateway`) and `src/gateway/registration.ts` (`readRegistrations`, `schemaEntityFor`, `registrationClaims`). Key decision: the schema's identity is the **entity**, not the name, so a republish at the same entity rebinds the running gateway with no restart.
+
 ## 6. Functions & the runner (roles across a hub + a flat ring)
 
 The reactive substrate is three **roles**, not three layers:
@@ -220,6 +232,8 @@ it in the village:
 - **Derived output must not feed its own grist** (the reactor's own-trigger guard covers the
   binding's author; the FUNCTION must also exclude its output contexts from its inputs, or a
   second runner identity re-grinds the first's flour).
+
+**Provenance.** Landed — [#9](https://github.com/bombadil-labs/loam/pull/9) (step 7: the runner as a peer client, genesis assembly) and [#32](https://github.com/bombadil-labs/loam/pull/32) (the mill: first animate deployment, `supersede`/`keyed` emission, budget-as-lifetime learned from running it). Lives in `src/runner/runner.ts` (`Runner.attach`, `readBindingDefinitions`, `bindingDefinitionClaims`) and the gateway's single `ingestVia` hook (`src/gateway/gateway.ts`) that flips passive ↔ animate. Key line: the passive/animate distinction cost one settable field, not a fork — exactly the "roles, not layers" the section names.
 
 ## 7. Object-capability & accounts
 
@@ -273,6 +287,8 @@ works (foreign grants, registrations, and definitions merge freely and bind noth
 - Tenant machinery (`loam.tenant` / `loam.members` / `loam.grants`) survives as **vocabulary for
   author-communities and read lenses**, not as write fences.
 
+**Provenance.** Landed — [#7](https://github.com/bombadil-labs/loam/pull/7) (step 5: tenants, membership, grants as signed deltas), [#14](https://github.com/bombadil-labs/loam/pull/14) (step 11: the authors-not-owners revision — the write gate moved to author standing), and [#17](https://github.com/bombadil-labs/loam/pull/17) (rhizomatic 0.2.0 adoption: `inView` lenses). Lives in `src/gateway/accounts.ts` (`authorize`, `holdsGrant`, `governedGatherBody`, `tenantSchemaFor`, `constitutionalDefect`). Key correction (Myk, out of the village field test): entities are unowned — the write gate asks only "does this author have standing," never what the delta points at; truth-telling moved entirely to the read/merge side.
+
 ## 8. Persistence, deployment, federation
 
 - **Store ⟂ app.** The running app (gateway + resolution) is separate from the store (persisted
@@ -317,6 +333,8 @@ works (foreign grants, registrations, and definitions merge freely and bind noth
   the local standard views light up; a better translation later is just another pass over the
   same immortal sources.
 
+**Provenance.** Landed — [#10](https://github.com/bombadil-labs/loam/pull/10) (CLI + deploy: the `loam` command, Dockerfile), [#11](https://github.com/bombadil-labs/loam/pull/11) (federation: union at the substrate), [#18](https://github.com/bombadil-labs/loam/pull/18) (trust is data), and [#19](https://github.com/bombadil-labs/loam/pull/19) (normalization/translation). Lives in `src/cli/` (`bin.ts`, `cli.ts`, `config.ts`), the `StoreBackend` seam (`src/store/backend.ts`, `src/store/sqlite.ts`), `src/federation/` (`offer.ts`, `pull.ts`, `wire.ts`, `translate.ts`), and `src/gateway/trust.ts` (`loam:trust`). Key decision: federation is union at the substrate, not a governed mutation — `gateway.federate` deliberately skips `authorize`, so whether a peer's facts shape a local view is a read-time trust choice, never a write denial.
+
 ## 9. Constraints & invariants
 
 - **Append-only, everything** — including materializations: a snapshot is never mutated; recompute
@@ -333,6 +351,8 @@ works (foreign grants, registrations, and definitions merge freely and bind noth
   opt-in streaming transform that **appends** typed deltas, signs as the migrator, cites the source
   deltas (provenance), and never re-signs as the original authors.
 
+**Provenance.** Foundational — no single landing PR; these are the invariants every step (0–14) is tested against, not a feature any one of them introduced. Append-only, content-addressed identity is enforced in `src/store/canon.ts` and every `StoreBackend` driver (`src/store/*.ts`); object-capability discipline lives in the gateway's `authorize` seam (`src/gateway/`). The rhizomatic-frozen and vocabulary-reconciliation rules are process, not code — held by CLAUDE.md and this SPEC. Full narrative in the [Journal](JOURNAL.md).
+
 ## 10. Reference inventory — what to learn from Chorus
 
 Roughly half of Loam's _plumbing_ has a shipped, tested ancestor in
@@ -348,7 +368,9 @@ Design-pattern references (they carry the EAV model): `agent.ts` (`beliefPointer
 new code is the hyperschema-sourced GraphQL, accounts-as-schema, and the runner's runtime variety
 and deployment.
 
-## 11. Erasure — degrees of forgetting (designed 2026-07-10; LANDED, operator-only — seam #34, law + hardening + gating #36/#40/#38)
+**Provenance.** Foundational / reference-only — no landing PR. Decided (Myk, 2026-07-09): [chorus](https://github.com/bombadil-labs/chorus) is read as a design guide only — its seams, its edge cases, its lessons — never as a dependency or a source of copied code; Loam's plumbing is written clean, against Loam's own tests, and no EAV residue rides in. This section is a map for future readers, not a build record.
+
+## 11. Erasure — degrees of forgetting
 
 GDPR Art. 17 and plain conscience both demand that a store can truly forget. The architecture
 makes this cheaper than it sounds: **Loam's immutability is per-fact, not global** — the ground
@@ -414,7 +436,9 @@ its content.
   property of the content itself (timestamps correlate, style fingerprints). Rung 4 is the
   tool for content-side scrubbing; no substrate can do it for you.
 
-## 12. The open door — public reads & the browser client (designed 2026-07-10; queued — browser-crypto spike GREEN)
+**Provenance.** Landed — [#34](https://github.com/bombadil-labs/loam/pull/34) (the erase seam), [#36](https://github.com/bombadil-labs/loam/pull/36) (the law slice: authority → manifest → tombstone → purge), [#38](https://github.com/bombadil-labs/loam/pull/38) (operator-only gating + hardening). Lives in `src/gateway/erase.ts` (`Gateway.erase`, `eraseDefect`) and the tombstone readers (`readTombstones`, honored at both the append and federation doors). Key decision (Myk, 2026-07-10): erasure is the instance operator's alone — a data subject asks, the operator executes — and the signed tombstone refuses the exact bytes' return by id, so the store remembers THAT it forgot without keeping what.
+
+## 12. The open door — public reads & the browser client
 
 The aggregator dream needs a store a stranger's browser can simply read.
 
@@ -434,7 +458,9 @@ The aggregator dream needs a store a stranger's browser can simply read.
   hash may be anchored to any external notary (a chain, a newspaper, RFC 3161). The chain
   becomes a timestamp service for the vault; the world stays in Loam.
 
-## 13. Boundaries & posture — what Loam refuses to be (recorded 2026-07-10)
+**Provenance.** Landed — [#43](https://github.com/bombadil-labs/loam/pull/43) (public reads as data, and the browser client; SPEC §12 landed whole). Lives in `src/gateway/public.ts` (`loam:public` declarations, `publicDefect` refused at both the append and federation doors) and `src/client/index.ts` (`@bombadil/loam/client`, non-custodial: keygen in-page, local signing, fetch-based SSE). Key decision: the anonymous GraphQL schema carries no Mutation type at all, so a tokenless write is a validation impossibility rather than a policed string; per-door budgets (`maxPublicWatches`, `maxPublicStreams`) confine a stranger's resource cost to the stranger's door.
+
+## 13. Boundaries & posture — what Loam refuses to be
 
 Red-teamed 2026-07-10; these are the honest edges, stated proudly. Strong paradigms host
 their own opposition.
@@ -467,102 +493,19 @@ their own opposition.
     reader picks. Failed coordination costs one translation delta, written after the fact,
     with provenance.
 
-## 14. Write semantics — mutation is the dual of resolution (designed 2026-07-10; queued)
+**Provenance.** Foundational — a posture record, not a build. Drafted 2026-07-10 in the same red-team night session that also spawned §11 (erasure, [#34](https://github.com/bombadil-labs/loam/pull/34)/[#36](https://github.com/bombadil-labs/loam/pull/36)) and §12 (the open door, [#43](https://github.com/bombadil-labs/loam/pull/43)), whose landings are this section's evidence rather than its own PR. These are boundaries stated proudly and held, not code shipped. Full narrative in the [Journal](JOURNAL.md).
 
-Reading is `resolve : Policy → HView → View` (§4): a field's value is not stored, it is
-COMPUTED per-property by its policy over a bucket of gathered deltas. Writing is the **dual**,
-and today does not know it — the mutation surface (§5) appends a `(subject/context, value)`
-delta uniformly, as if every field were a settable single slot, which is true only of `pick`.
-The read side knows a field may be a selection, an aggregate, a conflict set, an `expand`ed
-subtree, or (later) a derivation; the write side pretends otherwise. The symptom is `null`:
-there is no way through the surface to REMOVE a value, because "set to null" was never wired —
-and the naive fix (negate the winning delta) does not hold against union (a field is many
-deltas across many stores; you can negate only the ones you can see). This section makes
-writing as policy-aware as reading.
+## 14. Write semantics — mutation is the dual of resolution
 
-**Two primitives; everything else is sugar.** Every mutation is one of:
+**Planned — designed, not yet built; blocked on an open question.** The full design — assert and
+retract as the only two primitives, each policy kind inducing (or declining) its own write
+discipline, clearing-as-absence rather than a null value — lives in [TODO.md](TODO.md) until it
+lands, at which point its PR migrates it here with a Provenance footer. The open question holding
+it: when a field's policy admits OTHERS' claims, does "clear" mean retract-your-own or lens-scoped
+suppression of every admitted contributor — and who may negate another's delta? Resolve with Myk
+before implementation.
 
-- **assert** — append a contributing delta (a signed fact, with standing, §7).
-- **retract** — negate YOUR OWN contributing deltas (rhizomatic negation, §2; honored at the
-  mask stage of the gather, §4).
-
-`set`, `add`, `remove`, `clear`, `unset` are these two, parameterized by the field's policy.
-There is no universal "set" and no universal "clear"; each policy kind **induces** its own
-write discipline, or declines one.
-
-**Clearing is retraction, and it resolves to absence — never to a null value.** A View already
-represents "no value" natively: a policy with nothing to say returns an internal ABSENT
-sentinel, and `resolveView` OMITS that key from the View (a missing key reads as `null` at the
-surface). So removal needs no new value in the algebra — retract your contributing deltas, the
-bucket empties, the policy goes absent, the key vanishes; the reader's `absentAs` decides what
-that absence RENDERS as. Removal arrives without null-the-hole ever riding on a reference: the
-null-ness lives in the lens, explicit and per-field. Hoare's mistake sidestepped by
-construction, not by discipline.
-
-**Each policy kind induces its write semantics:**
-
-- **`pick`** — _assert_ to set (the new fact wins by the field's order); _retract-your-own_ to
-  clear (the next surviving delta steps up; if none, absence).
-- **`all` / `conflicts`** — _assert_ to add; _retract_ a specific delta to remove one;
-  _retract-all-yours_ to clear your contribution.
-- **`merge`** — _assert_ an **addend** and _retract_ an addend; there is **no** "set the
-  aggregate." You cannot invert `sum` to a chosen total; the surface refuses "set" as a
-  category error and offers only contribution.
-- **`absentAs`** — writes pass through to the inner `then`; the `constant` is a read-time
-  fallback, never a written value.
-- **expanded / relational** (an `expand`ed edge, §4) — _assert_ the **edge** to link; _retract_
-  the edge to sever (the nested subtree drops from the view). You never write INTO the nested
-  entity's resolved value — that is its own policy over its own ground.
-- **derived** (future resolve-time computed fields) — **read-only**: no backing assertion
-  exists to write or retract.
-- **default** — **immutable** unless a field opts into a write discipline. The store learns;
-  silence about writability means "you may not," not "you may set anything."
-
-Writability is declared in the registration (Loam-level metadata, beside the claim templates of
-§5), **not** in the rhizomatic `Policy`. It disciplines the mutation SURFACE, never the ground:
-the resolution algebra is untouched, so content-addressing and portability are unaffected, and
-two instances may declare different writability for one schema without ever diverging on a
-resolved View. (The same reason merge fns are a closed vocabulary — resolution must be a
-universal function of the data — is why write DISCIPLINE, which is not resolution, may be
-local.)
-
-**In practice.**
-
-- _`favorite_color` (`pick`)_ — `set(blue)` asserts; `clear()` retracts your blue → absence →
-  renders `null` (or whatever `absentAs` says).
-- _`tags` (`all`)_ — `add(t)` asserts; `remove(t)` retracts that assertion; `clear()` retracts
-  all of yours.
-- _`score` (`merge sum`)_ — `contribute(+5)` asserts an addend; `withdraw(+5)` retracts it;
-  there is no `setScore` — the total is whatever the addends sum to.
-- _`hometown` (`expand`ed edge)_ — `move(city)` asserts a new edge (retract the old if
-  single-valued); `clear()` retracts the edge, and the nested `City { … }` drops from the view.
-- _`full_name` (derived)_ — read-only; a mutation is refused with a reason.
-
-**Real limitations, stated plainly (the §13 register):**
-
-- **Clear is per-reader.** A retraction binds only for readers whose lens honors your negation
-  (trust masks, §7). "Cleared" is your TESTIMONY that you withdraw the fact, not a global
-  guarantee the field is empty for everyone. Truth is a lens; so is emptiness.
-- **You clear what you said, not what the world said.** You retract your OWN contributions;
-  you cannot negate assertions you cannot see or did not author, and a fresh (or freshly
-  federated) assertion repopulates the field — correctly. "Clear my favorite_color" means
-  "withdraw my claim," never "no one may state it."
-- **Absence is unknown, not affirmed-empty.** Retraction yields "no one is saying," distinct
-  from "affirmatively none." An app that must tell them apart uses an agreed sentinel value (a
-  normal assertion) today; a first-class null VALUE — distinct from absence, and defined for
-  every merge fn — is a `Primitive` change in rhizomatic (frozen: a conversation, not a Loam
-  workaround), deliberately out of scope here.
-- **Aggregates and derived fields are structurally non-clearable — and that is correct.** There
-  is no inverse of `sum` to null, and no backing delta beneath a computation. The surface
-  refuses them rather than pretending — the write side finally telling the truth the read side
-  always knew.
-- **Writability is front-door discipline, not a field lock.** A hand-signed or federated delta
-  may still assert into a "read-only" context; the store gathers and resolves it, because the
-  ground is open and entities are unowned (§7, "authors, not owners"). A reader who wants the
-  guarantee enforces it with a lens — e.g. a mask admitting only the deriving author for a
-  derived context. Writability disciplines the surface; lenses discipline the truth.
-
-## 15. The browser peer — a full store in the page (designed 2026-07-11; queued)
+## 15. The browser peer — a full store in the page
 
 §12 gave the page a CLIENT — keys minted and claims signed in the browser, a served store's door
 on the other end. This section gives the page the STORE. A complete Loam — gateway, genesis,
@@ -660,7 +603,9 @@ pull the network. What it cannot be is a place the network calls — stated prou
   the door out; key custody is page custody; timestamps come from a clock the user owns
   (testimony, §13 — only more so); erasure-in-a-tab erases one replica.
 
-## 16. The interactive tutorial — learn Loam by growing one (SHIPPED as the MVP, PRs #54–#56; its arc is superseded by §19)
+**Provenance.** Landed — [#51](https://github.com/bombadil-labs/loam/pull/51) (the browser store: `LocalStorageBackend` + the `@bombadil/loam/browser` barrel), [#52](https://github.com/bombadil-labs/loam/pull/52) (aftermath hardening), [#53](https://github.com/bombadil-labs/loam/pull/53) (continuity: `loam pull`, export). Lives in `src/browser/index.ts` and `src/store/local-storage.ts`. Learning that stuck: a raw NUL byte in `gateway/erase.ts`'s commitment preimage had made the file grep-invisible, hiding a `node:crypto` import that blocked the whole gateway from bundling — the byte became its escape sequence, and the fix is the reason the law bundles clean today.
+
+## 16. The interactive tutorial — learn Loam by growing one
 
 The browser peer (§15) makes a real store cheap to hand a stranger, so the tutorial hands them
 one and gets out of the way. It ships as a GitHub Pages static site: no signup, no server, no
@@ -749,7 +694,9 @@ falls out of the domain rather than being staged.
   must expose the in-process anonymous read surface (`queryPublic` / `subscribePublic` /
   `NothingPublic` — already in the gateway) for lesson 10, and the `loam pull` verb for lesson 11.
 
-## 17. Surfaces are materializations (designed 2026-07-11; queued — ships before tutorial v2)
+**Provenance.** Landed as the MVP — [#54](https://github.com/bombadil-labs/loam/pull/54) (the eleven-lesson arc as data and functions), [#55](https://github.com/bombadil-labs/loam/pull/55) (the zero-framework theater: View / Ground / GraphQL), [#56](https://github.com/bombadil-labs/loam/pull/56) (the Pages workflow, the cold-reader copy pass). Lives in `demos/tutorial/`, anti-rot pinned by `test/site/arc.test.ts`. Superseded by the sixteen-lesson v2 arc (§19); kept here as the MVP's record, including the review catch that a vacuously-green finale check became a signed homecoming claim the check reads back.
+
+## 17. Surfaces are materializations
 
 GraphQL was never the surface. It was the FIRST surface. A registration — `(HyperSchema,
 Policy)`, a gather and a resolution discipline, filed as deltas — is interface-agnostic truth,
@@ -827,6 +774,8 @@ not a version skew to manage.
   surface discipline (§12) applies per-door — a lens is public because the operator declared
   it, whatever language the asking arrives in.
 
+**Provenance.** Landed — [#59](https://github.com/bombadil-labs/loam/pull/59) (versioning: append-only publishing, the registration hash as true name), [#60](https://github.com/bombadil-labs/loam/pull/60) (the seam: `SurfaceHooks` / `SurfaceGenerator`, GraphQL as first witness), [#61](https://github.com/bombadil-labs/loam/pull/61) (the REST/OpenAPI door), [#62](https://github.com/bombadil-labs/loam/pull/62) (contract-flake hardening), closed by [#63](https://github.com/bombadil-labs/loam/pull/63) (the phase19 two-doors proof). Lives in `src/surface/surface.ts`, `src/surface/rest.ts`, and `src/gateway/registration.ts`. Key finding folded back in: the anonymous `@hash` probe was a registration-existence oracle across the whole ground, so the PUBLIC door now serves only the latest version per declared name — history is not anonymous.
+
 ## 18. Glossary
 
 - **Delta** — the signed, content-addressed atom (rhizomatic).
@@ -855,7 +804,9 @@ not a version skew to manage.
   OpenAPI, a generated client, a compiled capability projection. Doors share one law and must
   agree — one ground, one registration, the same view through every door.
 
-## 19. Tutorial v2 — needs before doctrine (designed 2026-07-11; queued after §17 ships)
+**Provenance.** Foundational / reference — not a build step, no landing PR; it grows with the SPEC as each section lands its vocabulary.
+
+## 19. Tutorial v2 — needs before doctrine
 
 The MVP (§16) proved the machinery: a real store in the page, checks that read the ground,
 an arc that cannot rot ahead of the library. Walking it proved something else: the lessons
@@ -954,3 +905,5 @@ never un-green an earlier one), and SIDE-EFFECT-FREE (safe to re-verify on every
 the copy is apprehensible cold; the arc test drives the page's own functions through all
 sixteen in order, the revisit, and the finale round trip — including the lesson-6 pin that a
 superseded generation's subscription keeps its shape.
+
+**Provenance.** Landed — [#64](https://github.com/bombadil-labs/loam/pull/64) (v2a instruments: Ground/GraphQL/View), [#65](https://github.com/bombadil-labs/loam/pull/65) (reset/unpin), [#66](https://github.com/bombadil-labs/loam/pull/66) (v2b: the sixteen-lesson arc), [#67](https://github.com/bombadil-labs/loam/pull/67) (localStorage namespace-collision hotfix), [#68](https://github.com/bombadil-labs/loam/pull/68) (v2c), [#69](https://github.com/bombadil-labs/loam/pull/69) (lesson-button fix), [#70](https://github.com/bombadil-labs/loam/pull/70) (step-through + in-order gating). Lives in `demos/tutorial/lessons.mjs`, `demos/tutorial/app.mjs`, `demos/tutorial/instruments.mjs`, tested end-to-end by `test/site/arc.test.ts`. Standing design split (PR #70): step progress within a lesson is ephemeral and content-address-idempotent, while the durable gate is always the ground-derived green — the split that keeps in-order gating honest across reloads without polluting the ground with UI state.
