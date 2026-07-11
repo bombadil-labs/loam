@@ -7,9 +7,9 @@ import eslintConfigPrettier from "eslint-config-prettier";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  // _testing is the ephemeral field-test playground (see _testing/PLAN.md): never committed,
+  // demos/village is the living demonstration (see demos/village/README.md): committed, but
   // never part of the gate. scripts/ is release tooling — plain node, no project service.
-  { ignores: ["dist/**", "site-dist/**", "_testing/**", "scripts/**"] },
+  { ignores: ["dist/**", "site-dist/**", "demos/village/**", "scripts/**"] },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
   {
@@ -17,12 +17,12 @@ export default tseslint.config(
       parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
     },
   },
-  // Plain-JS files (site/lessons.mjs is bundled into the page; the arc test types it via
-  // site/lessons.d.mts) get syntax linting without the project service.
+  // Plain-JS files (demos/tutorial/lessons.mjs is bundled into the page; the arc test types it via
+  // demos/tutorial/lessons.d.mts) get syntax linting without the project service.
   { files: ["**/*.js", "**/*.mjs"], ...tseslint.configs.disableTypeChecked },
   // The page itself runs in a browser; say so instead of silencing no-undef.
   {
-    files: ["site/**/*.mjs"],
+    files: ["demos/tutorial/**/*.mjs"],
     languageOptions: {
       globals: {
         window: "readonly",

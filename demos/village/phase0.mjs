@@ -17,7 +17,7 @@ import {
   registerHttp,
   summary,
 } from "./harness.mjs";
-import { initHome } from "../dist/index.js";
+import { initHome } from "../../dist/index.js";
 
 const stores = {};
 try {
@@ -25,7 +25,7 @@ try {
   check(
     "0.1",
     "dist built and schema files present",
-    existsSync(join(ROOT, "..", "dist", "index.js")),
+    existsSync(join(ROOT, "..", "..", "dist", "index.js")),
   );
   execFileSync("node", [join(ROOT, "gen-schemas.mjs")], { stdio: "inherit" });
 
@@ -40,7 +40,7 @@ try {
   );
 
   // 0.3 — Person registered on commons via the CLI, BEFORE any serve (single-writer rule)
-  const bin = join(ROOT, "..", "dist", "cli", "bin.js");
+  const bin = join(ROOT, "..", "..", "dist", "cli", "bin.js");
   const regOut = execFileSync(
     "node",
     [bin, "register", join(ROOT, "schemas", "person.json"), "--home", homeOf("commons")],

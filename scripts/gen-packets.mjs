@@ -1,7 +1,7 @@
-// Generate the tutorial's bundled data packets (SPEC §16): `site/packets/circle.json` — a
+// Generate the tutorial's bundled data packets (SPEC §16): `demos/tutorial/packets/circle.json` — a
 // whole foreign store (the circle: Alice, Bob, Carol, their names and friendships, signed
 // under the circle's OWN operator, its own registrations riding along so the learner can see
-// foreign law stay inert) — and `site/packets/adversary.json` — one forged claim against the
+// foreign law stay inert) — and `demos/tutorial/packets/adversary.json` — one forged claim against the
 // learner's film, really signed by the adversary's key, because "anyone may write" is true
 // and the reader's trust policy is the only defense that exists.
 //
@@ -16,7 +16,7 @@ import { authorForSeed, parsePolicy, parseTerm, signClaims } from "@bombadil/rhi
 import { Gateway, MemoryBackend, assembleGenesis, exportOffer, toWire } from "../dist/index.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const OUT = join(root, "site", "packets");
+const OUT = join(root, "demos", "tutorial", "packets");
 const checkMode = process.argv.includes("--check");
 
 // The circle's operator and the adversary: fixed identities, tutorial-only, never secret.
@@ -144,7 +144,7 @@ for (const [name, text] of Object.entries(files)) {
     }
   } else {
     writeFileSync(path, text);
-    console.log(`gen-packets: wrote site/packets/${name} (${text.length} bytes)`);
+    console.log(`gen-packets: wrote demos/tutorial/packets/${name} (${text.length} bytes)`);
   }
 }
 if (failed) process.exit(1);

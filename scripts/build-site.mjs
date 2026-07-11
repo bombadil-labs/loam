@@ -14,7 +14,7 @@ rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 
 await build({
-  entryPoints: [join(root, "site", "app.mjs")],
+  entryPoints: [join(root, "demos", "tutorial", "app.mjs")],
   outfile: join(out, "app.js"),
   bundle: true,
   format: "esm",
@@ -28,8 +28,8 @@ await build({
   logLevel: "silent",
 });
 
-cpSync(join(root, "site", "index.html"), join(out, "index.html"));
-cpSync(join(root, "site", "style.css"), join(out, "style.css"));
-cpSync(join(root, "site", "packets"), join(out, "packets"), { recursive: true });
+cpSync(join(root, "demos", "tutorial", "index.html"), join(out, "index.html"));
+cpSync(join(root, "demos", "tutorial", "style.css"), join(out, "style.css"));
+cpSync(join(root, "demos", "tutorial", "packets"), join(out, "packets"), { recursive: true });
 
 console.log("loam: built site-dist/ (the tutorial, self-contained)");

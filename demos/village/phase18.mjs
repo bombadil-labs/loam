@@ -8,10 +8,10 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
-import { run } from "../dist/index.js";
+import { run } from "../../dist/index.js";
 import { check, join, ROOT, signClaims, sleep, summary } from "./harness.mjs";
 
-const tab = await import(pathToFileURL(join(ROOT, "..", "dist", "browser", "index.js")).href);
+const tab = await import(pathToFileURL(join(ROOT, "..", "..", "dist", "browser", "index.js")).href);
 
 function origin() {
   const map = new Map();

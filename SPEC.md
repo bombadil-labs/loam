@@ -675,8 +675,8 @@ and knows none of this document. Every concept is taught from zero; the cast and
 the tutorial's own (Alice, Bob, a self-explanatory adversary); no lesson leans on another the
 learner skipped, and nothing is installed until the finale. The acceptance bar is that the
 writing is apprehensible cold — not only that the code runs. (Internally: the arc reprises
-patterns the `_testing` village already proves, so the mechanics are exercised and sound; the
-village is never named or assumed on the site.)
+patterns the village (`demos/village`) already proves, so the mechanics are exercised and sound;
+the village is never named or assumed on the site.)
 
 **Two stores, because federation is the point.** The learner owns a **media log** (films and
 books; a watch is an event with a date, a rating, and GUESTS). A second, bundled store — **the
@@ -733,7 +733,7 @@ falls out of the domain rather than being staged.
   tutorial, not an exam: a green mark never lies about the store's contents, and that is all it
   promises.
 
-- **Architecture.** The site lives in this repo under `site/` (so it imports the same-commit
+- **Architecture.** The site lives in this repo under `demos/tutorial/` (so it imports the same-commit
   browser bundle — version skew is impossible, and CI runs the whole arc as a test), built by
   esbuild like the client bundle and deployed by a `pages.yml` GitHub Actions workflow
   (`upload-pages-artifact` → `deploy-pages`; nothing built is committed, but the bundled packets —

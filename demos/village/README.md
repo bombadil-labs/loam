@@ -3,7 +3,7 @@
 Four (and counting) federated Loam stores, a cast of villagers, and a browser dashboard —
 a small society that exercises everything Loam claims, end to end, over real HTTP. It began
 as an ephemeral field test; it graduated (Myk, 2026-07-09) into a **living demonstration
-that grows with every PR**: the loop's stage 7 (see `../CLAUDE.md`) extends the village to
+that grows with every PR**: the loop's stage 7 (see `../../CLAUDE.md`) extends the village to
 exercise each new behavior, and logs it in the ledger below.
 
 Nothing here is product, and nothing here gates the build. `homes/` (sqlite stores and
@@ -36,9 +36,9 @@ Person entities are the only shared vocabulary; everything else composes by fede
 ## Run it
 
 ```sh
-node _testing/phase0.mjs   # groundwork: homes, operators, registrations (all 3 surfaces)
-node _testing/phase1.mjs   # …through phase17.mjs — each phase is a runnable act with checks
-node _testing/village.mjs  # the living village: all stores + pulse + simulator + dashboard
+node demos/village/phase0.mjs   # groundwork: homes, operators, registrations (all 3 surfaces)
+node demos/village/phase1.mjs   # …through phase17.mjs — each phase is a runnable act with checks
+node demos/village/village.mjs  # the living village: all stores + pulse + simulator + dashboard
                            #   → watch it at http://127.0.0.1:4400
 ```
 
@@ -54,8 +54,8 @@ and an entry in `homes/peers.json`. The village's pulse re-reads that file every
 almanac pulls the newcomer on its next beat and narrates first contact in the event log.
 
 ```sh
-node _testing/grow.mjs sightings --port 4406 \
-  --schema _testing/schemas/sighting.json --claims sightings-facts.json
+node demos/village/grow.mjs sightings --port 4406 \
+  --schema demos/village/schemas/sighting.json --claims sightings-facts.json
 ```
 
 - **The schema file** is the same shape `gen-schemas.mjs` emits (see any `schemas/*.json`):
@@ -75,12 +75,12 @@ node _testing/grow.mjs sightings --port 4406 \
 
 `phase16.mjs` drives this whole path headless (spawning `grow.mjs` as a child, as the demo
 does) and asserts the three claims — schema answers live, peers.json entry written, one pull
-lands the facts in the almanac. Run it like any phase: `node _testing/phase16.mjs`.
+lands the facts in the almanac. Run it like any phase: `node demos/village/phase16.mjs`.
 
-**The `grow-a-store` skill** (`_testing/skills/grow-a-store/SKILL.md`) is a short pointer at
+**The `grow-a-store` skill** (`demos/village/skills/grow-a-store/SKILL.md`) is a short pointer at
 this section — the recipe demo-Claude follows when asked to "build a store for X" mid-meeting.
 It lives here because it belongs to the demo; to make it an active Claude Code skill on a
-machine, copy `_testing/skills/grow-a-store/` into that repo's `.claude/skills/` (which is
+machine, copy `demos/village/skills/grow-a-store/` into that repo's `.claude/skills/` (which is
 gitignored, so the active copy stays local while this canonical one ships).
 
 ## What it demonstrates — the ledger

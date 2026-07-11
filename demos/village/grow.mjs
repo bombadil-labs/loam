@@ -1,4 +1,4 @@
-// Grow a store, live: `node _testing/grow.mjs <name> --port <p> --schema <file> [--claims <file>]`
+// Grow a store, live: `node demos/village/grow.mjs <name> --port <p> --schema <file> [--claims <file>]`
 //
 // The demo's item 7 — mid-meeting, a new sovereign store for whatever she names, federating
 // into the village before the coffee refills. One command: a home is minted (its own
@@ -14,8 +14,8 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
-import { Gateway, SqliteBackend, assembleGenesis, initHome, serve } from "../dist/index.js";
-import { readSeed } from "../dist/cli/config.js";
+import { Gateway, SqliteBackend, assembleGenesis, initHome, serve } from "../../dist/index.js";
+import { readSeed } from "../../dist/cli/config.js";
 import { HOMES, grantAuthor, registerHttp } from "./harness.mjs";
 
 const [name, ...rest] = process.argv.slice(2);
@@ -24,7 +24,7 @@ const flag = (f) => {
   return i >= 0 ? rest[i + 1] : undefined;
 };
 if (!name || !/^[a-z][a-z0-9-]*$/.test(name)) {
-  console.error("grow wants a lowercase store name: node _testing/grow.mjs <name> --schema <file>");
+  console.error("grow wants a lowercase store name: node demos/village/grow.mjs <name> --schema <file>");
   process.exit(2);
 }
 const port = Number(flag("port") ?? 4406);

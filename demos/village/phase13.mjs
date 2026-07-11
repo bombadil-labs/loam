@@ -6,8 +6,8 @@
 // lands under the villager's OWN name, because the token authenticates transport, never
 // authority. The client here is the SHIPPED artifact (dist/client — the browser bundle).
 
-import { publicClaims } from "../dist/index.js";
-import { authorForSeed, loamClient, mintSeed } from "../dist/client/index.js";
+import { publicClaims } from "../../dist/index.js";
+import { authorForSeed, loamClient, mintSeed } from "../../dist/client/index.js";
 import {
   AUTHORS,
   check,

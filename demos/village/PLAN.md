@@ -35,7 +35,7 @@ the hive.
 
 ## 2. The stores and their apps
 
-Four stores, four sqlite homes under `_testing/homes/`, four HTTP mounts on localhost.
+Four stores, four sqlite homes under `demos/village/homes/`, four HTTP mounts on localhost.
 
 ### 2.1 `commons` — the village social graph (port 4401)
 
@@ -129,7 +129,7 @@ gets a Field Note and either a fix (if ours) or a filed issue (if Loam's).
 
 ### Phase 0 — Groundwork
 
-- [x] 0.1 `npm run build` green; `_testing/` scaffolding in place (harness, schema files)
+- [x] 0.1 `npm run build` green; `demos/village/` scaffolding in place (harness, schema files)
 - [x] 0.2 Four homes minted (`loam init`), four DISTINCT operators confirmed (no two alike)
 - [x] 0.3 `Person` registered on commons via **CLI** before serve; `loam store` shows exactly
       marker + definition + reference (3 deltas)
@@ -279,14 +279,14 @@ All four stores up, the pulse running, subscribers parked on the almanac. The sa
 
 ### Teardown
 
-- [ ] T.1 Kill all servers; delete `_testing/` (this file's last act is its own deletion)
+- [ ] T.1 Kill all servers; delete `demos/village/` (this file's last act is its own deletion)
 - [ ] T.2 Anything Loam-worthy learned → summarized to Myk (JOURNAL/SPEC/issue as he directs)
 
 ---
 
 ## 4. Mechanics
 
-- **Layout**: `_testing/PLAN.md` (this file) · `harness.mjs` (spin/serve/gql/sse/mcp/pull
+- **Layout**: `demos/village/PLAN.md` (this file) · `harness.mjs` (spin/serve/gql/sse/mcp/pull
   helpers + `check()` tally) · `schemas/*.json` (register files) · `phase0.mjs` … `phase7.mjs`
   (one runnable act per phase, each idempotent-ish and resumable) · `pulse.mjs` (the
   federation tick) · `homes/` (the four sqlite homes; disposable).
@@ -296,7 +296,7 @@ All four stores up, the pulse running, subscribers parked on the almanac. The sa
   go over HTTP/MCP only.
 - **Progress**: run a phase → check its boxes here → append a Field Note for anything
   surprising (even if it passed). The boxes are the state; any session can resume from them.
-- **Nothing in `_testing/` is ever committed.** The repo's only record of this saga is
+- **Nothing in `demos/village/` is ever committed.** The repo's only record of this saga is
   whatever learning graduates to JOURNAL/SPEC/issues via Myk.
 
 ## 5. Field notes

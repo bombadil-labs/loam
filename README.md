@@ -21,6 +21,11 @@ last step) and teaches Loam by growing one: eleven lessons from "you are the ope
 carrying your store out of the tab and serving it from your own machine, the same store proven
 hash for hash.
 
+**Evaluating the repo — human or agent?** Start in [`demos/`](demos/README.md): the tutorial's
+source lives there, and beside it the **village** — five federated stores, an adversary, and a
+ledger mapping every demonstrated behavior to the machinery that proves it, end-to-end over
+real HTTP.
+
 ---
 
 ## Install

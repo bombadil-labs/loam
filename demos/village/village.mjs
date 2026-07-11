@@ -60,7 +60,7 @@ console.log("the mill wheel turns: the almanac is animate (fn:grind, signed by t
 // THE OPEN DOOR (Unit 2, SPEC §12): one operator-signed declaration at loam:public, and the
 // dossier lenses answer any browser, tokenless — the dashboard reads the almanac DIRECTLY
 // from here on (no token in the page, no proxy for the data). Idempotent: fixed timestamp.
-const { publicClaims } = await import("../dist/index.js");
+const { publicClaims } = await import("../../dist/index.js");
 await almanac.gateway.append([
   signClaims(
     publicClaims(["Dossier", "TrustedDossier", "GuardedDossier"], almanac.operator, 1_000_002),
@@ -134,7 +134,7 @@ const tell = (text, tone = "write") => {
 // operator — in the demo, immediately; in life, at the operator's judgment — grants write
 // standing, THEN appends the petition itself as the record of asking (the grant must come
 // first: an unstanding author's delta is refused at the door, which is exactly the point).
-const { fromWire, grantClaims } = await import("../dist/index.js");
+const { fromWire, grantClaims } = await import("../../dist/index.js");
 const { verifyDelta } = await import("@bombadil/rhizomatic");
 const { loadSpec, registerHttp } = await import("./harness.mjs");
 const players = new Set(); // person ids the gate has admitted this run (roots survive as data)
@@ -194,7 +194,7 @@ async function handlePetition(req, res) {
 const page = readFileSync(join(ROOT, "dashboard.html"), "utf8")
   .replace("__ALMANAC_PUBLIC_DOOR__", almanac.base)
   .replace("__GATE_TOKEN__", tok("gate", "almanac"));
-const clientJs = readFileSync(join(ROOT, "..", "dist", "client", "index.js"));
+const clientJs = readFileSync(join(ROOT, "..", "..", "dist", "client", "index.js"));
 const viewer = createServer((req, res) => {
   if (req.url === "/events") {
     res.writeHead(200, {
@@ -226,7 +226,7 @@ console.log(`the almanac is readable at http://127.0.0.1:${VIEWER_PORT}`);
 
 // ---- the pulse --------------------------------------------------------------------------------
 // The almanac publishes the cinelog translation ONCE (idempotent: fixed timestamp).
-const { translate, translationClaims } = await import("../dist/index.js");
+const { translate, translationClaims } = await import("../../dist/index.js");
 await almanac.gateway.append([
   signClaims(
     translationClaims(
@@ -492,7 +492,7 @@ const acts = [
     if (forgeryOut === "healing") {
       // TRUST IS DATA (step 13): the almanac's operator declares a roster — the villagers, no
       // one else. One delta; the very next federate obeys it.
-      const { trustClaims } = await import("../dist/index.js");
+      const { trustClaims } = await import("../../dist/index.js");
       await almanac.gateway.append([
         signClaims(
           trustClaims(
@@ -525,7 +525,7 @@ const acts = [
       return;
     }
     if (forgeryOut === "rostered") {
-      const { trustClaims } = await import("../dist/index.js");
+      const { trustClaims } = await import("../../dist/index.js");
       await almanac.gateway.append([
         signClaims(trustClaims("open", [], almanac.operator, Date.now()), almanac.seed),
       ]);
