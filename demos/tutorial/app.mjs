@@ -128,42 +128,18 @@ function actionsFor(lesson) {
     box.appendChild(n);
   }
 
-  switch (lesson.id) {
-    case 1:
-      if (!done) box.append("The boot already did this — the check reads it off the ground.");
-      break;
-    case 2: {
-      if (!done) addDoIt("Say it: you watched Arrival");
-      box.appendChild(inspector());
-      break;
-    }
-    case 3:
-      if (!done) addDoIt("Register Film and Book");
-      break;
-    case 4:
-      if (!done) addDoIt("Log the watch — one claim, with Alice");
-      break;
-    case 5:
-      if (!done) addDoIt("Rate it 9, take it back, read the book, try the impossible set");
-      break;
-    case 6:
-      if (!done) addDoIt("Evolve Film: add tags, tag it first-contact");
-      break;
-    case 7:
-      if (!done) addDoIt("Let the stranger's claim in, then change the reader");
-      break;
-    case 8:
-      if (!done) addDoIt("File the note, honor the request, erase it");
-      break;
-    case 9:
-      if (!done) addDoIt("Pull the circle; register your own Person lens");
-      break;
-    case 10:
-      if (!done) addDoIt("Declare Film public — one signed record");
-      break;
-    case 11:
-      box.appendChild(finale());
-      break;
+  // Data-driven off the lesson, never a hardcoded id map (which drifts the moment the arc is
+  // renumbered — the bug this replaced). The finale carries its own machinery; lesson 1 was
+  // performed by boot; every other lesson gets a button labelled from its own `action` field;
+  // lesson 2 also gets the inspector its copy promises.
+  const isFinale = lesson.id === arc[arc.length - 1].id;
+  if (isFinale) {
+    box.appendChild(finale());
+  } else if (lesson.action === undefined) {
+    if (!done) box.append("The boot already did this — the check reads it off the ground.");
+  } else {
+    if (!done) addDoIt(lesson.action);
+    if (lesson.id === 2) box.appendChild(inspector());
   }
   return box;
 }

@@ -20,6 +20,7 @@ export interface LessonCtx {
 export interface Lesson {
   id: number;
   title: string;
+  action?: string;
   copy: string;
   perform(ctx: LessonCtx): Promise<void>;
   check(ctx: LessonCtx): Promise<boolean>;
