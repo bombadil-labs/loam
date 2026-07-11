@@ -467,7 +467,102 @@ their own opposition.
     reader picks. Failed coordination costs one translation delta, written after the fact,
     with provenance.
 
-## 14. Glossary
+## 14. Write semantics — mutation is the dual of resolution (designed 2026-07-10; queued)
+
+Reading is `resolve : Policy → HView → View` (§4): a field's value is not stored, it is
+COMPUTED per-property by its policy over a bucket of gathered deltas. Writing is the **dual**,
+and today does not know it — the mutation surface (§5) appends a `(subject/context, value)`
+delta uniformly, as if every field were a settable single slot, which is true only of `pick`.
+The read side knows a field may be a selection, an aggregate, a conflict set, an `expand`ed
+subtree, or (later) a derivation; the write side pretends otherwise. The symptom is `null`:
+there is no way through the surface to REMOVE a value, because "set to null" was never wired —
+and the naive fix (negate the winning delta) does not hold against union (a field is many
+deltas across many stores; you can negate only the ones you can see). This section makes
+writing as policy-aware as reading.
+
+**Two primitives; everything else is sugar.** Every mutation is one of:
+
+- **assert** — append a contributing delta (a signed fact, with standing, §7).
+- **retract** — negate YOUR OWN contributing deltas (rhizomatic negation, §2; honored at the
+  mask stage of the gather, §4).
+
+`set`, `add`, `remove`, `clear`, `unset` are these two, parameterized by the field's policy.
+There is no universal "set" and no universal "clear"; each policy kind **induces** its own
+write discipline, or declines one.
+
+**Clearing is retraction, and it resolves to absence — never to a null value.** A View already
+represents "no value" natively: a policy with nothing to say returns an internal ABSENT
+sentinel, and `resolveView` OMITS that key from the View (a missing key reads as `null` at the
+surface). So removal needs no new value in the algebra — retract your contributing deltas, the
+bucket empties, the policy goes absent, the key vanishes; the reader's `absentAs` decides what
+that absence RENDERS as. Removal arrives without null-the-hole ever riding on a reference: the
+null-ness lives in the lens, explicit and per-field. Hoare's mistake sidestepped by
+construction, not by discipline.
+
+**Each policy kind induces its write semantics:**
+
+- **`pick`** — _assert_ to set (the new fact wins by the field's order); _retract-your-own_ to
+  clear (the next surviving delta steps up; if none, absence).
+- **`all` / `conflicts`** — _assert_ to add; _retract_ a specific delta to remove one;
+  _retract-all-yours_ to clear your contribution.
+- **`merge`** — _assert_ an **addend** and _retract_ an addend; there is **no** "set the
+  aggregate." You cannot invert `sum` to a chosen total; the surface refuses "set" as a
+  category error and offers only contribution.
+- **`absentAs`** — writes pass through to the inner `then`; the `constant` is a read-time
+  fallback, never a written value.
+- **expanded / relational** (an `expand`ed edge, §4) — _assert_ the **edge** to link; _retract_
+  the edge to sever (the nested subtree drops from the view). You never write INTO the nested
+  entity's resolved value — that is its own policy over its own ground.
+- **derived** (future resolve-time computed fields) — **read-only**: no backing assertion
+  exists to write or retract.
+- **default** — **immutable** unless a field opts into a write discipline. The store learns;
+  silence about writability means "you may not," not "you may set anything."
+
+Writability is declared in the registration (Loam-level metadata, beside the claim templates of
+§5), **not** in the rhizomatic `Policy`. It disciplines the mutation SURFACE, never the ground:
+the resolution algebra is untouched, so content-addressing and portability are unaffected, and
+two instances may declare different writability for one schema without ever diverging on a
+resolved View. (The same reason merge fns are a closed vocabulary — resolution must be a
+universal function of the data — is why write DISCIPLINE, which is not resolution, may be
+local.)
+
+**In practice.**
+
+- _`favorite_color` (`pick`)_ — `set(blue)` asserts; `clear()` retracts your blue → absence →
+  renders `null` (or whatever `absentAs` says).
+- _`tags` (`all`)_ — `add(t)` asserts; `remove(t)` retracts that assertion; `clear()` retracts
+  all of yours.
+- _`score` (`merge sum`)_ — `contribute(+5)` asserts an addend; `withdraw(+5)` retracts it;
+  there is no `setScore` — the total is whatever the addends sum to.
+- _`hometown` (`expand`ed edge)_ — `move(city)` asserts a new edge (retract the old if
+  single-valued); `clear()` retracts the edge, and the nested `City { … }` drops from the view.
+- _`full_name` (derived)_ — read-only; a mutation is refused with a reason.
+
+**Real limitations, stated plainly (the §13 register):**
+
+- **Clear is per-reader.** A retraction binds only for readers whose lens honors your negation
+  (trust masks, §7). "Cleared" is your TESTIMONY that you withdraw the fact, not a global
+  guarantee the field is empty for everyone. Truth is a lens; so is emptiness.
+- **You clear what you said, not what the world said.** You retract your OWN contributions;
+  you cannot negate assertions you cannot see or did not author, and a fresh (or freshly
+  federated) assertion repopulates the field — correctly. "Clear my favorite_color" means
+  "withdraw my claim," never "no one may state it."
+- **Absence is unknown, not affirmed-empty.** Retraction yields "no one is saying," distinct
+  from "affirmatively none." An app that must tell them apart uses an agreed sentinel value (a
+  normal assertion) today; a first-class null VALUE — distinct from absence, and defined for
+  every merge fn — is a `Primitive` change in rhizomatic (frozen: a conversation, not a Loam
+  workaround), deliberately out of scope here.
+- **Aggregates and derived fields are structurally non-clearable — and that is correct.** There
+  is no inverse of `sum` to null, and no backing delta beneath a computation. The surface
+  refuses them rather than pretending — the write side finally telling the truth the read side
+  always knew.
+- **Writability is front-door discipline, not a field lock.** A hand-signed or federated delta
+  may still assert into a "read-only" context; the store gathers and resolves it, because the
+  ground is open and entities are unowned (§7, "authors, not owners"). A reader who wants the
+  guarantee enforces it with a lens — e.g. a mask admitting only the deriving author for a
+  derived context. Writability disciplines the surface; lenses discipline the truth.
+
+## 15. Glossary
 
 - **Delta** — the signed, content-addressed atom (rhizomatic).
 - **Hyperschema** — recursive gather definition; `HyperSchema { name, alg, body: Term }`.
@@ -481,3 +576,8 @@ their own opposition.
 - **Runner** — a peer client playing the execution role; passive vs animate.
 - **Capability** — a signed delta granting a reference; the unit of all authority.
 - **Genesis** — the bootstrap deltas every store is born from (`SCHEMA_SCHEMA` + accounts + …).
+- **Assert / Retract** — the two universal write primitives (§14): append a contributing delta /
+  negate your own contributing deltas (→ absence). `set` / `add` / `remove` / `clear` are these,
+  parameterized by a field's policy.
+- **Write semantics** — the mutation discipline a policy kind induces; declared per-field in the
+  registration, Loam-level, dual to resolution (§14).
