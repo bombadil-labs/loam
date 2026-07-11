@@ -12,12 +12,13 @@ your data into views, maintains them live, and remembers everything. Nothing is 
 store only ever learns. Two Loam instances that meet simply merge. Trust is a lens the reader
 holds, not a verdict the ground hands down.
 
-The design is in [SPEC.md](SPEC.md); the working record in [JOURNAL.md](JOURNAL.md). This page is
-the manual.
+The design is in [SPEC.md](SPEC.md), the roadmap in [TODO.md](TODO.md), and the working record in
+[JOURNAL.md](JOURNAL.md). This page is the manual; [how the repo is organized](#how-the-repo-is-organized)
+is spelled out below.
 
 **New here? Take [the interactive tutorial](https://bombadil-labs.github.io/loam/)** — it hands
 you a real store running in your browser (no signup, no server, nothing to install until the
-last step) and teaches Loam by growing one: eleven lessons from "you are the operator" to
+last step) and teaches Loam by growing one: sixteen lessons from "you are the operator" to
 carrying your store out of the tab and serving it from your own machine, the same store proven
 hash for hash.
 
@@ -459,6 +460,30 @@ loudly) and every serve heals the pair by two-way union before it boots. Which m
 after disaster is no procedure at all: delete the lost sqlite and serve again — the archive
 replants it. Embedders get the same pieces as values: `MirrorBackend(primary, mirror)` and
 `ArchiveBackend(root)`.
+
+## How the repo is organized
+
+**Source.** `src/` is the library and CLI, split by seam: `gateway/` (the store's surface —
+GraphQL, mutations, registrations, accounts & capabilities, trust, erasure), `store/` (the
+`StoreBackend` drivers — sqlite, archive/mirror, localStorage), `surface/` (surfaces as
+materializations — the GraphQL and REST/OpenAPI doors from one generator seam), `federation/`
+(offer / pull / wire / translate), `runner/` (derived functions), `cli/`, and `browser/` +
+`client/` (the full in-page store and the read-only public client). `test/` mirrors that tree;
+[`demos/`](demos/README.md) holds the [tutorial](https://bombadil-labs.github.io/loam/) and the
+village.
+
+**The docs, by role — they don't overlap:**
+
+- **[README.md](README.md)** — this file: the manual (what Loam is, how to use it).
+- **[SPEC.md](SPEC.md)** — the design, and the record of what **is**: one section per shipped
+  capability, each closed by a `**Provenance.**` footer linking the PR(s) that landed it and
+  naming where it lives. Read it to understand the system; it grows only when work lands.
+- **[TODO.md](TODO.md)** — the backlog: unbuilt and partially-designed work. The next thing to
+  build is drawn from here, and its landing PR migrates it into SPEC.md.
+- **[JOURNAL.md](JOURNAL.md)** — the append-only record: one entry per step, what was done and why.
+- **[CLAUDE.md](CLAUDE.md)** — the process this repo runs by (the build loop).
+
+(`CURRENT_WORK.md` is a scratch checklist for whatever step is in flight — ephemeral by design.)
 
 ## Development
 
