@@ -405,8 +405,20 @@ it; you decide whether it binds.`,
       },
       check: async (ctx) => {
         const roommate = loam.authorForSeed(ROOMMATE_SEED);
+        // Scope to the ROOMMATE's grant by its subject — lesson 14 mints a second operator
+        // grant (to the miller) that is never revoked, so "any operator grant" would let the
+        // iteration order decide this check. grantClaims files the grantee as a `subject`
+        // primitive; match on it so monotonicity holds by construction, not by luck.
         const grant = ground(ctx).find(
-          (d) => d.claims.author === ctx.author && pointsAt("loam:store", "loam.grants")(d),
+          (d) =>
+            d.claims.author === ctx.author &&
+            pointsAt("loam:store", "loam.grants")(d) &&
+            d.claims.pointers.some(
+              (p) =>
+                p.role === "subject" &&
+                p.target.kind === "primitive" &&
+                p.target.value === roommate,
+            ),
         );
         const theirScreening = has(ctx, (d) => d.claims.author === roommate);
         // the revocation strikes THIS grant by id — not just any negation the learner made
