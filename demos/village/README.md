@@ -226,6 +226,16 @@ _(one entry per PR that grew the village; newest last)_
   from the laptop, the notebook answers through the imported law — no register() anywhere —
   and the view matches the tab **`_hex` for `_hex`**. A second pull accepts 0 of 4: union is
   union. A store born in a browser, served from a laptop; nothing re-signed, nothing lost.
+- **TWO DOORS, ONE TRUTH (SPEC §17, PRs #59–#62)** (phase19.mjs, 4/4 twice — re-runnable
+  by law: the operator clears its stage by striking stale versions, the same instrument the
+  finale demonstrates): the almanac answers REST beside GraphQL from the same registrations.
+  A live OpenAPI document names its lenses; the same view crosses both doors _hex for _hex;
+  evolution mints v2 while v1 stays answerable — one tags fact, two resolutions (the old
+  lens's DEFAULT answers a scalar where the new lens's ALL answers a list), two content
+  addresses, both true under their law; and withdrawal is the operator striking the
+  registration delta — 410 Gone by its true name on the operator's door, a uniform 404 to
+  the anonymous window, because history is not anonymous. The surface seam beneath it
+  (SurfaceGenerator, SPEC §17) is what the tutorial's two-doors beat will stand on.
 - **THE TUTORIAL (SPEC §16, PRs #54/#55/#56)** — not a village act but its public-facing
   sibling, recorded here because the arc reprises what the village proves: `site/` ships a
   GitHub Pages tutorial where a stranger boots a REAL governed store in their browser and
