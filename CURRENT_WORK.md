@@ -207,12 +207,12 @@ archive/mirror drivers (copy note in ⑯), HTTP/MCP serving (finale touches serv
 **Left off here (Sprint A, step 2 — the REST door; seam merged as PR #60):** design settled,
 build begins next cycle. The step's contract:
 
--  in registration.ts: ALL surviving
+- `readRegistrationVersions(reactor, operator)` in registration.ts: ALL surviving
   (lawful, non-negated) registrations per registration entity, ascending (timestamp, id) →
   v1..vN with each version's delta id (the hash = its true name). A struck version leaves the
   list (aliases shift, per §17 — the hash never lies); hash-addressing a struck version
   answers 410 Gone, withdrawn-by-the-operator.
--  public accessor: { registered, hooks } — the door-neutral twin
+- `Gateway.surface(door)` public accessor: { registered, hooks } — the door-neutral twin
   of the private gqlHooks(); 'public' filters registered to the declared-public set (reuse
   the publicCache defs computation).
 - PINNED RESOLUTION: old versions stay ANSWERABLE (the law is not words). Implementation
@@ -220,7 +220,7 @@ build begins next cycle. The step's contract:
   generation-qualified names (matName machinery exists), or (b) one-shot gather+resolve
   under the pinned (schema, policy) via evalTerm + resolveView. Whichever, the _hex of a
   pinned view is as real as the live one's.
-- : buildOpenApi(registered versions) → OpenAPI 3.1 (info, per-version
+- `src/surface/rest.ts`: buildOpenApi(registered versions) → OpenAPI 3.1 (info, per-version
   paths, components from policies; the doc names each version's hash); the router:
   GET /:mount/openapi.json; GET /:mount/rest/v<N>/<schema>/<entity> → { entity, view, _hex,
   _hviewHex }; GET /:mount/rest/@<regHash>/... (hash-addressed); POST /:mount/rest/v<N>/
