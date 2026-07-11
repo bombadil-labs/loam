@@ -155,8 +155,10 @@ records. That key is the only authority this store will ever answer to, and it l
     {
       id: 2,
       title: "A fact needs no permission slip",
-      copy: `Say something true: you watched Arrival. Press the button (or write it in the
-console) and watch the Ground pane — one new record. It has no table, no schema, no shape
+      copy: `Say something true: you watched Arrival. Press the button (or, if you speak
+JavaScript, open your browser's developer console — this page puts the store itself at
+window.store, and everything the buttons do you can do by hand) and watch the Ground pane —
+one new record. It has no table, no schema, no shape
 anyone approved. It is a CLAIM: a timestamp, your authorship, and pointers — "film:arrival's
 title is Arrival" — signed by your key and named by the hash of its own content. Try the
 inspector's one-byte edit: change anything and the id shatters. That id IS the fact's identity;
@@ -316,9 +318,10 @@ the old facts answer the new question the moment it's asked.`,
     {
       id: 7,
       title: "The adversary, and whose word wins",
-      copy: `A stranger's claim just arrived (we bundled one — inspect it first if you like):
-"film:arrival's title is ARRIVAL 2: TOTALLY REAL SEQUEL", signed with the stranger's own real
-key and stamped with a timestamp from the far future. Let it in. Your title flips — because
+      copy: `Time for trouble. We bundled a stranger's claim with this tutorial — press the
+button and it arrives like any federated record would: "film:arrival's title is ARRIVAL 2:
+TOTALLY REAL SEQUEL", signed with the stranger's own real key and stamped with a timestamp
+from the far future. Watch it land in the Ground pane, authored by someone who is not you. Your title flips — because
 your policy said "pick the latest word", and the stranger's word is latest. Here is the
 important part: NOTHING was hacked. Anyone may write; the signature is honest; your READING
 policy was simply naive. So change the reader, not the writer: re-register title to trust YOUR

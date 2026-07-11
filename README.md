@@ -15,6 +15,12 @@ holds, not a verdict the ground hands down.
 The design is in [SPEC.md](SPEC.md); the working record in [JOURNAL.md](JOURNAL.md). This page is
 the manual.
 
+**New here? Take [the interactive tutorial](https://bombadil-labs.github.io/loam/)** — it hands
+you a real store running in your browser (no signup, no server, nothing to install until the
+last step) and teaches Loam by growing one: eleven lessons from "you are the operator" to
+carrying your store out of the tab and serving it from your own machine, the same store proven
+hash for hash.
+
 ---
 
 ## Install
