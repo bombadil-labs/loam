@@ -13,22 +13,28 @@ round trip.
 
 ## Sub-steps (each is a PR-sized slice)
 
-### 3a — packets + the lesson arc, headless (in progress)
+### 3a — packets + the lesson arc, headless (built; PR pending review)
 
-- [ ] `scripts/gen-packets.mjs` — deterministic (fixed seeds, fixed timestamps): emits
-      `site/packets/circle.json` (the foreign Person store: Alice, Bob, friends — signed under
-      the circle operator) and `site/packets/adversary.json` (the forged title claim for
-      lesson 7). Committed data; regenerating is byte-identical.
-- [ ] `site/lessons.mjs` — the arc as DATA + FUNCTIONS, UI-free: for each of the 11 lessons
-      (SPEC §16 arc): `{ id, title, copy, perform(ctx), check(ctx) → boolean }` where ctx
-      holds the learner's gateway + storage + packets. `check` reads the STORE (query or
-      ground predicate), never UI state. The media-store schemas (Film/Book/Watch policies
-      exactly as §16 sketches) live here too.
-- [ ] `test/site/arc.test.ts` — boots a store headless (MemStorage shim), drives lessons 1–10
-      through the same `perform`/`check` functions the UI will call, asserts every check green
-      IN ORDER, then lesson 11: export `{ version, operator, seed, deltas }` → `loam init
-      --seed` + `loam pull` (run() in-process, tmp home) → boot/serve → `_hex` match.
-- [ ] Gate green → PR → one careful review → merge.
+- [x] `scripts/gen-packets.mjs` — deterministic; `--check` gates byte-identity (and the arc
+      test runs it in beforeAll, so a drifted packet fails CI). `site/packets/` is
+      prettier-ignored: generated data, formatter passes would break identity.
+- [x] `site/lessons.mjs` — the 11 lessons as `{ id, title, copy, perform, check }`, UI-free,
+      library injected (`buildArc(loam)`); checks are DURABLE ground predicates (safe to
+      re-verify after later lessons — the revisit test enforces this). Typed for the test via
+      `site/lessons.d.mts`.
+- [x] `test/site/arc.test.ts` — in-order greens + no-vacuous-green pre-checks + the
+      between-lessons beats (no surface before L3, NothingPublic before L10) + THE REVISIT
+      (reboot, all checks re-verify from ground) + the finale round trip (`_hex` for `_hex`).
+- [x] Gate green — 34 files, 412 tests.
+- [ ] PR → one careful review → merge.
+
+**3a learnings (feed 3b/3c):** (1) multi-pointer entries resolve to their whole claim record
+(`{guest, value}`) — better pedagogy than a scalar, but `merge max` can't digest it, so
+`lastWatched` left the domain; (2) "set an aggregate is REFUSED" needs SPEC §14 (unbuilt) —
+lesson 5 teaches the honest current truth instead: the "set" is one more counted claim (the
+count ticks +1, not to 100) — revisit when §14 lands (SPEC §16 wants a footnote; do at 3c
+re-plan); (3) GraphQL renders absence as `null`; (4) lesson checks must be MONOTONE in the
+ground or the revisit un-greens them.
 
 ### 3b — the page
 
