@@ -93,8 +93,9 @@ GraphQL hints), and lesson 15's smaller-world beat applies to both doors. Design
    The old lens shows the screening **but leaves Alice out** — a lens drops what it doesn't
    gather. Inspector: flip one byte, the id shatters. [raw claims; multi-pointer;
    content-addressing; lens-drops-unknown]
-6. *Evolve the lens, keep every past.* Add `guests` → re-register → Alice appears in the
-   SAME view, under a subscription that never disconnected. Then re-register the pre-guests
+6. *Evolve the lens, keep every past.* Add `guests` → re-register → a NEW query shows Alice;
+   the OLD subscription keeps streaming Alice-less (a pinned lens choice — see header
+   amendment). Then re-register the pre-guests
    policy as `FilmClassic`: two lenses, one ground, both live — nothing was mutated, ever;
    snapshots feed forward. [evolution-as-append; concurrent generations; nothing-destroyed]
 7. *Taking it back, and what silence means.* Retract a rating (negation → absence); Book's
