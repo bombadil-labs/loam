@@ -178,3 +178,21 @@ prefix must not brick when a stray non-delta key lands — see the tutorial's `h
 recovery); quarantine-vs-refuse semantics for a corrupt row on read (refuse-the-store vs
 isolate-the-row — Myk decides); boot resilience; an entity-ID reserved-vs-user convention (so
 constitutional ids can't collide with app ids); and `loam repair` tooling. Then STOP for review.
+
+---
+
+## Vocabulary overhaul against rhizomatic 0.3.0 — BLOCKED on upstream
+
+_Blocked on [rhizomatic#3](https://github.com/bombadil-labs/rhizomatic/issues/3) (a substrate
+change Myk owns): rename the L5 resolution vocabulary so `PropPolicy`→`Policy` (the per-property
+rule) and `Policy`→`Schema` (the resolution program), restoring the `HyperSchema:HyperView ::
+Schema:View` symmetry. Loam can't touch rhizomatic; this item starts only once 0.3.0 publishes._
+
+When 0.3.0 lands: bump the `@bombadil/rhizomatic` dep, then a wide-but-mechanical sweep of Loam —
+`Policy`/`PropPolicy` → `Schema`/`Policy`, `parsePolicy`→`parseSchema`, `policyToJson`→`schemaToJson`
+— across `src/gateway/registration.ts` (`Registration` becomes "a HyperSchema + a Schema + roots"),
+the gateway, the tutorial (`demos/tutorial/lessons.mjs` builds many policies), the village, and the
+tests. Watch for the `mask` term's on-wire `"policy"` field (L2 `MaskPolicy`, a different thing —
+do NOT rename). Update CLAUDE.md's "Match rhizomatic's vocabulary" standing rule and the README's
+model section to the new names. Pure rename upstream = no wire/content-address drift, so no data
+migration — the gate against unchanged fixtures is the proof.
