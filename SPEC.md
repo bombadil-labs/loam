@@ -800,6 +800,21 @@ not a version skew to manage.
   a GraphQL endpoint to a few kilobytes on a microcontroller. When an instance is wanted, it
   is a generator, not a fork.
 
+- **Every published door is versioned, and publishing is append-only (Myk, 2026-07-11).** A
+  version's TRUE NAME is the registration delta's content address — two peers naming the same
+  registration hash cannot disagree about what that version means. Monotonic `vN` is a
+  derived, human-friendly alias: the Nth surviving registration for that schema name, counted
+  in ground order. Evolution MINTS a version; it never unseats one — a door once published
+  stays answerable, by construction rather than by discipline (the gateway already keeps
+  superseded generations materialized; this law makes them citizens, not leftovers). And
+  because a registration is a claim, WITHDRAWING a shipped-broken version needs no new
+  machinery: the operator strikes the registration delta (lawful negation, the same
+  instrument as everywhere) — the version stops being served, the ground remembers that it
+  existed and that it was withdrawn, and nothing is erased. Concretely: the REST door is born
+  versioned (`/rest/v<N>/…`, and addressable by registration hash; the OpenAPI document names
+  the versions it describes); version-pinned access to GraphQL's older generations is
+  additive and QUEUED, not silently in Sprint A's scope.
+
 - **Boundaries, in the §13 register:** a surface generator derives doors, never law — it may
   narrow a projection (write-only, read-only, one schema of many) but never widen one; a
   projection that omits a capability is a smaller world, not a bypass; and the anonymous

@@ -16,7 +16,7 @@ the arc test pins the real semantics._
       `buildGqlSchema` becomes the first implementation. Contract: GraphQL behavior
       byte-identical before/after (existing suites are the witness).
 - [ ] **REST/OpenAPI**: `buildOpenApi(registered)` → OpenAPI 3.1 served at
-      `/:mount/openapi.json`; dynamic router `GET /:mount/rest/<schema>/<entity>` (the same
+      `/:mount/openapi.json`; dynamic router `GET /:mount/rest/v<N>/<schema>/<entity>` (the same
       view — `_hex` for `_hex` with GraphQL, contract-tested), `POST` through the same door
       discipline. REVIEW FOCUS: the doors must not disagree — tokens, public declarations,
       capability refusals, tombstones, all shared. Spec regenerates on evolution.
@@ -24,6 +24,12 @@ the arc test pins the real semantics._
       shipped since capabilities — one careful agent minimum) → merge → village act (the
       almanac answers REST beside GraphQL; dashboard or a phase19 hits both doors and
       compares `_hex`) → journal → re-plan.
+- [ ] **Versioning law (§17 amendment, Myk 2026-07-11)**: the REST door is BORN versioned —
+      `vN` aliases derived from surviving registrations in ground order, the registration
+      hash as the canonical version name; withdrawing a version = the operator strikes its
+      registration delta (existing grammar; test it). Version-pinned GraphQL access: QUEUED
+      follow-up, not Sprint A scope. Lesson 6 note: version-pinned queries may replace the
+      FilmClassic sibling-name trick in v2b — decide when the door exists.
 - [ ] Typed-client generation (`loam types`): designed in §17, NOT queued — do not build.
 
 # Tutorial v2 (follows Sprint A; the MVP grows up — design codified as SPEC §19)
