@@ -16,12 +16,15 @@ Ordering is rough priority, top-first; Myk sets it. Each item says what it needs
 
 _Designed 2026-07-10 (originally SPEC §14). **BLOCKED on an open question** (the clear-others
 question below) — resolve with Myk before implementation. When it lands, this migrates back to
-SPEC §14 with a Provenance footer. (Vocabulary note: this predates rhizomatic 0.3.0 but reads
-cleanly under it — a **Policy** here is a single property's rule, exactly the new meaning; the
-resolution program as a whole is a **Schema**.)_
+SPEC §14 with a Provenance footer._
+
+_Vocabulary (0.3.0): a **Policy** is a single property's rule — `pick` / `all` / `merge` /
+`conflicts` / `absentAs`; the whole `{ props, default }` resolution program a field belongs to is a
+**Schema**. This section is precisely about each field's write discipline following its Policy, so it
+reads natively under the new names — "Policy" below always means the per-property rule._
 
 Reading is `resolve : Schema → HView → View` (§4): a field's value is not stored, it is
-COMPUTED per-property by its policy over a bucket of gathered deltas. Writing is the **dual**,
+COMPUTED per-property by its Policy over a bucket of gathered deltas. Writing is the **dual**,
 and today does not know it — the mutation surface (§5) appends a `(subject/context, value)`
 delta uniformly, as if every field were a settable single slot, which is true only of `pick`.
 The read side knows a field may be a selection, an aggregate, a conflict set, an `expand`ed
@@ -37,20 +40,20 @@ writing as policy-aware as reading.
 - **retract** — negate YOUR OWN contributing deltas (rhizomatic negation, §2; honored at the
   mask stage of the gather, §4).
 
-`set`, `add`, `remove`, `clear`, `unset` are these two, parameterized by the field's policy.
-There is no universal "set" and no universal "clear"; each policy kind **induces** its own
+`set`, `add`, `remove`, `clear`, `unset` are these two, parameterized by the field's Policy.
+There is no universal "set" and no universal "clear"; each Policy kind **induces** its own
 write discipline, or declines one.
 
 **Clearing is retraction, and it resolves to absence — never to a null value.** A View already
-represents "no value" natively: a policy with nothing to say returns an internal ABSENT
+represents "no value" natively: a Policy with nothing to say returns an internal ABSENT
 sentinel, and `resolveView` OMITS that key from the View (a missing key reads as `null` at the
 surface). So removal needs no new value in the algebra — retract your contributing deltas, the
-bucket empties, the policy goes absent, the key vanishes; the reader's `absentAs` decides what
+bucket empties, the Policy goes absent, the key vanishes; the reader's `absentAs` decides what
 that absence RENDERS as. Removal arrives without null-the-hole ever riding on a reference: the
 null-ness lives in the lens, explicit and per-field. Hoare's mistake sidestepped by
 construction, not by discipline.
 
-**Each policy kind induces its write semantics:**
+**Each Policy kind induces its write semantics:**
 
 - **`pick`** — _assert_ to set (the new fact wins by the field's order); _retract-your-own_ to
   clear (the next surviving delta steps up; if none, absence).
@@ -63,7 +66,7 @@ construction, not by discipline.
   fallback, never a written value.
 - **expanded / relational** (an `expand`ed edge, §4) — _assert_ the **edge** to link; _retract_
   the edge to sever (the nested subtree drops from the view). You never write INTO the nested
-  entity's resolved value — that is its own schema over its own ground.
+  entity's resolved value — that is its own Schema over its own ground.
 - **derived** (future resolve-time computed fields) — **read-only**: no backing assertion
   exists to write or retract.
 - **default** — **immutable** unless a field opts into a write discipline. The store learns;
@@ -101,7 +104,7 @@ local.)
 
   > **OPEN — resolve before this work begins (Myk, 2026-07-11).** The bullet above is likely
   > too strong. It holds when the lens admits only your own contributions — but when a field's
-  > policy draws on OTHERS' claims (an `all` list, a `merge`, a `conflicts` set, a `pick` whose
+  > Policy draws on OTHERS' claims (an `all` list, a `merge`, a `conflicts` set, a `pick` whose
   > order can seat another author), retracting only your own deltas leaves the field populated
   > by theirs, so "clear" has not cleared. A binding clear would have to negate those foreign
   > contributions too — which the substrate already permits: an authored negation may reference
