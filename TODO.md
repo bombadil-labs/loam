@@ -39,42 +39,148 @@ are an **amendment appended to SPEC §14**, not a new section._
 
 ---
 
-## Reserved §21 — Shippable renderers: schemas AND their consumers, verified end-to-end
+## Reserved §21 — Custom resolvers: the last step of the lens becomes programmable
 
-_Handed over by Myk 2026-07-11. **NOT YET SCOPED — this opens at the design stage.** Draft the
-SPEC section answering the questions below, then STOP for Myk before writing implementation
-code. See memory `renderer-task`._
+_Proposed by Myk 2026-07-12; musings + open questions appended by Claude the same night. **NOT
+YET SCOPED — opens at the design stage.** Lands before renderers (§22) because it settles the
+"code shipped as deltas" question renderers inherit._
 
-Loam already persists GraphQL schemas as deltas. Add a way to **define and push _renderers_** —
-consumers of those schemas — as deltas too, so a "Loam app developer" ships ONE bundle of deltas
-holding **both the schema and its renderers**, and Loam **verifies at push time that the whole
-thing works end-to-end** rather than hoping at runtime. A renderer might be a React component (or
-a set), a text format, whatever. The bundle just needs to be **mounted**; Loam could ship a
-**stock React host** against which React renderers are **guaranteed to work** ("raw Loam + a
-React app").
+Today a field's **Policy** does two jobs in one breath: **selection** (which claims from the
+gathered bucket count — `pick`'s ordering, `all`'s inclusion, `conflicts`' refusal) and
+**representation** (what value the survivors denote — a `merge`'s fold, `absentAs`'s rendering
+of silence). The proposal: factor out an optional Loam-level **`resolve(deltas) → value`**,
+downstream of the Policy. The Policy keeps the epistemics — whose claims, in what order, what
+counts as disagreement; the closed rhizomatic algebra, untouched and frozen. `resolve` overrides
+the semantics — what those surviving claims *mean* as a value in this lens. Absent a custom
+`resolve`, the Policy's built-in representation stands, exactly as today; nothing existing moves.
 
-The design questions to answer BEFORE any code (this is the real work):
+What it opens: a field whose value is a computation over its bucket (trend, histogram, latest-N),
+a field that consults its siblings in the HyperView, a field that reaches past the selection into
+the store, even a field that leaves the store entirely and asks a remote API. The View stops
+being limited to the six shapes the Policy algebra happens to export and becomes what an app
+means by its data — while the ground stays pure deltas and rhizomatic stays closed.
 
-- **What _is_ a renderer delta?** Source, compiled artifact, or a content-addressed reference?
-  What is signed, and what does the signature attest to?
-- **What does "works end-to-end" mean, and how is it _proven at push time_** rather than
-  asserted? A renderer declares the schema(s)/fields it consumes; push-time verification checks
-  those against the registered schema surface (the SurfaceGenerator seam, §17, is the natural
-  anchor) and REFUSES a mismatch at the door. Pin down exactly which compatibility relation.
-- **Versioning (§17 law).** Renderers are born versioned, append-only; a renderer pinned to
-  schema version vN keeps working forever, and evolving the schema can't silently break a
-  shipped renderer. Work out how a renderer names the schema version it targets and what happens
-  when that version is struck.
-- **Trust/security for shipping _executable_ consumers** — the sharpest edge. A renderer delta
-  can carry code that runs in a host: who may push one, whose renderers a host will mount,
-  sandboxing, the capability story. Federation makes it acute — a foreign renderer over the wire
-  must be inert-by-default like foreign law (§8/§12) unless the operator blesses it.
-- **The stock React host** — the contract a React renderer implements so the shipped host mounts
-  any conformant one; the "raw Loam + React app" deliverable.
+**Musing — is this overlapping what policies already do? Did we overcook Policy?** Claude's
+read: the Policy isn't overcooked, it's *doing two jobs*, and only the second is the one that
+chafes. Selection is trust-and-provenance work and MUST stay in the closed algebra — §14 leans
+on it (writes are the dual of resolution *because* resolution is a known program). But
+representation was only ever a default, and Loam currently offers no way past it — that is the
+artificial constraint Myk is feeling, and it is Loam-surface, not substrate. An optional
+override at the lens layer recovers full expressiveness with **zero rhizomatic changes**.
+Whether `sum`/`average` should *long-term* migrate out of Policy into resolve is a real
+question — but rhizomatic is frozen, so it is a conversation with Myk in that repo, not a Loam
+decision; Loam's move is to make the question moot by letting resolve supersede.
 
-Closest existing machinery: SPEC §17 (surfaces are materializations) — renderers are the read
-side of the same story. Use a specialized review panel (substrate-semantics · capability-security
-· correctness-API), not one generalist.
+**The §14 consonance (this is the pleasant surprise):** writes never needed the value function.
+`assert` / `retract` / `clear` / `remove` act on the *bucket* — the ground — and clear works "by
+construction" precisely because it lets resolution re-run without caring what resolution
+computes. So a custom `resolve` does not break the write mechanism; it breaks *predictability*
+(write `x`, read back `f(x)`). And Loam already refuses to promise more than that — §13's
+posture, views are perspectival, absence is unknown. The surface just has to say so honestly.
+
+**The purity ladder** — not all resolvers cost the same, and the rung should probably be
+declared in the schema at rest, not discovered at runtime:
+
+- **(a) bucket-pure** — a function of the selected deltas only. Cacheable, deterministic,
+  testable; the gentlest rung, and maybe the only one v1 admits.
+- **(b) hyperview-scoped** — may read sibling fields' buckets. Still deterministic given the
+  HyperView; invalidation widens to the entity.
+- **(c) store-querying** — reaches past the selection. Deterministic given the store, but
+  hyperview-local invalidation is gone.
+- **(d) effectful** — remote APIs, clocks, anything. The view is no longer a function of the
+  ground; two readers of the same deltas see different values. Philosophically admissible
+  (lenses were never promised to agree — only the ground is shared) but it forfeits caching,
+  reproducibility, and any federation story that replays views.
+- **(e) synthetic** — the top of the ladder (Myk, 2026-07-12): a Schema property with **no
+  analog in the HyperView at all**. No bucket, no Policy, no gather — `resolve` is the field's
+  entire existence, an arbitrary function the schema designer invents. The Schema stops being
+  only a resolution discipline over gathered ground and becomes, in part, a *program* whose
+  output happens to be shaped like a View. Strictly this is a second axis, not just a higher
+  rung — (a)–(d) grade what a resolver of an existing field may READ; (e) drops the requirement
+  that the field correspond to anything gathered — but it composes with the input rungs (a
+  synthetic field may still be bucket-… well, there is no bucket; hyperview-scoped, store-
+  querying, or effectful). Two consequences fall out immediately: a synthetic field is
+  **read-only by definition** (there is no ground to assert against or retract from — the
+  §14-amendment's derived-fields bullet arrives early, at the Loam layer), and it is where the
+  overlap with rhizomatic's **`DerivedFn`** stops being a naming question and becomes a design
+  question (open question 2 below is load-bearing, not hygiene).
+
+**Open questions for the design stage:**
+
+1. Override or replacement — confirm `resolve` is optional atop an intact Policy (recommended),
+   not a second resolution system beside it. One near-synonym here would violate the vocabulary
+   rule; naming needs care.
+2. Relation to rhizomatic's **`DerivedFn`** — derived fields compute NEW values from other
+   fields; `resolve` re-represents THIS field's bucket; and rung (e) synthetics are new fields
+   with no bucket at all, which is DerivedFn territory by another road. One concept or two?
+   The §14-amendment item already marks derived fields blocked on a rhizomatic conversation;
+   don't fork the vocabulary before that conversation happens.
+3. Which rungs does v1 admit, and is the rung part of the signed schema definition (so a reader
+   knows what kind of lens it is trusting)?
+4. **What is a resolver at rest?** It is code shipped as deltas — source, artifact, or
+   content-addressed reference; what the signature attests. This is EXACTLY the renderer
+   question (§22); answer it once, here, and let renderers inherit the doctrine.
+5. Interaction with `writable` (§14): does a resolved field stay writable with an honest
+   "round-trip not guaranteed" posture (recommended — writes hit the bucket, which is still
+   real), or do rungs (c)/(d) default read-only like derived fields? Rung (e) is not a
+   question: no bucket, no write — the surface refuses with a reason.
+6. The caching/invalidation contract per rung — what does the gateway promise, and where does
+   memoization live?
+7. Is the resolver part of the lens identity — does changing a resolver constitute a new schema
+   version under §17's append-only law?
+
+---
+
+## Reserved §22 — Renderers: push deltas, get software
+
+_Handed over by Myk 2026-07-11; reframed 2026-07-12. **NOT YET SCOPED — opens at the design
+stage.** Draft the SPEC section, then STOP for Myk before implementation code. Depends on §21
+(resolvers) settling the executable-delta doctrine. See memory `renderer-task`._
+
+A Loam store already carries its own schema, its own doors, its own law — everything except its
+own face. Close that gap: **a renderer is a UI component pushed as deltas**, bound to a Schema
+and a route, and **Loam ships a stock React host** — a running app whose router is *derived from
+the store*. Push a renderer delta and the route exists; no build, no deploy, no app store
+between an idea and the people it's for. §17 said surfaces are materializations of the
+registration — GraphQL, REST, OpenAPI. This is the same law arriving at the screen: **a renderer
+is a surface whose door is pixels.** The database is the deployment.
+
+What becomes possible when this works:
+
+- **The village becomes a place, not a script** — a URL where every phase's stores render
+  themselves, and growing a store mid-meeting grows the town in the browser.
+- **Federation ships apps, not just data.** Join a confluence and its interfaces arrive with its
+  ground — a peer's board renders in your host, inert-by-default like foreign law (§8/§12)
+  until the operator blesses it. Software distribution becomes delta replication.
+- **Local-first, live by construction** — a renderer subscribes to a View over local ground;
+  writes go through the §14 verbs; offline is just the store being a store.
+- **An ecosystem on the substrate's own mechanics** — renderers are signed, versioned (§17 law),
+  content-addressed, forkable, supersedable. The app-store problems (provenance, updates,
+  rollback) are already solved by the delta model; we just point it at UI.
+
+What must be designed before any code (the real work):
+
+- **The host contract** — what a mounted renderer receives: a resolved View + a live
+  subscription + the write verbs (`assert`/`clear`/`remove`) as **capability-scoped handles**,
+  never raw store access. The renderer speaks lens; the host holds the keys. Pin this down
+  first — everything else is downstream of it.
+- **What a renderer delta IS** — inherited from §21's resolver doctrine (source vs artifact vs
+  content-addressed ref; what the signature attests). One answer for both kinds of shipped code.
+- **Proven at push time, not hoped at runtime** — a renderer declares the schema(s) + version it
+  consumes; the door checks that declaration against the registered surface (the
+  SurfaceGenerator seam, §17, is the natural anchor) and REFUSES a mismatch. Pin down the exact
+  compatibility relation.
+- **Versioning under §17 law** — renderers born versioned, append-only; pinned to schema vN a
+  renderer keeps working forever; decide what happens when vN is struck.
+- **Trust for executable consumers — the sharpest edge.** Who may push, whose renderers a host
+  mounts, the sandbox story. Federation makes it acute; inert-by-default is the floor.
+- **The router discipline** — how a renderer claims a route, who owns the namespace, collisions,
+  multiple renderers over one schema (a Schema is a lens; there is no reason it has only one
+  face).
+
+Closest existing machinery: SPEC §17 — renderers are the read side of the same story. Use a
+specialized review panel (substrate-semantics · capability-security · correctness-API), not one
+generalist.
 
 ---
 
