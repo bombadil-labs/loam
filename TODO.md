@@ -27,6 +27,11 @@ Ordering is rough priority, top-first; Myk sets it. Each item says what it needs
   changed deltas must be shape-distinguishable from every prior version (CLAUDE.md, hard rule).
   A design-stage PR ships no migration — the migration rides the code that makes the break real.
 - **Reserved section numbers are load-bearing** — items cite each other by them. Never renumber.
+- **"Lens" is prose, not a type.** Throughout these docs (SPEC.md included) it names the
+  reading-side assembly — a Schema over a hyperschema, the composed thing that turns shared
+  ground into a View. Mostly it just means the Schema. No exported type carries the name today;
+  §21 question 3 ("what names a lens?") is where the design decides whether it gets one. Until
+  then, write `Schema` when you mean the Schema.
 
 ---
 
