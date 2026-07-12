@@ -1,70 +1,48 @@
-# Current work — SPEC §14: write semantics (clearing is retraction)
+# Current work — §21 + §22 design stage: from open questions to concrete requirements
 
-_Branch `spec-14-write-semantics`. Migrates TODO §14 → SPEC §14. The open "clear-others" question is
-**resolved** (Myk, 2026-07-12): **retract-your-own only.** To keep OTHERS' claims out of a view you
-filter them in the schema **Policy**, never by authoring a negation against a delta you didn't sign —
-negation is a systemic act, view-shaping is a lens act, and conflating them invites "I over-scoped my
-schema, cleared it, and negated something that mattered elsewhere." So the original plan stands._
+_Set up 2026-07-12, late (Myk). SPEC §14 landed and merged
+([#73](https://github.com/bombadil-labs/loam/pull/73)); the backlog re-plan that reframed the next
+arc is [#74](https://github.com/bombadil-labs/loam/pull/74) — **merge it first if it is still open**
+(Myk has to name the merge), then work from the TODO.md it produces. The remaining-§14-verbs
+amendment may still be churning in a parallel session; it is independent of this step — stay out of
+its way (don't touch the §14-amendment TODO item or write-path code)._
+
+## The step
+
+This is a **design step, not a build step**. Take TODO.md's two reserved sections — **§21 custom
+resolvers** and **§22 renderers** — and drive them from "musings + open questions" to **locked,
+concrete requirements**, edited in place in TODO.md. No implementation code. The output is two TODO
+items a build step could open against without re-deciding anything.
 
 ## Success criteria
 
-The write side finally knows what the read side always knew: a field is not a settable slot, it is a
-bucket resolved per-Policy. There is now a way through the surface to **remove** a value, and it is
-**retraction**, not `set(null)`:
-
-- **`clear` is a first-class surface op** — negate the caller's OWN surviving contributions in a
-  field's gathered bucket. One mechanism, Policy-correct across `pick` / `all` / `conflicts` /
-  `merge` / `absentAs` **by construction** (resolution does the Policy work): pick → next survivor,
-  all → your tags gone, merge → your addend withdrawn, conflicts → recomputed; if you were the only
-  voice → **absence**, which the reader renders per `absentAs` (null-ness lives in the lens, never on
-  a reference).
-- **Retract-your-own is the floor AND the ceiling** — a clear never touches another author's
-  contribution; you cannot clear a field you never wrote; the surface refuses a field the schema
-  doesn't resolve (a quiet no-op reads as "cleared" when it cleared nothing).
-- **Grow-only + idempotent** — clear appends signed negations; re-clearing an already-cleared field
-  adds nothing (already-negated entries are skipped).
-- **The §13-register limitations hold, honestly** — clear is per-reader (binds only for lenses that
-  honor your negation); a fresh/federated assertion repopulates ("withdraw my claim", never "no one
-  may state it"); absence is unknown, not affirmed-empty.
-- **Both doors, in agreement** — GraphQL `clear<Type>(entity, fields: [String!]!)` and REST
-  `DELETE /rest/vN/<Schema>/<entity>` (body = field names; empty body = all props). Same hook, same
-  standing, same refusals — one ground, one registration, _hex for _hex.
+- **Every open question in §21 is answered or explicitly deferred-with-reason.** The seven on the
+  list (override-vs-replacement and naming; the DerivedFn relation — now load-bearing because of
+  rung (e) synthetics; which purity rungs v1 admits and whether the rung is signed at rest; what a
+  resolver IS at rest; the `writable` interaction; the caching/invalidation contract per rung;
+  resolver-in-the-lens-identity under §17 law). Answers become requirements ("v1 admits rungs
+  (a)–(b); the rung is a signed field of the schema definition"), not essays.
+- **§22's design questions get the same treatment**, in dependency order — the host contract first
+  (it anchors everything), then artifact/signing (inherited from §21's answer), push-time
+  verification relation, §17 versioning, trust/sandboxing, router discipline.
+- **Decisions that are Myk's are surfaced as a short numbered decision list**, each with a
+  recommendation and its cost — not buried in prose. Known ones going in: which purity rungs v1
+  admits; whether effectful/synthetic resolvers are v1 at all; the DerivedFn conversation (it is a
+  rhizomatic conversation — prepare the question, don't answer it unilaterally); how hot the trust
+  posture for executable deltas runs.
+- **The result still lives in TODO.md** — SPEC.md grows only by a landing PR. When the build steps
+  later land, the same-PR migration rule applies as always.
+- Gate green (docs-only, but the gate is the gate), PR opened, journal entry appended. Myk names
+  merges.
 
 ## Sub-tasks
 
-1. [x] **Tests first** — `test/gateway/clear.test.ts` (11: retract-your-own across pick/all/merge;
-   scoped to author; unknown-field refusal; idempotent; fresh assert repopulates; absentAs renders;
-   seedless refusal; stranger no-op). REST `DELETE` parity in `test/surface/rest.test.ts` (3).
-2. [x] **Write seam** — `SurfaceHooks.clear`; `Gateway.clearEntity` via `gather()` +
-   `makeNegationClaims` + `signClaims`, appended through `append` (standing). Refuses unknown fields.
-3. [x] **GraphQL door** — `clear<Type>(entity, fields)` mutation field (gql.ts).
-4. [x] **REST door** — `DELETE /rest/vN/<Schema>/<entity>` in `handleRest` + OpenAPI `delete` op +
-   http.ts body-read for DELETE + CORS. (MCP left as-is — its tool set predates this; a follow-up.)
-5. [x] **Green** — `npm run check`: **464 tests** (was 451, +13), format/lint/type/build clean.
-6. [x] **PR + SPEC migration** — SPEC §14 written (built core + the retract-your-own decision +
-   rationale + honest limitations), Provenance #73; TODO §14 trimmed to the now-UNBLOCKED per-Policy
-   verb amendment; README + village ledger updated.
-7. [x] **Review** — one correctness agent. Caught a **HIGH**: the authenticated REST door dropped the
-   DELETE body (my `replace_all` matched only the public door's indentation), so field-scoped clears
-   became clear-all — masked by a single-field test fixture. Fixed + a two-field discriminating test.
-   Also: moved unknown-field refusal to the doors (fixes a pinned/latest version-skew throw); added a
-   load-bearing comment on the `claims.author === author` retract-your-own check; SPEC note on
-   whole-delta retraction. 465 green.
-8. [x] **Village** — `phase20.mjs` (3/3 twice, re-runnable): shared Board, retract-your-own scoped,
-   REST DELETE → absence → repopulate, pick → null. Ledger entry added.
-9. [x] **Journal**.
+1. [ ] Merge #74 if Myk has named it / it is still open awaiting him (check first).
+2. [ ] Re-read SPEC §13, §14, §17 and rhizomatic's Schema/Policy/DerivedFn surface — the answers
+   must sit on what IS, not on memory.
+3. [ ] §21: answer the seven questions in place; rewrite the item as requirements + Myk's decision
+   list.
+4. [ ] §22: same, in dependency order, inheriting §21's artifact/signing doctrine.
+5. [ ] Journal + PR; update memory `renderer-task` if the shape changes.
 
-_Left off: PR #73 pushed, CI green. **NOT merging** — the merge guardrail needs Myk to name it._
-
-## Follow-up amendment (Myk, 2026-07-12: "one more commit into this PR") — remove-one + writability
-
-10. [x] **remove-one** — `remove<Type>(entity, field, values)` + REST `DELETE {field:[values]}`; a
-    shared private `retract(name, entity, seed, keep)` core under both `clear` and `remove`.
-11. [x] **writability** — optional `writable?: string[]` threaded like `mutations` (additive wire, no
-    migration); central `assertWritable` in the gateway write methods (both doors); GraphQL + OpenAPI
-    trim read-only fields. Opt-in restriction; the immutable-by-default flip stays a future breaking
-    change (noted in TODO). Deliberately did NOT build "merge refuses set" (honest contribution).
-12. [x] Tests (+8 → 473), village phase20 grew to 5/5 twice, SPEC §14 amended, TODO trimmed to the
-    remaining edge/derived verbs + the default-flip decision, README + JOURNAL updated. Green gate.
-
-**NOT merging** — awaiting Myk naming the merge.
+_Left off: nothing yet — this file IS the starting line for tomorrow._
