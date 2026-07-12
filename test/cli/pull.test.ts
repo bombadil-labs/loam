@@ -47,7 +47,7 @@ async function tabExport(): Promise<{ file: string; hex: string }> {
     new MemoryBackend(),
     assembleGenesis({
       operatorSeed: TAB_SEED,
-      registrations: [{ schema: PLANT, policy: PLANT_POLICY, roots: [FERN] }],
+      registrations: [{ hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN] }],
       grants: [grantClaims(STORE_ENTITY, GARDENER, "write", TAB_OPERATOR, 2)],
     }),
   );

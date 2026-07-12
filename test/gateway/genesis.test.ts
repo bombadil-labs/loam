@@ -54,7 +54,7 @@ describe("genesis: a fresh store, born governed and registered", () => {
     const backend = new MemoryBackend();
     const genesis = assembleGenesis({
       operatorSeed: OPERATOR_SEED,
-      registrations: [{ schema: PLANT, policy: PLANT_POLICY, roots: [FERN] }],
+      registrations: [{ hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN] }],
       grants: [grantClaims(STORE_ENTITY, GARDENER, "write", OPERATOR, 2)],
     });
     const gateway = await Gateway.boot(backend, genesis);
@@ -82,10 +82,10 @@ describe("genesis: a fresh store, born governed and registered", () => {
   it("genesis emits definitions + references: the registration delta carries no schema body", () => {
     const genesis = assembleGenesis({
       operatorSeed: OPERATOR_SEED,
-      registrations: [{ schema: PLANT, policy: PLANT_POLICY, roots: [FERN] }],
+      registrations: [{ hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN] }],
     });
     const definition = genesis.deltas.find((d) =>
-      d.claims.pointers.some((p) => p.role === `${VOCAB_PREFIX}.schema.defines`),
+      d.claims.pointers.some((p) => p.role === `${VOCAB_PREFIX}.hyperschema.defines`),
     );
     expect(definition).toBeDefined(); // the schema is DEFINED by a schema-schema delta
     const registration = genesis.deltas.find((d) =>
@@ -140,7 +140,7 @@ describe("genesis: a fresh store, born governed and registered", () => {
     const backend = new MemoryBackend();
     const genesis = assembleGenesis({
       operatorSeed: OPERATOR_SEED,
-      registrations: [{ schema: PLANT, policy: PLANT_POLICY, roots: [FERN] }],
+      registrations: [{ hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN] }],
       grants: [],
     });
     const first = await Gateway.boot(backend, genesis);
@@ -226,7 +226,7 @@ describe("evolution is append: the surface follows the surviving definitions", (
     await gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
     // find the definition delta in the store and negate it, operator-signed
     const definition = [...gateway.reactor.snapshot()].find((d) =>
-      d.claims.pointers.some((p) => p.role === `${VOCAB_PREFIX}.schema.defines`),
+      d.claims.pointers.some((p) => p.role === `${VOCAB_PREFIX}.hyperschema.defines`),
     );
     expect(definition).toBeDefined();
     await gateway.append([
@@ -425,8 +425,12 @@ describe("evolution is append: the surface follows the surviving definitions", (
       operatorSeed: OPERATOR_SEED,
       // Bed FIRST: its ref must wait for Plant — the fixpoint, not the order, resolves it
       registrations: [
-        { schema: BED_SCHEMA, policy: { props: new Map(), default: pickLatest }, roots: [BED] },
-        { schema: PLANT, policy: PLANT_POLICY, roots: [FERN] },
+        {
+          hyperschema: BED_SCHEMA,
+          schema: { props: new Map(), default: pickLatest },
+          roots: [BED],
+        },
+        { hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN] },
       ],
     });
     const gateway = await Gateway.boot(new MemoryBackend(), genesis);

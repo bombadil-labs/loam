@@ -1,12 +1,12 @@
 // A registration is a REFERENCE, not a carrier. The schema itself is DEFINED by schema-schema
 // deltas — rhizomatic's `publishSchemaClaims` shape — filed at a schema entity (`schema:<Name>`
 // by default); the registration delta, under the constitutional context `loam.registration`,
-// holds only a pointer to that entity, the policy as canonical JSON, and the roots. The GraphQL
+// holds only a pointer to that entity, the resolution schema as canonical JSON, and the roots. The GraphQL
 // surface is therefore GENERATED: `readRegistrations` meta-resolves each referenced entity via
 // `loadSchema` over the store's surviving definitions, so evolution is append (republish at the
 // same entity) and deprecation is negation (a definition with no survivor binds nothing).
 //
-// Policy carries no schema-schema and needs none: it is the reader's lens, not the entity's
+// Schema carries no schema-schema and needs none: it is the reader's lens, not the entity's
 // shape, and travels as canonical JSON (rhizomatic's own profile, so parse∘serialize is
 // identity). In a governed store only the operator's law binds — definitions, registrations,
 // and the negations that retire them are all read from the operator-authored slice, so a
@@ -15,11 +15,12 @@
 import {
   DeltaSet,
   loadSchema,
-  parsePolicy,
-  policyToJson,
+  parseSchema,
+  parseTerm,
+  schemaToJson,
   type Claims,
   type HyperSchema,
-  type Policy,
+  type Schema,
   type Primitive,
   type Reactor,
 } from "@bombadil/rhizomatic";
@@ -43,8 +44,8 @@ export interface ClaimTemplate {
 export type ClaimTemplates = Readonly<Record<string, ClaimTemplate>>;
 
 export interface Registration {
-  readonly schema: HyperSchema;
-  readonly policy: Policy;
+  readonly hyperschema: HyperSchema;
+  readonly schema: Schema;
   readonly roots: readonly string[];
   // The schema entity the definition lives at. Identity is the ENTITY, not the name:
   // republishing here evolves; a different entity is a different schema.
@@ -139,8 +140,8 @@ export function parseClaimTemplates(raw: unknown): ClaimTemplates {
   return out;
 }
 
-export const schemaEntityFor = (schema: HyperSchema, entity?: string): string =>
-  entity ?? `schema:${schema.name}`;
+export const schemaEntityFor = (hyperschema: HyperSchema, entity?: string): string =>
+  entity ?? `schema:${hyperschema.name}`;
 
 // The registration entity for a schema entity — one registration per schema entity, latest wins.
 const registrationEntity = (schemaEntity: string): string => `registration:${schemaEntity}`;
@@ -150,7 +151,7 @@ const registrationEntity = (schemaEntity: string): string => `registration:${sch
 // definition bucket is loadSchema's alone, and a registration must not masquerade in it.
 export function registrationClaims(
   schemaEntity: string,
-  policy: Policy,
+  schema: Schema,
   roots: readonly string[],
   author: string,
   timestamp: number,
@@ -175,16 +176,73 @@ export function registrationClaims(
           entity: { id: registrationEntity(schemaEntity), context: CTX_REGISTRATION },
         },
       },
+      // Wire roles follow rhizomatic's 0.3 model, and the parsed `Registration` mirrors them:
+      // `hyperschema` names the gather program's entity (the definition read by loadSchema),
+      // `schema` carries the resolution program itself.
       {
-        role: "schema",
+        role: "hyperschema",
         target: { kind: "entity", entity: { id: schemaEntity, context: "registration" } },
       },
       {
-        role: "policy",
-        target: { kind: "primitive", value: JSON.stringify(policyToJson(policy)) },
+        role: "schema",
+        target: { kind: "primitive", value: JSON.stringify(schemaToJson(schema)) },
       },
       { role: "roots", target: { kind: "primitive", value: JSON.stringify(roots) } },
     ],
+  };
+}
+
+// The ONE shape every registration surface accepts — the `loam register` file, POST
+// /:mount/register, and the MCP `loam_register` tool — identical to the `Registration` it yields:
+//
+//   { hyperschema: { name, alg?, body }, schema, roots, entity?, mutations? }
+//
+// The body and schema travel as rhizomatic's own JSON profiles (parse∘serialize is identity).
+// Anything malformed throws a plain-English reason; each caller renders it (a CLI exit code, an
+// HTTP 400, an MCP error) — so the three doors can never drift on what a registration looks like.
+export interface RegistrationInput {
+  readonly hyperschema: HyperSchema;
+  readonly schema: Schema;
+  readonly roots: string[];
+  readonly entity?: string;
+  readonly mutations?: ClaimTemplates;
+}
+
+export function parseRegistrationInput(raw: unknown): RegistrationInput {
+  const o = raw as {
+    hyperschema?: { name?: unknown; alg?: unknown; body?: unknown };
+    schema?: unknown;
+    roots?: unknown;
+    entity?: unknown;
+    mutations?: unknown;
+  } | null;
+  if (
+    o === null ||
+    typeof o !== "object" ||
+    o.hyperschema === null ||
+    typeof o.hyperschema !== "object"
+  ) {
+    throw new Error("register wants { hyperschema: { name, alg?, body }, schema, roots, entity? }");
+  }
+  const { name, alg, body } = o.hyperschema;
+  if (typeof name !== "string" || name.length === 0) {
+    throw new Error("register: hyperschema.name must be a non-empty string");
+  }
+  if (alg !== undefined && typeof alg !== "number") {
+    throw new Error("register: hyperschema.alg must be a number when given");
+  }
+  if (!Array.isArray(o.roots) || o.roots.some((r) => typeof r !== "string")) {
+    throw new Error("register: roots must be an array of entity ids");
+  }
+  if (o.entity !== undefined && typeof o.entity !== "string") {
+    throw new Error("register: entity must be a string when given");
+  }
+  return {
+    hyperschema: { name, alg: alg ?? 1, body: parseTerm(body) },
+    schema: parseSchema(o.schema),
+    roots: o.roots as string[],
+    ...(o.entity === undefined ? {} : { entity: o.entity }),
+    ...(o.mutations === undefined ? {} : { mutations: parseClaimTemplates(o.mutations) }),
   };
 }
 
@@ -229,7 +287,7 @@ export function lawfulNegated(reactor: Reactor, operator?: string): (id: string)
 
 interface Candidate {
   schemaEntity: string;
-  policy: Policy;
+  schema: Schema;
   roots: readonly string[];
   mutations?: ClaimTemplates;
   timestamp: number;
@@ -265,9 +323,9 @@ function survivingCandidates(
     if (struck && withdrawn === undefined) continue;
 
     const schemaRef = delta.claims.pointers.find(
-      (p) => p.role === "schema" && p.target.kind === "entity",
+      (p) => p.role === "hyperschema" && p.target.kind === "entity",
     );
-    const policyJson = primitive(delta.claims, "policy");
+    const policyJson = primitive(delta.claims, "schema");
     const rootsJson = primitive(delta.claims, "roots");
     if (
       schemaRef?.target.kind !== "entity" ||
@@ -276,10 +334,10 @@ function survivingCandidates(
     ) {
       continue; // a malformed registration binds nothing
     }
-    let policy: Policy;
+    let schema: Schema;
     let roots: string[];
     try {
-      policy = parsePolicy(JSON.parse(policyJson));
+      schema = parseSchema(JSON.parse(policyJson));
       roots = JSON.parse(rootsJson) as string[];
     } catch {
       continue;
@@ -298,7 +356,7 @@ function survivingCandidates(
     const schemaEntity = schemaRef.target.entity.id;
     const candidate: Candidate = {
       schemaEntity,
-      policy,
+      schema,
       roots,
       ...(mutations === undefined ? {} : { mutations }),
       timestamp: delta.claims.timestamp,
@@ -331,14 +389,14 @@ export function readRegistrations(reactor: Reactor, operator?: string): Registra
   const out: Registration[] = [];
   for (const cand of [...latest.values()].sort((a, b) => a.timestamp - b.timestamp)) {
     try {
-      const schema = loadSchema(lawful, cand.schemaEntity);
+      const hyperschema = loadSchema(lawful, cand.schemaEntity);
       // NUL is the gateway's own alphabet (internal materialization names): a definition whose
       // name carries it — plantable only by hand, never through publishRegistration — binds
       // nothing rather than colliding with that namespace.
-      if (schema.name.includes("\u0000")) continue;
+      if (hyperschema.name.includes("\u0000")) continue;
       out.push({
-        schema,
-        policy: cand.policy,
+        hyperschema,
+        schema: cand.schema,
         roots: cand.roots,
         entity: cand.schemaEntity,
         ...(cand.mutations === undefined ? {} : { mutations: cand.mutations }),
@@ -373,20 +431,20 @@ export function readRegistrationVersions(
   for (const group of survivingCandidates(reactor, operator).values()) {
     let n = 0;
     for (const cand of group) {
-      let schema: HyperSchema;
+      let hyperschema: HyperSchema;
       try {
         // The SCHEMA entity the candidate references, not the registration entity it files
         // under — the same resolution readRegistrations performs.
-        schema = loadSchema(lawful, cand.schemaEntity);
+        hyperschema = loadSchema(lawful, cand.schemaEntity);
         // NUL is the gateway's own alphabet (see readRegistrations) — it binds nothing.
-        if (schema.name.includes(String.fromCharCode(0))) continue;
+        if (hyperschema.name.includes(String.fromCharCode(0))) continue;
       } catch {
         continue; // no surviving definition: this candidate is unbound, not fatal
       }
       n += 1;
       out.push({
-        schema,
-        policy: cand.policy,
+        hyperschema,
+        schema: cand.schema,
         roots: cand.roots,
         entity: cand.schemaEntity,
         ...(cand.mutations === undefined ? {} : { mutations: cand.mutations }),

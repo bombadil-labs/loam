@@ -9,7 +9,7 @@ schemas + a skill). Loam does not know what a "belief" is.
 Loam is built **on** [rhizomatic](https://github.com/bombadil-labs/rhizomatic)
 (`@bombadil/rhizomatic`), and — this is the load-bearing fact — **rhizomatic already provides most of
 what a naïve reading would call "the database": the object model, resolution, the self-hosting
-schema-schema, and the function substrate.** Loam is the _wrapper_ that makes that core a deployable,
+hyperschema-schema, and the function substrate.** Loam is the _wrapper_ that makes that core a deployable,
 GraphQL-fronted, persistent, multi-tenant, federatable server. Do not reinvent the core; build on it.
 
 ---
@@ -44,9 +44,9 @@ near-synonyms (that is how you get two colliding "schema" concepts).
 - **Hyperview** (the gathered, arborescent, bucketed tree) — `HView { id, props: Map<string,
 HVEntry[]> }`, `HVEntry { delta, negated, expanded?: Map<number, HView> }` (the recursion + the
   negation-awareness), content-addressed via `hviewCanonicalHex`.
-- **Resolution & policy** (the resolve stage) — `resolveView(Policy, HView) → View`. `View =
-Primitive | View[] | { [k]: View }`. `Policy = { props: Map<string, PropPolicy>, default }`.
-  `PropPolicy` = `pick(order)` / `all(order)` / `merge(fn)` / `conflicts(order)` / `absentAs(const,
+- **Resolution & schema** (the resolve stage) — `resolveView(Schema, HView) → View`. `View =
+Primitive | View[] | { [k]: View }`. `Schema = { props: Map<string, Policy>, default }`.
+  `Policy` = `pick(order)` / `all(order)` / `merge(fn)` / `conflicts(order)` / `absentAs(const,
 then)`. `Order` = `byTimestamp` / `byAuthorRank(authors)` / `byPred` / `chain(orders…)` (0.2.0:
   general composition — "trusted, then latest" is `chain[byAuthorRank, byTimestamp]`) /
   `lexById`. `MergeFn` =
@@ -58,9 +58,9 @@ byTimestamp`; trusted-first = `byAuthorRank`; set-union = `all`; contested = `co
   deterministic.
 - **Snapshots** — a resolved `View` is content-addressed via `viewCanonicalHex`; a `HView` via
   `hviewCanonicalHex`. Static view = snapshot = a commit.
-- **Self-hosting schema-schema** — `SCHEMA_SCHEMA: HyperSchema`, `loadSchema(dset, entity) →
-HyperSchema` (deltas → schema), `publishSchemaClaims(schema, …) → Claims` (schema → deltas),
-  `definitionRoles()`. Schemas are data; the metacircular seed is already written.
+- **Self-hosting hyperschema-schema** — `HYPER_SCHEMA_SCHEMA: HyperSchema`, `loadSchema(dset, entity) →
+HyperSchema` (deltas → hyperschema), `publishSchemaClaims(schema, …) → Claims` (hyperschema → deltas),
+  `definitionRoles()`. Hyperschemas are data; the metacircular seed is already written.
 - **The reactor** — `ingest` (verifies content-addressing and any signature; unsigned deltas are
   accepted, ones whose id does not match their claims rejected without trace); live indexes
   (`byTarget`/`byValue`/`negationsOf`);
@@ -78,7 +78,7 @@ append|supersede|{keyed} }` (the _application_: binds a function to a materializ
   (execution records keyed on input content). `verifyPureDerivation(...) → boolean` (pure replay).
   Definition / application / execution, pure-vs-effectful, termination, idempotent emit — all present.
 - **Federation** — `Peer`, `syncBoth`, `SyncReport`, `servePeer` / `offerFor` / `pullFromUrl`.
-- **Reflective plumbing** — terms, policies, and predicates are serializable (`term-io` / `term-json`)
+- **Reflective plumbing** — terms, schemas, and predicates are serializable (`term-io` / `term-json`)
   → storable as data. Since 0.2.0: **`inView` reflective predicates** (a predicate satisfied
   when the candidate's author/id appears in a view extracted — by field or by ROLE — from a
   DSet-sort sub-term over the same delta-set; stratified depth-1, enforced at parse), and
@@ -89,7 +89,7 @@ name-for-name and semantics-for-semantics against the real package by the step-1
 
 ## 3. Loam's actual scope — what to build
 
-- **The GraphQL interface** — GraphQL derived from `HyperSchema` + `Policy`, exposing `query` /
+- **The GraphQL interface** — GraphQL derived from `HyperSchema` + `Schema`, exposing `query` /
   `mutate` / `subscribe` / `loadSchema` over rhizomatic's `resolveView` and reactor. rhizomatic gives
   the resolution primitives; GraphQL-as-the-surface is Loam's. (Chorus's read-only `gql.ts` is the
   design reference; Loam's is written clean: hyperschema-sourced, plus mutations.)
@@ -104,15 +104,15 @@ name-for-name and semantics-for-semantics against the real package by the step-1
 - **Deployment & runtime variety** — CLI, containerization, turnkey hosted persistence; and function
   **runtimes beyond in-process `DerivedFn`** (HTTP, VM, human) plus the runner's peer-client
   deployment (§6).
-- **The genesis assembly** — bundle `SCHEMA_SCHEMA` + accounts + names + function/trigger schemas
+- **The genesis assembly** — bundle `HYPER_SCHEMA_SCHEMA` + accounts + names + function/trigger schemas
   into a shippable genesis every store is born from.
 
 **Provenance.** Foundational scope framing — no single landing PR; each bullet is realized section-by-section across the build: persistence (step 2, [#3](https://github.com/bombadil-labs/loam/pull/3)), the read/write gateway (steps 3–4, [#4](https://github.com/bombadil-labs/loam/pull/4)/[#5](https://github.com/bombadil-labs/loam/pull/5)), accounts & capabilities (step 5, [#7](https://github.com/bombadil-labs/loam/pull/7)), the transport (step 6, [#8](https://github.com/bombadil-labs/loam/pull/8)), the runner & genesis assembly (step 7, [#9](https://github.com/bombadil-labs/loam/pull/9)), and CLI/deployment (step 8, [#10](https://github.com/bombadil-labs/loam/pull/10)). Full narrative in the [Journal](JOURNAL.md).
 
 ## 4. The object model & flow
 
-`deltas —[Hyperschema: gather]→ Hyperview —[Policy: resolve]→ View`. Two stages, kept separate: one
-`HView` backs many resolutions; one policy runs over many hyperviews.
+`deltas —[Hyperschema: gather]→ Hyperview —[Schema: resolve]→ View`. Two stages, kept separate: one
+`HView` backs many resolutions; one schema runs over many hyperviews.
 
 - **Selector** — the root/scope of a resolution: **static** (an id/list) or **dynamic** (a sub-query
   evaluated at execution — late-binding; composes; may be clock-effectful, but a snapshot pins the
@@ -134,7 +134,7 @@ name-for-name and semantics-for-semantics against the real package by the step-1
 
 HTTP, CLI and MCP interfaces exposing GraphQL: **`query`** (resolve → snapshot), **`subscribe`** (live →
 snapshot + patches), **`mutate`** (a schema's write-resolvers turn field-args → deltas → append),
-**`loadSchema(deltas) → schema`** (append schema-defining deltas, meta-resolve via `SCHEMA_SCHEMA`,
+**`loadSchema(deltas) → schema`** (append schema-defining deltas, meta-resolve via `HYPER_SCHEMA_SCHEMA`,
 return it). Nothing is reachable except through GraphQL over a schema — including schema CRUD.
 **Schemas are always built from deltas.** Underneath there are two primitives — **`append`** and
 **`resolve`** — and `query`/`mutate`/`loadSchema`/`subscribe` are framings of them. Query is
@@ -142,10 +142,11 @@ reflective (resolving a schema is itself a resolve); snapshots amortize the refl
 once at snapshot time, read cheap thereafter).
 
 **Registration (decided 2026-07-09, step 10 — cutover from step 7's blob form).** A schema is
-DEFINED by schema-schema deltas — rhizomatic's `publishSchemaClaims` shape (`rdb.schema.defines` /
+DEFINED by hyperschema-schema deltas — rhizomatic's `publishSchemaClaims` shape (`rhizomatic.hyperschema.defines` /
 `.name` / `.alg` / `.term`) filed at a schema entity, `schema:<Name>` by default. A REGISTRATION is
-a separate delta under `loam.registration` holding only references: a pointer to the schema entity,
-the policy as canonical JSON, and the roots. The GraphQL surface is generated: `readRegistrations`
+a separate delta under `loam.registration` holding only references: a `hyperschema` pointer to the
+definition entity, the `schema` (the resolution program) as canonical JSON, and the roots. The
+GraphQL surface is generated: `readRegistrations`
 meta-resolves each referenced entity via `loadSchema` over the store's surviving definitions —
 so **evolution is append** (republish at the same entity; the running gateway rebinds — the
 reactor has no deregister, so live materialization names are generation-qualified internally —
@@ -153,12 +154,12 @@ and a reopened store replays the latest shape) and **deprecation is negation** (
 definition leaves its registration unbound; the type drops from the surface). The schema's
 identity is the **entity**, not the name. In a governed store only operator-authored definitions
 and registrations bind — a federated foreign definition merges as a delta but reshapes nothing
-(the same operator-rooting that keeps foreign grants inert). Policy carries no schema-schema and
-needs none: it is the reader's lens, not the entity's shape, and travels as canonical JSON.
-The register surface is `POST /:mount/register` (operator token), the `loam_register` MCP tool,
-and `loam register <file>` — an HTTP endpoint rather than a GraphQL mutation because an empty
-store has no GraphQL surface to mutate through; the endpoint IS the schema-schema mutation
-mechanism, and GraphQL stays strictly derived-from-what-is-registered.
+(the same operator-rooting that keeps foreign grants inert). The policy — a Schema — carries no
+hyperschema-schema and needs none: it is the reader's lens, not the entity's shape, and travels as
+canonical JSON. The register surface is `POST /:mount/register` (operator token), the
+`loam_register` MCP tool, and `loam register <file>` — an HTTP endpoint rather than a GraphQL
+mutation because an empty store has no GraphQL surface to mutate through; the endpoint IS the
+hyperschema-schema mutation mechanism, and GraphQL stays strictly derived-from-what-is-registered.
 
 **Writes become claims (decided 2026-07-09, step 12 — queued).** A schema is a _protocol_: the
 read program (the hyperschema body) and the **write discipline**, both data, both traveling in
@@ -181,7 +182,7 @@ roots; one delta serves many views).
   the author-standing rule — the non-custodial path, where the server never holds the key.
 - **Both hashes on the surface**: `_hex` (the resolved view's canonical bytes — the answer) and
   `_hviewHex` (the gathered hyperview's — the evidence). Two lenses over the same ground share
-  `_hviewHex` while their `_hex` diverges exactly when their policies adjudicate differently.
+  `_hviewHex` while their `_hex` diverges exactly when their schemas adjudicate differently.
 - **Foreign dialects are transformed, not rejected**: deltas expressing the same ideas in other
   shapes merge as always; a runner binding reads them and emits canonical-shape deltas citing
   their sources (the §9 provenance discipline). Standard shape by guarantee for your own
@@ -343,10 +344,10 @@ works (foreign grants, registrations, and definitions merge freely and bind noth
   two resolutions over the same deltas converge to the same hash.
 - **Object-capability always** — no ambient authority in the gateway, functions, or federation.
 - **rhizomatic is frozen** — the one live candidate for a substrate change is a resolution reduction
-  `PropPolicy`/`Order`/`MergeFn` cannot express (unlikely; confirm in the spike). Any real need is a
+  `Policy`/`Order`/`MergeFn` cannot express (unlikely; confirm in the spike). Any real need is a
   PR + conversation with Myk, never an edit from here.
-- **Vocabulary reconciles to rhizomatic** — `HyperSchema`, `HView`, `View`, `Policy`, `DerivedFn`,
-  `BindingSpec`. Metaphor lives in the product name (Loam), never in the load-bearing nouns.
+- **Vocabulary reconciles to rhizomatic** — `HyperSchema`, `HView`, `View`, `Schema`, `Policy`,
+  `DerivedFn`, `BindingSpec`. Metaphor lives in the product name (Loam), never in the load-bearing nouns.
 - **If Loam ever ingests a legacy EAV store** (e.g. Chorus's current one): the honest path is an
   opt-in streaming transform that **appends** typed deltas, signs as the migrator, cites the source
   deltas (provenance), and never re-signs as the original authors.
@@ -525,9 +526,9 @@ pull the network. What it cannot be is a place the network calls — stated prou
   `readTrustPolicy`, `readTombstones`, `holdsGrant`), federation (`pullFrom`, `toWire` /
   `fromWire`), the `Runner` (an animate tab is a deploy choice too, §6), `mintSeed` /
   `authorForSeed` — and the substrate primitives the surface is SPOKEN in: `parseTerm`,
-  `parsePolicy`, `signClaims` (learned building it: without these a page could hold a schema
+  `parseSchema`, `signClaims` (learned building it: without these a page could hold a schema
   but never say one — the claim constructors return unsigned claims, and `assembleGenesis` /
-  `publishRegistration` take terms and policies the page must be able to parse from JSON).
+  `publishRegistration` take terms and schemas the page must be able to parse from JSON).
   Deliberately absent: `serve` (there is no port), `SqliteBackend` /
   `ArchiveBackend` / `MirrorBackend` (there is no fs), the CLI. Shipped exactly as `./client`
   is — a second esbuild entry (`src/browser/index.ts` → `dist/browser/index.js`), platform
@@ -699,7 +700,7 @@ falls out of the domain rather than being staged.
 ## 17. Surfaces are materializations
 
 GraphQL was never the surface. It was the FIRST surface. A registration — `(HyperSchema,
-Policy)`, a gather and a resolution discipline, filed as deltas — is interface-agnostic truth,
+Schema)`, a gather and a resolution discipline, filed as deltas — is interface-agnostic truth,
 and every interface a store answers through is a MATERIALIZATION of that truth, derived from
 it the way a view is derived from the ground. §8 made "where the deltas sleep" a driver's
 business; this section makes "how the answers are spoken" a generator's business. The
@@ -781,7 +782,10 @@ not a version skew to manage.
 - **Delta** — the signed, content-addressed atom (rhizomatic).
 - **Hyperschema** — recursive gather definition; `HyperSchema { name, alg, body: Term }`.
 - **Hyperview** — arborescent tree of bucketed scoped deltas; `HView`; live or pinned.
-- **Policy** — per-property reduction over a hyperview bucket; `resolveView(Policy, HView) → View`.
+- **Schema** — the resolution program; `resolveView(Schema, HView) → View`; `Schema = { props:
+  Map<string, Policy>, default }`.
+- **Policy** — the per-property reduction rule within a Schema (`pick` / `all` / `merge` /
+  `conflicts` / `absentAs`).
 - **View** — resolved output: **Snapshot** (static, content-addressed = a commit) or **Subscription**
   (dynamic, live = a branch).
 - **Snapshot** — a pinned, content-addressed resolution product (View or Hyperview).
@@ -789,7 +793,7 @@ not a version skew to manage.
   materialization, with purity + budget + emit) / the execution engine (rhizomatic).
 - **Runner** — a peer client playing the execution role; passive vs animate.
 - **Capability** — a signed delta granting a reference; the unit of all authority.
-- **Genesis** — the bootstrap deltas every store is born from (`SCHEMA_SCHEMA` + accounts + …).
+- **Genesis** — the bootstrap deltas every store is born from (`HYPER_SCHEMA_SCHEMA` + accounts + …).
 - **Assert / Retract** — the two universal write primitives (§14): append a contributing delta /
   negate your own contributing deltas (→ absence). `set` / `add` / `remove` / `clear` are these,
   parameterized by a field's policy.
@@ -842,7 +846,7 @@ instruments on four principles from the walkthrough:
   smaller schema — the instrument itself proves §12). Discovery is the interface: after the
   screenings lesson, typing `film {` OFFERS the watch history. Queries pin to the View pane.
 - **View** — a query-fed browser, no hardcoded cards. Seeded with the **Schemas meta-view**
-  (registrations read as data: name, generations, policy summary, roots), so registering Film
+  (registrations read as data: name, generations, schema summary, roots), so registering Film
   visibly ADDS FILM TO A VIEW before "schemas are data" is ever said. Select a schema → its
   roots → the live resolved view (a subscription, and the pane says so). Lessons contribute
   saved queries; so does the learner. After §17: the registration's OTHER door (the OpenAPI
@@ -865,7 +869,7 @@ instruments on four principles from the walkthrough:
   the lens, keep every past: add `guests`, re-register — a NEW query shows Alice; the OLD
   subscription keeps streaming Alice-less, because a subscription is executed against the
   generation that opened it and is a PINNED LENS CHOICE — nothing you were watching breaks;
-  you adopt the new shape by asking with it; then the pre-guests policy re-registered as
+  you adopt the new shape by asking with it; then the pre-guests schema re-registered as
   `FilmClassic`: two lenses, one ground, both live — nothing was mutated, ever. (7) Taking
   it back, and what silence means: negation → absence; merge sum and absentAs on the book;
   the aggregate that cannot be set (upgrades to §14's refusal when §14 ships).
@@ -907,3 +911,53 @@ sixteen in order, the revisit, and the finale round trip — including the lesso
 superseded generation's subscription keeps its shape.
 
 **Provenance.** Landed — [#64](https://github.com/bombadil-labs/loam/pull/64) (v2a instruments: Ground/GraphQL/View), [#65](https://github.com/bombadil-labs/loam/pull/65) (reset/unpin), [#66](https://github.com/bombadil-labs/loam/pull/66) (v2b: the sixteen-lesson arc), [#67](https://github.com/bombadil-labs/loam/pull/67) (localStorage namespace-collision hotfix), [#68](https://github.com/bombadil-labs/loam/pull/68) (v2c), [#69](https://github.com/bombadil-labs/loam/pull/69) (lesson-button fix), [#70](https://github.com/bombadil-labs/loam/pull/70) (step-through + in-order gating). Lives in `demos/tutorial/lessons.mjs`, `demos/tutorial/app.mjs`, `demos/tutorial/instruments.mjs`, tested end-to-end by `test/site/arc.test.ts`. Standing design split (PR #70): step progress within a lesson is ephemeral and content-address-idempotent, while the durable gate is always the ground-derived green — the split that keeps in-order gating honest across reloads without polluting the ground with UI state.
+
+## 20. Migration — old deltas in, new deltas out
+
+A store is grow-only and content-addressed, which makes a breaking change to the on-wire format a
+genuine problem: a signed delta CANNOT be rewritten in place (the id is its content; the signature
+is its author's). When a format change alters the bytes or roles of a delta that older stores
+already hold — as rhizomatic 0.3.0's realignment did to schema-definition deltas
+(`rhizomatic.schema.*` → `rhizomatic.hyperschema.*`, §2) — those stores open but lose the surface
+those deltas backed. So **every breaking on-wire change ships a migration** (standing rule): a step
+that reads the old deltas and streams correctly-formed ones out.
+
+**A migration never rewrites; it supersedes.** For each delta a step changes it does two grow-only
+things, both signed by the operator running the migration:
+
+1. **Re-sign** the delta into the new form, at its original timestamp — a faithful re-expression,
+   not a new fact. (Only the operator's OWN definitions: a seed can re-sign only what it authored,
+   and a foreign definition is inert under the new format anyway — its own operator migrates it.)
+2. **Negate** the old delta with a negation that also points `supersededBy` at the replacement and
+   carries a `reason`. The record reads as a linked chain of supersessions — every retirement
+   explained, nothing destroyed.
+
+Because the re-expression is deterministic (same input → same content address) and the output is
+deduplicated by id, **re-migrating is a no-op**: the tool is idempotent, and running it against an
+already-current store adds nothing.
+
+**Version detection is by SHAPE** — a step `applies` when the old shape it migrates is present —
+and steps run in declared order, so a store several versions back is carried forward one step at a
+time. This works because a delta's version already lives in its bytes: the vocabulary a structural
+delta speaks (`rhizomatic.hyperschema.*` vs the old `rhizomatic.schema.*`) IS its format, so no
+per-delta version stamp is needed (one would only pollute the content address with metadata the
+bytes already carry). The load-bearing discipline: **every breaking change must give its changed
+deltas a shape unambiguously distinct from all prior versions** — then shape-detection cannot
+misfire. Almost no delta kinds ever change across a version (a `subject/value` data claim is
+byte-identical), so the set a migration must recognize is small and self-labelling. Shape-detection
+is the mechanism, not a stopgap: even a per-store version marker could only ever be a fast-path in a
+federating store — a lagging peer can deliver an old-shape delta the day after you stamped a version
+— so the scan stays the backstop regardless, and the marker isn't worth its maintenance. The chain
+composes, so "many versions back" costs only more steps.
+
+The surface: a library `migrate(deltas, { seed }) → { deltas, report }` over the `MIGRATIONS` chain,
+and a CLI `loam migrate <offer> [--out <file>]` that re-expresses a frozen offer (a store's export or
+a saved `GET /federate` body) in the current format, run against the home whose seed authored the
+definitions.
+
+**Provenance.** Landed — the rhizomatic 0.3.0 overhaul PR (the first breaking on-wire change, and so
+the first migration). Lives in `src/migrate/migrate.ts` (`migrate`, `MIGRATIONS`, the
+`hyperschema-roles` step) and the `loam migrate` command (`src/cli/cli.ts`); tested by
+`test/migrate/migrate.test.ts` and `test/cli/migrate.test.ts`. Key decision (Myk, 2026-07-12):
+supersede, don't rewrite — re-sign the new form and negate the old with a forward link and a reason,
+so a content-addressed, grow-only store can change formats without losing its history or its soul.

@@ -52,7 +52,7 @@ export function classifyDelta(delta, selfAuthor) {
     note = foreign
       ? "a foreign lens — it arrived as data and reshapes nothing here"
       : "a lens taking effect: this record is why a schema answers";
-  } else if (pointers.some((p) => p.role === "rhizomatic.schema.defines")) {
+  } else if (pointers.some((p) => p.role === "rhizomatic.hyperschema.defines")) {
     kind = "schema";
     note = foreign
       ? "a foreign schema definition — held as data, binding nothing"
@@ -195,10 +195,10 @@ export async function renderViews(holder, ctx, ui) {
       const row = document.createElement("div");
       row.className = "schema-row";
       const name = document.createElement("strong");
-      name.textContent = `${v.schema.name} `;
+      name.textContent = `${v.hyperschema.name} `;
       const detail = document.createElement("span");
       detail.className = "pane-hint";
-      const props = [...v.policy.props.keys()].join(", ");
+      const props = [...v.schema.props.keys()].join(", ");
       detail.textContent = `v${v.version} · props: ${props || "(default only)"} · roots: ${v.roots.join(", ")}`;
       row.append(name, detail);
       meta.appendChild(row);
@@ -208,7 +208,7 @@ export async function renderViews(holder, ctx, ui) {
 
   // -- one live view per schema root ---------------------------------------------------------
   const latest = new Map();
-  for (const v of versions) latest.set(v.schema.name, v);
+  for (const v of versions) latest.set(v.hyperschema.name, v);
   for (const [name, v] of latest) {
     for (const root of v.roots) {
       const field = name.charAt(0).toLowerCase() + name.slice(1);
@@ -216,7 +216,7 @@ export async function renderViews(holder, ctx, ui) {
         holder,
         ctx,
         `${name}: ${root}`,
-        `{ ${field}(entity: ${JSON.stringify(root)}) { _hex ${[...v.policy.props.keys()].join(" ")} } }`,
+        `{ ${field}(entity: ${JSON.stringify(root)}) { _hex ${[...v.schema.props.keys()].join(" ")} } }`,
       );
     }
   }

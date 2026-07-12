@@ -16,7 +16,7 @@ import {
   type Claims,
   type Delta,
   type HyperSchema,
-  type Policy,
+  type Schema,
   type Reactor,
   type Term,
 } from "@bombadil/rhizomatic";
@@ -181,7 +181,7 @@ export function tenantSchemaFor(operator: string): HyperSchema {
   };
 }
 
-export const TENANT_POLICY: Policy = {
+export const TENANT_POLICY: Schema = {
   props: new Map(),
   default: { kind: "all", order: { kind: "byTimestamp", dir: "asc" } },
 };

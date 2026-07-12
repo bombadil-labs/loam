@@ -89,9 +89,9 @@ describe("readRegistrations: the surface is generated from surviving definitions
     const reactor = world(define(PLANT, OPERATOR, 1), register(OPERATOR, 2));
     const regs = readRegistrations(reactor, OPERATOR);
     expect(regs).toHaveLength(1);
-    expect(regs[0]!.schema.name).toBe("Plant");
-    expect(termHash(regs[0]!.schema.body)).toBe(termHash(PLANT.body));
-    expect(regs[0]!.policy.props.get("height")?.kind).toBe("pick");
+    expect(regs[0]!.hyperschema.name).toBe("Plant");
+    expect(termHash(regs[0]!.hyperschema.body)).toBe(termHash(PLANT.body));
+    expect(regs[0]!.schema.props.get("height")?.kind).toBe("pick");
     expect(regs[0]!.roots).toEqual([FERN]);
   });
 
@@ -103,7 +103,7 @@ describe("readRegistrations: the surface is generated from surviving definitions
     );
     const regs = readRegistrations(reactor, OPERATOR);
     expect(regs).toHaveLength(1);
-    expect(termHash(regs[0]!.schema.body)).toBe(termHash(V2_BODY));
+    expect(termHash(regs[0]!.hyperschema.body)).toBe(termHash(V2_BODY));
   });
 
   it("deprecation is negation: a negated definition unbinds its registration, quietly", () => {
@@ -157,7 +157,7 @@ describe("readRegistrations: the surface is generated from surviving definitions
     );
     const regs = readRegistrations(reactor, OPERATOR);
     expect(regs).toHaveLength(1);
-    expect(termHash(regs[0]!.schema.body)).toBe(termHash(PLANT.body)); // the operator's v1 holds
+    expect(termHash(regs[0]!.hyperschema.body)).toBe(termHash(PLANT.body)); // the operator's v1 holds
   });
 
   it("a foreign registration is likewise inert in a governed store", () => {
@@ -169,7 +169,7 @@ describe("readRegistrations: the surface is generated from surviving definitions
     const reactor = world(define(PLANT, MALLORY, 1), register(MALLORY, 2));
     const regs = readRegistrations(reactor);
     expect(regs).toHaveLength(1);
-    expect(regs[0]!.schema.name).toBe("Plant");
+    expect(regs[0]!.hyperschema.name).toBe("Plant");
   });
 
   it("a registration whose definition never arrived binds nothing (unbound, not a crash)", () => {

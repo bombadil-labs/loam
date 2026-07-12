@@ -1,33 +1,35 @@
 {
-  "name": "Circle",
-  "alg": 1,
-  "body": {
-    "op": "expand",
-    "role": {
-      "exact": "friend"
-    },
-    "schema": "Person",
-    "in": {
-      "op": "group",
-      "key": "byTargetContext",
+  "hyperschema": {
+    "name": "Circle",
+    "alg": 1,
+    "body": {
+      "op": "expand",
+      "role": {
+        "exact": "friend"
+      },
+      "schema": "Person",
       "in": {
-        "op": "select",
-        "pred": {
-          "hasPointer": {
-            "targetEntity": {
-              "var": "root"
-            }
-          }
-        },
+        "op": "group",
+        "key": "byTargetContext",
         "in": {
-          "op": "mask",
-          "policy": "drop",
-          "in": "input"
+          "op": "select",
+          "pred": {
+            "hasPointer": {
+              "targetEntity": {
+                "var": "root"
+              }
+            }
+          },
+          "in": {
+            "op": "mask",
+            "policy": "drop",
+            "in": "input"
+          }
         }
       }
     }
   },
-  "policy": {
+  "schema": {
     "props": {
       "name": {
         "pick": {

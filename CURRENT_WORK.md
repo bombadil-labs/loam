@@ -1,29 +1,35 @@
-# Current work — SPEC/TODO split + provenance backfill
+# Current work — rhizomatic 0.3.0 overhaul + migration tool + registration realignment
 
-_In flight (branch `spec-todo-split`). Establishes the doc model Myk asked for: SPEC.md is the
-record of what IS (grown only by landing PRs, every section carrying a `**Provenance.**` footer),
-and unbuilt/partial design lives in [TODO.md](TODO.md) until its PR migrates it in._
+_Branch `rhizomatic-0.3.0-vocab` (PR #72). **Complete — ready for Myk's merge.**_
 
-## Done this step
+## Done
 
-- [x] `CLAUDE.md`: five-doc rule → **six** (TODO.md named); the loop now keeps unbuilt steps in
-      TODO.md and migrates them to SPEC.md via the landing PR, with a Provenance footer.
-- [x] `TODO.md` created: the backlog — §14 write-semantics (moved out of SPEC, carries its OPEN
-      clear-others question), the renderer task (design-first, §20 reserved), the hardening pass.
-- [x] `SPEC.md`: `**Provenance.**` footers on all 18 built/foundational sections (PR links +
-      implementation notes), backfilled from JOURNAL + git history by a 3-agent Sonnet fan-out;
-      §14 replaced by a stub pointing to TODO.md; stale `(queued)/(SHIPPED)` header tags removed.
-      No section renumbering — the cross-references (§15, §17, §19, …) stay valid.
+- **0.3.0 vocabulary overhaul** — Schema/Policy rename + Option B wire realignment; source, tests,
+  demos, docs; village 0-19 green; tutorial live-verified; 2-angle review (6 doc fixes).
+- **Migration tool (SPEC §20)** — `migrate()` + `loam migrate` + the `hyperschema-roles` step:
+  re-sign the new form + negate the old with `supersededBy` + reason; grow-only, shape-detected,
+  idempotent. Review caught + fixed a signing-oracle (now gated on `verifyDelta`) and the re-run
+  report. The shape-distinguishability discipline is explicit (CLAUDE.md + §20).
+- **Registration-role realignment** — the registration delta's WIRE roles now follow the model:
+  `hyperschema` names the definition entity, `schema` carries the resolution program (was
+  `schema`/`policy`). `registration.ts` only; packets regenerated (content addresses moved);
+  451 tests + full village 0-19 green (transparent — everything reads the parsed `Registration`).
+- **Store-level version marker: dropped** (Myk) — shape-detection is the mechanism; a marker could
+  only be a fast-path in a federating store and isn't worth the maintenance.
 
-## Remaining before merge
+## Also done
 
-- [ ] Verify PR→section attributions are accurate (a review agent cross-checks the footers'
-      PR numbers + module paths against JOURNAL/git — the footers must be a *reliable* history).
-- [ ] `npm run check` (docs-only, but the gate must stay green) + link sanity.
-- [ ] JOURNAL entry recording the process change; PR through the cycle.
+- Internal `Registration`/`Registered`/`Bound` field rename to match the wire (`.schema`→
+  `.hyperschema`, `.policy`→`.schema`) across gql / rest / surface / gateway / migrate / tests /
+  demos — compiler-guided, no wire/content-address impact (packets byte-identical).
+- **Unified register input format**: the `loam register` file, `POST /:mount/register`, and the MCP
+  `loam_register` tool now take ONE shape, identical to `Registration` —
+  `{ hyperschema: { name, alg?, body }, schema, roots, entity?, mutations? }` — via a single shared
+  `parseRegistrationInput`. The file went flat → nested. No wire impact (register input isn't a
+  delta). Village schemas regenerated, README register docs rewritten.
 
-## After this: the backlog is TODO.md
+**Nothing deferred — the 0.3.0 vocabulary is complete end to end: wire, parsed, and user-facing.**
 
-Next steps live in [TODO.md](TODO.md): the **renderer task** (opens at design/SPEC stage, STOP
-for Myk before code) and the **hardening pass**. §14 write-semantics is unblocked only once Myk
-rules on the clear-others question.
+## Gate
+
+`npm run check` **green, 451 tests**. Village 0-19 green. PR #72 updated.

@@ -208,8 +208,8 @@ export function guardedDossierSpec(operator) {
     },
   };
   return {
-    schema: { name: "GuardedDossier", alg: 1, body: termToJson(governedGatherBody(operator)) },
-    policy: {
+    hyperschema: { name: "GuardedDossier", alg: 1, body: termToJson(governedGatherBody(operator)) },
+    schema: {
       props: { name: PICK, bio: TRUSTED_LATEST, follows: ALL, companioned: ALL, attended: ALL },
       default: PICK,
     },
@@ -217,11 +217,9 @@ export function guardedDossierSpec(operator) {
   };
 }
 
-// A register-file loaded and wrapped for the HTTP/MCP body shape.
+// A register file IS the register-request shape now ({ hyperschema, schema, roots }) — load it.
 export function loadSpec(file) {
-  const raw = JSON.parse(readFileSync(join(SCHEMAS, file), "utf8"));
-  const { name, alg, body, policy, roots, entity } = raw;
-  return { schema: { name, alg: alg ?? 1, body }, policy, roots, ...(entity ? { entity } : {}) };
+  return JSON.parse(readFileSync(join(SCHEMAS, file), "utf8"));
 }
 
 // ---- SSE --------------------------------------------------------------------------------------

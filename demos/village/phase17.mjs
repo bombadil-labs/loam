@@ -52,8 +52,8 @@ try {
     operatorSeed: wandererSeed,
     registrations: [
       {
-        schema: { name: "Note", alg: 1, body: tab.parseTerm(NOTE_BODY) },
-        policy: tab.parsePolicy({ props: { text: PICK, about: PICK }, default: PICK }),
+        hyperschema: { name: "Note", alg: 1, body: tab.parseTerm(NOTE_BODY) },
+        schema: tab.parseSchema({ props: { text: PICK, about: PICK }, default: PICK }),
         roots: ["note:first"],
       },
     ],
@@ -95,7 +95,12 @@ try {
   await commons.gateway.append([
     signClaims(
       {
-        timestamp: Date.now(),
+        // The commons' CURRENT word on Wren, and it must read as the latest: phase 12 left a
+        // future-dated "regret" bio on the commons (ts + 10_000_000, to top Mallory's forgeries)
+        // and erased it only on the ALMANAC — per-instance erasure (§11) means the commons still
+        // serves it. So the tab, pulling the commons, would see that stale future-dated regret
+        // under a naive pick-latest unless this claim out-dates it. +20_000_000 clears the fixture.
+        timestamp: Date.now() + 20_000_000,
         author: commons.operator,
         pointers: [
           {
@@ -123,7 +128,7 @@ try {
   // ---- her own lens over the imported ground: the reader decides everything
   await notebook.publishRegistration(
     { name: "Person", alg: 1, body: tab.parseTerm(NOTE_BODY) },
-    tab.parsePolicy({ props: { bio: PICK }, default: PICK }),
+    tab.parseSchema({ props: { bio: PICK }, default: PICK }),
     ["person:wren"],
   );
   const hers = await notebook.query(`{ person(entity: "person:wren") { bio } }`);

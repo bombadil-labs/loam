@@ -1,5 +1,5 @@
-// GraphQL derived from (HyperSchema, Policy) — not reflected from the data. The policy is the
-// contract: its props name the fields, and each PropPolicy's kind names the field's shape
+// GraphQL derived from (HyperSchema, Schema) — not reflected from the data. The policy is the
+// contract: its props name the fields, and each Policy's kind names the field's shape
 // (pick → one value; all/conflicts → a list; merge → its reduction's type; absentAs → the
 // pass-through scalar, because its primitive constant and its inner policy's shape need not
 // agree). Values pass through the ViewValue scalar untyped-but-faithful — a resolved View is
@@ -30,7 +30,7 @@ import {
   type GraphQLInputType,
   type GraphQLOutputType,
 } from "graphql";
-import type { Primitive, PropPolicy } from "@bombadil/rhizomatic";
+import type { Primitive, Policy } from "@bombadil/rhizomatic";
 import type { ClaimTemplates } from "./registration.js";
 import type {
   ClaimPointerSpec,
@@ -93,7 +93,7 @@ const legal = (s: string): string => {
   return /^[A-Za-z_]/.test(cleaned) ? cleaned : `_${cleaned}`;
 };
 
-function fieldTypeOf(pp: PropPolicy): GraphQLOutputType {
+function fieldTypeOf(pp: Policy): GraphQLOutputType {
   switch (pp.kind) {
     case "pick":
       return ViewValue;
@@ -155,7 +155,7 @@ function metaFields<N extends ResolvedNode>(): GraphQLFieldConfigMap<N, unknown>
 
 function propFields<N extends ResolvedNode>(def: Registered): GraphQLFieldConfigMap<N, unknown> {
   const fields: GraphQLFieldConfigMap<N, unknown> = {};
-  for (const [prop, pp] of def.policy.props) {
+  for (const [prop, pp] of def.schema.props) {
     fields[legal(prop)] = {
       type: fieldTypeOf(pp),
       resolve: (node) => node.view[prop] ?? null,
@@ -240,25 +240,25 @@ export function buildGqlSchema(
       "_changed",
       "entity",
     ]);
-    for (const [prop] of def.policy.props) {
+    for (const [prop] of def.schema.props) {
       const name = legal(prop);
       if (seen.has(name) || name === "__proto__") {
         throw new Error(
-          `schema ${def.schema.name}: property "${prop}" collides with field "${name}"`,
+          `schema ${def.hyperschema.name}: property "${prop}" collides with field "${name}"`,
         );
       }
       seen.add(name);
     }
 
-    const typeName = legal(def.schema.name);
+    const typeName = legal(def.hyperschema.name);
     const viewType = new GraphQLObjectType<ResolvedNode>({
       name: `${typeName}View`,
-      description: `The ${def.schema.name} hyperschema, resolved under its registered policy.`,
+      description: `The ${def.hyperschema.name} hyperschema, resolved under its registered policy.`,
       fields: () => ({ ...metaFields<ResolvedNode>(), ...propFields<ResolvedNode>(def) }),
     });
     const patchType = new GraphQLObjectType<PatchNode>({
       name: `${typeName}Patch`,
-      description: `A live ${def.schema.name} view: an initial snapshot, then one patch per change.`,
+      description: `A live ${def.hyperschema.name} view: an initial snapshot, then one patch per change.`,
       fields: () => ({
         ...metaFields<PatchNode>(),
         ...propFields<PatchNode>(def),
@@ -279,7 +279,7 @@ export function buildGqlSchema(
     // Own properties only: a schema named "toString" collides with nothing but itself.
     if (Object.hasOwn(queryFields, fieldName)) {
       throw new Error(
-        `schema ${def.schema.name}: its query field "${fieldName}" collides with an earlier schema`,
+        `schema ${def.hyperschema.name}: its query field "${fieldName}" collides with an earlier schema`,
       );
     }
 
@@ -287,16 +287,16 @@ export function buildGqlSchema(
 
     queryFields[fieldName] = {
       type: new GraphQLNonNull(viewType),
-      description: `Resolve ${def.schema.name} at an entity. Absence is an answer, not an error.`,
+      description: `Resolve ${def.hyperschema.name} at an entity. Absence is an answer, not an error.`,
       args: entityArg,
-      resolve: (_src, args: { entity: string }) => hooks.resolve(def.schema.name, args.entity),
+      resolve: (_src, args: { entity: string }) => hooks.resolve(def.hyperschema.name, args.entity),
     };
 
     subscriptionFields[fieldName] = {
       type: new GraphQLNonNull(patchType),
-      description: `Hold ${def.schema.name} live at an entity: a snapshot, then patches.`,
+      description: `Hold ${def.hyperschema.name} live at an entity: a snapshot, then patches.`,
       args: entityArg,
-      subscribe: (_src, args: { entity: string }) => hooks.watch(def.schema.name, args.entity),
+      subscribe: (_src, args: { entity: string }) => hooks.watch(def.hyperschema.name, args.entity),
       resolve: (payload: PatchNode) => payload,
     };
 
@@ -305,30 +305,30 @@ export function buildGqlSchema(
     if (surface === "read") continue;
 
     const propArgs: Record<string, { type: typeof PrimitiveValue }> = {};
-    for (const [prop] of def.policy.props) propArgs[legal(prop)] = { type: PrimitiveValue };
+    for (const [prop] of def.schema.props) propArgs[legal(prop)] = { type: PrimitiveValue };
     // The mutation namespace is shared between per-prop fields and TEMPLATE fields of every
     // schema — check it explicitly (queryFields' check does not cover an earlier schema's
     // template landing on this schema's field name).
     if (Object.hasOwn(mutationFields, fieldName)) {
       throw new Error(
-        `schema ${def.schema.name}: its mutation field "${fieldName}" collides with an existing mutation`,
+        `schema ${def.hyperschema.name}: its mutation field "${fieldName}" collides with an existing mutation`,
       );
     }
     mutationFields[fieldName] = {
       type: new GraphQLNonNull(viewType),
       description:
-        `Claim properties of an entity under ${def.schema.name}: every provided argument ` +
+        `Claim properties of an entity under ${def.hyperschema.name}: every provided argument ` +
         `becomes one signed delta. Returns the re-resolved view.`,
       args: { ...entityArg, ...propArgs },
       resolve: (_src, args: Record<string, unknown>, ctx: unknown) => {
         const actor = (ctx as { actor?: string } | undefined)?.actor;
         // A null prototype: no store-named property can ever reach a real Object.prototype key.
         const props: Record<string, Primitive> = Object.create(null) as Record<string, Primitive>;
-        for (const [prop] of def.policy.props) {
+        for (const [prop] of def.schema.props) {
           const v = args[legal(prop)];
           if (v !== undefined && v !== null) props[prop] = v as Primitive;
         }
-        return hooks.mutate(def.schema.name, args["entity"] as string, props, actor);
+        return hooks.mutate(def.hyperschema.name, args["entity"] as string, props, actor);
       },
     };
 
@@ -336,10 +336,10 @@ export function buildGqlSchema(
     for (const [templateName, template] of Object.entries(def.mutations ?? {})) {
       if (Object.hasOwn(mutationFields, templateName)) {
         throw new Error(
-          `schema ${def.schema.name}: template "${templateName}" collides with an existing mutation`,
+          `schema ${def.hyperschema.name}: template "${templateName}" collides with an existing mutation`,
         );
       }
-      const argSpec = templateArgs(def.schema.name, templateName, template);
+      const argSpec = templateArgs(def.hyperschema.name, templateName, template);
       const gqlArgs: Record<string, { type: GraphQLInputType }> = {};
       for (const [arg, meta] of argSpec) {
         const base: GraphQLInputType = meta.kind === "entity" ? GraphQLID : PrimitiveValue;
@@ -352,7 +352,7 @@ export function buildGqlSchema(
       mutationFields[templateName] = {
         type: new GraphQLNonNull(ClaimReceipt),
         description:
-          `${def.schema.name}'s "${templateName}" claim: one call, one signed delta, ` +
+          `${def.hyperschema.name}'s "${templateName}" claim: one call, one signed delta, ` +
           `exactly the declared shape.`,
         args: gqlArgs,
         resolve: (_src, args: Record<string, unknown>, ctx: unknown) => {

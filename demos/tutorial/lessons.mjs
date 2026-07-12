@@ -167,7 +167,7 @@ async function view(ctx, query) {
 const registerFilm = (loam, ctx, policy, body = GATHER) =>
   ctx.gateway.publishRegistration(
     { name: "Film", alg: 1, body: loam.parseTerm(body) },
-    loam.parsePolicy(policy),
+    loam.parseSchema(policy),
     [FILM],
   );
 
@@ -237,7 +237,7 @@ holds as many lenses as you like, side by side. We fill this one in in lesson 7.
           run: async (ctx) => {
             await ctx.gateway.publishRegistration(
               { name: "Book", alg: 1, body: loam.parseTerm(GATHER) },
-              loam.parsePolicy(BOOK_POLICY),
+              loam.parseSchema(BOOK_POLICY),
               ["book:solaris"],
             );
           },
@@ -246,8 +246,8 @@ holds as many lenses as you like, side by side. We fill this one in in lesson 7.
       // Green only once BOTH lenses exist — the second step is not optional flavour, it is what
       // lesson 7's book reading needs, so it gates the green too.
       check: async (ctx) =>
-        ctx.gateway.registrationVersions().some((v) => v.schema.name === "Film") &&
-        ctx.gateway.registrationVersions().some((v) => v.schema.name === "Book") &&
+        ctx.gateway.registrationVersions().some((v) => v.hyperschema.name === "Film") &&
+        ctx.gateway.registrationVersions().some((v) => v.hyperschema.name === "Book") &&
         (await view(ctx, `{ film(entity: "${FILM}") { title } }`)).__errors === undefined,
     },
 
@@ -320,7 +320,7 @@ guests later. Nothing references it yet.`,
           run: async (ctx) => {
             await ctx.gateway.publishRegistration(
               { name: "Screening", alg: 1, body: loam.parseTerm(GATHER) },
-              loam.parsePolicy(SCREENING_POLICY),
+              loam.parseSchema(SCREENING_POLICY),
               [SCREENING_1, SCREENING_2],
             );
           },
@@ -446,7 +446,7 @@ answerable.`,
           run: async (ctx) => {
             await ctx.gateway.publishRegistration(
               { name: "FilmClassic", alg: 1, body: loam.parseTerm(FILM_EXPAND_BODY) },
-              loam.parsePolicy(FILM_POLICY_V2),
+              loam.parseSchema(FILM_POLICY_V2),
               [FILM],
             );
           },
@@ -457,7 +457,7 @@ answerable.`,
         const hasAlice = Array.isArray(v.film?.guests) && v.film.guests.includes(ALICE);
         const classic = ctx.gateway
           .registrationVersions()
-          .some((r) => r.schema.name === "FilmClassic");
+          .some((r) => r.hyperschema.name === "FilmClassic");
         return hasAlice && classic;
       },
     },
@@ -661,7 +661,7 @@ and powerless. Truth here is a policy you choose, and can always revisit.`,
           run: async (ctx) => {
             await ctx.gateway.publishRegistration(
               { name: "FilmDispute", alg: 1, body: loam.parseTerm(GATHER) },
-              loam.parsePolicy({
+              loam.parseSchema({
                 props: { title: { conflicts: { order: { byTimestamp: "desc" } } } },
                 default: PICK,
               }),
@@ -830,7 +830,7 @@ keeps, and the film she was your guest at. Data federates; authority never does.
           run: async (ctx) => {
             await ctx.gateway.publishRegistration(
               { name: "Person", alg: 1, body: loam.parseTerm(GATHER) },
-              loam.parsePolicy(PERSON_POLICY),
+              loam.parseSchema(PERSON_POLICY),
               [ALICE, "person:bob", "person:carol"],
             );
           },
@@ -855,7 +855,7 @@ keeps, and the film she was your guest at. Data federates; authority never does.
         );
         const foreignInert = !loam
           .readRegistrations(ctx.gateway.reactor, ctx.author)
-          .some((r) => r.schema.name === "Friends");
+          .some((r) => r.hyperschema.name === "Friends");
         return lit && foreignArrived && foreignInert;
       },
     },

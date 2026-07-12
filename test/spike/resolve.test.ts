@@ -1,4 +1,4 @@
-// SPEC §2, "Resolution & policy": resolveView(Policy, HView) → View. One gathered HView backs
+// SPEC §2, "Resolution & policy": resolveView(Schema, HView) → View. One gathered HView backs
 // many resolutions; pluralism is policy choice. pick = one truth, all = set union, conflicts =
 // contested-kept, merge = reduction; a resolved View is content-addressed and deterministic.
 
@@ -9,8 +9,8 @@ import {
   resolveView,
   viewCanonicalHex,
   type HView,
+  type Schema,
   type Policy,
-  type PropPolicy,
   type View,
 } from "@bombadil/rhizomatic";
 import {
@@ -41,15 +41,15 @@ function gather(set: DeltaSet): HView {
 
 const hview = gather(DeltaSet.from(deltas));
 
-const pickLatest: PropPolicy = { kind: "pick", order: { kind: "byTimestamp", dir: "desc" } };
-const policy = (overrides: Record<string, PropPolicy> = {}): Policy => ({
+const pickLatest: Policy = { kind: "pick", order: { kind: "byTimestamp", dir: "desc" } };
+const policy = (overrides: Record<string, Policy> = {}): Schema => ({
   props: new Map(Object.entries(overrides)),
   default: pickLatest,
 });
 
 const asObj = (v: View) => v as Record<string, View>;
 
-describe("spike: resolveView(Policy, HView) → View", () => {
+describe("spike: resolveView(Schema, HView) → View", () => {
   it("pick byTimestamp: latest wins", () => {
     const view = asObj(resolveView(policy(), hview));
     expect(view["height"]).toBe(34);
@@ -99,7 +99,7 @@ describe("spike: resolveView(Policy, HView) → View", () => {
   });
 
   it("byPred: matching claims outrank the rest", () => {
-    const preferTallReadings: PropPolicy = {
+    const preferTallReadings: Policy = {
       kind: "pick",
       order: {
         kind: "byPred",

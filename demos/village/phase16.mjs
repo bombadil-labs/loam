@@ -33,18 +33,20 @@ const claimsPath = join(HOMES, "phasegrove-facts.json");
 writeFileSync(
   schemaPath,
   JSON.stringify({
-    name: "Grove",
-    alg: 1,
-    body: {
-      op: "group",
-      key: "byTargetContext",
-      in: {
-        op: "select",
-        pred: { hasPointer: { targetEntity: { var: "root" } } },
-        in: { op: "mask", policy: "drop", in: "input" },
+    hyperschema: {
+      name: "Grove",
+      alg: 1,
+      body: {
+        op: "group",
+        key: "byTargetContext",
+        in: {
+          op: "select",
+          pred: { hasPointer: { targetEntity: { var: "root" } } },
+          in: { op: "mask", policy: "drop", in: "input" },
+        },
       },
     },
-    policy: {
+    schema: {
       props: {
         species: { pick: { order: { byTimestamp: "desc" } } },
         age: { pick: { order: { byTimestamp: "desc" } } },

@@ -189,8 +189,8 @@ try {
   );
   denials.push(["odile write on reel", (o1.body?.errors ?? []).join(" ")]);
   const reg = await registerHttp(commons.base, tok("wren", "commons"), {
+    hyperschema: {},
     schema: {},
-    policy: {},
     roots: [],
   });
   const fed = await fetch(`${commons.base}/federate`, {

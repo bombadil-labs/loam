@@ -1,7 +1,7 @@
 // Step 3's contract: the read gateway. A Gateway fronts one StoreBackend — it boots by
 // replaying the store into a Reactor, writes every accepted delta through, and serves GraphQL
-// whose shape is DERIVED from (HyperSchema, Policy): field names from the policy's props,
-// field shapes from each PropPolicy's kind. A query resolves via resolveView over the live
+// whose shape is DERIVED from (HyperSchema, Schema): field names from the policy's props,
+// field shapes from each Policy's kind. A query resolves via resolveView over the live
 // materialization, and its `_hex` is the content-addressed snapshot — stable across arrival
 // order, stable across processes, changed only by relevant new deltas.
 
@@ -60,7 +60,7 @@ const tmp = mkdtempSync(join(tmpdir(), "loam-gateway-"));
 // maxRetries rides out a Windows EBUSY if the OS hasn't released a just-closed sqlite handle.
 afterAll(() => rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
 
-describe("the read gateway: GraphQL derived from (HyperSchema, Policy)", () => {
+describe("the read gateway: GraphQL derived from (HyperSchema, Schema)", () => {
   it("a query returns the resolved view, shaped by the policy", async () => {
     const gateway = await openGateway();
     const plant = await queryPlant(gateway);
@@ -106,7 +106,7 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Policy)", () => {
     await backward.close();
   });
 
-  it("loadSchema: schema-defining deltas meta-resolve through SCHEMA_SCHEMA into a HyperSchema", async () => {
+  it("loadSchema: schema-defining deltas meta-resolve through HYPER_SCHEMA_SCHEMA into a HyperSchema", async () => {
     const gateway = await Gateway.open(new MemoryBackend());
     const published = signClaims(
       publishSchemaClaims(PLANT, "schema:Plant", GARDENER, 1000),

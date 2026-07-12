@@ -7,7 +7,7 @@ portable format for signed, content-addressed deltas whose merge is union: order
 idempotent, conflict-free. Rhizomatic is the format and the reactive core; Loam is the wrapper
 that makes it a deployable, GraphQL-fronted, persistent, multi-tenant, federatable server.
 
-Its shapes are grown, not imposed — you declare a schema and a policy, and the medium resolves
+Its shapes are grown, not imposed — you declare a hyperschema and a schema (a shape, and how to read it), and the medium resolves
 your data into views, maintains them live, and remembers everything. Nothing is deleted; the
 store only ever learns. Two Loam instances that meet simply merge. Trust is a lens the reader
 holds, not a verdict the ground hands down.
@@ -43,8 +43,8 @@ store driver — a native addon with prebuilt binaries for common platforms).
 ## The model in one breath
 
 - A **delta** is a signed, content-addressed fact. A **store** is a grow-only set of them.
-- A **HyperSchema** gathers the deltas relevant to an entity into a **Hyperview**; a **Policy**
-  resolves that hyperview into a **View** — the answer. One schema, many policies; one policy,
+- A **HyperSchema** gathers the deltas relevant to an entity into a **Hyperview**; a **Schema**
+  resolves that hyperview into a **View** — the answer. One hyperschema, many schemas; one schema,
   many entities.
 - The **Gateway** fronts one store: it derives a GraphQL surface from the (schema, policy) pairs
   you register, and serves `query`, `mutate`, and `subscribe` over it.
@@ -92,8 +92,8 @@ A served store exposes three surfaces per mount, behind a `Bearer` token:
   fields).
 - **`POST /:mount/mcp`** — a minimal MCP JSON-RPC surface (`initialize`, `tools/list`,
   `tools/call`) exposing `loam_query`, `loam_mutate`, and `loam_register`.
-- **`POST /:mount/register`** — `{ schema: { name, alg?, body }, policy, roots, entity? }` →
-  `{ registered, entity }` (operator token only). The schema-schema mutation mechanism, served:
+- **`POST /:mount/register`** — `{ hyperschema: { name, alg?, body }, schema, roots, entity? }` →
+  `{ registered, entity }` (operator token only). The hyperschema-schema mutation mechanism, served:
   the definition and its registration land as deltas, and the surface serves the new type
   immediately. Republishing at the same entity evolves it. (An endpoint rather than a GraphQL
   mutation because an empty store has no GraphQL surface to mutate through — this is how it
@@ -124,7 +124,7 @@ import { parseTerm } from "@bombadil/rhizomatic";
 // A store, governed by an operator seed. Omit the seed for an ungoverned local store.
 const gateway = await Gateway.open(new SqliteBackend("./store.sqlite"), { seed: operatorSeedHex });
 
-// Register a (HyperSchema, Policy) over the roots you want held live. The schema's body is a
+// Register a (HyperSchema, Schema) over the roots you want held live. The schema's body is a
 // rhizomatic term; the policy's props name the GraphQL fields and their shapes.
 gateway.register(
   {
@@ -168,10 +168,11 @@ reopened store grows its surface back with no re-registration code.
 A schema is not configuration — it is DEFINED by deltas, like everything else. Registering a
 schema lands two of them:
 
-- a **definition** — rhizomatic's schema-schema claims (`publishSchemaClaims` shape: name, alg,
+- a **definition** — rhizomatic's hyperschema-schema claims (`publishSchemaClaims` shape: name, alg,
   and the body as canonical CBOR) filed at a schema entity, `schema:<Name>` by default;
-- a **registration** — a reference under `loam.registration`: a pointer to that entity, the
-  policy as canonical JSON, and the roots. No schema body rides it.
+- a **registration** — a reference under `loam.registration`: a `hyperschema` pointer to that
+  entity, the `schema` (the resolution program) as canonical JSON, and the roots. No schema body
+  rides it.
 
 The GraphQL surface is **generated**: on boot (and after every publish) the gateway
 meta-resolves each referenced entity via `loadSchema` over the surviving definitions. The
@@ -188,22 +189,26 @@ consequences are the whole point:
 - Streams subscribed before an evolution keep watching the shape they subscribed to; new
   subscriptions see the new shape.
 
-The `loam register` file (also the `POST /register` body, under a `schema` key):
+The `loam register` file — the **exact same shape** `POST /:mount/register` and the MCP
+`loam_register` tool take, so a registration is one object you can drop into a file, POST, or hand
+the tool. It mirrors the parts: a **HyperSchema** (the gather) and a **Schema** (the resolution).
 
 ```json
 {
-  "name": "Plant",
-  "alg": 1,
-  "body": {
-    "op": "group",
-    "key": "byTargetContext",
-    "in": {
-      "op": "select",
-      "pred": { "hasPointer": { "targetEntity": { "var": "root" } } },
-      "in": { "op": "mask", "policy": "drop", "in": "input" }
+  "hyperschema": {
+    "name": "Plant",
+    "alg": 1,
+    "body": {
+      "op": "group",
+      "key": "byTargetContext",
+      "in": {
+        "op": "select",
+        "pred": { "hasPointer": { "targetEntity": { "var": "root" } } },
+        "in": { "op": "mask", "policy": "drop", "in": "input" }
+      }
     }
   },
-  "policy": {
+  "schema": {
     "props": { "height": { "pick": { "order": { "byTimestamp": "desc" } } } },
     "default": { "pick": { "order": { "byTimestamp": "desc" } } }
   },
@@ -211,23 +216,23 @@ The `loam register` file (also the `POST /register` body, under a `schema` key):
 }
 ```
 
-**Anatomy of a registration.** Five fields, and the whole read pipeline lives in them:
+**Anatomy of a registration.** Three parts, and the whole read pipeline lives in them:
 
-- **`name`** — the GraphQL field this schema generates (`{ plant(entity: …) }`) and the default
-  schema entity (`schema:Plant`). Identity is the entity, not the name — rename freely by
-  republishing at the same entity.
-- **`alg`** — the L2 **algebra version** the `body` is written against (_not_ a signing algorithm).
-  It pins which rhizomatic operator semantics interpret the term. There is one algebra today, so
-  this is always `1`; it exists so a v1 body keeps its v1 meaning if the algebra ever grows a v2.
-- **`body`** — a rhizomatic **gather term**, evaluated once per root. It selects and buckets the
-  relevant deltas; it is a pure function of the ambient root, so it resolves the same on every
-  machine.
-- **`policy`** — a per-bucket **reduction**. Each prop names a GraphQL field and says how to fold
-  that bucket's deltas into one value.
+- **`hyperschema`** — the gather program:
+  - **`name`** — the GraphQL field it generates (`{ plant(entity: …) }`) and the default entity
+    (`schema:Plant`). Identity is the entity, not the name — rename freely by republishing at it.
+  - **`alg`** — the L2 **algebra version** the `body` is written against (_not_ a signing algorithm).
+    There is one algebra today, so this is always `1`; it exists so a v1 body keeps its v1 meaning
+    if the algebra ever grows a v2.
+  - **`body`** — a rhizomatic **gather term**, evaluated once per root. It selects and buckets the
+    relevant deltas; a pure function of the ambient root, so it resolves the same on every machine.
+- **`schema`** — the resolution program (a **Schema**): a per-property reduction — each prop names a
+  GraphQL field and says how to fold that bucket's deltas into one value. Each prop's rule is a
+  **Policy** (`pick` / `all` / `merge` / …); the map of them is the Schema.
 - **`roots`** — the entities held **live**: the gather runs for each, and its view stays current
   as deltas arrive.
 
-The `body` reads inside-out, each stage feeding the next:
+The `hyperschema.body` reads inside-out, each stage feeding the next:
 
 1. **`mask` / `drop` over `input`** — `input` is the store's whole delta set; `drop` applies
    retractions and passes on only the deltas still standing. (Nothing is erased — a retraction is
@@ -239,7 +244,7 @@ The `body` reads inside-out, each stage feeding the next:
    of the pointer that targets the root. A delta pointing at `plant:fern` with context `height`
    lands in the `height` bucket. The result is a hyperview: one root, its buckets.
 
-Then the **policy** folds each bucket. `height` and the `default` both `pick` the entry with the
+Then the **Schema** folds each bucket. `height` and the `default` both `pick` the entry with the
 newest timestamp (`order: byTimestamp desc`), so `plant(entity: "plant:fern") { height }` returns
 the latest recorded height and drops the rest. Add a `width` prop and you'd surface that bucket
 too; leave it out and the bucket stays gathered but unread.
@@ -256,7 +261,7 @@ the read program), and each template becomes a GraphQL mutation that emits exact
 delta:
 
 ```jsonc
-// in the register file/body, beside body/policy/roots:
+// in the register file/body, beside hyperschema/schema/roots:
 "mutations": {
   "hostScreening": {
     "pointers": [
@@ -285,7 +290,7 @@ mutations (`plant(entity:…, height: 4)`) remain as convenient sugar.
 
 Every view also carries two content addresses: **`_hex`** (the resolved view — the answer) and
 **`_hviewHex`** (the gathered hyperview — the evidence). Two lenses over the same body and root
-share `_hviewHex` while their `_hex` differs exactly when their policies adjudicate
+share `_hviewHex` while their `_hex` differs exactly when their schemas adjudicate
 differently.
 
 ## Capabilities: authors, not owners
@@ -293,7 +298,7 @@ differently.
 No ambient authority — and no ownership of ids. **Entities are unowned**: a pointer is a string
 that matches or doesn't, and a delta is never a free-floating fact about an entity — it is an
 assertion _from a perspective_ (a verified author, an instance of origin). Anyone with standing
-may point at anything; whether anyone **listens** is the reader's business (policies, author
+may point at anything; whether anyone **listens** is the reader's business (schemas, author
 ranks, admission predicates, the operator-filtered constitutional reads).
 
 What a governed store enforces is exactly one thing: **the author's standing on this
@@ -461,14 +466,31 @@ after disaster is no procedure at all: delete the lost sqlite and serve again �
 replants it. Embedders get the same pieces as values: `MirrorBackend(primary, mirror)` and
 `ArchiveBackend(root)`.
 
+## Migrations
+
+A store is grow-only and content-addressed, so a signed delta can never be rewritten — which makes
+a breaking change to the on-wire format something you migrate to, not patch in place. Loam ships a
+migration for every such change (a standing rule), and it supersedes rather than rewrites:
+
+```sh
+loam init --home ./store --seed <the store's original seed>   # re-signing is the operator's own hand
+loam migrate my-export.json --out migrated.json               # old deltas in, new deltas out
+```
+
+For each delta a format change touched, the migration **re-signs** it into the new form and
+**negates** the original with a negation that points `supersededBy` at its replacement and records a
+reason — so the history reads as a linked chain of supersessions, nothing lost. It is idempotent
+(re-running adds nothing) and composes across versions. See [SPEC §20](SPEC.md).
+
 ## How the repo is organized
 
 **Source.** `src/` is the library and CLI, split by seam: `gateway/` (the store's surface —
 GraphQL, mutations, registrations, accounts & capabilities, trust, erasure), `store/` (the
 `StoreBackend` drivers — sqlite, archive/mirror, localStorage), `surface/` (surfaces as
 materializations — the GraphQL and REST/OpenAPI doors from one generator seam), `federation/`
-(offer / pull / wire / translate), `runner/` (derived functions), `cli/`, and `browser/` +
-`client/` (the full in-page store and the read-only public client). `test/` mirrors that tree;
+(offer / pull / wire / translate), `runner/` (derived functions), `migrate/` (format migrations —
+old deltas in, new deltas out), `cli/`, and `browser/` + `client/` (the full in-page store and the
+read-only public client). `test/` mirrors that tree;
 [`demos/`](demos/README.md) holds the [tutorial](https://bombadil-labs.github.io/loam/) and the
 village.
 

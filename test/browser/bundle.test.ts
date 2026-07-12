@@ -69,8 +69,8 @@ function plantGenesis(b: BrowserModule): unknown {
     operatorSeed: OPERATOR_SEED,
     registrations: [
       {
-        schema: { name: "Plant", alg: 1, body },
-        policy: { props: new Map([["height", pickLatest]]), default: pickLatest },
+        hyperschema: { name: "Plant", alg: 1, body },
+        schema: { props: new Map([["height", pickLatest]]), default: pickLatest },
         roots: [FERN],
       },
     ],

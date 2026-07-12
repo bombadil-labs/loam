@@ -12,7 +12,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { authorForSeed, parsePolicy, parseTerm, signClaims } from "@bombadil/rhizomatic";
+import { authorForSeed, parseSchema, parseTerm, signClaims } from "@bombadil/rhizomatic";
 import { Gateway, MemoryBackend, assembleGenesis, exportOffer, toWire } from "../dist/index.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -62,12 +62,12 @@ async function buildCircle() {
       operatorSeed: CIRCLE_SEED,
       registrations: [
         {
-          schema: { name: "Person", alg: 1, body: parseTerm(GATHER) },
-          policy: parsePolicy({ props: { name: PICK, follows: ALL }, default: PICK }),
+          hyperschema: { name: "Person", alg: 1, body: parseTerm(GATHER) },
+          schema: parseSchema({ props: { name: PICK, follows: ALL }, default: PICK }),
           roots: PEOPLE,
         },
         {
-          schema: {
+          hyperschema: {
             name: "Friends",
             alg: 1,
             body: parseTerm({
@@ -77,7 +77,7 @@ async function buildCircle() {
               in: GATHER,
             }),
           },
-          policy: parsePolicy({ props: { name: PICK, follows: ALL }, default: PICK }),
+          schema: parseSchema({ props: { name: PICK, follows: ALL }, default: PICK }),
           roots: PEOPLE,
         },
       ],

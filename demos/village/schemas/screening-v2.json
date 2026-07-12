@@ -1,38 +1,40 @@
 {
-  "name": "Screening",
-  "alg": 1,
-  "body": {
-    "op": "group",
-    "key": "byTargetContext",
-    "in": {
-      "op": "select",
-      "pred": {
-        "not": {
-          "hasPointer": {
-            "context": {
-              "exact": "note"
-            }
-          }
-        }
-      },
+  "hyperschema": {
+    "name": "Screening",
+    "alg": 1,
+    "body": {
+      "op": "group",
+      "key": "byTargetContext",
       "in": {
         "op": "select",
         "pred": {
-          "hasPointer": {
-            "targetEntity": {
-              "var": "root"
+          "not": {
+            "hasPointer": {
+              "context": {
+                "exact": "note"
+              }
             }
           }
         },
         "in": {
-          "op": "mask",
-          "policy": "drop",
-          "in": "input"
+          "op": "select",
+          "pred": {
+            "hasPointer": {
+              "targetEntity": {
+                "var": "root"
+              }
+            }
+          },
+          "in": {
+            "op": "mask",
+            "policy": "drop",
+            "in": "input"
+          }
         }
       }
     }
   },
-  "policy": {
+  "schema": {
     "props": {
       "film": {
         "pick": {

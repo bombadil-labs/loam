@@ -31,7 +31,7 @@ const findDefinition = (gateway, entity) =>
   [...gateway.reactor.snapshot()].find((d) =>
     d.claims.pointers.some(
       (p) =>
-        p.role === `${VOCAB_PREFIX}.schema.defines` &&
+        p.role === `${VOCAB_PREFIX}.hyperschema.defines` &&
         p.target.kind === "entity" &&
         p.target.entity.id === entity,
     ),
@@ -135,8 +135,8 @@ try {
   // 7.4 — a broken schema refused at the served door, and nothing persists
   const before = [...hive.gateway.reactor.snapshot()].length;
   const broken = await registerHttp(hive.base, opToken("hive"), {
-    schema: { name: "Broken", alg: 1, body: { op: "mask", policy: "drop", in: "input" } },
-    policy: { default: { pick: { order: { byTimestamp: "desc" } } } },
+    hyperschema: { name: "Broken", alg: 1, body: { op: "mask", policy: "drop", in: "input" } },
+    schema: { default: { pick: { order: { byTimestamp: "desc" } } } },
     roots: ["colony:1"],
   });
   const after = [...hive.gateway.reactor.snapshot()].length;

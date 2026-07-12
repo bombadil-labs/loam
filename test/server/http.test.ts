@@ -349,7 +349,7 @@ describe("POST /:mount/append", () => {
 describe("POST /:mount/register: the schema-schema mutation mechanism, served", () => {
   const PICK = { pick: { order: { byTimestamp: "desc" } } };
   const rockBody = {
-    schema: {
+    hyperschema: {
       name: "Rock",
       alg: 1,
       body: {
@@ -362,7 +362,7 @@ describe("POST /:mount/register: the schema-schema mutation mechanism, served", 
         },
       },
     },
-    policy: { props: { color: PICK }, default: PICK },
+    schema: { props: { color: PICK }, default: PICK },
     roots: ["rock:1"],
   };
   const register = (mount: string, token: string, body: unknown) =>
@@ -399,8 +399,8 @@ describe("POST /:mount/register: the schema-schema mutation mechanism, served", 
 
   it("a malformed registration is 400 with a reason, and nothing binds", async () => {
     const res = await register("meadow", "op-token", {
-      schema: { name: "Broken", alg: 1, body: { op: "no-such-op" } },
-      policy: { default: PICK },
+      hyperschema: { name: "Broken", alg: 1, body: { op: "no-such-op" } },
+      schema: { default: PICK },
       roots: [],
     });
     expect(res.status).toBe(400);
@@ -413,7 +413,7 @@ describe("POST /:mount/register: the schema-schema mutation mechanism, served", 
   it("loam_register rides MCP under the same operator gate", async () => {
     const pondBody = {
       ...rockBody,
-      schema: { ...rockBody.schema, name: "Pond" },
+      hyperschema: { ...rockBody.hyperschema, name: "Pond" },
       roots: ["pond:1"],
     };
     const denied = await rpcOn("garden", "alice-token", {

@@ -42,7 +42,16 @@ const expandThrough = (role, schema) => ({
   in: GATHER,
 });
 
-const write = (file, spec) => {
+// The specs are authored flat for brevity; the register format is the nested shape every door
+// takes — { hyperschema: { name, alg, body }, schema, roots } — so emit that.
+const write = (file, { name, alg, body, policy, roots, entity, mutations }) => {
+  const spec = {
+    hyperschema: { name, alg: alg ?? 1, body },
+    schema: policy,
+    roots,
+    ...(entity ? { entity } : {}),
+    ...(mutations ? { mutations } : {}),
+  };
   writeFileSync(join(SCHEMAS, file), JSON.stringify(spec, null, 2) + "\n");
   console.log(`  wrote ${file}`);
 };

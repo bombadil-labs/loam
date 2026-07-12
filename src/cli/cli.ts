@@ -6,14 +6,20 @@
 // live ServerHandle so a caller (a test, or a supervisor) can drive and close it. The default
 // `serve` blocks until the process is signalled.
 
-import { readFileSync } from "node:fs";
-import { authorForSeed, parsePolicy, parseTerm, type HyperSchema } from "@bombadil/rhizomatic";
+import { readFileSync, writeFileSync } from "node:fs";
+import { authorForSeed } from "@bombadil/rhizomatic";
 import { Gateway, type FederationReport } from "../gateway/gateway.js";
 import { parseOffer } from "../federation/offer.js";
+import { toWire } from "../federation/wire.js";
+import { migrate } from "../migrate/migrate.js";
 import { pullFrom } from "../federation/pull.js";
 import { tombstonesIn } from "../gateway/erase.js";
 import { assembleGenesis } from "../gateway/genesis.js";
-import { schemaEntityFor } from "../gateway/registration.js";
+import {
+  parseRegistrationInput,
+  schemaEntityFor,
+  type RegistrationInput,
+} from "../gateway/registration.js";
 import { serve, type ServerHandle } from "../server/http.js";
 import type { StoreBackend } from "../store/backend.js";
 import { ArchiveBackend } from "../store/archive.js";
@@ -43,6 +49,7 @@ commands:
   serve     boot a store and serve it (GraphQL + SSE + MCP over HTTP)
   register  define a schema from a file and register it in the home's store
   pull      land a peer's deltas — a live URL or a frozen offer file
+  migrate   read an offer, re-express it in the current format, write it back
   store     inspect a store
 
 run \`loam <command> --help\` for a command's options.`;
@@ -178,7 +185,7 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
   if (file === undefined) {
     io.err(
       "register wants a schema file: `loam register <schema.json>` — " +
-        "{ name, alg?, body, policy, roots, entity? }",
+        "{ hyperschema: { name, alg?, body }, schema, roots, entity? }",
     );
     return 2;
   }
@@ -193,41 +200,9 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
     io.err(`register: cannot read ${file}: ${err instanceof Error ? err.message : String(err)}`);
     return 1;
   }
-  let spec: {
-    name?: unknown;
-    alg?: unknown;
-    body?: unknown;
-    policy?: unknown;
-    roots?: unknown;
-    entity?: unknown;
-  };
+  let input: RegistrationInput;
   try {
-    spec = JSON.parse(raw) as typeof spec;
-  } catch (err) {
-    io.err(`register: ${file} is not JSON: ${err instanceof Error ? err.message : String(err)}`);
-    return 2;
-  }
-  if (typeof spec.name !== "string" || spec.name.length === 0) {
-    io.err("register: the file must name the schema (a non-empty `name`)");
-    return 2;
-  }
-  if (!Array.isArray(spec.roots) || spec.roots.some((r) => typeof r !== "string")) {
-    io.err("register: the file must carry `roots`, an array of entity ids");
-    return 2;
-  }
-  if (spec.entity !== undefined && typeof spec.entity !== "string") {
-    io.err("register: `entity` must be a string when given");
-    return 2;
-  }
-  let schema: HyperSchema;
-  let policy: ReturnType<typeof parsePolicy>;
-  try {
-    schema = {
-      name: spec.name,
-      alg: typeof spec.alg === "number" ? spec.alg : 1,
-      body: parseTerm(spec.body),
-    };
-    policy = parsePolicy(spec.policy);
+    input = parseRegistrationInput(JSON.parse(raw));
   } catch (err) {
     io.err(`register: ${file}: ${err instanceof Error ? err.message : String(err)}`);
     return 2;
@@ -242,11 +217,12 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
   );
   try {
     await gateway.publishRegistration(
-      schema,
-      policy,
-      spec.roots as string[],
+      input.hyperschema,
+      input.schema,
+      input.roots,
       undefined,
-      spec.entity,
+      input.entity,
+      input.mutations,
     );
   } catch (err) {
     await gateway.close().catch(() => {}); // never let a close failure mask the real refusal
@@ -254,7 +230,7 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
   }
   await gateway.close();
   io.out(
-    `loam: registered ${spec.name} at ${schemaEntityFor(schema, spec.entity)}\n` +
+    `loam: registered ${input.hyperschema.name} at ${schemaEntityFor(input.hyperschema, input.entity)}\n` +
       `  the definition is deltas now — the next serve grows the surface from it`,
   );
   return 0;
@@ -340,6 +316,63 @@ async function cmdPull(args: readonly string[], io: IO): Promise<number> {
   return 0;
 }
 
+// Re-express a frozen offer in the current on-wire format (the standing policy: every breaking
+// format change ships a migration). Old deltas in, correctly-formed deltas out — schema
+// definitions re-signed into the current vocabulary, each superseded original negated with a
+// link to its replacement and a reason. Grow-only, so the output carries the whole history.
+// Re-signing needs the seed that authored those definitions: run it against the home whose
+// operator minted the store (`loam init --seed <hex>` first, with the store's original seed).
+function cmdMigrate(args: readonly string[], io: IO): number {
+  const parsed = parseArgs(args, new Set());
+  rejectUnknown(parsed, new Set(["home", "out"]), "migrate");
+  const source = parsed.positionals[0];
+  if (source === undefined) {
+    io.err(
+      "migrate wants an input: `loam migrate <file> [--out <file>]` — a frozen offer " +
+        "(a store's export, or a saved GET /federate body)",
+    );
+    return 2;
+  }
+  if (parsed.positionals.length > 1) {
+    io.err("migrate takes exactly one input");
+    return 2;
+  }
+  let deltas;
+  try {
+    deltas = parseOffer(readFileSync(source, "utf8"));
+  } catch (err) {
+    io.err(`migrate: ${source}: ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
+  }
+  const home = parsed.flags.get("home") ?? defaultHome();
+  let seed: string;
+  try {
+    seed = readSeed(home);
+  } catch {
+    io.err(
+      `migrate: no operator seed in ${home} — the definitions are re-signed, so run\n` +
+        "  `loam init --seed <hex>` with the store's ORIGINAL seed first, then migrate",
+    );
+    return 1;
+  }
+  const { deltas: migrated, report } = migrate(deltas, { seed });
+  const out = JSON.stringify({ deltas: migrated.map(toWire) });
+  const steps =
+    report.applied.length === 0
+      ? "already current — nothing to migrate"
+      : report.applied.map((a) => `${a.id} (${a.superseded} superseded)`).join(", ");
+  const dest = parsed.flags.get("out");
+  if (dest !== undefined) {
+    writeFileSync(dest, out);
+    io.out(
+      `loam: migrated ${source} → ${dest}\n  ${report.before} in, ${report.after} out — ${steps}`,
+    );
+  } else {
+    io.out(out); // to stdout, so `loam migrate old.json > new.json` works
+  }
+  return 0;
+}
+
 async function cmdStore(args: readonly string[], io: IO): Promise<number> {
   const parsed = parseArgs(args, new Set());
   rejectUnknown(parsed, new Set(["home", "store"]), "store");
@@ -390,6 +423,8 @@ export async function run(
         return await cmdRegister(rest, io);
       case "pull":
         return await cmdPull(rest, io);
+      case "migrate":
+        return cmdMigrate(rest, io);
       case "store":
         return await cmdStore(rest, io);
       default:

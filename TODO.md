@@ -18,8 +18,13 @@ _Designed 2026-07-10 (originally SPEC §14). **BLOCKED on an open question** (th
 question below) — resolve with Myk before implementation. When it lands, this migrates back to
 SPEC §14 with a Provenance footer._
 
-Reading is `resolve : Policy → HView → View` (§4): a field's value is not stored, it is
-COMPUTED per-property by its policy over a bucket of gathered deltas. Writing is the **dual**,
+_Vocabulary (0.3.0): a **Policy** is a single property's rule — `pick` / `all` / `merge` /
+`conflicts` / `absentAs`; the whole `{ props, default }` resolution program a field belongs to is a
+**Schema**. This section is precisely about each field's write discipline following its Policy, so it
+reads natively under the new names — "Policy" below always means the per-property rule._
+
+Reading is `resolve : Schema → HView → View` (§4): a field's value is not stored, it is
+COMPUTED per-property by its Policy over a bucket of gathered deltas. Writing is the **dual**,
 and today does not know it — the mutation surface (§5) appends a `(subject/context, value)`
 delta uniformly, as if every field were a settable single slot, which is true only of `pick`.
 The read side knows a field may be a selection, an aggregate, a conflict set, an `expand`ed
@@ -35,20 +40,20 @@ writing as policy-aware as reading.
 - **retract** — negate YOUR OWN contributing deltas (rhizomatic negation, §2; honored at the
   mask stage of the gather, §4).
 
-`set`, `add`, `remove`, `clear`, `unset` are these two, parameterized by the field's policy.
-There is no universal "set" and no universal "clear"; each policy kind **induces** its own
+`set`, `add`, `remove`, `clear`, `unset` are these two, parameterized by the field's Policy.
+There is no universal "set" and no universal "clear"; each Policy kind **induces** its own
 write discipline, or declines one.
 
 **Clearing is retraction, and it resolves to absence — never to a null value.** A View already
-represents "no value" natively: a policy with nothing to say returns an internal ABSENT
+represents "no value" natively: a Policy with nothing to say returns an internal ABSENT
 sentinel, and `resolveView` OMITS that key from the View (a missing key reads as `null` at the
 surface). So removal needs no new value in the algebra — retract your contributing deltas, the
-bucket empties, the policy goes absent, the key vanishes; the reader's `absentAs` decides what
+bucket empties, the Policy goes absent, the key vanishes; the reader's `absentAs` decides what
 that absence RENDERS as. Removal arrives without null-the-hole ever riding on a reference: the
 null-ness lives in the lens, explicit and per-field. Hoare's mistake sidestepped by
 construction, not by discipline.
 
-**Each policy kind induces its write semantics:**
+**Each Policy kind induces its write semantics:**
 
 - **`pick`** — _assert_ to set (the new fact wins by the field's order); _retract-your-own_ to
   clear (the next surviving delta steps up; if none, absence).
@@ -61,14 +66,14 @@ construction, not by discipline.
   fallback, never a written value.
 - **expanded / relational** (an `expand`ed edge, §4) — _assert_ the **edge** to link; _retract_
   the edge to sever (the nested subtree drops from the view). You never write INTO the nested
-  entity's resolved value — that is its own policy over its own ground.
+  entity's resolved value — that is its own Schema over its own ground.
 - **derived** (future resolve-time computed fields) — **read-only**: no backing assertion
   exists to write or retract.
 - **default** — **immutable** unless a field opts into a write discipline. The store learns;
   silence about writability means "you may not," not "you may set anything."
 
 Writability is declared in the registration (Loam-level metadata, beside the claim templates of
-§5), **not** in the rhizomatic `Policy`. It disciplines the mutation SURFACE, never the ground:
+§5), **not** in the rhizomatic `Schema`. It disciplines the mutation SURFACE, never the ground:
 the resolution algebra is untouched, so content-addressing and portability are unaffected, and
 two instances may declare different writability for one schema without ever diverging on a
 resolved View. (The same reason merge fns are a closed vocabulary — resolution must be a
@@ -99,7 +104,7 @@ local.)
 
   > **OPEN — resolve before this work begins (Myk, 2026-07-11).** The bullet above is likely
   > too strong. It holds when the lens admits only your own contributions — but when a field's
-  > policy draws on OTHERS' claims (an `all` list, a `merge`, a `conflicts` set, a `pick` whose
+  > Policy draws on OTHERS' claims (an `all` list, a `merge`, a `conflicts` set, a `pick` whose
   > order can seat another author), retracting only your own deltas leaves the field populated
   > by theirs, so "clear" has not cleared. A binding clear would have to negate those foreign
   > contributions too — which the substrate already permits: an authored negation may reference
@@ -128,7 +133,7 @@ local.)
 
 ---
 
-## Reserved §20 — Shippable renderers: schemas AND their consumers, verified end-to-end
+## Reserved §21 — Shippable renderers: schemas AND their consumers, verified end-to-end
 
 _Handed over by Myk 2026-07-11. **NOT YET SCOPED — this opens at the design stage.** Draft the
 SPEC section answering the questions below, then STOP for Myk before writing implementation
@@ -179,20 +184,3 @@ recovery); quarantine-vs-refuse semantics for a corrupt row on read (refuse-the-
 isolate-the-row — Myk decides); boot resilience; an entity-ID reserved-vs-user convention (so
 constitutional ids can't collide with app ids); and `loam repair` tooling. Then STOP for review.
 
----
-
-## Vocabulary overhaul against rhizomatic 0.3.0 — BLOCKED on upstream
-
-_Blocked on [rhizomatic#3](https://github.com/bombadil-labs/rhizomatic/issues/3) (a substrate
-change Myk owns): rename the L5 resolution vocabulary so `PropPolicy`→`Policy` (the per-property
-rule) and `Policy`→`Schema` (the resolution program), restoring the `HyperSchema:HyperView ::
-Schema:View` symmetry. Loam can't touch rhizomatic; this item starts only once 0.3.0 publishes._
-
-When 0.3.0 lands: bump the `@bombadil/rhizomatic` dep, then a wide-but-mechanical sweep of Loam —
-`Policy`/`PropPolicy` → `Schema`/`Policy`, `parsePolicy`→`parseSchema`, `policyToJson`→`schemaToJson`
-— across `src/gateway/registration.ts` (`Registration` becomes "a HyperSchema + a Schema + roots"),
-the gateway, the tutorial (`demos/tutorial/lessons.mjs` builds many policies), the village, and the
-tests. Watch for the `mask` term's on-wire `"policy"` field (L2 `MaskPolicy`, a different thing —
-do NOT rename). Update CLAUDE.md's "Match rhizomatic's vocabulary" standing rule and the README's
-model section to the new names. Pure rename upstream = no wire/content-address drift, so no data
-migration — the gate against unchanged fixtures is the proof.
