@@ -540,6 +540,25 @@ refusals as every other write — one ground, one registration, the same view th
 Clearing is grow-only and idempotent: it appends signed negations, and re-clearing an
 already-cleared field adds nothing (its entries are already negated).
 
+**Remove one, not just clear the field.** `clear` withdraws every one of your contributions to a
+field; `remove` withdraws a specific VALUE — the one tag you added, a particular `merge` addend —
+leaving the rest of the field, yours and everyone's, standing. It is the same retract-your-own
+mechanism with a value predicate: negate only your own deltas in the field whose claimed value is one
+named. GraphQL exposes `remove<Type>(entity, field, values)`; the REST door takes an object DELETE
+body, `{ field: [values] }`, beside the array form that clears whole fields. Trying to remove a value
+you did not author is a no-op — retract-your-own holds down to the single value.
+
+**Writability is declared, and it disciplines the door.** A registration MAY carry a `writable` list
+(Loam metadata, beside the claim templates of §5, additive on the wire); when present, ONLY those
+fields accept a surface write — assert, clear, AND remove refuse the rest with a reason, and GraphQL
+does not even offer a read-only field as a mutation argument. Silence leaves every field writable (the
+permissive default). It disciplines the SURFACE, never the ground: the resolution algebra is
+untouched, so content-addressing and portability are unaffected, and two instances may declare
+different writability for one schema without diverging on a resolved View. (The same reason merge fns
+are a closed vocabulary — resolution must be a universal function of the data — is why write
+DISCIPLINE, which is not resolution, may be local.) The global immutable-by-default posture — silence
+meaning "you may not" — would flip today's permissive default and stays a future breaking change.
+
 **Real limitations, stated plainly (the §13 register):**
 
 - **Clear is per-reader.** A retraction binds only for readers whose lens honors your negation (trust
@@ -562,18 +581,22 @@ already-cleared field adds nothing (its entries are already negated).
   field AND carries an unrelated pointer is retracted whole. Author one delta per fact you may want to
   withdraw independently (the surface's own writes already do).
 
-The write surface will grow richer per-Policy verbs — removing one specific value from a list,
-refusing "set the aggregate" on a `merge` as the category error it is, read-only derived fields, and
-writability declared in the registration — as the Policy vocabulary that needs them lands; those
-remain in [TODO.md](TODO.md). What ships here is the load-bearing half the read side always implied:
-**a way to remove, and it is retraction.**
+Two surface verbs remain for later, both narrow: relational **edges** as first-class `link` / `sever`
+(the `expand` that marks an edge lives in the hyperschema's gather, not the Schema, so the surface
+must learn to read it), and **read-only derived fields**, which wait on rhizomatic growing a
+resolve-time computed Policy kind to refuse writes to. Those stay in [TODO.md](TODO.md). What ships
+here is the whole read side's dual: **a way to remove — clear a field, remove a value, or lock one
+shut — and it is all retraction and declaration, never a null on a reference.**
 
-**Provenance.** [#73](https://github.com/bombadil-labs/loam/pull/73) — clearing-is-retraction on both
-doors (`Gateway.clearEntity`, GraphQL `clear<Type>`, REST `DELETE`), negating the caller's own
-contributions via rhizomatic negation and resolving to absence; verified across `pick` / `all` /
-`merge` / `absentAs`, author-scoped and idempotent. The open "clear-others" question was resolved
-**retract-your-own** (Myk, 2026-07-12): shaping a view against others' claims is the schema Policy's
-job, not a negation's. Migrated from TODO §14.
+**Provenance.** [#73](https://github.com/bombadil-labs/loam/pull/73) — writing as the dual of
+resolution. `Gateway.retract` (shared by `clear`/`remove`) negates the caller's own contributions via
+rhizomatic negation and re-resolves to what survives, or to absence; `clear<Type>` / REST `DELETE`
+(array body) clear whole fields, `remove<Type>` / REST `DELETE` (object body) withdraw specific
+values, and an optional registration `writable` list disciplines which fields the surface writes at
+all. Verified across `pick` / `all` / `merge` / `absentAs`, author-scoped and idempotent, both doors
+in agreement. The open "clear-others" question was resolved **retract-your-own** (Myk, 2026-07-12):
+shaping a view against others' claims is the schema Policy's job, not a negation's. Migrated from
+TODO §14 (the remaining edge/derived verbs stay in the backlog).
 
 ## 15. The browser peer — a full store in the page
 

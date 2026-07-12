@@ -22,6 +22,9 @@ export interface Registered {
   readonly schema: Schema;
   readonly roots: readonly string[];
   readonly mutations?: ClaimTemplates;
+  // Front-door writability (SPEC §14): when present, only these fields accept a surface write; the
+  // rest are read-only (assert / clear / remove refused). Absent → every field is writable.
+  readonly writable?: readonly string[];
 }
 
 // What flows from a root resolution to a door's field readers: one resolution, many reads.
@@ -68,6 +71,15 @@ export interface SurfaceHooks {
     schemaName: string,
     entity: string,
     fields: readonly string[],
+    actorSeed?: string,
+  ): Promise<ResolvedNode>;
+  // Remove ONE value (SPEC §14 amendment): retract only the caller's own contribution(s) to `field`
+  // whose claimed value is one of `values` — the rest of the field, theirs and everyone's, stands.
+  remove(
+    schemaName: string,
+    entity: string,
+    field: string,
+    values: readonly Primitive[],
     actorSeed?: string,
   ): Promise<ResolvedNode>;
   watch(schemaName: string, entity: string): AsyncGenerator<PatchNode>;

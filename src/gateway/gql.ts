@@ -304,8 +304,14 @@ export function buildGqlSchema(
     // were already validated when the FULL surface bound (the read set is a subset of it).
     if (surface === "read") continue;
 
+    // Only WRITABLE props are offered as per-prop mutation args (SPEC §14): a read-only field is
+    // simply absent from the write surface. Absent `writable` → every prop is writable.
+    const writable = def.writable === undefined ? undefined : new Set(def.writable);
     const propArgs: Record<string, { type: typeof PrimitiveValue }> = {};
-    for (const [prop] of def.schema.props) propArgs[legal(prop)] = { type: PrimitiveValue };
+    for (const [prop] of def.schema.props) {
+      if (writable === undefined || writable.has(prop))
+        propArgs[legal(prop)] = { type: PrimitiveValue };
+    }
     // The mutation namespace is shared between per-prop fields and TEMPLATE fields of every
     // schema — check it explicitly (queryFields' check does not cover an earlier schema's
     // template landing on this schema's field name).
@@ -361,6 +367,40 @@ export function buildGqlSchema(
           }
         }
         return hooks.clear(def.hyperschema.name, args["entity"] as string, fields, actor);
+      },
+    };
+
+    // remove<Type> (SPEC §14 amendment): value-scoped retraction — withdraw the ONE value you
+    // contributed to a field (a tag you added, a `merge` addend), the rest of the field untouched.
+    const removeField = `remove${typeName}`;
+    if (Object.hasOwn(mutationFields, removeField)) {
+      throw new Error(
+        `schema ${def.hyperschema.name}: its mutation field "${removeField}" collides with an existing mutation`,
+      );
+    }
+    mutationFields[removeField] = {
+      type: new GraphQLNonNull(viewType),
+      description:
+        `Retract YOUR OWN contribution(s) of specific values to one field of a ` +
+        `${def.hyperschema.name} entity — the rest of the field stands. Returns the re-resolved view.`,
+      args: {
+        ...entityArg,
+        field: { type: new GraphQLNonNull(GraphQLString) },
+        values: { type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(PrimitiveValue))) },
+      },
+      resolve: (_src, args: Record<string, unknown>, ctx: unknown) => {
+        const actor = (ctx as { actor?: string } | undefined)?.actor;
+        const field = args["field"] as string;
+        if (!def.schema.props.has(field)) {
+          throw new Error(`schema ${def.hyperschema.name} has no field "${field}"`);
+        }
+        return hooks.remove(
+          def.hyperschema.name,
+          args["entity"] as string,
+          field,
+          args["values"] as Primitive[],
+          actor,
+        );
       },
     };
 

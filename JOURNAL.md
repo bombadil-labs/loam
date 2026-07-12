@@ -1315,3 +1315,31 @@ standing, not that the target is theirs); it now carries a load-bearing comment 
 loosens it. (3) Validate an unknown field at the DOOR (against the version it addressed — latest for
 GraphQL, pinned for REST), not deep in `clearEntity` against the latest schema — otherwise clearing
 an older REST version whose lens named a since-dropped field throws instead of retracting real ground.
+
+### §14 amendment, same PR — remove-one + writability (Myk: "one more commit")
+
+The amendment was unblocked and the mechanism already sat there, so it rode PR #73 too. `clearEntity`
+and a new `removeEntity` now share one private `retract(name, entity, seed, keep)` core — clear passes
+`keep = field ∈ fields`, remove passes `keep = field === f && the delta carries a "value" pointer in
+the wanted set`. Value-scoped retraction is thus the same retract-your-own with a predicate: withdraw
+the ONE tag you added or a specific `merge` addend, the rest of the field standing, and removing a
+value you did not author is a no-op. `remove<Type>(entity, field, values)` on GraphQL; an object
+`DELETE` body `{ field: [values] }` on REST, beside the array form that clears whole fields.
+
+Writability is an optional `writable` string[] on the registration — additive on the wire (a new
+`writable` primitive pointer, no migration: old registrations lack it and stay permissive), threaded
+exactly like `mutations` (Registration → RegistrationInput → registrationClaims → survivingCandidates
+→ Registered, plus register()/publishRegistration()). Enforcement is CENTRAL — one `assertWritable`
+guard in the gateway's `mutateEntity`/`clearEntity`/`removeEntity`, so both doors inherit it through
+the hooks; GraphQL additionally trims read-only props out of the per-prop mutation args, and the
+OpenAPI write-body drops them, so the surfaces tell the truth about what they write. 473 tests green;
+village phase20 grew to 5/5.
+
+Design calls worth recording: (1) we deliberately did NOT build "merge refuses `set`" — a per-prop
+assert on a `merge` field is honest contribution (an addend), and refusing it would remove working
+behavior to force a rename; the useful half of that bullet is `remove` (withdraw a specific addend).
+(2) Writability shipped as opt-in RESTRICTION, not §14's original immutable-by-default: flipping the
+default would make every existing registration read-only overnight — a breaking change needing a
+migration and Myk's call, so it stays in TODO. (3) Central enforcement over per-door: putting
+`assertWritable` in the three gateway write methods means a new door can never forget it, and the
+door-level trims (GraphQL args, OpenAPI body) are honesty on top, not the gate.

@@ -415,4 +415,28 @@ describe("retraction: DELETE clears your own, in agreement with GraphQL clear (�
     });
     expect(anon.status).toBe(403);
   });
+
+  it("an object DELETE body removes specific values the writer contributed (value-scoped)", async () => {
+    // the writer adds a distinctive tag to the `all` list, both doors see it
+    await rest(
+      `/rest/v1/Plant/${encodeURIComponent(FERN)}`,
+      { method: "POST", body: JSON.stringify({ tag: "ephemeral" }) },
+      "writer-token",
+    );
+    const before = await gql(`{ plant(entity: "${FERN}") { tag } }`, "op-token");
+    expect((before.body as { data: { plant: { tag: string[] } } }).data.plant.tag).toContain(
+      "ephemeral",
+    );
+
+    // DELETE { tag: ["ephemeral"] } retracts only that value — the rest of the list stands
+    const del = await rest(
+      `/rest/v1/Plant/${encodeURIComponent(FERN)}`,
+      { method: "DELETE", body: JSON.stringify({ tag: ["ephemeral"] }) },
+      "writer-token",
+    );
+    expect(del.status).toBe(200);
+    const after = await gql(`{ plant(entity: "${FERN}") { tag } }`, "op-token");
+    const tag = (after.body as { data: { plant: { tag: string[] | null } } }).data.plant.tag;
+    expect(tag ?? []).not.toContain("ephemeral"); // withdrawn; sole value → absent (null)
+  });
 });

@@ -12,43 +12,30 @@ Ordering is rough priority, top-first; Myk sets it. Each item says what it needs
 
 ---
 
-## §14 amendment — the richer per-Policy write verbs
+## §14 amendment — the remaining write verbs (edges, derived, and the default flip)
 
-_The load-bearing half of write semantics **landed** in SPEC §14
-([#73](https://github.com/bombadil-labs/loam/pull/73)): the two primitives (assert / retract), and
-`clear` as retract-your-own resolving to absence, on both doors. The open "clear-others" question is
-**resolved** — retract-your-own is the floor and the ceiling; shaping a view against others' claims
-is the schema **Policy's** job, not a negation's (Myk, 2026-07-12). What remains is the
-**surface-level polish** that makes each verb name its Policy's discipline. This is now UNBLOCKED;
-when it lands it is an **amendment appended to SPEC §14**, not a new section._
+_Most of write semantics **landed** in SPEC §14
+([#73](https://github.com/bombadil-labs/loam/pull/73)): the two primitives (assert / retract), `clear`
+(retract-your-own → absence), `remove` (value-scoped retract), and optional `writable` declaration —
+both doors. The open "clear-others" question is **resolved**: retract-your-own is the floor and the
+ceiling; shaping a view against others' claims is the schema **Policy's** job, not a negation's (Myk,
+2026-07-12). What remains are two narrow surface verbs and one posture decision. When they land they
+are an **amendment appended to SPEC §14**, not a new section._
 
-The shipped `clear` is Policy-correct by construction (resolution does the Policy work), so this is
-naming and refusal, not new algebra:
-
-- **remove-one, not just clear-the-field.** For an `all` / `conflicts` list, a `remove(value)` verb
-  that retracts the ONE of your deltas whose value matches — beside the whole-field `clear` that
-  retracts all of yours.
-- **`merge` refuses "set the aggregate."** A per-prop `set` on a `merge` field today asserts an
-  addend (correct as contribution), but the verb reads like "pin the total," which is a category
-  error — you cannot invert `sum` to a chosen value. Offer `contribute` / `withdraw`; refuse a
-  `set`-the-total with a reason. Requires the surface to inspect each prop's Policy kind and name
-  verbs accordingly.
-- **expanded / relational edges as first-class verbs.** The uniform `clear` already negates edge
-  deltas (sever); name them — `link` (assert the edge) and `sever` (retract it) — so the write
-  surface speaks the relation, and never pretends you write INTO the nested entity's resolved value
-  (that is its own Schema over its own ground).
+- **expanded / relational edges as first-class verbs.** The uniform `clear`/`remove` already negate
+  edge deltas; name them — `link` (assert the edge) and `sever` (retract it) — so the write surface
+  speaks the relation, and never pretends you write INTO the nested entity's resolved value (that is
+  its own Schema over its own ground). The real work: the `expand` that marks a field as an edge lives
+  in the **hyperschema's gather body**, not the Schema, so the surface must learn to read the body to
+  know which fields are edges (and offer entity-pointer, not primitive-value, writes for them).
 - **derived fields are read-only.** When rhizomatic grows resolve-time computed fields, the surface
-  refuses a write to one with a reason — there is no backing delta to assert or retract. (Blocked on
-  the derived-field Policy vocabulary, which is a rhizomatic conversation, not a Loam workaround.)
-- **writability declared in the registration.** Loam-level metadata beside the claim templates of
-  §5: `default` is immutable unless a field opts into a write discipline (silence means "you may
-  not," not "you may set anything"). It disciplines the mutation SURFACE, never the ground — the
-  resolution algebra is untouched, so two instances may declare different writability for one schema
-  without ever diverging on a resolved View. (The same reason merge fns are a closed vocabulary —
-  resolution must be a universal function of the data — is why write DISCIPLINE, which is not
-  resolution, may be local.) Note the §14 limitation this refines: writability is front-door
-  discipline, not a field lock — a hand-signed or federated delta may still assert into a "read-only"
-  context, and a reader who wants the guarantee enforces it with a lens.
+  refuses a write to one with a reason — there is no backing delta to assert or retract. **Blocked**
+  on the derived-field Policy vocabulary, which is a rhizomatic conversation, not a Loam workaround.
+- **the immutable-by-default flip (a decision for Myk).** Shipped `writable` is opt-in RESTRICTION:
+  absent → every field writable (today's permissive default). §14's original intent was the inverse —
+  silence means "you may not." Flipping the default is a **breaking change**: every existing
+  registration (village, tutorial, tests) would need a `writable` list or go read-only, so it needs a
+  migration and Myk's call on whether the stricter posture is worth it. Left as opt-in until then.
 
 ---
 

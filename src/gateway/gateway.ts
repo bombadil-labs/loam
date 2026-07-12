@@ -28,6 +28,7 @@ import {
   verifyDelta,
   viewCanonicalHex,
   type Delta,
+  type HVEntry,
   type HView,
   type HyperSchema,
   type IngestResult,
@@ -248,6 +249,8 @@ export class Gateway {
       resolve: (name, entity) => this.resolvedNode(name, entity),
       mutate: (name, entity, props, actorSeed) => this.mutateEntity(name, entity, props, actorSeed),
       clear: (name, entity, fields, actorSeed) => this.clearEntity(name, entity, fields, actorSeed),
+      remove: (name, entity, field, values, actorSeed) =>
+        this.removeEntity(name, entity, field, values, actorSeed),
       watch: (name, entity) => this.watchEntity(name, entity, door),
       claim: (pointers, actorSeed) => this.claimEntity(pointers, actorSeed),
     };
@@ -377,6 +380,7 @@ export class Gateway {
       JSON.stringify(schemaToJson(r.schema)),
       JSON.stringify(r.roots),
       JSON.stringify(r.mutations ?? null),
+      JSON.stringify(r.writable ?? null),
       r.entity ?? "",
       r.origin,
     ].join(NUL);
@@ -574,6 +578,7 @@ export class Gateway {
     schema: Schema,
     roots: readonly string[],
     mutations?: ClaimTemplates,
+    writable?: readonly string[],
   ): void {
     if (hyperschema.name.includes(NUL)) {
       throw new Error("a schema name may not contain NUL — that alphabet is the gateway's own");
@@ -589,6 +594,7 @@ export class Gateway {
         roots,
         origin: "manual",
         ...(templates ? { mutations: templates } : {}),
+        ...(writable ? { writable } : {}),
       },
     ];
     const registry = SchemaRegistry.build(next.map((r) => r.hyperschema)); // refuses dups + bad refs
@@ -621,6 +627,7 @@ export class Gateway {
     context?: RequestContext,
     entity?: string,
     mutations?: ClaimTemplates,
+    writable?: readonly string[],
   ): Promise<void> {
     const seed = context?.actor ?? this.options.seed;
     if (seed === undefined) {
@@ -658,7 +665,13 @@ export class Gateway {
     buildGqlSchema(
       [
         ...survivors,
-        { hyperschema, schema, roots, ...(templates ? { mutations: templates } : {}) },
+        {
+          hyperschema,
+          schema,
+          roots,
+          ...(templates ? { mutations: templates } : {}),
+          ...(writable ? { writable } : {}),
+        },
       ],
       this.gqlHooks(),
     ); // arg names, field collisions — everything the replay would trip on, tripped NOW
@@ -671,7 +684,15 @@ export class Gateway {
     );
     await this.loadSchema([definition], schemaEntity); // proves, then persists the definition
     const reference = signClaims(
-      registrationClaims(schemaEntity, schema, roots, author, this.nextTimestamp(), templates),
+      registrationClaims(
+        schemaEntity,
+        schema,
+        roots,
+        author,
+        this.nextTimestamp(),
+        templates,
+        writable,
+      ),
       seed,
     );
     await this.append([reference]);
@@ -978,6 +999,7 @@ export class Gateway {
     if (entries.length === 0) {
       throw new Error(`mutation of ${entity} names no properties to claim`);
     }
+    this.assertWritable(name, Object.keys(props));
     const author = authorForSeed(seed);
     // Strictly monotonic WITHIN THIS INSTANCE: two mutations from one running gateway never tie
     // on timestamp, so pick-byTimestamp between them is an ordering, not a coin flip on
@@ -1000,42 +1022,40 @@ export class Gateway {
     return this.resolvedNode(name, entity);
   }
 
-  // Clearing is retraction, not a null value (SPEC §14): the DUAL of resolution. For each named
-  // field, negate the caller's OWN surviving contributions in that field's gathered bucket — one
-  // mechanism, correct across every Policy because the read side already does the Policy work: the
-  // pick falls to the next survivor, an `all` list loses your tag, a `merge` withdraws your addend,
-  // and a field only you spoke for goes ABSENT (the reader renders that per its own absentAs). The
-  // negations sign and append through the same standing-checked path as every write. Retract-your-
-  // own is the whole reach (Myk, 2026-07-12): a clear never negates a delta the caller did not
-  // author — to keep OTHERS' claims out of a view you narrow the schema Policy, not the ground.
-  private async clearEntity(
+  // Retraction, the DUAL of resolution (SPEC §14): negate the caller's OWN surviving contributions
+  // that `keep` selects, and re-resolve — one mechanism, correct across every Policy because the
+  // read side already does the Policy work (the pick falls to the next survivor, an `all` list loses
+  // your value, a `merge` withdraws your addend, a field only you spoke for goes ABSENT, rendered
+  // per its own absentAs). The negations sign and append through the same standing-checked path as
+  // every write.
+  //
+  // The `claims.author === author` filter is the SINGLE load-bearing check of the retract-your-own
+  // invariant (Myk, 2026-07-12): `append` only proves the negation's author holds write standing,
+  // NOT that the target is theirs — so a future refactor must never loosen this into negating a
+  // foreign delta. (`claims.author` is signature-bound by verifyDelta at append, not self-assertable.
+  // To keep OTHERS' claims out of a view you narrow the schema Policy, not the ground.) The `keep`
+  // predicate stays lens-agnostic: each DOOR refuses an unknown field against the version it
+  // addressed, so this never throws on a field an older version named that the latest lens dropped —
+  // its contributions are still real on the ground; a field with no bucket simply retracts nothing.
+  private async retract(
     name: string,
     entity: string,
-    fields: readonly string[],
-    actorSeed?: string,
+    actorSeed: string | undefined,
+    keep: (field: string, entry: HVEntry) => boolean,
   ): Promise<ResolvedNode> {
     const seed = actorSeed ?? this.options.seed;
     if (seed === undefined) {
       throw new Error("this gateway holds no signing seed and cannot write");
     }
-    if (fields.length === 0) {
-      throw new Error(`clear of ${entity} names no fields to retract`);
-    }
-    this.def(name); // refuses an unknown schema; each DOOR refuses an unknown field against the
-    // version it addressed (latest for GraphQL, the pinned version for REST) — so this stays lens-
-    // agnostic and never throws on a field an older version named that the latest lens dropped
-    // (its contributions are still real on the ground). A field with no bucket simply clears nothing.
+    this.def(name); // refuses an unknown schema
     const author = authorForSeed(seed);
     const hview = this.gather(name, entity);
-    // The caller's own, still-surviving contributions to the named buckets — the deltas to negate.
-    // The `claims.author === author` filter is the SINGLE load-bearing check of the retract-your-own
-    // invariant: `append` only proves the negation's author holds write standing, not that the
-    // target is theirs — so a future refactor must never loosen this into negating a foreign delta.
-    // (`claims.author` is signature-bound by verifyDelta at append, not self-assertable.)
     const targets = new Set<string>();
-    for (const field of fields) {
-      for (const entry of hview.props.get(field) ?? []) {
-        if (entry.delta.claims.author === author && !entry.negated) targets.add(entry.delta.id);
+    for (const [field, entries] of hview.props) {
+      for (const entry of entries) {
+        if (entry.delta.claims.author === author && !entry.negated && keep(field, entry)) {
+          targets.add(entry.delta.id);
+        }
       }
     }
     if (targets.size > 0) {
@@ -1046,6 +1066,68 @@ export class Gateway {
       await this.append(negations);
     }
     return this.resolvedNode(name, entity);
+  }
+
+  // Clear whole fields: retract every one of the caller's contributions to each named field.
+  private clearEntity(
+    name: string,
+    entity: string,
+    fields: readonly string[],
+    actorSeed?: string,
+  ): Promise<ResolvedNode> {
+    if (fields.length === 0) throw new Error(`clear of ${entity} names no fields to retract`);
+    this.assertWritable(name, fields);
+    const set = new Set(fields);
+    return this.retract(name, entity, actorSeed, (field) => set.has(field));
+  }
+
+  // Remove ONE value (SPEC §14 amendment): retract only the caller's own contribution(s) to `field`
+  // whose claimed value is one of `values` — withdraw the single tag you added, a specific `merge`
+  // addend. The rest of the field, yours and everyone's, stands.
+  private removeEntity(
+    name: string,
+    entity: string,
+    field: string,
+    values: readonly Primitive[],
+    actorSeed?: string,
+  ): Promise<ResolvedNode> {
+    if (values.length === 0) {
+      throw new Error(`remove from ${field} of ${entity} names no values to retract`);
+    }
+    this.assertWritable(name, [field]);
+    const wanted = new Set(values.map((v) => JSON.stringify(v)));
+    return this.retract(
+      name,
+      entity,
+      actorSeed,
+      (f, entry) =>
+        f === field &&
+        entry.delta.claims.pointers.some(
+          (p) =>
+            p.role === "value" &&
+            p.target.kind === "primitive" &&
+            wanted.has(JSON.stringify(p.target.value)),
+        ),
+    );
+  }
+
+  // Writability is front-door discipline (SPEC §14): a registration MAY declare `writable`, and when
+  // it does, only those fields accept a surface write — assert, clear, AND remove refuse the rest
+  // with a reason. Silence (no `writable`) leaves every field writable (the permissive default the
+  // whole village and tutorial were built on). It disciplines the SURFACE, never the ground: a
+  // hand-signed or federated delta may still assert into a "read-only" context, and a reader who
+  // wants the guarantee enforces it with a lens.
+  private assertWritable(name: string, fields: readonly string[]): void {
+    const { writable } = this.def(name);
+    if (writable === undefined) return;
+    const allowed = new Set(writable);
+    for (const field of fields) {
+      if (!allowed.has(field)) {
+        throw new Error(
+          `field "${field}" of ${name} is read-only: the registration does not open it`,
+        );
+      }
+    }
   }
 
   // One signed MULTI-POINTER delta from an explicit pointer list — what every claim template

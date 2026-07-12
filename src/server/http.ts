@@ -127,6 +127,7 @@ async function performRegistration(
     undefined,
     input.entity,
     input.mutations,
+    input.writable,
   );
   return {
     registered: input.hyperschema.name,
@@ -311,6 +312,15 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           schema: { type: "object", description: "the resolution schema, schema JSON" },
           roots: { type: "array", items: { type: "string" } },
           entity: { type: "string", description: "the schema entity (default schema:<name>)" },
+          mutations: {
+            type: "object",
+            description: "named claim templates (the write discipline)",
+          },
+          writable: {
+            type: "array",
+            items: { type: "string" },
+            description: "fields that accept a surface write; omit to leave every field writable",
+          },
         },
         required: ["hyperschema", "schema", "roots"],
       },

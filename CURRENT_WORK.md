@@ -54,4 +54,17 @@ bucket resolved per-Policy. There is now a way through the surface to **remove**
    REST DELETE → absence → repopulate, pick → null. Ledger entry added.
 9. [x] **Journal**.
 
-_Left off: PR #73 pushed, CI pending. **NOT merging** — the merge guardrail needs Myk to name it._
+_Left off: PR #73 pushed, CI green. **NOT merging** — the merge guardrail needs Myk to name it._
+
+## Follow-up amendment (Myk, 2026-07-12: "one more commit into this PR") — remove-one + writability
+
+10. [x] **remove-one** — `remove<Type>(entity, field, values)` + REST `DELETE {field:[values]}`; a
+    shared private `retract(name, entity, seed, keep)` core under both `clear` and `remove`.
+11. [x] **writability** — optional `writable?: string[]` threaded like `mutations` (additive wire, no
+    migration); central `assertWritable` in the gateway write methods (both doors); GraphQL + OpenAPI
+    trim read-only fields. Opt-in restriction; the immutable-by-default flip stays a future breaking
+    change (noted in TODO). Deliberately did NOT build "merge refuses set" (honest contribution).
+12. [x] Tests (+8 → 473), village phase20 grew to 5/5 twice, SPEC §14 amended, TODO trimmed to the
+    remaining edge/derived verbs + the default-flip decision, README + JOURNAL updated. Green gate.
+
+**NOT merging** — awaiting Myk naming the merge.

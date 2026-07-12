@@ -52,6 +52,9 @@ export interface Registration {
   readonly entity?: string;
   // The write discipline, traveling with the read program.
   readonly mutations?: ClaimTemplates;
+  // Front-door writability (SPEC §14): when present, ONLY these fields accept a surface write; the
+  // rest are read-only. Absent → every field is writable (the permissive default).
+  readonly writable?: readonly string[];
 }
 
 const isPrimitive = (v: unknown): v is Primitive =>
@@ -156,6 +159,7 @@ export function registrationClaims(
   author: string,
   timestamp: number,
   mutations?: ClaimTemplates,
+  writable?: readonly string[],
 ): Claims {
   return {
     timestamp,
@@ -167,6 +171,14 @@ export function registrationClaims(
             {
               role: "mutations",
               target: { kind: "primitive" as const, value: JSON.stringify(mutations) },
+            },
+          ]),
+      ...(writable === undefined
+        ? []
+        : [
+            {
+              role: "writable",
+              target: { kind: "primitive" as const, value: JSON.stringify(writable) },
             },
           ]),
       {
@@ -206,6 +218,7 @@ export interface RegistrationInput {
   readonly roots: string[];
   readonly entity?: string;
   readonly mutations?: ClaimTemplates;
+  readonly writable?: string[];
 }
 
 export function parseRegistrationInput(raw: unknown): RegistrationInput {
@@ -215,6 +228,7 @@ export function parseRegistrationInput(raw: unknown): RegistrationInput {
     roots?: unknown;
     entity?: unknown;
     mutations?: unknown;
+    writable?: unknown;
   } | null;
   if (
     o === null ||
@@ -237,12 +251,19 @@ export function parseRegistrationInput(raw: unknown): RegistrationInput {
   if (o.entity !== undefined && typeof o.entity !== "string") {
     throw new Error("register: entity must be a string when given");
   }
+  if (
+    o.writable !== undefined &&
+    (!Array.isArray(o.writable) || o.writable.some((f) => typeof f !== "string"))
+  ) {
+    throw new Error("register: writable must be an array of field names when given");
+  }
   return {
     hyperschema: { name, alg: alg ?? 1, body: parseTerm(body) },
     schema: parseSchema(o.schema),
     roots: o.roots as string[],
     ...(o.entity === undefined ? {} : { entity: o.entity }),
     ...(o.mutations === undefined ? {} : { mutations: parseClaimTemplates(o.mutations) }),
+    ...(o.writable === undefined ? {} : { writable: o.writable as string[] }),
   };
 }
 
@@ -290,6 +311,7 @@ interface Candidate {
   schema: Schema;
   roots: readonly string[];
   mutations?: ClaimTemplates;
+  writable?: readonly string[];
   timestamp: number;
   id: string;
 }
@@ -353,12 +375,27 @@ function survivingCandidates(
         mutations = undefined;
       }
     }
+    // Writability is a plain string[] — a malformed payload is likewise dropped quietly, leaving
+    // the schema permissive rather than refusing to bind.
+    let writable: readonly string[] | undefined;
+    const writableJson = primitive(delta.claims, "writable");
+    if (typeof writableJson === "string") {
+      try {
+        const parsed: unknown = JSON.parse(writableJson);
+        if (Array.isArray(parsed) && parsed.every((f) => typeof f === "string")) {
+          writable = parsed;
+        }
+      } catch {
+        writable = undefined;
+      }
+    }
     const schemaEntity = schemaRef.target.entity.id;
     const candidate: Candidate = {
       schemaEntity,
       schema,
       roots,
       ...(mutations === undefined ? {} : { mutations }),
+      ...(writable === undefined ? {} : { writable }),
       timestamp: delta.claims.timestamp,
       id: delta.id,
     };
@@ -400,6 +437,7 @@ export function readRegistrations(reactor: Reactor, operator?: string): Registra
         roots: cand.roots,
         entity: cand.schemaEntity,
         ...(cand.mutations === undefined ? {} : { mutations: cand.mutations }),
+        ...(cand.writable === undefined ? {} : { writable: cand.writable }),
       });
     } catch {
       // no surviving (or a malformed) definition: the registration is unbound, not fatal
@@ -448,6 +486,7 @@ export function readRegistrationVersions(
         roots: cand.roots,
         entity: cand.schemaEntity,
         ...(cand.mutations === undefined ? {} : { mutations: cand.mutations }),
+        ...(cand.writable === undefined ? {} : { writable: cand.writable }),
         version: n,
         deltaId: cand.id,
         timestamp: cand.timestamp,

@@ -176,3 +176,125 @@ describe("clear (§14): retraction is the dual of resolution", () => {
     await gateway.close();
   });
 });
+
+const remove = (entity: string, field: string, values: (string | number)[]): string =>
+  `mutation { removePlant(entity: "${entity}", field: "${field}", values: [${values
+    .map((v) => (typeof v === "string" ? `"${v}"` : v))
+    .join(", ")}]) { tag readings } }`;
+const removed = (r: { data?: unknown }): PlantView =>
+  (r.data as { removePlant: PlantView }).removePlant;
+
+describe("remove (§14 amendment): value-scoped retraction", () => {
+  it("withdraws only your own contribution of a value — the rest of the field stands", async () => {
+    const gateway = await keeperGateway();
+    // tag `all`: gardener=shade, surveyor=fronds → [shade, fronds].
+    const after = await gateway.query(remove(FERN, "tag", ["shade"]), undefined, {
+      actor: GARDENER_SEED,
+    });
+    expect(after.errors).toBeUndefined();
+    expect(removed(after).tag).toEqual(["fronds"]); // gardener's shade withdrawn, surveyor's stays
+    await gateway.close();
+  });
+
+  it("cannot remove a value you did not author — retract-your-own holds for a single value too", async () => {
+    const gateway = await keeperGateway();
+    // the gardener tries to remove the SURVEYOR's fronds; nothing of the gardener's matches → no-op.
+    const after = await gateway.query(remove(FERN, "tag", ["fronds"]), undefined, {
+      actor: GARDENER_SEED,
+    });
+    expect(removed(after).tag).toEqual(["shade", "fronds"]); // both still stand
+    await gateway.close();
+  });
+
+  it("withdraws a specific merge addend — the reduction recomputes without it", async () => {
+    const gateway = await keeperGateway();
+    // readings `merge count`: gardener=7, surveyor=9 → 2. Remove the gardener's 7 → 1.
+    const mine = await gateway.query(remove(FERN, "readings", [7]), undefined, {
+      actor: GARDENER_SEED,
+    });
+    expect(removed(mine).readings).toBe(1);
+    // removing the surveyor's 9 as the gardener does nothing — not the gardener's addend.
+    const notMine = await gateway.query(remove(FERN, "readings", [9]), undefined, {
+      actor: GARDENER_SEED,
+    });
+    expect(removed(notMine).readings).toBe(1);
+    await gateway.close();
+  });
+
+  it("refuses a field the schema does not resolve", async () => {
+    const gateway = await keeperGateway();
+    const result = await gateway.query(remove(FERN, "nonesuch", ["x"]), undefined, {
+      actor: GARDENER_SEED,
+    });
+    expect(result.errors?.join(" ")).toMatch(/no field "nonesuch"|nonesuch/);
+    await gateway.close();
+  });
+});
+
+describe("writability (§14 amendment): front-door discipline", () => {
+  // A lens that opens ONLY height to writes; tag/watered/readings are read-only at the surface.
+  async function writableGateway(): Promise<Gateway> {
+    const gateway = await Gateway.open(new MemoryBackend(), { seed: KEEPER_SEED });
+    await gateway.append(governedBootstrap(KEEPER_SEED));
+    await gateway.append(garden);
+    gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, ["height"]);
+    return gateway;
+  }
+
+  it("a read-only field is not even offered as a per-prop mutation argument", async () => {
+    const gateway = await writableGateway();
+    const result = await gateway.query(
+      `mutation { plant(entity: "${FERN}", tag: "x") { tag } }`,
+      undefined,
+      {
+        actor: GARDENER_SEED,
+      },
+    );
+    // `tag` is not a writable field, so it is not an argument the schema knows.
+    expect(result.errors?.join(" ")).toMatch(/tag|unknown|not defined/i);
+    // the writable field still writes fine
+    const ok = await gateway.query(
+      `mutation { plant(entity: "${FERN}", height: 40) { height } }`,
+      undefined,
+      {
+        actor: GARDENER_SEED,
+      },
+    );
+    expect(ok.errors).toBeUndefined();
+    expect((ok.data as { plant: { height: number } }).plant.height).toBe(40);
+    await gateway.close();
+  });
+
+  it("clear and remove refuse a read-only field with a reason", async () => {
+    const gateway = await writableGateway();
+    const cleared = await gateway.query(clear(FERN, ["tag"]), undefined, { actor: GARDENER_SEED });
+    expect(cleared.errors?.join(" ")).toMatch(/read-only/);
+    const removedRes = await gateway.query(remove(FERN, "tag", ["shade"]), undefined, {
+      actor: GARDENER_SEED,
+    });
+    expect(removedRes.errors?.join(" ")).toMatch(/read-only/);
+    // clearing the WRITABLE field is allowed
+    const okClear = await gateway.query(clear(FERN, ["height"]), undefined, {
+      actor: GARDENER_SEED,
+    });
+    expect(okClear.errors).toBeUndefined();
+    await gateway.close();
+  });
+
+  it("writability survives as data: a published registration re-enforces it after reopen", async () => {
+    const backend = new MemoryBackend();
+    const gw = await Gateway.open(backend, { seed: KEEPER_SEED });
+    await gw.append(governedBootstrap(KEEPER_SEED));
+    await gw.append(garden);
+    await gw.publishRegistration(PLANT, PLANT_POLICY, [FERN], undefined, undefined, undefined, [
+      "height",
+    ]);
+    await gw.flush(); // persist without closing the shared backend
+
+    // A fresh gateway replays the registration — writability rode the registration delta.
+    const reopened = await Gateway.open(backend, { seed: KEEPER_SEED });
+    const cleared = await reopened.query(clear(FERN, ["tag"]), undefined, { actor: GARDENER_SEED });
+    expect(cleared.errors?.join(" ")).toMatch(/read-only/);
+    await reopened.close();
+  });
+});

@@ -297,6 +297,13 @@ REST door maps it to `DELETE /:mount/rest/vN/<Schema>/<entity>`. Retract-your-ow
 reach: a clear never touches another author's claim — to keep others' claims out of a view you
 narrow the schema Policy, not the ground.
 
+To withdraw ONE value rather than a whole field there is `remove<Type>(entity, field, values: […])`
+(REST: a `DELETE` with an object body `{ field: [values] }`) — the one tag you added, a specific
+`merge` addend, the rest of the field left standing. And a registration may carry a **`writable`**
+list: when present, only those fields accept a surface write (assert, clear, and remove refuse the
+rest with a reason); omit it to leave every field writable. It disciplines the front door, never the
+ground — a reader who wants a hard guarantee still enforces it with a lens.
+
 Every view also carries two content addresses: **`_hex`** (the resolved view — the answer) and
 **`_hviewHex`** (the gathered hyperview — the evidence). Two lenses over the same body and root
 share `_hviewHex` while their `_hex` differs exactly when their schemas adjudicate

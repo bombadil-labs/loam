@@ -103,6 +103,58 @@ try {
       cleared.body?.data?.clearBoard?.headline === null,
     `set "${set.body?.data?.board?.headline}" → cleared → ${JSON.stringify(cleared.body?.data?.clearBoard?.headline)}`,
   );
+
+  // 20.4 — value-scoped REMOVE: withdraw the ONE note you named, the rest of the list stands. On a
+  // fresh board so it reads cleanly. Miles adds two; removing one by value leaves the other.
+  const GARDEN = "board:garden";
+  await gql(commons.base, tok("miles", "commons"), `mutation { board(entity: "${GARDEN}", notes: "water tuesdays") { notes } }`);
+  await gql(commons.base, tok("miles", "commons"), `mutation { board(entity: "${GARDEN}", notes: "prune in march") { notes } }`);
+  await gql(commons.base, tok("wren", "commons"), `mutation { board(entity: "${GARDEN}", notes: "wren was here") { notes } }`);
+  const removed = await gql(
+    commons.base,
+    tok("miles", "commons"),
+    `mutation { removeBoard(entity: "${GARDEN}", field: "notes", values: ["prune in march"]) { notes } }`,
+  );
+  // miles cannot remove wren's note — retract-your-own holds for a single value too
+  const foreign = await gql(
+    commons.base,
+    tok("miles", "commons"),
+    `mutation { removeBoard(entity: "${GARDEN}", field: "notes", values: ["wren was here"]) { notes } }`,
+  );
+  const finalNotes = foreign.body?.data?.removeBoard?.notes ?? [];
+  check(
+    "20.4",
+    "remove withdraws the ONE value you named — the rest, yours and others', stands",
+    JSON.stringify(removed.body?.data?.removeBoard?.notes) ===
+      JSON.stringify(["water tuesdays", "wren was here"]) &&
+      finalNotes.includes("wren was here") &&
+      !finalNotes.includes("prune in march"),
+    `after remove: [${finalNotes.join(", ")}] (wren's note untouched by miles)`,
+  );
+
+  // 20.5 — writability: a Ledger whose `amount` is writable and whose `memo` is read-only at the
+  // door. The surface refuses a write to memo (assert, clear, remove) though the ground stays open.
+  await registerHttp(commons.base, opToken("commons"), {
+    hyperschema: { name: "Ledger", alg: 1, body: GATHER },
+    schema: { props: { amount: PICK, memo: PICK }, default: PICK },
+    roots: ["ledger:commons"],
+    writable: ["amount"],
+  });
+  const wroteAmount = await gql(commons.base, tok("wren", "commons"), `mutation { ledger(entity: "ledger:commons", amount: 42) { amount } }`);
+  const wroteMemo = await gql(commons.base, tok("wren", "commons"), `mutation { ledger(entity: "ledger:commons", memo: "sneaky") { amount } }`);
+  const clearedMemo = await gql(
+    commons.base,
+    tok("wren", "commons"),
+    `mutation { clearLedger(entity: "ledger:commons", fields: ["memo"]) { amount } }`,
+  );
+  check(
+    "20.5",
+    "a read-only field refuses assert and clear at the door; the writable field still writes",
+    wroteAmount.body?.data?.ledger?.amount === 42 &&
+      wroteMemo.body?.errors !== undefined &&
+      /read-only/.test((clearedMemo.body?.errors ?? []).join(" ")),
+    `amount=42 ok; memo write refused; clear memo → ${(clearedMemo.body?.errors ?? []).join(" ").slice(0, 40)}`,
+  );
 } finally {
   if (commons) await commons.close().catch(() => {});
 }
