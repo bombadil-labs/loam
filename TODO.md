@@ -86,7 +86,11 @@ a lineage relation. That is not the missing feature; it is the design. According
 
 - **Deltas assert versions of coherent wholes, plus supersession claims relating them.** Never
   edits. History is `supersededBy` lineage — §17's append-only law, close kin to §20's
-  re-sign-and-negate.
+  re-sign-and-negate. (Decided, Myk 2026-07-12: `supersededBy` STAYS Loam vocabulary, never
+  substrate. The razor: negation is rhizomatic's because masking changes resolution's inputs;
+  supersession changes nothing operationally — it is testimony readers follow, and lineage is
+  a lens, per-reader like every interpretation. If cross-app interop ever wants it, standardize
+  the role NAME in rhizomatic's docs, never semantics in its algebra.)
 - **Diff is a lens.** Line diff, AST diff, semantic diff — derived views over two attested
   snapshots, chosen by the reader, never a storage format. Likewise the AST, the outline, the
   symbol table: structure WITHIN a unit is computed from the bytes, not stored as ground. The
