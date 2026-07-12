@@ -250,6 +250,62 @@ generalist.
 
 ---
 
+## Reserved §24 — The quarantine: a place where untrusted law may bind
+
+_Proposed by Myk 2026-07-12 as the stretch goal of the arc; lands after renderers (§23), before
+the hardening pass. **NOT YET SCOPED — opens at the design stage.**_
+
+Today, foreign law is inert-by-default (§8/§12): a remote-authored schema, function, or renderer
+merges as data and binds nothing — safe, and also *untestable*. The only way to see what a
+foreign lens does is to bless it, at which point it is already law. Close that gap with a
+**quarantine**: a sandboxed environment where untrusted, remote-authored schemas, resolvers, and
+renderers actually RUN — bind, materialize, render — but where everything they produce is
+**sequestered from the primary pool**. Dry-run a stranger's whole app against your real ground,
+watch what it computes, and throw it all away if you don't like it.
+
+The shape that wants to exist: **one-way glass.** The quarantine reads the primary store's
+ground (or a snapshot of it) but writes only into its own pool; nothing crosses back without a
+deliberate act. That act is **promotion**, and it comes in two distinct strengths:
+
+- **Promote the law** — the operator blesses the schema/resolver/renderer itself into the
+  primary store; it becomes bound like anything operator-registered. The quarantine was its
+  probation.
+- **Promote the outputs only** — the operator adopts specific deltas the quarantined thing
+  produced (re-signed or endorsed as the operator's own claims) while the code that made them
+  STAYS sequestered. "I like what it said, not what it is."
+
+And maybe this is not a feature but **the default workflow**: everything remote-authored lands
+in quarantine first, runs there, and blessing is always a promotion out of it — trust as a
+pipeline with a visible staging area, instead of a boolean flipped in the dark.
+
+Design questions:
+
+1. **What is a quarantine at rest?** A separate store that federates one-way inbound (stores are
+   cheap, federation exists, and discard = drop the store — the machinery may already be 90%
+   built), or a marked slice inside the primary store (one store to operate, but sequestration
+   now rests on every reader honoring the mark)? The separate-store answer smells right; prove
+   it.
+2. **The one-way glass, precisely.** Live-follow of the primary's ground vs a frozen snapshot;
+   whether quarantined code may even SEE capability-restricted slices; what "reads but never
+   writes back" means when the substrate is grow-only union.
+3. **Promotion semantics on append-only ground.** Promoting outputs cannot move deltas — it
+   re-signs or endorses them (provenance preserved: adopted-from-quarantine, by whom, when).
+   Pin the exact claim shape; this is close kin to §20's migration re-signing.
+4. **Promotion of law is registration** — does promoting a schema out of quarantine reuse the
+   ordinary publish/register path (it should), and does the quarantine record survive as
+   provenance on the blessed thing?
+5. **Resource discipline** — quarantined code is the purity ladder's (§22) wild end running for
+   real: caps on compute, lazy materializations, effectful resolvers calling out. The
+   quarantine's budget must not degrade the primary store's doors.
+6. **The workflow question (Myk's "maybe this becomes default")** — is quarantine-first the
+   POSTURE for all federated law, with the current inert-by-default as merely its degenerate
+   no-quarantine case? Decide the default; both must remain expressible.
+7. **The renderer tie-in (§23)** — a quarantined renderer needs a host willing to mount it in a
+   visibly-sequestered frame ("this is probation, its writes go nowhere") — the trust UI of the
+   stock host.
+
+---
+
 ## Hardening pass — namespacing, entity-IDs, brick-proofing, repair
 
 _Queued; draft as a SPEC section for Myk's review before implementing —
