@@ -6,7 +6,7 @@
 // `loadSchema` over the store's surviving definitions, so evolution is append (republish at the
 // same entity) and deprecation is negation (a definition with no survivor binds nothing).
 //
-// Policy carries no schema-schema and needs none: it is the reader's lens, not the entity's
+// Schema carries no schema-schema and needs none: it is the reader's lens, not the entity's
 // shape, and travels as canonical JSON (rhizomatic's own profile, so parse∘serialize is
 // identity). In a governed store only the operator's law binds — definitions, registrations,
 // and the negations that retire them are all read from the operator-authored slice, so a
@@ -15,11 +15,11 @@
 import {
   DeltaSet,
   loadSchema,
-  parsePolicy,
-  policyToJson,
+  parseSchema,
+  schemaToJson,
   type Claims,
   type HyperSchema,
-  type Policy,
+  type Schema,
   type Primitive,
   type Reactor,
 } from "@bombadil/rhizomatic";
@@ -44,7 +44,7 @@ export type ClaimTemplates = Readonly<Record<string, ClaimTemplate>>;
 
 export interface Registration {
   readonly schema: HyperSchema;
-  readonly policy: Policy;
+  readonly policy: Schema;
   readonly roots: readonly string[];
   // The schema entity the definition lives at. Identity is the ENTITY, not the name:
   // republishing here evolves; a different entity is a different schema.
@@ -150,7 +150,7 @@ const registrationEntity = (schemaEntity: string): string => `registration:${sch
 // definition bucket is loadSchema's alone, and a registration must not masquerade in it.
 export function registrationClaims(
   schemaEntity: string,
-  policy: Policy,
+  policy: Schema,
   roots: readonly string[],
   author: string,
   timestamp: number,
@@ -181,7 +181,7 @@ export function registrationClaims(
       },
       {
         role: "policy",
-        target: { kind: "primitive", value: JSON.stringify(policyToJson(policy)) },
+        target: { kind: "primitive", value: JSON.stringify(schemaToJson(policy)) },
       },
       { role: "roots", target: { kind: "primitive", value: JSON.stringify(roots) } },
     ],
@@ -229,7 +229,7 @@ export function lawfulNegated(reactor: Reactor, operator?: string): (id: string)
 
 interface Candidate {
   schemaEntity: string;
-  policy: Policy;
+  policy: Schema;
   roots: readonly string[];
   mutations?: ClaimTemplates;
   timestamp: number;
@@ -276,10 +276,10 @@ function survivingCandidates(
     ) {
       continue; // a malformed registration binds nothing
     }
-    let policy: Policy;
+    let policy: Schema;
     let roots: string[];
     try {
-      policy = parsePolicy(JSON.parse(policyJson));
+      policy = parseSchema(JSON.parse(policyJson));
       roots = JSON.parse(rootsJson) as string[];
     } catch {
       continue;

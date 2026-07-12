@@ -31,7 +31,7 @@ const findDefinition = (gateway, entity) =>
   [...gateway.reactor.snapshot()].find((d) =>
     d.claims.pointers.some(
       (p) =>
-        p.role === `${VOCAB_PREFIX}.schema.defines` &&
+        p.role === `${VOCAB_PREFIX}.hyperschema.defines` &&
         p.target.kind === "entity" &&
         p.target.entity.id === entity,
     ),

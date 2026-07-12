@@ -15,7 +15,7 @@ import {
   viewCanonicalHex,
   type Delta,
   type MaterializationChange,
-  type Policy,
+  type Schema,
 } from "@bombadil/rhizomatic";
 import {
   FERN,
@@ -32,7 +32,7 @@ const height34 = observed(FERN, "height", 34, 2000, SURVEYOR_SEED); // same buck
 const tag = observed(FERN, "tag", "shade", 1500, SURVEYOR_SEED);
 const elsewhere = observed("plant:moss", "height", 2, 1200, SURVEYOR_SEED);
 
-const latest: Policy = {
+const latest: Schema = {
   props: new Map(),
   default: { kind: "pick", order: { kind: "byTimestamp", dir: "desc" } },
 };

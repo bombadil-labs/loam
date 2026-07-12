@@ -1,12 +1,12 @@
 // The Gateway: one live front over one StoreBackend. It boots by replaying the store into a
 // Reactor, writes every accepted delta through to the backend by way of the raw stream (so a
 // future DerivationHost's emissions persist by the same path as appends), meta-resolves
-// schema-defining deltas via SCHEMA_SCHEMA, and serves GraphQL derived from what is registered:
+// schema-defining deltas via HYPER_SCHEMA_SCHEMA, and serves GraphQL derived from what is registered:
 // query (resolve once → snapshot), mutate (args → signed deltas → append → the re-resolved
 // view), and subscribe (a snapshot, then a patch per relevant change).
 //
 // The reactor is the living present tense; the backend is the ground it grows from and settles
-// back into. Nothing is reachable except through what a registered (HyperSchema, Policy) pair
+// back into. Nothing is reachable except through what a registered (HyperSchema, Schema) pair
 // exposes.
 
 import {
@@ -19,7 +19,7 @@ import {
   hviewCanonicalHex,
   loadSchema,
   makeDelta,
-  policyToJson,
+  schemaToJson,
   publishSchemaClaims,
   resolveView,
   signClaims,
@@ -31,7 +31,7 @@ import {
   type HyperSchema,
   type IngestResult,
   type MaterializationChange,
-  type Policy,
+  type Schema,
   type Primitive,
   type Term,
   type View,
@@ -372,7 +372,7 @@ export class Gateway {
     return [
       r.schema.name,
       termHash(r.schema.body),
-      JSON.stringify(policyToJson(r.policy)),
+      JSON.stringify(schemaToJson(r.policy)),
       JSON.stringify(r.roots),
       JSON.stringify(r.mutations ?? null),
       r.entity ?? "",
@@ -538,7 +538,7 @@ export class Gateway {
     return { accepted, duplicates };
   }
 
-  // Meta-resolve schema-defining deltas via SCHEMA_SCHEMA into a HyperSchema. The definition is
+  // Meta-resolve schema-defining deltas via HYPER_SCHEMA_SCHEMA into a HyperSchema. The definition is
   // proven against a TRIAL set first — the store is append-only, so nothing lands until the
   // deltas are known to define what the caller says they define. The trial reads the LAWFUL
   // slice (the operator's, in a governed store): a federated foreign definition at the same
@@ -552,14 +552,14 @@ export class Gateway {
     return schema;
   }
 
-  // Register a (HyperSchema, Policy) pair over the given roots: a live materialization per
+  // Register a (HyperSchema, Schema) pair over the given roots: a live materialization per
   // root, and a GraphQL surface rebuilt to include it. Everything that can refuse — duplicate
   // names, unresolved refs, GraphQL field collisions — refuses BEFORE any state changes, so a
   // failed registration leaves the gateway exactly as it was. Register dependencies first:
   // earlier schemas are visible to later refs.
   register(
     schema: HyperSchema,
-    policy: Policy,
+    policy: Schema,
     roots: readonly string[],
     mutations?: ClaimTemplates,
   ): void {
@@ -598,7 +598,7 @@ export class Gateway {
   // persist deltas that would look registered while shaping nothing.
   async publishRegistration(
     schema: HyperSchema,
-    policy: Policy,
+    policy: Schema,
     roots: readonly string[],
     context?: RequestContext,
     entity?: string,

@@ -70,7 +70,7 @@
     "prepublishOnly": "npm run check"
   },
   "dependencies": {
-    "@bombadil/rhizomatic": "^0.2.0",
+    "@bombadil/rhizomatic": "^0.3.0",
     "@noble/hashes": "^1.8.0",
     "better-sqlite3": "^12.11.1",
     "graphql": "^17.0.2"

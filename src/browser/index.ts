@@ -88,12 +88,12 @@ export { mintSeed } from "../client/index.js";
 export {
   authorForSeed,
   makeNegationClaims,
-  parsePolicy,
+  parseSchema,
   parseTerm,
   signClaims,
   type Delta,
   type HyperSchema,
-  type Policy,
+  type Schema,
   type Primitive,
   type Term,
 } from "@bombadil/rhizomatic";

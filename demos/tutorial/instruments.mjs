@@ -52,7 +52,7 @@ export function classifyDelta(delta, selfAuthor) {
     note = foreign
       ? "a foreign lens — it arrived as data and reshapes nothing here"
       : "a lens taking effect: this record is why a schema answers";
-  } else if (pointers.some((p) => p.role === "rhizomatic.schema.defines")) {
+  } else if (pointers.some((p) => p.role === "rhizomatic.hyperschema.defines")) {
     kind = "schema";
     note = foreign
       ? "a foreign schema definition — held as data, binding nothing"

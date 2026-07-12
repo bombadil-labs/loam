@@ -1,11 +1,11 @@
 // SPEC §2, "Self-hosting schema-schema": schemas are data. publishSchemaClaims turns a
 // HyperSchema into claims; loadSchema grows it back from deltas; evolution is append and
-// deprecation is negation. The metacircular seed (SCHEMA_SCHEMA) round-trips through itself.
+// deprecation is negation. The metacircular seed (HYPER_SCHEMA_SCHEMA) round-trips through itself.
 
 import { describe, expect, it } from "vitest";
 import {
   DeltaSet,
-  SCHEMA_SCHEMA,
+  HYPER_SCHEMA_SCHEMA,
   SchemaRegistry,
   collectRefs,
   evalTerm,
@@ -70,11 +70,11 @@ describe("spike: loadSchema(deltas) → HyperSchema", () => {
     );
   });
 
-  it("the metacircular seed: SCHEMA_SCHEMA round-trips through its own machinery", () => {
-    const claims = publishSchemaClaims(SCHEMA_SCHEMA, "schema:schema", GARDENER, 1);
+  it("the metacircular seed: HYPER_SCHEMA_SCHEMA round-trips through its own machinery", () => {
+    const claims = publishSchemaClaims(HYPER_SCHEMA_SCHEMA, "schema:schema", GARDENER, 1);
     const loaded = loadSchema(DeltaSet.from([makeDelta(claims)]), "schema:schema");
-    expect(loaded.name).toBe(SCHEMA_SCHEMA.name);
-    expect(termHash(loaded.body)).toBe(termHash(SCHEMA_SCHEMA.body));
+    expect(loaded.name).toBe(HYPER_SCHEMA_SCHEMA.name);
+    expect(termHash(loaded.body)).toBe(termHash(HYPER_SCHEMA_SCHEMA.body));
   });
 });
 

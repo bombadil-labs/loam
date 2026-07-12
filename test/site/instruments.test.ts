@@ -101,7 +101,7 @@ describe("classifyDelta: every badge earns its name", () => {
           author: ME,
           pointers: [
             {
-              role: "rhizomatic.schema.defines",
+              role: "rhizomatic.hyperschema.defines",
               target: { kind: "entity", entity: { id: "schema:Plant", context: "definition" } },
             },
           ],

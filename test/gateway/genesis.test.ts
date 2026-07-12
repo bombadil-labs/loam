@@ -85,7 +85,7 @@ describe("genesis: a fresh store, born governed and registered", () => {
       registrations: [{ schema: PLANT, policy: PLANT_POLICY, roots: [FERN] }],
     });
     const definition = genesis.deltas.find((d) =>
-      d.claims.pointers.some((p) => p.role === `${VOCAB_PREFIX}.schema.defines`),
+      d.claims.pointers.some((p) => p.role === `${VOCAB_PREFIX}.hyperschema.defines`),
     );
     expect(definition).toBeDefined(); // the schema is DEFINED by a schema-schema delta
     const registration = genesis.deltas.find((d) =>
@@ -226,7 +226,7 @@ describe("evolution is append: the surface follows the surviving definitions", (
     await gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
     // find the definition delta in the store and negate it, operator-signed
     const definition = [...gateway.reactor.snapshot()].find((d) =>
-      d.claims.pointers.some((p) => p.role === `${VOCAB_PREFIX}.schema.defines`),
+      d.claims.pointers.some((p) => p.role === `${VOCAB_PREFIX}.hyperschema.defines`),
     );
     expect(definition).toBeDefined();
     await gateway.append([

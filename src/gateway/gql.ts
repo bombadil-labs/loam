@@ -1,5 +1,5 @@
-// GraphQL derived from (HyperSchema, Policy) — not reflected from the data. The policy is the
-// contract: its props name the fields, and each PropPolicy's kind names the field's shape
+// GraphQL derived from (HyperSchema, Schema) — not reflected from the data. The policy is the
+// contract: its props name the fields, and each Policy's kind names the field's shape
 // (pick → one value; all/conflicts → a list; merge → its reduction's type; absentAs → the
 // pass-through scalar, because its primitive constant and its inner policy's shape need not
 // agree). Values pass through the ViewValue scalar untyped-but-faithful — a resolved View is
@@ -30,7 +30,7 @@ import {
   type GraphQLInputType,
   type GraphQLOutputType,
 } from "graphql";
-import type { Primitive, PropPolicy } from "@bombadil/rhizomatic";
+import type { Primitive, Policy } from "@bombadil/rhizomatic";
 import type { ClaimTemplates } from "./registration.js";
 import type {
   ClaimPointerSpec,
@@ -93,7 +93,7 @@ const legal = (s: string): string => {
   return /^[A-Za-z_]/.test(cleaned) ? cleaned : `_${cleaned}`;
 };
 
-function fieldTypeOf(pp: PropPolicy): GraphQLOutputType {
+function fieldTypeOf(pp: Policy): GraphQLOutputType {
   switch (pp.kind) {
     case "pick":
       return ViewValue;

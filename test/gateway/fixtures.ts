@@ -5,8 +5,8 @@ import {
   signClaims,
   type Delta,
   type HyperSchema,
+  type Schema,
   type Policy,
-  type PropPolicy,
 } from "@bombadil/rhizomatic";
 import { grantClaims, membershipClaims } from "../../src/gateway/accounts.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
@@ -22,10 +22,10 @@ import {
 
 export const PLANT: HyperSchema = { name: "Plant", alg: 1, body: PLANT_BODY };
 
-export const pickLatest: PropPolicy = { kind: "pick", order: { kind: "byTimestamp", dir: "desc" } };
+export const pickLatest: Policy = { kind: "pick", order: { kind: "byTimestamp", dir: "desc" } };
 
-export const PLANT_POLICY: Policy = {
-  props: new Map<string, PropPolicy>([
+export const PLANT_POLICY: Schema = {
+  props: new Map<string, Policy>([
     ["height", pickLatest],
     ["tag", { kind: "all", order: { kind: "byTimestamp", dir: "asc" } }],
     ["watered", { kind: "absentAs", constant: false, then: pickLatest }],

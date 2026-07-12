@@ -5,7 +5,7 @@
 // to write: unsigned authority does not exist here.
 
 import { describe, expect, it } from "vitest";
-import { authorForSeed, verifyDelta, type Policy, type PropPolicy } from "@bombadil/rhizomatic";
+import { authorForSeed, verifyDelta, type Schema, type Policy } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER } from "../spike/garden.js";
@@ -126,8 +126,8 @@ describe("mutate: the deltas survive like any others", () => {
     const gateway = await keeperGateway();
     await gateway.query(`mutation { plant(entity: "${FERN}", height: 50) { height } }`);
     // Two lenses over the same ground: one trusts the keeper, one trusts the gardener.
-    const trusting = (author: string): Policy => ({
-      props: new Map<string, PropPolicy>([
+    const trusting = (author: string): Schema => ({
+      props: new Map<string, Policy>([
         ["height", { kind: "pick", order: { kind: "byAuthorRank", authors: [author] } }],
       ]),
       default: pickLatest,
@@ -156,7 +156,7 @@ describe("mutate: the deltas survive like any others", () => {
     gateway.register(
       { name: "Plant", alg: 1, body: PLANT.body },
       {
-        props: new Map<string, PropPolicy>([["leaf-count", pickLatest]]),
+        props: new Map<string, Policy>([["leaf-count", pickLatest]]),
         default: pickLatest,
       },
       [FERN],

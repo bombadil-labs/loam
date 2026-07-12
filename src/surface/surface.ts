@@ -1,5 +1,5 @@
 // The surface seam (SPEC §17). GraphQL was never the surface; it was the first surface. A
-// registration — (HyperSchema, Policy), filed as deltas — is interface-agnostic truth, and
+// registration — (HyperSchema, Schema), filed as deltas — is interface-agnostic truth, and
 // every door a store answers through is a MATERIALIZATION derived from it. This module is
 // that seam, published exactly as the store seam is (src/store/backend.ts): the gateway owns
 // STATE and provides these hooks; a generator owns SHAPE and derives a door; every generator
@@ -12,14 +12,14 @@
 // contract test for any new generator is agreement with the doors that already exist — one
 // ground, one registration, the same view, _hex for _hex.
 
-import type { HyperSchema, Policy, Primitive, View } from "@bombadil/rhizomatic";
+import type { HyperSchema, Schema, Primitive, View } from "@bombadil/rhizomatic";
 import type { ClaimTemplates } from "../gateway/registration.js";
 
 // One registered lens, as a generator receives it: the schema, its resolution policy, the
 // roots it holds live, and (optionally) the claim templates its mutations compile to.
 export interface Registered {
   readonly schema: HyperSchema;
-  readonly policy: Policy;
+  readonly policy: Schema;
   readonly roots: readonly string[];
   readonly mutations?: ClaimTemplates;
 }

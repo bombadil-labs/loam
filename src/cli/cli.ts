@@ -7,7 +7,7 @@
 // `serve` blocks until the process is signalled.
 
 import { readFileSync } from "node:fs";
-import { authorForSeed, parsePolicy, parseTerm, type HyperSchema } from "@bombadil/rhizomatic";
+import { authorForSeed, parseSchema, parseTerm, type HyperSchema } from "@bombadil/rhizomatic";
 import { Gateway, type FederationReport } from "../gateway/gateway.js";
 import { parseOffer } from "../federation/offer.js";
 import { pullFrom } from "../federation/pull.js";
@@ -220,14 +220,14 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
     return 2;
   }
   let schema: HyperSchema;
-  let policy: ReturnType<typeof parsePolicy>;
+  let policy: ReturnType<typeof parseSchema>;
   try {
     schema = {
       name: spec.name,
       alg: typeof spec.alg === "number" ? spec.alg : 1,
       body: parseTerm(spec.body),
     };
-    policy = parsePolicy(spec.policy);
+    policy = parseSchema(spec.policy);
   } catch (err) {
     io.err(`register: ${file}: ${err instanceof Error ? err.message : String(err)}`);
     return 2;

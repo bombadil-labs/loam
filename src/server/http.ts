@@ -20,7 +20,7 @@
 
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { parsePolicy, parseTerm, type Delta, type HyperSchema } from "@bombadil/rhizomatic";
+import { parseSchema, parseTerm, type Delta, type HyperSchema } from "@bombadil/rhizomatic";
 import { fromWire, toWire, type WireDelta } from "../federation/wire.js";
 import { buildOpenApi, handleRest } from "../surface/rest.js";
 import {
@@ -147,7 +147,7 @@ async function performRegistration(
     throw new Error("register: entity must be a string when given");
   }
   const schema: HyperSchema = { name, alg: alg ?? 1, body: parseTerm(body) };
-  const policy = parsePolicy(o.policy);
+  const policy = parseSchema(o.policy);
   const mutations: ClaimTemplates | undefined =
     o.mutations === undefined ? undefined : parseClaimTemplates(o.mutations);
   await gateway.publishRegistration(
