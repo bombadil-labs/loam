@@ -10,6 +10,24 @@ renumbering the sections that already reference each other._
 
 Ordering is rough priority, top-first; Myk sets it. Each item says what it needs before code.
 
+**How to read this file (notes for the builder — hard-won; don't relearn them):**
+
+- **The dependency spine is strict: §21 → §22 → §23 → §24 → hardening pass.** Do not start an
+  item's implementation before everything it depends on is IN SPEC.md — merged, provenance footer
+  and all. The §14 amendment stands off the spine and may interleave anywhere.
+- **"Opens at the design stage" is a deliverable, not a mood.** It means: the step's first output
+  is the drafted SPEC-section prose (staged to migrate on landing) plus answers to the item's
+  listed design questions — and then you STOP and wait for Myk's word in chat before writing
+  implementation code. "He'd probably approve" is not his word.
+- **"(Myk)" / "Myk's call" marks a decision that needs his sentence in chat.** Do not resolve it
+  by inference, however obvious the answer looks. Likewise anything **blocked on a rhizomatic
+  conversation**: rhizomatic is frozen — no Loam workaround, no forked vocabulary, no edits to
+  that repo. Note the wall and route around it.
+- **A breaking on-wire change ships its §20 migration in the same implementing PR**, and the
+  changed deltas must be shape-distinguishable from every prior version (CLAUDE.md, hard rule).
+  A design-stage PR ships no migration — the migration rides the code that makes the break real.
+- **Reserved section numbers are load-bearing** — items cite each other by them. Never renumber.
+
 ---
 
 ## §14 amendment — the remaining write verbs (edges, derived, and the default flip)
@@ -22,20 +40,29 @@ ceiling; shaping a view against others' claims is the schema **Policy's** job, n
 2026-07-12). What remains are two narrow surface verbs and one posture decision. When they land they
 are an **amendment appended to SPEC §14**, not a new section._
 
-- **expanded / relational edges as first-class verbs.** The uniform `clear`/`remove` already negate
-  edge deltas; name them — `link` (assert the edge) and `sever` (retract it) — so the write surface
-  speaks the relation, and never pretends you write INTO the nested entity's resolved value (that is
-  its own Schema over its own ground). The real work: the `expand` that marks a field as an edge lives
-  in the **hyperschema's gather body**, not the Schema, so the surface must learn to read the body to
-  know which fields are edges (and offer entity-pointer, not primitive-value, writes for them).
-- **derived fields are read-only.** When rhizomatic grows resolve-time computed fields, the surface
-  refuses a write to one with a reason — there is no backing delta to assert or retract. **Blocked**
-  on the derived-field Policy vocabulary, which is a rhizomatic conversation, not a Loam workaround.
-- **the immutable-by-default flip (a decision for Myk).** Shipped `writable` is opt-in RESTRICTION:
-  absent → every field writable (today's permissive default). §14's original intent was the inverse —
-  silence means "you may not." Flipping the default is a **breaking change**: every existing
-  registration (village, tutorial, tests) would need a `writable` list or go read-only, so it needs a
-  migration and Myk's call on whether the stricter posture is worth it. Left as opt-in until then.
+- **expanded / relational edges as first-class verbs — READY TO BUILD.** The uniform
+  `clear`/`remove` already negate edge deltas; name them — `link` (assert the edge) and `sever`
+  (retract it) — so the write surface speaks the relation, and never pretends you write INTO the
+  nested entity's resolved value (that is its own Schema over its own ground). The real work: the
+  `expand` that marks a field as an edge lives in the **hyperschema's gather body**, not the
+  Schema, so the surface must learn to read the published hyperschema definition (not the inline
+  Schema) to know which fields are edges — and offer entity-pointer, not primitive-value, writes
+  for them. Two facts that save a day: (1) if `link`/`sever` are pure surface sugar over
+  assert/retract of the SAME edge-delta shape already on the wire, there is no on-wire change and
+  therefore no migration — keep it that way unless the design genuinely forces otherwise; (2) the
+  shipped write verbs and `writable` live in `src/gateway/gateway.ts` + `src/surface/surface.ts`,
+  and the hyperschema definition is loaded via `src/gateway/registration.ts` — start there.
+- **derived fields are read-only — BLOCKED, do not build.** When rhizomatic grows resolve-time
+  computed fields, the surface refuses a write to one with a reason — there is no backing delta to
+  assert or retract. Blocked on the derived-field Policy vocabulary, which is a rhizomatic
+  conversation (Myk's, in that repo), not a Loam workaround. §22's rung (e) reaches this same wall
+  from the other side — one conversation unblocks both; until it happens, neither moves.
+- **the immutable-by-default flip — DECISION, Myk's alone.** Shipped `writable` is opt-in
+  RESTRICTION: absent → every field writable (today's permissive default). §14's original intent
+  was the inverse — silence means "you may not." Flipping is a **breaking change**: every existing
+  registration (village, tutorial, tests) needs a `writable` list or goes read-only, so it ships a
+  §20 migration and every registration update in the same PR — and only after Myk says the word in
+  chat. Until then the permissive default is correct behavior, not a bug to fix in passing.
 
 ---
 
@@ -99,6 +126,15 @@ VersionedSchemas; the living Schema goes on living.
 6. How the upper rungs stand on this: a resolver (§22) rides the Schema and is presumably part
    of what a VersionedSchema freezes; a renderer (§23) PINS a VersionedSchema — "renderer pinned
    to schema vN keeps working forever" needs exactly this ladder under it.
+
+**Definition of done for the design stage:** a drafted SPEC §21 answering all six questions,
+argued in a PR, and Myk's sign-off in chat — only then implementation. **Code anchors** for the
+probe's facts: `schemaEntityFor` (`src/gateway/registration.ts:146`), `readRegistrationVersions`
+(`src/gateway/registration.ts:463`), and `registrationEntity` + the duplicate-name refusal in the
+same file. **Traps:** the `schema:` prefix rename (question 5) is on-wire — its migration rides
+the implementing PR, and the renamed entity ids must be shape-distinguishable from the old form;
+and rhizomatic's `loadSchema`/`publishSchemaClaims` names are frozen substrate — leave them,
+record the mismatch in prose only.
 
 ---
 
@@ -194,6 +230,14 @@ declared in the schema at rest, not discovered at runtime:
    version under §17's append-only law? (§21's VersionedSchema question, arriving from the
    other side.)
 
+**Guidance for the design stage (the posture, so it needn't be rediscovered):** recommend rung
+(a) only for v1 unless Myk widens it — every higher rung spends a promise (caching, determinism,
+federation replay) and nothing pending needs more than (a) to exist. Rung (e) is DESIGN-ONLY
+until the DerivedFn conversation (question 2) happens in rhizomatic — describe it fully in the
+SPEC draft, build none of it (the §14-amendment's derived-fields bullet is the same wall). And
+answer question 4 (code at rest) as a standalone subsection written for reuse: §23 inherits that
+doctrine verbatim, so its title and scope should already say so.
+
 ---
 
 ## Reserved §23 — Renderers: push deltas, get software
@@ -244,16 +288,22 @@ What must be designed before any code (the real work):
   multiple renderers over one schema (a Schema is a lens; there is no reason it has only one
   face).
 
-Closest existing machinery: SPEC §17 — renderers are the read side of the same story. Use a
-specialized review panel (substrate-semantics · capability-security · correctness-API), not one
-generalist.
+Closest existing machinery: SPEC §17 — renderers are the read side of the same story; the
+SurfaceGenerator seam lives in `src/surface/surface.ts`. For review, use a specialized panel
+(substrate-semantics · capability-security · correctness-API), not one generalist — this is the
+sanctioned exception to the one-reviewer budget rule (CLAUDE.md names capability/federation work
+as panel-worthy): three tightly-scoped angles, findings capped per angle, no separate verify
+stage (the fixer verifies while fixing — audit 1's retro).
 
 ---
 
 ## Reserved §24 — The quarantine: a place where untrusted law may bind
 
 _Proposed by Myk 2026-07-12 as the stretch goal of the arc; lands after renderers (§23), before
-the hardening pass. **NOT YET SCOPED — opens at the design stage.**_
+the hardening pass. **NOT YET SCOPED — opens at the design stage.** Do not open this item — even
+its design stage — before §23 is merged into SPEC.md: the host contract, the code-at-rest
+doctrine, and the trust UI are inputs here, and designing against guesses of them wastes the
+work twice._
 
 Today, foreign law is inert-by-default (§8/§12): a remote-authored schema, function, or renderer
 merges as data and binds nothing — safe, and also *untestable*. The only way to see what a
