@@ -181,14 +181,3 @@ recovery); quarantine-vs-refuse semantics for a corrupt row on read (refuse-the-
 isolate-the-row — Myk decides); boot resilience; an entity-ID reserved-vs-user convention (so
 constitutional ids can't collide with app ids); and `loam repair` tooling. Then STOP for review.
 
----
-
-## Optional: rename the internal `Registration` fields to match the wire
-
-_The registration delta's WIRE roles were realigned to the 0.3.0 model (landed: `hyperschema` names
-the definition entity, `schema` carries the resolution program). The parsed `Registration` interface
-still exposes those as `.schema` (a HyperSchema) and `.policy` (a Schema) — a purely internal naming
-lag. Mirroring it fully would rename `Registration.schema`→`.hyperschema` and `.policy`→`.schema`
-across ~40 read sites (gql / rest / surface / gateway / tests / demos, all the `.schema.name`
-accesses). No wire/content-address impact — a cosmetic sweep only, worth doing when convenient.
-Myk's call whether the churn earns the tidiness._

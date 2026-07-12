@@ -40,7 +40,7 @@ const seed = GARDENER_SEED;
 const operator = authorForSeed(seed);
 const genesis = assembleGenesis({
   operatorSeed: seed,
-  registrations: [{ schema: PLANT, policy: PLANT_POLICY, roots: [FERN] }],
+  registrations: [{ hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN] }],
 });
 const nativeDef = genesis.deltas.find((d) => hasRolePrefix(d, NEW))!;
 const oldDef = signClaims(downgrade(nativeDef.claims), seed);
@@ -54,7 +54,7 @@ describe("migration: 0.2 → 0.3 schema-definition vocabulary", () => {
     let bound = false;
     try {
       const gw = await Gateway.boot(new MemoryBackend(), { operatorSeed: seed, deltas: oldStore });
-      bound = gw.registrationVersions().some((v) => v.schema.name === "Plant");
+      bound = gw.registrationVersions().some((v) => v.hyperschema.name === "Plant");
       await gw.close();
     } catch {
       bound = false; // 0.3 may refuse to bind a registration whose definition it cannot read

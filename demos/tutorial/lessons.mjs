@@ -246,8 +246,8 @@ holds as many lenses as you like, side by side. We fill this one in in lesson 7.
       // Green only once BOTH lenses exist — the second step is not optional flavour, it is what
       // lesson 7's book reading needs, so it gates the green too.
       check: async (ctx) =>
-        ctx.gateway.registrationVersions().some((v) => v.schema.name === "Film") &&
-        ctx.gateway.registrationVersions().some((v) => v.schema.name === "Book") &&
+        ctx.gateway.registrationVersions().some((v) => v.hyperschema.name === "Film") &&
+        ctx.gateway.registrationVersions().some((v) => v.hyperschema.name === "Book") &&
         (await view(ctx, `{ film(entity: "${FILM}") { title } }`)).__errors === undefined,
     },
 
@@ -457,7 +457,7 @@ answerable.`,
         const hasAlice = Array.isArray(v.film?.guests) && v.film.guests.includes(ALICE);
         const classic = ctx.gateway
           .registrationVersions()
-          .some((r) => r.schema.name === "FilmClassic");
+          .some((r) => r.hyperschema.name === "FilmClassic");
         return hasAlice && classic;
       },
     },
@@ -855,7 +855,7 @@ keeps, and the film she was your guest at. Data federates; authority never does.
         );
         const foreignInert = !loam
           .readRegistrations(ctx.gateway.reactor, ctx.author)
-          .some((r) => r.schema.name === "Friends");
+          .some((r) => r.hyperschema.name === "Friends");
         return lit && foreignArrived && foreignInert;
       },
     },

@@ -62,12 +62,12 @@ async function buildCircle() {
       operatorSeed: CIRCLE_SEED,
       registrations: [
         {
-          schema: { name: "Person", alg: 1, body: parseTerm(GATHER) },
-          policy: parseSchema({ props: { name: PICK, follows: ALL }, default: PICK }),
+          hyperschema: { name: "Person", alg: 1, body: parseTerm(GATHER) },
+          schema: parseSchema({ props: { name: PICK, follows: ALL }, default: PICK }),
           roots: PEOPLE,
         },
         {
-          schema: {
+          hyperschema: {
             name: "Friends",
             alg: 1,
             body: parseTerm({
@@ -77,7 +77,7 @@ async function buildCircle() {
               in: GATHER,
             }),
           },
-          policy: parseSchema({ props: { name: PICK, follows: ALL }, default: PICK }),
+          schema: parseSchema({ props: { name: PICK, follows: ALL }, default: PICK }),
           roots: PEOPLE,
         },
       ],

@@ -43,11 +43,11 @@ const refuse = (status: number, ...errors: string[]): RestResult => ({
 function versionsFor(gateway: Gateway, door: "full" | "public"): RegistrationVersion[] {
   const surface = gateway.surface(door);
   if (surface === undefined) return [];
-  const admitted = new Set(surface.registered.map((r) => r.schema.name));
-  const versions = gateway.registrationVersions().filter((v) => admitted.has(v.schema.name));
+  const admitted = new Set(surface.registered.map((r) => r.hyperschema.name));
+  const versions = gateway.registrationVersions().filter((v) => admitted.has(v.hyperschema.name));
   if (door === "full") return versions;
   const latest = new Map<string, RegistrationVersion>();
-  for (const v of versions) latest.set(v.schema.name, v); // ascending order: last one wins
+  for (const v of versions) latest.set(v.hyperschema.name, v); // ascending order: last one wins
   return [...latest.values()];
 }
 
@@ -55,8 +55,8 @@ function versionsFor(gateway: Gateway, door: "full" | "public"): RegistrationVer
 function aliased(versions: readonly RegistrationVersion[]): Map<string, RegistrationVersion[]> {
   const byName = new Map<string, RegistrationVersion[]>();
   for (const v of versions) {
-    const list = byName.get(v.schema.name);
-    if (list === undefined) byName.set(v.schema.name, [v]);
+    const list = byName.get(v.hyperschema.name);
+    if (list === undefined) byName.set(v.hyperschema.name, [v]);
     else list.push(v);
   }
   return byName;
@@ -92,7 +92,7 @@ export function buildOpenApi(
       // the body's top level — the document must describe the body that actually answers.
       const viewProperties: Record<string, unknown> = {};
       const writeProperties: Record<string, unknown> = {};
-      for (const [prop, pp] of v.policy.props) {
+      for (const [prop, pp] of v.schema.props) {
         viewProperties[prop] = propSchema((pp as { kind: string }).kind);
         writeProperties[prop] = {
           description: "a primitive claim value (string | number | boolean)",
@@ -204,7 +204,7 @@ export async function handleRest(
     if (pinned === undefined) return refuse(404, `no version ${vTag} of ${schemaName} survives`);
   } else if (vTag.startsWith("@")) {
     const hash = vTag.slice(1);
-    pinned = versions.find((v) => v.deltaId === hash && v.schema.name === schemaName);
+    pinned = versions.find((v) => v.deltaId === hash && v.hyperschema.name === schemaName);
     if (pinned === undefined) {
       // Withdrawn is not never-existed — but ONLY the full door is owed that distinction,
       // and only for a hash that really was a LAWFUL registration of THIS schema, since
@@ -270,7 +270,7 @@ export async function handleRest(
     }
     // The version shapes the write: a property this version's policy does not name is
     // refused HERE, exactly as GraphQL's argument grammar refuses it there.
-    const known = new Set(pinned.policy.props.keys());
+    const known = new Set(pinned.schema.props.keys());
     const clean: Record<string, Primitive> = {};
     for (const [k, v] of Object.entries(props)) {
       if (!known.has(k)) {

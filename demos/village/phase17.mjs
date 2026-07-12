@@ -52,8 +52,8 @@ try {
     operatorSeed: wandererSeed,
     registrations: [
       {
-        schema: { name: "Note", alg: 1, body: tab.parseTerm(NOTE_BODY) },
-        policy: tab.parseSchema({ props: { text: PICK, about: PICK }, default: PICK }),
+        hyperschema: { name: "Note", alg: 1, body: tab.parseTerm(NOTE_BODY) },
+        schema: tab.parseSchema({ props: { text: PICK, about: PICK }, default: PICK }),
         roots: ["note:first"],
       },
     ],

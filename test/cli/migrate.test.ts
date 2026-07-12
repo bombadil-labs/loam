@@ -44,7 +44,7 @@ describe("loam migrate", () => {
     // Forge a 0.2-era offer: a native genesis with its Plant definition downgraded to old roles.
     const genesis = assembleGenesis({
       operatorSeed: GARDENER_SEED,
-      registrations: [{ schema: PLANT, policy: PLANT_POLICY, roots: [FERN] }],
+      registrations: [{ hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN] }],
     });
     const nativeDef = genesis.deltas.find((d) =>
       d.claims.pointers.some((p) => p.role.startsWith(NEW)),

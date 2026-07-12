@@ -60,7 +60,7 @@ beforeAll(async () => {
     new MemoryBackend(),
     assembleGenesis({
       operatorSeed: OPERATOR_SEED,
-      registrations: [{ schema: PLANT, policy: PLANT_POLICY, roots: [FERN] }],
+      registrations: [{ hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN] }],
       grants: [grantClaims(STORE_ENTITY, authorForSeed(WRITER_SEED), "write", OPERATOR, 2)],
     }),
   );
@@ -216,7 +216,7 @@ describe("versioning: publishing is append-only (SPEC §17 amendment)", () => {
 
   it("evolution mints v2; v1 stays answerable, without the new prop", async () => {
     const versions0 = readRegistrationVersions(gateway.reactor, OPERATOR);
-    const plantV1 = versions0.find((v) => v.schema.name === "Plant" && v.version === 1);
+    const plantV1 = versions0.find((v) => v.hyperschema.name === "Plant" && v.version === 1);
     expect(plantV1).toBeDefined();
     v1Hash = plantV1!.deltaId;
 
@@ -237,7 +237,7 @@ describe("versioning: publishing is append-only (SPEC §17 amendment)", () => {
     );
 
     const versions = readRegistrationVersions(gateway.reactor, OPERATOR);
-    const plants = versions.filter((v) => v.schema.name === "Plant");
+    const plants = versions.filter((v) => v.hyperschema.name === "Plant");
     expect(plants.map((v) => v.version)).toEqual([1, 2]);
 
     const v1 = await rest(`/rest/v1/Plant/${encodeURIComponent(FERN)}`, {}, "op-token");
@@ -295,7 +295,7 @@ describe("versioning: publishing is append-only (SPEC §17 amendment)", () => {
     // A LIVE registration of an undeclared schema — the ground holds it; the stranger must
     // not learn that.
     const bookHash = readRegistrationVersions(gateway.reactor, OPERATOR).find(
-      (v) => v.schema.name === "Book",
+      (v) => v.hyperschema.name === "Book",
     )!.deltaId;
     const probes = [
       `/rest/@${bookHash}/Book/${encodeURIComponent("book:dune")}`,
@@ -332,7 +332,7 @@ describe("versioning: publishing is append-only (SPEC §17 amendment)", () => {
     expect(wrongName.status).toBe(404);
     // Aliases shift: the surviving registration is now v1 (the Nth SURVIVING, in ground order).
     const versions = readRegistrationVersions(gateway.reactor, OPERATOR);
-    const plants = versions.filter((v) => v.schema.name === "Plant");
+    const plants = versions.filter((v) => v.hyperschema.name === "Plant");
     expect(plants).toHaveLength(1);
     expect(plants[0]!.version).toBe(1);
     const v1Now = await rest(`/rest/v1/Plant/${encodeURIComponent(FERN)}`, {}, "op-token");

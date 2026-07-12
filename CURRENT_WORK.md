@@ -17,10 +17,13 @@ _Branch `rhizomatic-0.3.0-vocab` (PR #72). **Complete — ready for Myk's merge.
 - **Store-level version marker: dropped** (Myk) — shape-detection is the mechanism; a marker could
   only be a fast-path in a federating store and isn't worth the maintenance.
 
-## Deferred (own PR, in TODO.md)
+## Also done
 
-- Rename the internal `Registration` fields (`.schema`→`.hyperschema`, `.policy`→`.schema`) to match
-  the wire — a cosmetic ~40-site sweep, no wire impact.
+- Internal `Registration`/`Registered`/`Bound` field rename to match the wire (`.schema`→
+  `.hyperschema`, `.policy`→`.schema`) across gql / rest / surface / gateway / migrate / tests /
+  demos — compiler-guided, no wire/content-address impact (packets byte-identical). The register
+  *file*/HTTP `/register` request format (`{ schema, policy, roots }`) is a separate public input
+  contract and stays. Nothing deferred — the 0.3.0 vocabulary is complete end to end.
 
 ## Gate
 

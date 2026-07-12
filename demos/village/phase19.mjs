@@ -48,7 +48,7 @@ try {
   // is the same instrument the finale demonstrates; idempotence by law, not by luck).
   for (const stale of almanac.gateway
     .registrationVersions()
-    .filter((v) => v.schema.name === "Fieldnote")) {
+    .filter((v) => v.hyperschema.name === "Fieldnote")) {
     await almanac.gateway.append([
       signClaims(
         makeNegationClaims(operator, Date.now(), stale.deltaId, "phase 19 clears its stage"),
@@ -129,7 +129,7 @@ try {
       almanac.seed,
     ),
   ]);
-  const versions = almanac.gateway.registrationVersions().filter((v) => v.schema.name === "Fieldnote");
+  const versions = almanac.gateway.registrationVersions().filter((v) => v.hyperschema.name === "Fieldnote");
   const v1 = await (
     await rest(`/rest/v1/Fieldnote/${encodeURIComponent("note:almanac-day")}`, opToken("almanac"))
   ).json();

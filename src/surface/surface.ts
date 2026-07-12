@@ -15,11 +15,11 @@
 import type { HyperSchema, Schema, Primitive, View } from "@bombadil/rhizomatic";
 import type { ClaimTemplates } from "../gateway/registration.js";
 
-// One registered lens, as a generator receives it: the schema, its resolution policy, the
-// roots it holds live, and (optionally) the claim templates its mutations compile to.
+// One registered lens, as a generator receives it: the hyperschema (gather), its resolution
+// schema, the roots it holds live, and (optionally) the claim templates its mutations compile to.
 export interface Registered {
-  readonly schema: HyperSchema;
-  readonly policy: Schema;
+  readonly hyperschema: HyperSchema;
+  readonly schema: Schema;
   readonly roots: readonly string[];
   readonly mutations?: ClaimTemplates;
 }

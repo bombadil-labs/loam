@@ -261,7 +261,7 @@ export class Gateway {
   ): { registered: readonly Registered[]; hooks: GqlHooks } | undefined {
     if (door === "public") {
       this.publicOpen ??= readPublicSchemas(this.reactor, this.operatorAuthor);
-      const defs = this.registered.filter((r) => this.publicOpen!.has(r.schema.name));
+      const defs = this.registered.filter((r) => this.publicOpen!.has(r.hyperschema.name));
       if (defs.length === 0) return undefined;
       return { registered: defs, hooks: this.gqlHooks("public") };
     }
@@ -286,11 +286,11 @@ export class Gateway {
   // one's: same ground, an older lens, an honest content address. Cross-schema refs resolve
   // via the live registry (a version pins the named lens, not the whole world's).
   resolvePinned(reg: Registered, entity: string): ResolvedNode {
-    const result = this.reactor.eval(reg.schema.body, entity, this.registry);
+    const result = this.reactor.eval(reg.hyperschema.body, entity, this.registry);
     if (result.sort !== "hview") {
-      throw new Error(`schema ${reg.schema.name} does not evaluate to a hyperview`);
+      throw new Error(`schema ${reg.hyperschema.name} does not evaluate to a hyperview`);
     }
-    const view = resolveView(reg.policy, result.hview) as Record<string, View>;
+    const view = resolveView(reg.schema, result.hview) as Record<string, View>;
     return {
       entity,
       view,
@@ -370,9 +370,9 @@ export class Gateway {
   // Everything that shapes the surface, as one comparable key.
   private static boundKey(r: Bound): string {
     return [
-      r.schema.name,
-      termHash(r.schema.body),
-      JSON.stringify(schemaToJson(r.policy)),
+      r.hyperschema.name,
+      termHash(r.hyperschema.body),
+      JSON.stringify(schemaToJson(r.schema)),
       JSON.stringify(r.roots),
       JSON.stringify(r.mutations ?? null),
       r.entity ?? "",
@@ -402,10 +402,10 @@ export class Gateway {
         const attempt = (candidate: Bound): boolean => {
           try {
             const trial = [...accepted, candidate];
-            const registry = SchemaRegistry.build(trial.map((r) => r.schema)); // dups, refs, cycles
-            Gateway.assertMaterializable(candidate.schema, registry); // reactor.register would throw
+            const registry = SchemaRegistry.build(trial.map((r) => r.hyperschema)); // dups, refs, cycles
+            Gateway.assertMaterializable(candidate.hyperschema, registry); // reactor.register would throw
             Gateway.assertTemplatesVisible(
-              candidate.schema,
+              candidate.hyperschema,
               candidate.mutations,
               registry,
               this.operatorAuthor ?? "loam:specimen",
@@ -420,8 +420,8 @@ export class Gateway {
         // A stored registration whose TEMPLATES are the only problem binds without them —
         // the schema still serves; the surface just lacks the mutation.
         const templateless: Bound = {
+          hyperschema: reg.hyperschema,
           schema: reg.schema,
-          policy: reg.policy,
           roots: reg.roots,
           origin: reg.origin,
           ...(reg.entity === undefined ? {} : { entity: reg.entity }),
@@ -448,10 +448,15 @@ export class Gateway {
       // Purely additive: bind just the newcomers under the current generation — no rebind, no
       // abandoned materializations. (The same registry-visibility semantics as register().)
       const additions = accepted.filter((r) => !currentKeys.has(Gateway.boundKey(r)));
-      const registry = SchemaRegistry.build(accepted.map((r) => r.schema));
+      const registry = SchemaRegistry.build(accepted.map((r) => r.hyperschema));
       const gql = buildGqlSchema(accepted, this.gqlHooks());
       for (const reg of additions) {
-        this.reactor.register(this.matName(reg.schema.name), reg.schema.body, reg.roots, registry);
+        this.reactor.register(
+          this.matName(reg.hyperschema.name),
+          reg.hyperschema.body,
+          reg.roots,
+          registry,
+        );
       }
       this.registered = accepted;
       this.registry = registry;
@@ -466,11 +471,16 @@ export class Gateway {
   // materializations stay behind (the reactor has no deregister); superseded lazy watches stop
   // counting against the cap.
   private rebind(next: Bound[]): void {
-    const registry = SchemaRegistry.build(next.map((r) => r.schema));
+    const registry = SchemaRegistry.build(next.map((r) => r.hyperschema));
     const gql = buildGqlSchema(next, this.gqlHooks());
     this.generation += 1;
     for (const reg of next) {
-      this.reactor.register(this.matName(reg.schema.name), reg.schema.body, reg.roots, registry);
+      this.reactor.register(
+        this.matName(reg.hyperschema.name),
+        reg.hyperschema.body,
+        reg.roots,
+        registry,
+      );
     }
     this.lazyMats.clear(); // generation-stale by construction — new watches re-create their own
     this.publicLazyMats.clear();
@@ -558,12 +568,12 @@ export class Gateway {
   // failed registration leaves the gateway exactly as it was. Register dependencies first:
   // earlier schemas are visible to later refs.
   register(
-    schema: HyperSchema,
-    policy: Schema,
+    hyperschema: HyperSchema,
+    schema: Schema,
     roots: readonly string[],
     mutations?: ClaimTemplates,
   ): void {
-    if (schema.name.includes(NUL)) {
+    if (hyperschema.name.includes(NUL)) {
       throw new Error("a schema name may not contain NUL — that alphabet is the gateway's own");
     }
     // Normalize through the parser so every invariant the wire form promises (usable names,
@@ -571,19 +581,25 @@ export class Gateway {
     const templates = mutations === undefined ? undefined : parseClaimTemplates(mutations);
     const next: Bound[] = [
       ...this.registered,
-      { schema, policy, roots, origin: "manual", ...(templates ? { mutations: templates } : {}) },
+      {
+        hyperschema,
+        schema,
+        roots,
+        origin: "manual",
+        ...(templates ? { mutations: templates } : {}),
+      },
     ];
-    const registry = SchemaRegistry.build(next.map((r) => r.schema)); // refuses dups + bad refs
-    Gateway.assertMaterializable(schema, registry); // refuses a body that yields no hyperview
+    const registry = SchemaRegistry.build(next.map((r) => r.hyperschema)); // refuses dups + bad refs
+    Gateway.assertMaterializable(hyperschema, registry); // refuses a body that yields no hyperview
     Gateway.assertTemplatesVisible(
-      schema,
+      hyperschema,
       templates,
       registry,
       this.operatorAuthor ?? "loam:specimen",
     ); // refuses invisible writes
     const gql = buildGqlSchema(next, this.gqlHooks()); // refuses collisions
     // Incremental: only the NEW materialization registers, under the current generation.
-    this.reactor.register(this.matName(schema.name), schema.body, roots, registry);
+    this.reactor.register(this.matName(hyperschema.name), hyperschema.body, roots, registry);
     this.registered = next;
     this.registry = registry;
     this.gql = gql;
@@ -597,8 +613,8 @@ export class Gateway {
   // only the operator's ever bind — so this method refuses non-operators up front rather than
   // persist deltas that would look registered while shaping nothing.
   async publishRegistration(
-    schema: HyperSchema,
-    policy: Schema,
+    hyperschema: HyperSchema,
+    schema: Schema,
     roots: readonly string[],
     context?: RequestContext,
     entity?: string,
@@ -614,8 +630,10 @@ export class Gateway {
     if (this.operatorAuthor !== undefined && authorForSeed(seed) !== this.operatorAuthor) {
       throw new Error("append rejected: only the operator may publish a registration");
     }
-    if (schema.name.includes(NUL)) {
-      throw new Error("a schema name may not contain NUL — that alphabet is the gateway's own");
+    if (hyperschema.name.includes(NUL)) {
+      throw new Error(
+        "a hyperschema name may not contain NUL — that alphabet is the gateway's own",
+      );
     }
     // Prove the WHOLE registration before anything persists — the refs must resolve against
     // what is bound (minus the same name, which this publish may be evolving), the body must
@@ -623,29 +641,35 @@ export class Gateway {
     // surface. Loud here, quiet on replay: a bad delta on append-only ground cannot be
     // taken back, and "registered" must never mean "silently missing its mutations".
     const templates = mutations === undefined ? undefined : parseClaimTemplates(mutations);
-    const survivors = this.registered.filter((r) => r.schema.name !== schema.name);
-    const trialRegistry = SchemaRegistry.build([...survivors.map((r) => r.schema), schema]);
-    Gateway.assertMaterializable(schema, trialRegistry);
+    const survivors = this.registered.filter((r) => r.hyperschema.name !== hyperschema.name);
+    const trialRegistry = SchemaRegistry.build([
+      ...survivors.map((r) => r.hyperschema),
+      hyperschema,
+    ]);
+    Gateway.assertMaterializable(hyperschema, trialRegistry);
     Gateway.assertTemplatesVisible(
-      schema,
+      hyperschema,
       templates,
       trialRegistry,
       this.operatorAuthor ?? authorForSeed(seed),
     );
     buildGqlSchema(
-      [...survivors, { schema, policy, roots, ...(templates ? { mutations: templates } : {}) }],
+      [
+        ...survivors,
+        { hyperschema, schema, roots, ...(templates ? { mutations: templates } : {}) },
+      ],
       this.gqlHooks(),
     ); // arg names, field collisions — everything the replay would trip on, tripped NOW
 
     const author = authorForSeed(seed);
-    const schemaEntity = schemaEntityFor(schema, entity);
+    const schemaEntity = schemaEntityFor(hyperschema, entity);
     const definition = signClaims(
-      publishSchemaClaims(schema, schemaEntity, author, this.nextTimestamp()),
+      publishSchemaClaims(hyperschema, schemaEntity, author, this.nextTimestamp()),
       seed,
     );
     await this.loadSchema([definition], schemaEntity); // proves, then persists the definition
     const reference = signClaims(
-      registrationClaims(schemaEntity, policy, roots, author, this.nextTimestamp(), templates),
+      registrationClaims(schemaEntity, schema, roots, author, this.nextTimestamp(), templates),
       seed,
     );
     await this.append([reference]);
@@ -655,8 +679,8 @@ export class Gateway {
     // collision with a manual registration — is not to be reported as a served surface.
     if (!this.registered.some((r) => r.origin === "store" && r.entity === schemaEntity)) {
       throw new Error(
-        `the registration persisted but did not bind: another schema already answers to ` +
-          `"${schema.name}" — negate the old definition first, or choose a different name`,
+        `the registration persisted but did not bind: another hyperschema already answers to ` +
+          `"${hyperschema.name}" — negate the old definition first, or choose a different name`,
       );
     }
   }
@@ -842,7 +866,7 @@ export class Gateway {
   // NOTE: the resolution is AS OF NOW — after an evolution, work bound to the superseded
   // generation keeps watching the old shape until it re-attaches.
   materializationFor(name: string): string {
-    return this.registered.some((r) => r.schema.name === name) ? this.matName(name) : name;
+    return this.registered.some((r) => r.hyperschema.name === name) ? this.matName(name) : name;
   }
 
   private nextTimestamp(): number {
@@ -853,7 +877,7 @@ export class Gateway {
   // --- the read seam ---------------------------------------------------------------------------
 
   private def(name: string): Bound {
-    const def = this.registered.find((r) => r.schema.name === name);
+    const def = this.registered.find((r) => r.hyperschema.name === name);
     if (def === undefined) throw new Error(`no registered schema named ${name}`);
     return def;
   }
@@ -903,7 +927,7 @@ export class Gateway {
         }
         this.publicLazyMats.add(matName);
       }
-      this.reactor.register(matName, def.schema.body, [entity], this.registry);
+      this.reactor.register(matName, def.hyperschema.body, [entity], this.registry);
       this.lazyMats.add(matName);
     }
     return matName;
@@ -917,14 +941,14 @@ export class Gateway {
       this.reactor.materializedView(this.lazyMatName(name, entity), entity);
     if (live !== undefined) return live;
     const def = this.def(name);
-    const result = this.reactor.eval(def.schema.body, entity, this.registry);
+    const result = this.reactor.eval(def.hyperschema.body, entity, this.registry);
     if (result.sort !== "hview") throw new Error(`schema ${name} does not evaluate to a hyperview`);
     return result.hview;
   }
 
   private resolvedNode(name: string, entity: string): ResolvedNode {
     const hview = this.gather(name, entity);
-    const view = resolveView(this.def(name).policy, hview) as Record<string, View>;
+    const view = resolveView(this.def(name).schema, hview) as Record<string, View>;
     return {
       entity,
       view,
@@ -1047,7 +1071,7 @@ export class Gateway {
       if (hview === undefined) {
         throw new Error(`the materialization backing this stream is gone — resubscribe`);
       }
-      const view = resolveView(bound.policy, hview) as Record<string, View>;
+      const view = resolveView(bound.schema, hview) as Record<string, View>;
       return {
         entity,
         view,
@@ -1125,7 +1149,7 @@ export class Gateway {
     this.publicOpen ??= readPublicSchemas(this.reactor, this.operatorAuthor);
     const open = this.publicOpen;
     if (open.size === 0) return undefined;
-    const defs = this.registered.filter((r) => open.has(r.schema.name));
+    const defs = this.registered.filter((r) => open.has(r.hyperschema.name));
     if (defs.length === 0) return undefined; // declared but not (yet) registered: nothing binds
     const key = defs.map((r) => Gateway.boundKey(r)).join(NUL);
     if (this.publicCache?.key !== key) {
