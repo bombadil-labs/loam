@@ -52,17 +52,20 @@ are an **amendment appended to SPEC §14**, not a new section._
   therefore no migration — keep it that way unless the design genuinely forces otherwise; (2) the
   shipped write verbs and `writable` live in `src/gateway/gateway.ts` + `src/surface/surface.ts`,
   and the hyperschema definition is loaded via `src/gateway/registration.ts` — start there.
-- **derived fields are read-only — BLOCKED, do not build.** When rhizomatic grows resolve-time
-  computed fields, the surface refuses a write to one with a reason — there is no backing delta to
-  assert or retract. Blocked on the derived-field Policy vocabulary, which is a rhizomatic
-  conversation (Myk's, in that repo), not a Loam workaround. §22's rung (e) reaches this same wall
-  from the other side — one conversation unblocks both; until it happens, neither moves.
-- **the immutable-by-default flip — DECISION, Myk's alone.** Shipped `writable` is opt-in
-  RESTRICTION: absent → every field writable (today's permissive default). §14's original intent
-  was the inverse — silence means "you may not." Flipping is a **breaking change**: every existing
-  registration (village, tutorial, tests) needs a `writable` list or goes read-only, so it ships a
-  §20 migration and every registration update in the same PR — and only after Myk says the word in
-  chat. Until then the permissive default is correct behavior, not a bug to fix in passing.
+- **derived fields are read-only — UNBLOCKED (Myk, 2026-07-12), re-scoped into §22.** The
+  rhizomatic conversation happened: `DerivedFn` is write-side computation — HView in, signed
+  CLAIMS out, "everything that computes is an author" — and needs no changes (§22 question 2
+  has the full resolution). Loam's read-time computed field is §22's rung (e) synthetic,
+  read-only by construction; when synthetics land, the surface refuses writes to them with a
+  reason. Nothing remains of this bullet but that refusal, and it ships with §22 — delete this
+  bullet when §22 lands.
+- **the immutable-by-default flip — DECIDED (Myk, 2026-07-12): flip it, riding §21's migration
+  wave.** §14's original intent wins: silence means "you may not." The flip is breaking, so it
+  lands WITH the §21 implementing PR — which already ships a §20 migration for the `schema:`
+  rename — one wave, one migration, every existing registration (village, tutorial, tests)
+  gaining its explicit `writable` list in the same change. Strictness arrives before renderers
+  and federation grow the ecosystem. Do not flip ahead of that wave; until it, the permissive
+  default is correct behavior, not a bug to fix in passing.
 
 ---
 
@@ -152,21 +155,20 @@ VersionedSchemas; the living Schema goes on living.
 
 **Design questions:**
 
-1. Does the Schema become a first-class entity — its own id, its own deltas, resolvable like any
-   domain node — with registration demoted to a BINDING (this hyperschema + this schema + these
-   roots, served here)? The hyperschema half already works exactly this way.
-2. What is a VersionedSchema at rest — the registration delta itself (today's de-facto answer),
-   or a distinct snapshot entity, so a version can exist, be named, and be pinned WITHOUT being
-   served? _The snapshot doctrine (above) frames this: a version is a reified snapshot of a
-   coherent whole, related to its kin by supersession — settled. What the design stage still
-   decides is only WHERE it lives; the doctrine's pin-without-serving pull favors the distinct
-   snapshot entity. Prove it._
+1. **DECIDED (Myk, 2026-07-12): yes.** The Schema becomes a first-class entity — its own id, its
+   own deltas, resolvable like any domain node — with registration demoted to a BINDING (this
+   hyperschema + this schema + these roots, served here). The hyperschema half already works
+   exactly this way; the design stage's job is the shape, not the whether.
+2. **DECIDED (Myk, 2026-07-12): a distinct snapshot entity**, not the registration delta — a
+   version can exist, be named, and be pinned WITHOUT being served, exactly as the snapshot
+   doctrine (above) pulls. The design stage pins its shape (plausibly literally the canonical
+   JSON, content-addressed) and its supersession wiring.
 3. Many-to-many unlocking: the `registration:<schemaEntity>` keying and the name-unique registry
    both assume 1:1. A surface type then needs a name of its own, apart from the hyperschema's —
    what names a lens?
-4. Where do `roots` belong on the ladder? The probe established they are a LIVENESS declaration
-   (which entities stay hot), not a scope — which smells like a property of the binding/serving
-   layer, not of the Schema.
+4. **DECIDED (Myk, 2026-07-12): the binding/serving layer.** The probe established roots are a
+   LIVENESS declaration (which entities stay hot), not a scope; they ride the
+   registration-as-binding, never the Schema.
 5. The naming pass — expunge the remaining schema/hyperschema blur in Loam's ids and prose;
    every on-wire rename ships its migration (§20).
 6. How the upper rungs stand on this: a resolver (§22) rides the Schema and is presumably part
@@ -253,42 +255,50 @@ declared in the schema at rest, not discovered at runtime:
 
 **Open questions for the design stage:**
 
-1. Override or replacement — confirm `resolve` is optional atop an intact Policy (recommended),
-   not a second resolution system beside it. One near-synonym here would violate the vocabulary
-   rule; naming needs care.
-2. Relation to rhizomatic's **`DerivedFn`** — derived fields compute NEW values from other
-   fields; `resolve` re-represents THIS field's bucket; and rung (e) synthetics are new fields
-   with no bucket at all, which is DerivedFn territory by another road. One concept or two?
-   The §14-amendment item already marks derived fields blocked on a rhizomatic conversation;
-   don't fork the vocabulary before that conversation happens.
-3. Which rungs does v1 admit, and is the rung part of the signed schema definition (so a reader
-   knows what kind of lens it is trusting)?
+1. **DECIDED (Myk, 2026-07-12): override.** `resolve` is optional atop an intact Policy, never a
+   second resolution system beside it. Naming still needs care — no near-synonyms.
+2. **RESOLVED (Myk, 2026-07-12): read/write DUALS — keep both, touch nothing in rhizomatic.**
+   `DerivedFn` (substrate, `implementations/ts/src/derivation.ts`) is write-side computation:
+   HView in, signed claims OUT — "everything that computes is an author," outputs on the record
+   with `rdb.derived.*` provenance down to the input HView's content address. `resolve` is
+   read-side: ground in, VALUE out, perspectival, never touching the record. They don't compete;
+   the per-field design choice is "should this computation's output be a claim or an
+   interpretation?" Rung (e) synthetics are resolve territory (nothing is asserted) — the old
+   "DerivedFn by another road" worry was a false alarm. Vocabulary guard: **"derived" is reserved
+   for the write side; the read side says "resolver" / "synthetic."** Signpost for the ladder: a
+   rung (c)/(d) resolver that wants to REMEMBER what it computed doesn't want to be a resolver —
+   it wants to be a derived author. (§24's promote-the-outputs rides derived authorship; this
+   dual is load-bearing there.)
+3. **DECIDED (Myk, 2026-07-12): v1 BUILDS rung (a) only; the design admits the whole ladder; the
+   rung is part of the signed schema definition**, so a reader knows what kind of lens it is
+   trusting.
 4. **What is a resolver at rest? — RESOLVED (Myk, 2026-07-12): the snapshot doctrine (above).**
    A resolver at rest is a delta asserting the content-addressed bytes of a named, versioned,
    coherent unit; the signature attests exactly the bytes that run; history is supersession
    claims; diff is a lens, never a storage format. The design stage TRANSCRIBES this into the
-   SPEC §22 draft as a standalone subsection titled for reuse — §23 inherits it verbatim. One
-   residue stays open: **source vs built artifact** (what the operator can AUDIT vs what the
-   host can RUN — plausibly both, paired or superseding); settle that residue in the
-   transcription, nothing else is left to invent.
-5. Interaction with `writable` (§14): does a resolved field stay writable with an honest
-   "round-trip not guaranteed" posture (recommended — writes hit the bucket, which is still
-   real), or do rungs (c)/(d) default read-only like derived fields? Rung (e) is not a
-   question: no bucket, no write — the surface refuses with a reason.
+   SPEC §22 draft as a standalone subsection titled for reuse — §23 inherits it verbatim. The
+   residue is settled too **(Myk, 2026-07-12): executable source.** The delta asserts
+   directly-runnable ESM — what you audit IS what runs, one hash, no signed-vs-executed gap;
+   building is the pusher's business, done before pushing; an optional provenance claim may link
+   the runnable bytes to their pre-build sources for deeper audit. Nothing left to invent, only
+   to word.
+5. **DECIDED (Myk, 2026-07-12): writability stays orthogonal at every rung** — writes hit the
+   bucket, which is real; the surface documents the honest "round-trip not guaranteed" posture
+   for resolved fields. Rung (e) never was a question: no bucket, no write — refused with a
+   reason.
 6. The caching/invalidation contract per rung — what does the gateway promise, and where does
-   memoization live?
-7. Is the resolver part of the lens identity — does changing a resolver constitute a new schema
-   version under §17's append-only law? (§21's VersionedSchema question, arriving from the
-   other side.)
+   memoization live? (Still open — genuine design-stage work.)
+7. **DECIDED (Myk, 2026-07-12): yes.** The resolver's content address is part of what a
+   VersionedSchema freezes; changing a resolver is a new schema version under §17's append-only
+   law.
 
-**Guidance for the design stage (the posture, so it needn't be rediscovered):** recommend rung
-(a) only for v1 unless Myk widens it — every higher rung spends a promise (caching, determinism,
-federation replay) and nothing pending needs more than (a) to exist. Rung (e) is DESIGN-ONLY
-until the DerivedFn conversation (question 2) happens in rhizomatic — describe it fully in the
-SPEC draft, build none of it (the §14-amendment's derived-fields bullet is the same wall). And
-question 4 (code at rest) is already resolved — the snapshot doctrine — so the design stage
-transcribes, not invents: a standalone subsection written for reuse, its one open residue
-(source vs artifact) settled inline; §23 inherits it verbatim.
+**Guidance for the design stage (the posture, so it needn't be rediscovered):** with questions
+1–5 and 7 decided above, the design stage DESCRIBES the whole ladder, BUILDS rung (a) only, and
+has exactly one open question left to argue: the caching/invalidation contract (question 6).
+Rung (e) is design-only in v1 by question 3's decision — the DerivedFn wall is gone (question 2
+resolved it as duals), so describe synthetics fully and build none of them yet. Question 4 is
+transcription, not invention: a standalone subsection written for reuse; §23 inherits it
+verbatim.
 
 ---
 
@@ -389,11 +399,10 @@ differently tomorrow. Quarantine judges a snapshot; promotion promotes a snapsho
 
 Design questions:
 
-1. **What is a quarantine at rest?** A separate store that federates one-way inbound (stores are
-   cheap, federation exists, and discard = drop the store — the machinery may already be 90%
-   built), or a marked slice inside the primary store (one store to operate, but sequestration
-   now rests on every reader honoring the mark)? The separate-store answer smells right; prove
-   it.
+1. **What is a quarantine at rest? — DECIDED as posture (Myk, 2026-07-12): a separate store,
+   federating one-way inbound.** Stores are cheap, federation exists, discard = drop the store —
+   and sequestration must not rest on every reader honoring a mark. The design stage PROVES it
+   rather than debates it; if the proof fails, that is news — bring it back.
 2. **The one-way glass, precisely.** Live-follow of the primary's ground vs a frozen snapshot;
    whether quarantined code may even SEE capability-restricted slices; what "reads but never
    writes back" means when the substrate is grow-only union.
@@ -406,9 +415,9 @@ Design questions:
 5. **Resource discipline** — quarantined code is the purity ladder's (§22) wild end running for
    real: caps on compute, lazy materializations, effectful resolvers calling out. The
    quarantine's budget must not degrade the primary store's doors.
-6. **The workflow question (Myk's "maybe this becomes default")** — is quarantine-first the
-   POSTURE for all federated law, with the current inert-by-default as merely its degenerate
-   no-quarantine case? Decide the default; both must remain expressible.
+6. **The workflow question — DECIDED (Myk, 2026-07-12): quarantine-first is the POSTURE** for
+   all federated law, with inert-by-default as its degenerate no-quarantine case. The default
+   flips only when the quarantine actually ships; both remain expressible forever.
 7. **The renderer tie-in (§23)** — a quarantined renderer needs a host willing to mount it in a
    visibly-sequestered frame ("this is probation, its writes go nowhere") — the trust UI of the
    stock host.
@@ -417,13 +426,17 @@ Design questions:
 
 ## Hardening pass — namespacing, entity-IDs, brick-proofing, repair
 
-_Queued; draft as a SPEC section for Myk's review before implementing —
-**quarantine-vs-refuse for corruption is his call.** See memory `hardening-pass-design` and
-`localstorage-namespace-collision` (the brick bug that motivated it)._
+_Queued; draft as a SPEC section for Myk's review before implementing. The corruption call is
+made (below); what remains for his review is the section itself. See memory
+`hardening-pass-design` and `localstorage-namespace-collision` (the brick bug that motivated
+it)._
 
 Draft a new SPEC section covering: backend namespace marking (a store owning its whole key
 prefix must not brick when a stray non-delta key lands — see the tutorial's `healStrayKeys`
-recovery); quarantine-vs-refuse semantics for a corrupt row on read (refuse-the-store vs
-isolate-the-row — Myk decides); boot resilience; an entity-ID reserved-vs-user convention (so
-constitutional ids can't collide with app ids); and `loam repair` tooling. Then STOP for review.
+recovery); corrupt-row semantics — **DECIDED (Myk, 2026-07-12): quarantine the row, never the
+store.** A corrupt or stray row is isolated and reported, boot proceeds, and `loam repair` lists
+and resolves what's quarantined; in a grow-only union store absence is already a legal,
+interpretable state (§13), so an isolated row reads as not-yet-synced — the store must never
+brick; boot resilience; an entity-ID reserved-vs-user convention (so constitutional ids can't
+collide with app ids); and `loam repair` tooling. Then STOP for review.
 
