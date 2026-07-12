@@ -39,11 +39,75 @@ are an **amendment appended to SPEC §14**, not a new section._
 
 ---
 
-## Reserved §21 — Custom resolvers: the last step of the lens becomes programmable
+## Reserved §21 — Schema identity & versioning: untangling the lens ladder
+
+_Opened by Myk 2026-07-12, off a late-night probe of the `loam register` payload. **NOT YET
+SCOPED — opens at the design stage,** and it lands BEFORE resolvers (§22) and renderers (§23):
+both need a schema identity that can be named, multiplied, and pinned, and today's registration
+model gives them none of the three._
+
+**What the probe found (facts, with receipts):**
+
+- **A second lens over a hyperschema REPLACES the first.** A registration files under
+  `registration:<schemaEntity>`, latest wins (`registration.ts` — `registrationEntity`), and the
+  registry refuses duplicate hyperschema names, so hyperschema : Schema : roots binds 1:1:1 by
+  construction. There is no way to hold two Schemas over one gather program — the thing the
+  whole HyperSchema/Schema symmetry promises. Not good (Myk).
+- **The two halves have different standings at rest.** The hyperschema definition is a
+  REFERENCE — it lives at its own entity, published as schema-schema deltas, and the
+  registration merely points at it. The Schema is a CARRIER — inline canonical JSON inside the
+  registration delta. Half the decoupling road is already paved; the Schema half never got its
+  own identity.
+- **Naming conflation residue.** The hyperschema definition entity defaults to `schema:<Name>`
+  (`schemaEntityFor`), and Loam's prose says "schema entity" throughout — for what is the
+  HYPERSCHEMA. The 0.3.0 vocabulary pass expunged this at the delta level
+  (`rhizomatic.hyperschema.*`) but not in Loam's ids and comments. (Rhizomatic's own
+  `loadSchema`/`publishSchemaClaims` load and publish HyperSchemas — frozen substrate naming, a
+  conversation in that repo, not ours to fix here.) Renaming Loam's `schema:` prefix is a
+  breaking on-wire change → ships a §20 migration in the same PR.
+- **A proto-VersionedSchema already exists.** `readRegistrationVersions` (§17) pins each
+  surviving registration delta — Schema + roots as canonical JSON — by its content address, the
+  version's TRUE NAME. What's missing is everything upstream of it: the version snapshots a
+  *registration*, because a registration is the only identity a Schema has.
+
+**The proposed ladder (Myk):**
+
+> **HyperSchema** —many→ **Schema** —many→ **VersionedSchema** —many→ **API** (GraphQL, REST,
+> whatever)
+
+A Schema is a LIVING domain node — a view computed from deltas via the Schema Schema, evolving
+like anything else in the system — until it is snapshotted and REIFIED into a fixed
+VersionedSchema (plausibly literally the canonical JSON string, content-addressed). Doors serve
+VersionedSchemas; the living Schema goes on living.
+
+**Design questions:**
+
+1. Does the Schema become a first-class entity — its own id, its own deltas, resolvable like any
+   domain node — with registration demoted to a BINDING (this hyperschema + this schema + these
+   roots, served here)? The hyperschema half already works exactly this way.
+2. What is a VersionedSchema at rest — the registration delta itself (today's de-facto answer),
+   or a distinct snapshot entity, so a version can exist, be named, and be pinned WITHOUT being
+   served?
+3. Many-to-many unlocking: the `registration:<schemaEntity>` keying and the name-unique registry
+   both assume 1:1. A surface type then needs a name of its own, apart from the hyperschema's —
+   what names a lens?
+4. Where do `roots` belong on the ladder? The probe established they are a LIVENESS declaration
+   (which entities stay hot), not a scope — which smells like a property of the binding/serving
+   layer, not of the Schema.
+5. The naming pass — expunge the remaining schema/hyperschema blur in Loam's ids and prose;
+   every on-wire rename ships its migration (§20).
+6. How the upper rungs stand on this: a resolver (§22) rides the Schema and is presumably part
+   of what a VersionedSchema freezes; a renderer (§23) PINS a VersionedSchema — "renderer pinned
+   to schema vN keeps working forever" needs exactly this ladder under it.
+
+---
+
+## Reserved §22 — Custom resolvers: the last step of the lens becomes programmable
 
 _Proposed by Myk 2026-07-12; musings + open questions appended by Claude the same night. **NOT
-YET SCOPED — opens at the design stage.** Lands before renderers (§22) because it settles the
-"code shipped as deltas" question renderers inherit._
+YET SCOPED — opens at the design stage.** Lands after schema identity (§21), whose ladder it
+rides, and before renderers (§23) because it settles the "code shipped as deltas" question
+renderers inherit._
 
 Today a field's **Policy** does two jobs in one breath: **selection** (which claims from the
 gathered bucket count — `pick`'s ordering, `all`'s inclusion, `conflicts`' refusal) and
@@ -119,7 +183,7 @@ declared in the schema at rest, not discovered at runtime:
    knows what kind of lens it is trusting)?
 4. **What is a resolver at rest?** It is code shipped as deltas — source, artifact, or
    content-addressed reference; what the signature attests. This is EXACTLY the renderer
-   question (§22); answer it once, here, and let renderers inherit the doctrine.
+   question (§23); answer it once, here, and let renderers inherit the doctrine.
 5. Interaction with `writable` (§14): does a resolved field stay writable with an honest
    "round-trip not guaranteed" posture (recommended — writes hit the bucket, which is still
    real), or do rungs (c)/(d) default read-only like derived fields? Rung (e) is not a
@@ -127,15 +191,17 @@ declared in the schema at rest, not discovered at runtime:
 6. The caching/invalidation contract per rung — what does the gateway promise, and where does
    memoization live?
 7. Is the resolver part of the lens identity — does changing a resolver constitute a new schema
-   version under §17's append-only law?
+   version under §17's append-only law? (§21's VersionedSchema question, arriving from the
+   other side.)
 
 ---
 
-## Reserved §22 — Renderers: push deltas, get software
+## Reserved §23 — Renderers: push deltas, get software
 
 _Handed over by Myk 2026-07-11; reframed 2026-07-12. **NOT YET SCOPED — opens at the design
 stage.** Draft the SPEC section, then STOP for Myk before implementation code. Depends on §21
-(resolvers) settling the executable-delta doctrine. See memory `renderer-task`._
+(schema identity — a renderer pins a VersionedSchema) and §22 (resolvers — the executable-delta
+doctrine). See memory `renderer-task`._
 
 A Loam store already carries its own schema, its own doors, its own law — everything except its
 own face. Close that gap: **a renderer is a UI component pushed as deltas**, bound to a Schema
@@ -164,7 +230,7 @@ What must be designed before any code (the real work):
   subscription + the write verbs (`assert`/`clear`/`remove`) as **capability-scoped handles**,
   never raw store access. The renderer speaks lens; the host holds the keys. Pin this down
   first — everything else is downstream of it.
-- **What a renderer delta IS** — inherited from §21's resolver doctrine (source vs artifact vs
+- **What a renderer delta IS** — inherited from §22's resolver doctrine (source vs artifact vs
   content-addressed ref; what the signature attests). One answer for both kinds of shipped code.
 - **Proven at push time, not hoped at runtime** — a renderer declares the schema(s) + version it
   consumes; the door checks that declaration against the registered surface (the
