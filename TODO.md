@@ -362,9 +362,10 @@ What must be designed before any code (the real work):
   byte string in CBOR), MIME riding in-kind as attested interpretation-testimony. Additive ⇒ no
   migration (shape-distinct by construction, the §20 corollary free); old peers refusing the
   unknown kind is version discipline, not breakage. Not needed for §21/§22 (v1 resolvers are
-  text ESM); becomes pressing here. It is a rhizomatic conversation — Myk opens it in that
-  repo; §23's design names it a dependency for binary assets and does NOT treat the primitive
-  as a blob store (it is the inline rung only; big assets still climb the ladder).
+  text ESM); becomes pressing here. Filed as
+  [rhizomatic#7](https://github.com/bombadil-labs/rhizomatic/issues/7); §23's design names it a
+  dependency for binary assets and does NOT treat the primitive as a blob store (it is the
+  inline rung only; big assets still climb the ladder).
 - **The public-door tension (gap sweep, 2026-07-12).** §17 deliberately serves only the LATEST
   version per declared name on the ANONYMOUS door (hash probes were an existence oracle) — but
   a renderer PINS a VersionedSchema, and the village-as-a-URL wants strangers reading rendered
