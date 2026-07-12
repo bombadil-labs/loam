@@ -144,8 +144,9 @@ once at snapshot time, read cheap thereafter).
 **Registration (decided 2026-07-09, step 10 — cutover from step 7's blob form).** A schema is
 DEFINED by hyperschema-schema deltas — rhizomatic's `publishSchemaClaims` shape (`rhizomatic.hyperschema.defines` /
 `.name` / `.alg` / `.term`) filed at a schema entity, `schema:<Name>` by default. A REGISTRATION is
-a separate delta under `loam.registration` holding only references: a pointer to the schema entity,
-the policy (a Schema) as canonical JSON, and the roots. The GraphQL surface is generated: `readRegistrations`
+a separate delta under `loam.registration` holding only references: a `hyperschema` pointer to the
+definition entity, the `schema` (the resolution program) as canonical JSON, and the roots. The
+GraphQL surface is generated: `readRegistrations`
 meta-resolves each referenced entity via `loadSchema` over the store's surviving definitions —
 so **evolution is append** (republish at the same entity; the running gateway rebinds — the
 reactor has no deregister, so live materialization names are generation-qualified internally —
@@ -943,10 +944,11 @@ per-delta version stamp is needed (one would only pollute the content address wi
 bytes already carry). The load-bearing discipline: **every breaking change must give its changed
 deltas a shape unambiguously distinct from all prior versions** — then shape-detection cannot
 misfire. Almost no delta kinds ever change across a version (a `subject/value` data claim is
-byte-identical), so the set a migration must recognize is small and self-labelling. This is
-deliberately naive (a per-store version marker is a possible future fast-path, but in a federating
-store a lagging peer can always deliver an old-shape delta after the fact, so shape-detection stays
-the backstop regardless); the chain composes, so "many versions back" costs only more steps.
+byte-identical), so the set a migration must recognize is small and self-labelling. Shape-detection
+is the mechanism, not a stopgap: even a per-store version marker could only ever be a fast-path in a
+federating store — a lagging peer can deliver an old-shape delta the day after you stamped a version
+— so the scan stays the backstop regardless, and the marker isn't worth its maintenance. The chain
+composes, so "many versions back" costs only more steps.
 
 The surface: a library `migrate(deltas, { seed }) → { deltas, report }` over the `MIGRATIONS` chain,
 and a CLI `loam migrate <offer> [--out <file>]` that re-expresses a frozen offer (a store's export or

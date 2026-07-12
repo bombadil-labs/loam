@@ -1,31 +1,27 @@
-# Current work — rhizomatic 0.3.0 vocab overhaul + the migration tool
+# Current work — rhizomatic 0.3.0 overhaul + migration tool + registration realignment
 
-_Branch `rhizomatic-0.3.0-vocab`. **Complete — ready for PR + Myk's merge.**_
+_Branch `rhizomatic-0.3.0-vocab` (PR #72). **Complete — ready for Myk's merge.**_
 
 ## Done
 
-**The vocab overhaul** (0.2.0 → 0.3.0): source + tests + demos + docs re-vocabularized (Schema = the
-resolution program, Policy = the per-property rule); Option B wire realignment; packets regenerated;
-village green 0-19 (incl. the phase17 fix); tutorial live-verified; 2-angle review resolved.
+- **0.3.0 vocabulary overhaul** — Schema/Policy rename + Option B wire realignment; source, tests,
+  demos, docs; village 0-19 green; tutorial live-verified; 2-angle review (6 doc fixes).
+- **Migration tool (SPEC §20)** — `migrate()` + `loam migrate` + the `hyperschema-roles` step:
+  re-sign the new form + negate the old with `supersededBy` + reason; grow-only, shape-detected,
+  idempotent. Review caught + fixed a signing-oracle (now gated on `verifyDelta`) and the re-run
+  report. The shape-distinguishability discipline is explicit (CLAUDE.md + §20).
+- **Registration-role realignment** — the registration delta's WIRE roles now follow the model:
+  `hyperschema` names the definition entity, `schema` carries the resolution program (was
+  `schema`/`policy`). `registration.ts` only; packets regenerated (content addresses moved);
+  451 tests + full village 0-19 green (transparent — everything reads the parsed `Registration`).
+- **Store-level version marker: dropped** (Myk) — shape-detection is the mechanism; a marker could
+  only be a fast-path in a federating store and isn't worth the maintenance.
 
-**The migration tool** (new standing policy — ship one with every breaking on-wire change):
+## Deferred (own PR, in TODO.md)
 
-- [x] `src/migrate/migrate.ts`: `migrate(deltas, {seed}) → {deltas, report}` over a `MIGRATIONS`
-      chain; the `hyperschema-roles` step re-signs schema-def deltas to the new roles and negates
-      each old one with a `supersededBy` link + `reason`. Grow-only, shape-detected, idempotent.
-- [x] `loam migrate <offer> [--out]` CLI (re-signs with the home's operator seed).
-- [x] Barrel exports; `test/migrate/migrate.test.ts` + `test/cli/migrate.test.ts`.
-- [x] Docs: CLAUDE.md standing rule, SPEC §20 (+ Provenance footer), README (Migrations section +
-      layout), JOURNAL entry; renderer reservation bumped §20 → §21 in TODO.md.
+- Rename the internal `Registration` fields (`.schema`→`.hyperschema`, `.policy`→`.schema`) to match
+  the wire — a cosmetic ~40-site sweep, no wire impact.
 
-**Gate:** `npm run check` **green, 450 tests**.
+## Gate
 
-## Deferred / flagged (own PRs, in TODO.md)
-
-- Loam's registration pointer roles still read `schema`/`policy` (the `policy` role holds a Schema) —
-  mirroring rhizomatic fully is its own PR (moves content addresses).
-- A per-store version marker (vs shape-detection) — a future migration-framework optimization.
-
-## Next
-
-Open the PR (vocab overhaul + migration tool + policy), leave the merge for Myk.
+`npm run check` **green, 451 tests**. Village 0-19 green. PR #72 updated.

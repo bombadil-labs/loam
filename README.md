@@ -170,8 +170,9 @@ schema lands two of them:
 
 - a **definition** — rhizomatic's hyperschema-schema claims (`publishSchemaClaims` shape: name, alg,
   and the body as canonical CBOR) filed at a schema entity, `schema:<Name>` by default;
-- a **registration** — a reference under `loam.registration`: a pointer to that entity, the
-  policy as canonical JSON, and the roots. No schema body rides it.
+- a **registration** — a reference under `loam.registration`: a `hyperschema` pointer to that
+  entity, the `schema` (the resolution program) as canonical JSON, and the roots. No schema body
+  rides it.
 
 The GraphQL surface is **generated**: on boot (and after every publish) the gateway
 meta-resolves each referenced entity via `loadSchema` over the surviving definitions. The

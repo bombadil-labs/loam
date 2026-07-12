@@ -183,13 +183,12 @@ constitutional ids can't collide with app ids); and `loam repair` tooling. Then 
 
 ---
 
-## Optional: realign Loam's registration pointer roles to the 0.3.0 model
+## Optional: rename the internal `Registration` fields to match the wire
 
-_Small consistency follow-up to the rhizomatic 0.3.0 overhaul (landed). rhizomatic split its L5
-vocabulary into HyperSchema (gather) and Schema (resolution). Loam's own registration delta still
-names its pointers `schema` (the HyperSchema entity reference) and `policy` (the serialized
-resolution program — now a **Schema**). So the `policy` role now holds a Schema, which is mildly
-stale. A clean mirror would rename the registration roles `schema`→`hyperschema` and
-`policy`→`schema`. Deferred from the overhaul PR to keep it scoped; it changes registration-delta
-content addresses (packets + genesis re-address) so it wants its own PR. Myk's call whether the
-extra churn is worth the naming purity._
+_The registration delta's WIRE roles were realigned to the 0.3.0 model (landed: `hyperschema` names
+the definition entity, `schema` carries the resolution program). The parsed `Registration` interface
+still exposes those as `.schema` (a HyperSchema) and `.policy` (a Schema) — a purely internal naming
+lag. Mirroring it fully would rename `Registration.schema`→`.hyperschema` and `.policy`→`.schema`
+across ~40 read sites (gql / rest / surface / gateway / tests / demos, all the `.schema.name`
+accesses). No wire/content-address impact — a cosmetic sweep only, worth doing when convenient.
+Myk's call whether the churn earns the tidiness._

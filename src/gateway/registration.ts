@@ -175,12 +175,16 @@ export function registrationClaims(
           entity: { id: registrationEntity(schemaEntity), context: CTX_REGISTRATION },
         },
       },
+      // Wire roles follow rhizomatic's 0.3 model: `hyperschema` names the gather program's entity
+      // (the definition read by loadSchema), `schema` carries the resolution program itself. (The
+      // parsed `Registration` still exposes these as `.schema`/`.policy` — an internal-naming
+      // follow-up, not a wire concern.)
       {
-        role: "schema",
+        role: "hyperschema",
         target: { kind: "entity", entity: { id: schemaEntity, context: "registration" } },
       },
       {
-        role: "policy",
+        role: "schema",
         target: { kind: "primitive", value: JSON.stringify(schemaToJson(policy)) },
       },
       { role: "roots", target: { kind: "primitive", value: JSON.stringify(roots) } },
@@ -265,9 +269,9 @@ function survivingCandidates(
     if (struck && withdrawn === undefined) continue;
 
     const schemaRef = delta.claims.pointers.find(
-      (p) => p.role === "schema" && p.target.kind === "entity",
+      (p) => p.role === "hyperschema" && p.target.kind === "entity",
     );
-    const policyJson = primitive(delta.claims, "policy");
+    const policyJson = primitive(delta.claims, "schema");
     const rootsJson = primitive(delta.claims, "roots");
     if (
       schemaRef?.target.kind !== "entity" ||
