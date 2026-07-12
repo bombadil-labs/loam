@@ -98,6 +98,7 @@ export {
   readBindingDefinitions,
   type RunnerOptions,
 } from "./runner/runner.js";
+export { migrate, MIGRATIONS, type Migration, type MigrationReport } from "./migrate/migrate.js";
 export { run, main, type IO, type RunOptions } from "./cli/cli.js";
 export { archivePath, initHome, readConfig, storePath, type LoamConfig } from "./cli/config.js";
 export { serve, type ServeOptions, type ServerHandle, type TokenIdentity } from "./server/http.js";

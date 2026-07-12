@@ -94,6 +94,13 @@ update `CURRENT_WORK.md`** so the next run resumes exactly here.
   `rhizomatic.hyperschema.*`. Don't parallel any of these with near-synonyms.
 - **The poetry is as important as the engineering** — errors, help text, commit messages, and docs are
   first-class craft.
+- **Every breaking on-wire change ships a migration** (Myk, 2026-07-12) — if a change alters the
+  bytes/roles of any delta that older stores already hold, add a step to `src/migrate/` (the
+  `MIGRATIONS` chain) in the SAME PR. A migration is grow-only: it re-signs each changed delta into
+  the new form and NEGATES the old one with a negation that points `supersededBy` at the replacement
+  and records a reason — never a silent rewrite. Steps are shape-detected and composable, so a store
+  several versions back is carried forward one step at a time (naive is fine; optimize later). See
+  SPEC §20.
 
 ## Standing decisions
 

@@ -130,7 +130,7 @@ local.)
 
 ---
 
-## Reserved §20 — Shippable renderers: schemas AND their consumers, verified end-to-end
+## Reserved §21 — Shippable renderers: schemas AND their consumers, verified end-to-end
 
 _Handed over by Myk 2026-07-11. **NOT YET SCOPED — this opens at the design stage.** Draft the
 SPEC section answering the questions below, then STOP for Myk before writing implementation
