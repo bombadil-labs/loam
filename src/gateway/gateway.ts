@@ -19,6 +19,7 @@ import {
   hviewCanonicalHex,
   loadSchema,
   makeDelta,
+  makeNegationClaims,
   schemaToJson,
   publishSchemaClaims,
   resolveView,
@@ -246,6 +247,7 @@ export class Gateway {
     return {
       resolve: (name, entity) => this.resolvedNode(name, entity),
       mutate: (name, entity, props, actorSeed) => this.mutateEntity(name, entity, props, actorSeed),
+      clear: (name, entity, fields, actorSeed) => this.clearEntity(name, entity, fields, actorSeed),
       watch: (name, entity) => this.watchEntity(name, entity, door),
       claim: (pointers, actorSeed) => this.claimEntity(pointers, actorSeed),
     };
@@ -995,6 +997,55 @@ export class Gateway {
       ),
     );
     await this.append(deltas);
+    return this.resolvedNode(name, entity);
+  }
+
+  // Clearing is retraction, not a null value (SPEC §14): the DUAL of resolution. For each named
+  // field, negate the caller's OWN surviving contributions in that field's gathered bucket — one
+  // mechanism, correct across every Policy because the read side already does the Policy work: the
+  // pick falls to the next survivor, an `all` list loses your tag, a `merge` withdraws your addend,
+  // and a field only you spoke for goes ABSENT (the reader renders that per its own absentAs). The
+  // negations sign and append through the same standing-checked path as every write. Retract-your-
+  // own is the whole reach (Myk, 2026-07-12): a clear never negates a delta the caller did not
+  // author — to keep OTHERS' claims out of a view you narrow the schema Policy, not the ground.
+  private async clearEntity(
+    name: string,
+    entity: string,
+    fields: readonly string[],
+    actorSeed?: string,
+  ): Promise<ResolvedNode> {
+    const seed = actorSeed ?? this.options.seed;
+    if (seed === undefined) {
+      throw new Error("this gateway holds no signing seed and cannot write");
+    }
+    if (fields.length === 0) {
+      throw new Error(`clear of ${entity} names no fields to retract`);
+    }
+    const def = this.def(name); // also refuses an unknown schema
+    // Only fields the schema resolves are clearable — the same surface the assert door offers.
+    // A typo names no bucket; refuse it rather than no-op, since a silent no-op reads as a
+    // successful clear when nothing was cleared.
+    for (const field of fields) {
+      if (!def.schema.props.has(field)) {
+        throw new Error(`schema ${name} has no field "${field}" to clear`);
+      }
+    }
+    const author = authorForSeed(seed);
+    const hview = this.gather(name, entity);
+    // The caller's own, still-surviving contributions to the named buckets — the deltas to negate.
+    const targets = new Set<string>();
+    for (const field of fields) {
+      for (const entry of hview.props.get(field) ?? []) {
+        if (entry.delta.claims.author === author && !entry.negated) targets.add(entry.delta.id);
+      }
+    }
+    if (targets.size > 0) {
+      const timestamp = this.nextTimestamp();
+      const negations = [...targets].map((id) =>
+        signClaims(makeNegationClaims(author, timestamp, id), seed),
+      );
+      await this.append(negations);
+    }
     return this.resolvedNode(name, entity);
   }
 

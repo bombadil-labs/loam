@@ -347,3 +347,54 @@ describe("versioning: publishing is append-only (SPEC §17 amendment)", () => {
     expect(noSchema.status).toBe(404);
   });
 });
+
+describe("retraction: DELETE clears your own, in agreement with GraphQL clear (§14)", () => {
+  it("DELETE /rest retracts the writer's own contribution — the field falls to what survives", async () => {
+    // the writer asserts a distinctive height, both doors see it
+    await rest(
+      `/rest/v1/Plant/${encodeURIComponent(FERN)}`,
+      { method: "POST", body: JSON.stringify({ height: 88 }) },
+      "writer-token",
+    );
+    const seen = await rest(`/rest/v1/Plant/${encodeURIComponent(FERN)}`, {}, "op-token");
+    expect(((await seen.json()) as { view: { height: number } }).view.height).toBe(88);
+
+    // DELETE naming the field retracts the writer's OWN height(s) — the operator's 30 still stands.
+    const del = await rest(
+      `/rest/v1/Plant/${encodeURIComponent(FERN)}`,
+      { method: "DELETE", body: JSON.stringify(["height"]) },
+      "writer-token",
+    );
+    expect(del.status).toBe(200);
+    const after = (await del.json()) as { view: { height: number } };
+    expect(after.view.height).toBe(30); // reverted to the operator's surviving reading, not null
+
+    // the OTHER door agrees immediately — one ground, one retraction
+    const viaGql = await gql(`{ plant(entity: "${FERN}") { height } }`, "op-token");
+    expect((viaGql.body as { data: { plant: { height: number } } }).data.plant.height).toBe(30);
+  });
+
+  it("a DELETE with an empty body clears every prop the writer contributed", async () => {
+    await rest(
+      `/rest/v1/Plant/${encodeURIComponent(FERN)}`,
+      { method: "POST", body: JSON.stringify({ height: 77 }) },
+      "writer-token",
+    );
+    const del = await rest(
+      `/rest/v1/Plant/${encodeURIComponent(FERN)}`,
+      { method: "DELETE" },
+      "writer-token",
+    );
+    expect(del.status).toBe(200);
+    const after = (await del.json()) as { view: { height: number } };
+    expect(after.view.height).toBe(30); // the writer's 77 withdrawn along with the rest
+  });
+
+  it("the public door cannot retract any more than it can write", async () => {
+    const anon = await rest(`/rest/v1/Plant/${encodeURIComponent(FERN)}`, {
+      method: "DELETE",
+      body: JSON.stringify(["height"]),
+    });
+    expect(anon.status).toBe(403);
+  });
+});

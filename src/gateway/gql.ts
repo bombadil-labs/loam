@@ -332,6 +332,35 @@ export function buildGqlSchema(
       },
     };
 
+    // The retract half (SPEC §14): clearing is not `set(null)`, it is retraction — negate the
+    // caller's OWN contributions to the named fields, so each resolves to what survives, or to
+    // absence (rendered per absentAs). One field per schema, `clear<Type>`.
+    const clearField = `clear${typeName}`;
+    if (Object.hasOwn(mutationFields, clearField)) {
+      throw new Error(
+        `schema ${def.hyperschema.name}: its mutation field "${clearField}" collides with an existing mutation`,
+      );
+    }
+    mutationFields[clearField] = {
+      type: new GraphQLNonNull(viewType),
+      description:
+        `Retract YOUR OWN contributions to the named fields of a ${def.hyperschema.name} ` +
+        `entity — each falls to what survives, or to absence. Returns the re-resolved view.`,
+      args: {
+        ...entityArg,
+        fields: { type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(GraphQLString))) },
+      },
+      resolve: (_src, args: Record<string, unknown>, ctx: unknown) => {
+        const actor = (ctx as { actor?: string } | undefined)?.actor;
+        return hooks.clear(
+          def.hyperschema.name,
+          args["entity"] as string,
+          args["fields"] as string[],
+          actor,
+        );
+      },
+    };
+
     // The schema's declared write shapes: one mutation per template, one DELTA per call.
     for (const [templateName, template] of Object.entries(def.mutations ?? {})) {
       if (Object.hasOwn(mutationFields, templateName)) {

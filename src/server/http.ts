@@ -98,7 +98,7 @@ const CORS = { "access-control-allow-origin": "*" } as const;
 const preflight = (res: ServerResponse): void => {
   res.writeHead(204, {
     ...CORS,
-    "access-control-allow-methods": "GET, POST, OPTIONS",
+    "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
     "access-control-allow-headers": "authorization, content-type",
     "access-control-max-age": "86400",
   });
@@ -493,7 +493,10 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           case "rest": {
             let body: string | undefined;
             try {
-              body = req.method === "POST" ? await readBody(req, maxBody) : undefined;
+              body =
+                req.method === "POST" || req.method === "DELETE"
+                  ? await readBody(req, maxBody)
+                  : undefined;
             } catch (err) {
               json(res, err instanceof BodyTooLarge ? 413 : 400, {
                 errors: [err instanceof Error ? err.message : String(err)],

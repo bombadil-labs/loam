@@ -256,3 +256,13 @@ _(one entry per PR that grew the village; newest last)_
   the demo does — and confirms the grown store answers its own `Grove` schema immediately,
   registers itself in `homes/peers.json`, and one pull lands its facts in the almanac's
   ground. Joining the village is running a command, not editing the village.
+- **CLEARING IS RETRACTION (SPEC §14, PR #73)** (phase20.mjs, 3/3): two residents keep a shared
+  `Board` on the commons — `notes` unions every voice, `headline` is latest-wins. Wren withdraws
+  their OWN note and miles's still stands: retract-your-own is scoped, a clear never touches
+  another author's claim (to keep others out of a view you narrow the Policy, not the ground).
+  Miles then clears through the REST door's honest verb — `DELETE /rest/v1/Board/board:commons` —
+  and the list empties to ABSENCE (null at the surface), until a fresh word repopulates it:
+  "withdraw my claim", never "no one may speak here". And a `pick` `headline`, cleared, resolves
+  to absence too — null on the answer, no null ever written onto a reference. Removal, at last,
+  through the surface — and it is the dual of reading: negate your own contributions, let the
+  Policy re-resolve.

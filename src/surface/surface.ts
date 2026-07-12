@@ -60,6 +60,16 @@ export interface SurfaceHooks {
     props: Record<string, Primitive>,
     actorSeed?: string,
   ): Promise<ResolvedNode>;
+  // Clearing is retraction (SPEC §14): negate the caller's OWN surviving contributions to each
+  // named field, so it resolves to what survives — the next pick, the remaining tags, the
+  // withdrawn addend — or, if the caller was its only voice, to absence (rendered per absentAs).
+  // Retract-your-own is the whole reach: a clear never touches a delta the caller did not author.
+  clear(
+    schemaName: string,
+    entity: string,
+    fields: readonly string[],
+    actorSeed?: string,
+  ): Promise<ResolvedNode>;
   watch(schemaName: string, entity: string): AsyncGenerator<PatchNode>;
   claim(pointers: readonly ClaimPointerSpec[], actorSeed?: string): Promise<{ delta: string }>;
 }

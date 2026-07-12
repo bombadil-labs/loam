@@ -151,6 +151,26 @@ export function buildOpenApi(
                 },
                 responses: { "200": read.responses["200"] },
               },
+              delete: {
+                summary: `retract your own ${name} contributions (version ${alias})`,
+                description:
+                  "Clearing is retraction, not deletion of the ground: each named field is " +
+                  "cleared of the caller's OWN contributions (empty body clears all), falling " +
+                  "to what survives or to absence. A clear never touches another author's claim.",
+                requestBody: {
+                  required: false,
+                  content: {
+                    "application/json": {
+                      schema: {
+                        type: "array",
+                        items: { type: "string" },
+                        description: "field names to clear; omit or empty to clear all",
+                      },
+                    },
+                  },
+                },
+                responses: { "200": read.responses["200"] },
+              },
             }),
       };
     });
@@ -303,5 +323,49 @@ export async function handleRest(
     }
   }
 
-  return refuse(405, "the rest door speaks GET and POST");
+  if (method === "DELETE") {
+    // Clearing is retraction (SPEC §14): DELETE retracts the caller's OWN contributions. The body
+    // is a JSON array of field names to clear; an absent/empty body clears every prop this version
+    // resolves. The public door is a smaller, read-only world — it retracts no more than it writes.
+    if (door === "public") return refuse(403, "the public door is a smaller world: read-only");
+    const known = [...pinned.schema.props.keys()];
+    let fields: string[] = known;
+    if (bodyText !== undefined && bodyText !== "") {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(bodyText);
+      } catch {
+        return refuse(400, "the body must be a JSON array of field names, or empty for all");
+      }
+      if (!Array.isArray(parsed) || parsed.some((f) => typeof f !== "string")) {
+        return refuse(400, "the body must be a JSON array of field names");
+      }
+      for (const f of parsed as string[]) {
+        if (!known.includes(f)) {
+          return refuse(400, `version ${vTag} of ${schemaName} has no property "${f}"`);
+        }
+      }
+      fields = parsed as string[];
+    }
+    try {
+      const node = await hooks.clear(schemaName, entity, fields, actorSeed);
+      const answered = isLatest ? node : gateway.resolvePinned(pinned, entity);
+      return {
+        status: 200,
+        body: {
+          entity: answered.entity,
+          view: answered.view,
+          _hex: answered.hex,
+          _hviewHex: answered.hviewHex,
+        },
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (/can no longer persist/.test(message)) return refuse(503, message);
+      if (/not permitted|was erased|refused/.test(message)) return refuse(403, message);
+      return refuse(400, message);
+    }
+  }
+
+  return refuse(405, "the rest door speaks GET, POST and DELETE");
 }
