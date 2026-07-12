@@ -7,7 +7,7 @@ portable format for signed, content-addressed deltas whose merge is union: order
 idempotent, conflict-free. Rhizomatic is the format and the reactive core; Loam is the wrapper
 that makes it a deployable, GraphQL-fronted, persistent, multi-tenant, federatable server.
 
-Its shapes are grown, not imposed — you declare a schema and a policy, and the medium resolves
+Its shapes are grown, not imposed — you declare a hyperschema and a schema (a shape, and how to read it), and the medium resolves
 your data into views, maintains them live, and remembers everything. Nothing is deleted; the
 store only ever learns. Two Loam instances that meet simply merge. Trust is a lens the reader
 holds, not a verdict the ground hands down.
@@ -43,8 +43,8 @@ store driver — a native addon with prebuilt binaries for common platforms).
 ## The model in one breath
 
 - A **delta** is a signed, content-addressed fact. A **store** is a grow-only set of them.
-- A **HyperSchema** gathers the deltas relevant to an entity into a **Hyperview**; a **Policy**
-  resolves that hyperview into a **View** — the answer. One schema, many policies; one policy,
+- A **HyperSchema** gathers the deltas relevant to an entity into a **Hyperview**; a **Schema**
+  resolves that hyperview into a **View** — the answer. One hyperschema, many schemas; one schema,
   many entities.
 - The **Gateway** fronts one store: it derives a GraphQL surface from the (schema, policy) pairs
   you register, and serves `query`, `mutate`, and `subscribe` over it.
@@ -124,7 +124,7 @@ import { parseTerm } from "@bombadil/rhizomatic";
 // A store, governed by an operator seed. Omit the seed for an ungoverned local store.
 const gateway = await Gateway.open(new SqliteBackend("./store.sqlite"), { seed: operatorSeedHex });
 
-// Register a (HyperSchema, Policy) over the roots you want held live. The schema's body is a
+// Register a (HyperSchema, Schema) over the roots you want held live. The schema's body is a
 // rhizomatic term; the policy's props name the GraphQL fields and their shapes.
 gateway.register(
   {
@@ -222,8 +222,8 @@ The `loam register` file (also the `POST /register` body, under a `schema` key):
 - **`body`** — a rhizomatic **gather term**, evaluated once per root. It selects and buckets the
   relevant deltas; it is a pure function of the ambient root, so it resolves the same on every
   machine.
-- **`policy`** — a per-bucket **reduction**. Each prop names a GraphQL field and says how to fold
-  that bucket's deltas into one value.
+- **`policy`** — a **Schema**: a per-bucket reduction. Each prop names a GraphQL field and says how
+  to fold that bucket's deltas into one value.
 - **`roots`** — the entities held **live**: the gather runs for each, and its view stays current
   as deltas arrive.
 
@@ -239,7 +239,7 @@ The `body` reads inside-out, each stage feeding the next:
    of the pointer that targets the root. A delta pointing at `plant:fern` with context `height`
    lands in the `height` bucket. The result is a hyperview: one root, its buckets.
 
-Then the **policy** folds each bucket. `height` and the `default` both `pick` the entry with the
+Then the **Schema** folds each bucket. `height` and the `default` both `pick` the entry with the
 newest timestamp (`order: byTimestamp desc`), so `plant(entity: "plant:fern") { height }` returns
 the latest recorded height and drops the rest. Add a `width` prop and you'd surface that bucket
 too; leave it out and the bucket stays gathered but unread.
@@ -285,7 +285,7 @@ mutations (`plant(entity:…, height: 4)`) remain as convenient sugar.
 
 Every view also carries two content addresses: **`_hex`** (the resolved view — the answer) and
 **`_hviewHex`** (the gathered hyperview — the evidence). Two lenses over the same body and root
-share `_hviewHex` while their `_hex` differs exactly when their policies adjudicate
+share `_hviewHex` while their `_hex` differs exactly when their schemas adjudicate
 differently.
 
 ## Capabilities: authors, not owners
@@ -293,7 +293,7 @@ differently.
 No ambient authority — and no ownership of ids. **Entities are unowned**: a pointer is a string
 that matches or doesn't, and a delta is never a free-floating fact about an entity — it is an
 assertion _from a perspective_ (a verified author, an instance of origin). Anyone with standing
-may point at anything; whether anyone **listens** is the reader's business (policies, author
+may point at anything; whether anyone **listens** is the reader's business (schemas, author
 ranks, admission predicates, the operator-filtered constitutional reads).
 
 What a governed store enforces is exactly one thing: **the author's standing on this

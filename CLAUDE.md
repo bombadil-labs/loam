@@ -83,10 +83,15 @@ update `CURRENT_WORK.md`** so the next run resumes exactly here.
   prior snapshots, don't be afraid to blow it away as necessary.
 - **Strict in PRs, creative and aggressive in execution.** Ship real vertical slices; don't gold-plate;
   don't reward-hack a green bar.
-- **Match rhizomatic's vocabulary** — the concepts are Hyperschema / Hyperview / View / Policy /
-  derived function / binding; the exported type names are `HyperSchema`, `HView`, `View`, `Policy`,
-  `DerivedFn`, `BindingSpec` (confirmed in the step-1 spike). Don't parallel either with
-  near-synonyms.
+- **Match rhizomatic's vocabulary** — the concepts are HyperSchema / HyperView / View / Schema /
+  Policy / derived function / binding; the exported type names are `HyperSchema`, `HView`, `View`,
+  `Schema`, `Policy`, `DerivedFn`, `BindingSpec`. Since rhizomatic 0.3.0 (the L5 realignment):
+  a **Schema** is the resolution program (`{ props: Map<field, Policy>, default: Policy }`) that
+  resolves a HyperView into a View, and a **Policy** is a single property's rule (`pick` / `all` /
+  `merge` / `conflicts` / `absentAs`) — the symmetry is `HyperSchema : HyperView :: Schema : View`.
+  (Before 0.3.0 these were named `Policy` and `PropPolicy`; older Journal entries use the old
+  names — that is historical, don't rewrite them.) The at-rest schema-definition vocabulary is
+  `rhizomatic.hyperschema.*`. Don't parallel any of these with near-synonyms.
 - **The poetry is as important as the engineering** — errors, help text, commit messages, and docs are
   first-class craft.
 

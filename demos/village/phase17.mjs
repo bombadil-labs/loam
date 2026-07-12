@@ -95,7 +95,12 @@ try {
   await commons.gateway.append([
     signClaims(
       {
-        timestamp: Date.now(),
+        // The commons' CURRENT word on Wren, and it must read as the latest: phase 12 left a
+        // future-dated "regret" bio on the commons (ts + 10_000_000, to top Mallory's forgeries)
+        // and erased it only on the ALMANAC — per-instance erasure (§11) means the commons still
+        // serves it. So the tab, pulling the commons, would see that stale future-dated regret
+        // under a naive pick-latest unless this claim out-dates it. +20_000_000 clears the fixture.
+        timestamp: Date.now() + 20_000_000,
         author: commons.operator,
         pointers: [
           {

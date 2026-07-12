@@ -16,7 +16,9 @@ Ordering is rough priority, top-first; Myk sets it. Each item says what it needs
 
 _Designed 2026-07-10 (originally SPEC §14). **BLOCKED on an open question** (the clear-others
 question below) — resolve with Myk before implementation. When it lands, this migrates back to
-SPEC §14 with a Provenance footer._
+SPEC §14 with a Provenance footer. (Vocabulary note: this predates rhizomatic 0.3.0 but reads
+cleanly under it — a **Policy** here is a single property's rule, exactly the new meaning; the
+resolution program as a whole is a **Schema**.)_
 
 Reading is `resolve : Policy → HView → View` (§4): a field's value is not stored, it is
 COMPUTED per-property by its policy over a bucket of gathered deltas. Writing is the **dual**,
@@ -68,7 +70,7 @@ construction, not by discipline.
   silence about writability means "you may not," not "you may set anything."
 
 Writability is declared in the registration (Loam-level metadata, beside the claim templates of
-§5), **not** in the rhizomatic `Policy`. It disciplines the mutation SURFACE, never the ground:
+§5), **not** in the rhizomatic `Schema`. It disciplines the mutation SURFACE, never the ground:
 the resolution algebra is untouched, so content-addressing and portability are unaffected, and
 two instances may declare different writability for one schema without ever diverging on a
 resolved View. (The same reason merge fns are a closed vocabulary — resolution must be a
@@ -181,18 +183,13 @@ constitutional ids can't collide with app ids); and `loam repair` tooling. Then 
 
 ---
 
-## Vocabulary overhaul against rhizomatic 0.3.0 — BLOCKED on upstream
+## Optional: realign Loam's registration pointer roles to the 0.3.0 model
 
-_Blocked on [rhizomatic#3](https://github.com/bombadil-labs/rhizomatic/issues/3) (a substrate
-change Myk owns): rename the L5 resolution vocabulary so `PropPolicy`→`Policy` (the per-property
-rule) and `Policy`→`Schema` (the resolution program), restoring the `HyperSchema:HyperView ::
-Schema:View` symmetry. Loam can't touch rhizomatic; this item starts only once 0.3.0 publishes._
-
-When 0.3.0 lands: bump the `@bombadil/rhizomatic` dep, then a wide-but-mechanical sweep of Loam —
-`Policy`/`PropPolicy` → `Schema`/`Policy`, `parsePolicy`→`parseSchema`, `policyToJson`→`schemaToJson`
-— across `src/gateway/registration.ts` (`Registration` becomes "a HyperSchema + a Schema + roots"),
-the gateway, the tutorial (`demos/tutorial/lessons.mjs` builds many policies), the village, and the
-tests. Watch for the `mask` term's on-wire `"policy"` field (L2 `MaskPolicy`, a different thing —
-do NOT rename). Update CLAUDE.md's "Match rhizomatic's vocabulary" standing rule and the README's
-model section to the new names. Pure rename upstream = no wire/content-address drift, so no data
-migration — the gate against unchanged fixtures is the proof.
+_Small consistency follow-up to the rhizomatic 0.3.0 overhaul (landed). rhizomatic split its L5
+vocabulary into HyperSchema (gather) and Schema (resolution). Loam's own registration delta still
+names its pointers `schema` (the HyperSchema entity reference) and `policy` (the serialized
+resolution program — now a **Schema**). So the `policy` role now holds a Schema, which is mildly
+stale. A clean mirror would rename the registration roles `schema`→`hyperschema` and
+`policy`→`schema`. Deferred from the overhaul PR to keep it scoped; it changes registration-delta
+content addresses (packets + genesis re-address) so it wants its own PR. Myk's call whether the
+extra churn is worth the naming purity._
