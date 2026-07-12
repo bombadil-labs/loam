@@ -356,7 +356,15 @@ What must be designed before any code (the real work):
   store-sized data: the browser peer's ~5 MB origin quota (§15) meets renderer snapshots
   immediately, so the snapshot doctrine's later rungs (content-addressed ref, chunked tree)
   likely graduate from "later economics" to §23 v1 design questions. Budget for it in the
-  design; don't discover it in the demo.
+  design; don't discover it in the demo. Related, proposed by Myk (2026-07-12): **a rhizomatic
+  0.4 `bytes` primitive** — an ADDITIVE Target kind `{ kind: "bytes", mime, value }`, identity
+  hashed over raw bytes (encoding is transport, never identity; base64url in JSON wire, native
+  byte string in CBOR), MIME riding in-kind as attested interpretation-testimony. Additive ⇒ no
+  migration (shape-distinct by construction, the §20 corollary free); old peers refusing the
+  unknown kind is version discipline, not breakage. Not needed for §21/§22 (v1 resolvers are
+  text ESM); becomes pressing here. It is a rhizomatic conversation — Myk opens it in that
+  repo; §23's design names it a dependency for binary assets and does NOT treat the primitive
+  as a blob store (it is the inline rung only; big assets still climb the ladder).
 - **The public-door tension (gap sweep, 2026-07-12).** §17 deliberately serves only the LATEST
   version per declared name on the ANONYMOUS door (hash probes were an existence oracle) — but
   a renderer PINS a VersionedSchema, and the village-as-a-URL wants strangers reading rendered
