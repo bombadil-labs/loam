@@ -13,7 +13,13 @@
 // present. Steps run in declared order, so a store many versions back is carried forward one step
 // at a time. Output is deduplicated by content address, so re-migrating is a no-op.
 
-import { authorForSeed, signClaims, type Claims, type Delta } from "@bombadil/rhizomatic";
+import {
+  authorForSeed,
+  signClaims,
+  verifyDelta,
+  type Claims,
+  type Delta,
+} from "@bombadil/rhizomatic";
 
 export interface Migration {
   /** Stable id for the step (also the negation's provenance handle). */
@@ -80,8 +86,14 @@ const HYPERSCHEMA_ROLES: Migration = {
     const added: Delta[] = [];
     for (const d of deltas) {
       // Only the operator's own definitions: we can re-sign only what our seed authored, and a
-      // foreign definition is inert under 0.3 anyway — its own operator migrates its own store.
+      // foreign definition is inert under the new format anyway — its own operator migrates it.
       if (d.claims.author !== operator || !isOldSchemaDef(d)) continue;
+      // ...and only if the SIGNATURE proves it. `author` is self-asserted content (fromWire
+      // checks the content address, not the signature), so without this gate `loam migrate` on a
+      // hostile offer would be a signing oracle: any delta merely CLAIMING the operator's public
+      // author, shaped like an old definition, would get its attacker-chosen pointers re-signed
+      // under the operator's real key. Re-sign only what the operator provably authored.
+      if (verifyDelta(d) !== "verified") continue;
       const reExpressed = signClaims(toNewForm(d.claims), seed);
       const negation = signClaims(
         supersession(operator, d.claims.timestamp, d.id, reExpressed.id, this.reason),
@@ -111,12 +123,15 @@ export function migrate(
   for (const step of MIGRATIONS) {
     if (!step.applies([...byId.values()])) continue;
     const added = step.additions([...byId.values()], opts.seed);
+    // Count only what is genuinely NEW: the step re-finds already-superseded defs on every run
+    // (the old form is retained, grow-only), and their re-expressions dedup away by content
+    // address — so a re-migration must report 0, not re-count the same supersessions.
+    const fresh = added.filter((d) => !byId.has(d.id));
     for (const d of added) byId.set(d.id, d);
-    // one supersession negation per delta the step retired
-    const superseded = added.filter((d) =>
+    const superseded = fresh.filter((d) =>
       d.claims.pointers.some((p) => p.role === "negates"),
     ).length;
-    applied.push({ id: step.id, superseded });
+    if (fresh.length > 0) applied.push({ id: step.id, superseded });
   }
   return {
     deltas: [...byId.values()],
