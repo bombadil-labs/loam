@@ -53,7 +53,7 @@ try {
     registrations: [
       {
         schema: { name: "Note", alg: 1, body: tab.parseTerm(NOTE_BODY) },
-        policy: tab.parsePolicy({ props: { text: PICK, about: PICK }, default: PICK }),
+        policy: tab.parseSchema({ props: { text: PICK, about: PICK }, default: PICK }),
         roots: ["note:first"],
       },
     ],
@@ -123,7 +123,7 @@ try {
   // ---- her own lens over the imported ground: the reader decides everything
   await notebook.publishRegistration(
     { name: "Person", alg: 1, body: tab.parseTerm(NOTE_BODY) },
-    tab.parsePolicy({ props: { bio: PICK }, default: PICK }),
+    tab.parseSchema({ props: { bio: PICK }, default: PICK }),
     ["person:wren"],
   );
   const hers = await notebook.query(`{ person(entity: "person:wren") { bio } }`);

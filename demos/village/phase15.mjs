@@ -15,7 +15,7 @@ import {
   trustClaims,
 } from "../../dist/index.js";
 import { authorForSeed, loamClient, mintSeed } from "../../dist/client/index.js";
-import { parsePolicy, parseTerm } from "@bombadil/rhizomatic";
+import { parseSchema, parseTerm } from "@bombadil/rhizomatic";
 import { readFileSync } from "node:fs";
 import {
   check,
@@ -126,7 +126,7 @@ try {
   const spec = JSON.parse(readFileSync(join(SCHEMAS, "dossier.json"), "utf8"));
   laptop.register(
     { name: spec.name, alg: spec.alg ?? 1, body: parseTerm(spec.body) },
-    parsePolicy(spec.policy),
+    parseSchema(spec.policy),
     [...spec.roots, ana, ben],
   );
   const hers = await laptop.query(

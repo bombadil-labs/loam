@@ -54,7 +54,7 @@ try {
       registrations: [
         {
           schema: { name: "Note", alg: 1, body: tab.parseTerm(NOTE_BODY) },
-          policy: tab.parsePolicy({ props: { text: PICK }, default: PICK }),
+          policy: tab.parseSchema({ props: { text: PICK }, default: PICK }),
           roots: ["note:first"],
         },
       ],

@@ -6,7 +6,7 @@
 // v1 (410 Gone by its true name — on the operator's door; anonymously every unknown hash is
 // the same 404, because history is not anonymous).
 
-import { authorForSeed, parsePolicy, parseTerm, signClaims } from "@bombadil/rhizomatic";
+import { authorForSeed, parseSchema, parseTerm, signClaims } from "@bombadil/rhizomatic";
 import { makeNegationClaims } from "@bombadil/rhizomatic";
 import { publicClaims } from "../../dist/index.js";
 import { check, openStore, opToken, summary } from "./harness.mjs";
@@ -59,7 +59,7 @@ try {
   const FIELDNOTE = { name: "Fieldnote", alg: 1, body: parseTerm(GATHER) };
   await almanac.gateway.publishRegistration(
     FIELDNOTE,
-    parsePolicy({ props: { text: PICK }, default: PICK }),
+    parseSchema({ props: { text: PICK }, default: PICK }),
     ["note:almanac-day"],
   );
   await almanac.gateway.append([
@@ -105,7 +105,7 @@ try {
   // 19.3 — the versioning law, lived: evolve (v2 minted, v1 answerable, resolutions diverge)
   await almanac.gateway.publishRegistration(
     FIELDNOTE,
-    parsePolicy({
+    parseSchema({
       props: { text: PICK, tags: { all: { order: { byTimestamp: "asc" } } } },
       default: PICK,
     }),
