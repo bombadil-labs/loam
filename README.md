@@ -288,6 +288,22 @@ For shapes no template anticipated there is the generic **`_claim(pointers: […
 for clients that keep their own keys there is `POST /:mount/append`. The old primitive-prop
 mutations (`plant(entity:…, height: 4)`) remain as convenient sugar.
 
+**Removing a value is retraction, not `set(null)`** (SPEC §14). Writing is the dual of reading: a
+field is a bucket resolved per-Policy, so to clear one you negate your OWN contributions to it and
+it re-resolves — the next `pick` steps up, an `all` list loses your tag, a `merge` withdraws your
+addend, and a field only you spoke for goes absent (rendered per its `absentAs`, so the null-ness
+lives in the lens, never on a reference). GraphQL exposes `clear<Type>(entity, fields: […])`; the
+REST door maps it to `DELETE /:mount/rest/vN/<Schema>/<entity>`. Retract-your-own is the whole
+reach: a clear never touches another author's claim — to keep others' claims out of a view you
+narrow the schema Policy, not the ground.
+
+To withdraw ONE value rather than a whole field there is `remove<Type>(entity, field, values: […])`
+(REST: a `DELETE` with an object body `{ field: [values] }`) — the one tag you added, a specific
+`merge` addend, the rest of the field left standing. And a registration may carry a **`writable`**
+list: when present, only those fields accept a surface write (assert, clear, and remove refuse the
+rest with a reason); omit it to leave every field writable. It disciplines the front door, never the
+ground — a reader who wants a hard guarantee still enforces it with a lens.
+
 Every view also carries two content addresses: **`_hex`** (the resolved view — the answer) and
 **`_hviewHex`** (the gathered hyperview — the evidence). Two lenses over the same body and root
 share `_hviewHex` while their `_hex` differs exactly when their schemas adjudicate

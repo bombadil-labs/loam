@@ -98,7 +98,7 @@ const CORS = { "access-control-allow-origin": "*" } as const;
 const preflight = (res: ServerResponse): void => {
   res.writeHead(204, {
     ...CORS,
-    "access-control-allow-methods": "GET, POST, OPTIONS",
+    "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
     "access-control-allow-headers": "authorization, content-type",
     "access-control-max-age": "86400",
   });
@@ -127,6 +127,7 @@ async function performRegistration(
     undefined,
     input.entity,
     input.mutations,
+    input.writable,
   );
   return {
     registered: input.hyperschema.name,
@@ -311,6 +312,15 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           schema: { type: "object", description: "the resolution schema, schema JSON" },
           roots: { type: "array", items: { type: "string" } },
           entity: { type: "string", description: "the schema entity (default schema:<name>)" },
+          mutations: {
+            type: "object",
+            description: "named claim templates (the write discipline)",
+          },
+          writable: {
+            type: "array",
+            items: { type: "string" },
+            description: "fields that accept a surface write; omit to leave every field writable",
+          },
         },
         required: ["hyperschema", "schema", "roots"],
       },
@@ -493,7 +503,10 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           case "rest": {
             let body: string | undefined;
             try {
-              body = req.method === "POST" ? await readBody(req, maxBody) : undefined;
+              body =
+                req.method === "POST" || req.method === "DELETE"
+                  ? await readBody(req, maxBody)
+                  : undefined;
             } catch (err) {
               json(res, err instanceof BodyTooLarge ? 413 : 400, {
                 errors: [err instanceof Error ? err.message : String(err)],
@@ -538,7 +551,10 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         case "rest": {
           let body: string | undefined;
           try {
-            body = req.method === "POST" ? await readBody(req, maxBody) : undefined;
+            body =
+              req.method === "POST" || req.method === "DELETE"
+                ? await readBody(req, maxBody)
+                : undefined;
           } catch (err) {
             json(res, err instanceof BodyTooLarge ? 413 : 400, {
               errors: [err instanceof Error ? err.message : String(err)],

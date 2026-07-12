@@ -223,6 +223,7 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
       undefined,
       input.entity,
       input.mutations,
+      input.writable,
     );
   } catch (err) {
     await gateway.close().catch(() => {}); // never let a close failure mask the real refusal

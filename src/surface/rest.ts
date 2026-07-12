@@ -92,11 +92,16 @@ export function buildOpenApi(
       // the body's top level — the document must describe the body that actually answers.
       const viewProperties: Record<string, unknown> = {};
       const writeProperties: Record<string, unknown> = {};
+      // Writability: when a registration names its `writable` fields, only those appear in the
+      // write body — the document must describe the writes that actually answer (SPEC §14).
+      const writable = v.writable === undefined ? undefined : new Set(v.writable);
       for (const [prop, pp] of v.schema.props) {
         viewProperties[prop] = propSchema((pp as { kind: string }).kind);
-        writeProperties[prop] = {
-          description: "a primitive claim value (string | number | boolean)",
-        };
+        if (writable === undefined || writable.has(prop)) {
+          writeProperties[prop] = {
+            description: "a primitive claim value (string | number | boolean)",
+          };
+        }
       }
       const read = {
         summary: `resolve a ${name} view (version ${alias})`,
@@ -145,6 +150,36 @@ export function buildOpenApi(
                         type: "object",
                         properties: writeProperties,
                         additionalProperties: false,
+                      },
+                    },
+                  },
+                },
+                responses: { "200": read.responses["200"] },
+              },
+              delete: {
+                summary: `retract your own ${name} contributions (version ${alias})`,
+                description:
+                  "Clearing is retraction, not deletion of the ground: each named field is " +
+                  "cleared of the caller's OWN contributions (empty body clears all), falling " +
+                  "to what survives or to absence. A clear never touches another author's claim. " +
+                  "An object body `{ field: [values] }` removes only those specific values.",
+                requestBody: {
+                  required: false,
+                  content: {
+                    "application/json": {
+                      schema: {
+                        oneOf: [
+                          {
+                            type: "array",
+                            items: { type: "string" },
+                            description: "field names to clear; omit or empty to clear all",
+                          },
+                          {
+                            type: "object",
+                            additionalProperties: { type: "array" },
+                            description: "field → specific values to remove (retract your own)",
+                          },
+                        ],
                       },
                     },
                   },
@@ -298,10 +333,105 @@ export async function handleRest(
       // The same outcomes the other doors map: standing and tombstone refusals are 403, a
       // degraded gateway is the server's trouble (503, as /append answers), the rest 400.
       if (/can no longer persist/.test(message)) return refuse(503, message);
-      if (/not permitted|was erased|refused/.test(message)) return refuse(403, message);
+      if (/not permitted|was erased|refused|read-only/.test(message)) return refuse(403, message);
       return refuse(400, message);
     }
   }
 
-  return refuse(405, "the rest door speaks GET and POST");
+  if (method === "DELETE") {
+    // Clearing is retraction (SPEC §14): DELETE retracts the caller's OWN contributions. The body
+    // resolves. The body speaks two shapes: a JSON ARRAY of field names clears those fields whole
+    // (empty/absent → every prop this version resolves); a JSON OBJECT `{ field: [values] }` is the
+    // §14-amendment value-scoped REMOVE — retract only the caller's own contributions of those
+    // values. The public door is a smaller, read-only world — it retracts no more than it writes.
+    if (door === "public") return refuse(403, "the public door is a smaller world: read-only");
+    const known = [...pinned.schema.props.keys()];
+    const isPrim = (v: unknown): v is Primitive =>
+      typeof v === "string" || typeof v === "number" || typeof v === "boolean";
+
+    let parsed: unknown = undefined;
+    if (bodyText !== undefined && bodyText !== "") {
+      try {
+        parsed = JSON.parse(bodyText);
+      } catch {
+        return refuse(400, "the body is a JSON array of fields, or { field: [values] }, or empty");
+      }
+    }
+
+    // The value-scoped REMOVE shape: an object of field → values.
+    if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const spec = parsed as Record<string, unknown>;
+      for (const [field, values] of Object.entries(spec)) {
+        if (!known.includes(field)) {
+          return refuse(400, `version ${vTag} of ${schemaName} has no property "${field}"`);
+        }
+        if (!Array.isArray(values) || values.length === 0 || !values.every(isPrim)) {
+          return refuse(400, `"${field}": a non-empty array of primitive values to remove`);
+        }
+      }
+      try {
+        let answered = isLatest
+          ? hooks.resolve(schemaName, entity)
+          : gateway.resolvePinned(pinned, entity);
+        for (const [field, values] of Object.entries(spec)) {
+          const node = await hooks.remove(
+            schemaName,
+            entity,
+            field,
+            values as Primitive[],
+            actorSeed,
+          );
+          answered = isLatest ? node : gateway.resolvePinned(pinned, entity);
+        }
+        return {
+          status: 200,
+          body: {
+            entity: answered.entity,
+            view: answered.view,
+            _hex: answered.hex,
+            _hviewHex: answered.hviewHex,
+          },
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (/can no longer persist/.test(message)) return refuse(503, message);
+        if (/not permitted|was erased|refused|read-only/.test(message)) return refuse(403, message);
+        return refuse(400, message);
+      }
+    }
+
+    // The whole-field CLEAR shape: an array of field names (or empty → all).
+    let fields: string[] = known;
+    if (parsed !== undefined) {
+      if (!Array.isArray(parsed) || parsed.some((f) => typeof f !== "string")) {
+        return refuse(400, "the body must be a JSON array of field names");
+      }
+      for (const f of parsed as string[]) {
+        if (!known.includes(f)) {
+          return refuse(400, `version ${vTag} of ${schemaName} has no property "${f}"`);
+        }
+      }
+      fields = parsed as string[];
+    }
+    try {
+      const node = await hooks.clear(schemaName, entity, fields, actorSeed);
+      const answered = isLatest ? node : gateway.resolvePinned(pinned, entity);
+      return {
+        status: 200,
+        body: {
+          entity: answered.entity,
+          view: answered.view,
+          _hex: answered.hex,
+          _hviewHex: answered.hviewHex,
+        },
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (/can no longer persist/.test(message)) return refuse(503, message);
+      if (/not permitted|was erased|refused|read-only/.test(message)) return refuse(403, message);
+      return refuse(400, message);
+    }
+  }
+
+  return refuse(405, "the rest door speaks GET, POST and DELETE");
 }
