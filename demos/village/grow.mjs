@@ -51,19 +51,14 @@ console.log(`${name} is up at ${base} — its own operator, its own law`);
 
 // The schema, registered over the running surface (the store gains a voice with no restart).
 if (schemaFile !== undefined) {
-  const raw = JSON.parse(readFileSync(schemaFile, "utf8"));
-  const spec = {
-    schema: { name: raw.name, alg: raw.alg ?? 1, body: raw.body },
-    policy: raw.policy,
-    roots: raw.roots,
-    ...(raw.entity ? { entity: raw.entity } : {}),
-  };
+  // The schema file IS the register-request shape ({ hyperschema, schema, roots }) — send it.
+  const spec = JSON.parse(readFileSync(schemaFile, "utf8"));
   const reg = await registerHttp(base, opToken, spec);
   if (reg.status !== 200) {
     console.error(`the schema was refused: ${JSON.stringify(reg.body)}`);
     process.exit(1);
   }
-  console.log(`registered ${raw.name} — the surface answers already`);
+  console.log(`registered ${spec.hyperschema.name} — the surface answers already`);
 }
 
 // The scribe: a minted identity with write standing. The seed stays in the home beside the

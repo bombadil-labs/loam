@@ -1,26 +1,28 @@
 {
-  "name": "Person",
-  "alg": 1,
-  "body": {
-    "op": "group",
-    "key": "byTargetContext",
-    "in": {
-      "op": "select",
-      "pred": {
-        "hasPointer": {
-          "targetEntity": {
-            "var": "root"
-          }
-        }
-      },
+  "hyperschema": {
+    "name": "Person",
+    "alg": 1,
+    "body": {
+      "op": "group",
+      "key": "byTargetContext",
       "in": {
-        "op": "mask",
-        "policy": "drop",
-        "in": "input"
+        "op": "select",
+        "pred": {
+          "hasPointer": {
+            "targetEntity": {
+              "var": "root"
+            }
+          }
+        },
+        "in": {
+          "op": "mask",
+          "policy": "drop",
+          "in": "input"
+        }
       }
     }
   },
-  "policy": {
+  "schema": {
     "props": {
       "name": {
         "pick": {

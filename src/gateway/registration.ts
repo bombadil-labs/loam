@@ -1,7 +1,7 @@
 // A registration is a REFERENCE, not a carrier. The schema itself is DEFINED by schema-schema
 // deltas — rhizomatic's `publishSchemaClaims` shape — filed at a schema entity (`schema:<Name>`
 // by default); the registration delta, under the constitutional context `loam.registration`,
-// holds only a pointer to that entity, the policy as canonical JSON, and the roots. The GraphQL
+// holds only a pointer to that entity, the resolution schema as canonical JSON, and the roots. The GraphQL
 // surface is therefore GENERATED: `readRegistrations` meta-resolves each referenced entity via
 // `loadSchema` over the store's surviving definitions, so evolution is append (republish at the
 // same entity) and deprecation is negation (a definition with no survivor binds nothing).
@@ -16,6 +16,7 @@ import {
   DeltaSet,
   loadSchema,
   parseSchema,
+  parseTerm,
   schemaToJson,
   type Claims,
   type HyperSchema,
@@ -188,6 +189,60 @@ export function registrationClaims(
       },
       { role: "roots", target: { kind: "primitive", value: JSON.stringify(roots) } },
     ],
+  };
+}
+
+// The ONE shape every registration surface accepts — the `loam register` file, POST
+// /:mount/register, and the MCP `loam_register` tool — identical to the `Registration` it yields:
+//
+//   { hyperschema: { name, alg?, body }, schema, roots, entity?, mutations? }
+//
+// The body and schema travel as rhizomatic's own JSON profiles (parse∘serialize is identity).
+// Anything malformed throws a plain-English reason; each caller renders it (a CLI exit code, an
+// HTTP 400, an MCP error) — so the three doors can never drift on what a registration looks like.
+export interface RegistrationInput {
+  readonly hyperschema: HyperSchema;
+  readonly schema: Schema;
+  readonly roots: string[];
+  readonly entity?: string;
+  readonly mutations?: ClaimTemplates;
+}
+
+export function parseRegistrationInput(raw: unknown): RegistrationInput {
+  const o = raw as {
+    hyperschema?: { name?: unknown; alg?: unknown; body?: unknown };
+    schema?: unknown;
+    roots?: unknown;
+    entity?: unknown;
+    mutations?: unknown;
+  } | null;
+  if (
+    o === null ||
+    typeof o !== "object" ||
+    o.hyperschema === null ||
+    typeof o.hyperschema !== "object"
+  ) {
+    throw new Error("register wants { hyperschema: { name, alg?, body }, schema, roots, entity? }");
+  }
+  const { name, alg, body } = o.hyperschema;
+  if (typeof name !== "string" || name.length === 0) {
+    throw new Error("register: hyperschema.name must be a non-empty string");
+  }
+  if (alg !== undefined && typeof alg !== "number") {
+    throw new Error("register: hyperschema.alg must be a number when given");
+  }
+  if (!Array.isArray(o.roots) || o.roots.some((r) => typeof r !== "string")) {
+    throw new Error("register: roots must be an array of entity ids");
+  }
+  if (o.entity !== undefined && typeof o.entity !== "string") {
+    throw new Error("register: entity must be a string when given");
+  }
+  return {
+    hyperschema: { name, alg: alg ?? 1, body: parseTerm(body) },
+    schema: parseSchema(o.schema),
+    roots: o.roots as string[],
+    ...(o.entity === undefined ? {} : { entity: o.entity }),
+    ...(o.mutations === undefined ? {} : { mutations: parseClaimTemplates(o.mutations) }),
   };
 }
 

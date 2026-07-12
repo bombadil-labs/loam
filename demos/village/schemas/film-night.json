@@ -1,33 +1,35 @@
 {
-  "name": "FilmNight",
-  "alg": 1,
-  "body": {
-    "op": "expand",
-    "role": {
-      "exact": "film"
-    },
-    "schema": "Film",
-    "in": {
-      "op": "group",
-      "key": "byTargetContext",
+  "hyperschema": {
+    "name": "FilmNight",
+    "alg": 1,
+    "body": {
+      "op": "expand",
+      "role": {
+        "exact": "film"
+      },
+      "schema": "Film",
       "in": {
-        "op": "select",
-        "pred": {
-          "hasPointer": {
-            "targetEntity": {
-              "var": "root"
-            }
-          }
-        },
+        "op": "group",
+        "key": "byTargetContext",
         "in": {
-          "op": "mask",
-          "policy": "drop",
-          "in": "input"
+          "op": "select",
+          "pred": {
+            "hasPointer": {
+              "targetEntity": {
+                "var": "root"
+              }
+            }
+          },
+          "in": {
+            "op": "mask",
+            "policy": "drop",
+            "in": "input"
+          }
         }
       }
     }
   },
-  "policy": {
+  "schema": {
     "props": {
       "date": {
         "pick": {

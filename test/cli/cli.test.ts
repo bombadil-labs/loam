@@ -230,18 +230,20 @@ describe("loam register", () => {
     writeFileSync(
       path,
       JSON.stringify({
-        name: "Plant",
-        alg: 1,
-        body: {
-          op: "group",
-          key: "byTargetContext",
-          in: {
-            op: "select",
-            pred: { hasPointer: { targetEntity: { var: "root" } } },
-            in: { op: "mask", policy: "drop", in: "input" },
+        hyperschema: {
+          name: "Plant",
+          alg: 1,
+          body: {
+            op: "group",
+            key: "byTargetContext",
+            in: {
+              op: "select",
+              pred: { hasPointer: { targetEntity: { var: "root" } } },
+              in: { op: "mask", policy: "drop", in: "input" },
+            },
           },
         },
-        policy: { props: { height: PICK }, default: PICK },
+        schema: { props: { height: PICK }, default: PICK },
         roots: ["plant:fern"],
       }),
     );

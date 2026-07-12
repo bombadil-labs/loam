@@ -84,6 +84,7 @@ export {
   lawfulNegated,
   lawfulSnapshot,
   parseClaimTemplates,
+  parseRegistrationInput,
   readRegistrations,
   registrationClaims,
   schemaEntityFor,
@@ -91,6 +92,7 @@ export {
   type ClaimTemplate,
   type ClaimTemplates,
   type Registration,
+  type RegistrationInput,
 } from "./gateway/registration.js";
 export {
   Runner,

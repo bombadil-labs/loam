@@ -20,7 +20,7 @@
 
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { parseSchema, parseTerm, type Delta, type HyperSchema } from "@bombadil/rhizomatic";
+import { type Delta } from "@bombadil/rhizomatic";
 import { fromWire, toWire, type WireDelta } from "../federation/wire.js";
 import { buildOpenApi, handleRest } from "../surface/rest.js";
 import {
@@ -29,11 +29,7 @@ import {
   type QueryResult,
   type RequestContext,
 } from "../gateway/gateway.js";
-import {
-  parseClaimTemplates,
-  schemaEntityFor,
-  type ClaimTemplates,
-} from "../gateway/registration.js";
+import { parseRegistrationInput, schemaEntityFor } from "../gateway/registration.js";
 
 export interface TokenIdentity {
   readonly actor?: string; // a signing seed: requests act as this identity
@@ -115,50 +111,27 @@ const json = (res: ServerResponse, status: number, body: unknown): void => {
   res.end(text);
 };
 
-// Parse and perform a registration request: { schema: { name, alg?, body }, policy, roots,
-// entity? }. The term and policy travel as their JSON profiles (rhizomatic's own); anything
-// that will not parse, or will not register, throws — the caller answers 400 with the reason.
+// Parse and perform a registration request — the SAME shape the CLI file and the MCP tool take,
+// { hyperschema: { name, alg?, body }, schema, roots, entity?, mutations? } (see
+// parseRegistrationInput). Anything malformed throws; the caller answers 400 with the reason.
 // Operator gating happens BEFORE this is called: shaping the store is constitutional.
 async function performRegistration(
   gateway: Gateway,
   raw: unknown,
 ): Promise<{ registered: string; entity: string }> {
-  const o = raw as {
-    schema?: { name?: unknown; alg?: unknown; body?: unknown };
-    policy?: unknown;
-    roots?: unknown;
-    entity?: unknown;
-    mutations?: unknown;
-  } | null;
-  if (o === null || typeof o !== "object" || o.schema === null || typeof o.schema !== "object") {
-    throw new Error("register wants { schema: { name, alg?, body }, policy, roots, entity? }");
-  }
-  const { name, alg, body } = o.schema;
-  if (typeof name !== "string" || name.length === 0) {
-    throw new Error("register: schema.name must be a non-empty string");
-  }
-  if (alg !== undefined && typeof alg !== "number") {
-    throw new Error("register: schema.alg must be a number when given");
-  }
-  if (!Array.isArray(o.roots) || o.roots.some((r) => typeof r !== "string")) {
-    throw new Error("register: roots must be an array of entity ids");
-  }
-  if (o.entity !== undefined && typeof o.entity !== "string") {
-    throw new Error("register: entity must be a string when given");
-  }
-  const schema: HyperSchema = { name, alg: alg ?? 1, body: parseTerm(body) };
-  const policy = parseSchema(o.policy);
-  const mutations: ClaimTemplates | undefined =
-    o.mutations === undefined ? undefined : parseClaimTemplates(o.mutations);
+  const input = parseRegistrationInput(raw);
   await gateway.publishRegistration(
-    schema,
-    policy,
-    o.roots as string[],
+    input.hyperschema,
+    input.schema,
+    input.roots,
     undefined,
-    o.entity,
-    mutations,
+    input.entity,
+    input.mutations,
   );
-  return { registered: name, entity: schemaEntityFor(schema, o.entity) };
+  return {
+    registered: input.hyperschema.name,
+    entity: schemaEntityFor(input.hyperschema, input.entity),
+  };
 }
 
 export async function serve(options: ServeOptions): Promise<ServerHandle> {
@@ -326,7 +299,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       inputSchema: {
         type: "object",
         properties: {
-          schema: {
+          hyperschema: {
             type: "object",
             properties: {
               name: { type: "string" },
@@ -335,11 +308,11 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             },
             required: ["name", "body"],
           },
-          policy: { type: "object", description: "the policy, policy JSON" },
+          schema: { type: "object", description: "the resolution schema, schema JSON" },
           roots: { type: "array", items: { type: "string" } },
           entity: { type: "string", description: "the schema entity (default schema:<name>)" },
         },
-        required: ["schema", "policy", "roots"],
+        required: ["hyperschema", "schema", "roots"],
       },
     },
   ];

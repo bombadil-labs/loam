@@ -7,7 +7,7 @@
 // `serve` blocks until the process is signalled.
 
 import { readFileSync, writeFileSync } from "node:fs";
-import { authorForSeed, parseSchema, parseTerm, type HyperSchema } from "@bombadil/rhizomatic";
+import { authorForSeed } from "@bombadil/rhizomatic";
 import { Gateway, type FederationReport } from "../gateway/gateway.js";
 import { parseOffer } from "../federation/offer.js";
 import { toWire } from "../federation/wire.js";
@@ -15,7 +15,11 @@ import { migrate } from "../migrate/migrate.js";
 import { pullFrom } from "../federation/pull.js";
 import { tombstonesIn } from "../gateway/erase.js";
 import { assembleGenesis } from "../gateway/genesis.js";
-import { schemaEntityFor } from "../gateway/registration.js";
+import {
+  parseRegistrationInput,
+  schemaEntityFor,
+  type RegistrationInput,
+} from "../gateway/registration.js";
 import { serve, type ServerHandle } from "../server/http.js";
 import type { StoreBackend } from "../store/backend.js";
 import { ArchiveBackend } from "../store/archive.js";
@@ -181,7 +185,7 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
   if (file === undefined) {
     io.err(
       "register wants a schema file: `loam register <schema.json>` — " +
-        "{ name, alg?, body, policy, roots, entity? }",
+        "{ hyperschema: { name, alg?, body }, schema, roots, entity? }",
     );
     return 2;
   }
@@ -196,41 +200,9 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
     io.err(`register: cannot read ${file}: ${err instanceof Error ? err.message : String(err)}`);
     return 1;
   }
-  let spec: {
-    name?: unknown;
-    alg?: unknown;
-    body?: unknown;
-    policy?: unknown;
-    roots?: unknown;
-    entity?: unknown;
-  };
+  let input: RegistrationInput;
   try {
-    spec = JSON.parse(raw) as typeof spec;
-  } catch (err) {
-    io.err(`register: ${file} is not JSON: ${err instanceof Error ? err.message : String(err)}`);
-    return 2;
-  }
-  if (typeof spec.name !== "string" || spec.name.length === 0) {
-    io.err("register: the file must name the schema (a non-empty `name`)");
-    return 2;
-  }
-  if (!Array.isArray(spec.roots) || spec.roots.some((r) => typeof r !== "string")) {
-    io.err("register: the file must carry `roots`, an array of entity ids");
-    return 2;
-  }
-  if (spec.entity !== undefined && typeof spec.entity !== "string") {
-    io.err("register: `entity` must be a string when given");
-    return 2;
-  }
-  let schema: HyperSchema;
-  let policy: ReturnType<typeof parseSchema>;
-  try {
-    schema = {
-      name: spec.name,
-      alg: typeof spec.alg === "number" ? spec.alg : 1,
-      body: parseTerm(spec.body),
-    };
-    policy = parseSchema(spec.policy);
+    input = parseRegistrationInput(JSON.parse(raw));
   } catch (err) {
     io.err(`register: ${file}: ${err instanceof Error ? err.message : String(err)}`);
     return 2;
@@ -245,11 +217,12 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
   );
   try {
     await gateway.publishRegistration(
-      schema,
-      policy,
-      spec.roots as string[],
+      input.hyperschema,
+      input.schema,
+      input.roots,
       undefined,
-      spec.entity,
+      input.entity,
+      input.mutations,
     );
   } catch (err) {
     await gateway.close().catch(() => {}); // never let a close failure mask the real refusal
@@ -257,7 +230,7 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
   }
   await gateway.close();
   io.out(
-    `loam: registered ${spec.name} at ${schemaEntityFor(schema, spec.entity)}\n` +
+    `loam: registered ${input.hyperschema.name} at ${schemaEntityFor(input.hyperschema, input.entity)}\n` +
       `  the definition is deltas now — the next serve grows the surface from it`,
   );
   return 0;

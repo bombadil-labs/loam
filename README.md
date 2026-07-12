@@ -92,7 +92,7 @@ A served store exposes three surfaces per mount, behind a `Bearer` token:
   fields).
 - **`POST /:mount/mcp`** — a minimal MCP JSON-RPC surface (`initialize`, `tools/list`,
   `tools/call`) exposing `loam_query`, `loam_mutate`, and `loam_register`.
-- **`POST /:mount/register`** — `{ schema: { name, alg?, body }, policy, roots, entity? }` →
+- **`POST /:mount/register`** — `{ hyperschema: { name, alg?, body }, schema, roots, entity? }` →
   `{ registered, entity }` (operator token only). The hyperschema-schema mutation mechanism, served:
   the definition and its registration land as deltas, and the surface serves the new type
   immediately. Republishing at the same entity evolves it. (An endpoint rather than a GraphQL
@@ -189,22 +189,26 @@ consequences are the whole point:
 - Streams subscribed before an evolution keep watching the shape they subscribed to; new
   subscriptions see the new shape.
 
-The `loam register` file (also the `POST /register` body, under a `schema` key):
+The `loam register` file — the **exact same shape** `POST /:mount/register` and the MCP
+`loam_register` tool take, so a registration is one object you can drop into a file, POST, or hand
+the tool. It mirrors the parts: a **HyperSchema** (the gather) and a **Schema** (the resolution).
 
 ```json
 {
-  "name": "Plant",
-  "alg": 1,
-  "body": {
-    "op": "group",
-    "key": "byTargetContext",
-    "in": {
-      "op": "select",
-      "pred": { "hasPointer": { "targetEntity": { "var": "root" } } },
-      "in": { "op": "mask", "policy": "drop", "in": "input" }
+  "hyperschema": {
+    "name": "Plant",
+    "alg": 1,
+    "body": {
+      "op": "group",
+      "key": "byTargetContext",
+      "in": {
+        "op": "select",
+        "pred": { "hasPointer": { "targetEntity": { "var": "root" } } },
+        "in": { "op": "mask", "policy": "drop", "in": "input" }
+      }
     }
   },
-  "policy": {
+  "schema": {
     "props": { "height": { "pick": { "order": { "byTimestamp": "desc" } } } },
     "default": { "pick": { "order": { "byTimestamp": "desc" } } }
   },
@@ -212,23 +216,23 @@ The `loam register` file (also the `POST /register` body, under a `schema` key):
 }
 ```
 
-**Anatomy of a registration.** Five fields, and the whole read pipeline lives in them:
+**Anatomy of a registration.** Three parts, and the whole read pipeline lives in them:
 
-- **`name`** — the GraphQL field this schema generates (`{ plant(entity: …) }`) and the default
-  schema entity (`schema:Plant`). Identity is the entity, not the name — rename freely by
-  republishing at the same entity.
-- **`alg`** — the L2 **algebra version** the `body` is written against (_not_ a signing algorithm).
-  It pins which rhizomatic operator semantics interpret the term. There is one algebra today, so
-  this is always `1`; it exists so a v1 body keeps its v1 meaning if the algebra ever grows a v2.
-- **`body`** — a rhizomatic **gather term**, evaluated once per root. It selects and buckets the
-  relevant deltas; it is a pure function of the ambient root, so it resolves the same on every
-  machine.
-- **`policy`** — a **Schema**: a per-bucket reduction. Each prop names a GraphQL field and says how
-  to fold that bucket's deltas into one value.
+- **`hyperschema`** — the gather program:
+  - **`name`** — the GraphQL field it generates (`{ plant(entity: …) }`) and the default entity
+    (`schema:Plant`). Identity is the entity, not the name — rename freely by republishing at it.
+  - **`alg`** — the L2 **algebra version** the `body` is written against (_not_ a signing algorithm).
+    There is one algebra today, so this is always `1`; it exists so a v1 body keeps its v1 meaning
+    if the algebra ever grows a v2.
+  - **`body`** — a rhizomatic **gather term**, evaluated once per root. It selects and buckets the
+    relevant deltas; a pure function of the ambient root, so it resolves the same on every machine.
+- **`schema`** — the resolution program (a **Schema**): a per-property reduction — each prop names a
+  GraphQL field and says how to fold that bucket's deltas into one value. Each prop's rule is a
+  **Policy** (`pick` / `all` / `merge` / …); the map of them is the Schema.
 - **`roots`** — the entities held **live**: the gather runs for each, and its view stays current
   as deltas arrive.
 
-The `body` reads inside-out, each stage feeding the next:
+The `hyperschema.body` reads inside-out, each stage feeding the next:
 
 1. **`mask` / `drop` over `input`** — `input` is the store's whole delta set; `drop` applies
    retractions and passes on only the deltas still standing. (Nothing is erased — a retraction is
@@ -257,7 +261,7 @@ the read program), and each template becomes a GraphQL mutation that emits exact
 delta:
 
 ```jsonc
-// in the register file/body, beside body/policy/roots:
+// in the register file/body, beside hyperschema/schema/roots:
 "mutations": {
   "hostScreening": {
     "pointers": [
