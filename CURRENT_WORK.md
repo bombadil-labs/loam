@@ -21,9 +21,14 @@ _Branch `rhizomatic-0.3.0-vocab` (PR #72). **Complete — ready for Myk's merge.
 
 - Internal `Registration`/`Registered`/`Bound` field rename to match the wire (`.schema`→
   `.hyperschema`, `.policy`→`.schema`) across gql / rest / surface / gateway / migrate / tests /
-  demos — compiler-guided, no wire/content-address impact (packets byte-identical). The register
-  *file*/HTTP `/register` request format (`{ schema, policy, roots }`) is a separate public input
-  contract and stays. Nothing deferred — the 0.3.0 vocabulary is complete end to end.
+  demos — compiler-guided, no wire/content-address impact (packets byte-identical).
+- **Unified register input format**: the `loam register` file, `POST /:mount/register`, and the MCP
+  `loam_register` tool now take ONE shape, identical to `Registration` —
+  `{ hyperschema: { name, alg?, body }, schema, roots, entity?, mutations? }` — via a single shared
+  `parseRegistrationInput`. The file went flat → nested. No wire impact (register input isn't a
+  delta). Village schemas regenerated, README register docs rewritten.
+
+**Nothing deferred — the 0.3.0 vocabulary is complete end to end: wire, parsed, and user-facing.**
 
 ## Gate
 
