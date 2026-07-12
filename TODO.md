@@ -296,6 +296,11 @@ declared in the schema at rest, not discovered at runtime:
 7. **DECIDED (Myk, 2026-07-12): yes.** The resolver's content address is part of what a
    VersionedSchema freezes; changing a resolver is a new schema version under §17's append-only
    law.
+8. **Output types for the doors (gap sweep, 2026-07-12).** A resolver changes what a field's
+   VALUE is, and the doors generate types from the registration (§17 — GraphQL fields, OpenAPI
+   shapes). The signed definition must therefore declare the resolver's output TYPE alongside
+   its rung, or the surfaces cannot speak the field they serve. Without it, a resolver that
+   turns a `pick` string into a histogram breaks every generated door silently.
 
 **Guidance for the design stage (the posture, so it needn't be rediscovered):** with questions
 1–5 and 7 decided above, the design stage DESCRIBES the whole ladder, BUILDS rung (a) only, and
@@ -340,7 +345,24 @@ What must be designed before any code (the real work):
 - **The host contract** — what a mounted renderer receives: a resolved View + a live
   subscription + the write verbs (`assert`/`clear`/`remove`) as **capability-scoped handles**,
   never raw store access. The renderer speaks lens; the host holds the keys. Pin this down
-  first — everything else is downstream of it.
+  first — everything else is downstream of it. Two sub-questions the 2026-07-12 gap sweep
+  added: **whose pen writes** — a click in a foreign renderer becomes a delta signed by WHICH
+  identity (the user's own key, or a per-renderer granted author, so provenance shows the
+  mediating code and revocation is per-renderer? §19's write-path labels — door, pen, wire,
+  derived — gain a fifth value here); and **the module contract** — what the host provides
+  ambient (React, the loam client) versus what a renderer must bundle INTO its snapshot unit.
+  Ambient must be tiny and versioned: the bundle IS the attested artifact.
+- **The economics arrive early (gap sweep, 2026-07-12).** A bundled UI riding in a delta is
+  store-sized data: the browser peer's ~5 MB origin quota (§15) meets renderer snapshots
+  immediately, so the snapshot doctrine's later rungs (content-addressed ref, chunked tree)
+  likely graduate from "later economics" to §23 v1 design questions. Budget for it in the
+  design; don't discover it in the demo.
+- **The public-door tension (gap sweep, 2026-07-12).** §17 deliberately serves only the LATEST
+  version per declared name on the ANONYMOUS door (hash probes were an existence oracle) — but
+  a renderer PINS a VersionedSchema, and the village-as-a-URL wants strangers reading rendered
+  routes. Reconcile explicitly: plausibly a public declaration may name pinned versions (a
+  declaration is not a probe — the operator chose to reveal that version), but that is a
+  §12/§17 amendment and must be argued, not assumed.
 - **What a renderer delta IS — RESOLVED by inheritance:** the snapshot doctrine (above §21,
   landing in §22). A renderer at rest is a delta asserting the content-addressed bytes of a
   whole, versioned unit; the signature attests exactly what mounts; history is supersession.
@@ -353,7 +375,10 @@ What must be designed before any code (the real work):
 - **Versioning under §17 law** — renderers born versioned, append-only; pinned to schema vN a
   renderer keeps working forever; decide what happens when vN is struck.
 - **Trust for executable consumers — the sharpest edge.** Who may push, whose renderers a host
-  mounts, the sandbox story. Federation makes it acute; inert-by-default is the floor.
+  mounts, the sandbox story. Federation makes it acute; inert-by-default is the floor. The
+  sandbox story does not start from zero: §6 already names object-capability confinement
+  (SES / Worker / wasm compartments) as the discipline for federated code in the runner —
+  renderers inherit that doctrine at the screen, they don't invent a parallel one.
 - **The router discipline** — how a renderer claims a route, who owns the namespace, collisions,
   multiple renderers over one schema (a Schema is a lens; there is no reason it has only one
   face).
@@ -409,8 +434,11 @@ Design questions:
    and sequestration must not rest on every reader honoring a mark. The design stage PROVES it
    rather than debates it; if the proof fails, that is news — bring it back.
 2. **The one-way glass, precisely.** Live-follow of the primary's ground vs a frozen snapshot;
-   whether quarantined code may even SEE capability-restricted slices; what "reads but never
-   writes back" means when the substrate is grow-only union.
+   what "reads but never writes back" means when the substrate is grow-only union. (Honesty
+   note from the 2026-07-12 gap sweep: Loam has no read-side capability slices today — the
+   mount is the read boundary, §7 — so "what quarantined code may see" is all-or-nothing
+   unless this design invents something narrower. Don't reference machinery that doesn't
+   exist; decide whether to build it or accept all-or-nothing.)
 3. **Promotion semantics on append-only ground.** Promoting outputs cannot move deltas — it
    re-signs or endorses them (provenance preserved: adopted-from-quarantine, by whom, when).
    Pin the exact claim shape; this is close kin to §20's migration re-signing.
@@ -426,6 +454,12 @@ Design questions:
 7. **The renderer tie-in (§23)** — a quarantined renderer needs a host willing to mount it in a
    visibly-sequestered frame ("this is probation, its writes go nowhere") — the trust UI of the
    stock host.
+8. **Erasure must reach the quarantine (gap sweep, 2026-07-12).** The quarantine holds a
+   replica of primary ground; if tombstone + purge (§11) do not propagate into it, the
+   quarantine becomes an erasure-EVASION vector — the forgotten bytes live on in the staging
+   area, inside the operator's own walls. The one-way glass must carry the operator's
+   tombstones IN even though nothing flows back out. Pin this with a test at design time; it
+   is the §11 law arriving at §24, not an optional nicety.
 
 ---
 
@@ -443,5 +477,21 @@ store.** A corrupt or stray row is isolated and reported, boot proceeds, and `lo
 and resolves what's quarantined; in a grow-only union store absence is already a legal,
 interpretable state (§13), so an isolated row reads as not-yet-synced — the store must never
 brick; boot resilience; an entity-ID reserved-vs-user convention (so constitutional ids can't
-collide with app ids); and `loam repair` tooling. Then STOP for review.
+collide with app ids); door resource budgets beyond the public ones (§12 caps strangers, but a
+granted author's appends are unmetered — decide whether per-author quotas are law or deployment
+config); and `loam repair` tooling. Then STOP for review.
+
+---
+
+## As-of reads — the temporal promise, queued or renounced
+
+_Flagged by the 2026-07-12 gap sweep; unscheduled — after the §21–§24 arc. The SPEC's first
+sentence calls the substrate TEMPORAL; §7 calls capabilities time-traveled; §19's tutorial copy
+names "as-of replay" as explicitly out UNTIL BUILT — but no backlog item existed. The ground
+already holds everything needed (timestamped deltas, dated negations, replayable
+materializations). Scope it when its turn comes: an as-of parameter on `query` (resolve against
+the ground as it stood at T), its interaction with erasure (purged is purged even in the past —
+§11 wins), whether subscriptions can replay, and what a VersionedSchema pin means when the
+reader also pins a time. Or renounce it into §13 as a boundary, stated proudly. Either is
+honest; a promise with no backlog home was the only wrong state._
 
