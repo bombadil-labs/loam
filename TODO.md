@@ -66,6 +66,49 @@ are an **amendment appended to SPEC §14**, not a new section._
 
 ---
 
+## The snapshot doctrine — code, schemas, and documents at rest (DECIDED)
+
+_Resolved in conversation (Myk + Claude, 2026-07-12). Cross-cutting doctrine, not its own SPEC
+section: it **lands with §22** (its natural home — the "what is a resolver at rest" answer), and
+§21, §23, §24 cite it. Recorded here so no design stage reopens it from scratch._
+
+Our deltas cannot do track changes — and neither can git's object model: blobs are whole
+snapshots, and every diff anyone has ever read was computed at read time from two snapshots plus
+a lineage relation. That is not the missing feature; it is the design. Accordingly:
+
+- **Deltas assert versions of coherent wholes, plus supersession claims relating them.** Never
+  edits. History is `supersededBy` lineage — §17's append-only law, close kin to §20's
+  re-sign-and-negate.
+- **Diff is a lens.** Line diff, AST diff, semantic diff — derived views over two attested
+  snapshots, chosen by the reader, never a storage format. Likewise the AST, the outline, the
+  symbol table: structure WITHIN a unit is computed from the bytes, not stored as ground. The
+  bytes are the ground truth; the AST never was.
+- **The granularity of a delta is the granularity of attestation — what would an author sign?**
+  Nobody signs a keystroke; nobody means an AST node in isolation. For code the unit is the
+  module/artifact, and the signature attests EXACTLY the bytes that run — which is what §24's
+  trust story requires. A swarm of signed fragments carries no signature on the combination a
+  reader manufactures from them; a substrate that assembles values from independent claims
+  manufactures interleavings nobody wrote, tested, or meant.
+- **Structure BETWEEN coherence units lives in deltas.** Module entities with import edges, a
+  document's outline — queryable, per-unit provenance, targeted supersession. The graph is
+  delta-native; the leaves are atomic.
+- **Ordering is an authored claim.** A container's arrangement is asserted as a value at the
+  container level, signed as a whole; concurrent rearrangements CONFLICT visibly (§13's honest
+  posture) instead of interleaving silently into an order nobody chose.
+- **The economics ladder: inline bytes → content-addressed ref → Merkle-chunked tree.** All
+  three are snapshot semantics — every version a complete whole — only the storage costs change.
+  Content addressing already dedups unchanged units across versions. v1 stops at the first rung
+  that fits in a delta.
+- **Live collaborative editing, if it ever comes, is an ephemeral layer** (a CRDT session, an
+  editor buffer) that periodically ASSERTS snapshots into the ground. Editing is conversation;
+  the delta is the notarized statement at the end of it.
+
+And this is §21's picture wearing different clothes: a living Schema evolving as a domain node,
+reified by snapshot into a fixed, content-addressed VersionedSchema — the same doctrine arriving
+at versioning instead of code. One picture, every rung of the ladder.
+
+---
+
 ## Reserved §21 — Schema identity & versioning: untangling the lens ladder
 
 _Opened by Myk 2026-07-12, off a late-night probe of the `loam register` payload. **NOT YET
@@ -114,7 +157,10 @@ VersionedSchemas; the living Schema goes on living.
    roots, served here)? The hyperschema half already works exactly this way.
 2. What is a VersionedSchema at rest — the registration delta itself (today's de-facto answer),
    or a distinct snapshot entity, so a version can exist, be named, and be pinned WITHOUT being
-   served?
+   served? _The snapshot doctrine (above) frames this: a version is a reified snapshot of a
+   coherent whole, related to its kin by supersession — settled. What the design stage still
+   decides is only WHERE it lives; the doctrine's pin-without-serving pull favors the distinct
+   snapshot entity. Prove it._
 3. Many-to-many unlocking: the `registration:<schemaEntity>` keying and the name-unique registry
    both assume 1:1. A surface type then needs a name of its own, apart from the hyperschema's —
    what names a lens?
@@ -217,9 +263,14 @@ declared in the schema at rest, not discovered at runtime:
    don't fork the vocabulary before that conversation happens.
 3. Which rungs does v1 admit, and is the rung part of the signed schema definition (so a reader
    knows what kind of lens it is trusting)?
-4. **What is a resolver at rest?** It is code shipped as deltas — source, artifact, or
-   content-addressed reference; what the signature attests. This is EXACTLY the renderer
-   question (§23); answer it once, here, and let renderers inherit the doctrine.
+4. **What is a resolver at rest? — RESOLVED (Myk, 2026-07-12): the snapshot doctrine (above).**
+   A resolver at rest is a delta asserting the content-addressed bytes of a named, versioned,
+   coherent unit; the signature attests exactly the bytes that run; history is supersession
+   claims; diff is a lens, never a storage format. The design stage TRANSCRIBES this into the
+   SPEC §22 draft as a standalone subsection titled for reuse — §23 inherits it verbatim. One
+   residue stays open: **source vs built artifact** (what the operator can AUDIT vs what the
+   host can RUN — plausibly both, paired or superseding); settle that residue in the
+   transcription, nothing else is left to invent.
 5. Interaction with `writable` (§14): does a resolved field stay writable with an honest
    "round-trip not guaranteed" posture (recommended — writes hit the bucket, which is still
    real), or do rungs (c)/(d) default read-only like derived fields? Rung (e) is not a
@@ -235,8 +286,9 @@ declared in the schema at rest, not discovered at runtime:
 federation replay) and nothing pending needs more than (a) to exist. Rung (e) is DESIGN-ONLY
 until the DerivedFn conversation (question 2) happens in rhizomatic — describe it fully in the
 SPEC draft, build none of it (the §14-amendment's derived-fields bullet is the same wall). And
-answer question 4 (code at rest) as a standalone subsection written for reuse: §23 inherits that
-doctrine verbatim, so its title and scope should already say so.
+question 4 (code at rest) is already resolved — the snapshot doctrine — so the design stage
+transcribes, not invents: a standalone subsection written for reuse, its one open residue
+(source vs artifact) settled inline; §23 inherits it verbatim.
 
 ---
 
@@ -274,8 +326,11 @@ What must be designed before any code (the real work):
   subscription + the write verbs (`assert`/`clear`/`remove`) as **capability-scoped handles**,
   never raw store access. The renderer speaks lens; the host holds the keys. Pin this down
   first — everything else is downstream of it.
-- **What a renderer delta IS** — inherited from §22's resolver doctrine (source vs artifact vs
-  content-addressed ref; what the signature attests). One answer for both kinds of shipped code.
+- **What a renderer delta IS — RESOLVED by inheritance:** the snapshot doctrine (above §21,
+  landing in §22). A renderer at rest is a delta asserting the content-addressed bytes of a
+  whole, versioned unit; the signature attests exactly what mounts; history is supersession.
+  The source-vs-artifact residue is settled once, in §22's transcription — do not reopen it
+  here. One answer for both kinds of shipped code, by construction.
 - **Proven at push time, not hoped at runtime** — a renderer declares the schema(s) + version it
   consumes; the door checks that declaration against the registered surface (the
   SurfaceGenerator seam, §17, is the natural anchor) and REFUSES a mismatch. Pin down the exact
@@ -327,6 +382,10 @@ deliberate act. That act is **promotion**, and it comes in two distinct strength
 And maybe this is not a feature but **the default workflow**: everything remote-authored lands
 in quarantine first, runs there, and blessing is always a promotion out of it — trust as a
 pipeline with a visible staging area, instead of a boolean flipped in the dark.
+
+The snapshot doctrine (above §21) is load-bearing here: the thing on probation is a fixed,
+content-addressed, author-attested artifact — not a swarm of fragments that might resolve
+differently tomorrow. Quarantine judges a snapshot; promotion promotes a snapshot.
 
 Design questions:
 
