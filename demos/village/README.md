@@ -256,7 +256,8 @@ _(one entry per PR that grew the village; newest last)_
   the demo does — and confirms the grown store answers its own `Grove` schema immediately,
   registers itself in `homes/peers.json`, and one pull lands its facts in the almanac's
   ground. Joining the village is running a command, not editing the village.
-- **CLEARING IS RETRACTION (SPEC §14, PR #73)** (phase20.mjs, 3/3): two residents keep a shared
+- **CLEARING IS RETRACTION (SPEC §14, PR #73)** (phase20.mjs, 3/3 twice — re-runnable: the act
+  resets its own commons stage, genesis re-lands): two residents keep a shared
   `Board` on the commons — `notes` unions every voice, `headline` is latest-wins. Wren withdraws
   their OWN note and miles's still stands: retract-your-own is scoped, a clear never touches
   another author's claim (to keep others out of a view you narrow the Policy, not the ground).

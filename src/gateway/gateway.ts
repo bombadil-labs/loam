@@ -1021,18 +1021,17 @@ export class Gateway {
     if (fields.length === 0) {
       throw new Error(`clear of ${entity} names no fields to retract`);
     }
-    const def = this.def(name); // also refuses an unknown schema
-    // Only fields the schema resolves are clearable — the same surface the assert door offers.
-    // A typo names no bucket; refuse it rather than no-op, since a silent no-op reads as a
-    // successful clear when nothing was cleared.
-    for (const field of fields) {
-      if (!def.schema.props.has(field)) {
-        throw new Error(`schema ${name} has no field "${field}" to clear`);
-      }
-    }
+    this.def(name); // refuses an unknown schema; each DOOR refuses an unknown field against the
+    // version it addressed (latest for GraphQL, the pinned version for REST) — so this stays lens-
+    // agnostic and never throws on a field an older version named that the latest lens dropped
+    // (its contributions are still real on the ground). A field with no bucket simply clears nothing.
     const author = authorForSeed(seed);
     const hview = this.gather(name, entity);
     // The caller's own, still-surviving contributions to the named buckets — the deltas to negate.
+    // The `claims.author === author` filter is the SINGLE load-bearing check of the retract-your-own
+    // invariant: `append` only proves the negation's author holds write standing, not that the
+    // target is theirs — so a future refactor must never loosen this into negating a foreign delta.
+    // (`claims.author` is signature-bound by verifyDelta at append, not self-assertable.)
     const targets = new Set<string>();
     for (const field of fields) {
       for (const entry of hview.props.get(field) ?? []) {

@@ -44,10 +44,14 @@ bucket resolved per-Policy. There is now a way through the surface to **remove**
 6. [x] **PR + SPEC migration** — SPEC §14 written (built core + the retract-your-own decision +
    rationale + honest limitations), Provenance #73; TODO §14 trimmed to the now-UNBLOCKED per-Policy
    verb amendment; README + village ledger updated.
-7. [ ] **Review** — one careful correctness pass (auth/standing; clear never touches a foreign delta;
-   pinned/latest version-skew on the REST DELETE).
-8. [x] **Village** — `phase20.mjs` (3/3): shared Board, retract-your-own scoped, REST DELETE →
-   absence → repopulate, pick → null. Ledger entry added.
-9. [ ] **Journal**.
+7. [x] **Review** — one correctness agent. Caught a **HIGH**: the authenticated REST door dropped the
+   DELETE body (my `replace_all` matched only the public door's indentation), so field-scoped clears
+   became clear-all — masked by a single-field test fixture. Fixed + a two-field discriminating test.
+   Also: moved unknown-field refusal to the doors (fixes a pinned/latest version-skew throw); added a
+   load-bearing comment on the `claims.author === author` retract-your-own check; SPEC note on
+   whole-delta retraction. 465 green.
+8. [x] **Village** — `phase20.mjs` (3/3 twice, re-runnable): shared Board, retract-your-own scoped,
+   REST DELETE → absence → repopulate, pick → null. Ledger entry added.
+9. [x] **Journal**.
 
-_Left off: open PR #73, run the review agent, then journal._
+_Left off: PR #73 pushed, CI pending. **NOT merging** — the merge guardrail needs Myk to name it._

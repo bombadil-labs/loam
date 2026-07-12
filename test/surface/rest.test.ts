@@ -374,6 +374,24 @@ describe("retraction: DELETE clears your own, in agreement with GraphQL clear (Â
     expect((viaGql.body as { data: { plant: { height: number } } }).data.plant.height).toBe(30);
   });
 
+  it("a field-scoped DELETE honors its body: clearing one field leaves the writer's others", async () => {
+    // the writer contributes TWO distinct fields in one shot, then clears ONLY height
+    await rest(
+      `/rest/v1/Plant/${encodeURIComponent(FERN)}`,
+      { method: "POST", body: JSON.stringify({ height: 66, watered: true }) },
+      "writer-token",
+    );
+    const del = await rest(
+      `/rest/v1/Plant/${encodeURIComponent(FERN)}`,
+      { method: "DELETE", body: JSON.stringify(["height"]) },
+      "writer-token",
+    );
+    expect(del.status).toBe(200);
+    const after = (await del.json()) as { view: { height: number; watered: boolean } };
+    expect(after.view.height).toBe(30); // height retracted â†’ the operator's reading survives
+    expect(after.view.watered).toBe(true); // watered was NOT named, so it stands (not a clear-all)
+  });
+
   it("a DELETE with an empty body clears every prop the writer contributed", async () => {
     await rest(
       `/rest/v1/Plant/${encodeURIComponent(FERN)}`,

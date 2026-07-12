@@ -556,6 +556,11 @@ already-cleared field adds nothing (its entries are already negated).
   still assert into any context; the store gathers and resolves it, because the ground is open and
   entities are unowned (§7, "authors, not owners"). A reader who wants a guarantee enforces it with a
   lens. Writability disciplines the surface; lenses discipline the truth.
+- **Retraction negates whole deltas.** Clearing a field negates the caller's contributing _deltas_,
+  not individual pointers. A single per-prop or `_claim` write is one delta per contribution, so this
+  is invisible in practice — but a hand-authored multi-pointer delta that contributes to a cleared
+  field AND carries an unrelated pointer is retracted whole. Author one delta per fact you may want to
+  withdraw independently (the surface's own writes already do).
 
 The write surface will grow richer per-Policy verbs — removing one specific value from a list,
 refusing "set the aggregate" on a `merge` as the category error it is, read-only derived fields, and

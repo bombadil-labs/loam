@@ -352,12 +352,15 @@ export function buildGqlSchema(
       },
       resolve: (_src, args: Record<string, unknown>, ctx: unknown) => {
         const actor = (ctx as { actor?: string } | undefined)?.actor;
-        return hooks.clear(
-          def.hyperschema.name,
-          args["entity"] as string,
-          args["fields"] as string[],
-          actor,
-        );
+        const fields = args["fields"] as string[];
+        // Refuse a typo against THIS lens's fields — a silent no-op would read as a successful
+        // clear when nothing was cleared. (REST does the same against its addressed version.)
+        for (const field of fields) {
+          if (!def.schema.props.has(field)) {
+            throw new Error(`schema ${def.hyperschema.name} has no field "${field}" to clear`);
+          }
+        }
+        return hooks.clear(def.hyperschema.name, args["entity"] as string, fields, actor);
       },
     };
 

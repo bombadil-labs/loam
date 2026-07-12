@@ -4,7 +4,17 @@
 // `clearBoard`, and the REST door's honest verb, DELETE. Retract-your-own is the whole reach: no
 // one's clear ever touches another's claim (to keep others out of a view you narrow the Policy).
 
-import { check, constitute, gql, openStore, opToken, registerHttp, summary, tok } from "./harness.mjs";
+import {
+  check,
+  constitute,
+  dropStore,
+  gql,
+  openStore,
+  opToken,
+  registerHttp,
+  summary,
+  tok,
+} from "./harness.mjs";
 
 const PICK = { pick: { order: { byTimestamp: "desc" } } };
 const ALL = { all: { order: { byTimestamp: "asc" } } };
@@ -30,6 +40,9 @@ const notesOf = (res) => res.body?.data?.board?.notes ?? null;
 
 let commons;
 try {
+  // A clean stage: this act writes to a shared board with wall-clock timestamps, so it resets its
+  // own store to stay deterministic and re-runnable (homes are disposable; genesis re-lands).
+  dropStore("commons");
   commons = await openStore("commons");
   // Standing (authors, not owners): the operator seats wren and miles as writers on the commons.
   await constitute(commons, ["wren", "miles"], Date.now());

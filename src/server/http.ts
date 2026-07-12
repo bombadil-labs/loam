@@ -541,7 +541,10 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         case "rest": {
           let body: string | undefined;
           try {
-            body = req.method === "POST" ? await readBody(req, maxBody) : undefined;
+            body =
+              req.method === "POST" || req.method === "DELETE"
+                ? await readBody(req, maxBody)
+                : undefined;
           } catch (err) {
             json(res, err instanceof BodyTooLarge ? 413 : 400, {
               errors: [err instanceof Error ? err.message : String(err)],
