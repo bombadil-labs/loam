@@ -1358,7 +1358,9 @@ expressiveness with zero substrate changes. The pleasant surprise recorded in th
 verbs never needed the value function — clear/remove act on the bucket and let resolution re-run —
 so a custom resolve costs predictability (write x, read f(x)), not mechanism, and Loam's §13
 posture already refuses to promise more. The item carries a purity ladder (bucket-pure →
-hyperview-scoped → store-querying → effectful) and seven open questions; the load-bearing one is
+hyperview-scoped → store-querying → effectful → synthetic, Myk's top rung: Schema properties with
+no hyperview analog at all — read-only by definition, and the point where the DerivedFn overlap
+becomes a design question) and seven open questions; the load-bearing one is
 that a resolver is CODE SHIPPED AS DELTAS, which is exactly the renderer question — answer it once
 in §21 and let §22 inherit the doctrine. That dependency is WHY resolvers go first.
 

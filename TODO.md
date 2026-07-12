@@ -91,6 +91,19 @@ declared in the schema at rest, not discovered at runtime:
   ground; two readers of the same deltas see different values. Philosophically admissible
   (lenses were never promised to agree — only the ground is shared) but it forfeits caching,
   reproducibility, and any federation story that replays views.
+- **(e) synthetic** — the top of the ladder (Myk, 2026-07-12): a Schema property with **no
+  analog in the HyperView at all**. No bucket, no Policy, no gather — `resolve` is the field's
+  entire existence, an arbitrary function the schema designer invents. The Schema stops being
+  only a resolution discipline over gathered ground and becomes, in part, a *program* whose
+  output happens to be shaped like a View. Strictly this is a second axis, not just a higher
+  rung — (a)–(d) grade what a resolver of an existing field may READ; (e) drops the requirement
+  that the field correspond to anything gathered — but it composes with the input rungs (a
+  synthetic field may still be bucket-… well, there is no bucket; hyperview-scoped, store-
+  querying, or effectful). Two consequences fall out immediately: a synthetic field is
+  **read-only by definition** (there is no ground to assert against or retract from — the
+  §14-amendment's derived-fields bullet arrives early, at the Loam layer), and it is where the
+  overlap with rhizomatic's **`DerivedFn`** stops being a naming question and becomes a design
+  question (open question 2 below is load-bearing, not hygiene).
 
 **Open questions for the design stage:**
 
@@ -98,9 +111,10 @@ declared in the schema at rest, not discovered at runtime:
    not a second resolution system beside it. One near-synonym here would violate the vocabulary
    rule; naming needs care.
 2. Relation to rhizomatic's **`DerivedFn`** — derived fields compute NEW values from other
-   fields; `resolve` re-represents THIS field's bucket. One concept or two? The §14-amendment
-   item already marks derived fields blocked on a rhizomatic conversation; don't fork the
-   vocabulary before that conversation happens.
+   fields; `resolve` re-represents THIS field's bucket; and rung (e) synthetics are new fields
+   with no bucket at all, which is DerivedFn territory by another road. One concept or two?
+   The §14-amendment item already marks derived fields blocked on a rhizomatic conversation;
+   don't fork the vocabulary before that conversation happens.
 3. Which rungs does v1 admit, and is the rung part of the signed schema definition (so a reader
    knows what kind of lens it is trusting)?
 4. **What is a resolver at rest?** It is code shipped as deltas — source, artifact, or
@@ -108,7 +122,8 @@ declared in the schema at rest, not discovered at runtime:
    question (§22); answer it once, here, and let renderers inherit the doctrine.
 5. Interaction with `writable` (§14): does a resolved field stay writable with an honest
    "round-trip not guaranteed" posture (recommended — writes hit the bucket, which is still
-   real), or do rungs (c)/(d) default read-only like derived fields?
+   real), or do rungs (c)/(d) default read-only like derived fields? Rung (e) is not a
+   question: no bucket, no write — the surface refuses with a reason.
 6. The caching/invalidation contract per rung — what does the gateway promise, and where does
    memoization live?
 7. Is the resolver part of the lens identity — does changing a resolver constitute a new schema
