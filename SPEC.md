@@ -9,7 +9,7 @@ schemas + a skill). Loam does not know what a "belief" is.
 Loam is built **on** [rhizomatic](https://github.com/bombadil-labs/rhizomatic)
 (`@bombadil/rhizomatic`), and — this is the load-bearing fact — **rhizomatic already provides most of
 what a naïve reading would call "the database": the object model, resolution, the self-hosting
-schema-schema, and the function substrate.** Loam is the _wrapper_ that makes that core a deployable,
+hyperschema-schema, and the function substrate.** Loam is the _wrapper_ that makes that core a deployable,
 GraphQL-fronted, persistent, multi-tenant, federatable server. Do not reinvent the core; build on it.
 
 ---

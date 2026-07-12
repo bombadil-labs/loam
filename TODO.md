@@ -20,7 +20,7 @@ SPEC §14 with a Provenance footer. (Vocabulary note: this predates rhizomatic 0
 cleanly under it — a **Policy** here is a single property's rule, exactly the new meaning; the
 resolution program as a whole is a **Schema**.)_
 
-Reading is `resolve : Policy → HView → View` (§4): a field's value is not stored, it is
+Reading is `resolve : Schema → HView → View` (§4): a field's value is not stored, it is
 COMPUTED per-property by its policy over a bucket of gathered deltas. Writing is the **dual**,
 and today does not know it — the mutation surface (§5) appends a `(subject/context, value)`
 delta uniformly, as if every field were a settable single slot, which is true only of `pick`.
@@ -63,7 +63,7 @@ construction, not by discipline.
   fallback, never a written value.
 - **expanded / relational** (an `expand`ed edge, §4) — _assert_ the **edge** to link; _retract_
   the edge to sever (the nested subtree drops from the view). You never write INTO the nested
-  entity's resolved value — that is its own policy over its own ground.
+  entity's resolved value — that is its own schema over its own ground.
 - **derived** (future resolve-time computed fields) — **read-only**: no backing assertion
   exists to write or retract.
 - **default** — **immutable** unless a field opts into a write discipline. The store learns;

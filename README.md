@@ -93,7 +93,7 @@ A served store exposes three surfaces per mount, behind a `Bearer` token:
 - **`POST /:mount/mcp`** — a minimal MCP JSON-RPC surface (`initialize`, `tools/list`,
   `tools/call`) exposing `loam_query`, `loam_mutate`, and `loam_register`.
 - **`POST /:mount/register`** — `{ schema: { name, alg?, body }, policy, roots, entity? }` →
-  `{ registered, entity }` (operator token only). The schema-schema mutation mechanism, served:
+  `{ registered, entity }` (operator token only). The hyperschema-schema mutation mechanism, served:
   the definition and its registration land as deltas, and the surface serves the new type
   immediately. Republishing at the same entity evolves it. (An endpoint rather than a GraphQL
   mutation because an empty store has no GraphQL surface to mutate through — this is how it
@@ -168,7 +168,7 @@ reopened store grows its surface back with no re-registration code.
 A schema is not configuration — it is DEFINED by deltas, like everything else. Registering a
 schema lands two of them:
 
-- a **definition** — rhizomatic's schema-schema claims (`publishSchemaClaims` shape: name, alg,
+- a **definition** — rhizomatic's hyperschema-schema claims (`publishSchemaClaims` shape: name, alg,
   and the body as canonical CBOR) filed at a schema entity, `schema:<Name>` by default;
 - a **registration** — a reference under `loam.registration`: a pointer to that entity, the
   policy as canonical JSON, and the roots. No schema body rides it.

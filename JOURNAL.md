@@ -1234,12 +1234,14 @@ untouched — a different, L2 concept the PR explicitly excluded. `npm run check
 Verification worth recording: the vocab change is provably semantics-neutral (rhizomatic's own
 `eval-resolve.json` vectors are byte-stable across the rename), so resolved Views don't move — only
 schema-definition delta addresses do. The tutorial boots clean and registers/resolves live on 0.3.0
-(all 16 arc lessons green headless), and the village rebuilds green across phases 0-16, 18, 19. One
-pre-existing village failure surfaced (phase17.3/17.4): phase12 files a future-dated "regret" bio on
-the commons and erases it only on the almanac, so when phase17's tab pulls the commons and writes its
-own real-time "waves" bio, a naive PICK-latest surfaces the future-dated regret. `git diff main`
-shows phase17's logic unchanged and resolution is byte-stable, so this fails identically on 0.2.0 —
-a latent demo timing bug, orthogonal to the vocab work, flagged as its own task.
+(all 16 arc lessons green headless), and the village rebuilds green across **all phases 0-19**. A
+pre-existing village failure surfaced along the way (phase17.3/17.4): phase12 files a future-dated
+"regret" bio on the commons and erases it only on the almanac (per-instance erasure, §11), so when
+phase17's tab pulls the commons and writes its own real-time "waves" bio, a naive PICK-latest
+surfaced the future-dated regret. `git diff main` showed phase17's logic unchanged and resolution is
+byte-stable, so it failed identically on 0.2.0 — a latent demo timing bug, orthogonal to the vocab
+work. Fixed in the same overhaul (Myk routed it back): the commons' current bio is now dated above
+the fixture, and the village is green end to end.
 
 Learnings: (1) an ordered word-boundary swap (rename the outgoing name first) avoids the classic
 A→B→A collision without a sentinel — `\bPolicy\b`→`Schema` can't touch `PropPolicy`/`MaskPolicy`
