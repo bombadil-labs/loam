@@ -937,8 +937,16 @@ already-current store adds nothing.
 
 **Version detection is by SHAPE** — a step `applies` when the old shape it migrates is present —
 and steps run in declared order, so a store several versions back is carried forward one step at a
-time. This is deliberately naive (a per-store version marker is a future optimization); the chain
-composes, so the cost of "many versions back" is only more steps, never a special case.
+time. This works because a delta's version already lives in its bytes: the vocabulary a structural
+delta speaks (`rhizomatic.hyperschema.*` vs the old `rhizomatic.schema.*`) IS its format, so no
+per-delta version stamp is needed (one would only pollute the content address with metadata the
+bytes already carry). The load-bearing discipline: **every breaking change must give its changed
+deltas a shape unambiguously distinct from all prior versions** — then shape-detection cannot
+misfire. Almost no delta kinds ever change across a version (a `subject/value` data claim is
+byte-identical), so the set a migration must recognize is small and self-labelling. This is
+deliberately naive (a per-store version marker is a possible future fast-path, but in a federating
+store a lagging peer can always deliver an old-shape delta after the fact, so shape-detection stays
+the backstop regardless); the chain composes, so "many versions back" costs only more steps.
 
 The surface: a library `migrate(deltas, { seed }) → { deltas, report }` over the `MIGRATIONS` chain,
 and a CLI `loam migrate <offer> [--out <file>]` that re-expresses a frozen offer (a store's export or

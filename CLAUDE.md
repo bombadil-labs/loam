@@ -101,6 +101,13 @@ update `CURRENT_WORK.md`** so the next run resumes exactly here.
   and records a reason — never a silent rewrite. Steps are shape-detected and composable, so a store
   several versions back is carried forward one step at a time (naive is fine; optimize later). See
   SPEC §20.
+  - **Corollary — the changed deltas must be shape-distinguishable.** Because migrations detect by
+    shape, every breaking change MUST give its changed deltas a shape unambiguously distinct from all
+    prior versions — the version lives IN the vocabulary (0.3 did it: `rhizomatic.hyperschema.*` can
+    never be confused with `rhizomatic.schema.*`). That is what keeps shape-detection sufficient and
+    makes a per-delta version stamp unnecessary (it would only pollute content addresses with metadata
+    the bytes already carry). Almost no delta kinds ever change between versions — only the structural
+    ones — and those few carry their version in their own roles.
 
 ## Standing decisions
 
