@@ -170,6 +170,17 @@ bucket-pure resolver observes nothing a View does not. There is no separate inva
 build: a resolver at rung (a) folds into the existing View memoization, and the resolver's content
 address is already in the key because it is already in the version.
 
+**Erasure invalidates by construction (§11) — make it explicit.** "The bucket recomputes" includes a
+fact that is FORGOTTEN, not only one that changes. When a delta in the bucket is tombstoned or purged,
+it drops out of the selected-delta-set, so the set's hash changes and the memo MISSES: the resolver
+re-runs over the surviving ground, and its old value — distilled from bytes that no longer exist — can
+never be served from cache. This is not a special case bolted onto invalidation; it falls straight out
+of keying on the delta-set hash. It is also non-negotiable: a resolver whose cache outlived an erasure
+would be an erasure-EVASION channel, handing back a value computed from forgotten bytes. The rung-(a)
+contract therefore promises what §11 requires — the cache forgets exactly when the ground does, and a
+memoized resolver value is proven, at implementation time, to disappear when any delta it was computed
+over is erased.
+
 **Higher rungs declare their invalidation SCOPE, and none are built in v1:**
 
 - (b) hyperview-scoped → invalidation scope is the ENTITY (the value depends on sibling buckets, so any
