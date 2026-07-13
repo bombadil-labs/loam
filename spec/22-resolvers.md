@@ -208,7 +208,7 @@ version cannot disagree about what the door speaks), and the surface generators 
 they read the Policy today. This keeps the §17 invariant intact — two doors over one registration
 agree, `_hex` for `_hex` — even when the field's value is a computation the algebra never named.
 
-**Provenance.** Design-stage draft — pending Myk's review and the implementing PR (rung (a) only);
+**Provenance.** Design accepted (Myk, 2026-07-13); pending the implementing PR (rung (a) only);
 rides §21. Not landed. Realizes ADLC ticket T3; describes the full purity ladder (a)–(e) and builds
 none of it yet. Questions 1–5 and 7 arrive DECIDED (Myk, 2026-07-12/13); questions 6 (caching) and 8
 (output types) are carried here as reasoned recommendations for Myk's review, not settled law.
