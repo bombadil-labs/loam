@@ -6,9 +6,14 @@
 // Write-through, no snapshot tier: localStorage is synchronous, so durability is the same
 // instant as acceptance. Quota is this disk's edge — a QuotaExceededError mid-batch removes
 // the keys the batch already wrote, then rejects the whole batch, atomically. Reads recompute
-// every id and verify every signature: a row edited in devtools is corruption, refused,
-// exactly as a tampered sqlite row is. The seed lives at its own key (`loam:<store>:seed`),
-// never in the delta set — no export of deltas can carry key material by accident.
+// every id and verify every signature; a row edited in devtools no longer recomputes, but it does
+// not brick the read (SPEC §25) — it is SET ASIDE into the quarantine and the read PROCEEDS, so
+// one poked key never darkens the whole tab. The prefix is a SHARED namespace on a shared origin,
+// so a key under it whose suffix is not a delta id (and is not the seed) was written by someone
+// else: it is FOREIGN, quarantined and ignored on the read path, never mistaken for corruption
+// that aborts the boot. The seed lives at its own key (`loam:<store>:seed`), never in the delta
+// set — no export of deltas can carry key material by accident. What quarantine holds is
+// surfaced and settled by `loam repair`.
 
 /* eslint-disable @typescript-eslint/require-await -- the async keyword is load-bearing: it
    turns every synchronous throw (quota, a closed handle, a refused delta) into the rejected
@@ -23,6 +28,13 @@ import {
 } from "@bombadil/rhizomatic";
 import type { StoreBackend } from "./backend.js";
 import { canonicalDelta } from "./canon.js";
+import {
+  admit,
+  isDeltaId,
+  previewOf,
+  type QuarantinedRow,
+  type RepairableBackend,
+} from "./quarantine.js";
 
 // The slice of the DOM Storage interface the driver stands on — injectable, so the driver
 // runs against the page's localStorage, a test shim, or any synchronous key-value witness.
@@ -43,10 +55,13 @@ interface WireRow {
   readonly sig?: string;
 }
 
-export class LocalStorageBackend implements StoreBackend {
+export class LocalStorageBackend implements StoreBackend, RepairableBackend {
   private readonly prefix: string;
   private readonly storage: StorageLike;
   private closed = false;
+  // Rows the most recent read set aside (SPEC §25): recomputed on every deltasSince from the
+  // origin's own keys, never a stored countdown. `loam repair` reads this back.
+  private lastQuarantine: QuarantinedRow[] = [];
 
   constructor(
     readonly store: string,
@@ -74,8 +89,10 @@ export class LocalStorageBackend implements StoreBackend {
     return this.prefix + id;
   }
 
-  // Every delta key this store holds, snapshotted before any read or write walks them.
-  private deltaKeys(): string[] {
+  // Every key under this store's owned prefix except the seed, snapshotted before any read or
+  // write walks them. A key here is EITHER one of our deltas (its suffix a delta id) or a foreign
+  // key someone else landed under the shared prefix — deltasSince tells them apart structurally.
+  private ownedKeys(): string[] {
     const keys: string[] = [];
     for (let i = 0; i < this.storage.length; i++) {
       const key = this.storage.key(i);
@@ -84,6 +101,12 @@ export class LocalStorageBackend implements StoreBackend {
       }
     }
     return keys;
+  }
+
+  // Only the delta keys — those whose suffix is a delta id. Append and purge walk these; a
+  // foreign key under the prefix is never a delta this driver wrote, so they never touch it.
+  private deltaKeys(): string[] {
+    return this.ownedKeys().filter((key) => isDeltaId(key.slice(this.prefix.length)));
   }
 
   async append(deltas: Iterable<Delta>): Promise<number> {
@@ -124,35 +147,61 @@ export class LocalStorageBackend implements StoreBackend {
   async deltasSince(knownIds: ReadonlySet<string>): Promise<Delta[]> {
     this.assertOpen();
     const out: Delta[] = [];
-    for (const key of this.deltaKeys()) {
-      const keyedId = key.slice(this.prefix.length);
+    const quarantine: QuarantinedRow[] = [];
+    for (const key of this.ownedKeys()) {
+      const suffix = key.slice(this.prefix.length);
       const raw = this.storage.getItem(key);
       if (raw === null) continue; // removed between snapshot and read — nothing to say
+      // A key whose suffix is not a delta id was never one of ours: foreign, set aside so repair
+      // can see it, ignored on the read path. This is the tutorial's `loam:tutorial:ui:pins`
+      // brick, disarmed — a UI writer's key under the shared prefix no longer aborts boot.
+      if (!isDeltaId(suffix)) {
+        quarantine.push({ key, reason: "foreign-key", preview: previewOf(raw) });
+        continue;
+      }
       let row: WireRow;
-      let claims: Delta["claims"];
       try {
         row = JSON.parse(raw) as WireRow;
-        claims = parseClaims(row.claims);
       } catch {
-        throw new Error(`store corruption: row ${keyedId} is not a delta — refusing to read`);
+        quarantine.push({ key, reason: "unparseable", preview: previewOf(raw) });
+        continue;
       }
-      if (computeId(claims) !== row.id || row.id !== keyedId) {
-        throw new Error(
-          `store corruption: row ${keyedId} does not recompute from its claims — refusing to read`,
-        );
+      // The suffix is the id the row is FILED under; row.id is the id the row's own bytes CLAIM.
+      // Admission recomputes from the claims and requires both to agree — a row relocated to a
+      // key that lies about its id is id-mismatch, quarantined, never laundered by relocation.
+      const verdict = admit(suffix, row.id, row.claims, row.sig, {
+        parseClaims,
+        computeId,
+        makeDelta,
+        verifyDelta,
+      });
+      if (!verdict.ok) {
+        quarantine.push({ key, reason: verdict.reason, preview: previewOf(raw) });
+        continue;
       }
-      const delta = makeDelta(claims, row.sig);
-      // The signature is part of the row's integrity: a sig that does not verify is
-      // corruption, refused like any other — never handed onward as healthy data.
-      if (verifyDelta(delta) === "invalid") {
-        throw new Error(
-          `store corruption: row ${keyedId} carries a signature that does not verify — refusing to read`,
-        );
-      }
-      if (knownIds.has(delta.id)) continue;
-      out.push(delta);
+      if (knownIds.has(verdict.delta.id)) continue;
+      out.push(verdict.delta);
     }
+    this.lastQuarantine = quarantine;
     return out;
+  }
+
+  // The rows the last read set aside (SPEC §25) — recomputed each deltasSince, never stored.
+  async quarantine(): Promise<QuarantinedRow[]> {
+    this.assertOpen();
+    return this.lastQuarantine;
+  }
+
+  // Remove a quarantined row's bytes from the origin (repair discard) — the same `removeItem`
+  // the tutorial's healStrayKeys reached for, now driven deliberately per key rather than swept
+  // blindly on boot. A quarantined row is never a lawful fact, so this is mechanical removal, not
+  // an erasure (§11). The key is the full storage key `loam repair list` reported.
+  async discardRow(key: string): Promise<boolean> {
+    this.assertOpen();
+    if (this.storage.getItem(key) === null) return false;
+    this.storage.removeItem(key);
+    this.lastQuarantine = this.lastQuarantine.filter((r) => r.key !== key);
+    return true;
   }
 
   async purge(ids: Iterable<string>): Promise<number> {

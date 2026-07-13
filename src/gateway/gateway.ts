@@ -40,10 +40,11 @@ import {
 } from "@bombadil/rhizomatic";
 import { graphql, parse, subscribe, type ExecutionResult, type GraphQLSchema } from "graphql";
 import type { StoreBackend } from "../store/backend.js";
+import { isRepairable } from "../store/quarantine.js";
 import { authorize } from "./accounts.js";
 import { ERASE_ENTITY, eraseClaims, eraseDefect, isTombstone, readTombstones } from "./erase.js";
 import { Channel } from "./channel.js";
-import type { Genesis } from "./genesis.js";
+import { STORE_ENTITY, operatorMarkerClaims, type Genesis } from "./genesis.js";
 import {
   buildGqlSchema,
   type ClaimPointerSpec,
@@ -214,12 +215,33 @@ export class Gateway {
 
   // Open a gateway over a backend: replay everything the store holds, then start listening.
   // The raw subscription attaches AFTER replay, so boot never writes the store back to itself.
+  //
+  // Boot DEGRADES, it does not abort (SPEC §25): a row the driver could not admit is quarantined
+  // by the read, so replay only ever sees admissible deltas, and a store missing some rows is a
+  // legal, younger store (union tolerates absence). The ONE loud exception is the constitutional
+  // core — the operator marker at `loam:store`/`loam.operator` that says who governs this store.
+  // If a governed store's own read quarantined that marker, the store cannot know its own
+  // constitution, and that is a failure the operator must see, not one to boot past.
   static async open(backend: StoreBackend, options: GatewayOptions = {}): Promise<Gateway> {
     const reactor = new Reactor();
     for (const d of await backend.deltasSince(new Set())) {
       const result = reactor.ingest(d);
       if (result.status === "rejected") {
         throw new Error(`replay: the store handed back an unacceptable delta ${d.id}`);
+      }
+    }
+    if (options.seed !== undefined && isRepairable(backend)) {
+      // The marker is a deterministic, content-addressed delta (genesis.ts), so its id is known
+      // from the operator alone. Quarantined (present but unreadable) is the loud case; simply
+      // ABSENT is fine — a fresh store has not been booted yet, and boot() will plant it.
+      const markerId = computeId(operatorMarkerClaims(authorForSeed(options.seed)));
+      const quarantined = await backend.quarantine();
+      if (quarantined.some((row) => row.key === markerId || row.key.endsWith(markerId))) {
+        throw new Error(
+          `constitutional core unreadable: the operator marker at ${STORE_ENTITY} was set aside ` +
+            `by boot — the store cannot know who governs it. Resolve it with \`loam repair\` ` +
+            `(re-admit if transient, else this store's genesis must be replanted).`,
+        );
       }
     }
     const gateway = new Gateway(backend, reactor, options);

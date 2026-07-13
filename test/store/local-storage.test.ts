@@ -120,22 +120,65 @@ describe("LocalStorageBackend: quota is this disk's edge", () => {
   });
 });
 
-describe("LocalStorageBackend: a row edited in devtools is corruption", () => {
-  it("unparseable bytes under the delta prefix refuse the read", async () => {
+describe("LocalStorageBackend: a poked row quarantines, it does not brick the tab (SPEC §25)", () => {
+  // A key whose suffix is not a delta id was never ours — the tutorial's `loam:tutorial:ui:pins`
+  // brick. Under the shared prefix it is FOREIGN: set aside so repair can see it, ignored on the
+  // read path, never mistaken for corruption that aborts boot.
+  it("a foreign key under the prefix is quarantined, and every good fact still resolves", async () => {
     const origin = new MemStorage();
-    origin.setItem("loam:garden:deadbeef", "not json at all");
     const store = new LocalStorageBackend("garden", origin);
-    await expect(store.deltasSince(new Set())).rejects.toThrow(/corruption/);
+    await store.append([d1, d3]);
+    origin.setItem("loam:garden:ui:pins", JSON.stringify(["fern", "moss"])); // an old build's UI key
+    // The store BOOTS: both good facts resolve; the stray key contributes nothing.
+    expect(ids(await store.deltasSince(new Set()))).toEqual(ids([d1, d3]));
+    const pen = await store.quarantine();
+    expect(pen).toHaveLength(1);
+    expect(pen[0]!.reason).toBe("foreign-key");
+    expect(pen[0]!.key).toBe("loam:garden:ui:pins");
+    // and repair discard sweeps it deliberately — the removeItem healStrayKeys reached for
+    expect(await store.discardRow("loam:garden:ui:pins")).toBe(true);
+    expect(origin.getItem("loam:garden:ui:pins")).toBeNull();
     await store.close();
   });
 
-  it("a row filed under a key that is not its id refuses the read", async () => {
+  it("unparseable bytes under a delta-shaped key are set aside, not fatal", async () => {
+    const origin = new MemStorage();
+    const store = new LocalStorageBackend("garden", origin);
+    await store.append([d1]);
+    // A key whose suffix IS a delta id, but whose value is garbage a devtools edit left.
+    origin.setItem(`loam:garden:${d2.id}`, "not json at all");
+    expect(ids(await store.deltasSince(new Set()))).toEqual([d1.id]); // d1 still resolves
+    const pen = await store.quarantine();
+    expect(pen.map((r) => r.reason)).toEqual(["unparseable"]);
+    await store.close();
+  });
+
+  it("a row filed under a key that is not its id is set aside, never laundered by relocation", async () => {
     const origin = new MemStorage();
     const store = new LocalStorageBackend("garden", origin);
     await store.append([d1]);
     // Copy d1's honest row to a key claiming a different id — laundering by relocation.
     origin.setItem(`loam:garden:${d2.id}`, origin.getItem(`loam:garden:${d1.id}`)!);
-    await expect(store.deltasSince(new Set())).rejects.toThrow(/corruption/);
+    // The honest d1 still resolves; the relocated copy quarantines rather than becoming d2.
+    expect(ids(await store.deltasSince(new Set()))).toEqual([d1.id]);
+    const pen = await store.quarantine();
+    expect(pen.map((r) => r.reason)).toEqual(["id-mismatch"]);
+    expect(pen[0]!.key).toBe(`loam:garden:${d2.id}`);
+    await store.close();
+  });
+
+  it("re-admits a row whose transient cause cleared, without reconstructing bytes", async () => {
+    const origin = new MemStorage();
+    const store = new LocalStorageBackend("garden", origin);
+    await store.append([d1]);
+    // Damage d1's row (a torn write), then let the correct bytes re-sync in place.
+    const good = origin.getItem(`loam:garden:${d1.id}`)!;
+    origin.setItem(`loam:garden:${d1.id}`, "torn");
+    expect(await store.deltasSince(new Set())).toEqual([]); // quarantined, tab still boots
+    expect((await store.quarantine()).map((r) => r.reason)).toEqual(["unparseable"]);
+    origin.setItem(`loam:garden:${d1.id}`, good); // the delta re-synced, bytes intact
+    expect(ids(await store.deltasSince(new Set()))).toEqual([d1.id]); // back in the ground
+    expect(await store.quarantine()).toEqual([]);
     await store.close();
   });
 });
