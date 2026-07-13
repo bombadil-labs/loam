@@ -1,0 +1,163 @@
+## 21. Schema identity & versioning — the lens ladder
+
+The whole promise of the HyperSchema/Schema symmetry (§4) is that one gather program can carry many
+readings: `HyperSchema : HyperView :: Schema : View`, and just as one HyperView answers many Views,
+one HyperSchema should answer many Schemas. Today it does not. A registration files under
+`registration:<schemaEntity>`, latest wins (`registrationEntity` in `src/gateway/registration.ts`),
+and the registry refuses a duplicate hyperschema name — so `HyperSchema : Schema : roots` binds
+**1:1:1** by construction. Register a second lens over a `Film` gather program and it does not join
+the first; it EVICTS it. The symmetry is promised in the types and denied at the door.
+
+That knot has to come undone before anything stands on top of it. A resolver (§22) needs a schema
+identity it can ride while the schema goes on evolving; a renderer (§23) needs one it can PIN so that
+"pinned to schema v3, works forever" means something. Naming, multiplying, pinning — the registration
+model gives a Schema none of the three, because it gives a Schema no identity of its own at all. This
+section gives it one, and reorganizes the pieces into a ladder:
+
+> **HyperSchema —many→ Schema —many→ VersionedSchema —many→ API.**
+
+Each rung is a real, addressable thing; each arrow is genuinely many. A HyperSchema (the gather
+program) carries many living Schemas; a living Schema throws off many VersionedSchemas as it mutates;
+a VersionedSchema is served through many APIs (GraphQL, REST, whatever a §17 generator derives). What
+follows walks the ladder from the bottom, because each rung explains the one above it.
+
+### The Schema becomes a first-class entity
+
+**A Schema is a domain node like any other** — its own id, its own deltas, resolved from the ground by
+the Schema Schema exactly as a `Film` is resolved from the ground by the film hyperschema. The
+hyperschema half of a registration already lives this way: the definition is a REFERENCE, planted at
+its own entity as `rhizomatic.hyperschema.*` claims and read back by `loadSchema`, while the
+registration merely points at it. Half the decoupling road was already paved. What was never paved is
+the other half: the Schema travels as a CARRIER — inline canonical JSON stuffed into the registration
+delta (`role: "schema"` in `registrationClaims`) — so it has no identity apart from the registration
+that quotes it. The design closes the asymmetry by lifting the Schema up beside the HyperSchema: both
+are entities, both are published as deltas, both are resolved, neither is a passenger of the binding
+that serves them.
+
+**Registration is demoted to a BINDING.** Once the Schema is an entity, a registration stops being the
+Schema's home and becomes what it always should have been: a small, three-part declaration — *this
+hyperschema, this schema, these roots, served here.* It names two entities and adds a liveness
+declaration; it carries no definition of either. A binding is cheap and plural by nature: binding a
+second Schema over a hyperschema is another binding delta, not a fight over one `registration:<…>`
+slot. The eviction goes away because the thing that evicted was the identity living inside the
+binding.
+
+### What names a lens
+
+If a Schema is its own entity, it needs a name that is its own — not borrowed from the hyperschema it
+reads, because the entire point is that many of them read the same hyperschema. **Schema names are
+semantic, and a human or an AI sets them.** Over a `Film` HyperSchema you might define a `Film`
+Schema — the broad public reading — and a `FilmClassic` Schema that surfaces only the archival fields,
+and the two evolve on their own clocks forever. The name says what the reading is FOR; it is content,
+authored like any other fact, not a coordinate the system hands out.
+
+**The registry lifts the old 1:1 by keying on `(hyperschema, schema-name)`** instead of on the
+hyperschema alone. That is the whole unlock: `Film` and `FilmClassic` are distinct keys over one
+gather program, so they coexist instead of colliding, and the duplicate-name refusal narrows from
+"one lens per hyperschema" to its honest form — "one LIVING lens per name per hyperschema," which is
+just what it means for a name to name something. Two operators may still bind different Schemas under
+the same pair on their own stores; that is federation, resolved by whose law binds (§7), not a
+registry collision.
+
+**The reified snapshot is that semantic name plus a short content-hash of the frozen bytes —
+`FilmClassic@a1b2c3`.** Loam is eventually-consistent and grow-only: the living `FilmClassic` Schema
+is a view computed from deltas, so a mutation of it does not overwrite anything — it produces a NEW
+snapshot with new bytes and therefore a new hash. The semantic name is the handle a person reaches
+for; the `@hash` suffix is what makes each frozen state unambiguous when the same name has meant
+several things over time. `FilmClassic` is the living lens; `FilmClassic@a1b2c3` is one photograph of
+it. This is the same discipline §17 already runs one level down — a version's TRUE NAME is a content
+address, the human-friendly alias is the convenience — pulled up to the Schema itself and given a
+name it can wear in a URL.
+
+### The VersionedSchema is a distinct snapshot entity
+
+A version is **not** the binding delta. `readRegistrationVersions` today pins each surviving
+registration by its content address, which was the best a Schema-with-no-identity could do — but it
+conflates two questions that the ladder must keep apart: *what is this frozen reading* and *is it
+being served.* A **VersionedSchema is a snapshot entity in its own right** — the canonical JSON of the
+resolved Schema at a moment, frozen and content-addressed, standing whether or not any door serves it.
+A version can exist, be named (`name@hash`), and be pinned WITHOUT being bound anywhere. That
+separation is load-bearing for the rungs above: a renderer pins a VersionedSchema so it keeps
+resolving against a fixed reading even after the living Schema has moved on and even if the operator
+has un-bound that version from every door.
+
+**Its shape is the frozen canonical JSON, and its wiring is supersession, not replacement.** The
+snapshot is literally the bytes the Schema Schema resolved to, run through rhizomatic's canonical JSON
+profile (so `parse∘serialize` is identity and the hash is stable across peers). Snapshots do not
+overwrite each other; a newer snapshot of a living Schema is a fresh entity, and the lineage from one
+to the next is a `supersededBy` link (§20's instrument, reused) — the same grow-only chain that lets a
+migration retire a delta without erasing it lets a Schema's history read as a sequence of photographs,
+each pointing forward to the one that replaced it, none destroyed. Pin any of them and it answers
+forever; the ground remembers all of them.
+
+### Roots are liveness, and they ride the binding
+
+**Roots declare which entities stay hot — they are not a scope, and they belong to neither the Schema
+nor its versions.** A root says "keep this entity materialized and ready to answer"; it is an
+operational fact about a serving deployment, and it changes when the deployment's concerns change, not
+when the reading changes. So roots ride the **binding** — the registration-as-binding that says
+"served here" — and never travel with the Schema entity or freeze into a VersionedSchema. Two
+deployments may serve the very same VersionedSchema with different roots hot without the reading
+diverging by a single byte; a VersionedSchema stays a pure statement of *how to read*, uncontaminated
+by *what to keep warm*. (This is the same instinct as §14's writability: discipline that is not
+resolution may be local to a deployment, because resolution must stay a universal function of the
+data.)
+
+### The naming pass — expunge the schema/hyperschema blur
+
+The 0.3.0 realignment expunged the schema/hyperschema conflation at the delta level
+(`rhizomatic.hyperschema.*`), but it never reached Loam's own ids and prose. The hyperschema
+definition entity still defaults to `schema:<Name>` (`schemaEntityFor`), and comments throughout call
+it the "schema entity" — for what is, precisely, the HYPERSCHEMA. Now that Schema is a first-class
+citizen with its own entity, that blur is not just untidy; it is a name collision waiting to bite. The
+implementing PR **renames the hyperschema's entity prefix off `schema:`** so the gather program and
+the reading no longer fight over one namespace.
+
+Two disciplines govern that rename, both non-negotiable:
+
+- **It is a breaking on-wire change, so it ships its §20 migration in the same PR.** The `schema:<Name>`
+  entity id is baked into registration deltas that older stores already hold; a rename that left them
+  behind would open the store and lose the surface. The migration re-signs each affected delta into
+  the new form at its original timestamp and negates the old with a `supersededBy` link and a reason —
+  supersede, never rewrite.
+- **The renamed ids must be shape-distinguishable from the old form** (the standing corollary): the new
+  prefix cannot be confusable with `schema:<anything>`, so shape-detection can tell a migrated store
+  from an un-migrated one without a per-delta version stamp. The version lives in the vocabulary, as it
+  did for `rhizomatic.hyperschema.*`.
+
+**One mismatch we record but do not touch:** rhizomatic's own API spells these `loadSchema` and
+`publishSchemaClaims` — and they load and publish HYPERSCHEMAS. That naming is frozen substrate (§2);
+correcting it is a conversation in that repo, never a Loam workaround or a forked vocabulary. We note
+the seam in prose and route around it: in Loam's ids and comments the hyperschema is the hyperschema,
+and where we must call rhizomatic's `loadSchema` we do so knowing its name lags its meaning.
+
+### How the upper rungs stand on this
+
+The ladder exists to be climbed, and §22–§23 are why it must hold weight:
+
+- **A resolver (§22) rides the living Schema, and is part of what a VersionedSchema freezes.** Resolution
+  is the Schema's job — the Schema Schema plus the per-property Policies ARE the resolver — so a
+  resolver is not a fourth rung; it is the Schema in motion. When a snapshot is taken, the resolution
+  discipline it froze travels inside the VersionedSchema's canonical bytes: pin the version and you have
+  pinned exactly how it resolves. That is what makes a pinned reading reproducible rather than merely
+  labelled.
+- **A renderer (§23) PINS a VersionedSchema.** "Renderer pinned to schema v3 keeps working forever" is
+  precisely the guarantee this ladder was built to provide: the renderer names a `name@hash`, the
+  snapshot is content-addressed and grow-only, the living Schema may evolve or be re-bound or un-bound
+  entirely, and the pinned reading still answers because a content address cannot be unsaid. Without the
+  snapshot rung there is nothing stable to pin; with it, pinning is just naming a hash. The renderer's
+  durability is not a feature it implements — it is a property it inherits from the rung below.
+
+**Boundaries, in the §13 register.** A VersionedSchema fixes a READING, not a promise about the ground:
+the data it resolves goes on growing, so "pinned" means the lens is stable, not that the answer is
+frozen. A binding is serving discipline, not authority: binding a Schema at a door never widens what
+that door may lawfully answer (§17), and un-binding a version stops serving it without erasing it. And
+a Schema is an entity in an open store, so a foreign peer may hold its own Schema under the same
+`(hyperschema, name)` pair — whose reading binds is a question of law (§7), the same as every other
+delta; the registry keys locally, and federation resolves globally.
+
+**Provenance.** Design-stage draft — pending Myk's review and the implementing PR (which ships the
+`schema:`-prefix rename migration, §20, and the §14 immutable-by-default flip in the same wave). Not
+yet landed: no implementation exists behind this section, and the code anchors it argues from
+(`schemaEntityFor`, `readRegistrationVersions`, `registrationEntity` and the duplicate-name refusal in
+`src/gateway/registration.ts`) describe the model this design REPLACES, not the one it proposes.
