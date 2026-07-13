@@ -83,13 +83,26 @@ meaning "you may not" — would flip today's permissive default and stays a futu
   field AND carries an unrelated pointer is retracted whole. Author one delta per fact you may want to
   withdraw independently (the surface's own writes already do).
 
-Two surface verbs remain for later, both narrow: relational **edges** as first-class `link` / `sever`
-(the `expand` that marks an edge lives in the hyperschema's gather, not the Schema, so the surface
-must learn to read it), and **read-only derived fields**, which wait on rhizomatic growing a
-resolve-time computed Policy kind to refuse writes to. Those remain on the backlog (ADLC tickets in
-`.adlc/tickets.json`). What ships
-here is the whole read side's dual: **a way to remove — clear a field, remove a value, or lock one
-shut — and it is all retraction and declaration, never a null on a reference.**
+Relational **edges** as first-class `link` / `sever` have since landed as an amendment (below). Two
+narrower additions remain on the backlog (ADLC tickets in `.adlc/tickets.json`): **read-only derived
+fields**, re-scoped to arrive with §22's synthetic resolvers (read-only by construction, refused a
+write with a reason); and the **immutable-by-default flip** — silence meaning *you may not* — which
+rides §21's migration wave. What ships here is the whole read side's dual: **a way to remove — clear a
+field, remove a value, or lock one shut — and it is all retraction and declaration, never a null on a
+reference.**
+
+### Amendment — edge verbs: `link` and `sever`
+
+The write surface speaks the relation directly. **`link`** asserts an edge — the same per-property
+write shape the wire already carries, its value pointer made an ENTITY target that the gather's
+`expand` follows into the child's view — and **`sever`** retracts your own such edges (all of them, or
+only those pointing at named targets), the exact retract-your-own reach `clear` / `remove` already
+have. They are pure surface sugar over `assert` / `retract` of a shape already on the wire, so nothing
+new lands and no migration rides them. The surface reads the **published hyperschema gather** — not
+the resolution Schema — to learn which fields are edges: a body with no `expand` resolves no edges, so
+it is offered neither verb and no entity-pointer write at all, while a primitive field still takes a
+primitive. `writable` disciplines edges exactly as it disciplines value writes. This is wave A of the
+§14 amendment; wave B (the immutable-by-default flip) still waits on §21's wave.
 
 **Provenance.** [#73](https://github.com/bombadil-labs/loam/pull/73) — writing as the dual of
 resolution. `Gateway.retract` (shared by `clear`/`remove`) negates the caller's own contributions via
@@ -99,4 +112,8 @@ values, and an optional registration `writable` list disciplines which fields th
 all. Verified across `pick` / `all` / `merge` / `absentAs`, author-scoped and idempotent, both doors
 in agreement. The open "clear-others" question was resolved **retract-your-own** (Myk, 2026-07-12):
 shaping a view against others' claims is the schema Policy's job, not a negation's. Migrated from
-TODO §14 (the remaining edge/derived verbs stay in the backlog).
+TODO §14. Edge verbs `link` / `sever` landed as wave A of the amendment —
+[#80](https://github.com/bombadil-labs/loam/pull/80) (pure sugar over `assert` / `retract`; `edgeRoles`
+reads the published hyperschema gather; 8 honest round-trip tests, no on-wire change, no migration).
+Still on the backlog: the immutable-by-default flip (rides §21's wave) and the derived-field refusal
+(ships with §22's synthetic resolvers).
