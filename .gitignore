@@ -7,3 +7,7 @@ dist/
 demos/village/homes/
 .claude/
 site-dist/
+.adlc/*
+!.adlc/tickets.json
+!.adlc/specs/
+.claude/settings.local.json

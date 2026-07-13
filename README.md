@@ -12,9 +12,9 @@ your data into views, maintains them live, and remembers everything. Nothing is 
 store only ever learns. Two Loam instances that meet simply merge. Trust is a lens the reader
 holds, not a verdict the ground hands down.
 
-The design is in [SPEC.md](SPEC.md), the roadmap in [TODO.md](TODO.md), and the working record in
-[JOURNAL.md](JOURNAL.md). This page is the manual; [how the repo is organized](#how-the-repo-is-organized)
-is spelled out below.
+The design is in [SPEC.md](SPEC.md), the working record in [JOURNAL.md](JOURNAL.md), and the backlog
+of unbuilt work as ADLC tickets in `.adlc/tickets.json`. This page is the manual;
+[how the repo is organized](#how-the-repo-is-organized) is spelled out below.
 
 **New here? Take [the interactive tutorial](https://bombadil-labs.github.io/loam/)** — it hands
 you a real store running in your browser (no signup, no server, nothing to install until the
@@ -513,15 +513,15 @@ village.
 **The docs, by role — they don't overlap:**
 
 - **[README.md](README.md)** — this file: the manual (what Loam is, how to use it).
-- **[SPEC.md](SPEC.md)** — the design, and the record of what **is**: one section per shipped
-  capability, each closed by a `**Provenance.**` footer linking the PR(s) that landed it and
-  naming where it lives. Read it to understand the system; it grows only when work lands.
-- **[TODO.md](TODO.md)** — the backlog: unbuilt and partially-designed work. The next thing to
-  build is drawn from here, and its landing PR migrates it into SPEC.md.
+- **[SPEC.md](SPEC.md)** + **[`spec/`](spec/)** — the design, and the record of what **is**: one
+  file per shipped capability under `spec/` (`NN-slug.md`), each closed by a `**Provenance.**`
+  footer linking the PR(s) that landed it and naming where it lives; `SPEC.md` is the index over
+  them. Read it to understand the system; it grows only when work lands — a landing adds a new
+  `spec/` file.
+- **`.adlc/tickets.json`** — the backlog: unbuilt and partially-designed work, as ADLC tickets.
+  The next thing to build is drawn from here, and its landing PR adds its `spec/` section file.
 - **[JOURNAL.md](JOURNAL.md)** — the append-only record: one entry per step, what was done and why.
-- **[CLAUDE.md](CLAUDE.md)** — the process this repo runs by (the build loop).
-
-(`CURRENT_WORK.md` is a scratch checklist for whatever step is in flight — ephemeral by design.)
+- **[CLAUDE.md](CLAUDE.md)** — the process this repo runs by (the ADLC lifecycle).
 
 ## Development
 

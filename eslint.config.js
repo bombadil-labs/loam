@@ -9,7 +9,7 @@ import tseslint from "typescript-eslint";
 export default tseslint.config(
   // demos/village is the living demonstration (see demos/village/README.md): committed, but
   // never part of the gate. scripts/ is release tooling — plain node, no project service.
-  { ignores: ["dist/**", "site-dist/**", "demos/village/**", "scripts/**"] },
+  { ignores: ["dist/**", "site-dist/**", "demos/village/**", "scripts/**", ".adlc/**"] },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
   {
