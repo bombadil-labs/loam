@@ -158,11 +158,15 @@ motion — author the finer tickets and wire `edges` (prerequisite → dependent
 
 ## Standing decisions
 
-- **Commit freely; push on request** (Myk, 2026-07-13) — commits are safe, reversible checkpoints
-  and part of autonomous progress: make them at coherent checkpoints without asking first, on a
-  feature branch (never `main`), with real messages (the poetry rule applies to commits too).
-  Pushing is outward-facing — ask before pushing. (This replaced the deleted fleet-level
-  control-pane rules; Loam is governed per-repo by this file.)
+- **Commit and push freely; the human gates are P1 and P6** (Myk, 2026-07-13) — commits and pushes
+  to a feature branch are safe, reversible checkpoints and part of autonomous progress: make them
+  without asking, on a feature branch (never `main`), with real messages (the poetry rule applies to
+  commits too). The point is to churn autonomously and pull Myk in only where ADLC actually needs a
+  human: **P1** (he keeps `.adlc/tickets.json` stocked — that is the approval of what to build) and
+  **P6** (accepting the merge). Open PRs; don't merge to `main` or self-approve the design-stage
+  "(Myk)" sign-offs unless he delegates that. Parallelism is per-ticket git worktrees, width bounded
+  by `adlc merge-forecast`. (This replaced the deleted fleet-level control-pane rules; Loam is
+  governed per-repo by this file.)
 - **v1 is fully multi-tenant** (SPEC §7) — tenant isolation is first-class in the genesis schemas
   and gateway enforcement (Myk, 2026-07-09).
 - **Chorus is reference-only** (SPEC §10) — read its plumbing as a design guide; Loam's code is
