@@ -23,9 +23,44 @@ import {
   type Schema,
   type Primitive,
   type Reactor,
+  type Term,
 } from "@bombadil/rhizomatic";
 
 export const CTX_REGISTRATION = "loam.registration";
+
+// The edge roles a gather DECLARES (SPEC §14 edge verbs). An `expand` in the HYPERSCHEMA's gather
+// body — never the resolution Schema — is what turns a field's entity pointers into a nested child
+// view; its `role` names the pointer an edge write must carry to be followed. Walking the body for
+// those roles is how the surface learns a schema HAS edges (and which role links them): a gather
+// with no `expand` resolves no edges, so it is offered no entity-pointer write. Only concrete
+// (`exact`) roles are collected — a wildcard expand marks no single writable relation.
+export function edgeRoles(body: Term): string[] {
+  const roles = new Set<string>();
+  const walk = (t: Term): void => {
+    switch (t.kind) {
+      case "expand":
+        if (t.role.kind === "exact") roles.add(t.role.value);
+        walk(t.of);
+        break;
+      case "select":
+      case "mask":
+      case "group":
+      case "prune":
+      case "resolve":
+        walk(t.of);
+        break;
+      case "union":
+        walk(t.left);
+        walk(t.right);
+        break;
+      case "input":
+      case "fix":
+        break; // input gathers nothing; fix invokes another schema, walked via the registry
+    }
+  };
+  walk(body);
+  return [...roles];
+}
 
 // The write discipline (step 12): a claim template is a pointer skeleton with argument holes.
 // `at` + `context` make an entity pointer (the hole takes an id; `each` takes a list of them);
