@@ -54,6 +54,19 @@ The past is not a copy Loam hoards; it is a reading the present ground can still
   door. A test that can pass without exercising a genuinely purged (not merely negated) delta is a
   bug in the test.
 
+- **The erasure annotation — the exception is visible even when its content is not (Myk, review).** A
+  perfect-looking reconstruction of a moment that SILENTLY omits a since-erased fact would mislead: the
+  reader would trust a completeness the past no longer has. So an as-of read whose resolved window spans
+  at least one tombstone carries an ANNOTATION saying so — the response is flagged, and counted (N facts
+  in this window were lawfully forgotten), drawn from the tombstones themselves, which remember *that*
+  they forgot without keeping *what*. It reveals nothing erased — only that an erasure fell inside the
+  moment being read — turning a silent gap into an honest footnote: *this reconstruction has an exception
+  here.* The flag rides the as-of response beside the view (a door surfaces it as it surfaces `_hex`),
+  never inside the resolved data, so it colors the reading without polluting the ground. A live
+  (non-as-of) read needs no such mark — the present already reflects every erasure as ordinary absence;
+  the annotation exists precisely because as-of PROMISES a faithful past and must confess where that past
+  was redacted.
+
 - **Subscriptions: the snapshot is in, the replay is out (v1).** `query(asOf:)` is a snapshot of one
   past moment, and it lands here. A **replaying subscription** — "start at T and stream the ground
   forward, tick by tick, as it actually unfolded" — is a different and larger machine (it must
