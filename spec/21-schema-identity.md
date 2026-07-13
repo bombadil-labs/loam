@@ -81,14 +81,20 @@ separation is load-bearing for the rungs above: a renderer pins a VersionedSchem
 resolving against a fixed reading even after the living Schema has moved on and even if the operator
 has un-bound that version from every door.
 
-**Its shape is the frozen canonical JSON, and its wiring is supersession, not replacement.** The
-snapshot is literally the bytes the Schema Schema resolved to, run through rhizomatic's canonical JSON
-profile (so `parse∘serialize` is identity and the hash is stable across peers). Snapshots do not
-overwrite each other; a newer snapshot of a living Schema is a fresh entity, and the lineage from one
-to the next is a `supersededBy` link (§20's instrument, reused) — the same grow-only chain that lets a
-migration retire a delta without erasing it lets a Schema's history read as a sequence of photographs,
-each pointing forward to the one that replaced it, none destroyed. Pin any of them and it answers
-forever; the ground remembers all of them.
+**Its shape is the frozen canonical JSON, and snapshots never supersede one another.** The snapshot is
+literally the bytes the Schema Schema resolved to, run through rhizomatic's canonical JSON profile (so
+`parse∘serialize` is identity and the hash is stable across peers). A newer snapshot of a living Schema
+is a fresh, permanent entity that does NOT retire the old one: `Film@abc` and `Film@xyz` coexist, each
+independently pinnable AND independently servable, so a consumer bound to `Film@abc` keeps being served
+it after the living Schema has moved on to `Film@xyz`. Backwards compatibility is therefore not a
+courtesy the operator must remember to preserve — it is the default a content-addressed snapshot cannot
+help but provide, because nothing about minting `Film@xyz` touches the bytes of `Film@abc`. The link
+between them is GENEALOGICAL, not supersessive: a snapshot may record the predecessor it was DERIVED
+FROM — an ancestry pointer, provenance a reader follows BACKWARD — but never a `supersededBy` that would
+mark it retired. Supersession (§20's instrument) is for a delta a migration replaces; a VersionedSchema
+is replaced by nothing. The operator chooses which versions to publish and MAY publish several at once
+(a binding names the version it serves, §17), so a Schema's history is a family of coexisting readings,
+all answerable, none struck. Pin any of them and it answers forever; the ground remembers all of them.
 
 ### Roots are liveness, and they ride the binding
 
@@ -127,9 +133,12 @@ Two disciplines govern that rename, both non-negotiable:
 
 **One mismatch we record but do not touch:** rhizomatic's own API spells these `loadSchema` and
 `publishSchemaClaims` — and they load and publish HYPERSCHEMAS. That naming is frozen substrate (§2);
-correcting it is a conversation in that repo, never a Loam workaround or a forked vocabulary. We note
-the seam in prose and route around it: in Loam's ids and comments the hyperschema is the hyperschema,
-and where we must call rhizomatic's `loadSchema` we do so knowing its name lags its meaning.
+correcting it is a conversation in that repo, never a Loam workaround or a forked vocabulary. That
+conversation is now open —
+[rhizomatic#10](https://github.com/bombadil-labs/rhizomatic/issues/10) proposes reconciling the names
+(rename with a version bump, alias-and-deprecate, or document-and-keep); until it resolves, Loam routes
+around the seam in prose: in Loam's ids and comments the hyperschema is the hyperschema, and where we
+must call rhizomatic's `loadSchema` we do so knowing its name lags its meaning.
 
 ### How the upper rungs stand on this
 
