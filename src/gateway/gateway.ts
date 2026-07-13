@@ -41,7 +41,14 @@ import {
 import { graphql, parse, subscribe, type ExecutionResult, type GraphQLSchema } from "graphql";
 import type { StoreBackend } from "../store/backend.js";
 import { authorize } from "./accounts.js";
-import { ERASE_ENTITY, eraseClaims, eraseDefect, isTombstone, readTombstones } from "./erase.js";
+import {
+  ERASE_ENTITY,
+  eraseClaims,
+  eraseDefect,
+  forgottenSince,
+  isTombstone,
+  readTombstones,
+} from "./erase.js";
 import { Channel } from "./channel.js";
 import type { Genesis } from "./genesis.js";
 import {
@@ -247,7 +254,7 @@ export class Gateway {
   // surface draw on their own, smaller budget (see matFor).
   private gqlHooks(door: "full" | "public" = "full"): GqlHooks {
     return {
-      resolve: (name, entity) => this.resolvedNode(name, entity),
+      resolve: (name, entity, asOf) => this.resolvedNode(name, entity, asOf),
       mutate: (name, entity, props, actorSeed) => this.mutateEntity(name, entity, props, actorSeed),
       clear: (name, entity, fields, actorSeed) => this.clearEntity(name, entity, fields, actorSeed),
       remove: (name, entity, field, values, actorSeed) =>
@@ -295,18 +302,45 @@ export class Gateway {
   // materialization is warm (reactor.eval). The _hex of a pinned view is as real as the live
   // one's: same ground, an older lens, an honest content address. Cross-schema refs resolve
   // via the live registry (a version pins the named lens, not the whole world's).
-  resolvePinned(reg: Registered, entity: string): ResolvedNode {
-    const result = this.reactor.eval(reg.hyperschema.body, entity, this.registry);
+  //
+  // The two pins are orthogonal (SPEC §26): with an `asOf`, this becomes an OLD lens over an OLD
+  // ground — full time travel — resolving the pinned body against the ground as it stood at T
+  // (the same gather the live as-of read uses, only the schema is pinned rather than the latest).
+  resolvePinned(reg: Registered, entity: string, asOf?: number): ResolvedNode {
+    const result =
+      asOf === undefined
+        ? this.reactor.eval(reg.hyperschema.body, entity, this.registry)
+        : evalTerm(reg.hyperschema.body, this.groundAsOf(asOf), entity, this.registry);
     if (result.sort !== "hview") {
       throw new Error(`schema ${reg.hyperschema.name} does not evaluate to a hyperview`);
     }
     const view = resolveView(reg.schema, result.hview) as Record<string, View>;
-    return {
-      entity,
-      view,
-      hex: viewCanonicalHex(view),
-      hviewHex: hviewCanonicalHex(result.hview),
-    };
+    return this.annotate(
+      {
+        entity,
+        view,
+        hex: viewCanonicalHex(view),
+        hviewHex: hviewCanonicalHex(result.hview),
+      },
+      asOf,
+    );
+  }
+
+  // The moment as a delta set (SPEC §26): the surviving snapshot filtered to the deltas IN FORCE
+  // at T — author-timestamp `≤ T`, and a negation counts only if ITS OWN timestamp is `≤ T` (a
+  // fact un-negated at T reads present; a retraction not yet spoken at T leaves the fact
+  // standing). Because negations are themselves timestamped deltas, one filter — `timestamp ≤ T`
+  // — is exactly both rules. It reads the SURVIVING ground, so purged content can never reappear,
+  // no matter how far back T points: erasure is the stronger promise (§11).
+  private groundAsOf(asOf: number): DeltaSet {
+    return DeltaSet.from([...this.reactor.snapshot()].filter((d) => d.claims.timestamp <= asOf));
+  }
+
+  // Ride the erasure annotation on an as-of node, beside the view (like `_hex`), never inside the
+  // resolved data. A present read (no `asOf`) carries neither pin nor mark.
+  private annotate(node: ResolvedNode, asOf: number | undefined): ResolvedNode {
+    if (asOf === undefined) return node;
+    return { ...node, asOf, forgotten: forgottenSince(this.reactor, this.operatorAuthor, asOf) };
   }
 
   // Every claim template must be VISIBLE to its own schema: substitute sentinels for the arg
@@ -963,7 +997,18 @@ export class Gateway {
 
   // Gather the HView for (schema, entity): the live materialization when one is watching —
   // registered root or lazy — and batch evaluation otherwise (the spike proved them identical).
-  private gather(name: string, entity: string): HView {
+  // An `asOf` read (SPEC §26) can use NEITHER warm path — the materialization IS the present by
+  // construction — so it takes the one honest path: evaluate the same body over the ground as it
+  // stood at T (groundAsOf). Same gather, a narrower ground; nothing about resolution is time-cased.
+  private gather(name: string, entity: string, asOf?: number): HView {
+    if (asOf !== undefined) {
+      const def = this.def(name);
+      const result = evalTerm(def.hyperschema.body, this.groundAsOf(asOf), entity, this.registry);
+      if (result.sort !== "hview") {
+        throw new Error(`schema ${name} does not evaluate to a hyperview`);
+      }
+      return result.hview;
+    }
     const live =
       this.reactor.materializedView(this.matName(name), entity) ??
       this.reactor.materializedView(this.lazyMatName(name, entity), entity);
@@ -974,15 +1019,18 @@ export class Gateway {
     return result.hview;
   }
 
-  private resolvedNode(name: string, entity: string): ResolvedNode {
-    const hview = this.gather(name, entity);
+  private resolvedNode(name: string, entity: string, asOf?: number): ResolvedNode {
+    const hview = this.gather(name, entity, asOf);
     const view = resolveView(this.def(name).schema, hview) as Record<string, View>;
-    return {
-      entity,
-      view,
-      hex: viewCanonicalHex(view),
-      hviewHex: hviewCanonicalHex(hview),
-    };
+    return this.annotate(
+      {
+        entity,
+        view,
+        hex: viewCanonicalHex(view),
+        hviewHex: hviewCanonicalHex(hview),
+      },
+      asOf,
+    );
   }
 
   // --- the write seam --------------------------------------------------------------------------

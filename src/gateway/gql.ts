@@ -150,6 +150,23 @@ function metaFields<N extends ResolvedNode>(): GraphQLFieldConfigMap<N, unknown>
       description: "The whole resolved view, dynamic properties included.",
       resolve: (node) => node.view,
     },
+    _asOf: {
+      // A timestamp is milliseconds — beyond Int32 — so Float is the honest carrier.
+      type: GraphQLFloat,
+      description:
+        "The time pin (SPEC §26): the moment T this view was resolved against, on an AS-OF " +
+        "read; null on a present-tense read (the live materialization by construction).",
+      resolve: (node) => node.asOf ?? null,
+    },
+    _forgotten: {
+      type: GraphQLInt,
+      description:
+        "The erasure annotation (SPEC §26/§11): on an as-of read, how many facts this ground " +
+        "has lawfully forgotten SINCE the moment T — a positive count flags that this " +
+        "reconstruction of the past may be missing a since-erased fact (the content stays " +
+        "forgotten; only THAT an erasure fell in the window is revealed). Null on a present read.",
+      resolve: (node) => node.forgotten ?? null,
+    },
   };
 }
 
@@ -236,6 +253,8 @@ export function buildGqlSchema(
       "_hex",
       "_hviewHex",
       "_view",
+      "_asOf",
+      "_forgotten",
       "_fromHex",
       "_changed",
       "entity",
@@ -288,8 +307,20 @@ export function buildGqlSchema(
     queryFields[fieldName] = {
       type: new GraphQLNonNull(viewType),
       description: `Resolve ${def.hyperschema.name} at an entity. Absence is an answer, not an error.`,
-      args: entityArg,
-      resolve: (_src, args: { entity: string }) => hooks.resolve(def.hyperschema.name, args.entity),
+      // The time pin (SPEC §26): an optional field argument, exactly like any other. Omit it and
+      // the read is present-tense; supply a timestamp and it resolves the ground as it stood at T.
+      // It rides the READ, not the connection — one query may pin different moments per field.
+      args: {
+        ...entityArg,
+        asOf: {
+          type: GraphQLFloat,
+          description:
+            "Resolve against the ground as it stood at this moment (a millisecond timestamp). " +
+            "Omit to read the present. Erasure still wins: purged content never reappears (§11).",
+        },
+      },
+      resolve: (_src, args: { entity: string; asOf?: number }) =>
+        hooks.resolve(def.hyperschema.name, args.entity, args.asOf ?? undefined),
     };
 
     subscriptionFields[fieldName] = {

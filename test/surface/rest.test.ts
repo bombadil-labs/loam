@@ -15,7 +15,7 @@ import { publicClaims } from "../../src/gateway/public.js";
 import { readRegistrationVersions } from "../../src/gateway/registration.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { serve, type ServerHandle } from "../../src/server/http.js";
-import { FERN, PLANT_BODY } from "../spike/garden.js";
+import { FERN, PLANT_BODY, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
 
 // A second, NEVER-DECLARED schema: the smaller-world assertions need a real thing to be
@@ -114,6 +114,58 @@ describe("agreement: one registration, two doors, the same answer", () => {
     // and the OTHER door sees the write immediately — one ground
     const viaGql = await gql(`{ plant(entity: "${FERN}") { height } }`, "op-token");
     expect((viaGql.body as { data: { plant: { height: number } } }).data.plant.height).toBe(31);
+  });
+});
+
+describe("agreement on the time axis: one ground, one asOf, both doors (SPEC §26)", () => {
+  // A fresh entity with two dated heights, so the moment between them is unambiguous — and
+  // untouched by the versioning block that evolves Plant later in this file.
+  const CLOCK = "plant:asof";
+  const enc = encodeURIComponent(CLOCK);
+
+  it("GET /rest?asOf agrees with GraphQL asOf — same view, same _hex, same annotation", async () => {
+    await gateway.append([
+      observed(CLOCK, "height", 10, 100, OPERATOR_SEED),
+      observed(CLOCK, "height", 20, 200, OPERATOR_SEED),
+    ]);
+
+    // The moment T=150 sits between the two heights: the earlier one is in force.
+    const viaGql = await gql(
+      `{ plant(entity: "${CLOCK}", asOf: 150) { height _hex _asOf _forgotten } }`,
+      "op-token",
+    );
+    const viaRest = await rest(`/rest/v1/Plant/${enc}?asOf=150`, {}, "op-token");
+    expect(viaRest.status).toBe(200);
+    const gqlPlant = (viaGql.body as { data: { plant: Record<string, unknown> } }).data.plant;
+    const restBody = (await viaRest.json()) as {
+      view: { height: number };
+      _hex: string;
+      _asOf: number;
+      _forgotten: number;
+    };
+    expect(gqlPlant["height"]).toBe(10);
+    expect(restBody.view.height).toBe(10);
+    expect(restBody._hex).toBe(gqlPlant["_hex"]); // _hex for _hex, across the time axis too
+    expect(restBody._asOf).toBe(150);
+    expect(gqlPlant["_asOf"]).toBe(150);
+    expect(restBody._forgotten).toBe(gqlPlant["_forgotten"]); // nothing forgotten here: 0 == 0
+    expect(restBody._forgotten).toBe(0);
+  });
+
+  it("the present tense is unchanged through both doors — every prior query keeps its meaning", async () => {
+    const viaGql = await gql(`{ plant(entity: "${CLOCK}") { height _asOf } }`, "op-token");
+    const viaRest = await rest(`/rest/v1/Plant/${enc}`, {}, "op-token");
+    const gqlPlant = (viaGql.body as { data: { plant: Record<string, unknown> } }).data.plant;
+    const restBody = (await viaRest.json()) as { view: { height: number }; _asOf?: number };
+    expect(gqlPlant["height"]).toBe(20); // the latest, present-tense
+    expect(restBody.view.height).toBe(20);
+    expect(gqlPlant["_asOf"]).toBeNull(); // no time pin on a present read
+    expect(restBody._asOf).toBeUndefined(); // REST omits the annotation entirely on a present read
+  });
+
+  it("a malformed asOf refuses plainly (400), never a resolver 500", async () => {
+    const res = await rest(`/rest/v1/Plant/${enc}?asOf=nonsense`, {}, "op-token");
+    expect(res.status).toBe(400);
   });
 });
 
