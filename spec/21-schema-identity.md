@@ -165,7 +165,7 @@ a Schema is an entity in an open store, so a foreign peer may hold its own Schem
 `(hyperschema, name)` pair — whose reading binds is a question of law (§7), the same as every other
 delta; the registry keys locally, and federation resolves globally.
 
-**Provenance.** Design-stage draft — pending Myk's review and the implementing PR (which ships the
+**Provenance.** Design accepted (Myk, 2026-07-13); pending the implementing PR (which ships the
 `schema:`-prefix rename migration, §20, and the §14 immutable-by-default flip in the same wave). Not
 yet landed: no implementation exists behind this section, and the code anchors it argues from
 (`schemaEntityFor`, `readRegistrationVersions`, `registrationEntity` and the duplicate-name refusal in

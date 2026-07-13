@@ -207,7 +207,7 @@ has verbs for *deciding the fate of* a fact the store could not read.
   the store's ground (re-admit adds a fact; discard-as-erasure removes one), so the act belongs to
   the controller, never to a grantee or a peer.
 
-**Provenance.** Design-stage draft — pending Myk's review and the implementing PR. No code
+**Provenance.** Design accepted (Myk, 2026-07-13); pending the implementing PR. No code
 landed; the mechanisms above (namespace marking, row quarantine on boot, the entity-ID
 reservation, per-author budgets as deployment config, and `loam repair`) are argued here to be
 reviewed, and the §25 section number is provisional (Myk may renumber). The two decisions folded

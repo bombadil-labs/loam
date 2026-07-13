@@ -106,7 +106,7 @@ The past is not a copy Loam hoards; it is a reading the present ground can still
   those honest edges it is exactly what the first sentence claimed: a temporal substrate you can
   actually read temporally.
 
-**Provenance.** Design-stage draft — pending Myk's review and the implementing PR. Section number
+**Provenance.** Design accepted (Myk, 2026-07-13); pending the implementing PR. Section number
 **§26 is provisional** (the next free number after §20; §21–§25 are reserved for the in-flight arc).
 Nothing here has landed: no `asOf` parameter, door threading, or erasure-in-the-past test exists in
 the code yet. The shape (an optional `asOf` on `query`, resolving against the ground as it stood at

@@ -50,7 +50,12 @@ name begins with that number.
 | §18 | [Glossary](spec/18-glossary.md) |
 | §19 | [Tutorial v2 — needs before doctrine](spec/19-tutorial-v2.md) |
 | §20 | [Migration — old deltas in, new deltas out](spec/20-migration.md) |
+| §21 | [Schema identity & versioning — the lens ladder](spec/21-schema-identity.md) |
+| §22 | [Custom resolvers — the last step of the lens becomes programmable](spec/22-resolvers.md) |
+| §25 | [Hardening — namespacing, entity-IDs, brick-proofing, repair](spec/25-hardening.md) |
+| §26 | [As-of reads — the temporal promise, kept](spec/26-as-of-reads.md) |
 
-_Reserved section numbers §21–§24 (schema identity, resolvers, renderers, quarantine) and beyond are
-in flight — see the backlog in `.adlc/tickets.json`. A reserved number lands here as its own
-`spec/NN-*.md` file when its work merges._
+_§21, §22, §25, and §26 are **design-landed** — the accepted design brief is recorded here, with
+implementation pending (each section's Provenance footer says so). Reserved **§23** (renderers) and
+**§24** (quarantine) are still in flight — see the backlog in `.adlc/tickets.json`. A reserved number
+lands here as its own `spec/NN-*.md` file when its work merges._
