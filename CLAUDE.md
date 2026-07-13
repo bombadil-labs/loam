@@ -119,6 +119,36 @@ motion — author the finer tickets and wire `edges` (prerequisite → dependent
   the composed thing that turns shared ground into a View). No exported type carries the name today;
   write `Schema` when you mean the Schema, until a design stage decides otherwise.
 
+## Autonomous operation — churn until a human gate
+
+The default posture is autonomous churn (Myk, 2026-07-13): Myk keeps `.adlc/tickets.json` stocked
+(that is P1 — the approval of *what* to build), and the model works the backlog until it hits a gate
+that genuinely needs him. The loop, per unblocked ticket:
+
+1. Pick the next unblocked, buildable ticket — `adlc merge-forecast`'s `mergeOrder` is the order,
+   its `recommendedWidth` the safe fan-out (idle builders claim the next unblocked ticket).
+2. Run it through the gates (P1→P5), building on a **feature branch**, committing and pushing freely
+   as it goes. Independent unblocked tickets run **in parallel in per-ticket git worktrees**, up to
+   the forecast width (this §21–§24 arc is width-1, so it runs sequentially).
+3. Open a PR carrying the gate evidence. Then **merge by risk**:
+   - **The model self-merges** a PR only when *all* hold: `npm run check` green **and** P5 prosecute
+     clean, **and** it is a non-breaking **build** ticket touching no trust-root / capability / auth
+     / federation / erasure surface (§6/§7/§8/§11/§12) and shipping **no** §20 migration.
+   - **Myk merges** everything else: every **design-stage** spec section (T2–T7), anything touching
+     capabilities/auth/federation/erasure, and **any breaking on-wire change** (it ships a migration
+     → it is his call). This is P6.
+4. **Design-stage tickets never self-merge.** The model drafts the full `spec/NN-*.md` section,
+   answers every open **"(Myk)"** question with a *reasoned recommendation*, and opens the PR — that
+   PR is Myk's decision + merge (P6), batching his input into one review instead of chat interrupts.
+   It does not decide a reserved "(Myk)" call unilaterally.
+5. When a ticket is blocked (a rhizomatic version not yet landed, a "(Myk)" call the model can't
+   responsibly recommend past), **surface it and move to the next unblocked ticket** — don't stall
+   the loop. Stop and summarize for Myk only when nothing buildable remains.
+
+The lever: autonomous throughput scales with how many **build** (non-design) tickets are queued —
+design tickets always tap Myk at review. Stock buildable, coldstart-clean tickets to keep the model
+busy.
+
 ## Standing rules
 
 - **Root holds exactly four markdown docs** — `README.md` (the vision), `CLAUDE.md` (the process),
