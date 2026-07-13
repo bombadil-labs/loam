@@ -82,6 +82,26 @@ export interface SurfaceHooks {
     values: readonly Primitive[],
     actorSeed?: string,
   ): Promise<ResolvedNode>;
+  // Link an edge (SPEC §14 edge verbs): assert an edge delta — the same per-prop shape as a write,
+  // but its value pointer targets an ENTITY, followed by the gather's `expand` into the child's
+  // view. Pure sugar over `assert`; offered only for a field whose schema declares an edge role.
+  link(
+    schemaName: string,
+    entity: string,
+    field: string,
+    target: string,
+    context: string | undefined,
+    actorSeed?: string,
+  ): Promise<ResolvedNode>;
+  // Sever an edge (SPEC §14 edge verbs): retract YOUR OWN edge deltas in `field` — all of them, or
+  // only those pointing at one of `targets`. Pure sugar over `retract`; the dual of link.
+  sever(
+    schemaName: string,
+    entity: string,
+    field: string,
+    targets: readonly string[] | undefined,
+    actorSeed?: string,
+  ): Promise<ResolvedNode>;
   watch(schemaName: string, entity: string): AsyncGenerator<PatchNode>;
   claim(pointers: readonly ClaimPointerSpec[], actorSeed?: string): Promise<{ delta: string }>;
 }

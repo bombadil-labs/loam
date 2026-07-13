@@ -31,7 +31,7 @@ import {
   type GraphQLOutputType,
 } from "graphql";
 import type { Primitive, Policy } from "@bombadil/rhizomatic";
-import type { ClaimTemplates } from "./registration.js";
+import { edgeRoles, type ClaimTemplates } from "./registration.js";
 import type {
   ClaimPointerSpec,
   PatchNode,
@@ -403,6 +403,81 @@ export function buildGqlSchema(
         );
       },
     };
+
+    // Edge verbs (SPEC §14): a gather that `expand`s a role resolves relations, so its fields take
+    // ENTITY-pointer writes — `link<Type>` asserts an edge, `sever<Type>` retracts your own. Read
+    // from the published hyperschema gather, NOT the resolution Schema; a gather with no `expand`
+    // resolves no edges and is offered neither verb (so a primitive schema refuses entity pointers).
+    if (edgeRoles(def.hyperschema.body).length > 0) {
+      const linkField = `link${typeName}`;
+      if (Object.hasOwn(mutationFields, linkField)) {
+        throw new Error(
+          `schema ${def.hyperschema.name}: its mutation field "${linkField}" collides with an existing mutation`,
+        );
+      }
+      mutationFields[linkField] = {
+        type: new GraphQLNonNull(viewType),
+        description:
+          `Link an edge on a ${def.hyperschema.name} entity: assert that \`field\` points at the ` +
+          `\`target\` entity, resolved into its child view. Returns the re-resolved view.`,
+        args: {
+          ...entityArg,
+          field: { type: new GraphQLNonNull(GraphQLString) },
+          target: { type: new GraphQLNonNull(GraphQLID) },
+          context: {
+            type: GraphQLString,
+            description: "The child pointer's context; defaults to the field name.",
+          },
+        },
+        resolve: (_src, args: Record<string, unknown>, ctx: unknown) => {
+          const actor = (ctx as { actor?: string } | undefined)?.actor;
+          const field = args["field"] as string;
+          if (!def.schema.props.has(field)) {
+            throw new Error(`schema ${def.hyperschema.name} has no field "${field}" to link`);
+          }
+          return hooks.link(
+            def.hyperschema.name,
+            args["entity"] as string,
+            field,
+            args["target"] as string,
+            (args["context"] as string | undefined) ?? undefined,
+            actor,
+          );
+        },
+      };
+
+      const severField = `sever${typeName}`;
+      if (Object.hasOwn(mutationFields, severField)) {
+        throw new Error(
+          `schema ${def.hyperschema.name}: its mutation field "${severField}" collides with an existing mutation`,
+        );
+      }
+      mutationFields[severField] = {
+        type: new GraphQLNonNull(viewType),
+        description:
+          `Sever edges on a ${def.hyperschema.name} entity: retract YOUR OWN edges in \`field\` — ` +
+          `all of them, or only those pointing at a named \`target\`. Returns the re-resolved view.`,
+        args: {
+          ...entityArg,
+          field: { type: new GraphQLNonNull(GraphQLString) },
+          targets: { type: new GraphQLList(new GraphQLNonNull(GraphQLID)) },
+        },
+        resolve: (_src, args: Record<string, unknown>, ctx: unknown) => {
+          const actor = (ctx as { actor?: string } | undefined)?.actor;
+          const field = args["field"] as string;
+          if (!def.schema.props.has(field)) {
+            throw new Error(`schema ${def.hyperschema.name} has no field "${field}" to sever`);
+          }
+          return hooks.sever(
+            def.hyperschema.name,
+            args["entity"] as string,
+            field,
+            (args["targets"] as string[] | undefined) ?? undefined,
+            actor,
+          );
+        },
+      };
+    }
 
     // The schema's declared write shapes: one mutation per template, one DELTA per call.
     for (const [templateName, template] of Object.entries(def.mutations ?? {})) {

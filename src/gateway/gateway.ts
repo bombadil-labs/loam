@@ -54,6 +54,7 @@ import {
 } from "./gql.js";
 import { publicDefect, readPublicSchemas } from "./public.js";
 import {
+  edgeRoles,
   lawfulSnapshot,
   parseClaimTemplates,
   readRegistrations,
@@ -251,6 +252,10 @@ export class Gateway {
       clear: (name, entity, fields, actorSeed) => this.clearEntity(name, entity, fields, actorSeed),
       remove: (name, entity, field, values, actorSeed) =>
         this.removeEntity(name, entity, field, values, actorSeed),
+      link: (name, entity, field, target, context, actorSeed) =>
+        this.linkEntity(name, entity, field, target, context, actorSeed),
+      sever: (name, entity, field, targets, actorSeed) =>
+        this.severEntity(name, entity, field, targets, actorSeed),
       watch: (name, entity) => this.watchEntity(name, entity, door),
       claim: (pointers, actorSeed) => this.claimEntity(pointers, actorSeed),
     };
@@ -1107,6 +1112,99 @@ export class Gateway {
             p.role === "value" &&
             p.target.kind === "primitive" &&
             wanted.has(JSON.stringify(p.target.value)),
+        ),
+    );
+  }
+
+  // The edge role a gather declares for `field` (SPEC §14 edge verbs): the pointer role an edge
+  // write must carry so the body's `expand` follows it into the child's view. Read from the
+  // PUBLISHED hyperschema gather, never the resolution Schema. A gather with no `expand` resolves no
+  // edges — link/sever are meaningless there and refuse. One expand role covers a byTargetContext
+  // gather's fields; a body with several distinct edge roles disambiguates by the field's own name.
+  private edgeRoleFor(name: string, field: string): string {
+    const roles = edgeRoles(this.def(name).hyperschema.body);
+    if (roles.length === 0) {
+      throw new Error(
+        `schema ${name} resolves no edges: its gather has no \`expand\`, so "${field}" takes a ` +
+          `value, not a relation`,
+      );
+    }
+    if (roles.length === 1) return roles[0]!;
+    if (roles.includes(field)) return field;
+    throw new Error(
+      `schema ${name} declares several edge roles (${roles.join(", ")}); wave A links a gather ` +
+        `whose edge role is unambiguous for "${field}"`,
+    );
+  }
+
+  // Link an edge (SPEC §14 edge verbs): assert ONE edge delta — the same per-prop write shape, its
+  // value pointer made an ENTITY target the gather's `expand` follows. Pure sugar over assert: no
+  // new delta shape, nothing new on the wire. The subject pointer files the edge into the `field`
+  // bucket (byTargetContext); the edge-role pointer is what `expand` resolves into the child view.
+  private async linkEntity(
+    name: string,
+    entity: string,
+    field: string,
+    target: string,
+    context: string | undefined,
+    actorSeed?: string,
+  ): Promise<ResolvedNode> {
+    const seed = actorSeed ?? this.options.seed;
+    if (seed === undefined) {
+      throw new Error("this gateway holds no signing seed and cannot write");
+    }
+    if (!this.def(name).schema.props.has(field)) {
+      throw new Error(`schema ${name} has no field "${field}" to link`);
+    }
+    this.assertWritable(name, [field]);
+    const role = this.edgeRoleFor(name, field);
+    const author = authorForSeed(seed);
+    const delta = signClaims(
+      {
+        timestamp: this.nextTimestamp(),
+        author,
+        pointers: [
+          { role: "subject", target: { kind: "entity", entity: { id: entity, context: field } } },
+          {
+            role,
+            target: { kind: "entity", entity: { id: target, context: context ?? field } },
+          },
+        ],
+      },
+      seed,
+    );
+    await this.append([delta]);
+    return this.resolvedNode(name, entity);
+  }
+
+  // Sever an edge (SPEC §14 edge verbs): retract YOUR OWN edge deltas in `field` — the dual of link,
+  // the same retract-your-own reach clear/remove already have. With `targets`, only edges whose
+  // edge-role pointer lands on one of them are withdrawn (value-scoped, like remove); without,
+  // every edge you authored in the field. Never touches another author's edge.
+  private severEntity(
+    name: string,
+    entity: string,
+    field: string,
+    targets: readonly string[] | undefined,
+    actorSeed?: string,
+  ): Promise<ResolvedNode> {
+    if (!this.def(name).schema.props.has(field)) {
+      throw new Error(`schema ${name} has no field "${field}" to sever`);
+    }
+    this.assertWritable(name, [field]);
+    const role = this.edgeRoleFor(name, field);
+    const wanted = targets !== undefined && targets.length > 0 ? new Set(targets) : undefined;
+    return this.retract(
+      name,
+      entity,
+      actorSeed,
+      (f, entry) =>
+        f === field &&
+        entry.delta.claims.pointers.some(
+          (p) =>
+            p.role === role &&
+            p.target.kind === "entity" &&
+            (wanted === undefined || wanted.has(p.target.entity.id)),
         ),
     );
   }
