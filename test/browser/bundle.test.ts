@@ -72,6 +72,7 @@ function plantGenesis(b: BrowserModule): unknown {
         hyperschema: { name: "Plant", alg: 1, body },
         schema: { props: new Map([["height", pickLatest]]), default: pickLatest },
         roots: [FERN],
+        writable: ["height"],
       },
     ],
     grants: [

@@ -13,7 +13,7 @@ import { toWire } from "../../src/federation/wire.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
-import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
+import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
 import { FERN, GARDENER_SEED, observed } from "../spike/garden.js";
 
 vi.setConfig({ testTimeout: 15000 });
@@ -44,7 +44,9 @@ describe("loam migrate", () => {
     // Forge a 0.2-era offer: a native genesis with its Plant definition downgraded to old roles.
     const genesis = assembleGenesis({
       operatorSeed: GARDENER_SEED,
-      registrations: [{ hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN] }],
+      registrations: [
+        { hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN], writable: [...PLANT_WRITABLE] },
+      ],
     });
     const nativeDef = genesis.deltas.find((d) =>
       d.claims.pointers.some((p) => p.role.startsWith(NEW)),

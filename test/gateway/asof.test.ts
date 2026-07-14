@@ -14,7 +14,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { handleRest } from "../../src/surface/rest.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
-import { PLANT, PLANT_POLICY } from "./fixtures.js";
+import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
 
 const OP_SEED = "0e".repeat(32);
 const OPERATOR = authorForSeed(OP_SEED);
@@ -26,7 +26,9 @@ async function bootPlant(): Promise<Gateway> {
     new MemoryBackend(),
     assembleGenesis({
       operatorSeed: OP_SEED,
-      registrations: [{ hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN] }],
+      registrations: [
+        { hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN], writable: [...PLANT_WRITABLE] },
+      ],
       grants: [grantClaims(STORE_ENTITY, GARDENER, "write", OPERATOR, 2)],
     }),
   );

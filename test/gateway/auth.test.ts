@@ -20,7 +20,7 @@ import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED, SURVEYOR, observed } from "../spike/garden.js";
-import { PLANT, PLANT_POLICY, garden } from "./fixtures.js";
+import { PLANT, PLANT_POLICY, PLANT_WRITABLE, garden } from "./fixtures.js";
 
 const OPERATOR_SEED = "0e".repeat(32);
 const ALICE_SEED = GARDENER_SEED; // alice is the gardener
@@ -43,7 +43,7 @@ async function grantedWorld(): Promise<Gateway> {
     signClaims(grantClaims(STORE_ENTITY, SURVEYOR, "write", OPERATOR, tick()), OPERATOR_SEED),
   ]);
   await gateway.append(garden);
-  gateway.register(PLANT, PLANT_POLICY, [FERN]);
+  gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
   gateway.register(tenantSchemaFor(OPERATOR), TENANT_POLICY, [STORE_ENTITY]);
   return gateway;
 }
@@ -181,7 +181,7 @@ describe("standing: deny is the default, permission is an artifact", () => {
     await gateway.append([
       signClaims(grantClaims(STORE_ENTITY, ALICE, "admin", OPERATOR, tick()), OPERATOR_SEED),
     ]);
-    gateway.register(PLANT, PLANT_POLICY, [FERN]);
+    gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
 
     await gateway.append([
       signClaims(grantClaims(STORE_ENTITY, BOB, "write", ALICE, tick()), ALICE_SEED),
@@ -245,7 +245,7 @@ describe("standing: deny is the default, permission is an artifact", () => {
       OPERATOR_SEED,
     );
     await gateway.append([aliceAdmin]);
-    gateway.register(PLANT, PLANT_POLICY, [FERN]);
+    gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
     await gateway.append([
       signClaims(grantClaims(STORE_ENTITY, BOB, "write", ALICE, tick()), ALICE_SEED),
     ]);
@@ -266,7 +266,7 @@ describe("standing: deny is the default, permission is an artifact", () => {
       OPERATOR_SEED,
     );
     await gateway.append([aliceAdmin]);
-    gateway.register(PLANT, PLANT_POLICY, [FERN]);
+    gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
     expect((await mutateHeight(gateway, ALICE_SEED, 82)).errors).toBeUndefined();
 
     await gateway.append([signClaims(revocationClaims(aliceAdmin.id, ALICE, tick()), ALICE_SEED)]);
@@ -324,7 +324,7 @@ describe("standing: deny is the default, permission is an artifact", () => {
     await free.flush();
 
     const governed = await Gateway.open(backend, { seed: OPERATOR_SEED });
-    governed.register(PLANT, PLANT_POLICY, [FERN]);
+    governed.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
     const denied = await governed.query(
       `mutation { plant(entity: "${FERN}", height: 66) { height } }`,
       undefined,
@@ -353,7 +353,7 @@ describe("standing: deny is the default, permission is an artifact", () => {
     await free.flush();
 
     const governed = await Gateway.open(backend, { seed: OPERATOR_SEED });
-    governed.register(PLANT, PLANT_POLICY, [FERN]);
+    governed.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
     const allowed = await governed.query(
       `mutation { plant(entity: "${FERN}", height: 67) { height } }`,
       undefined,
@@ -424,7 +424,7 @@ describe("standing: deny is the default, permission is an artifact", () => {
     await gateway.append([
       signClaims(grantClaims(STORE_ENTITY, CAROL, "admin", ALICE, tick()), ALICE_SEED),
     ]);
-    gateway.register(PLANT, PLANT_POLICY, [FERN]);
+    gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
     gateway.register(tenantSchemaFor(OPERATOR), TENANT_POLICY, [STORE_ENTITY]);
     const audit = async () =>
       (

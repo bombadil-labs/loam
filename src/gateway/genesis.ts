@@ -57,15 +57,25 @@ export function assembleGenesis(spec: GenesisSpec): Genesis {
   const deltas: Delta[] = [signClaims(operatorMarkerClaims(operator), seed)];
   let clock = 1;
   for (const reg of spec.registrations ?? []) {
-    // Two deltas per registration: the DEFINITION (schema-schema claims at the schema entity)
-    // and the REFERENCE that registers it. Deterministic timestamps keep boot idempotent.
+    // Two deltas per registration: the DEFINITION (schema-schema claims at the hyperschema entity)
+    // and the REFERENCE that registers it. Deterministic timestamps keep boot idempotent. The
+    // registration carries its `writable` list through — under immutable-by-default (§14) a genesis
+    // registration that dropped it would open a store nothing could write.
     const entity = schemaEntityFor(reg.hyperschema, reg.entity);
     deltas.push(
       signClaims(publishHyperSchemaClaims(reg.hyperschema, entity, operator, clock++), seed),
     );
     deltas.push(
       signClaims(
-        registrationClaims(entity, reg.schema, reg.roots, operator, clock++, reg.mutations),
+        registrationClaims(
+          entity,
+          reg.schema,
+          reg.roots,
+          operator,
+          clock++,
+          reg.mutations,
+          reg.writable,
+        ),
         seed,
       ),
     );

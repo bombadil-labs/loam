@@ -17,7 +17,7 @@ import { pullFrom } from "../../src/federation/pull.js";
 import { serve, type ServerHandle } from "../../src/server/http.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
-import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
+import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
 
 const OP_A = "0a".repeat(32);
 const OP_B = "0b".repeat(32);
@@ -44,7 +44,7 @@ async function instance(
   await gateway.append([
     signClaims(grantClaims(STORE_ENTITY, GARDENER, "write", operator, 2), operatorSeed),
   ]);
-  gateway.register(PLANT, PLANT_POLICY, [FERN]);
+  gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
   const token = `tok-${operatorSeed.slice(0, 4)}`;
   const handle = await serve({
     mounts: { default: gateway },
@@ -219,7 +219,9 @@ describe("federation: two instances meet and merge", () => {
     const OP_B_LOCAL = "0c".repeat(32);
     const backend = new MemoryBackend();
     const b = await Gateway.open(backend, { seed: OP_B_LOCAL });
-    await b.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+    await b.publishRegistration(PLANT, PLANT_POLICY, [FERN], undefined, undefined, undefined, [
+      ...PLANT_WRITABLE,
+    ]);
     await b.query(`mutation { plant(entity: "${FERN}", height: 42) { height } }`); // operator writes
     gateways.push(b);
 

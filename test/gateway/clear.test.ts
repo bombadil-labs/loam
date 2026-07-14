@@ -14,7 +14,7 @@ import { verifyDelta } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED, SURVEYOR_SEED } from "../spike/garden.js";
-import { PLANT, PLANT_POLICY, garden, governedBootstrap } from "./fixtures.js";
+import { PLANT, PLANT_POLICY, PLANT_WRITABLE, garden, governedBootstrap } from "./fixtures.js";
 
 const KEEPER_SEED = "c3".repeat(32);
 
@@ -24,7 +24,7 @@ async function keeperGateway(backend = new MemoryBackend()): Promise<Gateway> {
   const gateway = await Gateway.open(backend, { seed: KEEPER_SEED });
   await gateway.append(governedBootstrap(KEEPER_SEED));
   await gateway.append(garden);
-  gateway.register(PLANT, PLANT_POLICY, [FERN]);
+  gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
   return gateway;
 }
 
@@ -160,7 +160,7 @@ describe("clear (§14): retraction is the dual of resolution", () => {
   it("a seedless, actorless gateway cannot retract any more than it can assert", async () => {
     const gateway = await Gateway.open(new MemoryBackend());
     await gateway.append(garden);
-    gateway.register(PLANT, PLANT_POLICY, [FERN]);
+    gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
     const result = await gateway.query(clear(FERN, ["height"]));
     expect(result.errors?.join(" ")).toMatch(/no signing seed/);
     await gateway.close();

@@ -20,7 +20,7 @@ import {
 } from "../../src/gateway/public.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED, SURVEYOR } from "../spike/garden.js";
-import { PLANT, PLANT_POLICY, garden } from "./fixtures.js";
+import { PLANT, PLANT_POLICY, PLANT_WRITABLE, garden } from "./fixtures.js";
 
 const OPERATOR_SEED = "0e".repeat(32);
 const OPERATOR = authorForSeed(OPERATOR_SEED);
@@ -39,7 +39,7 @@ async function governedGarden(): Promise<Gateway> {
     signClaims(grantClaims(STORE_ENTITY, MALLORY, "write", OPERATOR, 9003), OPERATOR_SEED),
   ]);
   await gateway.append(garden);
-  gateway.register(PLANT, PLANT_POLICY, [FERN]);
+  gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
   gateway.register(LEDGER, PLANT_POLICY, ["ledger:1"]);
   return gateway;
 }
@@ -265,7 +265,7 @@ describe("the restricted surface", () => {
   it("the public door's watch budget is its own — the full surface keeps watching", async () => {
     const backend = new MemoryBackend();
     const gateway = await Gateway.open(backend, { seed: OPERATOR_SEED, maxPublicWatches: 1 });
-    gateway.register(PLANT, PLANT_POLICY, [FERN]);
+    gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
     await declare(gateway, ["Plant"]);
 
     // The first unregistered entity takes the public door's one slot...

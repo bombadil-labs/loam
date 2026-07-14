@@ -14,7 +14,7 @@ import { assembleGenesis, operatorMarkerClaims } from "../../src/gateway/genesis
 import { Gateway } from "../../src/gateway/gateway.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
 import { FERN, observed } from "../spike/garden.js";
-import { PLANT, PLANT_POLICY } from "./fixtures.js";
+import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
 
 const OP_SEED = "0e".repeat(32);
 const OPERATOR = authorForSeed(OP_SEED);
@@ -64,7 +64,7 @@ describe("boot degrades, it does not abort (SPEC §25)", () => {
 
     const backend = new SqliteBackend(path);
     const gateway = await Gateway.open(backend, { seed: OP_SEED }); // boots — no throw
-    gateway.register(PLANT, PLANT_POLICY, [FERN]);
+    gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
 
     // The surviving fact resolves; the quarantined row contributes to no view.
     const answer = await gateway.query(`{ plant(entity: "${FERN}") { height } }`);

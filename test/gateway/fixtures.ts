@@ -34,6 +34,10 @@ export const PLANT_POLICY: Schema = {
   default: pickLatest,
 };
 
+// The Plant schema's full field list. Under immutable-by-default (SPEC §14/§21) a registration must
+// name its writable fields explicitly; this is "everything writable," the pre-flip surface.
+export const PLANT_WRITABLE: readonly string[] = ["height", "tag", "watered", "readings"];
+
 // A governed gateway's constitution under the authors-not-owners model: the garden fixture's
 // two authors hold write STANDING on the store — signed by whatever operator the suite runs
 // under. (The membership stays as vocabulary: the fern still belongs to the garden community,

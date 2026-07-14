@@ -29,7 +29,7 @@ import {
   SURVEYOR_SEED,
   observed,
 } from "../spike/garden.js";
-import { PLANT, PLANT_POLICY } from "./fixtures.js";
+import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
 
 const OPERATOR_SEED = "0e".repeat(32);
 const OPERATOR = authorForSeed(OPERATOR_SEED);
@@ -279,7 +279,7 @@ describe("per-author door budgets (SPEC §25)", () => {
     await gateway.append([
       signClaims(grantClaims(STORE_ENTITY, GARDENER, "write", OPERATOR, 9001), OPERATOR_SEED),
     ]);
-    gateway.register(PLANT, PLANT_POLICY, [FERN]);
+    gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
     // The trusted CEILING — a per-author budget — is set on the gardener...
     await setBudget(gateway, GARDENER, 1, 5000);
     await gateway.append([signClaims(publicClaims(["Plant"], OPERATOR, 10_000), OPERATOR_SEED)]);

@@ -20,7 +20,7 @@ import {
 import { serve, type ServerHandle } from "../../src/server/http.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
-import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
+import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
 
 vi.setConfig({ testTimeout: 15000 });
 
@@ -57,7 +57,7 @@ async function mixedSource(): Promise<{ url: string; token: string }> {
 
 async function puller(): Promise<Gateway> {
   const gateway = await Gateway.open(new MemoryBackend(), { seed: OP_B });
-  gateway.register(PLANT, PLANT_POLICY, [FERN]);
+  gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
   gateways.push(gateway);
   return gateway;
 }

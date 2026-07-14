@@ -1291,20 +1291,19 @@ export class Gateway {
     );
   }
 
-  // Writability is front-door discipline (SPEC §14): a registration MAY declare `writable`, and when
-  // it does, only those fields accept a surface write — assert, clear, AND remove refuse the rest
-  // with a reason. Silence (no `writable`) leaves every field writable (the permissive default the
-  // whole village and tutorial were built on). It disciplines the SURFACE, never the ground: a
-  // hand-signed or federated delta may still assert into a "read-only" context, and a reader who
+  // Writability is front-door discipline (SPEC §14, immutable-by-default): a registration names its
+  // `writable` fields, and ONLY those accept a surface write — assert, clear, remove, link, AND
+  // sever refuse the rest with a reason. Silence (no `writable`) now means "you may not": absent a
+  // list, NOTHING is writable (§21's wave flipped the old permissive default, so every registration
+  // Loam mints names its writable fields explicitly). It disciplines the SURFACE, never the ground:
+  // a hand-signed or federated delta may still assert into a "read-only" context, and a reader who
   // wants the guarantee enforces it with a lens.
   private assertWritable(name: string, fields: readonly string[]): void {
-    const { writable } = this.def(name);
-    if (writable === undefined) return;
-    const allowed = new Set(writable);
+    const allowed = new Set(this.def(name).writable ?? []);
     for (const field of fields) {
       if (!allowed.has(field)) {
         throw new Error(
-          `field "${field}" of ${name} is read-only: the registration does not open it`,
+          `field "${field}" of ${name} is read-only: the registration does not open it for writes`,
         );
       }
     }

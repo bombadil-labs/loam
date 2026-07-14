@@ -22,8 +22,9 @@ export interface Registered {
   readonly schema: Schema;
   readonly roots: readonly string[];
   readonly mutations?: ClaimTemplates;
-  // Front-door writability (SPEC §14): when present, only these fields accept a surface write; the
-  // rest are read-only (assert / clear / remove refused). Absent → every field is writable.
+  // Front-door writability (SPEC §14, immutable-by-default): the fields that accept a surface write;
+  // the rest are read-only (assert / clear / remove / link / sever refused). Absent → NO field is
+  // writable (§21's deny-by-default posture).
   readonly writable?: readonly string[];
 }
 

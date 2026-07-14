@@ -21,7 +21,7 @@ import { legibilityWarnings } from "../../src/gateway/repair.js";
 import { serve, type ServerHandle } from "../../src/server/http.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED } from "../spike/garden.js";
-import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
+import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
 
 const OP_A = "0a".repeat(32);
 const OP_B = "0b".repeat(32);
@@ -67,7 +67,7 @@ async function instance(
   await gateway.append([
     signClaims(grantClaims(STORE_ENTITY, GARDENER, "write", operator, 2), operatorSeed),
   ]);
-  gateway.register(PLANT, PLANT_POLICY, [FERN]);
+  gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
   const token = `tok-${operatorSeed.slice(0, 4)}`;
   const handle = await serve({
     mounts: { default: gateway },
@@ -120,7 +120,7 @@ describe("bytes Target kind (rhizomatic 0.4.0, adopted in T8): Loam receives, ne
         OP_A,
       ),
     ]);
-    gateway.register(PLANT, PLANT_POLICY, [FERN]);
+    gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
     gateways.push(gateway);
 
     // The foreign bytes delta arrives through the federation-in door (verification, not grant).

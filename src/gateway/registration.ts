@@ -1,6 +1,6 @@
-// A registration is a REFERENCE, not a carrier. The schema itself is DEFINED by schema-schema
-// deltas — rhizomatic's `publishHyperSchemaClaims` shape — filed at a schema entity (`schema:<Name>`
-// by default); the registration delta, under the constitutional context `loam.registration`,
+// A registration is a REFERENCE, not a carrier. The HYPERSCHEMA itself is DEFINED by schema-schema
+// deltas — rhizomatic's `publishHyperSchemaClaims` shape — filed at a hyperschema entity
+// (`hyperschema:<Name>` by default); the registration delta, under the constitutional context `loam.registration`,
 // holds only a pointer to that entity, the resolution schema as canonical JSON, and the roots. The GraphQL
 // surface is therefore GENERATED: `readRegistrations` meta-resolves each referenced entity via
 // `loadHyperSchema` over the store's surviving definitions, so evolution is append (republish at the
@@ -82,13 +82,15 @@ export interface Registration {
   readonly hyperschema: HyperSchema;
   readonly schema: Schema;
   readonly roots: readonly string[];
-  // The schema entity the definition lives at. Identity is the ENTITY, not the name:
-  // republishing here evolves; a different entity is a different schema.
+  // The hyperschema entity the definition lives at (`hyperschema:<Name>` by default). Identity is
+  // the ENTITY, not the name: republishing here evolves; a different entity is a different schema.
   readonly entity?: string;
   // The write discipline, traveling with the read program.
   readonly mutations?: ClaimTemplates;
-  // Front-door writability (SPEC §14): when present, ONLY these fields accept a surface write; the
-  // rest are read-only. Absent → every field is writable (the permissive default).
+  // Front-door writability (SPEC §14, immutable-by-default): when present, ONLY these fields accept
+  // a surface write; the rest are read-only. Absent → NO field is writable (silence means "you may
+  // not" — the deny-by-default posture §21's wave flipped in). Every registration Loam mints names
+  // its writable fields explicitly.
   readonly writable?: readonly string[];
 }
 
@@ -178,14 +180,21 @@ export function parseClaimTemplates(raw: unknown): ClaimTemplates {
   return out;
 }
 
+// The at-rest entity a hyperschema DEFINITION lives at. `hyperschema:<Name>` by default (§21): the
+// prefix names what the entity holds — the gather program — and is shape-distinguishable from the
+// old `schema:<Name>` form by construction, so a §20 migration can tell a pre-rename store from a
+// migrated one without a per-delta version stamp. `schema:` is freed for the resolution Schema's own
+// entities (a later §21 slice). An explicit `entity` always overrides the default.
 export const schemaEntityFor = (hyperschema: HyperSchema, entity?: string): string =>
-  entity ?? `schema:${hyperschema.name}`;
+  entity ?? `hyperschema:${hyperschema.name}`;
 
-// The registration entity for a schema entity — one registration per schema entity, latest wins.
+// The registration entity for a hyperschema entity — one registration per hyperschema entity,
+// latest wins. Keys off the (now `hyperschema:`-prefixed) entity, so the registration files under
+// `registration:hyperschema:<Name>`.
 const registrationEntity = (schemaEntity: string): string => `registration:${schemaEntity}`;
 
-// Serialize a registration's claims: a pointer to the schema entity plus policy and roots.
-// The schema-entity pointer targets the "registration" context, NEVER "definition" — the
+// Serialize a registration's claims: a pointer to the hyperschema entity plus policy and roots.
+// The hyperschema-entity pointer targets the "registration" context, NEVER "definition" — the
 // definition bucket is loadHyperSchema's alone, and a registration must not masquerade in it.
 export function registrationClaims(
   schemaEntity: string,
