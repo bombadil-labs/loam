@@ -34,6 +34,17 @@ export interface ResolvedNode {
   readonly view: Record<string, View>;
   readonly hex: string;
   readonly hviewHex: string;
+  // The time pin (SPEC §26): present only on an AS-OF read — the moment T this view was
+  // resolved against ("the ground as it stood at T"). Absent on a present-tense read, which is
+  // the live materialization by construction. It rides the response beside `hex`, never inside
+  // the resolved data.
+  readonly asOf?: number;
+  // The erasure annotation (SPEC §26/§11): on an as-of read, the sorted timestamps at which this
+  // ground lawfully forgot something SINCE the moment T — an erasure spoken after T may have
+  // redacted a fact that stood at T, so the read confesses each discontinuity's moment (never the
+  // content: a tombstone remembers THAT it forgot and WHEN, not what; the count is their length).
+  // Absent on a present read (the present already reflects every erasure as ordinary absence).
+  readonly forgotten?: number[];
 }
 
 // A subscription event: the re-resolved node plus where it came from and what moved.
@@ -56,7 +67,9 @@ export interface ClaimPointerSpec {
 // door discipline, watch streams re-resolutions, claim lands raw signed pointers. The
 // GATEWAY owns all four; a door only translates its dialect into these calls.
 export interface SurfaceHooks {
-  resolve(schemaName: string, entity: string): ResolvedNode;
+  // Resolve a view at an entity. An optional `asOf` (SPEC §26) reads a MOMENT: the ground as it
+  // stood at timestamp T, resolved by the same program — omit it and the read is present-tense.
+  resolve(schemaName: string, entity: string, asOf?: number): ResolvedNode;
   mutate(
     schemaName: string,
     entity: string,

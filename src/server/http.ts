@@ -519,6 +519,8 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
               req.method ?? "GET",
               url.pathname.split("/").slice(3),
               body,
+              undefined,
+              url.searchParams.get("asOf") ?? undefined,
             );
             json(res, result.status, result.body);
             return;
@@ -568,6 +570,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             url.pathname.split("/").slice(3),
             body,
             contextFor(identity)?.actor,
+            url.searchParams.get("asOf") ?? undefined,
           );
           json(res, result.status, result.body);
           return;

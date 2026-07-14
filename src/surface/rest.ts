@@ -207,6 +207,24 @@ export function buildOpenApi(
 
 // GET/POST /rest/<vN | @hash>/<schema>/<entity>. Transport-free; the caller has already
 // resolved identity to a door ("full" with an optional actorSeed, or "public").
+// The resolved node as a REST body: the view beside its content addresses, and — on an as-of
+// read (SPEC §26) — the time pin and the erasure annotation, riding alongside exactly as `_hex`
+// does and never inside the resolved data. A present read carries neither.
+const nodeBody = (node: {
+  entity: string;
+  view: Record<string, unknown>;
+  hex: string;
+  hviewHex: string;
+  asOf?: number;
+  forgotten?: number[];
+}): Record<string, unknown> => ({
+  entity: node.entity,
+  view: node.view,
+  _hex: node.hex,
+  _hviewHex: node.hviewHex,
+  ...(node.asOf === undefined ? {} : { _asOf: node.asOf, _forgotten: node.forgotten }),
+});
+
 export async function handleRest(
   gateway: Gateway,
   door: "full" | "public",
@@ -214,6 +232,7 @@ export async function handleRest(
   segments: readonly string[],
   bodyText: string | undefined,
   actorSeed?: string,
+  asOfRaw?: string,
 ): Promise<RestResult> {
   const [vTag, schemaName, entityRaw] = segments;
   if (vTag === undefined || schemaName === undefined || entityRaw === undefined) {
@@ -224,6 +243,15 @@ export async function handleRest(
     entity = decodeURIComponent(entityRaw);
   } catch {
     return refuse(400, "the entity segment is not decodable");
+  }
+
+  // The time pin (SPEC §26): `?asOf=<T>` reads the ground as it stood at that millisecond. A
+  // read parameter — meaningful on GET; a write is always present-tense, so POST/DELETE ignore it.
+  let asOf: number | undefined;
+  if (asOfRaw !== undefined && asOfRaw !== "") {
+    const t = Number(asOfRaw);
+    if (!Number.isFinite(t)) return refuse(400, "asOf must be a numeric timestamp (milliseconds)");
+    asOf = t;
   }
 
   const versions = versionsFor(gateway, door);
@@ -273,17 +301,9 @@ export async function handleRest(
     // them: a resolver error must not become a 500 that leaks internals on any door.
     try {
       const node = isLatest
-        ? hooks.resolve(schemaName, entity)
-        : gateway.resolvePinned(pinned, entity);
-      return {
-        status: 200,
-        body: {
-          entity: node.entity,
-          view: node.view,
-          _hex: node.hex,
-          _hviewHex: node.hviewHex,
-        },
-      };
+        ? hooks.resolve(schemaName, entity, asOf)
+        : gateway.resolvePinned(pinned, entity, asOf);
+      return { status: 200, body: nodeBody(node) };
     } catch (err) {
       return refuse(400, err instanceof Error ? err.message : String(err));
     }
@@ -319,15 +339,7 @@ export async function handleRest(
     try {
       const node = await hooks.mutate(schemaName, entity, clean, actorSeed);
       const answered = isLatest ? node : gateway.resolvePinned(pinned, entity);
-      return {
-        status: 200,
-        body: {
-          entity: answered.entity,
-          view: answered.view,
-          _hex: answered.hex,
-          _hviewHex: answered.hviewHex,
-        },
-      };
+      return { status: 200, body: nodeBody(answered) };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       // The same outcomes the other doors map: standing and tombstone refusals are 403, a
@@ -383,15 +395,7 @@ export async function handleRest(
           );
           answered = isLatest ? node : gateway.resolvePinned(pinned, entity);
         }
-        return {
-          status: 200,
-          body: {
-            entity: answered.entity,
-            view: answered.view,
-            _hex: answered.hex,
-            _hviewHex: answered.hviewHex,
-          },
-        };
+        return { status: 200, body: nodeBody(answered) };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         if (/can no longer persist/.test(message)) return refuse(503, message);
@@ -416,15 +420,7 @@ export async function handleRest(
     try {
       const node = await hooks.clear(schemaName, entity, fields, actorSeed);
       const answered = isLatest ? node : gateway.resolvePinned(pinned, entity);
-      return {
-        status: 200,
-        body: {
-          entity: answered.entity,
-          view: answered.view,
-          _hex: answered.hex,
-          _hviewHex: answered.hviewHex,
-        },
-      };
+      return { status: 200, body: nodeBody(answered) };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (/can no longer persist/.test(message)) return refuse(503, message);

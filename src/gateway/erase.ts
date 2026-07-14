@@ -132,17 +132,48 @@ export function eraseDefect(
 // sits in the ground binds nothing. A struck tombstone (lawful negation) is forgiveness: the id
 // may return.
 export function readTombstones(reactor: Reactor, operator: string | undefined): Set<string> {
-  if (operator === undefined) return new Set();
-  const negated = lawfulNegated(reactor, operator);
   const dead = new Set<string>();
+  for (const tomb of survivingTombstones(reactor, operator)) {
+    dead.add(tombstoneParts(tomb.claims).targetId!); // survivingTombstones proved it well-shaped
+  }
+  return dead;
+}
+
+// The surviving, lawful, operator-signed tombstones — the record of what this ground has
+// forgotten (that it forgot, never what). One place computes the set both readTombstones (the
+// dead ids) and forgottenSince (the as-of annotation) draw from, so the author-confirmation and
+// forgiveness rules cannot drift between them.
+function survivingTombstones(reactor: Reactor, operator: string | undefined): Delta[] {
+  if (operator === undefined) return []; // an ungoverned store honors no erasure at all
+  const negated = lawfulNegated(reactor, operator);
+  const out: Delta[] = [];
   for (const delta of reactor.snapshot()) {
-    if (!isTombstone(delta.claims) || negated(delta.id)) continue;
+    if (!isTombstone(delta.claims) || negated(delta.id)) continue; // struck = forgiven
     if (delta.claims.author !== operator) continue; // erasure is the operator's alone
     const { targetId, count } = tombstoneParts(delta.claims);
     if (targetId === undefined || count.erases !== 1) continue; // shape the door enforces
-    dead.add(targetId);
+    out.push(delta);
   }
-  return dead;
+  return out;
+}
+
+// The erasure annotation (SPEC §26): the moments at which this ground lawfully forgot something
+// SINCE a moment T. An as-of read reconstructs the SURVIVING ground at T; an erasure spoken after T
+// may have redacted a fact that stood at T, so the read confesses each discontinuity's TIMESTAMP —
+// never the content, for a tombstone keeps only THAT it forgot and WHEN. Erasures spoken at or
+// before T are already baked into the moment's honest absence (the fact was gone by T) and need no
+// mark; a present read needs none at all. Store-wide by necessity: a purged delta's entity is
+// unknowable, so the honest signal is temporal — the sorted moments an erasure fell in the window
+// since T (their length is the count), never scoped to this view.
+export function forgottenSince(
+  reactor: Reactor,
+  operator: string | undefined,
+  since: number,
+): number[] {
+  return survivingTombstones(reactor, operator)
+    .map((d) => d.claims.timestamp)
+    .filter((t) => t > since)
+    .sort((a, b) => a - b);
 }
 
 // The pre-boot variant for `loam serve`: given the deltas held across the tiers (before any
