@@ -207,11 +207,17 @@ has verbs for *deciding the fate of* a fact the store could not read.
   the store's ground (re-admit adds a fact; discard-as-erasure removes one), so the act belongs to
   the controller, never to a grantee or a peer.
 
-**Provenance.** Design accepted (Myk, 2026-07-13); pending the implementing PR. No code
-landed; the mechanisms above (namespace marking, row quarantine on boot, the entity-ID
-reservation, per-author budgets as deployment config, and `loam repair`) are argued here to be
-reviewed, and the §25 section number is provisional (Myk may renumber). The two decisions folded
-in — quarantine the row and never the store (Myk, 2026-07-12), and per-author quotas as
-deployment config rather than constitutional law (Myk, 2026-07-13) — are settled; the section
-that realizes them will carry the implementing PR link(s) and an implementation note in this
-footer's place.
+**Provenance.** Landed — [#85](https://github.com/bombadil-labs/loam/pull/85) (pieces 1–4: backend
+namespace marking, row-quarantine on boot, boot resilience, the `loam:` / `loam.` entity-ID
+reservation, and `loam repair`) and [#86](https://github.com/bombadil-labs/loam/pull/86) (piece 5:
+per-author door budgets). Lives in `src/store/quarantine.ts` + the `RepairableBackend` seam (sqlite
+and localStorage set a bad row aside on boot instead of bricking; the archive vault keeps its loud
+restore-time doctrine, the mirror delegates), `src/gateway/repair.ts` + `loam repair`
+(list/discard/re-admit/leave, operator-authority — discarding a quarantined row is not an erasure,
+forgetting a real ground delta still routes through §11), the constitutional-core exception in
+`Gateway.open` (a quarantined operator marker refuses loudly), and `src/gateway/budget.ts`
+(`budgetDefect` / `readBudgetPolicy` / `budgetRefusal`, wired into `authorize` and the append door —
+opt-in and off by default, volume metered as grow-only footprint, the limit shape extensible by
+addition). Decisions folded in: quarantine the row and never the store (Myk, 2026-07-12), and
+per-author quotas as deployment config not constitutional law (Myk, 2026-07-13). The two
+"quarantine" senses stay distinct: §25 sequesters an unreadable ROW, §24 sandboxes foreign LAW.
