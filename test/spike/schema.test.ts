@@ -1,5 +1,5 @@
-// SPEC §2, "Self-hosting schema-schema": schemas are data. publishSchemaClaims turns a
-// HyperSchema into claims; loadSchema grows it back from deltas; evolution is append and
+// SPEC §2, "Self-hosting schema-schema": schemas are data. publishHyperSchemaClaims turns a
+// HyperSchema into claims; loadHyperSchema grows it back from deltas; evolution is append and
 // deprecation is negation. The metacircular seed (HYPER_SCHEMA_SCHEMA) round-trips through itself.
 
 import { describe, expect, it } from "vitest";
@@ -9,11 +9,11 @@ import {
   SchemaRegistry,
   collectRefs,
   evalTerm,
-  loadSchema,
+  loadHyperSchema,
   makeDelta,
   makeNegationClaims,
   parseTerm,
-  publishSchemaClaims,
+  publishHyperSchemaClaims,
   resolveView,
   resultCanonicalHex,
   signClaims,
@@ -25,11 +25,11 @@ import { FERN, GARDENER, GARDENER_SEED, PLANT_BODY, SURVEYOR_SEED, observed } fr
 
 const PLANT: HyperSchema = { name: "Plant", alg: 1, body: PLANT_BODY };
 
-describe("spike: loadSchema(deltas) → HyperSchema", () => {
+describe("spike: loadHyperSchema(deltas) → HyperSchema", () => {
   it("publish → load round-trips a schema through deltas", () => {
-    const claims = publishSchemaClaims(PLANT, "schema:Plant", GARDENER, 1000);
+    const claims = publishHyperSchemaClaims(PLANT, "schema:Plant", GARDENER, 1000);
     const dset = DeltaSet.from([makeDelta(claims)]);
-    const loaded = loadSchema(dset, "schema:Plant");
+    const loaded = loadHyperSchema(dset, "schema:Plant");
     expect(loaded.name).toBe("Plant");
     expect(loaded.alg).toBe(PLANT.alg);
     expect(termHash(loaded.body)).toBe(termHash(PLANT.body));
@@ -38,9 +38,9 @@ describe("spike: loadSchema(deltas) → HyperSchema", () => {
   it("the loaded schema evaluates identically to the original", () => {
     const world = DeltaSet.from([
       observed(FERN, "height", 30, 1000, GARDENER_SEED),
-      makeDelta(publishSchemaClaims(PLANT, "schema:Plant", GARDENER, 1000)),
+      makeDelta(publishHyperSchemaClaims(PLANT, "schema:Plant", GARDENER, 1000)),
     ]);
-    const loaded = loadSchema(world, "schema:Plant");
+    const loaded = loadHyperSchema(world, "schema:Plant");
     const viaLoaded = evalTerm(loaded.body, world, FERN);
     const viaOriginal = evalTerm(PLANT.body, world, FERN);
     expect(resultCanonicalHex(viaLoaded)).toBe(resultCanonicalHex(viaOriginal));
@@ -49,30 +49,33 @@ describe("spike: loadSchema(deltas) → HyperSchema", () => {
   it("evolution is append: the newer definition supersedes, body and all", () => {
     // v2's body genuinely differs from v1's — otherwise supersession of the term is unprovable.
     const v2Body = parseTerm({ op: "group", key: "byRole", in: "input" });
-    const v1 = publishSchemaClaims(PLANT, "schema:Evolving", GARDENER, 1000);
-    const v2 = publishSchemaClaims(
+    const v1 = publishHyperSchemaClaims(PLANT, "schema:Evolving", GARDENER, 1000);
+    const v2 = publishHyperSchemaClaims(
       { name: "PlantV2", alg: 1, body: v2Body },
       "schema:Evolving",
       GARDENER,
       2000,
     );
-    const loaded = loadSchema(DeltaSet.from([makeDelta(v1), makeDelta(v2)]), "schema:Evolving");
+    const loaded = loadHyperSchema(
+      DeltaSet.from([makeDelta(v1), makeDelta(v2)]),
+      "schema:Evolving",
+    );
     expect(loaded.name).toBe("PlantV2");
     expect(termHash(loaded.body)).toBe(termHash(v2Body));
     expect(termHash(loaded.body)).not.toBe(termHash(PLANT.body));
   });
 
   it("deprecation is negation: a negated definition does not load", () => {
-    const only = makeDelta(publishSchemaClaims(PLANT, "schema:Dead", GARDENER, 1000));
+    const only = makeDelta(publishHyperSchemaClaims(PLANT, "schema:Dead", GARDENER, 1000));
     const negation = makeDelta(makeNegationClaims(GARDENER, 1100, only.id));
-    expect(() => loadSchema(DeltaSet.from([only, negation]), "schema:Dead")).toThrow(
+    expect(() => loadHyperSchema(DeltaSet.from([only, negation]), "schema:Dead")).toThrow(
       /no surviving schema definition/,
     );
   });
 
   it("the metacircular seed: HYPER_SCHEMA_SCHEMA round-trips through its own machinery", () => {
-    const claims = publishSchemaClaims(HYPER_SCHEMA_SCHEMA, "schema:schema", GARDENER, 1);
-    const loaded = loadSchema(DeltaSet.from([makeDelta(claims)]), "schema:schema");
+    const claims = publishHyperSchemaClaims(HYPER_SCHEMA_SCHEMA, "schema:schema", GARDENER, 1);
+    const loaded = loadHyperSchema(DeltaSet.from([makeDelta(claims)]), "schema:schema");
     expect(loaded.name).toBe(HYPER_SCHEMA_SCHEMA.name);
     expect(termHash(loaded.body)).toBe(termHash(HYPER_SCHEMA_SCHEMA.body));
   });

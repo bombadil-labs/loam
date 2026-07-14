@@ -211,9 +211,9 @@ describe("claim templates: the write discipline travels with the schema", () => 
     const backend = new MemoryBackend();
     const gateway = await Gateway.open(backend, { seed: OPERATOR_SEED });
     // hand-plant a registration whose mutations payload is garbage (past publish's guards)
-    const { publishSchemaClaims } = await import("@bombadil/rhizomatic");
+    const { publishHyperSchemaClaims } = await import("@bombadil/rhizomatic");
     await gateway.append([
-      signClaims(publishSchemaClaims(PLANT, "schema:Plant", OPERATOR, 1), OPERATOR_SEED),
+      signClaims(publishHyperSchemaClaims(PLANT, "schema:Plant", OPERATOR, 1), OPERATOR_SEED),
       signClaims(
         {
           ...registrationClaims("schema:Plant", PLANT_POLICY, [FERN], OPERATOR, 2),

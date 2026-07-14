@@ -227,12 +227,12 @@ describe("federation: two instances meet and merge", () => {
     // AND a newer definition at B's own schema entity — all verified, all admitted (union).
     const MALLORY_SEED = "ee".repeat(32);
     const MALLORY = authorForSeed(MALLORY_SEED);
-    const { publishSchemaClaims } = await import("@bombadil/rhizomatic");
+    const { publishHyperSchemaClaims } = await import("@bombadil/rhizomatic");
     const { registrationClaims } = await import("../../src/gateway/registration.js");
     const byRole = parseTerm({ op: "group", key: "byRole", in: "input" });
     const report = await b.federate([
       signClaims(
-        publishSchemaClaims(
+        publishHyperSchemaClaims(
           { name: "Intruder", alg: 1, body: byRole },
           "schema:Intruder",
           MALLORY,
@@ -245,7 +245,12 @@ describe("federation: two instances meet and merge", () => {
         MALLORY_SEED,
       ),
       signClaims(
-        publishSchemaClaims({ name: "Plant", alg: 1, body: byRole }, "schema:Plant", MALLORY, 9e12),
+        publishHyperSchemaClaims(
+          { name: "Plant", alg: 1, body: byRole },
+          "schema:Plant",
+          MALLORY,
+          9e12,
+        ),
         MALLORY_SEED,
       ),
     ]);

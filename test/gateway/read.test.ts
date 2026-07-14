@@ -12,7 +12,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import {
   makeDelta,
   parseTerm,
-  publishSchemaClaims,
+  publishHyperSchemaClaims,
   signClaims,
   termHash,
   type Delta,
@@ -106,13 +106,13 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Schema)", () => {
     await backward.close();
   });
 
-  it("loadSchema: schema-defining deltas meta-resolve through HYPER_SCHEMA_SCHEMA into a HyperSchema", async () => {
+  it("loadHyperSchema: schema-defining deltas meta-resolve through HYPER_SCHEMA_SCHEMA into a HyperSchema", async () => {
     const gateway = await Gateway.open(new MemoryBackend());
     const published = signClaims(
-      publishSchemaClaims(PLANT, "schema:Plant", GARDENER, 1000),
+      publishHyperSchemaClaims(PLANT, "schema:Plant", GARDENER, 1000),
       GARDENER_SEED,
     );
-    const loaded = await gateway.loadSchema([published], "schema:Plant");
+    const loaded = await gateway.loadHyperSchema([published], "schema:Plant");
     expect(loaded.name).toBe("Plant");
     expect(termHash(loaded.body)).toBe(termHash(PLANT.body));
     // the loaded schema serves queries like the hand-built one
@@ -264,11 +264,11 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Schema)", () => {
     await gateway.close();
   });
 
-  it("loadSchema proves the definition before anything lands: a bad batch persists nothing", async () => {
+  it("loadHyperSchema proves the definition before anything lands: a bad batch persists nothing", async () => {
     const backend = new MemoryBackend();
     const gateway = await Gateway.open(backend);
     const stray = observed(FERN, "height", 30, 1000, GARDENER_SEED); // defines no schema
-    await expect(gateway.loadSchema([stray], "schema:Nope")).rejects.toThrow(
+    await expect(gateway.loadHyperSchema([stray], "schema:Nope")).rejects.toThrow(
       /no surviving schema definition/,
     );
     expect(await backend.deltasSince(new Set())).toEqual([]); // append-only stores forgive nothing

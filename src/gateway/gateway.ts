@@ -17,11 +17,11 @@ import {
   computeId,
   evalTerm,
   hviewCanonicalHex,
-  loadSchema,
+  loadHyperSchema,
   makeDelta,
   makeNegationClaims,
   schemaToJson,
-  publishSchemaClaims,
+  publishHyperSchemaClaims,
   resolveView,
   signClaims,
   termHash,
@@ -632,11 +632,11 @@ export class Gateway {
   // deltas are known to define what the caller says they define. The trial reads the LAWFUL
   // slice (the operator's, in a governed store): a federated foreign definition at the same
   // entity — newer, or malformed — must not shadow what the operator is proving.
-  async loadSchema(deltas: Iterable<Delta>, entity: string): Promise<HyperSchema> {
+  async loadHyperSchema(deltas: Iterable<Delta>, entity: string): Promise<HyperSchema> {
     const batch = [...deltas];
     const trial = lawfulSnapshot(this.reactor, this.operatorAuthor);
     for (const d of batch) trial.add(d);
-    const schema = loadSchema(trial, entity); // throws here → nothing was persisted
+    const schema = loadHyperSchema(trial, entity); // throws here → nothing was persisted
     await this.append(batch);
     return schema;
   }
@@ -688,7 +688,7 @@ export class Gateway {
 
   // Publish a schema and its registration as data, then bind them, so the surface survives
   // reopen with no code. Two deltas: the DEFINITION (schema-schema claims at the schema
-  // entity — proven by loadSchema before anything lands) and the REFERENCE that registers it.
+  // entity — proven by loadHyperSchema before anything lands) and the REFERENCE that registers it.
   // Republishing at the same entity is evolution: the running surface rebinds to the latest
   // surviving definition. Any granted author could APPEND such deltas (writes are open), but
   // only the operator's ever bind — so this method refuses non-operators up front rather than
@@ -752,10 +752,10 @@ export class Gateway {
     const author = authorForSeed(seed);
     const schemaEntity = schemaEntityFor(hyperschema, entity);
     const definition = signClaims(
-      publishSchemaClaims(hyperschema, schemaEntity, author, this.nextTimestamp()),
+      publishHyperSchemaClaims(hyperschema, schemaEntity, author, this.nextTimestamp()),
       seed,
     );
-    await this.loadSchema([definition], schemaEntity); // proves, then persists the definition
+    await this.loadHyperSchema([definition], schemaEntity); // proves, then persists the definition
     const reference = signClaims(
       registrationClaims(
         schemaEntity,
