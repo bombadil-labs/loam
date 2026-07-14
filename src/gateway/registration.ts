@@ -1,9 +1,9 @@
 // A registration is a REFERENCE, not a carrier. The schema itself is DEFINED by schema-schema
-// deltas — rhizomatic's `publishSchemaClaims` shape — filed at a schema entity (`schema:<Name>`
+// deltas — rhizomatic's `publishHyperSchemaClaims` shape — filed at a schema entity (`schema:<Name>`
 // by default); the registration delta, under the constitutional context `loam.registration`,
 // holds only a pointer to that entity, the resolution schema as canonical JSON, and the roots. The GraphQL
 // surface is therefore GENERATED: `readRegistrations` meta-resolves each referenced entity via
-// `loadSchema` over the store's surviving definitions, so evolution is append (republish at the
+// `loadHyperSchema` over the store's surviving definitions, so evolution is append (republish at the
 // same entity) and deprecation is negation (a definition with no survivor binds nothing).
 //
 // Schema carries no schema-schema and needs none: it is the reader's lens, not the entity's
@@ -14,7 +14,7 @@
 
 import {
   DeltaSet,
-  loadSchema,
+  loadHyperSchema,
   parseSchema,
   parseTerm,
   schemaToJson,
@@ -186,7 +186,7 @@ const registrationEntity = (schemaEntity: string): string => `registration:${sch
 
 // Serialize a registration's claims: a pointer to the schema entity plus policy and roots.
 // The schema-entity pointer targets the "registration" context, NEVER "definition" — the
-// definition bucket is loadSchema's alone, and a registration must not masquerade in it.
+// definition bucket is loadHyperSchema's alone, and a registration must not masquerade in it.
 export function registrationClaims(
   schemaEntity: string,
   schema: Schema,
@@ -224,7 +224,7 @@ export function registrationClaims(
         },
       },
       // Wire roles follow rhizomatic's 0.3 model, and the parsed `Registration` mirrors them:
-      // `hyperschema` names the gather program's entity (the definition read by loadSchema),
+      // `hyperschema` names the gather program's entity (the definition read by loadHyperSchema),
       // `schema` carries the resolution program itself.
       {
         role: "hyperschema",
@@ -317,7 +317,7 @@ const primitive = (claims: Claims, role: string): string | number | boolean | un
 };
 
 // Every surviving registration, its schema GENERATED from the surviving definition deltas.
-// The latest registration per schema entity names the policy and roots; `loadSchema` over the
+// The latest registration per schema entity names the policy and roots; `loadHyperSchema` over the
 // lawful slice yields the schema itself. A registration whose definition does not survive (or
 // never arrived, or is malformed) binds nothing — unbound, never a crash.
 // The substrate's negation algebra, over the lawful slice — shared by every constitutional
@@ -461,7 +461,7 @@ export function readRegistrations(reactor: Reactor, operator?: string): Registra
   const out: Registration[] = [];
   for (const cand of [...latest.values()].sort((a, b) => a.timestamp - b.timestamp)) {
     try {
-      const hyperschema = loadSchema(lawful, cand.schemaEntity);
+      const hyperschema = loadHyperSchema(lawful, cand.schemaEntity);
       // NUL is the gateway's own alphabet (internal materialization names): a definition whose
       // name carries it — plantable only by hand, never through publishRegistration — binds
       // nothing rather than colliding with that namespace.
@@ -508,7 +508,7 @@ export function readRegistrationVersions(
       try {
         // The SCHEMA entity the candidate references, not the registration entity it files
         // under — the same resolution readRegistrations performs.
-        hyperschema = loadSchema(lawful, cand.schemaEntity);
+        hyperschema = loadHyperSchema(lawful, cand.schemaEntity);
         // NUL is the gateway's own alphabet (see readRegistrations) — it binds nothing.
         if (hyperschema.name.includes(String.fromCharCode(0))) continue;
       } catch {
@@ -554,7 +554,7 @@ export function readWithdrawnRegistrations(
   const out: WithdrawnRegistration[] = [];
   for (const cand of withdrawn) {
     try {
-      const schema = loadSchema(lawful, cand.schemaEntity);
+      const schema = loadHyperSchema(lawful, cand.schemaEntity);
       out.push({ deltaId: cand.id, schemaName: schema.name });
     } catch {
       // its definition is gone too: nothing nameable remains to say "withdrawn" about

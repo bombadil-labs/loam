@@ -337,12 +337,12 @@ describe("evolution is append: the surface follows the surviving definitions", (
     const backend = new MemoryBackend();
     const gateway = await Gateway.open(backend, { seed: OPERATOR_SEED });
     // the operator plants the poison by hand, past publishRegistration's guard
-    const { publishSchemaClaims } = await import("@bombadil/rhizomatic");
+    const { publishHyperSchemaClaims } = await import("@bombadil/rhizomatic");
     const { registrationClaims } = await import("../../src/gateway/registration.js");
     const dsetBody = parseTerm({ op: "mask", policy: "drop", in: "input" });
     await gateway.append([
       signClaims(
-        publishSchemaClaims(
+        publishHyperSchemaClaims(
           { name: "Poison", alg: 1, body: dsetBody },
           "schema:Poison",
           OPERATOR,
@@ -385,9 +385,9 @@ describe("evolution is append: the surface follows the surviving definitions", (
 
     // the gardener publishes a NEWER definition at the operator's own schema entity — under
     // open writes it lands as data; under operator-filtered reads it binds nothing
-    const { publishSchemaClaims } = await import("@bombadil/rhizomatic");
+    const { publishHyperSchemaClaims } = await import("@bombadil/rhizomatic");
     const rival = signClaims(
-      publishSchemaClaims(PLANT_V2, "schema:Plant", GARDENER, Date.now() + 9_000_000),
+      publishHyperSchemaClaims(PLANT_V2, "schema:Plant", GARDENER, Date.now() + 9_000_000),
       GARDENER_SEED,
     );
     await expect(gateway.append([rival])).resolves.toMatchObject({ accepted: 1 });

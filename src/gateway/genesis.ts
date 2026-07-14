@@ -7,7 +7,7 @@
 
 import {
   authorForSeed,
-  publishSchemaClaims,
+  publishHyperSchemaClaims,
   signClaims,
   type Claims,
   type Delta,
@@ -60,7 +60,9 @@ export function assembleGenesis(spec: GenesisSpec): Genesis {
     // Two deltas per registration: the DEFINITION (schema-schema claims at the schema entity)
     // and the REFERENCE that registers it. Deterministic timestamps keep boot idempotent.
     const entity = schemaEntityFor(reg.hyperschema, reg.entity);
-    deltas.push(signClaims(publishSchemaClaims(reg.hyperschema, entity, operator, clock++), seed));
+    deltas.push(
+      signClaims(publishHyperSchemaClaims(reg.hyperschema, entity, operator, clock++), seed),
+    );
     deltas.push(
       signClaims(
         registrationClaims(entity, reg.schema, reg.roots, operator, clock++, reg.mutations),

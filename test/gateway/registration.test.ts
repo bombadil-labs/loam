@@ -1,7 +1,7 @@
 // Step 10's contract, part 1: registrations REFERENCE, definitions DEFINE. A schema is defined
-// by schema-schema deltas (rhizomatic's publishSchemaClaims shape) at a schema entity; a
+// by schema-schema deltas (rhizomatic's publishHyperSchemaClaims shape) at a schema entity; a
 // registration delta holds only a pointer to that entity, the policy as canonical JSON, and the
-// roots. readRegistrations GENERATES each HyperSchema via loadSchema over the store's surviving
+// roots. readRegistrations GENERATES each HyperSchema via loadHyperSchema over the store's surviving
 // definitions — so evolution is append, deprecation is negation, and in a governed store only
 // the operator's law binds.
 
@@ -12,7 +12,7 @@ import {
   makeDelta,
   makeNegationClaims,
   parseTerm,
-  publishSchemaClaims,
+  publishHyperSchemaClaims,
   termCanonicalHex,
   termHash,
   type Delta,
@@ -47,7 +47,7 @@ const V2_BODY = parseTerm({
 const PLANT_V2: HyperSchema = { name: "Plant", alg: 1, body: V2_BODY };
 
 const define = (schema: HyperSchema, author: string, ts: number): Delta =>
-  makeDelta(publishSchemaClaims(schema, ENTITY, author, ts));
+  makeDelta(publishHyperSchemaClaims(schema, ENTITY, author, ts));
 const register = (author: string, ts: number): Delta =>
   makeDelta(registrationClaims(ENTITY, PLANT_POLICY, [FERN], author, ts));
 
@@ -74,7 +74,7 @@ describe("registration claims: a reference, never a carrier", () => {
     expect(flat).not.toContain('"group"');
   });
 
-  it("does not file under the schema entity's definition bucket (loadSchema stays clean)", () => {
+  it("does not file under the schema entity's definition bucket (loadHyperSchema stays clean)", () => {
     const claims = registrationClaims(ENTITY, PLANT_POLICY, [FERN], OPERATOR, 5);
     for (const p of claims.pointers) {
       if (p.target.kind === "entity" && p.target.entity.id === ENTITY) {
