@@ -59,7 +59,8 @@ untouched, so content-addressing and portability are unaffected, and two instanc
 different writability for one schema without diverging on a resolved View. (The same reason merge fns
 are a closed vocabulary — resolution must be a universal function of the data — is why write
 DISCIPLINE, which is not resolution, may be local.) The global immutable-by-default posture — silence
-meaning "you may not" — would flip today's permissive default and stays a future breaking change.
+meaning "you may not" — has since flipped the old permissive default (§21's first slice): a
+registration now names its writable fields explicitly, and silence denies.
 
 **Real limitations, stated plainly (the §13 register):**
 
@@ -83,11 +84,11 @@ meaning "you may not" — would flip today's permissive default and stays a futu
   field AND carries an unrelated pointer is retracted whole. Author one delta per fact you may want to
   withdraw independently (the surface's own writes already do).
 
-Relational **edges** as first-class `link` / `sever` have since landed as an amendment (below). Two
-narrower additions remain on the backlog (ADLC tickets in `.adlc/tickets.json`): **read-only derived
+Relational **edges** as first-class `link` / `sever` have since landed as an amendment (below), and so
+has the **immutable-by-default flip** (silence now means *you may not*), with §21's first slice. One
+narrower addition remains on the backlog (ADLC tickets in `.adlc/tickets.json`): **read-only derived
 fields**, re-scoped to arrive with §22's synthetic resolvers (read-only by construction, refused a
-write with a reason); and the **immutable-by-default flip** — silence meaning *you may not* — which
-rides §21's migration wave. What ships here is the whole read side's dual: **a way to remove — clear a
+write with a reason). What ships here is the whole read side's dual: **a way to remove — clear a
 field, remove a value, or lock one shut — and it is all retraction and declaration, never a null on a
 reference.**
 
@@ -101,8 +102,9 @@ have. They are pure surface sugar over `assert` / `retract` of a shape already o
 new lands and no migration rides them. The surface reads the **published hyperschema gather** — not
 the resolution Schema — to learn which fields are edges: a body with no `expand` resolves no edges, so
 it is offered neither verb and no entity-pointer write at all, while a primitive field still takes a
-primitive. `writable` disciplines edges exactly as it disciplines value writes. This is wave A of the
-§14 amendment; wave B (the immutable-by-default flip) still waits on §21's wave.
+primitive. `writable` disciplines edges exactly as it disciplines value writes. This was wave A of the
+§14 amendment; wave B (the immutable-by-default flip) landed with §21's first slice — silence now
+denies, and the §20 migration gave every existing registration an explicit `writable` list.
 
 **Provenance.** [#73](https://github.com/bombadil-labs/loam/pull/73) — writing as the dual of
 resolution. `Gateway.retract` (shared by `clear`/`remove`) negates the caller's own contributions via
@@ -115,5 +117,8 @@ shaping a view against others' claims is the schema Policy's job, not a negation
 TODO §14. Edge verbs `link` / `sever` landed as wave A of the amendment —
 [#80](https://github.com/bombadil-labs/loam/pull/80) (pure sugar over `assert` / `retract`; `edgeRoles`
 reads the published hyperschema gather; 8 honest round-trip tests, no on-wire change, no migration).
-Still on the backlog: the immutable-by-default flip (rides §21's wave) and the derived-field refusal
-(ships with §22's synthetic resolvers).
+Wave B — the immutable-by-default flip — landed with §21's first slice
+([#92](https://github.com/bombadil-labs/loam/pull/92)): `assertWritable` now denies when no `writable`
+list is declared, and §21's §20 migration re-signed every existing registration with an explicit
+`writable` list of all its fields (behavior preserved). Still on the backlog: the derived-field
+refusal (ships with §22's synthetic resolvers).
