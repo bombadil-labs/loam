@@ -21,7 +21,14 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
 import { FERN, GARDENER, GARDENER_SEED, PLANT_BODY, observed } from "../spike/garden.js";
-import { PLANT, PLANT_POLICY, garden, governedBootstrap, pickLatest } from "./fixtures.js";
+import {
+  PLANT,
+  PLANT_POLICY,
+  PLANT_WRITABLE,
+  garden,
+  governedBootstrap,
+  pickLatest,
+} from "./fixtures.js";
 
 const QUERY = `{
   plant(entity: "${FERN}") {
@@ -46,7 +53,7 @@ type PlantRow = {
 async function openGateway(deltas: readonly Delta[] = garden): Promise<Gateway> {
   const gateway = await Gateway.open(new MemoryBackend());
   await gateway.append(deltas);
-  gateway.register(PLANT, PLANT_POLICY, [FERN]);
+  gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
   return gateway;
 }
 
@@ -77,7 +84,7 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Schema)", () => {
     const backend = new MemoryBackend();
     await backend.append(garden);
     const gateway = await Gateway.open(backend);
-    gateway.register(PLANT, PLANT_POLICY, [FERN]);
+    gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
     expect((await queryPlant(gateway)).height).toBe(34);
     await gateway.close();
   });
@@ -145,12 +152,12 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Schema)", () => {
     const path = join(tmp, "garden.sqlite");
     const first = await Gateway.open(new SqliteBackend(path));
     await first.append(garden);
-    first.register(PLANT, PLANT_POLICY, [FERN]);
+    first.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
     const before = await queryPlant(first);
     await first.close();
 
     const second = await Gateway.open(new SqliteBackend(path));
-    second.register(PLANT, PLANT_POLICY, [FERN]);
+    second.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
     const after = await queryPlant(second);
     expect(after).toEqual(before);
     await second.close();
@@ -250,7 +257,9 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Schema)", () => {
   it("a refused registration leaves the gateway exactly as it was", async () => {
     const gateway = await openGateway();
     // duplicate schema name → refused by the registry
-    expect(() => gateway.register(PLANT, PLANT_POLICY, [FERN])).toThrow();
+    expect(() =>
+      gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE),
+    ).toThrow();
     // a colliding property name → refused by the gql builder
     expect(() =>
       gateway.register(
@@ -287,7 +296,7 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Schema)", () => {
     const gateway = await Gateway.open(backend, { seed: "c3".repeat(32) });
     await gateway.append(governedBootstrap("c3".repeat(32)));
     await gateway.append(garden);
-    gateway.register(PLANT, PLANT_POLICY, [FERN]);
+    gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
     const before = await queryPlant(gateway);
 
     backend.failNow = true;

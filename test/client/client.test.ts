@@ -20,7 +20,7 @@ import { publicClaims } from "../../src/gateway/public.js";
 import { serve, type ServerHandle } from "../../src/server/http.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN } from "../spike/garden.js";
-import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
+import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
 
 const OPERATOR_SEED = "0e".repeat(32);
 const OPERATOR = serverAuthorForSeed(OPERATOR_SEED);
@@ -32,7 +32,7 @@ let mount: string;
 
 beforeAll(async () => {
   gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
-  gateway.register(PLANT, PLANT_POLICY, [FERN]);
+  gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
   await gateway.append([signClaims(publicClaims(["Plant"], OPERATOR, 9000), OPERATOR_SEED)]);
   handle = await serve({
     mounts: { garden: gateway },

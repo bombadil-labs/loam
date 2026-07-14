@@ -14,7 +14,7 @@ import {
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER_SEED, SURVEYOR_SEED, observed } from "../spike/garden.js";
-import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
+import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 
 const RUNNER_SEED = "0d".repeat(32);
@@ -55,7 +55,7 @@ const SPEC = {
 async function plantStore(): Promise<{ gateway: Gateway; backend: MemoryBackend }> {
   const backend = new MemoryBackend();
   const gateway = await Gateway.open(backend);
-  gateway.register(PLANT, PLANT_POLICY, [FERN]);
+  gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
   // The function definition, planted in the store as data.
   await gateway.append([signClaims(bindingDefinitionClaims(SPEC, RUNNER, 1), RUNNER_SEED)]);
   return { gateway, backend };
@@ -130,13 +130,13 @@ describe("the runner: definitions in the store, execution in a peer client", () 
     const backend = new MemoryBackend();
     // planted while ungoverned — welcomed, since there was no operator to answer to
     const free = await Gateway.open(backend);
-    free.register(PLANT, PLANT_POLICY, [FERN]);
+    free.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
     await free.append([signClaims(bindingDefinitionClaims(SPEC, RUNNER, 1), RUNNER_SEED)]);
     await free.flush();
 
     // an operator opens the same store and attaches a runner: the poison does not install
     const governed = await Gateway.open(backend, { seed: OPERATOR_SEED });
-    governed.register(PLANT, PLANT_POLICY, [FERN]);
+    governed.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
     const runner = Runner.attach(governed, {
       seed: RUNNER_SEED,
       implementations: { "fn:avgHeight": avgHeight },
@@ -171,7 +171,7 @@ describe("the runner: definitions in the store, execution in a peer client", () 
 
     // reopen WITHOUT a runner: the emission is durable ground, not recomputed
     const reopened = await Gateway.open(backend);
-    reopened.register(PLANT, PLANT_POLICY, [FERN]);
+    reopened.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
     const entries = reopened.reactor
       .materializedView(reopened.materializationFor("Plant"), FERN)!
       .props.get("derived:avgHeight");

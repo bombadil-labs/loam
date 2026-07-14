@@ -16,7 +16,7 @@ import { readRegistrationVersions } from "../../src/gateway/registration.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { serve, type ServerHandle } from "../../src/server/http.js";
 import { FERN, PLANT_BODY, observed } from "../spike/garden.js";
-import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
+import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
 
 // A second, NEVER-DECLARED schema: the smaller-world assertions need a real thing to be
 // missing, and the oracle probes need a live undeclared registration hash to ask about.
@@ -60,11 +60,21 @@ beforeAll(async () => {
     new MemoryBackend(),
     assembleGenesis({
       operatorSeed: OPERATOR_SEED,
-      registrations: [{ hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN] }],
+      registrations: [
+        { hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN], writable: [...PLANT_WRITABLE] },
+      ],
       grants: [grantClaims(STORE_ENTITY, authorForSeed(WRITER_SEED), "write", OPERATOR, 2)],
     }),
   );
-  await gateway.publishRegistration(BOOK, PLANT_POLICY, ["book:dune"]);
+  await gateway.publishRegistration(
+    BOOK,
+    PLANT_POLICY,
+    ["book:dune"],
+    undefined,
+    undefined,
+    undefined,
+    [...PLANT_WRITABLE],
+  );
   await gateway.query(`mutation { plant(entity: "${FERN}", height: 30) { height } }`);
   server = await serve({
     mounts: { plants: gateway },
@@ -283,7 +293,10 @@ describe("versioning: publishing is append-only (SPEC §17 amendment)", () => {
         ],
       ]),
     };
-    await gateway.publishRegistration(PLANT, evolved, [FERN]);
+    await gateway.publishRegistration(PLANT, evolved, [FERN], undefined, undefined, undefined, [
+      ...PLANT_WRITABLE,
+      "note",
+    ]);
     await gateway.query(
       `mutation { plant(entity: "${FERN}", note: "evolved and thriving") { height } }`,
     );

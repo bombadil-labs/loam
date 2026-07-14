@@ -10,7 +10,7 @@ import { LocalStorageBackend, type StorageLike } from "../../src/store/local-sto
 import { toWire } from "../../src/federation/wire.js";
 import { canonicalDelta } from "../../src/store/canon.js";
 import { Gateway } from "../../src/gateway/gateway.js";
-import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
+import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
 import { FERN, GARDENER_SEED, SURVEYOR_SEED, observed } from "../spike/garden.js";
 import { MemStorage } from "./mem-storage.js";
 
@@ -223,7 +223,15 @@ describe("quota reaches the gateway (SPEC §15): the degradation latch", () => {
     const gateway = await Gateway.open(new LocalStorageBackend("tab", storage), {
       seed: OPERATOR_SEED,
     });
-    await gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+    await gateway.publishRegistration(
+      PLANT,
+      PLANT_POLICY,
+      [FERN],
+      undefined,
+      undefined,
+      undefined,
+      [...PLANT_WRITABLE],
+    );
     await gateway.query(`mutation { plant(entity: "${FERN}", height: 30) { height } }`);
     await gateway.flush(); // durable before the storm
 
@@ -244,7 +252,15 @@ describe("quota reaches the gateway (SPEC §15): the degradation latch", () => {
     const gateway = await Gateway.open(new LocalStorageBackend("tab", storage), {
       seed: OPERATOR_SEED,
     });
-    await gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+    await gateway.publishRegistration(
+      PLANT,
+      PLANT_POLICY,
+      [FERN],
+      undefined,
+      undefined,
+      undefined,
+      [...PLANT_WRITABLE],
+    );
     await gateway.query(`mutation { plant(entity: "${FERN}", height: 30) { height } }`);
     await gateway.flush(); // durable before the storm
 

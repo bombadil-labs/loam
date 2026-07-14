@@ -51,6 +51,7 @@ try {
     hyperschema: { name: "Board", alg: 1, body: GATHER },
     schema: { props: { notes: ALL, headline: PICK }, default: PICK },
     roots: [BOARD],
+    writable: ["notes", "headline"], // immutable-by-default (§14/§21): open both fields to writes
   });
 
   // Both residents write to the shared list; the union holds both, in ground order.

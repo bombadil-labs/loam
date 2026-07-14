@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN } from "../spike/garden.js";
-import { PLANT, PLANT_POLICY, garden, governedBootstrap } from "./fixtures.js";
+import { PLANT, PLANT_POLICY, PLANT_WRITABLE, garden, governedBootstrap } from "./fixtures.js";
 
 // A generous hang-guard for genuine failures; the passing paths resolve in microseconds (patches
 // are queued synchronously by the awaited mutation), so this only ever matters if something is
@@ -31,7 +31,7 @@ async function keeperGateway(): Promise<Gateway> {
   const gateway = await Gateway.open(new MemoryBackend(), { seed: KEEPER_SEED });
   await gateway.append(governedBootstrap(KEEPER_SEED)); // the keeper governs; the authors may write
   await gateway.append(garden);
-  gateway.register(PLANT, PLANT_POLICY, [FERN]);
+  gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
   return gateway;
 }
 

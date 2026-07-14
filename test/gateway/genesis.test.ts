@@ -17,7 +17,7 @@ import { grantClaims } from "../../src/gateway/accounts.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
-import { PLANT, PLANT_POLICY, pickLatest } from "./fixtures.js";
+import { PLANT, PLANT_POLICY, PLANT_WRITABLE, pickLatest } from "./fixtures.js";
 
 const OPERATOR_SEED = "0e".repeat(32);
 const OPERATOR = authorForSeed(OPERATOR_SEED);
@@ -54,7 +54,9 @@ describe("genesis: a fresh store, born governed and registered", () => {
     const backend = new MemoryBackend();
     const genesis = assembleGenesis({
       operatorSeed: OPERATOR_SEED,
-      registrations: [{ hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN] }],
+      registrations: [
+        { hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN], writable: [...PLANT_WRITABLE] },
+      ],
       grants: [grantClaims(STORE_ENTITY, GARDENER, "write", OPERATOR, 2)],
     });
     const gateway = await Gateway.boot(backend, genesis);
@@ -82,7 +84,9 @@ describe("genesis: a fresh store, born governed and registered", () => {
   it("genesis emits definitions + references: the registration delta carries no schema body", () => {
     const genesis = assembleGenesis({
       operatorSeed: OPERATOR_SEED,
-      registrations: [{ hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN] }],
+      registrations: [
+        { hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN], writable: [...PLANT_WRITABLE] },
+      ],
     });
     const definition = genesis.deltas.find((d) =>
       d.claims.pointers.some((p) => p.role === `${VOCAB_PREFIX}.hyperschema.defines`),
@@ -97,7 +101,7 @@ describe("genesis: a fresh store, born governed and registered", () => {
     // the registration references the schema entity; the body travels only in the definition
     expect(
       registration!.claims.pointers.some(
-        (p) => p.target.kind === "entity" && p.target.entity.id === "schema:Plant",
+        (p) => p.target.kind === "entity" && p.target.entity.id === "hyperschema:Plant",
       ),
     ).toBe(true);
     expect(JSON.stringify(registration!.claims)).not.toContain('"group"');
@@ -140,7 +144,9 @@ describe("genesis: a fresh store, born governed and registered", () => {
     const backend = new MemoryBackend();
     const genesis = assembleGenesis({
       operatorSeed: OPERATOR_SEED,
-      registrations: [{ hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN] }],
+      registrations: [
+        { hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN], writable: [...PLANT_WRITABLE] },
+      ],
       grants: [],
     });
     const first = await Gateway.boot(backend, genesis);
@@ -271,14 +277,30 @@ describe("evolution is append: the surface follows the surviving definitions", (
   it("a live stream keeps the shape it subscribed to; a new reader sees the evolution", async () => {
     const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
     await seedGarden(gateway);
-    await gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+    await gateway.publishRegistration(
+      PLANT,
+      PLANT_POLICY,
+      [FERN],
+      undefined,
+      undefined,
+      undefined,
+      [...PLANT_WRITABLE],
+    );
     const stream = await gateway.subscribe(
       `subscription { plant(entity: "${FERN}") { height tag } }`,
     );
     const snapshot = (await stream.next()).value as { plant: { height: number; tag: string[] } };
     expect(snapshot.plant).toMatchObject({ height: 30, tag: ["shade"] });
 
-    await gateway.publishRegistration(PLANT_V2, PLANT_POLICY, [FERN]); // evolve: heights only
+    await gateway.publishRegistration(
+      PLANT_V2,
+      PLANT_POLICY,
+      [FERN],
+      undefined,
+      undefined,
+      undefined,
+      [...PLANT_WRITABLE],
+    ); // evolve: heights only
     const evolved = await gateway.query(`{ plant(entity: "${FERN}") { height tag } }`);
     expect((evolved.data as { plant: { tag: string[] | null } }).plant.tag ?? []).toEqual([]);
 
@@ -293,7 +315,7 @@ describe("evolution is append: the surface follows the surviving definitions", (
 
   it("a store registration colliding with a manual name persists but does not bind — and says so", async () => {
     const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
-    gateway.register(PLANT, PLANT_POLICY, [FERN]); // manual, this process's own
+    gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE); // manual, this process's own
     await expect(gateway.publishRegistration(PLANT_V2, PLANT_POLICY, [FERN])).rejects.toThrow(
       /did not bind/,
     );
@@ -430,7 +452,7 @@ describe("evolution is append: the surface follows the surviving definitions", (
           schema: { props: new Map(), default: pickLatest },
           roots: [BED],
         },
-        { hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN] },
+        { hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN], writable: [...PLANT_WRITABLE] },
       ],
     });
     const gateway = await Gateway.boot(new MemoryBackend(), genesis);

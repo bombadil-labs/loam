@@ -16,7 +16,7 @@ import { publicClaims } from "../../src/gateway/public.js";
 import { serve, type ServerHandle } from "../../src/server/http.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, SURVEYOR } from "../spike/garden.js";
-import { PLANT, PLANT_POLICY, garden } from "../gateway/fixtures.js";
+import { PLANT, PLANT_POLICY, PLANT_WRITABLE, garden } from "../gateway/fixtures.js";
 
 const OPERATOR_SEED = "0e".repeat(32);
 const OPERATOR = authorForSeed(OPERATOR_SEED);
@@ -36,7 +36,7 @@ async function governed(): Promise<Gateway> {
     signClaims(grantClaims(STORE_ENTITY, SURVEYOR, "write", OPERATOR, 9002), OPERATOR_SEED),
   ]);
   await gateway.append(garden);
-  gateway.register(PLANT, PLANT_POLICY, [FERN]);
+  gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
   return gateway;
 }
 

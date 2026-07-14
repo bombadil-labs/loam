@@ -17,7 +17,7 @@ import { serve, type ServerHandle } from "../../src/server/http.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, observed } from "../spike/garden.js";
 import { toWire } from "../../src/federation/wire.js";
-import { PLANT, PLANT_POLICY, garden } from "./../gateway/fixtures.js";
+import { PLANT, PLANT_POLICY, PLANT_WRITABLE, garden } from "./../gateway/fixtures.js";
 
 const OPERATOR_SEED = "0e".repeat(32);
 const ALICE_SEED = "a1".repeat(32); // the gardener
@@ -36,13 +36,13 @@ async function governedGarden(): Promise<Gateway> {
     signClaims(grantClaims(STORE_ENTITY, SURVEYOR, "write", OPERATOR, 9003), OPERATOR_SEED),
   ]);
   await gateway.append(garden);
-  gateway.register(PLANT, PLANT_POLICY, [FERN]);
+  gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
   return gateway;
 }
 
 async function emptyMeadow(): Promise<Gateway> {
   const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
-  gateway.register(PLANT, PLANT_POLICY, ["plant:moss"]);
+  gateway.register(PLANT, PLANT_POLICY, ["plant:moss"], undefined, PLANT_WRITABLE);
   return gateway;
 }
 
@@ -364,6 +364,7 @@ describe("POST /:mount/register: the schema-schema mutation mechanism, served", 
     },
     schema: { props: { color: PICK }, default: PICK },
     roots: ["rock:1"],
+    writable: ["color"],
   };
   const register = (mount: string, token: string, body: unknown) =>
     fetch(`${base}/${mount}/register`, {
@@ -377,7 +378,7 @@ describe("POST /:mount/register: the schema-schema mutation mechanism, served", 
     expect(res.status).toBe(200);
     const body = (await res.json()) as { registered: string; entity: string };
     expect(body.registered).toBe("Rock");
-    expect(body.entity).toBe("schema:Rock");
+    expect(body.entity).toBe("hyperschema:Rock");
 
     // write and read through the brand-new surface — no restart, no library
     const write = await gql(

@@ -11,7 +11,7 @@ import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { registrationClaims, type ClaimTemplates } from "../../src/gateway/registration.js";
 import { MemoryBackend } from "../../src/store/memory.js";
-import { PLANT, PLANT_POLICY, pickLatest } from "./fixtures.js";
+import { PLANT, PLANT_POLICY, PLANT_WRITABLE, pickLatest } from "./fixtures.js";
 import { FERN } from "../spike/garden.js";
 
 const OPERATOR_SEED = "0e".repeat(32);
@@ -307,7 +307,7 @@ describe("_claim: the generic pointer mutation", () => {
 describe("_hviewHex: same evidence, many answers", () => {
   it("two lenses over one body share _hviewHex; _hex diverges when policies truly differ", async () => {
     const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
-    gateway.register(PLANT, PLANT_POLICY, [FERN]);
+    gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
     gateway.register(
       { ...PLANT, name: "PlantCount" },
       { props: new Map([["height", { kind: "merge", fn: "count" }]]), default: pickLatest },

@@ -311,7 +311,10 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           },
           schema: { type: "object", description: "the resolution schema, schema JSON" },
           roots: { type: "array", items: { type: "string" } },
-          entity: { type: "string", description: "the schema entity (default schema:<name>)" },
+          entity: {
+            type: "string",
+            description: "the hyperschema entity (default hyperschema:<name>)",
+          },
           mutations: {
             type: "object",
             description: "named claim templates (the write discipline)",
@@ -319,7 +322,8 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           writable: {
             type: "array",
             items: { type: "string" },
-            description: "fields that accept a surface write; omit to leave every field writable",
+            description:
+              "fields that accept a surface write; omit and NONE are writable (immutable-by-default, §14/§21)",
           },
         },
         required: ["hyperschema", "schema", "roots"],

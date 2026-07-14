@@ -15,11 +15,13 @@
 
 import {
   authorForSeed,
+  parseSchema,
   signClaims,
   verifyDelta,
   type Claims,
   type Delta,
 } from "@bombadil/rhizomatic";
+import { CTX_REGISTRATION } from "../gateway/registration.js";
 
 export interface Migration {
   /** Stable id for the step (also the negation's provenance handle). */
@@ -105,8 +107,122 @@ const HYPERSCHEMA_ROLES: Migration = {
   },
 };
 
-// The chain, in order. Add one entry per breaking on-wire format change, forever composable.
-export const MIGRATIONS: readonly Migration[] = [HYPERSCHEMA_ROLES];
+// ---- the §21 step: hyperschema-entity rename + immutable-by-default writable --------------------
+//
+// One wave, two coupled breaking changes (SPEC §21):
+//   1. The hyperschema DEFINITION entity moves off the `schema:` prefix — `schema:<Name>` →
+//      `hyperschema:<Name>` — so the gather program and the resolution Schema stop sharing one
+//      namespace. The new prefix is shape-distinguishable from `schema:<anything>` by construction
+//      (it starts with `hyper`), which is what lets THIS step shape-detect a pre-rename store.
+//   2. Immutable-by-default (§14 wave B): silence in a registration used to mean "everything
+//      writable"; now it means "nothing writable." So every migrated registration gains an EXPLICIT
+//      `writable` list naming all its schema's fields — preserving exactly the pre-flip surface
+//      (every field still writable) while the store's ON-WIRE posture becomes the new deny-by-default.
+//
+// Both moves ride one re-sign per affected delta: the definition and registration deltas carry the
+// `schema:`-prefixed entity ids, and the registration additionally quotes its resolution Schema
+// (the `schema` role) from which the field list is read. Everything else — data claims, grants,
+// memberships — is untouched (they carry no `schema:` entity), so the self-labelling set stays small.
+
+const OLD_ENTITY_PREFIX = "schema:";
+const OLD_REGISTRATION_PREFIX = "registration:schema:";
+
+// Rewrite one entity id off the old `schema:` namespace. Anchored on the two exact forms a
+// registration wave planted — the hyperschema entity (`schema:<Name>`) and the registration entity
+// it files under (`registration:schema:<Name>`) — so a domain entity (`plant:fern`) or any id that
+// merely CONTAINS "schema:" is left untouched.
+const renameEntityId = (id: string): string => {
+  if (id.startsWith(OLD_REGISTRATION_PREFIX)) {
+    return "registration:hyperschema:" + id.slice(OLD_REGISTRATION_PREFIX.length);
+  }
+  if (id.startsWith(OLD_ENTITY_PREFIX)) {
+    return "hyperschema:" + id.slice(OLD_ENTITY_PREFIX.length);
+  }
+  return id;
+};
+
+// True when a delta carries at least one old-prefix entity id — the shape this step migrates.
+const touchesOldPrefix = (d: Delta): boolean =>
+  d.claims.pointers.some(
+    (p) => p.target.kind === "entity" && renameEntityId(p.target.entity.id) !== p.target.entity.id,
+  );
+
+// A registration delta files under an entity in the constitutional registration context.
+const isRegistration = (claims: Claims): boolean =>
+  claims.pointers.some(
+    (p) => p.target.kind === "entity" && p.target.entity.context === CTX_REGISTRATION,
+  );
+
+const hasWritable = (claims: Claims): boolean => claims.pointers.some((p) => p.role === "writable");
+
+// The registration's own resolution Schema, quoted inline in the `schema` role — the source of
+// truth for "all this schema's fields." Parsed exactly as the registration reader parses it, so the
+// writable list the migration adds names precisely the fields the surface would offer.
+const schemaFieldNames = (claims: Claims): string[] | undefined => {
+  const p = claims.pointers.find((x) => x.role === "schema" && x.target.kind === "primitive");
+  if (p?.target.kind !== "primitive" || typeof p.target.value !== "string") return undefined;
+  try {
+    return [...parseSchema(JSON.parse(p.target.value)).props.keys()];
+  } catch {
+    return undefined;
+  }
+};
+
+// The new form: rename every old-prefix entity id, and — for a registration that names no
+// `writable` fields — add one listing all of its schema's fields (immutable-by-default preservation).
+const toRenamedForm = (claims: Claims): Claims => {
+  const pointers = claims.pointers.map((p) =>
+    p.target.kind === "entity"
+      ? {
+          ...p,
+          target: {
+            ...p.target,
+            entity: { ...p.target.entity, id: renameEntityId(p.target.entity.id) },
+          },
+        }
+      : p,
+  );
+  if (isRegistration(claims) && !hasWritable(claims)) {
+    const fields = schemaFieldNames(claims);
+    if (fields !== undefined) {
+      pointers.push({
+        role: "writable",
+        target: { kind: "primitive" as const, value: JSON.stringify(fields) },
+      });
+    }
+  }
+  return { timestamp: claims.timestamp, author: claims.author, pointers };
+};
+
+const SCHEMA_ENTITY_RENAME: Migration = {
+  id: "hyperschema-entity-rename",
+  reason:
+    "migrated to §21: hyperschema-definition entity schema:<Name> → hyperschema:<Name>, and every " +
+    "registration gains an explicit writable list (immutable-by-default, §14 wave B)",
+  applies: (deltas) => deltas.some(touchesOldPrefix),
+  additions(deltas, seed) {
+    const operator = authorForSeed(seed);
+    const added: Delta[] = [];
+    for (const d of deltas) {
+      // Only the operator's own definitions/registrations, and only when the SIGNATURE proves it
+      // (author is self-asserted content — re-signing an unverified delta would make the migrator a
+      // signing oracle, exactly as guarded in the 0.3 step). A foreign registration is inert anyway.
+      if (d.claims.author !== operator || !touchesOldPrefix(d)) continue;
+      if (verifyDelta(d) !== "verified") continue;
+      const reExpressed = signClaims(toRenamedForm(d.claims), seed);
+      const negation = signClaims(
+        supersession(operator, d.claims.timestamp, d.id, reExpressed.id, this.reason),
+        seed,
+      );
+      added.push(reExpressed, negation);
+    }
+    return added;
+  },
+};
+
+// The chain, in order. Add one entry per breaking on-wire format change, forever composable. A
+// store two versions back runs both: hyperschema-roles first (vocabulary), then the entity rename.
+export const MIGRATIONS: readonly Migration[] = [HYPERSCHEMA_ROLES, SCHEMA_ENTITY_RENAME];
 
 // ---- the driver --------------------------------------------------------------------------------
 

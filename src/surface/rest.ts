@@ -92,12 +92,13 @@ export function buildOpenApi(
       // the body's top level — the document must describe the body that actually answers.
       const viewProperties: Record<string, unknown> = {};
       const writeProperties: Record<string, unknown> = {};
-      // Writability: when a registration names its `writable` fields, only those appear in the
-      // write body — the document must describe the writes that actually answer (SPEC §14).
-      const writable = v.writable === undefined ? undefined : new Set(v.writable);
+      // Writability: a registration names its `writable` fields, and only those appear in the write
+      // body — the document must describe the writes that actually answer (SPEC §14). Immutable-by-
+      // default (§21): absent a `writable` list, NONE are writable, so the write body carries no props.
+      const writable = new Set(v.writable ?? []);
       for (const [prop, pp] of v.schema.props) {
         viewProperties[prop] = propSchema((pp as { kind: string }).kind);
-        if (writable === undefined || writable.has(prop)) {
+        if (writable.has(prop)) {
           writeProperties[prop] = {
             description: "a primitive claim value (string | number | boolean)",
           };

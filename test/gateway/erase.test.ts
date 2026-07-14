@@ -24,7 +24,7 @@ import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED, SURVEYOR_SEED, observed } from "../spike/garden.js";
-import { PLANT, PLANT_POLICY } from "./fixtures.js";
+import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
 
 const OP_SEED = "0e".repeat(32);
 const OPERATOR = authorForSeed(OP_SEED);
@@ -34,7 +34,7 @@ const SURVEYOR = authorForSeed(SURVEYOR_SEED);
 async function grove(): Promise<{ gateway: Gateway; backend: MemoryBackend; fact: Delta }> {
   const backend = new MemoryBackend();
   const gateway = await Gateway.open(backend, { seed: OP_SEED });
-  gateway.register(PLANT, PLANT_POLICY, [FERN]);
+  gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
   await gateway.append([
     signClaims(grantClaims(STORE_ENTITY, GARDENER, "write", OPERATOR, 1), OP_SEED),
   ]);

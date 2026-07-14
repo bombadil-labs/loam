@@ -168,8 +168,8 @@ reopened store grows its surface back with no re-registration code.
 A schema is not configuration — it is DEFINED by deltas, like everything else. Registering a
 schema lands two of them:
 
-- a **definition** — rhizomatic's hyperschema-schema claims (`publishSchemaClaims` shape: name, alg,
-  and the body as canonical CBOR) filed at a schema entity, `schema:<Name>` by default;
+- a **definition** — rhizomatic's hyperschema-schema claims (`publishHyperSchemaClaims` shape: name,
+  alg, and the body as canonical CBOR) filed at a hyperschema entity, `hyperschema:<Name>` by default;
 - a **registration** — a reference under `loam.registration`: a `hyperschema` pointer to that
   entity, the `schema` (the resolution program) as canonical JSON, and the roots. No schema body
   rides it.
@@ -220,7 +220,7 @@ the tool. It mirrors the parts: a **HyperSchema** (the gather) and a **Schema** 
 
 - **`hyperschema`** — the gather program:
   - **`name`** — the GraphQL field it generates (`{ plant(entity: …) }`) and the default entity
-    (`schema:Plant`). Identity is the entity, not the name — rename freely by republishing at it.
+    (`hyperschema:Plant`). Identity is the entity, not the name — rename freely by republishing at it.
   - **`alg`** — the L2 **algebra version** the `body` is written against (_not_ a signing algorithm).
     There is one algebra today, so this is always `1`; it exists so a v1 body keeps its v1 meaning
     if the algebra ever grows a v2.

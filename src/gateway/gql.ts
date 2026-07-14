@@ -337,12 +337,12 @@ export function buildGqlSchema(
     if (surface === "read") continue;
 
     // Only WRITABLE props are offered as per-prop mutation args (SPEC §14): a read-only field is
-    // simply absent from the write surface. Absent `writable` → every prop is writable.
-    const writable = def.writable === undefined ? undefined : new Set(def.writable);
+    // simply absent from the write surface. Immutable-by-default (§21): absent `writable` → NO prop
+    // is writable, so a registration that names none offers a bare mutate field (entity only).
+    const writable = new Set(def.writable ?? []);
     const propArgs: Record<string, { type: typeof PrimitiveValue }> = {};
     for (const [prop] of def.schema.props) {
-      if (writable === undefined || writable.has(prop))
-        propArgs[legal(prop)] = { type: PrimitiveValue };
+      if (writable.has(prop)) propArgs[legal(prop)] = { type: PrimitiveValue };
     }
     // The mutation namespace is shared between per-prop fields and TEMPLATE fields of every
     // schema — check it explicitly (queryFields' check does not cover an earlier schema's

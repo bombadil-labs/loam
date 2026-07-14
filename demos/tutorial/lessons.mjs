@@ -169,6 +169,12 @@ const registerFilm = (loam, ctx, policy, body = GATHER) =>
     { name: "Film", alg: 1, body: loam.parseTerm(body) },
     loam.parseSchema(policy),
     [FILM],
+    undefined,
+    undefined,
+    undefined,
+    // Immutable-by-default (§14/§21): a registration opens its fields explicitly. The tutorial
+    // writes freely, so every field of the lens is writable.
+    Object.keys(policy.props),
   );
 
 // Find the operator's grant to a specific grantee (grantClaims files the grantee as a `subject`
@@ -239,6 +245,10 @@ holds as many lenses as you like, side by side. We fill this one in in lesson 7.
               { name: "Book", alg: 1, body: loam.parseTerm(GATHER) },
               loam.parseSchema(BOOK_POLICY),
               ["book:solaris"],
+              undefined,
+              undefined,
+              undefined,
+              Object.keys(BOOK_POLICY.props),
             );
           },
         },
@@ -322,6 +332,10 @@ guests later. Nothing references it yet.`,
               { name: "Screening", alg: 1, body: loam.parseTerm(GATHER) },
               loam.parseSchema(SCREENING_POLICY),
               [SCREENING_1, SCREENING_2],
+              undefined,
+              undefined,
+              undefined,
+              Object.keys(SCREENING_POLICY.props),
             );
           },
         },
@@ -448,6 +462,10 @@ answerable.`,
               { name: "FilmClassic", alg: 1, body: loam.parseTerm(FILM_EXPAND_BODY) },
               loam.parseSchema(FILM_POLICY_V2),
               [FILM],
+              undefined,
+              undefined,
+              undefined,
+              Object.keys(FILM_POLICY_V2.props),
             );
           },
         },
@@ -850,7 +868,7 @@ keeps, and the film she was your guest at. Data federates; authority never does.
           (d) =>
             d.claims.author !== ctx.author &&
             d.claims.pointers.some(
-              (p) => p.target.kind === "entity" && p.target.entity.id === "schema:Friends",
+              (p) => p.target.kind === "entity" && p.target.entity.id === "hyperschema:Friends",
             ),
         );
         const foreignInert = !loam

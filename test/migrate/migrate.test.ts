@@ -18,7 +18,7 @@ import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { migrate } from "../../src/migrate/migrate.js";
-import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
+import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
 import { FERN, GARDENER_SEED, observed } from "../spike/garden.js";
 
 const NEW = "rhizomatic.hyperschema.";
@@ -40,7 +40,9 @@ const seed = GARDENER_SEED;
 const operator = authorForSeed(seed);
 const genesis = assembleGenesis({
   operatorSeed: seed,
-  registrations: [{ hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN] }],
+  registrations: [
+    { hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN], writable: [...PLANT_WRITABLE] },
+  ],
 });
 const nativeDef = genesis.deltas.find((d) => hasRolePrefix(d, NEW))!;
 const oldDef = signClaims(downgrade(nativeDef.claims), seed);

@@ -9,7 +9,7 @@ import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED, SURVEYOR_SEED, observed } from "../spike/garden.js";
-import { PLANT, PLANT_POLICY, pickLatest } from "./fixtures.js";
+import { PLANT, PLANT_POLICY, PLANT_WRITABLE, pickLatest } from "./fixtures.js";
 
 const OPERATOR_SEED = "0e".repeat(32);
 const OPERATOR = authorForSeed(OPERATOR_SEED);
@@ -62,7 +62,7 @@ describe("governedGatherBody: the heckler's veto ends here", () => {
       signClaims(grantClaims(STORE_ENTITY, SURVEYOR, "write", OPERATOR, 2), OPERATOR_SEED),
     ]);
     // two lenses over the SAME root: the plain drop-bodied Plant, and the trust-masked Guarded
-    gateway.register(PLANT, PLANT_POLICY, [FERN]);
+    gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
     gateway.register(
       { name: "Guarded", alg: 1, body: governedGatherBody(OPERATOR) },
       PLANT_POLICY,

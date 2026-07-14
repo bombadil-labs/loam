@@ -9,7 +9,14 @@ import { authorForSeed, verifyDelta, type Schema, type Policy } from "@bombadil/
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER } from "../spike/garden.js";
-import { PLANT, PLANT_POLICY, garden, governedBootstrap, pickLatest } from "./fixtures.js";
+import {
+  PLANT,
+  PLANT_POLICY,
+  PLANT_WRITABLE,
+  garden,
+  governedBootstrap,
+  pickLatest,
+} from "./fixtures.js";
 
 const KEEPER_SEED = "c3".repeat(32);
 const KEEPER = authorForSeed(KEEPER_SEED);
@@ -18,7 +25,7 @@ async function keeperGateway(backend = new MemoryBackend()): Promise<Gateway> {
   const gateway = await Gateway.open(backend, { seed: KEEPER_SEED });
   await gateway.append(governedBootstrap(KEEPER_SEED)); // the keeper governs; the authors may write
   await gateway.append(garden);
-  gateway.register(PLANT, PLANT_POLICY, [FERN]);
+  gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
   return gateway;
 }
 
@@ -89,7 +96,7 @@ describe("mutate: args → signed deltas → append", () => {
   it("a seedless gateway refuses to write", async () => {
     const gateway = await Gateway.open(new MemoryBackend());
     await gateway.append(garden);
-    gateway.register(PLANT, PLANT_POLICY, [FERN]);
+    gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
     const result = await gateway.query(`mutation {
       plant(entity: "${FERN}", height: 99) { height }
     }`);
@@ -116,7 +123,7 @@ describe("mutate: the deltas survive like any others", () => {
     await first.flush();
 
     const second = await Gateway.open(backend); // no seed: read-only is fine
-    second.register(PLANT, PLANT_POLICY, [FERN]);
+    second.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
     const result = await second.query(`{ plant(entity: "${FERN}") { height } }`);
     expect((result.data as { plant: { height: number } }).plant.height).toBe(44);
     await second.close();
@@ -160,6 +167,8 @@ describe("mutate: the deltas survive like any others", () => {
         default: pickLatest,
       },
       [FERN],
+      undefined,
+      ["leaf-count"], // the store-native field name — writability disciplines the surface by it
     );
     // The GraphQL field is leaf_count; the claim context stays the store-native "leaf-count".
     const result = await gateway.query(`mutation {

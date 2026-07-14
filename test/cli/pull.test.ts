@@ -18,7 +18,7 @@ import { grantClaims } from "../../src/gateway/accounts.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
-import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
+import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
 
 vi.setConfig({ testTimeout: 15000 }); // real sqlite homes and a real HTTP server ride here
@@ -47,7 +47,9 @@ async function tabExport(): Promise<{ file: string; hex: string }> {
     new MemoryBackend(),
     assembleGenesis({
       operatorSeed: TAB_SEED,
-      registrations: [{ hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN] }],
+      registrations: [
+        { hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN], writable: [...PLANT_WRITABLE] },
+      ],
       grants: [grantClaims(STORE_ENTITY, GARDENER, "write", TAB_OPERATOR, 2)],
     }),
   );
