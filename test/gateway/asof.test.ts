@@ -36,7 +36,7 @@ async function bootPlant(): Promise<Gateway> {
 async function readGql(
   gateway: Gateway,
   asOf?: number,
-): Promise<{ height: number | null; asOf: number | null; forgotten: number | null }> {
+): Promise<{ height: number | null; asOf: number | null; forgotten: number[] | null }> {
   const arg = asOf === undefined ? "" : `, asOf: ${asOf}`;
   const res = await gateway.query(`{ plant(entity: "${FERN}"${arg}) { height _asOf _forgotten } }`);
   expect(res.errors, JSON.stringify(res.errors)).toBeUndefined();
@@ -44,7 +44,7 @@ async function readGql(
   return {
     height: plant["height"] as number | null,
     asOf: plant["_asOf"] as number | null,
-    forgotten: plant["_forgotten"] as number | null,
+    forgotten: plant["_forgotten"] as number[] | null,
   };
 }
 
@@ -71,7 +71,7 @@ describe("the past is a reading, not an archive (SPEC §26)", () => {
     // The pin and mark ride the response beside the view; a present read carries neither.
     const past = await readGql(gateway, 1500);
     expect(past.asOf).toBe(1500);
-    expect(past.forgotten).toBe(0); // nothing forgotten
+    expect(past.forgotten).toEqual([]); // nothing forgotten
     const now = await readGql(gateway);
     expect(now.asOf).toBeNull();
     expect(now.forgotten).toBeNull();
@@ -128,26 +128,26 @@ describe("erasure wins even in the past (SPEC §26 / §11) — in every door", (
 });
 
 describe("the erasure annotation — the exception is visible even when its content is not", () => {
-  it("flags and counts a fact forgotten SINCE the moment; a settled past needs no mark", async () => {
+  it("flags and enumerates a fact forgotten SINCE the moment; a settled past needs no mark", async () => {
     const gateway = await bootPlant();
     const fact = observed(FERN, "height", 50, 1000, GARDENER_SEED);
     await gateway.append([fact]);
 
     // Before any erasure the window is clean.
-    expect((await readGql(gateway, 2000)).forgotten).toBe(0);
+    expect((await readGql(gateway, 2000)).forgotten).toEqual([]);
 
     await gateway.erase(fact.id);
     const forgotAt = tombstoneFor(gateway, fact.id).claims.timestamp; // when the ground forgot
 
     // Reading the moment T=2000, the erasure was spoken AFTER it (forgotAt ≫ 2000): the past this
-    // read reconstructs may be missing a since-erased fact, so it confesses — flagged and counted.
+    // read reconstructs may be missing a since-erased fact, so it confesses — the discontinuity named.
     const past = await readGql(gateway, 2000);
     expect(past.height).toBeNull(); // the content stays forgotten
-    expect(past.forgotten).toBe(1); // …but THAT it was forgotten is honest
+    expect(past.forgotten).toEqual([forgotAt]); // …but THAT it was forgotten, and WHEN, is honest
 
     // Reading a moment at or after the erasure, the forgetting is already baked into the moment's
     // honest absence — a settled past needs no mark.
-    expect((await readGql(gateway, forgotAt)).forgotten).toBe(0);
+    expect((await readGql(gateway, forgotAt)).forgotten).toEqual([]);
     await gateway.close();
   });
 });

@@ -141,15 +141,15 @@ describe("agreement on the time axis: one ground, one asOf, both doors (SPEC §2
       view: { height: number };
       _hex: string;
       _asOf: number;
-      _forgotten: number;
+      _forgotten: number[];
     };
     expect(gqlPlant["height"]).toBe(10);
     expect(restBody.view.height).toBe(10);
     expect(restBody._hex).toBe(gqlPlant["_hex"]); // _hex for _hex, across the time axis too
     expect(restBody._asOf).toBe(150);
     expect(gqlPlant["_asOf"]).toBe(150);
-    expect(restBody._forgotten).toBe(gqlPlant["_forgotten"]); // nothing forgotten here: 0 == 0
-    expect(restBody._forgotten).toBe(0);
+    expect(restBody._forgotten).toEqual(gqlPlant["_forgotten"]); // same enumeration, both doors: [] == []
+    expect(restBody._forgotten).toEqual([]);
   });
 
   it("the present tense is unchanged through both doors — every prior query keeps its meaning", async () => {

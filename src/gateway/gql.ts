@@ -159,12 +159,13 @@ function metaFields<N extends ResolvedNode>(): GraphQLFieldConfigMap<N, unknown>
       resolve: (node) => node.asOf ?? null,
     },
     _forgotten: {
-      type: GraphQLInt,
+      type: new GraphQLList(new GraphQLNonNull(GraphQLFloat)),
       description:
-        "The erasure annotation (SPEC §26/§11): on an as-of read, how many facts this ground " +
-        "has lawfully forgotten SINCE the moment T — a positive count flags that this " +
-        "reconstruction of the past may be missing a since-erased fact (the content stays " +
-        "forgotten; only THAT an erasure fell in the window is revealed). Null on a present read.",
+        "The erasure annotation (SPEC §26/§11): on an as-of read, the sorted timestamps at which " +
+        "this ground lawfully forgot something SINCE the moment T — each moment flags a " +
+        "discontinuity where this reconstruction of the past may be missing a since-erased fact " +
+        "(the content stays forgotten; only THAT and WHEN an erasure fell in the window is " +
+        "revealed; the count is the list's length). Null on a present read.",
       resolve: (node) => node.forgotten ?? null,
     },
   };

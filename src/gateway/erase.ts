@@ -157,19 +157,23 @@ function survivingTombstones(reactor: Reactor, operator: string | undefined): De
   return out;
 }
 
-// The erasure annotation (SPEC §26): how many facts this ground has lawfully forgotten SINCE a
-// moment T. An as-of read reconstructs the SURVIVING ground at T; an erasure spoken after T may
-// have redacted a fact that stood at T, so the read confesses the count — never the content, for
-// a tombstone keeps only THAT it forgot. Erasures spoken at or before T are already baked into
-// the moment's honest absence (the fact was gone by T) and need no mark; a present read needs
-// none at all. Store-wide by necessity: a purged delta's entity is unknowable, so the honest
-// signal is temporal ("an erasure fell in the window since T"), not scoped to this view.
+// The erasure annotation (SPEC §26): the moments at which this ground lawfully forgot something
+// SINCE a moment T. An as-of read reconstructs the SURVIVING ground at T; an erasure spoken after T
+// may have redacted a fact that stood at T, so the read confesses each discontinuity's TIMESTAMP —
+// never the content, for a tombstone keeps only THAT it forgot and WHEN. Erasures spoken at or
+// before T are already baked into the moment's honest absence (the fact was gone by T) and need no
+// mark; a present read needs none at all. Store-wide by necessity: a purged delta's entity is
+// unknowable, so the honest signal is temporal — the sorted moments an erasure fell in the window
+// since T (their length is the count), never scoped to this view.
 export function forgottenSince(
   reactor: Reactor,
   operator: string | undefined,
   since: number,
-): number {
-  return survivingTombstones(reactor, operator).filter((d) => d.claims.timestamp > since).length;
+): number[] {
+  return survivingTombstones(reactor, operator)
+    .map((d) => d.claims.timestamp)
+    .filter((t) => t > since)
+    .sort((a, b) => a - b);
 }
 
 // The pre-boot variant for `loam serve`: given the deltas held across the tiers (before any

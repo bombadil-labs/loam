@@ -216,7 +216,7 @@ const nodeBody = (node: {
   hex: string;
   hviewHex: string;
   asOf?: number;
-  forgotten?: number;
+  forgotten?: number[];
 }): Record<string, unknown> => ({
   entity: node.entity,
   view: node.view,

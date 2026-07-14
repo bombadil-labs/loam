@@ -39,12 +39,12 @@ export interface ResolvedNode {
   // the live materialization by construction. It rides the response beside `hex`, never inside
   // the resolved data.
   readonly asOf?: number;
-  // The erasure annotation (SPEC §26/§11): on an as-of read, how many facts this ground has
-  // lawfully forgotten SINCE the moment T — an erasure spoken after T may have redacted a fact
-  // that stood at T, so the read confesses the count (never the content: a tombstone remembers
-  // THAT it forgot, not what). Absent on a present read (the present already reflects every
-  // erasure as ordinary absence).
-  readonly forgotten?: number;
+  // The erasure annotation (SPEC §26/§11): on an as-of read, the sorted timestamps at which this
+  // ground lawfully forgot something SINCE the moment T — an erasure spoken after T may have
+  // redacted a fact that stood at T, so the read confesses each discontinuity's moment (never the
+  // content: a tombstone remembers THAT it forgot and WHEN, not what; the count is their length).
+  // Absent on a present read (the present already reflects every erasure as ordinary absence).
+  readonly forgotten?: number[];
 }
 
 // A subscription event: the re-resolved node plus where it came from and what moved.
