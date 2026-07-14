@@ -106,10 +106,14 @@ The past is not a copy Loam hoards; it is a reading the present ground can still
   those honest edges it is exactly what the first sentence claimed: a temporal substrate you can
   actually read temporally.
 
-**Provenance.** Design accepted (Myk, 2026-07-13); pending the implementing PR. Section number
-**§26 is provisional** (the next free number after §20; §21–§25 are reserved for the in-flight arc).
-Nothing here has landed: no `asOf` parameter, door threading, or erasure-in-the-past test exists in
-the code yet. The shape (an optional `asOf` on `query`, resolving against the ground as it stood at
-T) is Myk's call, recorded 2026-07-13; this file argues it into spec prose and answers the ticket's
-scoped design questions (erasure precedence, subscriptions out, the schema-pin × time-pin square) so
-the implementing PR can rail and build against a settled design.
+**Provenance.** Landed — [#84](https://github.com/bombadil-labs/loam/pull/84). The optional `asOf` on
+`query` resolves the view against the ground as it stood at T (`resolvedNode` → `gather` →
+`resolveView` over `groundAsOf`, bypassing the warm materialization; the `annotate` helper and
+`resolvePinned(asOf)` compose the schema-pin × time-pin square). Erasure wins even in the past (a
+required test purges a genuine delta and asserts its absence, in both doors), and the annotation
+**enumerates** the discontinuity timestamps in the window — `forgottenSince` / `survivingTombstones`
+in `src/gateway/erase.ts`, a read-only reading that changes no erasure semantics — surfaced as the
+`_asOf` / `_forgotten` door meta-fields (`metaFields` in `src/gateway/gql.ts`, the REST node body),
+never inside the resolved data. Non-breaking (an optional param, no migration); subscription replay
+stays out for v1 (a snapshot read is in, a replaying stream is a later question). Shape is Myk's call
+(2026-07-13).
