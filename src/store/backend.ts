@@ -13,11 +13,16 @@ import type { Delta } from "@bombadil/rhizomatic";
 
 // Failure semantics, uniform across drivers: every failure is a REJECTED PROMISE, never a
 // synchronous throw. A delta whose id does not recompute from its claims — or that carries a
-// lone surrogate, whose bytes and identity disagree — is refused, and one refusal refuses its
-// whole batch, atomically. A stored row that no longer recomputes, or whose signature no longer
-// verifies, is corruption: reads reject rather than laundering. After `close()`, every method
-// rejects. What a store returns is the canonical form of what went in (the JSON profile's fixed
-// point) — so any two drivers return byte-identical deltas.
+// lone surrogate, whose bytes and identity disagree — is refused at APPEND, and one refusal
+// refuses its whole batch, atomically. A stored row that no longer recomputes, or whose
+// signature no longer verifies, is never laundered onward as healthy data — but on the READ path
+// the key-owning drivers (sqlite, localStorage) do not brick on it: they SET IT ASIDE into a
+// quarantine and read on (SPEC §25, RepairableBackend). One bad row must never darken the whole
+// store; what the quarantine holds is surfaced and settled by `loam repair`. (The archive vault
+// is the deliberate exception: restored only through the mirror's loud `heal`, it still refuses a
+// misfiled file rather than replant damage as health.) After `close()`, every method rejects.
+// What a store returns is the canonical form of what went in (the JSON profile's fixed point) —
+// so any two drivers return byte-identical deltas.
 //
 // Concurrency: the durable drivers keep the DISK convergent across handles (union by id), but a
 // reader holds no live view of other writers — whoever fronts a store (the Gateway) reads it

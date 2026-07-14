@@ -17,6 +17,7 @@ import {
   type Delta,
 } from "@bombadil/rhizomatic";
 import type { StoreBackend } from "../../src/store/backend.js";
+import { isRepairable } from "../../src/store/quarantine.js";
 import { ArchiveBackend } from "../../src/store/archive.js";
 import { LocalStorageBackend } from "../../src/store/local-storage.js";
 import { MemoryBackend } from "../../src/store/memory.js";
@@ -59,10 +60,15 @@ interface Harness {
   // Durable drivers only: a fresh handle over the same underlying storage.
   reopen?(): StoreBackend;
   // Durable drivers only: reach BEHIND the seam and damage a stored row, so the contract can
-  // assert that reads refuse corruption rather than laundering it. Each driver knows its own
-  // storage; the contract only knows the promise.
+  // assert that reads never launder corruption. Each driver knows its own storage; the contract
+  // only knows the promise.
   corruptSig?(id: string): void;
   corruptClaims?(id: string, claims: unknown): void;
+  // The key-owning boot-path drivers (sqlite, localStorage, and a mirror fronting one) QUARANTINE
+  // a bad row and read on (SPEC §25); the archive vault, restored only through the loud `heal`,
+  // still REFUSES it. Either way the row is never handed onward as health — the difference is
+  // whether the read survives it.
+  quarantines?: boolean;
 }
 
 const tmp = mkdtempSync(join(tmpdir(), "loam-store-"));
@@ -81,6 +87,7 @@ function sqliteHarness(): Harness {
     name: "sqlite",
     open: () => new SqliteBackend(path),
     reopen: () => new SqliteBackend(path),
+    quarantines: true,
     // a well-shaped signature that verifies nothing / another delta's well-formed claims
     corruptSig: (id) => raw("UPDATE deltas SET sig = ? WHERE id = ?", "ab".repeat(64), id),
     corruptClaims: (id, claims) =>
@@ -124,6 +131,7 @@ function mirrorDurableHarness(): Harness {
     name: "mirror(sqlite, archive)",
     open,
     reopen: () => new MirrorBackend(sqlite.reopen!(), archive.reopen!()),
+    quarantines: true, // reads answer from the sqlite primary, so its quarantine is the store's
     corruptSig: sqlite.corruptSig!.bind(sqlite),
     corruptClaims: sqlite.corruptClaims!.bind(sqlite),
   };
@@ -148,6 +156,7 @@ function localStorageHarness(): Harness {
     name: "localStorage",
     open: () => new LocalStorageBackend("contract", origin),
     reopen: () => new LocalStorageBackend("contract", origin),
+    quarantines: true,
     corruptSig: (id) => rewrite(id, (row) => (row.sig = "ab".repeat(64))),
     corruptClaims: (id, claims) => rewrite(id, (row) => (row.claims = claims)),
   };
@@ -315,18 +324,27 @@ for (const makeHarness of harnesses) {
       });
 
       if (sample.corruptSig !== undefined) {
-        it("a tampered signature is corruption too: reads refuse it", async () => {
+        it("a tampered signature is never laundered: quarantined and read on, or refused", async () => {
           const h = makeHarness();
           const store = h.open();
           await store.append([signed1]);
           await store.close();
           h.corruptSig!(signed1.id); // a well-shaped signature that verifies nothing
           const again = h.reopen!();
-          await expect(again.deltasSince(new Set())).rejects.toThrow(/does not verify/);
+          if (sample.quarantines === true) {
+            // §25: the bad row is set aside, the read PROCEEDS — signed1 was the only delta, so
+            // the ground is now empty, and the pen names WHY the row was set aside.
+            expect(await again.deltasSince(new Set())).toEqual([]);
+            expect(isRepairable(again)).toBe(true);
+            const pen = isRepairable(again) ? await again.quarantine() : [];
+            expect(pen.map((r) => r.reason)).toContain("invalid-signature");
+          } else {
+            await expect(again.deltasSince(new Set())).rejects.toThrow(/does not verify/);
+          }
           await again.close();
         });
 
-        it("a tampered row is corruption: reads refuse, they do not launder", async () => {
+        it("a tampered row is never laundered: quarantined and read on, or refused", async () => {
           const h = makeHarness();
           const store = h.open();
           await store.append([signed1]);
@@ -335,7 +353,13 @@ for (const makeHarness of harnesses) {
           // valid in shape but no longer recomputes to its own id.
           h.corruptClaims!(signed1.id, claimsToJson(signed2.claims));
           const again = h.reopen!();
-          await expect(again.deltasSince(new Set())).rejects.toThrow(/corruption/);
+          if (sample.quarantines === true) {
+            expect(await again.deltasSince(new Set())).toEqual([]);
+            const pen = isRepairable(again) ? await again.quarantine() : [];
+            expect(pen.map((r) => r.reason)).toContain("id-mismatch");
+          } else {
+            await expect(again.deltasSince(new Set())).rejects.toThrow(/corruption/);
+          }
           await again.close();
         });
       }

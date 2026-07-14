@@ -5,8 +5,11 @@
 //
 // better-sqlite3 is synchronous inside; the methods are `async` so every failure — SQLITE_BUSY,
 // a closed handle, a refused delta — arrives as a rejected promise, exactly as the seam
-// promises. Claims travel as canonical JSON; rehydration recomputes each id from its claims and
-// REFUSES a row whose id does not recompute — corruption is an error, never a quiet new delta.
+// promises. Claims travel as canonical JSON; rehydration recomputes each id from its claims. A
+// row that no longer recomputes, or whose signature no longer verifies, is not laundered onward
+// as healthy data — but neither does it brick the read (SPEC §25): it is SET ASIDE into the
+// quarantine and the read PROCEEDS, so one bad row never darkens the whole store. What the
+// quarantine holds is surfaced and settled by `loam repair`.
 
 /* eslint-disable @typescript-eslint/require-await -- the async keyword is load-bearing: it
    turns every synchronous throw (SQLITE_BUSY, a closed handle, a refused delta) into the
@@ -24,6 +27,7 @@ import {
 } from "@bombadil/rhizomatic";
 import type { StoreBackend } from "./backend.js";
 import { canonicalDelta } from "./canon.js";
+import { admit, previewOf, type QuarantinedRow, type RepairableBackend } from "./quarantine.js";
 
 interface DeltaRow {
   readonly id: string;
@@ -31,11 +35,14 @@ interface DeltaRow {
   readonly sig: string | null;
 }
 
-export class SqliteBackend implements StoreBackend {
+export class SqliteBackend implements StoreBackend, RepairableBackend {
   private readonly db: Database.Database;
   // Ids known durable (read or written by this handle) — the cheap fast-path; UNIQUE(id) is the
   // real guard, and the count returned always comes from actual insert changes.
   private readonly onDisk = new Set<string>();
+  // Rows the most recent read set aside (SPEC §25): recomputed on every deltasSince from the
+  // table's own bytes, never a stored countdown. `loam repair` reads this back.
+  private lastQuarantine: QuarantinedRow[] = [];
 
   private readonly insertDelta: Database.Statement;
   private readonly selectAll: Database.Statement;
@@ -109,26 +116,53 @@ export class SqliteBackend implements StoreBackend {
   async deltasSince(knownIds: ReadonlySet<string>): Promise<Delta[]> {
     this.assertOpen();
     const out: Delta[] = [];
+    const quarantine: QuarantinedRow[] = [];
     for (const row of this.selectAll.all() as DeltaRow[]) {
-      const claims = parseClaims(JSON.parse(row.claims));
-      if (computeId(claims) !== row.id) {
-        throw new Error(
-          `store corruption: row ${row.id} does not recompute from its claims — refusing to read`,
-        );
+      // Parse the claims JSON up front so a row of pure garbage cannot throw past the admission
+      // check — the whole point is that the read survives it.
+      let rawClaims: unknown;
+      try {
+        rawClaims = JSON.parse(row.claims);
+      } catch {
+        quarantine.push({ key: row.id, reason: "unparseable", preview: previewOf(row.claims) });
+        continue;
       }
-      const delta = makeDelta(claims, row.sig ?? undefined);
-      // The signature column is part of the row's integrity: a sig that does not verify is
-      // corruption, refused like any other — never handed onward as healthy data.
-      if (verifyDelta(delta) === "invalid") {
-        throw new Error(
-          `store corruption: row ${row.id} carries a signature that does not verify — refusing to read`,
-        );
+      // The id column is the only id a table row carries, so it plays both filed and claimed id.
+      const verdict = admit(row.id, row.id, rawClaims, row.sig ?? undefined, {
+        parseClaims,
+        computeId,
+        makeDelta,
+        verifyDelta,
+      });
+      if (!verdict.ok) {
+        quarantine.push({ key: row.id, reason: verdict.reason, preview: previewOf(row.claims) });
+        continue;
       }
       this.onDisk.add(row.id);
       if (knownIds.has(row.id)) continue;
-      out.push(delta);
+      out.push(verdict.delta);
     }
+    this.lastQuarantine = quarantine;
     return out;
+  }
+
+  // The rows the last read set aside (SPEC §25) — recomputed each deltasSince, never stored.
+  async quarantine(): Promise<QuarantinedRow[]> {
+    this.assertOpen();
+    return this.lastQuarantine;
+  }
+
+  // Remove a quarantined row's bytes from the table (repair discard). A quarantined row is never
+  // a lawful fact in the ground, so this is mechanical removal, not an erasure (§11).
+  async discardRow(key: string): Promise<boolean> {
+    this.assertOpen();
+    const info = this.db.prepare("DELETE FROM deltas WHERE id = ?").run(key);
+    if (info.changes > 0) {
+      this.onDisk.delete(key);
+      this.lastQuarantine = this.lastQuarantine.filter((r) => r.key !== key);
+      return true;
+    }
+    return false;
   }
 
   async purge(ids: Iterable<string>): Promise<number> {

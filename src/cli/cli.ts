@@ -25,6 +25,7 @@ import type { StoreBackend } from "../store/backend.js";
 import { ArchiveBackend } from "../store/archive.js";
 import { MirrorBackend } from "../store/mirror.js";
 import { SqliteBackend } from "../store/sqlite.js";
+import { legibilityWarnings, reAdmit } from "../gateway/repair.js";
 import { parseArgs, rejectUnknown } from "./args.js";
 import { archivePath, initHome, readSeed, storePath } from "./config.js";
 
@@ -51,6 +52,7 @@ commands:
   pull      land a peer's deltas — a live URL or a frozen offer file
   migrate   read an offer, re-express it in the current format, write it back
   store     inspect a store
+  repair    list and settle a store's quarantine (SPEC §25)
 
 run \`loam <command> --help\` for a command's options.`;
 
@@ -386,6 +388,142 @@ async function cmdStore(args: readonly string[], io: IO): Promise<number> {
   return 0;
 }
 
+// `loam repair` (SPEC §25): read the quarantine side channel and settle it. Repair is the
+// operator's alone — like erasure (§11) — and running it in a home that holds the operator seed
+// IS that authority; a home with no seed cannot repair, exactly as it cannot erase.
+//
+//   loam repair list                — every quarantined row + why, plus entity-id legibility warnings
+//   loam repair discard   <key>     — remove a quarantined row's bytes from the origin (garbage out)
+//   loam repair re-admit  <key>     — re-run admission; a row whose transient cause cleared returns
+//   loam repair leave     <key>     — inaction is legal; an idempotent no-op that says so
+async function cmdRepair(args: readonly string[], io: IO): Promise<number> {
+  const parsed = parseArgs(args, new Set());
+  rejectUnknown(parsed, new Set(["home", "store"]), "repair");
+  const sub = parsed.positionals[0];
+  if (sub === undefined) {
+    io.err(
+      "repair wants a subcommand: `loam repair list | discard <key> | re-admit <key> | leave <key>`",
+    );
+    return 2;
+  }
+  const home = parsed.flags.get("home") ?? defaultHome();
+  let seed: string;
+  try {
+    seed = readSeed(home);
+  } catch {
+    io.err(
+      `repair: no operator seed in ${home} — repair is the operator's alone, like erasure; ` +
+        "init the home (or point --home at the store's own) first",
+    );
+    return 1;
+  }
+  const operator = authorForSeed(seed);
+  const path = storePath(home, parsed.flags.get("store"));
+  const backend = new SqliteBackend(path);
+  try {
+    switch (sub) {
+      case "list": {
+        // The read is what fills the pen; the good deltas feed the legibility scan.
+        const good = await backend.deltasSince(new Set());
+        const pen = await backend.quarantine();
+        const warnings = legibilityWarnings(good, operator);
+        if (pen.length === 0 && warnings.length === 0) {
+          io.out(
+            `loam repair ${path}\n` +
+              "  the quarantine is empty and every entity id is legible — nothing to settle",
+          );
+          return 0;
+        }
+        io.out(`loam repair ${path}`);
+        if (pen.length > 0) {
+          io.out(`  ${pen.length} quarantined row${pen.length === 1 ? "" : "s"}:`);
+          for (const r of pen) {
+            io.out(`    ${r.key}`);
+            io.out(`      reason:  ${r.reason}`);
+            io.out(`      preview: ${r.preview}`);
+          }
+        }
+        if (warnings.length > 0) {
+          io.out(
+            `  ${warnings.length} entity-id legibility warning${warnings.length === 1 ? "" : "s"} ` +
+              "(an app delta points at a reserved loam: name):",
+          );
+          for (const w of warnings) {
+            io.out(`    ${w.deltaId} by ${w.author} → ${w.reference}`);
+          }
+        }
+        return 0;
+      }
+      case "discard": {
+        const key = parsed.positionals[1];
+        if (key === undefined) {
+          io.err(
+            "repair discard wants a key: `loam repair discard <key>` (from `loam repair list`)",
+          );
+          return 2;
+        }
+        await backend.deltasSince(new Set()); // fill the pen, so we only discard a quarantined row
+        const pen = await backend.quarantine();
+        if (!pen.some((r) => r.key === key)) {
+          io.err(
+            `repair discard: ${key} is not quarantined — \`loam repair list\` shows what is. ` +
+              "A good ground delta is `erase`'s to forget (§11), never repair's.",
+          );
+          return 2;
+        }
+        const removed = await backend.discardRow(key);
+        io.out(
+          removed
+            ? `loam: discarded ${key}\n  its bytes are gone from the origin; no lawful fact was forgotten`
+            : `loam: ${key} was already gone`,
+        );
+        return 0;
+      }
+      case "re-admit":
+      case "readmit": {
+        const key = parsed.positionals[1];
+        if (key === undefined) {
+          io.err("repair re-admit wants a key: `loam repair re-admit <key>`");
+          return 2;
+        }
+        const outcome = await reAdmit(backend, key);
+        if (outcome === "readmitted") {
+          io.out(
+            `loam: re-admitted ${key}\n  it verifies now and rejoins the ground on the next read`,
+          );
+          return 0;
+        }
+        if (outcome === "still-quarantined") {
+          io.out(
+            `loam: ${key} still fails admission — it stays quarantined\n` +
+              "  (repair never edits bytes into validity; leave it, or discard it as garbage)",
+          );
+          return 0;
+        }
+        io.err(`repair re-admit: no quarantined or admitted row is filed under ${key}`);
+        return 2;
+      }
+      case "leave": {
+        const key = parsed.positionals[1];
+        if (key === undefined) {
+          io.err("repair leave wants a key: `loam repair leave <key>`");
+          return 2;
+        }
+        io.out(
+          `loam: left ${key} in quarantine\n` +
+            "  inaction is legal — the store runs fine around it; quarantine is not a countdown",
+        );
+        return 0;
+      }
+      default:
+        io.err(`repair: unknown subcommand "${sub}" — list | discard | re-admit | leave`);
+        return 2;
+    }
+  } finally {
+    await backend.close();
+  }
+}
+
 function defaultHome(): string {
   return process.env["LOAM_HOME"] ?? ".loam";
 }
@@ -428,6 +566,8 @@ export async function run(
         return cmdMigrate(rest, io);
       case "store":
         return await cmdStore(rest, io);
+      case "repair":
+        return await cmdRepair(rest, io);
       default:
         io.err(`loam: unknown command "${command}" — run \`loam --help\``);
         return 2;

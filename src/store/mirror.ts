@@ -20,6 +20,7 @@
 
 import type { Delta } from "@bombadil/rhizomatic";
 import type { StoreBackend } from "./backend.js";
+import { isRepairable, type QuarantinedRow, type RepairableBackend } from "./quarantine.js";
 
 export interface MirrorOptions {
   // Called when a mirror write fails (the append itself still succeeds). Wire this to a log:
@@ -32,7 +33,7 @@ export interface HealReport {
   readonly toPrimary: number; // deltas the primary was missing, now replanted
 }
 
-export class MirrorBackend implements StoreBackend {
+export class MirrorBackend implements StoreBackend, RepairableBackend {
   #lagging = false;
   #lagEpoch = 0; // counts lag events, so a heal only clears the lag it actually saw
 
@@ -64,6 +65,17 @@ export class MirrorBackend implements StoreBackend {
 
   async deltasSince(knownIds: ReadonlySet<string>): Promise<Delta[]> {
     return this.primary.deltasSince(knownIds);
+  }
+
+  // Reads answer from the primary, so its quarantine (SPEC §25) is the store's quarantine — a
+  // corrupt row set aside on the hot side. A primary that cannot quarantine (a bare memory tier)
+  // holds nothing to repair, so the pen is empty.
+  async quarantine(): Promise<QuarantinedRow[]> {
+    return isRepairable(this.primary) ? this.primary.quarantine() : [];
+  }
+
+  async discardRow(key: string): Promise<boolean> {
+    return isRepairable(this.primary) ? this.primary.discardRow(key) : false;
   }
 
   // Physical removal on BOTH sides — forgetting must be verified, so purge is loud where
