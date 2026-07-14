@@ -60,6 +60,7 @@ import {
   type Registered,
   type ResolvedNode,
 } from "./gql.js";
+import { budgetRefusal } from "./budget.js";
 import { publicDefect, readPublicSchemas } from "./public.js";
 import {
   edgeRoles,
@@ -595,6 +596,17 @@ export class Gateway {
         if (!verdict.ok) {
           throw new Error(`append rejected: ${verdict.refusal}`);
         }
+      }
+    }
+    // Door resource budgets (SPEC §25): a granted author the operator has metered may not append
+    // past their volume quota — deployment config, re-resolved live from `loam:budget`, layered
+    // above §12's stranger floor. Absent a budget the author is unmetered (today's behavior); the
+    // operator sets budgets and is never metered. Checked once for the whole batch, on the state
+    // as it stands before it — the same discipline authorize() reads under.
+    if (this.operatorAuthor !== undefined) {
+      const overBudget = budgetRefusal(this.reactor, this.operatorAuthor, batch);
+      if (overBudget !== undefined) {
+        throw new Error(`append rejected: ${overBudget}`);
       }
     }
     await this.backend.append(batch); // a throw here means NOTHING was ingested or served

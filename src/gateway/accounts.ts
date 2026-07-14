@@ -24,6 +24,7 @@ import { STORE_ENTITY } from "./genesis.js";
 import { eraseDefect } from "./erase.js";
 import { publicDefect } from "./public.js";
 import { trustDefect } from "./trust.js";
+import { budgetDefect } from "./budget.js";
 
 export const CTX_TENANT = "loam.tenant";
 export const CTX_MEMBERS = "loam.members";
@@ -391,6 +392,7 @@ export function authorize(
     constitutionalDefect(delta) ??
     trustDefect(delta.claims) ??
     publicDefect(delta.claims) ??
+    budgetDefect(delta.claims) ??
     eraseDefect(delta, reactor, operator);
   if (defect !== undefined) {
     return { ok: false, refusal: `delta ${delta.id} is malformed law: ${defect}` };
