@@ -50,6 +50,28 @@ const setBudget = (gateway: Gateway, subject: string, max: number, ts = Date.now
   return gateway.append([delta]).then(() => delta);
 };
 
+// A budget declaration with ARBITRARY limit dimensions — the shape a newer store would author, so
+// forward-compatibility can be exercised (an unknown dimension is tolerated here, never rejected).
+const budgetWith = (
+  subject: string,
+  limits: readonly { readonly role: string; readonly value: number }[],
+  ts: number,
+): Claims => ({
+  timestamp: ts,
+  author: OPERATOR,
+  pointers: [
+    {
+      role: "declares",
+      target: { kind: "entity", entity: { id: BUDGET_ENTITY, context: CTX_BUDGET } },
+    },
+    { role: "subject", target: { kind: "primitive", value: subject } },
+    ...limits.map((l) => ({
+      role: l.role,
+      target: { kind: "primitive" as const, value: l.value },
+    })),
+  ],
+});
+
 // A distinct gardener-authored delta each call — distinct timestamps give distinct ids, so each
 // is a genuine unit of volume.
 const grow = (gateway: Gateway, ts: number, seed = GARDENER_SEED) =>
@@ -68,7 +90,7 @@ describe("per-author door budgets (SPEC §25)", () => {
   it("an operator-signed budget meters that author at the append door", async () => {
     const gateway = await governed();
     await setBudget(gateway, GARDENER, 2, 5000);
-    expect(readBudgetPolicy(gateway.reactor, OPERATOR).get(GARDENER)).toBe(2);
+    expect(readBudgetPolicy(gateway.reactor, OPERATOR).get(GARDENER)?.maxAppends).toBe(2);
 
     await expect(grow(gateway, 1001)).resolves.toMatchObject({ accepted: 1 }); // held 0 → 1
     await expect(grow(gateway, 1002)).resolves.toMatchObject({ accepted: 1 }); // held 1 → 2
@@ -103,7 +125,7 @@ describe("per-author door budgets (SPEC §25)", () => {
     // A fresh declaration raises the ceiling — a delta, not a reboot — and the same live
     // gateway lets the next append through.
     await setBudget(gateway, GARDENER, 3, 5001);
-    expect(readBudgetPolicy(gateway.reactor, OPERATOR).get(GARDENER)).toBe(3);
+    expect(readBudgetPolicy(gateway.reactor, OPERATOR).get(GARDENER)?.maxAppends).toBe(3);
     await expect(grow(gateway, 1004)).resolves.toMatchObject({ accepted: 1 }); // held 2 → 3
     await expect(grow(gateway, 1005)).rejects.toThrow(/over budget/); // and metered again at 3
     await gateway.close();
@@ -209,6 +231,44 @@ describe("per-author door budgets (SPEC §25)", () => {
     expect(budgetDefect(observed(FERN, "height", 1, 1, GARDENER_SEED).claims)).toBeUndefined();
     expect(budgetDefect(grantClaims(STORE_ENTITY, GARDENER, "write", OPERATOR, 1))).toBeUndefined();
     expect(budgetDefect(budgetClaims(GARDENER, 5, OPERATOR, 1))).toBeUndefined();
+  });
+
+  it("tolerates a dimension it does not recognize, still enforcing the one it does (forward-compat)", async () => {
+    const gateway = await governed();
+    // A newer store's declaration: a volume cap AND a `maxRate` cap this store cannot enforce yet.
+    // The door must ACCEPT the unknown dimension (never reject a newer store's limit) and go on
+    // enforcing maxAppends — this is what lets the budget vocabulary grow without a migration.
+    await gateway.append([
+      signClaims(
+        budgetWith(
+          GARDENER,
+          [
+            { role: "maxAppends", value: 1 },
+            { role: "maxRate", value: 99 },
+          ],
+          5000,
+        ),
+        OPERATOR_SEED,
+      ),
+    ]);
+    expect(readBudgetPolicy(gateway.reactor, OPERATOR).get(GARDENER)?.maxAppends).toBe(1);
+    await expect(grow(gateway, 1001)).resolves.toMatchObject({ accepted: 1 }); // maxAppends honored
+    await expect(grow(gateway, 1002)).rejects.toThrow(/over budget/); // the unknown dimension ignored
+    await gateway.close();
+  });
+
+  it("a declaration bearing ONLY an unrecognized dimension leaves the author unmetered here", async () => {
+    const gateway = await governed();
+    // A future rate-only budget: accepted (never rejected), but a store that cannot enforce rate
+    // meters nothing by it — the honest forward-compatible reading, not a silent full stop.
+    await gateway.append([
+      signClaims(budgetWith(GARDENER, [{ role: "maxRate", value: 1 }], 5000), OPERATOR_SEED),
+    ]);
+    expect(readBudgetPolicy(gateway.reactor, OPERATOR).has(GARDENER)).toBe(false);
+    for (let i = 0; i < 4; i += 1) {
+      await expect(grow(gateway, 2000 + i)).resolves.toMatchObject({ accepted: 1 });
+    }
+    await gateway.close();
   });
 
   it("§12's stranger caps are untouched by an author budget", async () => {

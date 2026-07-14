@@ -32,8 +32,19 @@ import { lawfulNegated, lawfulSnapshot } from "./registration.js";
 export const BUDGET_ENTITY = "loam:budget";
 export const CTX_BUDGET = "loam.budget";
 
-// One declaration: the metered author (a `subject` primitive, echoing a grant's subject) and the
-// volume ceiling (a single `maxAppends` primitive — the count of deltas the author may hold).
+// A resolved budget: the per-dimension ceilings in force for one author. v1 recognizes exactly one
+// dimension — `maxAppends` (volume: the count of deltas the author may hold). The shape is
+// EXTENSIBLE by addition, never by migration: a future dimension (a rate window, a byte ceiling) is
+// a new OPTIONAL field here and a new pointer role on the wire, so an old store tolerates and
+// ignores a dimension it does not recognize while enforcing the ones it does. The whole feature is
+// OPT-IN and OFF by default — an author with no surviving declaration has no policy and is
+// unmetered; there is no global cap, so nothing is limited until an operator names an author here.
+export interface BudgetPolicy {
+  readonly maxAppends?: number; // volume ceiling; future dimensions join here (maxRate?, maxBytes?)
+}
+
+// One declaration: the metered author (a `subject` primitive, echoing a grant's subject) and one or
+// more limit dimensions — v1 emits `maxAppends` (the count of deltas the author may hold).
 // Operator-signed; a fresh declaration for the same subject supersedes by timestamp.
 export function budgetClaims(
   subject: string,
@@ -55,10 +66,11 @@ export function budgetClaims(
   };
 }
 
-// Is this delta a budget declaration, and if so, is it WELL-FORMED law? A declaration carries
-// exactly one string `subject` and exactly one `maxAppends` that is a non-negative integer.
-// The DOOR refuses malformed declarations at append (wired into authorize), so nothing can sit
-// at `loam:budget` looking like a quota while metering nothing — door and lens read one ground.
+// Is this delta a budget declaration, and if so, is it WELL-FORMED law? A declaration names exactly
+// one string `subject` and carries at least one limit dimension; the dimensions this store knows
+// (v1: `maxAppends`, a non-negative integer) must be well-formed, and any it does NOT know are a
+// newer store's limits — tolerated, not rejected. The DOOR refuses malformed declarations at append
+// (wired into authorize), so nothing sits at `loam:budget` looking like a quota it cannot honor.
 export function budgetDefect(claims: Claims): string | undefined {
   const declares = claims.pointers.some(
     (p) =>
@@ -76,31 +88,44 @@ export function budgetDefect(claims: Claims): string | undefined {
   ) {
     return "a budget declaration names exactly one author subject";
   }
+  // Dimensions are every pointer that is not the `declares` anchor or the `subject`. A declaration
+  // must carry at least one (an empty budget is a mistake, not a silent no-op), and each dimension
+  // this store RECOGNIZES must be well-formed. A dimension it does NOT recognize is a newer store's
+  // limit — tolerated and ignored, never rejected — so the vocabulary grows without a migration.
+  const dimensions = claims.pointers.filter((p) => p.role !== "declares" && p.role !== "subject");
+  if (dimensions.length === 0) {
+    return "a budget declaration carries at least one limit (v1: maxAppends)";
+  }
   const ceilings = claims.pointers.filter((p) => p.role === "maxAppends");
+  if (ceilings.length > 1) return "a budget declaration carries at most one maxAppends";
   if (
-    ceilings.length !== 1 ||
-    ceilings[0]!.target.kind !== "primitive" ||
-    typeof ceilings[0]!.target.value !== "number" ||
-    !Number.isInteger(ceilings[0]!.target.value) ||
-    ceilings[0]!.target.value < 0
+    ceilings.length === 1 &&
+    (ceilings[0]!.target.kind !== "primitive" ||
+      typeof ceilings[0]!.target.value !== "number" ||
+      !Number.isInteger(ceilings[0]!.target.value) ||
+      ceilings[0]!.target.value < 0)
   ) {
-    return "a budget declaration carries exactly one maxAppends: a non-negative integer";
+    return "maxAppends must be a non-negative integer";
   }
   return undefined;
 }
 
-// The per-author volume ceilings in force: for each metered author, the maximum count of
-// surviving deltas the operator will let them hold. Governed stores only — an ungoverned store
-// returns the empty map, always (no operator, no lawful voice). The latest surviving lawful
-// declaration per subject wins (timestamp, id as tiebreak); a subject with no declaration is
-// absent from the map and therefore unmetered. The harvest mirrors readTrustPolicy: malformed
-// declarations are refused at APPEND (`budgetDefect`), so on any store whose law arrived through
-// the door, door and this reader cannot disagree.
-export function readBudgetPolicy(reactor: Reactor, operator?: string): ReadonlyMap<string, number> {
-  const budgets = new Map<string, number>();
+// The per-author budgets in force: for each metered author, the ceilings the operator set — v1,
+// their `maxAppends` volume cap. Governed stores only (an ungoverned store returns the empty map,
+// always). The latest surviving lawful declaration per subject wins (timestamp, id as tiebreak); a
+// subject with no declaration is absent and therefore unmetered. Only subjects whose latest
+// declaration carries a dimension THIS store recognizes are surfaced — a declaration bearing only a
+// newer store's limit leaves the subject unmetered here, the honest forward-compatible reading.
+// Mirrors readTrustPolicy; malformed declarations are refused at APPEND (`budgetDefect`), so door
+// and reader cannot disagree on any store whose law arrived through the door.
+export function readBudgetPolicy(
+  reactor: Reactor,
+  operator?: string,
+): ReadonlyMap<string, BudgetPolicy> {
+  const budgets = new Map<string, BudgetPolicy>();
   if (operator === undefined) return budgets;
   const negated = lawfulNegated(reactor, operator);
-  const latest = new Map<string, { max: number; timestamp: number; id: string }>();
+  const latest = new Map<string, { policy: BudgetPolicy; timestamp: number; id: string }>();
   for (const delta of lawfulSnapshot(reactor, operator)) {
     const declares = delta.claims.pointers.some(
       (p) =>
@@ -111,7 +136,7 @@ export function readBudgetPolicy(reactor: Reactor, operator?: string): ReadonlyM
     if (!declares || negated(delta.id)) continue;
 
     let subject: string | undefined;
-    let max: number | undefined;
+    const policy: { maxAppends?: number } = {};
     for (const p of delta.claims.pointers) {
       if (p.target.kind !== "primitive") continue;
       if (p.role === "subject" && typeof p.target.value === "string" && p.target.value !== "") {
@@ -123,12 +148,10 @@ export function readBudgetPolicy(reactor: Reactor, operator?: string): ReadonlyM
         Number.isInteger(p.target.value) &&
         p.target.value >= 0
       ) {
-        max = p.target.value;
+        policy.maxAppends = p.target.value;
       }
     }
-    // The same shape the door enforces (budgetDefect): a declaration missing either half reads
-    // exactly as the law says — as no budget at all.
-    if (subject === undefined || max === undefined) continue;
+    if (subject === undefined) continue; // no subject binds nothing (the door refuses it anyway)
 
     const current = latest.get(subject);
     if (
@@ -136,10 +159,14 @@ export function readBudgetPolicy(reactor: Reactor, operator?: string): ReadonlyM
       delta.claims.timestamp > current.timestamp ||
       (delta.claims.timestamp === current.timestamp && delta.id > current.id)
     ) {
-      latest.set(subject, { max, timestamp: delta.claims.timestamp, id: delta.id });
+      latest.set(subject, { policy, timestamp: delta.claims.timestamp, id: delta.id });
     }
   }
-  for (const [subject, { max }] of latest) budgets.set(subject, max);
+  // Surface only what this store can meter: a latest declaration whose every dimension is
+  // unrecognized (a newer store's limit) leaves its subject unmetered here.
+  for (const [subject, { policy }] of latest) {
+    if (policy.maxAppends !== undefined) budgets.set(subject, policy);
+  }
   return budgets;
 }
 
@@ -175,7 +202,7 @@ export function budgetRefusal(
     additions.set(author, (additions.get(author) ?? 0) + 1);
   }
   for (const [author, added] of additions) {
-    const quota = budgets.get(author)!;
+    const quota = budgets.get(author)!.maxAppends!; // in the map ⇒ this dimension is set
     const held = countHeldBy(reactor, author);
     if (held + added > quota) {
       return (
