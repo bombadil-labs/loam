@@ -24,10 +24,14 @@ follows walks the ladder from the bottom, because each rung explains the one abo
 ### The Schema becomes a first-class entity
 
 **A Schema is a domain node like any other** — its own id, its own deltas, resolved from the ground by
-the Schema Schema exactly as a `Film` is resolved from the ground by the film hyperschema. The
-hyperschema half of a registration already lives this way: the definition is a REFERENCE, planted at
-its own entity as `rhizomatic.hyperschema.*` claims and read back by `loadSchema`, while the
-registration merely points at it. Half the decoupling road was already paved. What was never paved is
+the Schema Schema exactly as a `Film` is resolved from the ground by the film hyperschema. Since
+**rhizomatic 0.5.0 this is real machinery, not an aspiration**: `SCHEMA_SCHEMA` plus
+`publishSchemaClaims` / `loadSchema` publish and read a resolution `Schema` as its own deltas over the
+`rhizomatic.schema.*` vocabulary — the exact mirror of `HYPER_SCHEMA_SCHEMA` +
+`publishHyperSchemaClaims` / `loadHyperSchema` for a HyperSchema. The hyperschema half of a
+registration already lives this way: the definition is a REFERENCE, planted at its own entity as
+`rhizomatic.hyperschema.*` claims and read back by `loadHyperSchema`, while the registration merely
+points at it. Half the decoupling road was already paved. What was never paved is
 the other half: the Schema travels as a CARRIER — inline canonical JSON stuffed into the registration
 delta (`role: "schema"` in `registrationClaims`) — so it has no identity apart from the registration
 that quotes it. The design closes the asymmetry by lifting the Schema up beside the HyperSchema: both
@@ -60,7 +64,11 @@ the same pair on their own stores; that is federation, resolved by whose law bin
 registry collision.
 
 **The reified snapshot is that semantic name plus a short content-hash of the frozen bytes —
-`FilmClassic@a1b2c3`.** Loam is eventually-consistent and grow-only: the living `FilmClassic` Schema
+`FilmClassic@a1b2c3`.** Both halves are now rhizomatic primitives (0.5.0): the name is `Schema.name`
+(0.5.0 gave a `Schema` optional `name` + `alg`), and the hash is `schemaCanonicalHex(schema)` over the
+resolution content — `props` + `default` — with `name`/`alg` deliberately EXCLUDED as identity
+metadata, so renaming a lens does not change its version and two peers computing the hash agree.
+Loam is eventually-consistent and grow-only: the living `FilmClassic` Schema
 is a view computed from deltas, so a mutation of it does not overwrite anything — it produces a NEW
 snapshot with new bytes and therefore a new hash. The semantic name is the handle a person reaches
 for; the `@hash` suffix is what makes each frozen state unambiguous when the same name has meant
@@ -82,8 +90,9 @@ resolving against a fixed reading even after the living Schema has moved on and 
 has un-bound that version from every door.
 
 **Its shape is the frozen canonical JSON, and snapshots never supersede one another.** The snapshot is
-literally the bytes the Schema Schema resolved to, run through rhizomatic's canonical JSON profile (so
-`parse∘serialize` is identity and the hash is stable across peers). A newer snapshot of a living Schema
+literally the bytes the Schema Schema resolved to, run through rhizomatic's canonical JSON profile —
+`schemaCanonicalHex` (0.5.0) is exactly that hash — so `parse∘serialize` is identity and the hash is
+stable across peers. A newer snapshot of a living Schema
 is a fresh, permanent entity that does NOT retire the old one: `Film@abc` and `Film@xyz` coexist, each
 independently pinnable AND independently servable, so a consumer bound to `Film@abc` keeps being served
 it after the living Schema has moved on to `Film@xyz`. Backwards compatibility is therefore not a
@@ -131,14 +140,16 @@ Two disciplines govern that rename, both non-negotiable:
   from an un-migrated one without a per-delta version stamp. The version lives in the vocabulary, as it
   did for `rhizomatic.hyperschema.*`.
 
-**One mismatch we record but do not touch:** rhizomatic's own API spells these `loadSchema` and
-`publishSchemaClaims` — and they load and publish HYPERSCHEMAS. That naming is frozen substrate (§2);
-correcting it is a conversation in that repo, never a Loam workaround or a forked vocabulary. That
-conversation is now open —
-[rhizomatic#10](https://github.com/bombadil-labs/rhizomatic/issues/10) proposes reconciling the names
-(rename with a version bump, alias-and-deprecate, or document-and-keep); until it resolves, Loam routes
-around the seam in prose: in Loam's ids and comments the hyperschema is the hyperschema, and where we
-must call rhizomatic's `loadSchema` we do so knowing its name lags its meaning.
+**The rhizomatic naming lag is fixed upstream (0.5.0), so this section's rename is the ONLY one left.**
+rhizomatic's API used to spell these `loadSchema` / `publishSchemaClaims` while operating on
+HYPERSCHEMAS — names that predated the 0.3.0 realignment.
+[rhizomatic#10](https://github.com/bombadil-labs/rhizomatic/issues/10) resolved it in **0.5.0**: those
+are now `loadHyperSchema` / `publishHyperSchemaClaims`, and the old names are reused for resolution
+Schemas (`loadSchema` now returns a `Schema`). Loam adopted the rename in the 0.5.0 upgrade, so the
+substrate's API and Loam's own vocabulary finally agree that the hyperschema is the hyperschema — a
+code-only change, no data moved. What remains for this section is Loam's OWN at-rest rename above
+(`schema:` → `hyperschema:` on the hyperschema-definition entity), which the API rename does not touch
+and which ships its §20 migration.
 
 ### How the upper rungs stand on this
 
