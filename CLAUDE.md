@@ -188,14 +188,6 @@ busy.
 
 ## Standing decisions
 
-- **Reason in whatever language fits; every artifact stays English** (Myk, 2026-07-14) — recent work
-  shows a model can reason differently, and sometimes better, in a different language than it writes.
-  So think in whatever language makes a given problem easiest; the reasoning is scratch. But every
-  OUTPUT is English: prose to Myk, code, comments, commit messages, spec and ticket text, JOURNAL
-  entries — and the rhizomatic type names stay exactly as spelled (`HyperSchema`, `HView`, … — the
-  vocabulary rule is unaffected). The language of the thinking is free; the language of the record is
-  not.
-
 - **Commit and push freely; the human gates are P1 and P6** (Myk, 2026-07-13) — commits and pushes
   to a feature branch are safe, reversible checkpoints and part of autonomous progress: make them
   without asking, on a feature branch (never `main`), with real messages (the poetry rule applies to
