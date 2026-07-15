@@ -246,11 +246,18 @@ contract fixes exactly how a bytes value crosses a door. **This is settled law, 
   type declaration, so "is it bytes" is a schema fact (a `bytes` output type extending §22.6's enum
   additively; GraphQL types it a `BytesValue`, OpenAPI `format: binary`). "Inline or ref" is the one
   value-level check the consumer makes.
-- **The byte-door: `GET /:mount/bytes/<ref>`** returns the raw bytes with `mime` as `Content-Type`,
-  inheriting §17 read discipline (serve only what the caller may LAWFULLY read — a raw-hash endpoint on
-  the anonymous door would be exactly the existence oracle §17 already closed, so the byte-door authorizes
-  against the same tokens and public declarations as every other read) and §11 erasure (a purged asset
-  404s — the tombstoned id is refused re-entry forever).
+- **The byte-door: `GET /:mount/bytes/<ref>?from=<lens>/<entity>`** returns the raw bytes with `mime` as
+  `Content-Type`, inheriting §17 read discipline and §11 erasure. The read discipline is **PROOF-OF-READ**
+  (Myk, 2026-07-15, over a reachability-scan and a token-broad model): a bare `ref → bytes` endpoint would
+  be exactly the content-address existence oracle §17 already closed, so the fetch must NAME the lens and
+  entity it got the ref from, and the door RE-RESOLVES that view under the caller's own access (the same
+  door discipline a normal read runs — the anonymous door only over a publicly-declared lens) and serves
+  the bytes only if the resolved view actually contains a `BytesView` whose content address is `<ref>`.
+  Every failure — unknown ref, wrong `from`, a lens the caller may not read — collapses to a UNIFORM 404,
+  so a stranger learns nothing. No oracle, no store scan (the re-resolution IS the lookup), and the
+  consumer always has the lens+entity because it just rendered them. §11 erasure then falls out for free:
+  a purged source delta is no longer in the live re-resolved view, so the ref 404s by construction — the
+  door never caches the bytes. (This is the settled contract the T9 build ticket implements.)
 
 ### 23.8 The public-door tension — a declaration is not a probe (RECOMMENDATION)
 
