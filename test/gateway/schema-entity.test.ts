@@ -5,15 +5,28 @@
 // each old version against ITS snapshot so a reading, once pinned, answers forever.
 
 import { describe, expect, it } from "vitest";
-import { DeltaSet, loadSchema, type Policy, type Schema } from "@bombadil/rhizomatic";
+import {
+  DeltaSet,
+  authorForSeed,
+  loadSchema,
+  makeNegationClaims,
+  signClaims,
+  type Policy,
+  type Schema,
+} from "@bombadil/rhizomatic";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
-import { schemaLivingEntityFor, versionedSchemaEntityFor } from "../../src/gateway/registration.js";
+import {
+  readRegistrations,
+  schemaLivingEntityFor,
+  versionedSchemaEntityFor,
+} from "../../src/gateway/registration.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
 import { FERN } from "../spike/garden.js";
 
 const OPERATOR_SEED = "0e".repeat(32);
+const OPERATOR = authorForSeed(OPERATOR_SEED);
 
 const pickAsc: Policy = { kind: "pick", order: { kind: "byTimestamp", dir: "asc" } };
 // PLANT_POLICY with a `note` prop added — an evolution that changes the resolution bytes.
@@ -86,6 +99,45 @@ describe("§21 slice 2: the Schema is a first-class entity", () => {
     // ITS OWN snapshot, not the shared living entity, which is exactly §17's per-version freezing.
     expect(versions[0]!.schema.props.has("note")).toBe(false);
     expect(versions[1]!.schema.props.has("note")).toBe(true);
+    await gw.close();
+  });
+
+  it("withdrawing the LATEST version reverts the live surface to the prior reading", async () => {
+    const gw = await boot();
+    await gw.publishRegistration(PLANT, EVOLVED, [FERN], undefined, undefined, undefined, [
+      ...PLANT_WRITABLE,
+      "note",
+    ]);
+    // the live lens now reads the evolved schema (has `note`)
+    const bound = () =>
+      readRegistrations(gw.reactor, OPERATOR).find((r) => r.hyperschema.name === "Plant")!;
+    expect(bound().schema.props.has("note")).toBe(true);
+
+    // strike the LATEST registration (v2) — its living-entity publish is NOT itself negated
+    const versions = gw.registrationVersions().filter((v) => v.hyperschema.name === "Plant");
+    await gw.append([
+      signClaims(
+        makeNegationClaims(
+          OPERATOR,
+          9_000_000,
+          versions[versions.length - 1]!.deltaId,
+          "withdraw v2",
+        ),
+        OPERATOR_SEED,
+      ),
+    ]);
+
+    // the live surface must recede to v1's reading (no `note`) — it resolves the surviving binding's
+    // snapshot, not the living entity, which still holds v2's bytes
+    expect(gw.registrationVersions().filter((v) => v.hyperschema.name === "Plant")).toHaveLength(1);
+    expect(bound().schema.props.has("note")).toBe(false);
+    // the living entity is unchanged — it is a first-class node, just not the live read path
+    expect(
+      loadSchema(
+        DeltaSet.from([...gw.reactor.snapshot()]),
+        schemaLivingEntityFor("Plant"),
+      ).props.has("note"),
+    ).toBe(true);
     await gw.close();
   });
 });

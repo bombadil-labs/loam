@@ -209,9 +209,15 @@ single-lens, `Schema.name = hyperschema.name`. That landing also hardened the mi
 0.5.0's reuse of the `rhizomatic.schema.*` vocabulary and the `schema:` prefix for resolution Schemas:
 the 0.3 role-realignment step now skips a store that already speaks `rhizomatic.hyperschema.*`, and the
 slice-1 entity rename is role-scoped to genuine hyperschema references — so re-migrating a §21 store is
-a no-op rather than a corruption. The implementation lives in `src/gateway/registration.ts`
-(`registrationDeltaClaims`, `versionedSchemaEntityFor`), `src/gateway/gateway.ts`, and
-`src/gateway/genesis.ts`. **Coexistence** — two lenses over one hyperschema — remains deferred to its
+a no-op rather than a corruption. One implementation refinement to the picture above: the LIVE surface
+resolves the latest SURVIVING binding against **its own snapshot**, not the living `schema:<name>`
+entity. The two agree in the common case (every publish republishes the living entity), but diverge
+under withdrawal — striking the latest registration does not negate its living-entity publish, so
+resolving the living entity would keep serving a withdrawn shape; resolving the surviving binding's
+snapshot keeps the live reading and §17's version door in lockstep. The living entity remains the
+first-class, directly-loadable evolving node it is above; it is simply not the read path. The
+implementation lives in `src/gateway/registration.ts` (`registrationDeltaClaims`,
+`versionedSchemaEntityFor`), `src/gateway/gateway.ts`, and `src/gateway/genesis.ts`. **Coexistence** — two lenses over one hyperschema — remains deferred to its
 own design-stage slice: this section pins the registry key `(hyperschema, schema-name)`, but the
 SERVING surface (the GraphQL type/mutation/hooks keying, and the `schema.name == hyperschema.name`
 single-lens naming) is unspecified and needs a design pass before build. The `VersionedHyperSchema`

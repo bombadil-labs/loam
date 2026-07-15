@@ -1679,11 +1679,23 @@ a new meaning, every migration that ever rewrote that token gains a new false-po
 composability that makes the chain safe also makes vocabulary reuse a cross-step hazard, and each step's
 shape-detector has to be re-audited against the newcomer, not just the newcomer given a distinct shape.
 
-`npm run check` green — format, lint, typecheck, build, 536 tests (a focused
-`test/gateway/schema-entity.test.ts` proves the living entity loads and evolving mints a coexisting
-snapshot; the §17 freezing test in `test/surface/rest.test.ts` still passes unchanged, now served by
-snapshots). Breaking on-wire → Myk's merge (P6). On-wire decisions to flag at review: the snapshot
-entity id scheme (`schema:<name>@<contentAddress>`) and the `schemaVersion` binding role.
+Second learning, caught in the self-review (P5): the design says "the latest binding resolves against
+the living entity," but implementing it literally is a withdrawal bug. Striking the latest registration
+does NOT negate its living-entity publish, so the live surface would keep serving the withdrawn shape
+while the version door correctly recedes to the prior version — the two out of lockstep. Fix: the live
+surface resolves the latest SURVIVING binding against its OWN snapshot, exactly as the version door
+does; they agree in the common case and diverge only under withdrawal, where the snapshot is right. The
+living entity stays first-class and directly loadable — it is just not the read path. General shape:
+when two facts are kept in separate deltas (here a binding and its living-entity publish) but only one
+carries the withdrawal signal, resolving the OTHER re-introduces the retracted state — read paths must
+key off whichever delta the retraction actually strikes.
+
+`npm run check` green — format, lint, typecheck, build, 537 tests (a focused
+`test/gateway/schema-entity.test.ts` proves the living entity loads, evolving mints a coexisting
+snapshot, and withdrawing the latest version reverts the live surface; the §17 freezing test in
+`test/surface/rest.test.ts` still passes unchanged, now served by snapshots). Breaking on-wire → Myk's
+merge (P6). On-wire decisions to flag at review: the snapshot entity id scheme
+(`schema:<name>@<contentAddress>`) and the `schemaVersion` binding role.
 
 Note for the demonstration ledger: village to be extended below in the same PR (the demonstrable §21
 story — a first-class, versioned Schema — arrives here; coexisting lenses and the `name@hash` URL wait

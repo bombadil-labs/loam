@@ -573,9 +573,15 @@ export function readRegistrations(reactor: Reactor, operator?: string): Registra
       // name carries it — plantable only by hand, never through publishRegistration — binds
       // nothing rather than colliding with that namespace.
       if (hyperschema.name.includes("\u0000")) continue;
-      // The LATEST lens resolves against the LIVING Schema entity (SPEC §21) — evolve the Schema and
-      // the live surface follows, exactly as republishing the hyperschema reshapes the gather.
-      const schema = loadSchema(lawful, cand.livingEntity);
+      // The LIVE lens resolves against the latest SURVIVING binding's own frozen snapshot (SPEC §21) —
+      // NOT the living `schema:<name>` entity. The distinction bites under withdrawal: striking the
+      // latest registration must revert the live surface to the prior version, but the struck binding's
+      // living-entity publish is not itself negated, so the living entity would stay ahead of the
+      // surviving binding and keep serving a withdrawn shape. Resolving each surviving binding against
+      // ITS snapshot keeps the live reading and the version door in lockstep — the snapshot of the
+      // latest survivor IS the current reading, and it recedes exactly when its binding is withdrawn.
+      // (The living entity remains a first-class, directly-loadable node; it just is not the read path.)
+      const schema = loadSchema(lawful, cand.snapshotEntity);
       out.push({
         hyperschema,
         schema,
