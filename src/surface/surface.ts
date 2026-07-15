@@ -13,7 +13,7 @@
 // ground, one registration, the same view, _hex for _hex.
 
 import type { HyperSchema, Schema, Primitive, View } from "@bombadil/rhizomatic";
-import type { ClaimTemplates } from "../gateway/registration.js";
+import type { ClaimTemplates, ResolverSpecs } from "../gateway/registration.js";
 
 // One registered lens, as a generator receives it: the hyperschema (gather), its resolution
 // schema, the roots it holds live, and (optionally) the claim templates its mutations compile to.
@@ -26,6 +26,9 @@ export interface Registered {
   // the rest are read-only (assert / clear / remove / link / sever refused). Absent → NO field is
   // writable (§21's deny-by-default posture).
   readonly writable?: readonly string[];
+  // Custom resolvers (SPEC §22), per field — a generator reads each resolved field's declared OUTPUT
+  // TYPE to advertise the field honestly (the value is a computation the Policy algebra never named).
+  readonly resolvers?: ResolverSpecs;
 }
 
 // What flows from a root resolution to a door's field readers: one resolution, many reads.

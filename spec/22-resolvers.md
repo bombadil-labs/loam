@@ -150,12 +150,23 @@ snapshot into a fixed content-addressed VersionedSchema. One picture, every rung
 
 A resolver does not float free. §21 (decided by Myk, 2026-07-13) makes a **Schema** a first-class,
 semantically-named living entity — `FilmClassic`, say — that evolves as a domain node and is reified
-by snapshot into a fixed **VersionedSchema** identified by `name@short-content-hash`. A resolver's
-content address is part of what that VersionedSchema FREEZES (question 7, DECIDED — Myk, 2026-07-12):
-changing a resolver mints a NEW version under §17's append-only law, exactly as any other change to
-the definition does. A version once published stays answerable; evolving a resolver never unseats the
-old lens, it publishes a new one beside it. This section rides that ladder; it does not redesign it —
-see §21 for the identity model itself.
+by snapshot into a fixed **VersionedSchema** identified by `name@short-content-hash`. Changing a
+resolver mints a NEW version under §17's append-only law (question 7, DECIDED — Myk, 2026-07-12),
+exactly as any other change to the definition does; a version once published stays answerable, and
+evolving a resolver publishes a new lens beside the old rather than unseating it.
+
+**Where a resolver freezes, precisely** (refined at build, Myk overruling the assumption that §21 had
+already frozen it, 2026-07-14). §21 landed with the VersionedSchema snapshot hashing the rhizomatic
+`Schema` — `props` + `default`, the SELECTION program — because rhizomatic's `Schema` has no room for
+a Loam-level `resolve`, and rhizomatic is frozen. So in v1 a resolver rides the **binding**, per field,
+and freezes at the **registration-version** granularity: each registration delta is a version
+(`readRegistrationVersions` pins it by content address), changing a resolver mints a new binding →
+a new version, and a pinned version applies its OWN resolver forever. This satisfies §17's
+append-only law and the "pin it, it answers the same" guarantee at the version-delta level. Folding a
+resolver's content address into the `name@hash` VersionedSchema itself — so a renderer that pins
+`FilmClassic@<hash>` (§23) freezes the resolution too — is deferred to §23, exactly as §21 deferred the
+symmetric `VersionedHyperSchema`: built when the renderer-pin needs the whole reading frozen, not
+before. This section rides §21's ladder; it does not redesign it — see §21 for the identity model.
 
 ### 22.5 Caching and invalidation (question 6 — RECOMMENDATION, for Myk's review)
 
@@ -208,7 +219,20 @@ version cannot disagree about what the door speaks), and the surface generators 
 they read the Policy today. This keeps the §17 invariant intact — two doors over one registration
 agree, `_hex` for `_hex` — even when the field's value is a computation the algebra never named.
 
-**Provenance.** Design accepted (Myk, 2026-07-13); pending the implementing PR (rung (a) only);
-rides §21. Not landed. Realizes ADLC ticket T3; describes the full purity ladder (a)–(e) and builds
-none of it yet. Questions 1–5 and 7 arrive DECIDED (Myk, 2026-07-12/13); questions 6 (caching) and 8
-(output types) are carried here as reasoned recommendations for Myk's review, not settled law.
+**Provenance.** Design accepted (Myk, 2026-07-13); **rung (a) landed**
+[#97](https://github.com/bombadil-labs/loam/pull/97), riding §21. The lens's last step is now
+programmable: an optional `resolve(bucket) → value` per field, declared with its rung and output type
+in the signed binding, executed as directly-runnable ESM (loaded from a `data:` URL, cached by content
+address, applied synchronously over the field's bucket). The memo (question 6) landed as recommended —
+keyed on `(resolver-content-address, surviving-bucket-delta-set)`, so erasure invalidates by
+construction (§11): an erased fact drops from the bucket, the key changes, and a value distilled from
+forgotten bytes can never be served. Output types (question 8) landed as recommended — GraphQL and
+OpenAPI advertise each resolved field's declared type, keeping the §17 two-doors-agree invariant. The
+implementation lives in `src/gateway/resolvers.ts` (load / apply / memo), `src/gateway/registration.ts`
+(the `ResolverSpec` on the binding), `src/gateway/gateway.ts` (the resolve paths + publish validation),
+and the door generators (`src/gateway/gql.ts`, `src/surface/rest.ts`). Only rung (a) is built; the
+higher rungs (b/c/d) and (e) synthetics are described above and refused at parse — a store admits
+exactly the purity its signed definition names. v1 executes the operator's OWN resolvers in a governed
+store (only operator law binds, §7); confinement for UNTRUSTED executable law is §24's quarantine and
+§23's renderer trust. Additive/non-breaking: a binding without resolvers is the pre-§22 shape, so no
+§20 migration. Realizes ADLC ticket T3.

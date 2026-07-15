@@ -75,6 +75,7 @@ export function assembleGenesis(spec: GenesisSpec): Genesis {
       () => clock++,
       reg.mutations,
       reg.writable,
+      reg.resolvers,
     );
     deltas.push(signClaims(living, seed), signClaims(snapshot, seed), signClaims(binding, seed));
   }

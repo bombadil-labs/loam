@@ -71,11 +71,13 @@ import {
   readWithdrawnRegistrations,
   registrationDeltaClaims,
   schemaEntityFor,
+  type ResolverSpecs,
   type ClaimTemplates,
   type Registration,
   type RegistrationVersion,
   type WithdrawnRegistration,
 } from "./registration.js";
+import { applyResolvers, loadResolvers, newResolverMemo, type ResolverMemo } from "./resolvers.js";
 import { readTrustPolicy } from "./trust.js";
 
 export interface AppendReceipt {
@@ -141,6 +143,10 @@ interface Bound extends Registration {
 
 export class Gateway {
   private registered: Bound[] = [];
+  // The resolver memo (SPEC §22.5): (resolver-content-address, bucket-delta-set) → value. Keyed on the
+  // surviving bucket, so it invalidates by construction when the ground moves — an erased fact drops
+  // from the bucket and its old value can never be served again. A pure cache; safe to clear anytime.
+  private readonly resolverMemo: ResolverMemo = newResolverMemo();
   private registry = SchemaRegistry.build([]);
   private gql: GraphQLSchema | undefined;
   // Materialization names are generation-qualified (see matName): the reactor has no
@@ -254,7 +260,20 @@ export class Gateway {
     }
     const gateway = new Gateway(backend, reactor, options);
     gateway.replayRegistrations();
+    await gateway.preloadResolvers();
     return gateway;
+  }
+
+  // Load every resolver's ESM (SPEC §22) into the content-addressed cache — the live lenses AND every
+  // answerable version's, so both the warm path and a pinned version-door read find their functions
+  // synchronously. Async (a `data:` import); idempotent (the cache dedups by content address). Called
+  // after every (re)bind and every publish, so a newly-arrived resolver is runnable by the next read.
+  private async preloadResolvers(): Promise<void> {
+    const specs: Array<ResolverSpecs | undefined> = [
+      ...this.registered.map((r) => r.resolvers),
+      ...this.registrationVersions().map((v) => v.resolvers),
+    ];
+    await loadResolvers(specs);
   }
 
   // Boot a fresh (or existing) store from a genesis delta-set: open governed by the genesis
@@ -269,6 +288,7 @@ export class Gateway {
     const gateway = await Gateway.open(backend, { ...options, seed: genesis.operatorSeed });
     if (genesis.deltas.length > 0) await gateway.append(genesis.deltas);
     gateway.replayRegistrations();
+    await gateway.preloadResolvers();
     return gateway;
   }
 
@@ -337,7 +357,15 @@ export class Gateway {
     if (result.sort !== "hview") {
       throw new Error(`schema ${reg.hyperschema.name} does not evaluate to a hyperview`);
     }
-    const view = resolveView(reg.schema, result.hview) as Record<string, View>;
+    // The pinned version's OWN resolvers apply (SPEC §22) — a version freezes its resolver with its
+    // schema, so an old lens keeps computing exactly as it did. Pre-loaded across all versions at bind.
+    const view = applyResolvers(
+      reg.resolvers,
+      resolveView(reg.schema, result.hview) as Record<string, View>,
+      result.hview,
+      entity,
+      this.resolverMemo,
+    );
     return this.annotate(
       {
         entity,
@@ -443,6 +471,7 @@ export class Gateway {
       JSON.stringify(r.roots),
       JSON.stringify(r.mutations ?? null),
       JSON.stringify(r.writable ?? null),
+      JSON.stringify(r.resolvers ?? null),
       r.entity ?? "",
       r.origin,
     ].join(NUL);
@@ -493,6 +522,7 @@ export class Gateway {
           roots: reg.roots,
           origin: reg.origin,
           ...(reg.entity === undefined ? {} : { entity: reg.entity }),
+          ...(reg.resolvers === undefined ? {} : { resolvers: reg.resolvers }),
         };
         if (attempt(reg) || (reg.mutations !== undefined && attempt(templateless))) {
           progressed = true;
@@ -701,6 +731,7 @@ export class Gateway {
     entity?: string,
     mutations?: ClaimTemplates,
     writable?: readonly string[],
+    resolvers?: ResolverSpecs,
   ): Promise<void> {
     const seed = context?.actor ?? this.options.seed;
     if (seed === undefined) {
@@ -723,6 +754,23 @@ export class Gateway {
     // surface. Loud here, quiet on replay: a bad delta on append-only ground cannot be
     // taken back, and "registered" must never mean "silently missing its mutations".
     const templates = mutations === undefined ? undefined : parseClaimTemplates(mutations);
+    // A resolver may only name a field the schema HAS (SPEC §22) — a resolver over a phantom field
+    // would advertise a door the lens can never fill. Loud here, at publish, where the schema is known
+    // (parseResolvers checked shape/rung; this checks existence). Rung (e) synthetics — fields with no
+    // Policy at all — are design-only in v1, so every resolved field must already be in the schema.
+    if (resolvers !== undefined) {
+      for (const field of Object.keys(resolvers)) {
+        if (!schema.props.has(field)) {
+          throw new Error(
+            `resolver "${field}": no such field in the schema — a resolver rides an existing ` +
+              `property (synthetic fields with no Policy are SPEC §22 rung (e), not built in v1)`,
+          );
+        }
+      }
+      // Prove the ESM actually loads to a function NOW, so "registered" never means "carries a
+      // resolver the doors cannot run" — the same loud-here/quiet-on-replay discipline as templates.
+      await loadResolvers([resolvers]);
+    }
     const survivors = this.registered.filter((r) => r.hyperschema.name !== hyperschema.name);
     const trialRegistry = SchemaRegistry.build([
       ...survivors.map((r) => r.hyperschema),
@@ -744,10 +792,11 @@ export class Gateway {
           roots,
           ...(templates ? { mutations: templates } : {}),
           ...(writable ? { writable } : {}),
+          ...(resolvers ? { resolvers } : {}),
         },
       ],
       this.gqlHooks(),
-    ); // arg names, field collisions — everything the replay would trip on, tripped NOW
+    ); // arg names, field collisions, resolver output types — everything the replay would trip on, NOW
 
     const author = authorForSeed(seed);
     const schemaEntity = schemaEntityFor(hyperschema, entity);
@@ -769,6 +818,7 @@ export class Gateway {
       () => this.nextTimestamp(),
       templates,
       writable,
+      resolvers,
     );
     await this.append([
       signClaims(living, seed),
@@ -776,6 +826,7 @@ export class Gateway {
       signClaims(binding, seed),
     ]);
     this.replayRegistrations();
+    await this.preloadResolvers();
     // Success must mean BOUND. The deltas are down either way (append-only ground), but a
     // publish the replay could not bind — a name already answered for by another entity, a
     // collision with a manual registration — is not to be reported as a served surface.
@@ -852,6 +903,9 @@ export class Gateway {
     this.lazyMats.clear();
     this.publicLazyMats.clear();
     this.publicOpen = undefined; // the ground changed out from under the cached read
+    // Drop the resolver memo (SPEC §22.5/§11): keying already forbids serving a value over erased
+    // bytes, but a re-seat is exactly the moment the ground forgot — clear it so nothing lingers.
+    this.resolverMemo.clear();
     const reactor = new Reactor();
     for (const d of await this.backend.deltasSince(new Set())) {
       if (reactor.ingest(d).status === "rejected") {
@@ -1060,8 +1114,17 @@ export class Gateway {
   }
 
   private resolvedNode(name: string, entity: string, asOf?: number): ResolvedNode {
+    const def = this.def(name);
     const hview = this.gather(name, entity, asOf);
-    const view = resolveView(this.def(name).schema, hview) as Record<string, View>;
+    // The lens's resolvers apply as the final step (SPEC §22): the Policy computes the value, then a
+    // resolver — if the field declares one — overrides its representation over the same bucket.
+    const view = applyResolvers(
+      def.resolvers,
+      resolveView(def.schema, hview) as Record<string, View>,
+      hview,
+      entity,
+      this.resolverMemo,
+    );
     return this.annotate(
       {
         entity,
@@ -1388,7 +1451,14 @@ export class Gateway {
       if (hview === undefined) {
         throw new Error(`the materialization backing this stream is gone — resubscribe`);
       }
-      const view = resolveView(bound.schema, hview) as Record<string, View>;
+      // Resolvers apply on the stream too (SPEC §22), so a live frame reads exactly as a query does.
+      const view = applyResolvers(
+        bound.resolvers,
+        resolveView(bound.schema, hview) as Record<string, View>,
+        hview,
+        entity,
+        this.resolverMemo,
+      );
       return {
         entity,
         view,

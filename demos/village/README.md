@@ -37,7 +37,7 @@ Person entities are the only shared vocabulary; everything else composes by fede
 
 ```sh
 node demos/village/phase0.mjs   # groundwork: homes, operators, registrations (all 3 surfaces)
-node demos/village/phase1.mjs   # …through phase21.mjs — each phase is a runnable act with checks
+node demos/village/phase1.mjs   # …through phase22.mjs — each phase is a runnable act with checks
 node demos/village/village.mjs  # the living village: all stores + pulse + simulator + dashboard
                            #   → watch it at http://127.0.0.1:4400
 ```
@@ -284,3 +284,15 @@ _(one entry per PR that grew the village; newest last)_
   itself changed shape here: a registration is five deltas now — marker aside, hyperschema + living
   Schema + snapshot + binding — checked in phase0.3b.) The demonstrable §21 story so far; coexisting
   lenses and the `name@hash` URL wait for the coexistence slice.
+- **THE LENS COMPUTES (SPEC §22, rung a)** (phase22.mjs, 4/4, re-runnable — clears its own Ledger22
+  stage): a Policy adjudicates WHICH claims survive; a custom resolver decides what they MEAN. The
+  almanac registers a `Ledger22` whose `amount` carries a bucket-pure resolver, and the field's value
+  becomes a computation over the whole bucket — the SUM of three entries (140), where the Policy's
+  pick-latest would answer 90. The resolver is directly-runnable ESM riding the binding; the door
+  advertises the field it actually serves (OpenAPI types `amount` a number, §22.6). Then the two edges
+  that make it honest: erase one entry and the sum RE-RUNS to 130 — the memo keys on the surviving
+  bucket, so the cache forgets exactly when the ground does (§22.5/§11), never handing back a value
+  distilled from forgotten bytes; and change ONLY the resolver (sum → count) and a new version mints
+  while v1 keeps its own reading — `/rest/v1` still SUMS (130) where `/rest/v2` COUNTS (2) over one
+  ground, a resolver frozen with its version (§22.4). The higher rungs and synthetics are refused at
+  the door; v1 runs the operator's own code, the sandbox for untrusted law waiting on §24.

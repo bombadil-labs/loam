@@ -85,6 +85,7 @@ export {
   lawfulSnapshot,
   parseClaimTemplates,
   parseRegistrationInput,
+  parseResolvers,
   readRegistrations,
   registrationClaims,
   registrationDeltaClaims,
@@ -98,6 +99,10 @@ export {
   type Registration,
   type RegistrationDeltaClaims,
   type RegistrationInput,
+  type ResolverOutputType,
+  type ResolverRung,
+  type ResolverSpec,
+  type ResolverSpecs,
 } from "./gateway/registration.js";
 export {
   Runner,

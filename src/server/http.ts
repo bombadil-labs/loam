@@ -128,6 +128,7 @@ async function performRegistration(
     input.entity,
     input.mutations,
     input.writable,
+    input.resolvers,
   );
   return {
     registered: input.hyperschema.name,
