@@ -458,3 +458,21 @@ re-pointed at the first-class scope surface when it lands). §24.3 promote-outpu
 a DRAFT awaiting Myk's sign-off; questions 1 and 6 are his decisions proved, 2 largely his decisions with
 one residual recommendation (all-or-nothing read granularity), 3/4/5/7 reasoned recommendations, 8 a hard
 requirement pinned green against slice 1.
+
+**PROMOTE-OUTPUTS BUILT** [#PR14](https://github.com/bombadil-labs/loam/pull/PR14) (realizes ticket T14) —
+promotion's first strength (§24.3), and the FIRST cross-container operation of §27 (merge-load with kept
+provenance, the thing that makes fork/pull-request native). `Gateway.promote(source, deltaId, opts?)` adopts
+a delta a quarantine produced by RE-SIGNING its content as the operator's OWN claim into the primary, plus a
+separate `loam.adoption` RECORD (`src/gateway/adopt.ts`) citing it with the trail: adopted-from, source-delta,
+produced-by (the granted-author it wrote under), adopted-by, at. The value crosses by re-assertion (authored
+fresh, not federated), so the pool can be dropped wholesale and the adopted value survives in the operator's
+voice. `Gateway.adoptions()` reads the trail (the raw material of §27's "review what's in here"). Reference
+CLOSURE is enforced: a promotion whose delta-ref pointer would dangle in the primary is refused (§27). A
+build-time correction worth recording: the provenance must ride a SEPARATE record delta, not the content
+delta — co-mingling made the content's own gather pick the provenance up as part of the value, resolving a
+`pick` field to a compound object; the fix is §11's tombstone-is-separate discipline applied to adoption.
+Additive → no §20 migration. Tests `test/gateway/promotion.test.ts` (4: adopt + resolve under the operator,
+the provenance trail, survives-drop, reference-closure-refused). **Follow-on slices:** promote-LAW (bless a
+schema/renderer via the ordinary publish path, §24.4) and endorse-import (attribution-preserving federation)
+are their own tickets; the fork/PR village demo is a fast follow-on. New capability/provenance surface →
+Myk's merge (P6).

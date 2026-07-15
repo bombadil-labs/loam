@@ -42,6 +42,7 @@ import { graphql, parse, subscribe, type ExecutionResult, type GraphQLSchema } f
 import type { StoreBackend } from "../store/backend.js";
 import { isRepairable } from "../store/quarantine.js";
 import { authorize } from "./accounts.js";
+import { adoptionRecordClaims, readAdoptions, type Adoption } from "./adopt.js";
 import {
   ERASE_ENTITY,
   eraseClaims,
@@ -1271,6 +1272,67 @@ export class Gateway {
         await pool.close();
       },
     };
+  }
+
+  // Promote a delta a quarantine produced into THIS store (SPEC §24.3 — promote-outputs, the first container
+  // operation of §27): the operator RE-SPEAKS the source delta's content as their OWN claim, carrying
+  // `loam.adoption` provenance back to the pool. The value crosses by re-assertion (authored fresh), never
+  // federation — so the pool can be dropped wholesale and the adopted value survives in the operator's voice.
+  // This is MERGE-load with kept provenance: where an interpretation in a sandbox becomes a claim in your
+  // canonical history, and always remembers where it came from (which is what makes fork/pull-request native).
+  async promote(
+    source: Gateway,
+    deltaId: string,
+    opts: { from?: string } = {},
+  ): Promise<{ promoted: string }> {
+    if (this.options.seed === undefined || this.operatorAuthor === undefined) {
+      throw new Error(
+        "only an operated store may promote (an adoption is the operator's own claim)",
+      );
+    }
+    const src = source.reactor.get(deltaId);
+    if (src === undefined) {
+      throw new Error(`nothing to promote: ${deltaId} is not held in the source`);
+    }
+    // Reference closure (§24.3/§27): a promoted delta must resolve in its new home — refuse one whose
+    // delta-ref pointer would DANGLE in the primary. Adopt the closure first, or refuse; never half a thing.
+    for (const p of src.claims.pointers) {
+      if (p.target.kind === "delta" && this.reactor.get(p.target.deltaRef.delta) === undefined) {
+        throw new Error(
+          `promotion would dangle: ${deltaId} cites ${p.target.deltaRef.delta}, not held here — adopt its closure first`,
+        );
+      }
+    }
+    // Land TWO deltas: the source's content RE-SPOKEN by the operator (clean, so it resolves as itself),
+    // and a separate loam.adoption RECORD citing it with the provenance trail (kept off the content so it
+    // never pollutes the value's own gather — §11's tombstone-is-separate discipline, applied to adoption).
+    const adopted = signClaims(
+      {
+        timestamp: this.nextTimestamp(),
+        author: this.operatorAuthor,
+        pointers: src.claims.pointers,
+      },
+      this.options.seed,
+    );
+    const record = signClaims(
+      adoptionRecordClaims(
+        adopted.id,
+        opts.from ?? "quarantine",
+        deltaId,
+        src.claims.author, // the granted-author it wrote under in the pool
+        this.operatorAuthor,
+        this.nextTimestamp(),
+      ),
+      this.options.seed,
+    );
+    await this.append([adopted, record]);
+    return { promoted: adopted.id };
+  }
+
+  // The adoptions this store's operator has made (SPEC §24.3) — the visible trail from a canonical value
+  // back to the quarantine that produced it. The read side of promotion, for audit and review (§27).
+  adoptions(): Adoption[] {
+    return readAdoptions(this.reactor, this.operatorAuthor);
   }
 
   // Honor an erasure DECIDED by the primary operator (SPEC §24.8), called on a pool by the primary's fan-out:
