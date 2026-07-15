@@ -360,22 +360,29 @@ describe("evolution is append: the surface follows the surviving definitions", (
     const gateway = await Gateway.open(backend, { seed: OPERATOR_SEED });
     // the operator plants the poison by hand, past publishRegistration's guard
     const { publishHyperSchemaClaims } = await import("@bombadil/rhizomatic");
-    const { registrationClaims } = await import("../../src/gateway/registration.js");
+    const { registrationDeltaClaims } = await import("../../src/gateway/registration.js");
     const dsetBody = parseTerm({ op: "mask", policy: "drop", in: "input" });
+    const { living, snapshot, binding } = registrationDeltaClaims(
+      "hyperschema:Poison",
+      "Poison",
+      PLANT_POLICY,
+      [FERN],
+      OPERATOR,
+      () => 2,
+    );
     await gateway.append([
       signClaims(
         publishHyperSchemaClaims(
           { name: "Poison", alg: 1, body: dsetBody },
-          "schema:Poison",
+          "hyperschema:Poison",
           OPERATOR,
           1,
         ),
         OPERATOR_SEED,
       ),
-      signClaims(
-        registrationClaims("schema:Poison", PLANT_POLICY, [FERN], OPERATOR, 2),
-        OPERATOR_SEED,
-      ),
+      signClaims(living, OPERATOR_SEED),
+      signClaims(snapshot, OPERATOR_SEED),
+      signClaims(binding, OPERATOR_SEED),
     ]);
     await gateway.flush();
 

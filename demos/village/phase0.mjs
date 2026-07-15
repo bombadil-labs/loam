@@ -58,8 +58,8 @@ try {
   const count = Number(/(\d+) deltas/.exec(storeOut)?.[1] ?? -1);
   check(
     "0.3b",
-    "the store holds marker + definition + reference (3 deltas)",
-    count === 3,
+    "the store holds marker + hyperschema + living Schema + snapshot + binding (5 deltas, SPEC §21)",
+    count === 5,
     `${count} deltas`,
   );
 

@@ -14,10 +14,13 @@
 
 import {
   DeltaSet,
+  contentAddress,
   loadHyperSchema,
+  loadSchema,
   parseSchema,
   parseTerm,
-  schemaToJson,
+  publishSchemaClaims,
+  schemaCanonicalHex,
   type Claims,
   type HyperSchema,
   type Schema,
@@ -188,17 +191,51 @@ export function parseClaimTemplates(raw: unknown): ClaimTemplates {
 export const schemaEntityFor = (hyperschema: HyperSchema, entity?: string): string =>
   entity ?? `hyperschema:${hyperschema.name}`;
 
+// The living resolution Schema's own entity (SPEC §21): `schema:<name>`, freed for exactly this by
+// slice 1's `schema:`→`hyperschema:` rename. Single-lens for now — the name is the hyperschema's,
+// so one lens per gather program. A migrated store may still hold the OLD hyperschema definition at
+// this id, but those deltas are negated by slice 1 and the SCHEMA_SCHEMA gather masks negations, so
+// `loadSchema` here only ever sees the resolution Schema's own claims — the ids coexist, never collide.
+export const schemaLivingEntityFor = (name: string): string => `schema:${name}`;
+
+// A VersionedSchema's true name (SPEC §21 — `name@hash`): the content address of the FROZEN bytes.
+// `schemaCanonicalHex` is the canonical CBOR of `props`+`default` only (name/alg are identity
+// metadata, excluded), so renaming a lens never moves the version and two peers computing it agree;
+// `contentAddress` bounds it to one BLAKE3 multihash — the same addressing discipline §17's version
+// door already runs one rung down. The frozen bytes cannot be unsaid, so a snapshot is grow-only.
+const hexToBytes = (hex: string): Uint8Array => {
+  const out = new Uint8Array(hex.length >> 1);
+  for (let i = 0; i < out.length; i += 1) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  return out;
+};
+export const versionedSchemaHash = (schema: Schema): string =>
+  contentAddress(hexToBytes(schemaCanonicalHex(schema)));
+
+export const versionedSchemaEntityFor = (name: string, schema: Schema): string =>
+  `${schemaLivingEntityFor(name)}@${versionedSchemaHash(schema)}`;
+
 // The registration entity for a hyperschema entity — one registration per hyperschema entity,
 // latest wins. Keys off the (now `hyperschema:`-prefixed) entity, so the registration files under
 // `registration:hyperschema:<Name>`.
 const registrationEntity = (schemaEntity: string): string => `registration:${schemaEntity}`;
 
-// Serialize a registration's claims: a pointer to the hyperschema entity plus policy and roots.
-// The hyperschema-entity pointer targets the "registration" context, NEVER "definition" — the
-// definition bucket is loadHyperSchema's alone, and a registration must not masquerade in it.
+// The pointer context every registration-internal entity pointer wears (the hyperschema definition,
+// the living Schema, the frozen snapshot). It is NOT `CTX_REGISTRATION` on purpose — that context is
+// the `registers` key alone, the one pointer `survivingCandidates` groups on. `loadHyperSchema` /
+// `loadSchema` re-gather at the pointed-at entity id under `definition` context, so this tag is only
+// a namespace marker keeping the definition bucket clear of a registration masquerading in it.
+const CTX_POINTER = "registration";
+
+// The claims a registration BINDING carries (SPEC §21 — registration demoted to a binding). It names
+// three entities and no definitions: the hyperschema gather program, the LIVING resolution Schema
+// (`schema:<name>` — what the latest lens resolves and evolves against), and this version's FROZEN
+// VersionedSchema snapshot (`schema:<name>@<hash>` — what §17's version door resolves an old version
+// against, so v1 keeps its reading forever). Roots, mutations, and writability still ride the binding
+// inline: they are serving discipline, local to a deployment, never part of the reading (§21).
 export function registrationClaims(
   schemaEntity: string,
-  schema: Schema,
+  livingEntity: string,
+  snapshotEntity: string,
   roots: readonly string[],
   author: string,
   timestamp: number,
@@ -232,20 +269,67 @@ export function registrationClaims(
           entity: { id: registrationEntity(schemaEntity), context: CTX_REGISTRATION },
         },
       },
-      // Wire roles follow rhizomatic's 0.3 model, and the parsed `Registration` mirrors them:
-      // `hyperschema` names the gather program's entity (the definition read by loadHyperSchema),
-      // `schema` carries the resolution program itself.
+      // `hyperschema` names the gather program's entity (the definition read by loadHyperSchema);
+      // `schema` names the LIVING resolution Schema entity (read by loadSchema, the latest lens);
+      // `schemaVersion` names this binding's FROZEN VersionedSchema snapshot (the §17 version freeze).
       {
         role: "hyperschema",
-        target: { kind: "entity", entity: { id: schemaEntity, context: "registration" } },
+        target: { kind: "entity", entity: { id: schemaEntity, context: CTX_POINTER } },
       },
       {
         role: "schema",
-        target: { kind: "primitive", value: JSON.stringify(schemaToJson(schema)) },
+        target: { kind: "entity", entity: { id: livingEntity, context: CTX_POINTER } },
+      },
+      {
+        role: "schemaVersion",
+        target: { kind: "entity", entity: { id: snapshotEntity, context: CTX_POINTER } },
       },
       { role: "roots", target: { kind: "primitive", value: JSON.stringify(roots) } },
     ],
   };
+}
+
+// Everything a registration plants beyond the hyperschema definition (SPEC §21). The Schema, once a
+// passenger quoted inline in the binding, is now a first-class entity in its own right: published
+// twice — as the LIVING `schema:<name>` (which evolves on republish) and as an immutable
+// VersionedSchema SNAPSHOT at its content address (which never supersedes) — and then REFERENCED by
+// the binding. rhizomatic requires a published Schema to carry name+alg, so the single-lens name is
+// stamped here. All four deltas (definition aside) go down together: `loadSchema` needs the entities
+// present before the binding that points at them can resolve. Timestamps come from the caller's own
+// monotonic clock so genesis stays idempotent and a live publish stays ordered.
+export interface RegistrationDeltaClaims {
+  readonly living: Claims;
+  readonly snapshot: Claims;
+  readonly binding: Claims;
+  readonly livingEntity: string;
+  readonly snapshotEntity: string;
+}
+export function registrationDeltaClaims(
+  schemaEntity: string,
+  name: string,
+  schema: Schema,
+  roots: readonly string[],
+  author: string,
+  nextTimestamp: () => number,
+  mutations?: ClaimTemplates,
+  writable?: readonly string[],
+): RegistrationDeltaClaims {
+  const named: Schema = { ...schema, name, alg: schema.alg ?? 1 };
+  const livingEntity = schemaLivingEntityFor(name);
+  const snapshotEntity = versionedSchemaEntityFor(name, schema);
+  const living = publishSchemaClaims(named, livingEntity, author, nextTimestamp());
+  const snapshot = publishSchemaClaims(named, snapshotEntity, author, nextTimestamp());
+  const binding = registrationClaims(
+    schemaEntity,
+    livingEntity,
+    snapshotEntity,
+    roots,
+    author,
+    nextTimestamp(),
+    mutations,
+    writable,
+  );
+  return { living, snapshot, binding, livingEntity, snapshotEntity };
 }
 
 // The ONE shape every registration surface accepts — the `loam register` file, POST
@@ -352,13 +436,23 @@ export function lawfulNegated(reactor: Reactor, operator?: string): (id: string)
 
 interface Candidate {
   schemaEntity: string;
-  schema: Schema;
+  // The living lens and this version's frozen snapshot — resolved to a Schema lazily by the reader
+  // (latest → living, a version → snapshot), each against the lawful ground it already holds.
+  livingEntity: string;
+  snapshotEntity: string;
   roots: readonly string[];
   mutations?: ClaimTemplates;
   writable?: readonly string[];
   timestamp: number;
   id: string;
 }
+
+// The entity a registration pointer names, by role — the living `schema` and the frozen
+// `schemaVersion`. An entity target under this role, or undefined (a malformed binding binds nothing).
+const entityRef = (claims: Claims, role: string): string | undefined => {
+  const p = claims.pointers.find((x) => x.role === role);
+  return p?.target.kind === "entity" ? p.target.entity.id : undefined;
+};
 
 // The shared walk both readers stand on: every SURVIVING (lawful, non-negated) registration
 // delta, grouped by the registration entity it files under, each group ascending in ground
@@ -391,19 +485,22 @@ function survivingCandidates(
     const schemaRef = delta.claims.pointers.find(
       (p) => p.role === "hyperschema" && p.target.kind === "entity",
     );
-    const policyJson = primitive(delta.claims, "schema");
+    // The Schema no longer travels inline (SPEC §21): the binding NAMES its living entity and its
+    // frozen snapshot, and the reader resolves the right one via loadSchema. A binding missing any
+    // of the three references — hyperschema, living schema, snapshot — binds nothing.
+    const livingEntity = entityRef(delta.claims, "schema");
+    const snapshotEntity = entityRef(delta.claims, "schemaVersion");
     const rootsJson = primitive(delta.claims, "roots");
     if (
       schemaRef?.target.kind !== "entity" ||
-      typeof policyJson !== "string" ||
+      livingEntity === undefined ||
+      snapshotEntity === undefined ||
       typeof rootsJson !== "string"
     ) {
       continue; // a malformed registration binds nothing
     }
-    let schema: Schema;
     let roots: string[];
     try {
-      schema = parseSchema(JSON.parse(policyJson));
       roots = JSON.parse(rootsJson) as string[];
     } catch {
       continue;
@@ -436,7 +533,8 @@ function survivingCandidates(
     const schemaEntity = schemaRef.target.entity.id;
     const candidate: Candidate = {
       schemaEntity,
-      schema,
+      livingEntity,
+      snapshotEntity,
       roots,
       ...(mutations === undefined ? {} : { mutations }),
       ...(writable === undefined ? {} : { writable }),
@@ -475,16 +573,25 @@ export function readRegistrations(reactor: Reactor, operator?: string): Registra
       // name carries it — plantable only by hand, never through publishRegistration — binds
       // nothing rather than colliding with that namespace.
       if (hyperschema.name.includes("\u0000")) continue;
+      // The LIVE lens resolves against the latest SURVIVING binding's own frozen snapshot (SPEC §21) —
+      // NOT the living `schema:<name>` entity. The distinction bites under withdrawal: striking the
+      // latest registration must revert the live surface to the prior version, but the struck binding's
+      // living-entity publish is not itself negated, so the living entity would stay ahead of the
+      // surviving binding and keep serving a withdrawn shape. Resolving each surviving binding against
+      // ITS snapshot keeps the live reading and the version door in lockstep — the snapshot of the
+      // latest survivor IS the current reading, and it recedes exactly when its binding is withdrawn.
+      // (The living entity remains a first-class, directly-loadable node; it just is not the read path.)
+      const schema = loadSchema(lawful, cand.snapshotEntity);
       out.push({
         hyperschema,
-        schema: cand.schema,
+        schema,
         roots: cand.roots,
         entity: cand.schemaEntity,
         ...(cand.mutations === undefined ? {} : { mutations: cand.mutations }),
         ...(cand.writable === undefined ? {} : { writable: cand.writable }),
       });
     } catch {
-      // no surviving (or a malformed) definition: the registration is unbound, not fatal
+      // no surviving (or a malformed) definition/schema: the registration is unbound, not fatal
     }
   }
   return out;
@@ -514,19 +621,24 @@ export function readRegistrationVersions(
     let n = 0;
     for (const cand of group) {
       let hyperschema: HyperSchema;
+      let schema: Schema;
       try {
         // The SCHEMA entity the candidate references, not the registration entity it files
         // under — the same resolution readRegistrations performs.
         hyperschema = loadHyperSchema(lawful, cand.schemaEntity);
         // NUL is the gateway's own alphabet (see readRegistrations) — it binds nothing.
         if (hyperschema.name.includes(String.fromCharCode(0))) continue;
+        // A VERSION freezes against ITS OWN snapshot (SPEC §21/§17) — never the living entity — so
+        // v1 keeps resolving an evolved field with its old reading long after the living Schema has
+        // moved on. This IS §17's per-version freezing, now a named, content-addressed entity.
+        schema = loadSchema(lawful, cand.snapshotEntity);
       } catch {
-        continue; // no surviving definition: this candidate is unbound, not fatal
+        continue; // no surviving definition/snapshot: this candidate is unbound, not fatal
       }
       n += 1;
       out.push({
         hyperschema,
-        schema: cand.schema,
+        schema,
         roots: cand.roots,
         entity: cand.schemaEntity,
         ...(cand.mutations === undefined ? {} : { mutations: cand.mutations }),

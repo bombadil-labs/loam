@@ -230,22 +230,31 @@ describe("federation: two instances meet and merge", () => {
     const MALLORY_SEED = "ee".repeat(32);
     const MALLORY = authorForSeed(MALLORY_SEED);
     const { publishHyperSchemaClaims } = await import("@bombadil/rhizomatic");
-    const { registrationClaims } = await import("../../src/gateway/registration.js");
+    const { registrationDeltaClaims } = await import("../../src/gateway/registration.js");
     const byRole = parseTerm({ op: "group", key: "byRole", in: "input" });
+    // §21: a registration is now three deltas (living Schema, snapshot, binding). Mallory federates
+    // all of them; every one crosses (union is union) and every one is inert (foreign law binds nothing).
+    const intruderReg = registrationDeltaClaims(
+      "hyperschema:Intruder",
+      "Intruder",
+      PLANT_POLICY,
+      [FERN],
+      MALLORY,
+      () => 51,
+    );
     const report = await b.federate([
       signClaims(
         publishHyperSchemaClaims(
           { name: "Intruder", alg: 1, body: byRole },
-          "schema:Intruder",
+          "hyperschema:Intruder",
           MALLORY,
           50,
         ),
         MALLORY_SEED,
       ),
-      signClaims(
-        registrationClaims("schema:Intruder", PLANT_POLICY, [FERN], MALLORY, 51),
-        MALLORY_SEED,
-      ),
+      signClaims(intruderReg.living, MALLORY_SEED),
+      signClaims(intruderReg.snapshot, MALLORY_SEED),
+      signClaims(intruderReg.binding, MALLORY_SEED),
       signClaims(
         publishHyperSchemaClaims(
           { name: "Plant", alg: 1, body: byRole },
@@ -256,7 +265,7 @@ describe("federation: two instances meet and merge", () => {
         MALLORY_SEED,
       ),
     ]);
-    expect(report.accepted).toBe(3); // union is union: the deltas cross
+    expect(report.accepted).toBe(5); // union is union: 2 hyperschemas + 3 registration deltas cross
 
     // …but the surface a reopened store GENERATES is the operator's alone
     const reopened = await Gateway.open(backend, { seed: OP_B_LOCAL });

@@ -9,7 +9,7 @@ import { grantClaims } from "../../src/gateway/accounts.js";
 import { eraseClaims } from "../../src/gateway/erase.js";
 import { operatorMarkerClaims, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { publicClaims } from "../../src/gateway/public.js";
-import { registrationClaims } from "../../src/gateway/registration.js";
+import { registrationDeltaClaims } from "../../src/gateway/registration.js";
 import { trustClaims } from "../../src/gateway/trust.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
 // The page and this test share the classifier — same import discipline as the arc.
@@ -47,9 +47,16 @@ describe("classifyDelta: every badge earns its name", () => {
       props: new Map(),
       default: { kind: "pick", order: { kind: "byTimestamp", dir: "desc" } },
     };
-    expect(kindOf(sign(registrationClaims("schema:Plant", policy as never, [FERN], ME, 5)))).toBe(
-      "registration",
+    // the BINDING is the delta a classifier sees as a registration (it files under CTX_REGISTRATION)
+    const { binding } = registrationDeltaClaims(
+      "hyperschema:Plant",
+      "Plant",
+      policy as never,
+      [FERN],
+      ME,
+      () => 5,
     );
+    expect(kindOf(sign(binding))).toBe("registration");
   });
 
   it("recognizes a grant", () => {

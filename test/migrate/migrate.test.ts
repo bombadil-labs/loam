@@ -1,32 +1,34 @@
 // The migration policy in practice (the standing rule: every breaking on-wire change ships a
-// migration). The 0.2→0.3 step re-signs schema-definition deltas into the hyperschema.* vocabulary
-// and NEGATES each old delta with a negation that points `supersededBy` at its replacement and
-// records a reason. Grow-only: nothing is removed; the store's history reads as a linked chain of
-// supersessions. This suite fabricates a 0.2-era store (a native 0.3 genesis with its schema
-// definition downgraded to the old roles), proves it has no surface under 0.3, migrates it, and
-// proves the surface is back — with the supersession recorded.
+// migration). The chain is composable: a store many versions back is carried forward one step at a
+// time — each step re-signs the deltas it changes into the new form and NEGATES the old with a
+// negation that points `supersededBy` at its replacement and records a reason. Grow-only: nothing is
+// removed; history reads as a linked chain of supersessions. This suite fabricates a genuine 0.2-era
+// store (a hyperschema definition on the OLD `rhizomatic.schema.*` vocabulary at a `schema:` entity,
+// with an INLINE registration — the shape that predates every later step), proves it has no surface,
+// migrates it all the way forward, and proves the surface is back, with every supersession recorded.
 
 import { describe, expect, it } from "vitest";
 import {
   authorForSeed,
   computeId,
+  publishHyperSchemaClaims,
   signClaims,
   type Claims,
   type Delta,
 } from "@bombadil/rhizomatic";
-import { assembleGenesis } from "../../src/gateway/genesis.js";
+import { operatorMarkerClaims } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { migrate } from "../../src/migrate/migrate.js";
-import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
+import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
 import { FERN, GARDENER_SEED, observed } from "../spike/garden.js";
+import { legacyInlineRegistrationClaims } from "./legacy.js";
 
 const NEW = "rhizomatic.hyperschema.";
 const OLD = "rhizomatic.schema.";
-const hasRolePrefix = (d: Delta, prefix: string): boolean =>
-  d.claims.pointers.some((p) => p.role.startsWith(prefix));
 
-// The inverse of the migration: move hyperschema.* roles back to schema.*, to forge a 0.2-era delta.
+// The inverse of the 0.3 realignment: move hyperschema.* roles back to schema.*, to forge a 0.2-era
+// definition delta from a native one.
 const downgrade = (claims: Claims): Claims => ({
   ...claims,
   pointers: claims.pointers.map((p) =>
@@ -34,46 +36,51 @@ const downgrade = (claims: Claims): Claims => ({
   ),
 });
 
-// A 0.2-era store: a real 0.3 genesis (operator marker + Plant definition + registration) with the
-// definition downgraded to the old vocabulary, plus one data claim.
+// A genuine 0.2-era store, forged from the ground up — nothing a later step touched has arrived yet:
+//   • the hyperschema definition sits at the OLD `schema:Plant` entity, on the OLD `rhizomatic.schema.*`
+//     vocabulary (downgraded from a native 0.3 definition);
+//   • the registration is the legacy INLINE form (the Schema quoted as canonical JSON, no `writable`);
+//   • plus the operator marker and one data claim so there is a view to (fail to, then) resolve.
 const seed = GARDENER_SEED;
 const operator = authorForSeed(seed);
-const genesis = assembleGenesis({
-  operatorSeed: seed,
-  registrations: [
-    { hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN], writable: [...PLANT_WRITABLE] },
-  ],
-});
-const nativeDef = genesis.deltas.find((d) => hasRolePrefix(d, NEW))!;
-const oldDef = signClaims(downgrade(nativeDef.claims), seed);
+const OLD_ENTITY = "schema:Plant";
+const marker = signClaims(operatorMarkerClaims(operator), seed);
+const oldDef = signClaims(
+  downgrade(publishHyperSchemaClaims(PLANT, OLD_ENTITY, operator, 1)),
+  seed,
+);
+const oldReg = signClaims(
+  legacyInlineRegistrationClaims(OLD_ENTITY, PLANT_POLICY, [FERN], operator, 2),
+  seed,
+);
 const data = observed(FERN, "height", 40, 5000, seed);
-const oldStore: Delta[] = genesis.deltas
-  .map((d) => (d.id === nativeDef.id ? oldDef : d))
-  .concat(data);
+const oldStore: Delta[] = [marker, oldDef, oldReg, data];
 
-describe("migration: 0.2 → 0.3 schema-definition vocabulary", () => {
-  it("a 0.2-era store's schema does not bind under 0.3 (the breakage the migration heals)", async () => {
+describe("migration: the composable chain, from a 0.2-era store", () => {
+  it("a 0.2-era store's schema does not bind (the breakage the migration heals)", async () => {
     let bound = false;
     try {
       const gw = await Gateway.boot(new MemoryBackend(), { operatorSeed: seed, deltas: oldStore });
       bound = gw.registrationVersions().some((v) => v.hyperschema.name === "Plant");
       await gw.close();
     } catch {
-      bound = false; // 0.3 may refuse to bind a registration whose definition it cannot read
+      bound = false; // the definition is unreadable on the old vocabulary; nothing binds
     }
     expect(bound).toBe(false);
   });
 
-  it("re-signs the definition to the new form, negates the old, and the store answers again", async () => {
+  it("runs every step in order, negates each old form, and the store answers again", async () => {
     const { deltas, report } = migrate(oldStore, { seed });
 
-    // The re-expressed definition is byte-identical to a native 0.3 definition (same content address).
-    expect(
-      deltas.some((d) => d.id === nativeDef.id),
-      "new-form definition present, same id as a native 0.3 def",
-    ).toBe(true);
+    // The whole chain fires in order: vocabulary realignment, then the entity rename + writability
+    // flip, then the inline-Schema lift. Each supersedes exactly the deltas it re-expresses.
+    expect(report.applied).toEqual([
+      { id: "hyperschema-roles", superseded: 1 },
+      { id: "hyperschema-entity-rename", superseded: 2 },
+      { id: "inline-schema-to-entity", superseded: 1 },
+    ]);
 
-    // The old definition is negated, and the negation points at the replacement with a reason.
+    // The original 0.2-era definition is negated, and its negation points forward with a reason.
     const negation = deltas.find((d) =>
       d.claims.pointers.some(
         (p) =>
@@ -83,19 +90,16 @@ describe("migration: 0.2 → 0.3 schema-definition vocabulary", () => {
       ),
     );
     expect(negation, "the old definition is negated").toBeDefined();
-    const forward = negation!.claims.pointers.find((p) => p.role === "supersededBy");
-    expect(forward?.target.kind === "delta" ? forward.target.deltaRef.delta : undefined).toBe(
-      nativeDef.id,
-    );
+    expect(negation!.claims.pointers.some((p) => p.role === "supersededBy")).toBe(true);
     expect(
       negation!.claims.pointers.some((p) => p.role === "reason" && p.target.kind === "primitive"),
     ).toBe(true);
     expect(negation!.claims.author, "the operator authors the supersession").toBe(operator);
 
-    // Grow-only: the old definition is still on the record; data + registration pass through intact.
+    // Grow-only: every old form is still on the record; data passes through intact.
     expect(deltas.some((d) => d.id === oldDef.id)).toBe(true);
+    expect(deltas.some((d) => d.id === oldReg.id)).toBe(true);
     expect(deltas.some((d) => d.id === data.id)).toBe(true);
-    expect(report.applied).toEqual([{ id: "hyperschema-roles", superseded: 1 }]);
 
     // The surface is back: the migrated store answers the very query the old one couldn't.
     const gw = await Gateway.boot(new MemoryBackend(), { operatorSeed: seed, deltas });
@@ -147,7 +151,11 @@ describe("migration: 0.2 → 0.3 schema-definition vocabulary", () => {
       ),
     );
     expect(reExpressedEvil, "a forged old-def must not be re-signed").toBe(false);
-    // only the one legitimately-signed definition was superseded
-    expect(report.applied).toEqual([{ id: "hyperschema-roles", superseded: 1 }]);
+    // only the operator's own legitimate 0.2-era store migrates; the forgery supersedes nothing
+    expect(report.applied).toEqual([
+      { id: "hyperschema-roles", superseded: 1 },
+      { id: "hyperschema-entity-rename", superseded: 2 },
+      { id: "inline-schema-to-entity", superseded: 1 },
+    ]);
   });
 });
