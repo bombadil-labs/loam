@@ -52,10 +52,13 @@ name begins with that number.
 | §20 | [Migration — old deltas in, new deltas out](spec/20-migration.md) |
 | §21 | [Schema identity & versioning — the lens ladder](spec/21-schema-identity.md) |
 | §22 | [Custom resolvers — the last step of the lens becomes programmable](spec/22-resolvers.md) |
+| §23 | [Renderers — push deltas, get software](spec/23-renderers.md) |
 | §25 | [Hardening — namespacing, entity-IDs, brick-proofing, repair](spec/25-hardening.md) |
 | §26 | [As-of reads — the temporal promise, kept](spec/26-as-of-reads.md) |
 
-_§21, §22, §25, and §26 are **design-landed** — the accepted design brief is recorded here, with
-implementation pending (each section's Provenance footer says so). Reserved **§23** (renderers) and
-**§24** (quarantine) are still in flight — see the backlog in `.adlc/tickets.json`. A reserved number
-lands here as its own `spec/NN-*.md` file when its work merges._
+_**§21** and **§22** are **fully landed** — design accepted and implemented (see each Provenance
+footer). **§25** and **§26** are **design-landed** — the accepted design brief is recorded here,
+implementation pending. **§23** (renderers) is **design-drafted** — this section holds the design for
+acceptance, not yet built (its Provenance footer says so). Reserved **§24** (quarantine) is still in
+flight — see the backlog in `.adlc/tickets.json`. A reserved number lands here as its own
+`spec/NN-*.md` file when its work merges._
