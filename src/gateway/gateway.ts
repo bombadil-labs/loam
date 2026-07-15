@@ -69,7 +69,7 @@ import {
   readRegistrations,
   readRegistrationVersions,
   readWithdrawnRegistrations,
-  registrationClaims,
+  registrationDeltaClaims,
   schemaEntityFor,
   type ClaimTemplates,
   type Registration,
@@ -756,19 +756,25 @@ export class Gateway {
       seed,
     );
     await this.loadHyperSchema([definition], schemaEntity); // proves, then persists the definition
-    const reference = signClaims(
-      registrationClaims(
-        schemaEntity,
-        schema,
-        roots,
-        author,
-        this.nextTimestamp(),
-        templates,
-        writable,
-      ),
-      seed,
+    // The Schema is lifted to a first-class entity (SPEC §21): publish it as the LIVING
+    // `schema:<name>` (single-lens — its name is the hyperschema's) AND freeze a content-addressed
+    // VersionedSchema snapshot, then file the binding that references both. All three ride down
+    // together so `loadSchema` finds the entities the binding names.
+    const { living, snapshot, binding } = registrationDeltaClaims(
+      schemaEntity,
+      hyperschema.name,
+      schema,
+      roots,
+      author,
+      () => this.nextTimestamp(),
+      templates,
+      writable,
     );
-    await this.append([reference]);
+    await this.append([
+      signClaims(living, seed),
+      signClaims(snapshot, seed),
+      signClaims(binding, seed),
+    ]);
     this.replayRegistrations();
     // Success must mean BOUND. The deltas are down either way (append-only ground), but a
     // publish the replay could not bind — a name already answered for by another entity, a

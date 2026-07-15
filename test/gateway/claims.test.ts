@@ -9,7 +9,7 @@ import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
-import { registrationClaims, type ClaimTemplates } from "../../src/gateway/registration.js";
+import { registrationDeltaClaims, type ClaimTemplates } from "../../src/gateway/registration.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE, pickLatest } from "./fixtures.js";
 import { FERN } from "../spike/garden.js";
@@ -210,15 +210,27 @@ describe("claim templates: the write discipline travels with the schema", () => 
   it("a malformed template in a stored registration is dropped; the schema still binds", async () => {
     const backend = new MemoryBackend();
     const gateway = await Gateway.open(backend, { seed: OPERATOR_SEED });
-    // hand-plant a registration whose mutations payload is garbage (past publish's guards)
+    // hand-plant a registration whose mutations payload is garbage (past publish's guards). §21: the
+    // binding names its schema entities, so we plant the living Schema + snapshot too, then bolt the
+    // poison mutations pointer onto the binding.
     const { publishHyperSchemaClaims } = await import("@bombadil/rhizomatic");
+    const { living, snapshot, binding } = registrationDeltaClaims(
+      "hyperschema:Plant",
+      "Plant",
+      PLANT_POLICY,
+      [FERN],
+      OPERATOR,
+      () => 2,
+    );
     await gateway.append([
-      signClaims(publishHyperSchemaClaims(PLANT, "schema:Plant", OPERATOR, 1), OPERATOR_SEED),
+      signClaims(publishHyperSchemaClaims(PLANT, "hyperschema:Plant", OPERATOR, 1), OPERATOR_SEED),
+      signClaims(living, OPERATOR_SEED),
+      signClaims(snapshot, OPERATOR_SEED),
       signClaims(
         {
-          ...registrationClaims("schema:Plant", PLANT_POLICY, [FERN], OPERATOR, 2),
+          ...binding,
           pointers: [
-            ...registrationClaims("schema:Plant", PLANT_POLICY, [FERN], OPERATOR, 2).pointers,
+            ...binding.pointers,
             // JSON-valid but SHAPE-invalid: parseClaimTemplates throws, the drop is quiet
             { role: "mutations", target: { kind: "primitive", value: '{"x":{"pointers":[]}}' } },
           ],

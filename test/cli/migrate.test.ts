@@ -6,15 +6,21 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { signClaims, type Claims } from "@bombadil/rhizomatic";
+import {
+  authorForSeed,
+  publishHyperSchemaClaims,
+  signClaims,
+  type Claims,
+} from "@bombadil/rhizomatic";
 import { run } from "../../src/cli/cli.js";
 import { parseOffer } from "../../src/federation/offer.js";
 import { toWire } from "../../src/federation/wire.js";
-import { assembleGenesis } from "../../src/gateway/genesis.js";
+import { operatorMarkerClaims } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
-import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
+import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
 import { FERN, GARDENER_SEED, observed } from "../spike/garden.js";
+import { legacyInlineRegistrationClaims } from "../migrate/legacy.js";
 
 vi.setConfig({ testTimeout: 15000 });
 
@@ -40,20 +46,20 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
 
 describe("loam migrate", () => {
-  it("re-expresses a 0.2-era offer in the current format, and it answers on arrival", async () => {
-    // Forge a 0.2-era offer: a native genesis with its Plant definition downgraded to old roles.
-    const genesis = assembleGenesis({
-      operatorSeed: GARDENER_SEED,
-      registrations: [
-        { hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN], writable: [...PLANT_WRITABLE] },
-      ],
-    });
-    const nativeDef = genesis.deltas.find((d) =>
-      d.claims.pointers.some((p) => p.role.startsWith(NEW)),
-    )!;
-    const oldStore = genesis.deltas
-      .map((d) => (d.id === nativeDef.id ? signClaims(downgrade(d.claims), GARDENER_SEED) : d))
-      .concat(observed(FERN, "height", 40, 5000, GARDENER_SEED));
+  it("re-expresses a 0.2-era offer through the whole chain, and it answers on arrival", async () => {
+    // Forge a genuine 0.2-era offer: a hyperschema definition on the OLD `rhizomatic.schema.*`
+    // vocabulary at a `schema:` entity, plus the legacy INLINE registration — the shape that predates
+    // every migration step, so `loam migrate` runs the full chain (roles → entity rename → lift).
+    const op = authorForSeed(GARDENER_SEED);
+    const oldStore = [
+      signClaims(operatorMarkerClaims(op), GARDENER_SEED),
+      signClaims(downgrade(publishHyperSchemaClaims(PLANT, "schema:Plant", op, 1)), GARDENER_SEED),
+      signClaims(
+        legacyInlineRegistrationClaims("schema:Plant", PLANT_POLICY, [FERN], op, 2),
+        GARDENER_SEED,
+      ),
+      observed(FERN, "height", 40, 5000, GARDENER_SEED),
+    ];
     const infile = join(dir, "old.json");
     const outfile = join(dir, "new.json");
     writeFileSync(infile, JSON.stringify({ deltas: oldStore.map(toWire) }));
@@ -61,20 +67,20 @@ describe("loam migrate", () => {
     // The home must hold the ORIGINAL seed — re-signing definitions is the operator's own hand.
     expect(await run(["init", "--home", dir, "--seed", GARDENER_SEED], io())).toBe(0);
     expect(await run(["migrate", infile, "--home", dir, "--out", outfile], io())).toBe(0);
+    // the report names each step of the chain, superseding as it goes
     expect(out.join("\n")).toMatch(/hyperschema-roles \(1 superseded\)/);
+    expect(out.join("\n")).toMatch(/inline-schema-to-entity \(1 superseded\)/);
 
-    // The migrated offer boots a store that answers the query the old offer couldn't.
+    // The migrated offer boots a store that answers the query the old offer couldn't — and the Schema
+    // arrives as a first-class entity, lifted out of the registration.
     const migrated = parseOffer(readFileSync(outfile, "utf8"));
-    expect(
-      migrated.some((d) => d.id === nativeDef.id),
-      "carries a native 0.3 definition",
-    ).toBe(true);
     const gw = await Gateway.boot(new MemoryBackend(), {
       operatorSeed: GARDENER_SEED,
       deltas: migrated,
     });
     const res = await gw.query(`{ plant(entity: "${FERN}") { height } }`);
     expect((res.data as { plant: { height: number } }).plant.height).toBe(40);
+    expect(gw.registrationVersions()[0]!.schema.name).toBe("Plant");
     await gw.close();
   });
 
