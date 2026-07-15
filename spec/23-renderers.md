@@ -469,11 +469,30 @@ and erasing the avatar darkens the door. Capability-security review: the door re
 `surface(door)` + resolve discipline, so it opens no read path GraphQL/REST don't already (the mount is the
 read boundary, §7); the fs/net confinement of executable consumers remains the §23.9/§24 work.
 
+**§23.8 PINNED-PUBLIC — v1 BUILT** [#103](https://github.com/bombadil-labs/loam/pull/103) (realizes ticket
+T10). A `loam.public` declaration entry grows from `[Name]` to `[Name | Name@vN]`. A bare name still means
+"the latest, served anonymously" (unchanged); a `Name@vN` pin is FROZEN at declare time to the version's
+content address (`Name@<deltaId>`, the same freeze a renderer does, §23.6) via the new operator-only
+`Gateway.declarePublic`, so the pin never slides when an earlier version is withdrawn. `readPublicSchemas`
+keeps returning a flat `Set<string>` — a `@` distinguishes a pin from a bare name — and two predicates
+(`Gateway.isPublicLatest` / `isPublicPin`) read it. `serveRoute`'s pinned branch now serves the anonymous
+door IFF the operator declared THAT pin; the full door serves any surviving registered version. The REST
+public door is symmetric: `versionsFor` admits declared pins so `GET /rest/@<deltaId>` answers on the
+anonymous door, and a pinned GET resolves through `resolvePinned` (no live surface needed, so a store that
+declared ONLY a pin still serves it) — the warm live path is used only when the version is the store's true
+latest AND the door's live surface serves that lens. Every UNdeclared `@hash` stays a UNIFORM 404 (history
+un-probable), and the 410 withdrawn-vs-never distinction stays FULL-door-only. Additive/non-breaking (a
+bare-name declaration is exactly the old behavior) → no §20 migration. Tests
+`test/gateway/pinned-public.test.ts` (10: rails a–e + the freeze/authority guards + the REST `@<deltaId>`
+symmetry); village act `demos/village/phase-pinned.mjs` (A DECLARATION IS PUBLICATION, 3/3). This is the
+§12/§17 amendment §23.8 describes, and it is the operator's to accept (P6). **Known composition follow-up:**
+a pin-only public store (no bare-name declaration) does not yet serve its pinned view's bytes through the
+§23.7 byte-door — `serveBytes` uses the bare public surface — which is more-restrictive, not a leak; a
+future refinement can teach the byte-door the pinned-public set.
+
 **Queued build slices — design firmed (Myk, 2026-07-15), authored as coldstart-clean tickets so a fresh
 session can build each end-to-end.** (1) **T9 — the byte-door + bytes-in-views (§23.7)** — BUILT (above).
-(2) **T10 — pinned-public (§23.8)**: a
-`loam.public` declaration may name `Name@vN`, frozen to the version's content address, so the anonymous
-door serves a pinned renderer route because a declaration is publication, not a probe. (3) **T11 — the
+(2) **T10 — pinned-public (§23.8)** — BUILT (above). (3) **T11 — the
 renderer sandbox + timeout (§23.9)**: each render runs in a Node `worker_threads` Worker with a HARD
 timeout (terminate on overrun) + `resourceLimits` — closing the panel's wedge-the-process residual; the
 honest scope is that a Worker bounds the HANG/crash/memory, while no-fs/no-net object-capability isolation
