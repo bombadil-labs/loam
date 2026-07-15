@@ -1889,3 +1889,159 @@ non-breaking (a store with no bytes is unchanged) → no §20 migration. Executa
 self-merged despite the ticket being `build`-category; opened for Myk's merge (P6). Capability-security
 self-review folded in (the door reuses serveRoute's discipline; no new read path); the fs/net ocap of
 executable consumers stays the named §23.9/§24 work.
+
+## 2026-07-15 — §23.8 pinned-public, v1 build: a declaration is publication, not a probe
+
+The second of the four §23 build slices (stacked on T9). §17 deliberately narrowed the anonymous door to
+a lens's LATEST version, because an anonymous `@hash` probe was a registration-existence oracle. But a
+renderer PINS a version (§23.6), and village-as-a-URL wants a stranger reading that pinned route. §23.8's
+reconciliation is a distinction §17 half-stated: a probe is DISCOVERY, a declaration is PUBLICATION. When
+the operator names `Name@vN` in `loam.public`, they chose to reveal exactly that version — so the anonymous
+door may serve it, and every other `@hash` stays 404.
+
+The build kept the blast radius small by NOT changing `readPublicSchemas`'s return type: it still yields a
+flat `Set<string>`, and a pin is simply the string `Name@<deltaId>` (a `@` distinguishes it from a bare
+name). Two predicates — `Gateway.isPublicLatest` / `isPublicPin` — read it, and `surface("public")`'s
+bare-name filter is untouched, so GraphQL/REST latest exposure stays exactly bare-name-gated. The new
+operator-only `Gateway.declarePublic` freezes each `Name@vN` to the version's content address at declare
+time (the same filter-then-index-then-take-deltaId `publishRenderer` uses), so the pin never slides when an
+earlier version is withdrawn. `serveRoute`'s pinned branch now serves the anonymous door IFF that pin is
+declared; the full door serves any surviving registered version.
+
+Two decisions worth recording. (1) `hasPublicSurface` had to learn about pins — a pin-only store (no
+bare-name lens) still has an open anonymous door for its pinned route, and the gate that guards the whole
+anonymous door keyed only on the bare-latest GraphQL surface. Loosening it to "any declaration, bare or
+pinned" is correct: the operator published the pin, so revealing that something is public here is the
+intent, not a leak. (2) The REST symmetry exposed a latent bug in the version-resolution's `isLatest`
+flag. It meant "last in the door's family list," but once the public family can be truncated to a single
+DECLARED PIN, that pin wrongly looked like "the latest" and took the warm `hooks.resolve` path — which
+needs a live surface a pin-only store doesn't have (404). The fix corrected `isLatest` to its true meaning:
+the version is the store's CURRENT latest AND the door's live surface actually serves that lens; a declared
+pin otherwise answers through `resolvePinned`, which needs no live surface. That is a strictly more correct
+definition on every door, not just the new path.
+
+Learning: an additive "the operator may reveal more" feature still has to be audited as a door-widening —
+the questions are the same §12/§17 ones (does an undeclared thing stay 404? does the withdrawn-vs-never
+distinction stay full-door-only?), and the answers held (every undeclared `@hash` is a uniform 404; the 410
+is still full-door-only). And a truncated version family is a sharp edge: any code that inferred "latest"
+from list position was resting on the family being complete, which the public door no longer guarantees.
+
+Known composition follow-up (documented in spec/23 §23.8): a pin-only public store does not yet serve its
+pinned view's BYTES through the §23.7 byte-door, because `serveBytes` uses the bare public surface — which
+is more-restrictive, not a leak; a future refinement teaches the byte-door the pinned-public set.
+
+`npm run check` green — 591 tests (test/gateway/pinned-public.test.ts 10: rails a–e — declare-then-serve,
+undeclared-pin-404, bare-serves-latest-only, withdraw-darkens, full-door-regardless — plus the declare-time
+freeze, the operator-only and no-such-version guards, and the REST `@<deltaId>` public symmetry). Village
+act demos/village/phase-pinned.mjs (A DECLARATION IS PUBLICATION, 3/3). Additive/non-breaking (a bare-name
+declaration is the old behavior) → no §20 migration. A §12/§17 constitutional amendment to the anonymous
+door → Myk's merge (P6), opened stacked on T9.
+
+## 2026-07-15 — §23.9 renderer sandbox + timeout, v1 build: the wedge is closed
+
+The third §23 build slice (stacked on T10). It closes the capability-security panel's HEADLINE residual on
+the §23 v1 build (#99): `serveRoute` executed the author's bundle SYNCHRONOUSLY on the event loop with no
+timeout, so an infinite-loop bundle wedged EVERY mount — and on the anonymous door, with an attacker-chosen
+entity, that is a one-line denial of service. Each render now runs in a Node `worker_threads` Worker with a
+hard timeout (`terminate()` on overrun — which `node:vm`'s timeout cannot guarantee against an async
+escape) and `resourceLimits`.
+
+Three things made the build cleaner than feared. (1) T9's envelope did double duty: because `serveRoute`
+already hands the renderer the §23.7-enveloped view (bytes are `{ mime, ref, base64url }` strings, not
+`Uint8Array`s), the node is already JSON/structured-clone-safe to `postMessage` across the thread boundary
+— no extra serialization. (2) The worker runs via `new Worker(src, { eval: true })`, which is CommonJS even
+in this `type: module` package, so `require('worker_threads')` + dynamic `import(dataUrl)` both work and no
+separate worker file must ship in dist. I verified empirically before wiring it in: a `while(true){}` bundle
+times out at ~550ms, is terminated, and the main event loop survives — the test asserts exactly that (a
+second route answers 200 while the hanging render spins). (3) Authority never crosses the boundary: the
+read-discipline + resolve stay on the main thread, and only the untrusted render runs in the worker; every
+failure folds to a clean 500 that leaks nothing of the bundle's internals.
+
+Two decisions worth recording. The async ripple: `serveRoute` became `async`, so every caller awaits —
+~29 test call sites (transformed mechanically) plus the two HTTP `app` cases (already in async handlers).
+And the browser-bundle wall: the worker module is Node-only (its worker-source string names
+`worker_threads`), and the browser/site bundles are a zero-`node:`, no-`require(` invariant
+(test/browser/bundle.test.ts). Aliasing `node:worker_threads` alone was NOT enough — the worker-source
+STRING still carried a literal `require(` into the bundle. The right fix keeps the whole module out: a
+shared esbuild resolve plugin (`scripts/esbuild-stub-render-worker.mjs`) redirects any `render-worker`
+import to a browser stub that refuses, used by both `build-bundles.mjs` and `build-site.mjs`.
+
+Honest scope, stated in code and spec: a Worker bounds the HANG / crash / memory — it is NOT full
+object-capability isolation. A worker can still reach `node:fs` or the network. True no-fs/no-net ocap
+(SES-in-worker or isolated-vm) is a FURTHER hardening, deferred to §24 / a deeper slice. And v1 spawns a
+worker per render (~ms) — acceptable, noted; a small warm pool is the obvious follow-on. Overselling a
+worker as a sandbox is exactly the trap the ticket warned against, so the deferral is loud, not buried.
+
+Learning: a "bound the bad bundle" feature's real surface area is the async ripple and the bundle
+invariants, not the worker itself — the Worker was ~40 lines and worked first try (after a 20-line
+empirical spike); the day went to the ~29 awaited call sites and the browser bundle's no-`require(` line,
+which a literal worker-source string quietly violated. Grep the invariants, don't assume an alias covers a
+string.
+
+`npm run check` green — 595 tests (test/gateway/render-sandbox.test.ts 4: happy path unchanged; infinite
+loop → 500 timeout while a second route still answers, proving the event loop is not wedged; a throwing
+bundle → clean 500, no leak; a memory-hog is bounded and the host survives; all serveRoute callers now
+await). Village phase23/phase-bytes/phase-pinned still pass (their renders now ride the worker). Additive/
+non-breaking → no §20 migration. Executable/capability surface → Myk's merge (P6), opened stacked on T10.
+
+## 2026-07-15 — §23.3 write-enabled renderers, v1 build: a face that writes
+
+The fourth and last §23 build slice (stacked on T11) — and the sharpest, because it opens a new WRITE path.
+§23 v1 renderers only read; §23.3 lets a rendered `<form>` POST and the store sign the resulting delta as a
+per-renderer PEN — a granted-author identity provisioned in config, never the caller's key. Provenance thus
+shows the mediating code, and revocation strikes the pen's grant.
+
+The custody model is §6's two keys, transcribed to the screen. A renderer binding gains `writable` (the
+form's field allow-list) and `pen` (the granted-author name), plumbed at rest exactly like `consumes`. The
+pen's SEED lives in `GatewayOptions.pens` (config, keyed by the binding's pen name) — CUSTODY; the binding
+carries only the NAME, never the seed, so the ground never holds a signing key. And the pen must ALSO hold an
+operator GRANT of write standing — AUTHORIZATION. `Gateway.writeRoute` signs the form-submit AS the pen via
+the normal §14 `mutateEntity`, so `append`→`authorize` re-checks the grant on every write: a
+provisioned-but-ungranted pen writes nothing, and revoking the grant refuses future writes while every past
+write stays attributed to the pen. The two keys are genuinely independent — a test proves each failure mode.
+
+Three decisions worth recording. (1) A form's fields are a NARROWER writable than the schema's own: the
+door refuses a field outside the renderer's `writable`, and `mutateEntity` independently re-checks the
+registration's `writable` — two gates, the renderer's atop the schema's. (2) No anonymous write by default
+(§12) falls out of composition, not a new rule: an anon form write needs the operator to have done all three
+of declare-public + provision-pen + grant-pen; miss any one and it is 404 (route not visible) or 403 (pen
+not provisioned / not granted). The village act walks exactly that: an anonymous POST lands only once all
+three are present. (3) `writeRoute` reuses serveRoute's visibility discipline (a new `routeServableOn`
+helper), so a stranger can only POST where they could GET — an undeclared route stays a uniform 404 to a
+write probe too.
+
+The honest gap, named in code and spec: the §19 write-path label `renderer` has **no representation on
+deltas anywhere in the codebase today** — a delta is `{ timestamp, author, pointers }`, distinguished only
+by its author (which seed signed it). So "labeled `renderer`" is realized as the PEN'S AUTHORSHIP: a
+renderer write is the write signed by that renderer's provisioned pen, and provenance reads the pen. A
+formal §19 four-way label enum is separate future work; I did not invent one, because inventing an on-wire
+label the rest of the system doesn't read would be a lie dressed as rigor. And the USER'S-OWN-PEN
+(non-custodial client signing) path needs the browser host — deferred to that slice, as designed.
+
+Learning: the map's most valuable finding was a NEGATIVE one — grepping for the §19 label proved it doesn't
+exist, which turned "implement the renderer label" from a build task into a spec-honesty task (say what IS,
+which is pen-authorship). A write path's real surface is the two-keys separation and the compose-not-add
+§12 story; both were provable with focused rails rather than new machinery. The one harness change (openStore
+gaining an optional `pens` config) is the village's way to hold a pen's seed in a demo store's home.
+
+`npm run check` green — 602 tests (test/gateway/write-renderers.test.ts 7: pen authorship asserted against
+the landed delta's author; the writable door-gate; read-only refusal; provisioned-but-ungranted refused;
+revocation with past-attribution preserved; and the anonymous-write gate both directions). Village act
+demos/village/phase-guestbook.mjs (A FACE THAT WRITES, 2/2) exercises the anonymous form POST + revocation
+end to end over HTTP. Additive/non-breaking (a renderer with no pen is the pre-§23.3 shape) → no §20
+migration. New write path + pen-custody model → Myk's merge (P6), opened stacked on T11.
+
+---
+
+### Arc note — the four §23 build slices (T9–T12), one night
+
+T9 (byte-door), T10 (pinned-public), T11 (renderer sandbox), T12 (write-enabled renderers) were all built,
+tested, village-demonstrated, and PR-opened in one session, each stacked on the last (they share
+gateway.ts / http.ts / spec/23, so the forecast serialized them). None self-merged: every one touches a
+capability / erasure / anonymous-door / write surface the standing rules (and the auto-merge classifier)
+reserve for P6 — so all four are opened as a stack (#102 → #103 → #104 → #105) for Myk's review, in merge
+order. The recurring pattern across the four: each new SURFACE (a raw-bytes door, a pinned-public
+declaration, a sandboxed executor, a write pen) rode existing seams — serveRoute's read discipline, §17's
+version freeze, the §14 mutate path, §6's two keys — so the novel code was small and the real work was the
+sweep for what the new surface touched (every view→JSON site; the truncated public family; the browser
+bundle's no-`require(` line; the §19 label that doesn't exist).

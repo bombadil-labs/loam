@@ -61,7 +61,7 @@ import {
   type ResolvedNode,
 } from "./gql.js";
 import { budgetRefusal } from "./budget.js";
-import { publicDefect, readPublicSchemas } from "./public.js";
+import { publicClaims, publicDefect, readPublicSchemas } from "./public.js";
 import {
   edgeRoles,
   lawfulSnapshot,
@@ -79,6 +79,7 @@ import {
 } from "./registration.js";
 import { applyResolvers, loadResolvers, newResolverMemo, type ResolverMemo } from "./resolvers.js";
 import { bytesEnvelope, findBytesByRef } from "./bytes.js";
+import { renderInWorker } from "./render-worker.js";
 import {
   loadRenderers,
   loadedRenderer,
@@ -112,6 +113,12 @@ export interface GatewayOptions {
   // created by tokenless subscriptions). A separate, smaller budget than MAX_LAZY_MATS, so a
   // stranger can exhaust the stranger's allowance and never the authenticated surface's.
   readonly maxPublicWatches?: number;
+  // Provisioned renderer-pen SEEDS (SPEC §23.3), keyed by the pen identity a renderer binding names. This
+  // is CUSTODY: a pen's seed lives in config (the store's home), never on the ground — a write-enabled
+  // renderer signs its form-submits AS this seed's author. Provisioning the seed is NOT authorization; the
+  // pen still needs an operator GRANT of write standing (§6's two keys), and revocation strikes that grant.
+  // A store that compromises this config can sign as the pen — the same trust as the operator seed here.
+  readonly pens?: Readonly<Record<string, string>>;
 }
 
 export interface FederationReport {
@@ -338,6 +345,19 @@ export class Gateway {
       return { registered: defs, hooks: this.gqlHooks("public") };
     }
     return { registered: this.registered, hooks: this.gqlHooks() };
+  }
+
+  // The two shapes a `loam.public` declaration can take (SPEC §23.8): a BARE name means "the latest
+  // version, served anonymously" (unchanged); a `Name@<deltaId>` pin means "exactly this version, served
+  // anonymously — because the operator declared it." A declaration is publication, not a probe, so the
+  // anonymous door may reveal exactly what the operator chose to name, and nothing else stays 404.
+  isPublicLatest(name: string): boolean {
+    this.publicOpen ??= readPublicSchemas(this.reactor, this.operatorAuthor);
+    return this.publicOpen.has(name);
+  }
+  isPublicPin(name: string, deltaId: string): boolean {
+    this.publicOpen ??= readPublicSchemas(this.reactor, this.operatorAuthor);
+    return this.publicOpen.has(`${name}@${deltaId}`);
   }
 
   // Every answerable version of every registration (SPEC §17): the append-only publication
@@ -857,6 +877,47 @@ export class Gateway {
     return readRenderers(this.reactor, this.operatorAuthor);
   }
 
+  // Declare lenses public (SPEC §12/§17, amended by §23.8). Each entry is a BARE name (the latest
+  // version, served anonymously — unchanged) or a `Name@vN` PIN, which this FREEZES to the version's
+  // content address (`Name@<deltaId>`) at declare time, exactly as a renderer pins (§23.6): the operator
+  // named a version for convenience, and the true name that cannot slide when an earlier version is
+  // withdrawn is the deltaId. A declaration is publication, not a probe — so a pinned version becomes
+  // anonymously servable BECAUSE the operator chose to reveal it; every other `@hash` stays 404. Operator
+  // only, exactly like any `loam.public` write (a governed store binds only operator law).
+  async declarePublic(entries: readonly string[], context?: RequestContext): Promise<void> {
+    const seed = context?.actor ?? this.options.seed;
+    if (seed === undefined) {
+      throw new Error("this gateway holds no signing seed and cannot declare a lens public");
+    }
+    if (this.operatorAuthor !== undefined && authorForSeed(seed) !== this.operatorAuthor) {
+      throw new Error("append rejected: only the operator may declare a lens public");
+    }
+    const resolved = entries.map((entry) => this.freezePublicEntry(entry));
+    await this.append([
+      signClaims(publicClaims(resolved, authorForSeed(seed), this.nextTimestamp()), seed),
+    ]);
+  }
+
+  // Resolve one declaration entry to the string that goes on the record. A bare name and an already-frozen
+  // `Name@<deltaId>` pass through unchanged (idempotent re-declare); a `Name@vN` is resolved to the Nth
+  // surviving version's deltaId — the same filter-then-index publishRenderer uses — and refused if absent.
+  private freezePublicEntry(entry: string): string {
+    const at = entry.indexOf("@");
+    if (at < 0) return entry;
+    const name = entry.slice(0, at);
+    const ver = entry.slice(at + 1);
+    const m = /^v([1-9]\d*)$/.exec(ver);
+    if (m === null) return entry; // already an @<deltaId> (or opaque): freeze it as given
+    const versions = this.registrationVersions().filter((v) => v.hyperschema.name === name);
+    const pinned = versions[Number(m[1]) - 1];
+    if (pinned === undefined) {
+      throw new Error(
+        `public: schema "${name}" has no version v${m[1]} (it has ${versions.length})`,
+      );
+    }
+    return `${name}@${pinned.deltaId}`;
+  }
+
   // Publish a renderer as data (SPEC §23), so a UI route survives reopen with no code. PROVEN AT PUSH,
   // not hoped at runtime (§23.4): the operator alone may publish (a governed store binds only operator
   // law); the schema it reads must be REGISTERED and, if version-pinned, that version must EXIST; every
@@ -939,33 +1000,35 @@ export class Gateway {
   // bundles in a governed store (only operator law binds, §7); the compute budget + object-capability
   // confinement (SES / Worker / wasm) that would bound an untrusted or buggy bundle is the named §24
   // quarantine / §23.9 hardening work, deliberately NOT invented here.
-  serveRoute(
+  async serveRoute(
     route: string,
     entity: string,
     door: "full" | "public",
-  ): { status: number; contentType: string; body: string } {
+  ): Promise<{ status: number; contentType: string; body: string }> {
     // One refusal, everywhere — history is not anonymous, and neither is "which routes exist" (§17).
     const gone = { status: 404, contentType: "text/plain; charset=utf-8", body: "no such route" };
     const binding = this.renderers().find((r) => r.route === route);
     if (binding === undefined) return gone;
-    const surface = this.surface(door);
-    // The lens must be in THIS door's surface: registered (full) or publicly declared (public). A schema
-    // withdrawn after the renderer was published thus darkens the route too — the app is a view over
-    // surviving law (§23.6). Both doors check symmetrically; no 404-vs-error oracle.
-    if (
-      surface === undefined ||
-      !surface.registered.some((r) => r.hyperschema.name === binding.schemaName)
-    ) {
-      return gone;
-    }
-    // The anonymous door serves only a lens's LATEST version (§17); the §23.8 pinned-public amendment is
-    // unbuilt, so a pinned renderer is invisible to a stranger.
-    if (door === "public" && binding.versionId !== undefined) return gone;
     let node: ResolvedNode;
     try {
       if (binding.versionId === undefined) {
+        // A LATEST renderer: its lens must be in THIS door's surface — registered (full) or bare-name
+        // publicly declared (public). A schema withdrawn after the renderer was published thus darkens the
+        // route too — the app is a view over surviving law (§23.6). No 404-vs-error oracle.
+        const surface = this.surface(door);
+        if (
+          surface === undefined ||
+          !surface.registered.some((r) => r.hyperschema.name === binding.schemaName)
+        ) {
+          return gone;
+        }
         node = surface.hooks.resolve(binding.schemaName, entity);
       } else {
+        // A PINNED renderer. The anonymous door serves it IFF the operator publicly declared THAT pin
+        // (§23.8 — a declaration is publication, not a probe); every undeclared pin stays a uniform 404,
+        // so history is not anonymously probable. The full door serves any surviving registered version.
+        if (door === "public" && !this.isPublicPin(binding.schemaName, binding.versionId))
+          return gone;
         // Pinned by the version's CONTENT ADDRESS: resolve the exact surviving version, or — if it was
         // withdrawn or erased — go dark (§23.6, an app never outlives its source).
         const pinned = this.registrationVersions().find((v) => v.deltaId === binding.versionId);
@@ -983,32 +1046,103 @@ export class Gateway {
         body: err instanceof Error ? err.message : String(err),
       };
     }
-    const render = loadedRenderer(binding.bundle);
-    if (render === undefined) return gone; // unloaded → unmounted, not a 500 (prepareRoute loads it)
-    try {
-      // The renderer is a view consumer like gql/REST: hand it the §23.7 envelope so a bytes leaf is a
-      // { mime, ref, base64url? } it can point an `<img src>` at (primitives pass through unchanged).
-      const html = render({
-        entity,
-        view: bytesEnvelope(node.view) as Record<string, unknown>,
-        hex: node.hex,
-      });
-      if (typeof html !== "string") {
+    // The bundle must be loadable (unloaded → unmounted, a 404, not a 500 — prepareRoute pre-loads it on
+    // the serve path). The read-discipline + resolve above stayed on THIS thread (authority never leaves
+    // it); only the untrusted render runs in the bounded worker (SPEC §23.9).
+    if (loadedRenderer(binding.bundle) === undefined) return gone;
+    // Execute the renderer in a worker_threads Worker with a hard timeout + resourceLimits: a hanging or
+    // heavy bundle cannot wedge the event loop or OOM the host, and every route keeps answering. The
+    // renderer is a view consumer like gql/REST — hand it the §23.7 envelope (a bytes leaf becomes
+    // { mime, ref, base64url? }, primitives pass through), which is also what makes the node JSON/clone-safe
+    // to cross the thread boundary. renderInWorker never rejects; every fault folds to a clean refusal.
+    return renderInWorker(binding.bundle, {
+      entity,
+      view: bytesEnvelope(node.view) as Record<string, unknown>,
+      hex: node.hex,
+    });
+  }
+
+  // May THIS door serve THIS renderer's route (SPEC §23.5/§23.8)? The same read discipline serveRoute
+  // applies — a latest renderer's lens must be in the door's surface (public = a bare-name declaration); a
+  // pinned renderer's version must be publicly declared (public) or simply survive (full). writeRoute
+  // reuses it so a stranger can only POST to a route they could GET, and an undeclared route stays 404.
+  private routeServableOn(binding: RendererBinding, door: "full" | "public"): boolean {
+    if (binding.versionId === undefined) {
+      const surface = this.surface(door);
+      return (
+        surface !== undefined &&
+        surface.registered.some((r) => r.hyperschema.name === binding.schemaName)
+      );
+    }
+    if (door === "public") return this.isPublicPin(binding.schemaName, binding.versionId);
+    return this.registrationVersions().some((v) => v.deltaId === binding.versionId);
+  }
+
+  // Write through a rendered route (SPEC §23.3): a form on a mounted renderer POSTs its fields, and the
+  // STORE signs the resulting delta as the renderer's PEN — a granted-author identity whose seed is
+  // provisioned in config (options.pens), NEVER the caller's token. Provenance thus shows the mediating
+  // code (the pen author is the §19 write attribution), and revocation is striking the pen's grant. The
+  // write runs the gateway's normal §14 mutate — assertWritable (the schema's own writable) AND authorize
+  // (the pen must actually HOLD write standing: provisioning ≠ authorization, §6's two keys). A field
+  // outside the renderer's OWN `writable` allow-list is refused at the door. On the anonymous door a
+  // public renderer's form writes ONLY if the operator BOTH declared the lens public AND provisioned+
+  // granted a pen — no anonymous writes by default (§12).
+  async writeRoute(
+    route: string,
+    entity: string,
+    fields: Record<string, Primitive>,
+    door: "full" | "public",
+  ): Promise<{ status: number; contentType: string; body: string }> {
+    const text = "text/plain; charset=utf-8";
+    const gone = { status: 404, contentType: text, body: "no such route" };
+    const binding = this.renderers().find((r) => r.route === route);
+    if (binding === undefined) return gone;
+    // Visible on this door (the same discipline as a GET), so a stranger can only write where they could
+    // read, and an undeclared route stays a uniform 404 rather than revealing itself.
+    if (!this.routeServableOn(binding, door)) return gone;
+    // A read-only renderer (no pen/writable) declared no way to author — refuse the write, not the route.
+    if (
+      binding.pen === undefined ||
+      binding.writable === undefined ||
+      binding.writable.length === 0
+    ) {
+      return { status: 405, contentType: text, body: "this route is read-only" };
+    }
+    const posted = Object.keys(fields);
+    if (posted.length === 0)
+      return { status: 400, contentType: text, body: "the form wrote no fields" };
+    // Every posted field must be in the renderer's OWN writable allow-list (§14/§21 at the renderer door),
+    // narrower than (and atop) the schema's own writable, which mutateEntity re-checks.
+    for (const f of posted) {
+      if (!binding.writable.includes(f)) {
         return {
-          status: 500,
-          contentType: "text/plain; charset=utf-8",
-          body: "the renderer did not return HTML",
+          status: 400,
+          contentType: text,
+          body: `field "${f}" is not writable by this renderer`,
         };
       }
-      return { status: 200, contentType: "text/html; charset=utf-8", body: html };
-    } catch {
-      // A faulting renderer is the operator's own bug; refuse cleanly without leaking its internals.
+    }
+    // The pen must be PROVISIONED (its seed in config) — custody. Absent → refuse (nothing to sign with).
+    const penSeed = this.options.pens?.[binding.pen];
+    if (penSeed === undefined) {
+      return { status: 403, contentType: text, body: "this renderer's pen is not provisioned" };
+    }
+    try {
+      // Sign AS the pen (not the caller). append→authorize checks the pen's GRANT — provisioning is not
+      // authorization; a pen with no surviving write grant is refused here exactly as any actor would be.
+      await this.mutateEntity(binding.schemaName, entity, fields, penSeed);
+    } catch (err) {
+      // A refused write leaks its reason only to the full (token) door; a stranger gets a uniform refusal.
+      if (door === "public")
+        return { status: 403, contentType: text, body: "the write was refused" };
       return {
-        status: 500,
-        contentType: "text/plain; charset=utf-8",
-        body: "the renderer faulted",
+        status: 403,
+        contentType: text,
+        body: err instanceof Error ? err.message : String(err),
       };
     }
+    // Re-render the now-updated route so a browser form submit lands on the fresh page (§23.3).
+    return this.serveRoute(route, entity, door);
   }
 
   // The byte-door (SPEC §23.7): serve the raw bytes a caller names by content address `ref`, but only
@@ -1763,7 +1897,12 @@ export class Gateway {
   // Is there anything to serve a tokenless caller? The transport asks this to keep its
   // refusals uniform — a mount with nothing public must answer exactly like no mount at all.
   hasPublicSurface(): boolean {
-    return this.publicSurface() !== undefined;
+    if (this.publicSurface() !== undefined) return true;
+    // §23.8: a pinned-public declaration opens the anonymous door for its route (and its byte-door) even
+    // when no BARE-name lens is public — publicSurface builds only the bare-latest GraphQL/REST surface.
+    this.publicOpen ??= readPublicSchemas(this.reactor, this.operatorAuthor);
+    for (const entry of this.publicOpen) if (entry.includes("@")) return true;
+    return false;
   }
 
   // A tokenless query: the restricted surface, and NEVER an acting identity — there is no one

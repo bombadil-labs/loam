@@ -11,6 +11,7 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
+import { stubRenderWorker } from "./esbuild-stub-render-worker.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -37,6 +38,7 @@ for (const name of wanted.length > 0 ? wanted : Object.keys(ENTRIES)) {
     platform: "browser",
     target: "es2022",
     alias: { "node:http": resolve(root, "scripts/client-node-http-stub.mjs") },
+    plugins: [stubRenderWorker()],
     legalComments: "none",
     logLevel: "silent",
   });

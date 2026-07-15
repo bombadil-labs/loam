@@ -20,7 +20,7 @@
 
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { type Delta } from "@bombadil/rhizomatic";
+import { type Delta, type Primitive } from "@bombadil/rhizomatic";
 import { fromWire, toWire, type WireDelta } from "../federation/wire.js";
 import { buildOpenApi, handleRest } from "../surface/rest.js";
 import {
@@ -132,6 +132,32 @@ const appRouteOf = (pathname: string): { route: string; entity: string } | undef
   } catch {
     return undefined;
   }
+};
+
+// Parse a rendered route's write body (SPEC §23.3): a browser `<form>` POSTs
+// `application/x-www-form-urlencoded` (every value a string); a programmatic caller may POST JSON (typed
+// primitives, validated like the REST write door). Either yields the field map writeRoute signs as the
+// renderer's pen. Throws a plain-English reason the caller answers 400 with.
+const parseAppBody = (
+  bodyText: string,
+  contentType: string | undefined,
+): Record<string, Primitive> => {
+  const out: Record<string, Primitive> = {};
+  if ((contentType ?? "").includes("application/json")) {
+    const parsed = JSON.parse(bodyText) as unknown;
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("the write body must be a JSON object of fields");
+    }
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof v !== "string" && typeof v !== "number" && typeof v !== "boolean") {
+        throw new Error(`field "${k}" wants a primitive (string | number | boolean)`);
+      }
+      out[k] = v;
+    }
+    return out;
+  }
+  for (const [k, v] of new URLSearchParams(bodyText)) out[k] = v; // form-urlencoded: values are strings
+  return out;
 };
 
 // A raw-bytes response (SPEC §23.7 byte-door): the BytesView's own mime as Content-Type, the bytes as
@@ -588,17 +614,37 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           // A rendered route (SPEC §23), on the anonymous door: read-only, GET only, and only a
           // publicly-declared lens's LATEST version (serveRoute enforces the §17 public discipline).
           case "app": {
-            if (req.method !== "GET") {
-              refused(res);
-              return;
-            }
             const parsed = appRouteOf(url.pathname);
             if (parsed === undefined) {
               refused(res);
               return;
             }
-            await gateway.prepareRoute(parsed.route); // load the bundle (async) before the sync serve
-            sendRendered(res, gateway.serveRoute(parsed.route, parsed.entity, "public"));
+            await gateway.prepareRoute(parsed.route); // load the bundle before the render (worker, §23.9)
+            if (req.method === "GET") {
+              sendRendered(res, await gateway.serveRoute(parsed.route, parsed.entity, "public"));
+              return;
+            }
+            // A write-enabled renderer's form POST (SPEC §23.3): the store signs as the renderer's pen,
+            // never the (here anonymous) caller — and only if the operator provisioned+granted one (§12).
+            if (req.method === "POST") {
+              let fields;
+              try {
+                fields = parseAppBody(await readBody(req, maxBody), req.headers["content-type"]);
+              } catch (err) {
+                sendRendered(res, {
+                  status: err instanceof BodyTooLarge ? 413 : 400,
+                  contentType: "text/plain; charset=utf-8",
+                  body: err instanceof Error ? err.message : "bad request",
+                });
+                return;
+              }
+              sendRendered(
+                res,
+                await gateway.writeRoute(parsed.route, parsed.entity, fields, "public"),
+              );
+              return;
+            }
+            refused(res);
             return;
           }
           // The byte-door (SPEC §23.7), on the anonymous door: GET raw bytes by content address, proof
@@ -670,17 +716,37 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         // A rendered route (SPEC §23), on the full door: GET a route's HTML, rendered from the store's
         // live view under the token's read discipline.
         case "app": {
-          if (req.method !== "GET") {
-            refused(res);
-            return;
-          }
           const parsed = appRouteOf(url.pathname);
           if (parsed === undefined) {
             refused(res);
             return;
           }
-          await gateway.prepareRoute(parsed.route); // load the bundle (async) before the sync serve
-          sendRendered(res, gateway.serveRoute(parsed.route, parsed.entity, "full"));
+          await gateway.prepareRoute(parsed.route); // load the bundle before the render (worker, §23.9)
+          if (req.method === "GET") {
+            sendRendered(res, await gateway.serveRoute(parsed.route, parsed.entity, "full"));
+            return;
+          }
+          // A write-enabled renderer's form POST (SPEC §23.3): the store signs as the renderer's pen, not
+          // the token caller — the whole point is that provenance shows the mediating code, not the user.
+          if (req.method === "POST") {
+            let fields;
+            try {
+              fields = parseAppBody(await readBody(req, maxBody), req.headers["content-type"]);
+            } catch (err) {
+              sendRendered(res, {
+                status: err instanceof BodyTooLarge ? 413 : 400,
+                contentType: "text/plain; charset=utf-8",
+                body: err instanceof Error ? err.message : "bad request",
+              });
+              return;
+            }
+            sendRendered(
+              res,
+              await gateway.writeRoute(parsed.route, parsed.entity, fields, "full"),
+            );
+            return;
+          }
+          refused(res);
           return;
         }
         // The byte-door (SPEC §23.7), on the full door: GET raw bytes by content address under the
