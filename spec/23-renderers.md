@@ -407,8 +407,34 @@ direction is accepted and these decisions are now settled (pending the build):
   (federation cost + abuse) (Myk).
 - **Bytes-in-views** — DECIDED earlier (Myk, 2026-07-14): the `{ mime, ref, base64url? }` envelope + byte-door.
 
-Realizes ADLC ticket T4; describes the full renderer model and builds none of it yet. Depends on §21 (a
-renderer pins a VersionedSchema) and §22 (the snapshot doctrine, and the resolver-in-snapshot fold that
-lands here). **Review posture for the BUILD (the sanctioned panel exception, CLAUDE.md):** a three-angle
+Realizes ADLC ticket T4. Depends on §21 (a renderer pins a VersionedSchema) and §22 (the snapshot
+doctrine). **Review posture for the BUILD (the sanctioned panel exception, CLAUDE.md):** a three-angle
 panel — substrate-semantics · capability-security · correctness-API — not one generalist, because §23 is
 where Loam first executes a foreign author's code with a user's face around it.
+
+**v1 BUILD LANDED** [#99](https://github.com/bombadil-labs/loam/pull/99) — the §23.11 read-only slice. A
+renderer is a content-addressed ESM bundle pushed as a delta (`src/gateway/renderers.ts`), bound to a
+route + schema + optional §17 vN pin, with a `renders` key under `loam.renderer` — read live by
+`readRenderers` (latest-per-route, lawful slice only), exactly as `readRegistrations` derives the surface.
+`Gateway.publishRenderer` proves it at push (operator-only; the schema registered; a pinned version
+exists; every consumed field is a real property; the bundle loads to a function); `Gateway.serveRoute`
+resolves the node under the door's discipline and executes the bundle to HTML. The door is
+`GET /:mount/app/<route>/<entity>` (`src/server/http.ts`), on both the full and anonymous doors — the
+anonymous door serving only a publicly-declared lens's latest version (§17). The bundle rides the shared
+content-addressed ESM loader (`src/gateway/esm.ts`, now shared with §22 resolvers). **v1 pins a schema by
+its §17 vN**, which already freezes the reading — resolvers included (§22, version-level) — so the
+resolver-in-snapshot fold and name@hash schema-snapshot pinning defer cleanly to the slice that first
+pins by schema content-hash. **Deferred to their own slices (spec/23 §23.11):** the live browser React
+host + client hydration + subscription; write-enabled renderers + the pen (§23.3); the ocap SES/Worker
+sandbox hardening (§23.9); the byte-door + bytes-in-views (§23.7); the §12/§17 pinned-public amendment
+(§23.8); chunked economics; and the §24 quarantine trust UI. v1 executes the operator's OWN bundles in a
+governed store (only operator law binds, §7); untrusted-code confinement is that named §23.9/§24 work.
+Village act `demos/village/phase23.mjs` (PUSH DELTAS, GET SOFTWARE, 4/4). **Panel-reviewed** (the
+sanctioned three-angle exception): substrate-semantics, capability-security, correctness-API. Fixes
+folded from the panel: a pin freezes the version's CONTENT ADDRESS not the shifting numeric vN alias, and
+field-coverage is checked against the PINNED version's schema (so the §23.4 guarantee holds for the
+reading actually resolved); every serve refusal is a UNIFORM 404 (no existence oracle), an unloaded
+bundle is UNMOUNTED (404) not a 500, and `prepareRoute` pre-loads on the serve path. The panel's headline
+residual — a bundle runs SYNCHRONOUSLY with no timeout, on the anonymous door with an attacker-chosen
+entity — is the deferred §23.9/§24 sandbox work, documented in `serveRoute` and accepted as v1's
+operator-authored-in-a-governed-store trust model.

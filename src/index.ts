@@ -105,6 +105,16 @@ export {
   type ResolverSpecs,
 } from "./gateway/registration.js";
 export {
+  CTX_RENDERER,
+  parseRendererInput,
+  readRenderers,
+  rendererBindingClaims,
+  type RenderNode,
+  type RendererBinding,
+  type RendererSpec,
+  type RenderFn,
+} from "./gateway/renderers.js";
+export {
   Runner,
   bindingDefinitionClaims,
   readBindingDefinitions,

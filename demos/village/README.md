@@ -37,7 +37,7 @@ Person entities are the only shared vocabulary; everything else composes by fede
 
 ```sh
 node demos/village/phase0.mjs   # groundwork: homes, operators, registrations (all 3 surfaces)
-node demos/village/phase1.mjs   # …through phase22.mjs — each phase is a runnable act with checks
+node demos/village/phase1.mjs   # …through phase23.mjs — each phase is a runnable act with checks
 node demos/village/village.mjs  # the living village: all stores + pulse + simulator + dashboard
                            #   → watch it at http://127.0.0.1:4400
 ```
@@ -296,3 +296,15 @@ _(one entry per PR that grew the village; newest last)_
   while v1 keeps its own reading — `/rest/v1` still SUMS (130) where `/rest/v2` COUNTS (2) over one
   ground, a resolver frozen with its version (§22.4). The higher rungs and synthetics are refused at
   the door; v1 runs the operator's own code, the sandbox for untrusted law waiting on §24.
+- **PUSH DELTAS, GET SOFTWARE (SPEC §23, v1)** (phase23.mjs, 4/4, re-runnable — clears its own Card23
+  stage): a store carries its schema, its doors, and its law; §23 gives it its own FACE. The almanac
+  registers a `Card23` lens, lays a card's worth of facts, and PUSHES A RENDERER — a UI unit, as deltas,
+  bound to a schema and a route — and then a plain `GET /almanac/app/card23/<entity>` returns HTML
+  rendered from the store's own live view: no build, no deploy, the database is the deployment. Then the
+  beats that make it real: the anonymous door serves the face only once the operator declares the lens
+  public (401 → 200, §17 read discipline at the screen); re-pushing the renderer EVOLVES the face live
+  (one ground, new pixels — a ✦ and a blockquote appear); and an app never outlives its source (§23.6) —
+  strike its bindings and the route goes dark (404). The renderer is a headless `(node) => html` bundle,
+  executed server-side through the same door projection GraphQL and REST resolve through — a whole new
+  surface, no new authority machinery. The live browser React host, write-enabled faces, the ocap
+  sandbox, and binary assets are §23's later slices.
