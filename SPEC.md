@@ -56,6 +56,7 @@ name begins with that number.
 | §24 | [The quarantine — a place where untrusted law may bind](spec/24-quarantine.md) *(design-stage draft)* |
 | §25 | [Hardening — namespacing, entity-IDs, brick-proofing, repair](spec/25-hardening.md) |
 | §26 | [As-of reads — the temporal promise, kept](spec/26-as-of-reads.md) |
+| §27 | [Containers — the primitive under sandboxes, modules, and federation (Loam as git for signed claims)](spec/27-containers.md) *(design-stage draft)* |
 
 _**§21** and **§22** are **fully landed** — design accepted and implemented (see each Provenance
 footer). **§25** and **§26** are **design-landed** — the accepted design brief is recorded here,
