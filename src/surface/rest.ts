@@ -78,6 +78,25 @@ function propSchema(kind: string): Record<string, unknown> {
   }
 }
 
+// A resolved field's OpenAPI shape comes from its DECLARED output type (SPEC §22.6), not the policy —
+// the resolver changes what the value IS, so the document must describe the field it actually serves.
+function resolverPropSchema(type: string): Record<string, unknown> {
+  const jsonType =
+    type === "number"
+      ? "number"
+      : type === "boolean"
+        ? "boolean"
+        : type === "list"
+          ? "array"
+          : type === "object"
+            ? "object"
+            : "string";
+  return {
+    type: jsonType,
+    description: `resolved by a custom resolver (SPEC §22, output "${type}")`,
+  };
+}
+
 export function buildOpenApi(
   gateway: Gateway,
   door: "full" | "public",
@@ -97,7 +116,11 @@ export function buildOpenApi(
       // default (§21): absent a `writable` list, NONE are writable, so the write body carries no props.
       const writable = new Set(v.writable ?? []);
       for (const [prop, pp] of v.schema.props) {
-        viewProperties[prop] = propSchema((pp as { kind: string }).kind);
+        const resolver = v.resolvers?.[prop];
+        viewProperties[prop] =
+          resolver === undefined
+            ? propSchema((pp as { kind: string }).kind)
+            : resolverPropSchema(resolver.type);
         if (writable.has(prop)) {
           writeProperties[prop] = {
             description: "a primitive claim value (string | number | boolean)",

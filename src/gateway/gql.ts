@@ -31,7 +31,7 @@ import {
   type GraphQLOutputType,
 } from "graphql";
 import type { Primitive, Policy } from "@bombadil/rhizomatic";
-import { edgeRoles, type ClaimTemplates } from "./registration.js";
+import { edgeRoles, type ClaimTemplates, type ResolverOutputType } from "./registration.js";
 import type {
   ClaimPointerSpec,
   PatchNode,
@@ -171,11 +171,31 @@ function metaFields<N extends ResolvedNode>(): GraphQLFieldConfigMap<N, unknown>
   };
 }
 
+// A resolved field's GraphQL type comes from the resolver's DECLARED output type (SPEC §22.6), not
+// the Policy — a resolver changes what the value IS, so the door must advertise the field it actually
+// serves. The five tags map to the honest GraphQL carriers; `object` and the pass-through fall to
+// ViewValue, exactly as a policy-shaped dynamic value already does.
+function resolverTypeOf(type: ResolverOutputType): GraphQLOutputType {
+  switch (type) {
+    case "string":
+      return GraphQLString;
+    case "number":
+      return GraphQLFloat;
+    case "boolean":
+      return GraphQLBoolean;
+    case "list":
+      return new GraphQLList(new GraphQLNonNull(ViewValue));
+    case "object":
+      return ViewValue;
+  }
+}
+
 function propFields<N extends ResolvedNode>(def: Registered): GraphQLFieldConfigMap<N, unknown> {
   const fields: GraphQLFieldConfigMap<N, unknown> = {};
   for (const [prop, pp] of def.schema.props) {
+    const resolver = def.resolvers?.[prop];
     fields[legal(prop)] = {
-      type: fieldTypeOf(pp),
+      type: resolver === undefined ? fieldTypeOf(pp) : resolverTypeOf(resolver.type),
       resolve: (node) => node.view[prop] ?? null,
     };
   }

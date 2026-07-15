@@ -81,6 +81,72 @@ export interface ClaimTemplate {
 }
 export type ClaimTemplates = Readonly<Record<string, ClaimTemplate>>;
 
+// A custom resolver (SPEC §22): the last, optional step of a lens — `resolve(bucket) → value`,
+// downstream of the Policy. The Policy keeps the epistemics (WHICH claims survive, in what order);
+// the resolver overrides only the semantics (what the survivors MEAN as a value in this lens). It
+// travels on the BINDING, per field, so changing a resolver mints a new registration version (SPEC
+// §22.4 at the version-delta level; folding it into the `name@hash` VersionedSchema waits for §23's
+// renderer pin, exactly as §21 deferred `VersionedHyperSchema`).
+//
+// v1 admits RUNG (a) ONLY — bucket-pure, a function of the field's gathered deltas alone: cacheable,
+// deterministic, reproducible on any peer. The higher rungs (b hyperview-scoped, c store-querying, d
+// effectful) and (e) synthetics are described by SPEC §22 but not built; a resolver declaring any of
+// them is refused, so a reader trusts exactly the purity the signed definition names.
+export type ResolverRung = "a";
+
+// The field's declared output TYPE (SPEC §22.6): what the doors advertise once a resolver changes
+// what the value IS. The signed definition carries it so GraphQL/OpenAPI speak the field they serve —
+// a resolver turning a `pick` string into a histogram must not leave the door advertising `String`.
+export type ResolverOutputType = "string" | "number" | "boolean" | "list" | "object";
+const RESOLVER_TYPES: ReadonlySet<string> = new Set([
+  "string",
+  "number",
+  "boolean",
+  "list",
+  "object",
+]);
+
+export interface ResolverSpec {
+  readonly rung: ResolverRung;
+  readonly type: ResolverOutputType;
+  // Directly-runnable ESM (SPEC §22.3): `export default (bucket) => value`. What is audited IS what
+  // runs — one hash, no signed-vs-executed gap. Inline for v1 (the snapshot doctrine's first rung).
+  readonly code: string;
+}
+export type ResolverSpecs = Readonly<Record<string, ResolverSpec>>;
+
+// Parse and validate the resolvers' JSON profile. Every entry must name rung (a) — the only rung v1
+// builds — a known output type, and non-empty ESM. Throws on anything malformed; the caller decides
+// loud (a publish refusal) vs quiet (drop from a replayed registration — the schema still binds, the
+// field simply falls back to its Policy value). Field-EXISTENCE is checked by the publisher, which
+// holds the schema; this validates shape alone.
+export function parseResolvers(raw: unknown): ResolverSpecs {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("resolvers must be an object of per-field resolver specs");
+  }
+  const out: Record<string, ResolverSpec> = {};
+  for (const [field, spec] of Object.entries(raw as Record<string, unknown>)) {
+    const s = spec as { rung?: unknown; type?: unknown; code?: unknown } | null;
+    if (s === null || typeof s !== "object" || Array.isArray(s)) {
+      throw new Error(`resolver "${field}": wants { rung, type, code }`);
+    }
+    if (s.rung !== "a") {
+      throw new Error(
+        `resolver "${field}": rung ${JSON.stringify(s.rung)} is not admitted — v1 builds bucket-pure ` +
+          `rung (a) only (SPEC §22); the higher rungs and synthetics are designed but not built`,
+      );
+    }
+    if (typeof s.type !== "string" || !RESOLVER_TYPES.has(s.type)) {
+      throw new Error(`resolver "${field}": type must be one of ${[...RESOLVER_TYPES].join(", ")}`);
+    }
+    if (typeof s.code !== "string" || s.code.trim() === "") {
+      throw new Error(`resolver "${field}": code must be non-empty runnable ESM`);
+    }
+    out[field] = { rung: "a", type: s.type as ResolverOutputType, code: s.code };
+  }
+  return out;
+}
+
 export interface Registration {
   readonly hyperschema: HyperSchema;
   readonly schema: Schema;
@@ -95,6 +161,8 @@ export interface Registration {
   // not" — the deny-by-default posture §21's wave flipped in). Every registration Loam mints names
   // its writable fields explicitly.
   readonly writable?: readonly string[];
+  // Custom resolvers (SPEC §22), per field — the optional last step of the lens.
+  readonly resolvers?: ResolverSpecs;
 }
 
 const isPrimitive = (v: unknown): v is Primitive =>
@@ -241,6 +309,7 @@ export function registrationClaims(
   timestamp: number,
   mutations?: ClaimTemplates,
   writable?: readonly string[],
+  resolvers?: ResolverSpecs,
 ): Claims {
   return {
     timestamp,
@@ -260,6 +329,16 @@ export function registrationClaims(
             {
               role: "writable",
               target: { kind: "primitive" as const, value: JSON.stringify(writable) },
+            },
+          ]),
+      // Custom resolvers ride the binding (SPEC §22): per-field runnable ESM + rung + output type,
+      // so changing a resolver mints a new version. Inline JSON, the snapshot doctrine's first rung.
+      ...(resolvers === undefined
+        ? []
+        : [
+            {
+              role: "resolvers",
+              target: { kind: "primitive" as const, value: JSON.stringify(resolvers) },
             },
           ]),
       {
@@ -313,6 +392,7 @@ export function registrationDeltaClaims(
   nextTimestamp: () => number,
   mutations?: ClaimTemplates,
   writable?: readonly string[],
+  resolvers?: ResolverSpecs,
 ): RegistrationDeltaClaims {
   const named: Schema = { ...schema, name, alg: schema.alg ?? 1 };
   const livingEntity = schemaLivingEntityFor(name);
@@ -328,6 +408,7 @@ export function registrationDeltaClaims(
     nextTimestamp(),
     mutations,
     writable,
+    resolvers,
   );
   return { living, snapshot, binding, livingEntity, snapshotEntity };
 }
@@ -347,6 +428,7 @@ export interface RegistrationInput {
   readonly entity?: string;
   readonly mutations?: ClaimTemplates;
   readonly writable?: string[];
+  readonly resolvers?: ResolverSpecs;
 }
 
 export function parseRegistrationInput(raw: unknown): RegistrationInput {
@@ -357,6 +439,7 @@ export function parseRegistrationInput(raw: unknown): RegistrationInput {
     entity?: unknown;
     mutations?: unknown;
     writable?: unknown;
+    resolvers?: unknown;
   } | null;
   if (
     o === null ||
@@ -392,6 +475,7 @@ export function parseRegistrationInput(raw: unknown): RegistrationInput {
     ...(o.entity === undefined ? {} : { entity: o.entity }),
     ...(o.mutations === undefined ? {} : { mutations: parseClaimTemplates(o.mutations) }),
     ...(o.writable === undefined ? {} : { writable: o.writable as string[] }),
+    ...(o.resolvers === undefined ? {} : { resolvers: parseResolvers(o.resolvers) }),
   };
 }
 
@@ -443,6 +527,7 @@ interface Candidate {
   roots: readonly string[];
   mutations?: ClaimTemplates;
   writable?: readonly string[];
+  resolvers?: ResolverSpecs;
   timestamp: number;
   id: string;
 }
@@ -530,6 +615,17 @@ function survivingCandidates(
         writable = undefined;
       }
     }
+    // Resolvers (SPEC §22) are dropped QUIETLY on a malformed or unadmitted-rung payload — the schema
+    // still binds, the field just falls back to its Policy value. The loud refusal belongs to publish.
+    let resolvers: ResolverSpecs | undefined;
+    const resolversJson = primitive(delta.claims, "resolvers");
+    if (typeof resolversJson === "string") {
+      try {
+        resolvers = parseResolvers(JSON.parse(resolversJson));
+      } catch {
+        resolvers = undefined;
+      }
+    }
     const schemaEntity = schemaRef.target.entity.id;
     const candidate: Candidate = {
       schemaEntity,
@@ -538,6 +634,7 @@ function survivingCandidates(
       roots,
       ...(mutations === undefined ? {} : { mutations }),
       ...(writable === undefined ? {} : { writable }),
+      ...(resolvers === undefined ? {} : { resolvers }),
       timestamp: delta.claims.timestamp,
       id: delta.id,
     };
@@ -589,6 +686,7 @@ export function readRegistrations(reactor: Reactor, operator?: string): Registra
         entity: cand.schemaEntity,
         ...(cand.mutations === undefined ? {} : { mutations: cand.mutations }),
         ...(cand.writable === undefined ? {} : { writable: cand.writable }),
+        ...(cand.resolvers === undefined ? {} : { resolvers: cand.resolvers }),
       });
     } catch {
       // no surviving (or a malformed) definition/schema: the registration is unbound, not fatal
@@ -643,6 +741,7 @@ export function readRegistrationVersions(
         entity: cand.schemaEntity,
         ...(cand.mutations === undefined ? {} : { mutations: cand.mutations }),
         ...(cand.writable === undefined ? {} : { writable: cand.writable }),
+        ...(cand.resolvers === undefined ? {} : { resolvers: cand.resolvers }),
         version: n,
         deltaId: cand.id,
         timestamp: cand.timestamp,
