@@ -308,3 +308,14 @@ _(one entry per PR that grew the village; newest last)_
   executed server-side through the same door projection GraphQL and REST resolve through — a whole new
   surface, no new authority machinery. The live browser React host, write-enabled faces, the ocap
   sandbox, and binary assets are §23's later slices.
+- **A FACE MADE OF BYTES (SPEC §23.7)** (phase-bytes.mjs, 3/3, re-runnable — clears its own Portrait
+  stage): renderers paint pixels, and some pixels ARE bytes. The almanac registers a `Portrait` lens with
+  an `avatar` image fact (a `bytes` target), pushes a renderer that paints an `<img>` whose `src` points at
+  the BYTE-DOOR, and a `GET /almanac/app/portrait/<entity>` returns HTML carrying that `<img src>`. A view's
+  bytes leaf crosses every door as the self-describing envelope `{ mime, ref, base64url? }`, so the renderer
+  builds the URL from `ref` and never touches a `Uint8Array`. Following that `<img src>` — `GET
+  /almanac/bytes/<ref>?from=Portrait/<entity>` — returns the raw image bytes with `image/png`, by PROOF OF
+  READ: the door re-resolves the lens under the caller's own access and serves the bytes only because the
+  view actually contains them (no ref→bytes oracle, no store scan). Then §11 arrives at the screen: erase the
+  avatar fact and the byte-door 404s by construction — the door never cached, so forgotten bytes cannot
+  outlive their ground.

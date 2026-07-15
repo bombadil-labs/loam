@@ -78,6 +78,7 @@ import {
   type WithdrawnRegistration,
 } from "./registration.js";
 import { applyResolvers, loadResolvers, newResolverMemo, type ResolverMemo } from "./resolvers.js";
+import { bytesEnvelope, findBytesByRef } from "./bytes.js";
 import {
   loadRenderers,
   loadedRenderer,
@@ -985,7 +986,13 @@ export class Gateway {
     const render = loadedRenderer(binding.bundle);
     if (render === undefined) return gone; // unloaded → unmounted, not a 500 (prepareRoute loads it)
     try {
-      const html = render({ entity, view: node.view, hex: node.hex });
+      // The renderer is a view consumer like gql/REST: hand it the §23.7 envelope so a bytes leaf is a
+      // { mime, ref, base64url? } it can point an `<img src>` at (primitives pass through unchanged).
+      const html = render({
+        entity,
+        view: bytesEnvelope(node.view) as Record<string, unknown>,
+        hex: node.hex,
+      });
       if (typeof html !== "string") {
         return {
           status: 500,
@@ -1002,6 +1009,42 @@ export class Gateway {
         body: "the renderer faulted",
       };
     }
+  }
+
+  // The byte-door (SPEC §23.7): serve the raw bytes a caller names by content address `ref`, but only
+  // by PROOF OF READ — the fetch names the lens+entity it got the ref from, and this RE-RESOLVES that
+  // view under this door's own discipline (full: any registered lens; public: only a declared one, §17)
+  // and serves the bytes only if the resolved view actually contains a BytesView whose content address
+  // is `ref`. A bare ref→bytes endpoint would be exactly the content-address existence oracle §17 closed;
+  // this is not — the re-resolution IS the lookup (no store scan), and every failure (unknown ref, wrong
+  // `from`, a lens this door may not read) collapses to the SAME uniform 404, so a stranger learns
+  // nothing. §11 erasure then falls out for free: a purged source delta is no longer in the live
+  // re-resolved view, so its ref 404s by construction — the door NEVER caches the bytes.
+  serveBytes(
+    ref: string,
+    fromLens: string,
+    fromEntity: string,
+    door: "full" | "public",
+  ): { status: number; contentType: string; body: Uint8Array } {
+    const gone = {
+      status: 404,
+      contentType: "text/plain; charset=utf-8",
+      body: new TextEncoder().encode("no such bytes"),
+    };
+    const surface = this.surface(door);
+    if (surface === undefined || !surface.registered.some((r) => r.hyperschema.name === fromLens)) {
+      return gone;
+    }
+    let node: ResolvedNode;
+    try {
+      node = surface.hooks.resolve(fromLens, fromEntity);
+    } catch {
+      // A resolve fault collapses to the same silence — the door reveals nothing a normal read wouldn't.
+      return gone;
+    }
+    const found = findBytesByRef(node.view, ref);
+    if (found === undefined) return gone;
+    return { status: 200, contentType: found.mime, body: found.value };
   }
 
   // Animate the gateway: route ingest through a runner's DerivationHost so bindings fire.
