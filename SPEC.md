@@ -53,6 +53,7 @@ name begins with that number.
 | §21 | [Schema identity & versioning — the lens ladder](spec/21-schema-identity.md) |
 | §22 | [Custom resolvers — the last step of the lens becomes programmable](spec/22-resolvers.md) |
 | §23 | [Renderers — push deltas, get software](spec/23-renderers.md) |
+| §24 | [The quarantine — a place where untrusted law may bind](spec/24-quarantine.md) *(design-stage draft)* |
 | §25 | [Hardening — namespacing, entity-IDs, brick-proofing, repair](spec/25-hardening.md) |
 | §26 | [As-of reads — the temporal promise, kept](spec/26-as-of-reads.md) |
 

@@ -2063,3 +2063,30 @@ everything on shared-scope globs). Reconciled to what IS:
 The queue is now honest: **T2** (§21 coexistence, design-stage, deferred) and **T5** (§24 quarantine,
 design-stage) — both design-stage, both Myk's call. The four build tickets (T9–T12) are removed by their own
 landing PRs in the stack.
+
+## 2026-07-15 — §24 quarantine: design-stage draft opened for Myk
+
+The stretch goal of the arc, drafted (not built). Today foreign law is inert-by-default (§8/§12): a remote
+schema/resolver/renderer merges as data and binds nothing — safe, and also UNTESTABLE. §24 closes that gap
+with a QUARANTINE: a sandboxed place where untrusted law actually RUNS — binds, resolves, renders — but
+everything it produces is sequestered. Dry-run a stranger's whole app against your real ground, and throw it
+all away if you don't like it.
+
+The draft (`spec/24-quarantine.md`, design-stage) answers all eight design questions — Q1 (separate-store)
+and Q6 (quarantine-first) DECIDED and proved; Q2/Q3/Q4/Q5/Q7 carrying reasoned recommendations for Myk; Q8
+(erasure reaches the quarantine) stated as a HARD REQUIREMENT with a precise four-part test. The load-bearing
+moves: a separate store beats a "sandboxed" mark because you cannot DISCARD a mark (isolation must be
+structural, not every-reader-honors-a-flag); the one-way glass is one-way in the MERGE but transparent by
+opt-in in the READ (§23.9), with the law-under-test a frozen snapshot and the ground it reads live-followed;
+promotion re-signs or endorses (never moves) on append-only ground, kin to §20; and erasure reaches through
+the glass unconditionally — a quarantine that could hide a forgotten byte would be an erasure-evasion channel
+inside the operator's own walls, so §11's purge must fan out to active quarantine pools (flagged as a build
+requirement §11 doesn't literally build yet). Two honest gaps named: Loam has no read-side capability slices
+(the mount is the read boundary, §7), so v1 accepts all-or-nothing reads with selective inbound federation as
+the narrowing knob; and worker-only confinement bounds hang/crash/memory but not fs/net for effectful rungs
+until the deferred SES/isolated-vm ocap (§23.9) ships.
+
+Per the design-stage convention: this is drafted prose + answered questions, and it STOPS for Myk's sign-off
+in chat before any implementation code. Opened as a PR (stacked atop the §23 build slices), which also carries
+the backlog reconciliation (retired T3/T4, re-scoped T2). No test code yet — §24.8 specifies the erasure test
+precisely as an executable spec; the runnable test lands with the implementation.
