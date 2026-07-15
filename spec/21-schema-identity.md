@@ -200,7 +200,7 @@ delta; the registry keys locally, and federation resolves globally.
 
 **Provenance.** Design accepted (Myk, 2026-07-13); **landed in slices.** Slice 1 — the
 `schema:`→`hyperschema:` entity rename + the §14 immutable-by-default flip in one §20 migration —
-landed [#92](https://github.com/bombadil-labs/loam/pull/92). Slice 2 lifted the Schema to a first-class
+landed [#92](https://github.com/bombadil-labs/loam/pull/92). Slice 2 ([#96](https://github.com/bombadil-labs/loam/pull/96)) lifted the Schema to a first-class
 entity via 0.5.0's `SCHEMA_SCHEMA` (`publishSchemaClaims`/`loadSchema` at `schema:<name>`) and minted
 the per-version, content-addressed VersionedSchema snapshots that serve §17's freezing; the
 registration became a binding (`schema` → the living entity, `schemaVersion` → the frozen snapshot),
