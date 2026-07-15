@@ -111,6 +111,28 @@ const json = (res: ServerResponse, status: number, body: unknown): void => {
   res.end(text);
 };
 
+// A rendered renderer route (SPEC §23): served with its own content-type (HTML on success, plain text on
+// a refusal), never JSON — the door is pixels.
+const sendRendered = (
+  res: ServerResponse,
+  out: { status: number; contentType: string; body: string },
+): void => {
+  res.writeHead(out.status, { "content-type": out.contentType, ...CORS });
+  res.end(out.body);
+};
+
+// Parse `GET /:mount/app/<route>/<entity>` into its route + entity (both percent-decoded); undefined if
+// either is missing or malformed — the caller refuses uniformly, learning nothing extra.
+const appRouteOf = (pathname: string): { route: string; entity: string } | undefined => {
+  const segs = pathname.split("/").slice(3);
+  if (segs.length < 2 || segs[0] === undefined || segs[1] === undefined) return undefined;
+  try {
+    return { route: decodeURIComponent(segs[0]), entity: decodeURIComponent(segs[1]) };
+  } catch {
+    return undefined;
+  }
+};
+
 // Parse and perform a registration request — the SAME shape the CLI file and the MCP tool take,
 // { hyperschema: { name, alg?, body }, schema, roots, entity?, mutations? } (see
 // parseRegistrationInput). Anything malformed throws; the caller answers 400 with the reason.
@@ -530,6 +552,21 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             json(res, result.status, result.body);
             return;
           }
+          // A rendered route (SPEC §23), on the anonymous door: read-only, GET only, and only a
+          // publicly-declared lens's LATEST version (serveRoute enforces the §17 public discipline).
+          case "app": {
+            if (req.method !== "GET") {
+              refused(res);
+              return;
+            }
+            const parsed = appRouteOf(url.pathname);
+            if (parsed === undefined) {
+              refused(res);
+              return;
+            }
+            sendRendered(res, gateway.serveRoute(parsed.route, parsed.entity, "public"));
+            return;
+          }
           default:
             refused(res);
             return;
@@ -578,6 +615,21 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             url.searchParams.get("asOf") ?? undefined,
           );
           json(res, result.status, result.body);
+          return;
+        }
+        // A rendered route (SPEC §23), on the full door: GET a route's HTML, rendered from the store's
+        // live view under the token's read discipline.
+        case "app": {
+          if (req.method !== "GET") {
+            refused(res);
+            return;
+          }
+          const parsed = appRouteOf(url.pathname);
+          if (parsed === undefined) {
+            refused(res);
+            return;
+          }
+          sendRendered(res, gateway.serveRoute(parsed.route, parsed.entity, "full"));
           return;
         }
         case "append": {

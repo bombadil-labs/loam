@@ -78,6 +78,14 @@ import {
   type WithdrawnRegistration,
 } from "./registration.js";
 import { applyResolvers, loadResolvers, newResolverMemo, type ResolverMemo } from "./resolvers.js";
+import {
+  loadRenderers,
+  loadedRenderer,
+  parseRendererInput,
+  readRenderers,
+  rendererBindingClaims,
+  type RendererBinding,
+} from "./renderers.js";
 import { readTrustPolicy } from "./trust.js";
 
 export interface AppendReceipt {
@@ -274,6 +282,9 @@ export class Gateway {
       ...this.registrationVersions().map((v) => v.resolvers),
     ];
     await loadResolvers(specs);
+    // Renderer bundles ride the same content-addressed ESM loader (SPEC §23/§22.3), pre-loaded here so
+    // the synchronous serve path always finds its function.
+    await loadRenderers(readRenderers(this.reactor, this.operatorAuthor).map((r) => r.bundle));
   }
 
   // Boot a fresh (or existing) store from a genesis delta-set: open governed by the genesis
@@ -835,6 +846,120 @@ export class Gateway {
         `the registration persisted but did not bind: another hyperschema already answers to ` +
           `"${hyperschema.name}" — negate the old definition first, or choose a different name`,
       );
+    }
+  }
+
+  // --- renderers (SPEC §23) ----------------------------------------------------------------------
+
+  // Every surviving renderer binding, latest per route, read live under this store's law.
+  renderers(): RendererBinding[] {
+    return readRenderers(this.reactor, this.operatorAuthor);
+  }
+
+  // Publish a renderer as data (SPEC §23), so a UI route survives reopen with no code. PROVEN AT PUSH,
+  // not hoped at runtime (§23.4): the operator alone may publish (a governed store binds only operator
+  // law); the schema it reads must be REGISTERED and, if version-pinned, that version must EXIST; every
+  // field it declares consuming must be a property the schema names; and its bundle must LOAD to a
+  // function. Only then does the binding persist and the route go live.
+  async publishRenderer(input: unknown, context?: RequestContext): Promise<void> {
+    const seed = context?.actor ?? this.options.seed;
+    if (seed === undefined) {
+      throw new Error("this gateway holds no signing seed and cannot publish a renderer");
+    }
+    if (this.operatorAuthor !== undefined && authorForSeed(seed) !== this.operatorAuthor) {
+      throw new Error("append rejected: only the operator may publish a renderer");
+    }
+    const spec = parseRendererInput(input); // one shape for every door (HTTP / CLI / MCP / direct)
+    // The schema must be registered — a renderer over a lens the store does not serve mounts nothing.
+    const bound = this.registered.find((r) => r.hyperschema.name === spec.schemaName);
+    if (bound === undefined) {
+      throw new Error(
+        `renderer: no registered schema "${spec.schemaName}" — a renderer reads a lens the store serves`,
+      );
+    }
+    // A pinned version must exist (a §17 vN), so "renderer pinned to v3" never dangles.
+    if (spec.version !== undefined) {
+      const versions = this.registrationVersions().filter(
+        (v) => v.hyperschema.name === spec.schemaName,
+      );
+      if (spec.version > versions.length) {
+        throw new Error(
+          `renderer: schema "${spec.schemaName}" has no version v${spec.version} (it has ${versions.length})`,
+        );
+      }
+    }
+    // Field coverage (§23.4): every consumed field must be one the schema names — refuse a renderer that
+    // reads what the lens can never fill, at push, rather than painting undefined at runtime.
+    for (const field of spec.consumes) {
+      if (!bound.schema.props.has(field)) {
+        throw new Error(
+          `renderer: consumes "${field}", but schema "${spec.schemaName}" has no such field`,
+        );
+      }
+    }
+    // The bundle must load to a function NOW (loud here, never a serve-time surprise), and pre-load into
+    // the content-addressed cache so the synchronous serve path finds it.
+    await loadRenderers([spec.bundle]);
+    const author = authorForSeed(seed);
+    await this.append([
+      signClaims(rendererBindingClaims(spec, author, this.nextTimestamp()), seed),
+    ]);
+  }
+
+  // Serve a route (SPEC §23): resolve the renderer's node under the door's discipline and execute its
+  // bundle to HTML. Read-only in v1 — a renderer receives the resolved view and nothing else (§23.2).
+  // Returns a refusal (never a throw that leaks internals) for an unknown route, a lens the door may not
+  // read, a missing pinned version, or a renderer that faults; the caller renders the status.
+  serveRoute(
+    route: string,
+    entity: string,
+    door: "full" | "public",
+  ): { status: number; contentType: string; body: string } {
+    const refuse = (status: number, message: string) => ({
+      status,
+      contentType: "text/plain; charset=utf-8",
+      body: message,
+    });
+    const binding = this.renderers().find((r) => r.route === route);
+    if (binding === undefined) return refuse(404, "no such route");
+    const surface = this.surface(door);
+    // On the ANONYMOUS door a renderer serves only a PUBLICLY-DECLARED lens, and only its LATEST version
+    // (SPEC §17 — the public door serves latest-per-name; the §23.8 pinned-public amendment is unbuilt).
+    if (door === "public") {
+      if (
+        surface === undefined ||
+        !surface.registered.some((r) => r.hyperschema.name === binding.schemaName)
+      ) {
+        return refuse(404, "no such route");
+      }
+      if (binding.version !== undefined) return refuse(404, "no such route");
+    } else if (surface === undefined) {
+      return refuse(404, "nothing is registered");
+    }
+    let node: ResolvedNode;
+    try {
+      if (binding.version === undefined) {
+        node = surface.hooks.resolve(binding.schemaName, entity);
+      } else {
+        const versions = this.registrationVersions().filter(
+          (v) => v.hyperschema.name === binding.schemaName,
+        );
+        const pinned = versions[binding.version - 1];
+        if (pinned === undefined) return refuse(404, "the pinned version is gone");
+        node = this.resolvePinned(pinned, entity);
+      }
+    } catch (err) {
+      return refuse(400, err instanceof Error ? err.message : String(err));
+    }
+    const render = loadedRenderer(binding.bundle);
+    if (render === undefined) return refuse(500, "the renderer bundle is not loaded");
+    try {
+      const html = render({ entity, view: node.view, hex: node.hex });
+      if (typeof html !== "string") return refuse(500, "the renderer did not return HTML");
+      return { status: 200, contentType: "text/html; charset=utf-8", body: html };
+    } catch {
+      // A faulting renderer is the operator's own bug; refuse cleanly without leaking its internals.
+      return refuse(500, "the renderer faulted");
     }
   }
 
