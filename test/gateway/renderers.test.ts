@@ -145,7 +145,95 @@ describe("§23.5: latest per route, and pinned versions", () => {
   });
 });
 
+describe("§23.4 + §17: a pin is the version's CONTENT ADDRESS, durable against withdrawal", () => {
+  // evolve Plant to v2 (adds `note`), returning the gateway with versions [v1, v2].
+  const withV2 = async (): Promise<Gateway> => {
+    const gw = await boot();
+    await gw.append([
+      observed(FERN, "height", 30, 1000, OP_SEED),
+      observed(FERN, "note", "hi", 1500, OP_SEED),
+    ]);
+    const evolved = {
+      ...PLANT_POLICY,
+      props: new Map([
+        ...PLANT_POLICY.props,
+        [
+          "note",
+          { kind: "all" as const, order: { kind: "byTimestamp" as const, dir: "asc" as const } },
+        ],
+      ]),
+    };
+    await gw.publishRegistration(PLANT, evolved, [FERN], undefined, undefined, undefined, [
+      ...PLANT_WRITABLE,
+      "note",
+    ]);
+    return gw;
+  };
+
+  it("a pin resolves the SAME frozen version even after an EARLIER version is withdrawn (no vN shift)", async () => {
+    const gw = await withV2();
+    // pin to v2 (which declares `note` as a list), render it
+    await gw.publishRenderer(
+      spec({
+        route: "pinned2",
+        version: 2,
+        consumes: ["note"],
+        bundle: "export default (n) => `<i>${JSON.stringify(n.view.note)}</i>`;",
+      }),
+    );
+    const before = gw.serveRoute("pinned2", FERN, "full").body;
+    expect(before).toBe('<i>["hi"]</i>'); // v2 sees `note` as a list
+
+    // withdraw v1 — the numeric alias would now renumber v2 to "v1", but the pin is by content address
+    const v1 = gw.registrationVersions().filter((v) => v.hyperschema.name === "Plant")[0]!;
+    await gw.append([
+      signClaims(makeNegationClaims(OP, 9_000_000, v1.deltaId, "withdraw v1"), OP_SEED),
+    ]);
+    // the pinned renderer STILL resolves v2's frozen reading — it never slid to a different version
+    expect(gw.serveRoute("pinned2", FERN, "full").body).toBe('<i>["hi"]</i>');
+    await gw.close();
+  });
+
+  it("field coverage is checked against the PINNED version, not the latest (§23.4)", async () => {
+    const gw = await withV2();
+    // `note` exists only in v2; a renderer pinned to v1 that consumes it must be refused at push,
+    // not accepted-because-latest-has-it (the false-accept the panel caught).
+    await expect(
+      gw.publishRenderer(spec({ route: "p1", version: 1, consumes: ["note"] })),
+    ).rejects.toThrow(/no such field/);
+    // ...and consuming a field v1 DOES have is accepted for a v1 pin
+    await expect(
+      gw.publishRenderer(spec({ route: "p1", version: 1, consumes: ["height"] })),
+    ).resolves.toBeUndefined();
+    await gw.close();
+  });
+});
+
 describe("§23.6: an app never outlives its source", () => {
+  it("a route whose schema is not in the door's surface serves a clean 404, never a resolve-error leak", async () => {
+    const gw = await boot();
+    await gw.append([observed(FERN, "height", 3, 1000, OP_SEED)]);
+    // raw-append a renderer over a schema the store never registered (past publishRenderer's guard) — the
+    // surface check darkens it with a uniform 404, never a 400 leaking the resolver's internals (§23.6 /
+    // the correctness panel's door-asymmetry finding).
+    const { rendererBindingClaims } = await import("../../src/gateway/renderers.js");
+    await gw.append([
+      signClaims(
+        rendererBindingClaims(
+          { route: "ghost", schemaName: "Ghost", consumes: [], bundle: HEIGHT_CARD },
+          undefined,
+          OP,
+          9_000_000,
+        ),
+        OP_SEED,
+      ),
+    ]);
+    const out = gw.serveRoute("ghost", FERN, "full");
+    expect(out.status).toBe(404);
+    expect(out.body).toBe("no such route");
+    await gw.close();
+  });
+
   it("withdrawing the renderer binding stops serving the route", async () => {
     const gw = await boot();
     await gw.append([observed(FERN, "height", 9, 1000, OP_SEED)]);
@@ -204,11 +292,49 @@ describe("§23: a faulting renderer refuses cleanly", () => {
     await gw.close();
   });
 
+  it("a bundle that returns a non-string is a 500, not garbage HTML", async () => {
+    const gw = await boot();
+    await gw.append([observed(FERN, "height", 1, 1000, OP_SEED)]);
+    await gw.publishRenderer(spec({ bundle: "export default () => 42;" }));
+    const out = gw.serveRoute("plant", FERN, "full");
+    expect(out.status).toBe(500);
+    expect(out.body).toMatch(/did not return HTML/);
+    await gw.close();
+  });
+
   it("only the operator may publish a renderer", async () => {
     const gw = await boot();
     await expect(gw.publishRenderer(spec(), { actor: "cd".repeat(32) })).rejects.toThrow(
       /only the operator/,
     );
+    await gw.close();
+  });
+});
+
+describe("§23: an unloaded bundle is UNMOUNTED (404), and prepareRoute loads it", () => {
+  it("a renderer binding appended raw (not preloaded) serves 404 until prepareRoute loads it", async () => {
+    const gw = await boot();
+    await gw.append([observed(FERN, "height", 7, 1000, OP_SEED)]);
+    // hand-forge a valid renderer binding with a UNIQUE bundle (never loaded by another test — the ESM
+    // cache is process-global) and append it RAW — no publishRenderer, so no preload.
+    const uniqueBundle = "export default (n) => `<u>raw ${n.view.height}</u>`;";
+    const { rendererBindingClaims } = await import("../../src/gateway/renderers.js");
+    await gw.append([
+      signClaims(
+        rendererBindingClaims(
+          { route: "raw", schemaName: "Plant", consumes: ["height"], bundle: uniqueBundle },
+          undefined,
+          OP,
+          9_000_000,
+        ),
+        OP_SEED,
+      ),
+    ]);
+    // the binding is live, but its bundle is not in the ESM cache → unmounted, a clean 404 (never a 500)
+    expect(gw.serveRoute("raw", FERN, "full").status).toBe(404);
+    // prepareRoute (the async serve-path step) loads it, and then it mounts
+    await gw.prepareRoute("raw");
+    expect(gw.serveRoute("raw", FERN, "full").status).toBe(200);
     await gw.close();
   });
 });

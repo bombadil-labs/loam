@@ -877,23 +877,34 @@ export class Gateway {
         `renderer: no registered schema "${spec.schemaName}" — a renderer reads a lens the store serves`,
       );
     }
-    // A pinned version must exist (a §17 vN), so "renderer pinned to v3" never dangles.
+    // FREEZE the pin to the version's CONTENT ADDRESS, not the numeric vN (SPEC §17/§23.6): the author
+    // names a vN for convenience, and we resolve it — at push — to that surviving registration version's
+    // true name (its deltaId), which cannot slide when an earlier version is later withdrawn. The pinned
+    // version's own schema is also what field-coverage is checked against, so the guarantee holds for the
+    // reading the renderer will ACTUALLY resolve, not the latest.
+    let versionId: string | undefined;
+    let coverage = bound.schema;
     if (spec.version !== undefined) {
       const versions = this.registrationVersions().filter(
         (v) => v.hyperschema.name === spec.schemaName,
       );
-      if (spec.version > versions.length) {
+      const pinned = versions[spec.version - 1];
+      if (pinned === undefined) {
         throw new Error(
           `renderer: schema "${spec.schemaName}" has no version v${spec.version} (it has ${versions.length})`,
         );
       }
+      versionId = pinned.deltaId;
+      coverage = pinned.schema;
     }
-    // Field coverage (§23.4): every consumed field must be one the schema names — refuse a renderer that
-    // reads what the lens can never fill, at push, rather than painting undefined at runtime.
+    // Field coverage (§23.4): every consumed field must be one the PINNED reading names — refuse a
+    // renderer that reads what its lens can never fill, at push, rather than painting undefined at serve.
     for (const field of spec.consumes) {
-      if (!bound.schema.props.has(field)) {
+      if (!coverage.props.has(field)) {
         throw new Error(
-          `renderer: consumes "${field}", but schema "${spec.schemaName}" has no such field`,
+          `renderer: consumes "${field}", but ${
+            spec.version === undefined ? "the latest" : `v${spec.version} of`
+          } schema "${spec.schemaName}" has no such field`,
         );
       }
     }
@@ -902,64 +913,94 @@ export class Gateway {
     await loadRenderers([spec.bundle]);
     const author = authorForSeed(seed);
     await this.append([
-      signClaims(rendererBindingClaims(spec, author, this.nextTimestamp()), seed),
+      signClaims(rendererBindingClaims(spec, versionId, author, this.nextTimestamp()), seed),
     ]);
+  }
+
+  // Ensure a route's bundle is loaded (SPEC §23) — async, so a renderer binding that arrived by any path
+  // (a raw `/append`, a fresh reactor in another process) is runnable before the synchronous serveRoute.
+  // Idempotent (the ESM cache dedups by content address). A no-op for an unknown route.
+  async prepareRoute(route: string): Promise<void> {
+    const binding = this.renderers().find((r) => r.route === route);
+    if (binding !== undefined) await loadRenderers([binding.bundle]);
   }
 
   // Serve a route (SPEC §23): resolve the renderer's node under the door's discipline and execute its
   // bundle to HTML. Read-only in v1 — a renderer receives the resolved view and nothing else (§23.2).
-  // Returns a refusal (never a throw that leaks internals) for an unknown route, a lens the door may not
-  // read, a missing pinned version, or a renderer that faults; the caller renders the status.
+  // Every refusal is a UNIFORM 404 "no such route" (unknown route, a lens this door may not read, a
+  // withdrawn/erased pin, an unmounted bundle) — an anonymous prober learns nothing about what exists
+  // (§17). Synchronous, so the bundle must already be loaded (see prepareRoute); an unloaded bundle is
+  // treated as UNMOUNTED (404), never a 500. A faulting bundle refuses cleanly without leaking.
+  //
+  // KNOWN RESIDUAL (SPEC §23.9 / §24, surfaced by the capability-security panel): the bundle runs
+  // SYNCHRONOUSLY on the event loop with no timeout, on the anonymous door with an attacker-chosen
+  // entity — a hanging operator bundle would wedge every mount. v1's trust model is operator-authored
+  // bundles in a governed store (only operator law binds, §7); the compute budget + object-capability
+  // confinement (SES / Worker / wasm) that would bound an untrusted or buggy bundle is the named §24
+  // quarantine / §23.9 hardening work, deliberately NOT invented here.
   serveRoute(
     route: string,
     entity: string,
     door: "full" | "public",
   ): { status: number; contentType: string; body: string } {
-    const refuse = (status: number, message: string) => ({
-      status,
-      contentType: "text/plain; charset=utf-8",
-      body: message,
-    });
+    // One refusal, everywhere — history is not anonymous, and neither is "which routes exist" (§17).
+    const gone = { status: 404, contentType: "text/plain; charset=utf-8", body: "no such route" };
     const binding = this.renderers().find((r) => r.route === route);
-    if (binding === undefined) return refuse(404, "no such route");
+    if (binding === undefined) return gone;
     const surface = this.surface(door);
-    // On the ANONYMOUS door a renderer serves only a PUBLICLY-DECLARED lens, and only its LATEST version
-    // (SPEC §17 — the public door serves latest-per-name; the §23.8 pinned-public amendment is unbuilt).
-    if (door === "public") {
-      if (
-        surface === undefined ||
-        !surface.registered.some((r) => r.hyperschema.name === binding.schemaName)
-      ) {
-        return refuse(404, "no such route");
-      }
-      if (binding.version !== undefined) return refuse(404, "no such route");
-    } else if (surface === undefined) {
-      return refuse(404, "nothing is registered");
+    // The lens must be in THIS door's surface: registered (full) or publicly declared (public). A schema
+    // withdrawn after the renderer was published thus darkens the route too — the app is a view over
+    // surviving law (§23.6). Both doors check symmetrically; no 404-vs-error oracle.
+    if (
+      surface === undefined ||
+      !surface.registered.some((r) => r.hyperschema.name === binding.schemaName)
+    ) {
+      return gone;
     }
+    // The anonymous door serves only a lens's LATEST version (§17); the §23.8 pinned-public amendment is
+    // unbuilt, so a pinned renderer is invisible to a stranger.
+    if (door === "public" && binding.versionId !== undefined) return gone;
     let node: ResolvedNode;
     try {
-      if (binding.version === undefined) {
+      if (binding.versionId === undefined) {
         node = surface.hooks.resolve(binding.schemaName, entity);
       } else {
-        const versions = this.registrationVersions().filter(
-          (v) => v.hyperschema.name === binding.schemaName,
-        );
-        const pinned = versions[binding.version - 1];
-        if (pinned === undefined) return refuse(404, "the pinned version is gone");
+        // Pinned by the version's CONTENT ADDRESS: resolve the exact surviving version, or — if it was
+        // withdrawn or erased — go dark (§23.6, an app never outlives its source).
+        const pinned = this.registrationVersions().find((v) => v.deltaId === binding.versionId);
+        if (pinned === undefined) return gone;
         node = this.resolvePinned(pinned, entity);
       }
     } catch (err) {
-      return refuse(400, err instanceof Error ? err.message : String(err));
+      // A resolve fault is unusual (the lens is registered); leak the reason only to the full (token)
+      // door, never to a stranger.
+      if (door === "public")
+        return { ...gone, status: 400, body: "the route could not be rendered" };
+      return {
+        status: 400,
+        contentType: "text/plain; charset=utf-8",
+        body: err instanceof Error ? err.message : String(err),
+      };
     }
     const render = loadedRenderer(binding.bundle);
-    if (render === undefined) return refuse(500, "the renderer bundle is not loaded");
+    if (render === undefined) return gone; // unloaded → unmounted, not a 500 (prepareRoute loads it)
     try {
       const html = render({ entity, view: node.view, hex: node.hex });
-      if (typeof html !== "string") return refuse(500, "the renderer did not return HTML");
+      if (typeof html !== "string") {
+        return {
+          status: 500,
+          contentType: "text/plain; charset=utf-8",
+          body: "the renderer did not return HTML",
+        };
+      }
       return { status: 200, contentType: "text/html; charset=utf-8", body: html };
     } catch {
       // A faulting renderer is the operator's own bug; refuse cleanly without leaking its internals.
-      return refuse(500, "the renderer faulted");
+      return {
+        status: 500,
+        contentType: "text/plain; charset=utf-8",
+        body: "the renderer faulted",
+      };
     }
   }
 

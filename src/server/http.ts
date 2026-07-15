@@ -121,13 +121,14 @@ const sendRendered = (
   res.end(out.body);
 };
 
-// Parse `GET /:mount/app/<route>/<entity>` into its route + entity (both percent-decoded); undefined if
-// either is missing or malformed — the caller refuses uniformly, learning nothing extra.
+// Parse `GET /:mount/app/<route>/<entity>` into its route + entity (both percent-decoded); undefined for
+// anything but EXACTLY two non-empty segments — a missing/empty entity, or a trailing segment, refuses
+// uniformly rather than serving an empty or truncated node. The caller learns nothing extra.
 const appRouteOf = (pathname: string): { route: string; entity: string } | undefined => {
   const segs = pathname.split("/").slice(3);
-  if (segs.length < 2 || segs[0] === undefined || segs[1] === undefined) return undefined;
+  if (segs.length !== 2 || segs[0] === "" || segs[1] === "") return undefined;
   try {
-    return { route: decodeURIComponent(segs[0]), entity: decodeURIComponent(segs[1]) };
+    return { route: decodeURIComponent(segs[0]!), entity: decodeURIComponent(segs[1]!) };
   } catch {
     return undefined;
   }
@@ -564,6 +565,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
               refused(res);
               return;
             }
+            await gateway.prepareRoute(parsed.route); // load the bundle (async) before the sync serve
             sendRendered(res, gateway.serveRoute(parsed.route, parsed.entity, "public"));
             return;
           }
@@ -629,6 +631,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             refused(res);
             return;
           }
+          await gateway.prepareRoute(parsed.route); // load the bundle (async) before the sync serve
           sendRendered(res, gateway.serveRoute(parsed.route, parsed.entity, "full"));
           return;
         }

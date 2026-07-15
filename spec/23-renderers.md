@@ -429,4 +429,12 @@ host + client hydration + subscription; write-enabled renderers + the pen (§23.
 sandbox hardening (§23.9); the byte-door + bytes-in-views (§23.7); the §12/§17 pinned-public amendment
 (§23.8); chunked economics; and the §24 quarantine trust UI. v1 executes the operator's OWN bundles in a
 governed store (only operator law binds, §7); untrusted-code confinement is that named §23.9/§24 work.
-Village act `demos/village/phase23.mjs` (PUSH DELTAS, GET SOFTWARE, 4/4).
+Village act `demos/village/phase23.mjs` (PUSH DELTAS, GET SOFTWARE, 4/4). **Panel-reviewed** (the
+sanctioned three-angle exception): substrate-semantics, capability-security, correctness-API. Fixes
+folded from the panel: a pin freezes the version's CONTENT ADDRESS not the shifting numeric vN alias, and
+field-coverage is checked against the PINNED version's schema (so the §23.4 guarantee holds for the
+reading actually resolved); every serve refusal is a UNIFORM 404 (no existence oracle), an unloaded
+bundle is UNMOUNTED (404) not a 500, and `prepareRoute` pre-loads on the serve path. The panel's headline
+residual — a bundle runs SYNCHRONOUSLY with no timeout, on the anonymous door with an attacker-chosen
+entity — is the deferred §23.9/§24 sandbox work, documented in `serveRoute` and accepted as v1's
+operator-authored-in-a-governed-store trust model.
