@@ -335,3 +335,13 @@ _(one entry per PR that grew the village; newest last)_
   every other route keeps answering — the anonymous door can no longer be wedged by an infinite-loop
   bundle. The renders in phase23 / phase-bytes / phase-pinned all cross that boundary now. Honest scope: a
   Worker bounds the hang/crash/memory, not fs/net — true object-capability isolation is §24's work.
+- **A FACE THAT WRITES (SPEC §23.3)** (phase-guestbook.mjs, 2/2, re-runnable — clears its own guestbook
+  stage): §23 v1 renderers only read; this closes the loop. The almanac mounts a guestbook whose renderer
+  paints an HTML `<form>`, and an ANONYMOUS visitor POSTs a message over plain HTTP. The store signs the
+  resulting delta as a per-renderer PEN — a granted-author identity provisioned in the store's config, never
+  the visitor's key — so provenance shows the mediating code, and the re-rendered page shows the new entry.
+  Then §6's two keys made visible: REVOKE the pen's grant, and the very same form writes nothing
+  (provisioning is custody; the grant is authorization) — while the entry it already wrote stays on the
+  record, still attributed to the pen. The anonymous write lands only because the operator did all three:
+  declared the lens public, provisioned the pen's seed, and granted it write standing (§12 — no anonymous
+  writes by default). The user's-own-pen (non-custodial) variant awaits the browser host.
