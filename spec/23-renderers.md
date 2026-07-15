@@ -446,7 +446,7 @@ residual — a bundle runs SYNCHRONOUSLY with no timeout, on the anonymous door 
 entity — is the deferred §23.9/§24 sandbox work, documented in `serveRoute` and accepted as v1's
 operator-authored-in-a-governed-store trust model.
 
-**§23.7 BYTE-DOOR + BYTES-IN-VIEWS — v1 BUILT** [#PR9](https://github.com/bombadil-labs/loam/pull/PR9)
+**§23.7 BYTE-DOOR + BYTES-IN-VIEWS — v1 BUILT** [#102](https://github.com/bombadil-labs/loam/pull/102)
 (realizes ticket T9). A `bytes` leaf in a resolved view now serializes to the self-describing envelope
 `{ mime, ref, base64url? }` at every view→JSON seam — the gql `ViewValue`/`BytesValue` scalars, the REST
 `nodeBody`, and the renderer host itself (`serveRoute` hands the renderer the same envelope, so a bundle
