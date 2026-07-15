@@ -113,6 +113,12 @@ export interface GatewayOptions {
   // created by tokenless subscriptions). A separate, smaller budget than MAX_LAZY_MATS, so a
   // stranger can exhaust the stranger's allowance and never the authenticated surface's.
   readonly maxPublicWatches?: number;
+  // Provisioned renderer-pen SEEDS (SPEC §23.3), keyed by the pen identity a renderer binding names. This
+  // is CUSTODY: a pen's seed lives in config (the store's home), never on the ground — a write-enabled
+  // renderer signs its form-submits AS this seed's author. Provisioning the seed is NOT authorization; the
+  // pen still needs an operator GRANT of write standing (§6's two keys), and revocation strikes that grant.
+  // A store that compromises this config can sign as the pen — the same trust as the operator seed here.
+  readonly pens?: Readonly<Record<string, string>>;
 }
 
 export interface FederationReport {
@@ -1054,6 +1060,89 @@ export class Gateway {
       view: bytesEnvelope(node.view) as Record<string, unknown>,
       hex: node.hex,
     });
+  }
+
+  // May THIS door serve THIS renderer's route (SPEC §23.5/§23.8)? The same read discipline serveRoute
+  // applies — a latest renderer's lens must be in the door's surface (public = a bare-name declaration); a
+  // pinned renderer's version must be publicly declared (public) or simply survive (full). writeRoute
+  // reuses it so a stranger can only POST to a route they could GET, and an undeclared route stays 404.
+  private routeServableOn(binding: RendererBinding, door: "full" | "public"): boolean {
+    if (binding.versionId === undefined) {
+      const surface = this.surface(door);
+      return (
+        surface !== undefined &&
+        surface.registered.some((r) => r.hyperschema.name === binding.schemaName)
+      );
+    }
+    if (door === "public") return this.isPublicPin(binding.schemaName, binding.versionId);
+    return this.registrationVersions().some((v) => v.deltaId === binding.versionId);
+  }
+
+  // Write through a rendered route (SPEC §23.3): a form on a mounted renderer POSTs its fields, and the
+  // STORE signs the resulting delta as the renderer's PEN — a granted-author identity whose seed is
+  // provisioned in config (options.pens), NEVER the caller's token. Provenance thus shows the mediating
+  // code (the pen author is the §19 write attribution), and revocation is striking the pen's grant. The
+  // write runs the gateway's normal §14 mutate — assertWritable (the schema's own writable) AND authorize
+  // (the pen must actually HOLD write standing: provisioning ≠ authorization, §6's two keys). A field
+  // outside the renderer's OWN `writable` allow-list is refused at the door. On the anonymous door a
+  // public renderer's form writes ONLY if the operator BOTH declared the lens public AND provisioned+
+  // granted a pen — no anonymous writes by default (§12).
+  async writeRoute(
+    route: string,
+    entity: string,
+    fields: Record<string, Primitive>,
+    door: "full" | "public",
+  ): Promise<{ status: number; contentType: string; body: string }> {
+    const text = "text/plain; charset=utf-8";
+    const gone = { status: 404, contentType: text, body: "no such route" };
+    const binding = this.renderers().find((r) => r.route === route);
+    if (binding === undefined) return gone;
+    // Visible on this door (the same discipline as a GET), so a stranger can only write where they could
+    // read, and an undeclared route stays a uniform 404 rather than revealing itself.
+    if (!this.routeServableOn(binding, door)) return gone;
+    // A read-only renderer (no pen/writable) declared no way to author — refuse the write, not the route.
+    if (
+      binding.pen === undefined ||
+      binding.writable === undefined ||
+      binding.writable.length === 0
+    ) {
+      return { status: 405, contentType: text, body: "this route is read-only" };
+    }
+    const posted = Object.keys(fields);
+    if (posted.length === 0)
+      return { status: 400, contentType: text, body: "the form wrote no fields" };
+    // Every posted field must be in the renderer's OWN writable allow-list (§14/§21 at the renderer door),
+    // narrower than (and atop) the schema's own writable, which mutateEntity re-checks.
+    for (const f of posted) {
+      if (!binding.writable.includes(f)) {
+        return {
+          status: 400,
+          contentType: text,
+          body: `field "${f}" is not writable by this renderer`,
+        };
+      }
+    }
+    // The pen must be PROVISIONED (its seed in config) — custody. Absent → refuse (nothing to sign with).
+    const penSeed = this.options.pens?.[binding.pen];
+    if (penSeed === undefined) {
+      return { status: 403, contentType: text, body: "this renderer's pen is not provisioned" };
+    }
+    try {
+      // Sign AS the pen (not the caller). append→authorize checks the pen's GRANT — provisioning is not
+      // authorization; a pen with no surviving write grant is refused here exactly as any actor would be.
+      await this.mutateEntity(binding.schemaName, entity, fields, penSeed);
+    } catch (err) {
+      // A refused write leaks its reason only to the full (token) door; a stranger gets a uniform refusal.
+      if (door === "public")
+        return { status: 403, contentType: text, body: "the write was refused" };
+      return {
+        status: 403,
+        contentType: text,
+        body: err instanceof Error ? err.message : String(err),
+      };
+    }
+    // Re-render the now-updated route so a browser form submit lands on the fresh page (§23.3).
+    return this.serveRoute(route, entity, door);
   }
 
   // The byte-door (SPEC §23.7): serve the raw bytes a caller names by content address `ref`, but only

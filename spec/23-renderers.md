@@ -512,12 +512,34 @@ browser and site bundles. Additive/non-breaking → no §20 migration. Tests
 that leaks nothing; a memory-hog is bounded and the host survives). Executable/capability surface → Myk's
 merge (P6).
 
+**§23.3 WRITE-ENABLED RENDERERS (headless, granted-author) — v1 BUILT**
+[#105](https://github.com/bombadil-labs/loam/pull/105) (realizes ticket T12). A rendered route can WRITE, not
+just read. A renderer binding gains an optional `writable` (the fields its forms may write) and `pen` (a
+granted-author identity), both plumbed at rest like `consumes` (parse/claims/read in `src/gateway/renderers.ts`)
+— both-or-neither, absent → read-only (v1's default). `Gateway.writeRoute` handles `POST /:mount/app/<route>/<entity>`
+(the HTTP `app` verb now takes GET or POST; a browser `<form>` posts `application/x-www-form-urlencoded`, a
+programmatic caller posts JSON): it re-checks the route is visible on this door (a stranger writes only where
+they could read), refuses a field outside the renderer's `writable`, and signs the delta AS THE PEN — never
+the caller's token — via the normal §14 `mutateEntity`. **The custody model is §6's two keys, exactly:** the
+pen's SEED is provisioned in config (`GatewayOptions.pens`, keyed by the binding's `pen` name — never on the
+ground; the binding carries only the name), and the pen must ALSO hold an operator GRANT of write standing.
+Provisioning is custody; the grant is authorization; a provisioned-but-ungranted pen writes nothing (the
+`append`→`authorize` path refuses it), and REVOCATION is striking the grant (past writes stay attributed to the
+pen). No anonymous write by default (§12): a public renderer's form writes only if the operator BOTH declared
+the lens public AND provisioned+granted a pen. **The §19 write-path label `renderer` is realized as the pen's
+authorship** — a renderer write is distinguished by its pen author (a formal §19 four-way label enum is not yet
+represented on deltas anywhere; that is separate future work). The USER'S-OWN-PEN (non-custodial client
+signing) variant needs the browser host and is DEFERRED to that slice. Additive/non-breaking (a renderer with
+no pen is the pre-§23.3 shape) → no §20 migration. Tests `test/gateway/write-renderers.test.ts` (7: pen
+authorship, the writable door-gate, read-only refusal, provisioned-but-ungranted refused, revocation with
+past-attribution preserved, and the anonymous-write gate both directions); village act
+`demos/village/phase-guestbook.mjs` (A FACE THAT WRITES, 2/2): an anonymous form POST signed by the pen over
+real HTTP, then revocation blocking the next write while the first entry stays attributed. New write path +
+pen-custody model → Myk's merge (P6).
+
 **Queued build slices — design firmed (Myk, 2026-07-15), authored as coldstart-clean tickets so a fresh
 session can build each end-to-end.** (1) **T9 — the byte-door + bytes-in-views (§23.7)** — BUILT (above).
 (2) **T10 — pinned-public (§23.8)** — BUILT (above). (3) **T11 — the
-renderer sandbox + timeout (§23.9)** — BUILT (above). (4) **T12 — write-enabled renderers
-(§23.3)**: the headless granted-author path — a rendered `<form>` POSTs and the store signs the delta
-under a per-renderer GRANTED AUTHOR (§6's runner-identity custody: provision the pen, grant it standing,
-revoke by striking the grant); the user's-own-pen variant defers to the browser-host slice. The live
-browser React host itself remains a design-stage unit (hydration, the client bundle, the live subscription
-transport) — a design pass before a build.
+renderer sandbox + timeout (§23.9)** — BUILT (above). (4) **T12 — write-enabled renderers (§23.3)** — BUILT
+(above); the user's-own-pen (non-custodial) variant and the live browser React host (hydration, the client
+bundle, the live subscription transport) remain design-stage units — a design pass before a build.

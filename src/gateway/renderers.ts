@@ -28,6 +28,12 @@ interface RendererCore {
   readonly schemaName: string;
   readonly consumes: readonly string[];
   readonly bundle: string;
+  // Write-enabled renderers (SPEC §23.3). `writable` is the fields this renderer's forms may write — a
+  // door-level narrowing atop the registration's own writable (§14/§21); `pen` is the granted-author
+  // identity the server signs form-submits AS (never the caller's token). Both absent → READ-ONLY (v1's
+  // default); both-or-neither is enforced at parse (a writing renderer needs a pen; a pen needs fields).
+  readonly writable?: readonly string[];
+  readonly pen?: string;
 }
 
 // A renderer, as PUSHED. `route` is the path it claims (`/:mount/app/<route>/<entity>`); `schemaName` the
@@ -85,6 +91,8 @@ export function parseRendererInput(raw: unknown): RendererSpec {
     version?: unknown;
     consumes?: unknown;
     bundle?: unknown;
+    writable?: unknown;
+    pen?: unknown;
   } | null;
   if (o === null || typeof o !== "object") {
     throw new Error("register-renderer wants { route, schema, consumes, bundle, version? }");
@@ -113,12 +121,31 @@ export function parseRendererInput(raw: unknown): RendererSpec {
   if (typeof o.bundle !== "string" || o.bundle.trim() === "") {
     throw new Error("renderer: bundle must be non-empty runnable ESM");
   }
+  // Write-enabling (SPEC §23.3): `writable` is the form's field allow-list, `pen` the granted-author it
+  // writes as. Both or neither — a writing renderer with no pen could not sign, a pen with no writable
+  // could write nothing; absent both, the renderer stays read-only (v1's default).
+  if (
+    o.writable !== undefined &&
+    (!Array.isArray(o.writable) || o.writable.some((f) => typeof f !== "string" || f === ""))
+  ) {
+    throw new Error("renderer: writable must be an array of field names when given");
+  }
+  if (o.pen !== undefined && (typeof o.pen !== "string" || o.pen === "")) {
+    throw new Error("renderer: pen must be a non-empty granted-author identity when given");
+  }
+  if ((o.writable === undefined) !== (o.pen === undefined)) {
+    throw new Error(
+      "renderer: writable and pen must be given together — a writing renderer needs a pen to sign as",
+    );
+  }
   return {
     route: o.route,
     schemaName,
     ...(o.version === undefined ? {} : { version: o.version }),
     consumes: o.consumes as string[],
     bundle: o.bundle,
+    ...(o.writable === undefined ? {} : { writable: o.writable as string[] }),
+    ...(o.pen === undefined ? {} : { pen: o.pen }),
   };
 }
 
@@ -150,6 +177,19 @@ export function rendererBindingClaims(
         : [{ role: "versionId", target: { kind: "primitive" as const, value: versionId } }]),
       { role: "consumes", target: { kind: "primitive", value: JSON.stringify(core.consumes) } },
       { role: "bundle", target: { kind: "primitive", value: core.bundle } },
+      // Write-enabling (SPEC §23.3), present only for a writing renderer. The pen NAME rides at rest (the
+      // SEED is custody, held in config — never on the ground); revocation is striking its grant, not this.
+      ...(core.writable === undefined
+        ? []
+        : [
+            {
+              role: "writable" as const,
+              target: { kind: "primitive" as const, value: JSON.stringify(core.writable) },
+            },
+          ]),
+      ...(core.pen === undefined
+        ? []
+        : [{ role: "pen" as const, target: { kind: "primitive" as const, value: core.pen } }]),
     ],
   };
 }
@@ -188,12 +228,29 @@ export function readRenderers(reactor: Reactor, operator?: string): RendererBind
         consumes = [];
       }
     }
+    // Write-enabling (SPEC §23.3): read the form allow-list and the pen name. A binding with one but not
+    // the other is malformed and stays READ-ONLY (both dropped) — the parse gate keeps them paired, and a
+    // reader never trusts a half-written binding to sign.
+    const penRaw = primitive(delta.claims, "pen");
+    let writable: string[] | undefined;
+    const writableRaw = primitive(delta.claims, "writable");
+    if (typeof writableRaw === "string") {
+      try {
+        const parsed: unknown = JSON.parse(writableRaw);
+        if (Array.isArray(parsed) && parsed.every((f) => typeof f === "string")) writable = parsed;
+      } catch {
+        writable = undefined;
+      }
+    }
+    const pen = typeof penRaw === "string" && penRaw !== "" ? penRaw : undefined;
+    const writeReady = writable !== undefined && writable.length > 0 && pen !== undefined;
     const binding: RendererBinding = {
       route,
       schemaName,
       ...(versionId === undefined ? {} : { versionId }),
       consumes,
       bundle,
+      ...(writeReady ? { writable: writable as readonly string[], pen } : {}),
       deltaId: delta.id,
       timestamp: delta.claims.timestamp,
     };
