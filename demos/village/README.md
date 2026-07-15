@@ -319,3 +319,13 @@ _(one entry per PR that grew the village; newest last)_
   view actually contains them (no ref→bytes oracle, no store scan). Then §11 arrives at the screen: erase the
   avatar fact and the byte-door 404s by construction — the door never cached, so forgotten bytes cannot
   outlive their ground.
+- **A DECLARATION IS PUBLICATION (SPEC §23.8)** (phase-pinned.mjs, 3/3, re-runnable — clears its own Notice
+  stage): §17 keeps the anonymous door to a lens's LATEST version, because an anonymous @hash probe was a
+  version-existence oracle — but a renderer PINS a version, and a public pinned route wants a stranger. The
+  almanac registers a `Notice` lens, EVOLVES it to v2 (so "v1" and "the latest" differ), pins a renderer to
+  v1, and declares that pin public with `declarePublic(["Notice@v1"])`. The anonymous door then serves the
+  v1-pinned route — but only after the declaration: a declaration is publication (the operator chose to
+  reveal exactly that version), not a probe (every other version stays 404). The full door serves the pin
+  regardless; and withdrawing the declared version darkens the anonymous route by construction (§23.6), a
+  uniform 404 with no withdrawn-vs-never oracle. The pin is frozen to the version's content address at
+  declare time, so it never slides.
