@@ -80,6 +80,8 @@ import {
 import { applyResolvers, loadResolvers, newResolverMemo, type ResolverMemo } from "./resolvers.js";
 import { bytesEnvelope, findBytesByRef } from "./bytes.js";
 import { renderInWorker } from "./render-worker.js";
+import { MemoryBackend } from "../store/memory.js";
+import type { QuarantineOptions, QuarantinePool } from "./quarantine-pool.js";
 import {
   loadRenderers,
   loadedRenderer,
@@ -1229,7 +1231,62 @@ export class Gateway {
     await this.flush(); // the tombstone must be ground before the target stops being ground
     await this.backend.purge([id]);
     await this.reseat();
+    // §24.8 — the erasure reaches every attached QUARANTINE POOL (the operator's own replicas of this
+    // ground): the same tombstone lands there and the byte is purged there too, so a forgotten record can
+    // never live on in a staging area inside the operator's own walls. §11 reaches through the one-way
+    // glass unconditionally; a quarantine that could hide a purged byte would be an erasure-evasion channel.
+    for (const pool of this.quarantinePools) await pool.eraseReplica(tombstone, id);
     return { erased: id, citations };
+  }
+
+  // The quarantine pools attached to this store (SPEC §24.8): the operator's own one-way replicas that an
+  // erasure here must fan out to. Live Gateway handles registered by `openQuarantine`, dropped on `drop`.
+  private readonly quarantinePools = new Set<Gateway>();
+
+  // Open a QUARANTINE POOL over this store (SPEC §24): a second gateway on its OWN backend, seeded ONE-WAY
+  // from here by federation, sharing THIS operator (§24.1 — the pool is the operator's own staging store, so
+  // the operator's erasure stays authoritative there, §24.8; the one sanctioned shared-seed case). The edge
+  // is inbound only — nothing is ever wired back, so a pool write can never reach this store. The operator's
+  // seeded law binds in the pool (it resolves a real, living lens over the real ground); foreign law stays
+  // inert until promoted. Drop the pool and this store is untouched (discard = erase-by-construction).
+  async openQuarantine(opts: QuarantineOptions = {}): Promise<QuarantinePool> {
+    if (this.options.seed === undefined) {
+      throw new Error("only an operated store can open a quarantine pool (§24.1)");
+    }
+    const backend = opts.backend ?? new MemoryBackend();
+    const pool = await Gateway.open(backend, { seed: this.options.seed });
+    const reseed = (): Promise<FederationReport> =>
+      pool.federate(this.offeredDeltas(), opts.admit ? { admit: opts.admit } : {});
+    await reseed(); // one-way INBOUND seeding; the reverse leg is never wired
+    // Bind the operator's federated schemas so the pool RESOLVES the seeded ground — the dry-run reads a
+    // living lens, not raw deltas. (Foreign, non-operator law federated in binds nothing until promoted.)
+    pool.replayRegistrations();
+    await pool.preloadResolvers();
+    this.quarantinePools.add(pool);
+    return {
+      gateway: pool,
+      reseed,
+      drop: async () => {
+        this.quarantinePools.delete(pool);
+        await pool.close();
+      },
+    };
+  }
+
+  // Honor an erasure DECIDED by the primary operator (SPEC §24.8), called on a pool by the primary's fan-out:
+  // land the operator's tombstone (so the pool remembers the hole and refuses re-entry — the federation door
+  // already enforces that, §11), purge the byte, and re-seat. No local target need exist; the erasure was
+  // decided upstream, and the shared operator makes the tombstone lawful here. This is what keeps a pool from
+  // becoming a place a forgotten byte can hide.
+  async eraseReplica(tombstone: Delta, id: string): Promise<void> {
+    await this.federate([tombstone]); // stores the operator's tombstone (or no-ops if already dead)
+    await this.flush();
+    // Purge ONLY if the operator's tombstone actually landed here (federate's eraseDefect gate rejects a
+    // forged or foreign tombstone). A purge is §11 removal — the operator's alone — so a rejected tombstone
+    // must never trigger one: no unauthorized caller can use this path to forget a record it does not own.
+    if (!readTombstones(this.reactor, this.operatorAuthor).has(id)) return;
+    await this.backend.purge([id]);
+    await this.reseat();
   }
 
   // A fresh reactor replayed from the backend as it stands NOW — how open() built the first

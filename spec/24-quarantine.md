@@ -368,5 +368,24 @@ corrected here — writes go into the pool, which is the entire point of a dry-r
 (the host contract, the snapshot doctrine, the two trust axes, and the sandboxed-renderer pen — all
 merged) and, through it, on §21 (a Schema is a first-class publishable entity — `SCHEMA_SCHEMA` /
 `publishSchemaClaims`, which makes promote-of-law clean) and §22 (the purity ladder whose wild end this
-lets run for real). No implementation ships with this draft; the build slice of §24.9 is the next ticket,
-and the erasure test of §24.8 is written first.
+lets run for real).
+
+**SLICE 1 BUILT** [#PR13](https://github.com/bombadil-labs/loam/pull/PR13) (realizes ticket T13) — the
+non-negotiable foundation of §24.9. `Gateway.openQuarantine` (`src/gateway/quarantine-pool.ts` +
+`gateway.ts`) stands up a QUARANTINE POOL: a second gateway over its OWN backend, seeded ONE-WAY from the
+primary by federation (`federate(offeredDeltas())` — inbound only, so a pool write can never reach the
+primary), sharing the primary's operator so the operator's law binds and — the point — the operator's
+erasure stays authoritative there. The ground live-follows (`reseed` re-pulses the edge). §24.8's law is
+built and tested first: `Gateway.erase` now FANS the erasure OUT to every attached pool (`eraseReplica`
+lands the operator's tombstone and purges the byte — gated on the tombstone actually landing, so a forged
+tombstone can never drive a purge), so §11 reaches through the one-way glass and the pool can never hide a
+forgotten byte. Drop is consequence-free (`drop` detaches from the fan-out + discards the store). Tests
+`test/gateway/quarantine.test.ts` (6: separate-store/drop, one-way glass, live-follow, the four-part §24.8
+erasure at the byte level, purge-reaches-every-pool, and the forged-tombstone-cannot-purge guard); village
+act `demos/village/phase-quarantine.mjs` (A PLACE WHERE UNTRUSTED LAW MAY BIND, 4/4). **Deferred to their
+own slices** (§24.9 DESCRIBE): promotion (promote-outputs `loam.adoption` re-sign + promote-law via the
+ordinary publish path); the per-quarantine resource envelope over the §23.9 worker; the sequestered
+renderer frame; the full no-fs/no-net ocap; and a read-side capability slice. **Residual, noted:** the
+erasure fan-out is best-effort-and-loud — a pool whose `eraseReplica` throws makes `erase` REJECT (the
+operator learns the erasure did not fully complete) rather than silently evade; a future slice can make it
+transactional. New capability/federation/erasure surface → Myk's merge (P6).

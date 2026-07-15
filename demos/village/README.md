@@ -345,3 +345,14 @@ _(one entry per PR that grew the village; newest last)_
   record, still attributed to the pen. The anonymous write lands only because the operator did all three:
   declared the lens public, provisioned the pen's seed, and granted it write standing (§12 — no anonymous
   writes by default). The user's-own-pen (non-custodial) variant awaits the browser host.
+- **A PLACE WHERE UNTRUSTED LAW MAY BIND (SPEC §24, slice 1)** (phase-quarantine.mjs, 4/4, re-runnable):
+  today foreign law is inert-by-default — safe, but untestable. The quarantine closes that gap. The almanac
+  stands up a QUARANTINE POOL — a second store over its own ground, seeded ONE-WAY from the primary — that
+  resolves the primary's LIVING ground (a real lens over real ground, where a stranger's whole app could run
+  sequestered). Then the invariants that make it trustworthy: the glass is ONE-WAY (a write inside the pool
+  never reaches the primary — sandbox writes go INTO the sandbox, nowhere else); §11 reaches THROUGH the
+  glass (erase a fact in the primary and the byte is gone from the quarantine too, so a forgotten record can
+  never hide in a staging area inside the operator's own walls — §24.8, the non-negotiable law); and DROP is
+  consequence-free (discard the whole pool and the primary's coherence is untouched — its title still reads
+  true). Promotion (the door OUT), the resource envelope, the sequestered renderer frame, and the full ocap
+  are §24's later slices.
