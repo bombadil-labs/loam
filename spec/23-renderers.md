@@ -194,30 +194,32 @@ stay answerable by hash — §17's whole law, unchanged. Evolution mints a versi
 Withdrawing a shipped-broken renderer is the operator striking its binding (lawful negation), the same
 instrument as everywhere; the route stops being served, the ground remembers it existed.
 
-**Three strengths of "going away" (RECOMMENDATION, with an open tension Myk named 2026-07-14).** A
-running app can lose the deltas that generated it three different ways, and they are NOT the same act:
+**An app is a live view over SURVIVING deltas — it never outlives its source (DECIDED, Myk 2026-07-15).**
+This is the governing principle, and it resolves the tension cleanly. A renderer is not a running instance
+that persists on its own; it is, conceptually, a view into some set of deltas, re-derived from the current
+surviving ground every time it is served. So **if the deltas are gone, so is the app** — immediately, by
+construction, never "still running until a restart." (That we do not literally rehydrate the bundle on
+every request is an OPTIMIZATION, never a change to the semantics: the served state always reflects the
+surviving ground, and a host that has cached a mounted app must drop it the moment its source stops
+surviving.) The alternative — an app that keeps answering after its law was struck or erased — is exactly
+the odd, stale situation this principle refuses.
 
-- **WITHDRAW (negation of the binding).** §21 is emphatic that a snapshot never supersedes — "pin any of
-  them and it answers forever; the ground remembers all of them." So striking a renderer's binding, or the
-  schema version it pins, does not delete the content-addressed snapshot; it stops the operator SERVING it.
-  A hard-pinned route (`board@<hash>` over `Film@<hash>`) keeps resolving the frozen bytes — the reading is
-  content-addressed and cannot be unsaid — while the default/latest route (§23.5) moves off the withdrawn
-  version to the prior survivor, and the host surfaces "reading a retired lens" (honest per §13).
-- **ERASE (§11), the stronger promise, reaches EVERYTHING** — even a hard pin. Purge removes the bytes and
-  the tombstoned id is refused re-entry forever; a renderer whose bytes are purged 404s, a purged asset it
-  references 404s at the byte-door. Content addressing lets a pin answer forever; erasure is the one thing
-  that overrides it, by design.
+Three acts remove the source, and all three stop the serving:
+
+- **WITHDRAW (negation of the binding).** Striking a renderer's binding, or the schema version it pins,
+  removes it from the SURVIVING lawful set — so it stops being served, exactly as §17/§21 already withdraw
+  a schema version (a struck version is 410, not "still answered from its snapshot"). The default/latest
+  route (§23.5) falls back to the prior survivor; a route pinned to the struck version goes dark. The bytes
+  are not purged (the ground still remembers THAT it existed, §21), but "remembered" is not "served." This
+  is consistent with §21 by construction: "a pin answers forever" means a SURVIVING snapshot never
+  auto-supersedes under evolution — not that it outlives a deliberate withdrawal.
+- **ERASE (§11), the strongest, reaches the bytes themselves.** Purge removes the content and the
+  tombstoned id is refused re-entry forever; the renderer 404s, a purged asset it references 404s at the
+  byte-door. Withdrawal stops serving; erasure removes the possibility of ever serving again.
 - **QUARANTINE-DROP discards the sandbox wholesale (§23.9).** A quarantined renderer and its writes never
-  entered canonical history, so dropping the sandbox pool simply removes them — no negation, no residue.
-  This is the clean-discard §23.3 leans on.
-
-**The open tension (Myk):** keeping a running app alive after its generating deltas are negated is a
-sensible v1 strategy — a content-addressed pin is exactly the "works forever" guarantee — but it is worth
-revisiting whether a hard pin SHOULD outlive an operator's deliberate withdrawal, or whether withdrawal
-should be able to reach a pin the way erasure does (a softer "unmount everywhere" that stops short of
-purging the bytes). v1 recommends: withdrawal stops SERVING (default route moves, public reveal ends,
-§23.8) but does not unmount an existing hard pin; erasure is the operator's tool when they mean "gone
-everywhere." Flagged here so the build can reopen it if the pin-outlives-withdrawal posture chafes.
+  entered canonical history, so dropping the sandbox pool removes them and their app stops being served —
+  no negation, no residue. This is the clean discard §23.3 leans on, and it is the same principle: the
+  app's deltas are gone, so the app is gone.
 
 ### 23.7 Bytes in views — the self-describing envelope (DECIDED, Myk 2026-07-14)
 
@@ -391,8 +393,10 @@ direction is accepted and these decisions are now settled (pending the build):
   catch so much) (Myk).
 - **Router discipline** — renderers pinned like schemas, with a default route serving the most-recent pin
   (Myk).
-- **Struck-version behavior** — three strengths (withdraw / erase / quarantine-drop); a hard pin outlives
-  withdrawal but not erasure. Myk flagged pin-outlives-withdrawal as a v1 posture worth revisiting.
+- **Struck-version behavior** — DECIDED (Myk, 2026-07-15): an app is a live view over SURVIVING deltas and
+  never outlives its source; withdraw / erase / quarantine-drop all stop the serving. No app runs after
+  its law is gone. (This corrected the draft's "hard pin outlives withdrawal," which had contradicted
+  §21's own 410-on-withdrawal.)
 - **Public-door amendment** — a declaration is publication, not a probe; a public declaration may name
   pinned versions (Myk: "sounds right"). A genuine §12/§17 amendment.
 - **Trust** — TWO distinct axes (Myk's key precision): delta-isolation (a separate, opt-in-queryable,
