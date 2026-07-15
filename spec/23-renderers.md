@@ -72,9 +72,13 @@ renderer is handed three capabilities and no others:
   compiles a click into one of these calls; it cannot forge a delta, widen a grant, or touch a store the
   handle does not reach.
 
-The renderer holds no keys and no reactor. The HOST holds them and injects capability-scoped handles —
-the object-capability discipline (§6) at the screen: a renderer's authority is exactly the set of handles
-it was given, nothing ambient. A read-only host injects `resolve` + `watch` and no write verbs — the
+The mental model (Myk, 2026-07-14): **for all a renderer knows, it is an ordinary React app talking to a
+GraphQL service that happens to be bundled with it** — it does not know it is inside a Loam host, it just
+calls the client it was handed and renders the result. That is the whole trick: the "service" is the
+projected `SurfaceHooks`, and swapping a live door for a pinned one, or a full projection for a read-only
+one, is invisible to the component. The renderer holds no keys and no reactor. The HOST holds them and
+injects capability-scoped handles — the object-capability discipline (§6) at the screen: a renderer's
+authority is exactly the set of handles it was given, nothing ambient. A read-only host injects `resolve` + `watch` and no write verbs — the
 `"read"` projection of §17, "a smaller world, not a bypass." A full host injects the write verbs too. So
 the host contract is not new machinery: **it is `SurfaceGenerator<ReactApp>` over `SurfaceHooks`, scoped
 by `SurfaceProjection`.** The stock React host is a running app whose router is DERIVED from the store's
@@ -110,6 +114,16 @@ default the user's own pen (non-custodial), with an optional per-renderer grante
 the operator has not made its own. A host must SHOW which pen a mounted renderer writes under (the trust
 UI), so a user never signs with their own key inside a face they did not author without knowing it.
 
+**And a SANDBOXED renderer's writes are scoped to the sandbox, discardable wholesale (Myk, 2026-07-14).**
+When a renderer is quarantined, its writes do not land in the canonical ground at all — the per-renderer
+granted author writes into the SANDBOX POOL (§23.9/§24), a separate store, and the entire point is that
+the operator can simply DISCARD the whole thing: drop the sandbox and everything the quarantined renderer
+authored vanishes with it, no negation-by-negation cleanup, no residue in canonical history. This shapes
+how the sandbox is built: it must be a real, separate pool the writes actually land in (a store the
+operator can drop), never a mere mark on canonical deltas that a reader is trusted to honor — you cannot
+discard a mark. Promotion out of the sandbox (§24) is then the deliberate act that moves specific outputs
+into canonical authorship; absent it, closing the sandbox is a clean erase-by-construction.
+
 ### 23.4 Binding a renderer, and proving it at push time
 
 A renderer binding is a small, three-part declaration — *this renderer (content hash), consuming this
@@ -134,6 +148,13 @@ strength, and v1 recommends the first two:
 3. **Structural type agreement (deferred)** — checking that each consumed field's declared type matches
    the schema's output type (§22.6) exactly. A later hardening slice; v1 stops at coverage.
 
+Push-time verification is best-effort by design, not a proof of runtime safety: this is a LIVING system
+(Myk, 2026-07-14), the ground goes on moving under a mounted renderer, and no push-time check can
+guarantee a future read never surprises a component. The goal is to catch the breakage we CAN catch
+cheaply — an unregistered schema, a field the lens cannot fill — and refuse it at the door, so the common
+"renderer references what the store does not serve" class fails loudly at push instead of silently at
+runtime. We do what we can and are honest that it is not everything.
+
 A renderer pinning `Film@<hash>` gets §21's guarantee for free: the VersionedSchema is a content-
 addressed snapshot that never supersedes, so "renderer pinned to schema v3 works forever" is not a
 feature the renderer implements — it is a property it inherits from the rung below. (This is precisely
@@ -152,10 +173,14 @@ recommendations:
   blessed). Routes live under the mount — `/:mount/app/<route>` — and the operator's law is the only law
   that claims one. Federation brings foreign routes that are inert until blessed, and when blessed into a
   probation frame (§24), they mount visibly sequestered.
-- **Collisions.** A route is claimed by a renderer binding; the LATEST surviving binding per route wins,
-  exactly as the latest registration per schema entity wins (§21). Re-pushing a renderer at the same
-  route is evolution; striking it darkens the route. Two live bindings for one route is the same
-  latest-wins resolution the surface already runs — no new arbitration.
+- **Renderers are PINNED, like schemas, with a latest route (Myk, 2026-07-14).** A renderer version is a
+  content-addressed thing, and a route may PIN a specific version (`/:mount/app/board@<hash>`) — frozen,
+  answering that exact renderer forever, the exact mirror of a `name@hash` schema pin (§21) — OR be a
+  DEFAULT route (`/:mount/app/board`) that always serves the MOST-RECENT pin, tracking evolution the way
+  a bare schema name tracks the latest registration (§17). So the two access modes of the version door
+  arrive at the screen: pin-and-freeze for a consumer who wants stability, follow-latest for the default
+  face. Re-pushing a renderer mints a new pin and moves the default route to it; striking the latest pin
+  moves the default route back to the prior survivor; a hard-pinned route is unmoved by either.
 - **Many faces per schema.** A Schema is a lens, and a lens has no reason to have exactly one face: many
   renderers may bind the same schema at different routes (a `Film` card, a `Film` full page, a `Film`
   admin form), each its own versioned unit. The schema is the shared ground; the renderers are readings
@@ -169,17 +194,30 @@ stay answerable by hash — §17's whole law, unchanged. Evolution mints a versi
 Withdrawing a shipped-broken renderer is the operator striking its binding (lawful negation), the same
 instrument as everywhere; the route stops being served, the ground remembers it existed.
 
-**What happens when the pinned SCHEMA version is struck (RECOMMENDATION).** A renderer pins a
-VersionedSchema, and §21 is emphatic that a snapshot never supersedes — "pin any of them and it answers
-forever; the ground remembers all of them." So striking a schema version does not delete its snapshot;
-it strikes the schema's REGISTRATION (stops the operator serving that version through the schema's own
-doors). The recommendation keeps the two consistent: a renderer pinned to a struck version continues to
-RESOLVE against the frozen snapshot on the FULL (operator) door — the pinned reading is content-addressed
-and cannot be unsaid — while the host surfaces that the underlying registration was withdrawn (a "reading
-a retired lens" banner, honest per §13). Striking a schema version stops NEW bindings to it and its
-public reveal (§23.8), never a pin already taken. Erasure (§11) is the stronger promise and reaches
-everything: a renderer whose bytes are purged 404s like any other content; a purged asset it references
-404s at the byte-door.
+**Three strengths of "going away" (RECOMMENDATION, with an open tension Myk named 2026-07-14).** A
+running app can lose the deltas that generated it three different ways, and they are NOT the same act:
+
+- **WITHDRAW (negation of the binding).** §21 is emphatic that a snapshot never supersedes — "pin any of
+  them and it answers forever; the ground remembers all of them." So striking a renderer's binding, or the
+  schema version it pins, does not delete the content-addressed snapshot; it stops the operator SERVING it.
+  A hard-pinned route (`board@<hash>` over `Film@<hash>`) keeps resolving the frozen bytes — the reading is
+  content-addressed and cannot be unsaid — while the default/latest route (§23.5) moves off the withdrawn
+  version to the prior survivor, and the host surfaces "reading a retired lens" (honest per §13).
+- **ERASE (§11), the stronger promise, reaches EVERYTHING** — even a hard pin. Purge removes the bytes and
+  the tombstoned id is refused re-entry forever; a renderer whose bytes are purged 404s, a purged asset it
+  references 404s at the byte-door. Content addressing lets a pin answer forever; erasure is the one thing
+  that overrides it, by design.
+- **QUARANTINE-DROP discards the sandbox wholesale (§23.9).** A quarantined renderer and its writes never
+  entered canonical history, so dropping the sandbox pool simply removes them — no negation, no residue.
+  This is the clean-discard §23.3 leans on.
+
+**The open tension (Myk):** keeping a running app alive after its generating deltas are negated is a
+sensible v1 strategy — a content-addressed pin is exactly the "works forever" guarantee — but it is worth
+revisiting whether a hard pin SHOULD outlive an operator's deliberate withdrawal, or whether withdrawal
+should be able to reach a pin the way erasure does (a softer "unmount everywhere" that stops short of
+purging the bytes). v1 recommends: withdrawal stops SERVING (default route moves, public reveal ends,
+§23.8) but does not unmount an existing hard pin; erasure is the operator's tool when they mean "gone
+everywhere." Flagged here so the build can reopen it if the pin-outlives-withdrawal posture chafes.
 
 ### 23.7 Bytes in views — the self-describing envelope (DECIDED, Myk 2026-07-14)
 
@@ -240,37 +278,56 @@ resolvers alongside its `props`/`default`, and `name@hash` becomes the address o
 is a Loam-layer change (rhizomatic untouched), symmetric to §21's deferred `VersionedHyperSchema`, and it
 is a prerequisite of the pinned-public-renderer guarantee, not an optional nicety.
 
-### 23.9 Trust for executable consumers — the sharpest edge
+### 23.9 Trust — two distinct disciplines, not one (refined by Myk, 2026-07-14)
 
-A renderer runs code a host did not write, and federation makes that acute: a confluence ships apps, and
-a peer's renderer is executable law. The floor is the one the whole substrate already stands on —
-**inert-by-default** (§8/§12/§15): a foreign renderer's deltas cross (union is union), its testimony is
-all present, and its law stays inert. In a governed store only operator-authored renderer bindings bind,
-so a foreign renderer mounts NOTHING until the operator blesses it — "data federates; authority never
-does," now at the screen.
+The sharpest edge, and the review's precision matters: a renderer is untrusted on TWO independent axes,
+and the design must not conflate them.
 
-Blessing does not start from zero. **§6 already names the discipline: object-capability confinement —
-`isolated` bodies in a SES / Worker / wasm compartment, required for federated code.** Renderers inherit
-that doctrine at the screen; they do not invent a parallel sandbox. Concretely:
+**Axis one — DELTA ISOLATION (the sandbox/quarantine's actual purpose).** The point of a sandbox is to
+keep deltas from an UNTRUSTED SOURCE out of the canonical store history — a foreign renderer, its writes,
+its outputs must not merge into your primary ground. This is a DATA property, not a code-execution one.
+Three things follow, and the third is the one the first draft missed:
 
-- **The host mounts every renderer in an ocap compartment** whose ONLY capabilities are the `SurfaceHooks`
-  handles the host injects (§23.2). No ambient store, no ambient network, no DOM beyond its mount point —
-  a renderer reaches the world only through the capability-scoped handles, so a foreign renderer can do
-  exactly what its projection allows and nothing more. A read-only projection cannot write; a full
-  projection writes only through the door discipline, under the pen its binding is scoped to (§23.3).
-- **Quarantine-first is the posture for federated renderers (§24).** A foreign renderer lands inert,
-  and the trust UI mounts it in a visibly SEQUESTERED frame — "this is probation; its writes go into a
-  staging pool, not your ground" — until the operator promotes it. Blessing is a promotion out of
-  quarantine (§24's one-way glass), not a boolean flipped in the dark; the two-authority discipline (§6)
-  holds — blessing the renderer and granting its pen are different keys.
-- **The budget is §6's, and §24 tightens it.** Executable code carries a divergence guard (§6's lifetime
-  trigger count); a renderer's compute, its subscription fan-out, and its asset appetite are resource-
-  disciplined so a mounted stranger's cost stays confined to the stranger's frame — the same "confine a
-  stranger's resource cost to the stranger's door" §12 already runs for public watches.
+- **A separate pool, not a mark.** The sandbox is a real separate store (§24's decided posture), so a
+  quarantined renderer and its writes land THERE, never in canonical history — and the operator can DROP
+  it wholesale (§23.3). Isolation that rests on canonical deltas carrying a "sandboxed" mark every reader
+  must honor is not isolation; a separate pool is.
+- **FULL INTEROP by opt-in (Myk).** A sandbox is NOT a black box. While it is active, any query may OPT IN
+  to including it within its own scope — read across the canonical ground AND the sandbox together,
+  deliberately, for that query. The default scope is canonical-only (the sandbox pollutes nothing by
+  omission); widening to include a sandbox is a per-query choice, the exact dual of federation's read-time
+  trust (§8 — "whether a peer's facts shape a local view is a read-time trust choice"). So you can dry-run
+  a stranger's whole app against your real ground and SEE what it computes, precisely because the
+  interop is there for the asking — you just never merge it without meaning to.
+- **Discard is erase-by-construction.** Drop the pool and everything untrusted vanishes with it, no
+  negation-by-negation cleanup. Promotion (§24) is the deliberate opposite: move specific outputs into
+  canonical authorship.
 
-This is the sanctioned panel-review surface: capability-security is one of the three angles §23's
-prosecution must run (§23 provenance), because a renderer is the first place Loam executes a foreign
-author's code with a user's face around it.
+This refines §24's "one-way glass": the glass is not opaque — a query may look THROUGH it on purpose. What
+stays one-way is the MERGE: nothing crosses into canonical history without a deliberate promotion.
+
+**Axis two — CODE CONFINEMENT (running the renderer's bytes safely).** Separate concern: a renderer
+executes code, and the running code must not reach ambient authority. Here §6's discipline applies
+directly — **object-capability confinement, `isolated` bodies in a SES / Worker / wasm compartment,
+required for federated code.** The host mounts every renderer in an ocap compartment whose ONLY
+capabilities are the `SurfaceHooks` handles it injects (§23.2): no ambient store, no ambient network, no
+DOM beyond its mount point. A renderer reaches the world only through its capability-scoped handles, so it
+does exactly what its projection allows and nothing more, and §6's divergence budget (a lifetime trigger
+count) and §12's per-door resource caps keep a mounted stranger's cost confined to the stranger's frame.
+
+**The two compose.** A quarantined federated renderer runs CONFINED (axis two — it can touch only its
+handles) AND writes ISOLATED (axis one — its deltas land in the opt-in-queryable, discardable pool). The
+floor beneath both is inert-by-default (§8/§12/§15): in a governed store only operator-authored renderer
+bindings bind, so a foreign renderer mounts nothing until blessed — "data federates; authority never
+does," now at the screen. Blessing is promotion out of quarantine (§24), not a boolean flipped in the
+dark, and §6's two-authority discipline holds: blessing the renderer and granting its pen are different
+keys.
+
+This is the sanctioned panel-review surface: capability-security is one of §23's three prosecution angles
+(§23 provenance), because a renderer is the first place Loam executes a foreign author's code with a
+user's face around it. (This section also FEEDS §24: the opt-in-interop refinement above is an input to
+the quarantine's own design — §24's separate-store posture gains a read-time "include this sandbox in
+scope" query control.)
 
 ### 23.10 The economics arrive early
 
@@ -287,7 +344,13 @@ addressing already deduping unchanged units across versions.
 - **Binary assets ride the `bytes` Target kind** (adopted, T8) — small inline as base64url, large as a
   content-addressed ref through the byte-door, exactly the §23.7 envelope. §23 does NOT treat the bytes
   primitive as a blob store: it is the inline rung only, and big assets climb the ladder like everything
-  else.
+  else. **Past a strict ceiling, binaries do NOT ride deltas AT ALL (Myk, 2026-07-14)** — a fat binary in
+  a delta makes federation challenging (every peer syncing the whole payload, `deltasSince` moving
+  megabytes) and is prone to ABUSE (a delta stream is not a CDN, and a signed grow-only log is a bad place
+  to smuggle bulk). So the inline rung is deliberately SMALL, the content-addressed ref is the working
+  default, and above the ceiling the bytes live out-of-band behind their ref (the byte-door fetches them),
+  never inline in a delta that federation must carry. The delta carries the IDENTITY (the ref); the bytes
+  travel on their own terms.
 - **The browser peer stays a leaf** (§15 — a browser store is a leaf or aggregator, never a hub, and
   cannot BE pulled), so a renderer-heavy store on the browser peer meets the quota wall the same way any
   data does: reads keep answering, writes refuse loudly, and the remedy is export or a bigger driver. The
@@ -317,12 +380,31 @@ the host holds the keys, always: a renderer's authority is exactly the handles i
 deltas, get software" never means "push deltas, get authority" — the pen is the user's or a revocable
 grant's, never the code's to seize.
 
-**Provenance.** Design drafted (Claude, 2026-07-14); **awaiting Myk's acceptance — not landed.** Realizes
-ADLC ticket T4; describes the full renderer model and builds none of it yet. Questions decided arrive
-DECIDED (bytes-in-views, Myk 2026-07-14); the open ones — the host contract shape, whose pen writes, the
-module contract, the router discipline, the struck-version behavior, the push-time compatibility relation,
-the public-declaration amendment, and the trust/sandbox posture — are carried as reasoned RECOMMENDATIONS
-for Myk's review. Depends on §21 (a renderer pins a VersionedSchema) and §22 (the snapshot doctrine, and
-the resolver-in-snapshot fold that lands here). **Review posture (the sanctioned panel exception,
-CLAUDE.md):** a three-angle panel — substrate-semantics · capability-security · correctness-API — not one
-generalist, because §23 is where Loam first executes a foreign author's code with a user's face around it.
+**Provenance.** Design drafted (Claude, 2026-07-14); **reviewed and refined by Myk the same day**; the
+direction is accepted and these decisions are now settled (pending the build):
+
+- **Host contract** — projected `SurfaceHooks`; a renderer is, for all it knows, a React app against a
+  bundled GraphQL service (Myk).
+- **Whose pen writes** — the `renderer` write-path label; default the user's own pen, and a SANDBOXED
+  renderer's writes are scoped to the discardable sandbox pool, never canonical (Myk).
+- **Push-time verification** — existence + field coverage, best-effort by design (a living system can only
+  catch so much) (Myk).
+- **Router discipline** — renderers pinned like schemas, with a default route serving the most-recent pin
+  (Myk).
+- **Struck-version behavior** — three strengths (withdraw / erase / quarantine-drop); a hard pin outlives
+  withdrawal but not erasure. Myk flagged pin-outlives-withdrawal as a v1 posture worth revisiting.
+- **Public-door amendment** — a declaration is publication, not a probe; a public declaration may name
+  pinned versions (Myk: "sounds right"). A genuine §12/§17 amendment.
+- **Trust** — TWO distinct axes (Myk's key precision): delta-isolation (a separate, opt-in-queryable,
+  discardable pool — the sandbox exists to keep untrusted deltas out of canonical history WHILE allowing
+  full opt-in interop) and code-confinement (§6 ocap). This refines §24's one-way glass and is an input to
+  §24's own design.
+- **Economics** — the snapshot ladder; a strict ceiling past which binaries do NOT ride deltas at all
+  (federation cost + abuse) (Myk).
+- **Bytes-in-views** — DECIDED earlier (Myk, 2026-07-14): the `{ mime, ref, base64url? }` envelope + byte-door.
+
+Realizes ADLC ticket T4; describes the full renderer model and builds none of it yet. Depends on §21 (a
+renderer pins a VersionedSchema) and §22 (the snapshot doctrine, and the resolver-in-snapshot fold that
+lands here). **Review posture for the BUILD (the sanctioned panel exception, CLAUDE.md):** a three-angle
+panel — substrate-semantics · capability-security · correctness-API — not one generalist, because §23 is
+where Loam first executes a foreign author's code with a user's face around it.
