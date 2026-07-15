@@ -18,6 +18,7 @@
 // inside what public GraphQL answers, and its version history stays its own business.
 
 import type { Primitive } from "@bombadil/rhizomatic";
+import { bytesEnvelope } from "../gateway/bytes.js";
 import type { Gateway } from "../gateway/gateway.js";
 import type { RegistrationVersion } from "../gateway/registration.js";
 import type { SurfaceHooks } from "./surface.js";
@@ -81,6 +82,16 @@ function propSchema(kind: string): Record<string, unknown> {
 // A resolved field's OpenAPI shape comes from its DECLARED output type (SPEC §22.6), not the policy —
 // the resolver changes what the value IS, so the document must describe the field it actually serves.
 function resolverPropSchema(type: string): Record<string, unknown> {
+  // A bytes field (SPEC §23.7) serves the self-describing envelope, documented `format: binary` so a
+  // consumer reads "these are bytes" from the schema — the raw bytes ride the byte-door behind `ref`.
+  if (type === "bytes") {
+    return {
+      type: "object",
+      format: "binary",
+      description:
+        "a bytes value (SPEC §23.7): { mime, ref, base64url? } — fetch raw bytes at /bytes/<ref>?from=<lens>/<entity>",
+    };
+  }
   const jsonType =
     type === "number"
       ? "number"
@@ -243,7 +254,9 @@ const nodeBody = (node: {
   forgotten?: number[];
 }): Record<string, unknown> => ({
   entity: node.entity,
-  view: node.view,
+  // A bytes leaf anywhere in the view becomes the §23.7 envelope; raw bytes are not JSON (bytesEnvelope
+  // passes everything else through unchanged and is a no-op when the view holds none).
+  view: bytesEnvelope(node.view),
   _hex: node.hex,
   _hviewHex: node.hviewHex,
   ...(node.asOf === undefined ? {} : { _asOf: node.asOf, _forgotten: node.forgotten }),

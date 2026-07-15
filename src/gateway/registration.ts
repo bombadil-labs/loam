@@ -97,13 +97,14 @@ export type ResolverRung = "a";
 // The field's declared output TYPE (SPEC §22.6): what the doors advertise once a resolver changes
 // what the value IS. The signed definition carries it so GraphQL/OpenAPI speak the field they serve —
 // a resolver turning a `pick` string into a histogram must not leave the door advertising `String`.
-export type ResolverOutputType = "string" | "number" | "boolean" | "list" | "object";
+export type ResolverOutputType = "string" | "number" | "boolean" | "list" | "object" | "bytes";
 const RESOLVER_TYPES: ReadonlySet<string> = new Set([
   "string",
   "number",
   "boolean",
   "list",
   "object",
+  "bytes",
 ]);
 
 export interface ResolverSpec {

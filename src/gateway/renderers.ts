@@ -16,7 +16,7 @@
 // confinement for UNTRUSTED code (SES / Worker / wasm, §6) is §24's quarantine and a named §23 hardening
 // slice, not invented here.
 
-import type { Claims, Reactor, View } from "@bombadil/rhizomatic";
+import type { Claims, Reactor } from "@bombadil/rhizomatic";
 import { importEsm, loadedEsm } from "./esm.js";
 import { lawfulNegated, lawfulSnapshot } from "./registration.js";
 
@@ -50,10 +50,13 @@ export interface RendererBinding extends RendererCore {
 }
 
 // What the host hands a renderer: the resolved node, and nothing else (§23.2 — a renderer speaks lens, the
-// host holds the keys). v1 is read-only, so it is exactly a `ResolvedNode`'s public face.
+// host holds the keys). v1 is read-only, so it is exactly a `ResolvedNode`'s public face. A bytes leaf is
+// handed over as the §23.7 envelope { mime, ref, base64url? } — the same face gql/REST show — so a
+// renderer builds `<img src>` from `ref` (the byte-door) or the inline `base64url`, never juggling raw
+// Uint8Arrays; every non-bytes value passes through unchanged.
 export interface RenderNode {
   readonly entity: string;
-  readonly view: Record<string, View>;
+  readonly view: Record<string, unknown>;
   readonly hex: string;
 }
 

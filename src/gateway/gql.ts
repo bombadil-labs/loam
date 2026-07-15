@@ -31,6 +31,7 @@ import {
   type GraphQLOutputType,
 } from "graphql";
 import type { Primitive, Policy } from "@bombadil/rhizomatic";
+import { bytesEnvelope } from "./bytes.js";
 import { edgeRoles, type ClaimTemplates, type ResolverOutputType } from "./registration.js";
 import type {
   ClaimPointerSpec,
@@ -55,11 +56,24 @@ export type {
 } from "../surface/surface.js";
 
 // The pass-through output scalar: a resolved View value — primitive, list, or nested object —
-// exactly as the policy adjudicated it.
+// exactly as the policy adjudicated it. One transformation only (SPEC §23.7): a BytesView anywhere in
+// the value (a bytes leaf, or one nested in a list/object) becomes the self-describing { mime, ref,
+// base64url? } envelope — raw bytes are not JSON, and this is the value-level detection that fires for
+// ANY bytes leaf, whether or not the field was declared `bytes`. Everything else passes through as-is.
 const ViewValue = new GraphQLScalarType({
   name: "ViewValue",
-  description: "A resolved view value — primitive, list, or nested view — passed through as-is.",
-  serialize: (v) => v,
+  description: "A resolved view value — primitive, list, nested view, or a bytes envelope (§23.7).",
+  serialize: (v) => bytesEnvelope(v),
+});
+
+// The type-level face of a bytes field (SPEC §23.7): a field DECLARED `bytes` (a §22.6 resolver output
+// type) is typed BytesValue so a consumer knows it is bytes from the schema, not by inspecting a value.
+// Serialization is the same envelope — the two knowings are independent, the transformation is one.
+const BytesValue = new GraphQLScalarType({
+  name: "BytesValue",
+  description:
+    "A bytes value (§23.7): { mime, ref, base64url? } — fetch raw bytes at /bytes/<ref>.",
+  serialize: (v) => bytesEnvelope(v),
 });
 
 // The write-side input scalar: exactly a rhizomatic Primitive.
@@ -173,8 +187,8 @@ function metaFields<N extends ResolvedNode>(): GraphQLFieldConfigMap<N, unknown>
 
 // A resolved field's GraphQL type comes from the resolver's DECLARED output type (SPEC §22.6), not
 // the Policy — a resolver changes what the value IS, so the door must advertise the field it actually
-// serves. The five tags map to the honest GraphQL carriers; `object` and the pass-through fall to
-// ViewValue, exactly as a policy-shaped dynamic value already does.
+// serves. The tags map to the honest GraphQL carriers; `bytes` types the §23.7 envelope, `object` and
+// the pass-through fall to ViewValue, exactly as a policy-shaped dynamic value already does.
 function resolverTypeOf(type: ResolverOutputType): GraphQLOutputType {
   switch (type) {
     case "string":
@@ -185,6 +199,8 @@ function resolverTypeOf(type: ResolverOutputType): GraphQLOutputType {
       return GraphQLBoolean;
     case "list":
       return new GraphQLList(new GraphQLNonNull(ViewValue));
+    case "bytes":
+      return BytesValue;
     case "object":
       return ViewValue;
   }

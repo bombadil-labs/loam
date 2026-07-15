@@ -134,6 +134,38 @@ const appRouteOf = (pathname: string): { route: string; entity: string } | undef
   }
 };
 
+// A raw-bytes response (SPEC §23.7 byte-door): the BytesView's own mime as Content-Type, the bytes as
+// the body — never JSON. The refusal body is a short plain-text encoded upstream, sent the same way.
+const sendBytes = (
+  res: ServerResponse,
+  out: { status: number; contentType: string; body: Uint8Array },
+): void => {
+  res.writeHead(out.status, { "content-type": out.contentType, ...CORS });
+  res.end(Buffer.from(out.body));
+};
+
+// Parse `GET /:mount/bytes/<ref>?from=<lens>/<entity>` (SPEC §23.7): the ref is the single path segment,
+// the proof-of-read pair rides the `from` query as `lens/entity` (split on the FIRST slash — an entity id
+// may itself contain slashes). Undefined for a missing/extra segment or a `from` without both halves —
+// which refuses uniformly, so a malformed probe looks exactly like a miss.
+const byteDoorOf = (
+  pathname: string,
+  params: URLSearchParams,
+): { ref: string; lens: string; entity: string } | undefined => {
+  const segs = pathname.split("/").slice(3);
+  if (segs.length !== 1 || segs[0] === "") return undefined;
+  const fromRaw = params.get("from");
+  if (fromRaw === null || fromRaw === "") return undefined;
+  try {
+    const from = decodeURIComponent(fromRaw);
+    const i = from.indexOf("/");
+    if (i <= 0 || i >= from.length - 1) return undefined;
+    return { ref: decodeURIComponent(segs[0]!), lens: from.slice(0, i), entity: from.slice(i + 1) };
+  } catch {
+    return undefined;
+  }
+};
+
 // Parse and perform a registration request — the SAME shape the CLI file and the MCP tool take,
 // { hyperschema: { name, alg?, body }, schema, roots, entity?, mutations? } (see
 // parseRegistrationInput). Anything malformed throws; the caller answers 400 with the reason.
@@ -569,6 +601,22 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             sendRendered(res, gateway.serveRoute(parsed.route, parsed.entity, "public"));
             return;
           }
+          // The byte-door (SPEC §23.7), on the anonymous door: GET raw bytes by content address, proof
+          // of read — serveBytes re-resolves the named lens under the PUBLIC discipline (a declared lens
+          // only) and serves the bytes only if that view actually contains them. Uniform 404 otherwise.
+          case "bytes": {
+            if (req.method !== "GET") {
+              refused(res);
+              return;
+            }
+            const parsed = byteDoorOf(url.pathname, url.searchParams);
+            if (parsed === undefined) {
+              refused(res);
+              return;
+            }
+            sendBytes(res, gateway.serveBytes(parsed.ref, parsed.lens, parsed.entity, "public"));
+            return;
+          }
           default:
             refused(res);
             return;
@@ -633,6 +681,21 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           }
           await gateway.prepareRoute(parsed.route); // load the bundle (async) before the sync serve
           sendRendered(res, gateway.serveRoute(parsed.route, parsed.entity, "full"));
+          return;
+        }
+        // The byte-door (SPEC §23.7), on the full door: GET raw bytes by content address under the
+        // token's own read discipline (any registered lens the token may read), proof of read.
+        case "bytes": {
+          if (req.method !== "GET") {
+            refused(res);
+            return;
+          }
+          const parsed = byteDoorOf(url.pathname, url.searchParams);
+          if (parsed === undefined) {
+            refused(res);
+            return;
+          }
+          sendBytes(res, gateway.serveBytes(parsed.ref, parsed.lens, parsed.entity, "full"));
           return;
         }
         case "append": {

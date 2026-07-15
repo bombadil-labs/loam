@@ -446,11 +446,32 @@ residual — a bundle runs SYNCHRONOUSLY with no timeout, on the anonymous door 
 entity — is the deferred §23.9/§24 sandbox work, documented in `serveRoute` and accepted as v1's
 operator-authored-in-a-governed-store trust model.
 
+**§23.7 BYTE-DOOR + BYTES-IN-VIEWS — v1 BUILT** [#102](https://github.com/bombadil-labs/loam/pull/102)
+(realizes ticket T9). A `bytes` leaf in a resolved view now serializes to the self-describing envelope
+`{ mime, ref, base64url? }` at every view→JSON seam — the gql `ViewValue`/`BytesValue` scalars, the REST
+`nodeBody`, and the renderer host itself (`serveRoute` hands the renderer the same envelope, so a bundle
+paints `<img src="/:mount/bytes/${ref}?from=…">` without ever touching a `Uint8Array`). One shared helper
+`src/gateway/bytes.ts` (`bytesEnvelope`, `findBytesByRef`, `INLINE_MAX = 512`, `bytesRefOf`) is reused by
+all three plus the door; `ref` is `contentAddress` over the RAW bytes (equal to rhizomatic's bytes-target
+identity, asserted in a test), `base64url` is rhizomatic's unpadded url-safe encoding, present only below
+the inline threshold. `ResolverOutputType` gains `bytes` (§22.6) so a field is ADVERTISED as bytes —
+GraphQL `BytesValue`, OpenAPI `format: binary`. The byte-door is `GET /:mount/bytes/<ref>?from=<lens>/<entity>`
+(`Gateway.serveBytes`, wired on both doors in `src/server/http.ts`): PROOF-OF-READ — it re-resolves the
+named lens+entity under this door's own discipline (public → a declared lens only) and serves the bytes
+only if that live view actually contains a `BytesView` whose content address is `ref`. Every miss —
+unknown ref, wrong `from`, a lens this door may not read — is a UNIFORM 404, so a stranger learns nothing;
+the re-resolution IS the lookup (no store scan). §11 erasure falls out for free: the door never caches, so
+a purged source delta drops from the live view and the ref 404s by construction. Additive/non-breaking (a
+store with no bytes is unchanged) → no §20 migration. Tests `test/gateway/bytes.test.ts` (11) +
+`test/server/byte-door-http.test.ts` (4); village act `demos/village/phase-bytes.mjs` (A FACE MADE OF
+BYTES, 3/3): a Portrait renderer paints an `<img>` at the byte-door, the raw image bytes return over HTTP,
+and erasing the avatar darkens the door. Capability-security review: the door reuses `serveRoute`'s exact
+`surface(door)` + resolve discipline, so it opens no read path GraphQL/REST don't already (the mount is the
+read boundary, §7); the fs/net confinement of executable consumers remains the §23.9/§24 work.
+
 **Queued build slices — design firmed (Myk, 2026-07-15), authored as coldstart-clean tickets so a fresh
-session can build each end-to-end.** (1) **T9 — the byte-door + bytes-in-views (§23.7)**: the envelope +
-`GET /:mount/bytes/<ref>?from=<lens>/<entity>` under PROOF-OF-READ discipline (the fetch names the lens
-it read the ref from; the door re-resolves that view under the caller's access and serves only what it
-contains — no oracle, no scan, erasure 404s by construction). (2) **T10 — pinned-public (§23.8)**: a
+session can build each end-to-end.** (1) **T9 — the byte-door + bytes-in-views (§23.7)** — BUILT (above).
+(2) **T10 — pinned-public (§23.8)**: a
 `loam.public` declaration may name `Name@vN`, frozen to the version's content address, so the anonymous
 door serves a pinned renderer route because a declaration is publication, not a probe. (3) **T11 — the
 renderer sandbox + timeout (§23.9)**: each render runs in a Node `worker_threads` Worker with a HARD
