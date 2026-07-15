@@ -459,7 +459,7 @@ a DRAFT awaiting Myk's sign-off; questions 1 and 6 are his decisions proved, 2 l
 one residual recommendation (all-or-nothing read granularity), 3/4/5/7 reasoned recommendations, 8 a hard
 requirement pinned green against slice 1.
 
-**PROMOTE-OUTPUTS BUILT** [#PR14](https://github.com/bombadil-labs/loam/pull/PR14) (realizes ticket T14) —
+**PROMOTE-OUTPUTS BUILT** [#111](https://github.com/bombadil-labs/loam/pull/111) (realizes ticket T14) —
 promotion's first strength (§24.3), and the FIRST cross-container operation of §27 (merge-load with kept
 provenance, the thing that makes fork/pull-request native). `Gateway.promote(source, deltaId, opts?)` adopts
 a delta a quarantine produced by RE-SIGNING its content as the operator's OWN claim into the primary, plus a
