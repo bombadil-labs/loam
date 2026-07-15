@@ -597,8 +597,8 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
               refused(res);
               return;
             }
-            await gateway.prepareRoute(parsed.route); // load the bundle (async) before the sync serve
-            sendRendered(res, gateway.serveRoute(parsed.route, parsed.entity, "public"));
+            await gateway.prepareRoute(parsed.route); // load the bundle before the render (worker, §23.9)
+            sendRendered(res, await gateway.serveRoute(parsed.route, parsed.entity, "public"));
             return;
           }
           // The byte-door (SPEC §23.7), on the anonymous door: GET raw bytes by content address, proof
@@ -679,8 +679,8 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             refused(res);
             return;
           }
-          await gateway.prepareRoute(parsed.route); // load the bundle (async) before the sync serve
-          sendRendered(res, gateway.serveRoute(parsed.route, parsed.entity, "full"));
+          await gateway.prepareRoute(parsed.route); // load the bundle before the render (worker, §23.9)
+          sendRendered(res, await gateway.serveRoute(parsed.route, parsed.entity, "full"));
           return;
         }
         // The byte-door (SPEC §23.7), on the full door: GET raw bytes by content address under the

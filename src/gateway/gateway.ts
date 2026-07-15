@@ -79,6 +79,7 @@ import {
 } from "./registration.js";
 import { applyResolvers, loadResolvers, newResolverMemo, type ResolverMemo } from "./resolvers.js";
 import { bytesEnvelope, findBytesByRef } from "./bytes.js";
+import { renderInWorker } from "./render-worker.js";
 import {
   loadRenderers,
   loadedRenderer,
@@ -993,11 +994,11 @@ export class Gateway {
   // bundles in a governed store (only operator law binds, §7); the compute budget + object-capability
   // confinement (SES / Worker / wasm) that would bound an untrusted or buggy bundle is the named §24
   // quarantine / §23.9 hardening work, deliberately NOT invented here.
-  serveRoute(
+  async serveRoute(
     route: string,
     entity: string,
     door: "full" | "public",
-  ): { status: number; contentType: string; body: string } {
+  ): Promise<{ status: number; contentType: string; body: string }> {
     // One refusal, everywhere — history is not anonymous, and neither is "which routes exist" (§17).
     const gone = { status: 404, contentType: "text/plain; charset=utf-8", body: "no such route" };
     const binding = this.renderers().find((r) => r.route === route);
@@ -1039,32 +1040,20 @@ export class Gateway {
         body: err instanceof Error ? err.message : String(err),
       };
     }
-    const render = loadedRenderer(binding.bundle);
-    if (render === undefined) return gone; // unloaded → unmounted, not a 500 (prepareRoute loads it)
-    try {
-      // The renderer is a view consumer like gql/REST: hand it the §23.7 envelope so a bytes leaf is a
-      // { mime, ref, base64url? } it can point an `<img src>` at (primitives pass through unchanged).
-      const html = render({
-        entity,
-        view: bytesEnvelope(node.view) as Record<string, unknown>,
-        hex: node.hex,
-      });
-      if (typeof html !== "string") {
-        return {
-          status: 500,
-          contentType: "text/plain; charset=utf-8",
-          body: "the renderer did not return HTML",
-        };
-      }
-      return { status: 200, contentType: "text/html; charset=utf-8", body: html };
-    } catch {
-      // A faulting renderer is the operator's own bug; refuse cleanly without leaking its internals.
-      return {
-        status: 500,
-        contentType: "text/plain; charset=utf-8",
-        body: "the renderer faulted",
-      };
-    }
+    // The bundle must be loadable (unloaded → unmounted, a 404, not a 500 — prepareRoute pre-loads it on
+    // the serve path). The read-discipline + resolve above stayed on THIS thread (authority never leaves
+    // it); only the untrusted render runs in the bounded worker (SPEC §23.9).
+    if (loadedRenderer(binding.bundle) === undefined) return gone;
+    // Execute the renderer in a worker_threads Worker with a hard timeout + resourceLimits: a hanging or
+    // heavy bundle cannot wedge the event loop or OOM the host, and every route keeps answering. The
+    // renderer is a view consumer like gql/REST — hand it the §23.7 envelope (a bytes leaf becomes
+    // { mime, ref, base64url? }, primitives pass through), which is also what makes the node JSON/clone-safe
+    // to cross the thread boundary. renderInWorker never rejects; every fault folds to a clean refusal.
+    return renderInWorker(binding.bundle, {
+      entity,
+      view: bytesEnvelope(node.view) as Record<string, unknown>,
+      hex: node.hex,
+    });
   }
 
   // The byte-door (SPEC §23.7): serve the raw bytes a caller names by content address `ref`, but only
