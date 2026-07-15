@@ -246,13 +246,20 @@ contract fixes exactly how a bytes value crosses a door. **This is settled law, 
   type declaration, so "is it bytes" is a schema fact (a `bytes` output type extending §22.6's enum
   additively; GraphQL types it a `BytesValue`, OpenAPI `format: binary`). "Inline or ref" is the one
   value-level check the consumer makes.
-- **The byte-door: `GET /:mount/bytes/<ref>`** returns the raw bytes with `mime` as `Content-Type`,
-  inheriting §17 read discipline (serve only what the caller may LAWFULLY read — a raw-hash endpoint on
-  the anonymous door would be exactly the existence oracle §17 already closed, so the byte-door authorizes
-  against the same tokens and public declarations as every other read) and §11 erasure (a purged asset
-  404s — the tombstoned id is refused re-entry forever).
+- **The byte-door: `GET /:mount/bytes/<ref>?from=<lens>/<entity>`** returns the raw bytes with `mime` as
+  `Content-Type`, inheriting §17 read discipline and §11 erasure. The read discipline is **PROOF-OF-READ**
+  (Myk, 2026-07-15, over a reachability-scan and a token-broad model): a bare `ref → bytes` endpoint would
+  be exactly the content-address existence oracle §17 already closed, so the fetch must NAME the lens and
+  entity it got the ref from, and the door RE-RESOLVES that view under the caller's own access (the same
+  door discipline a normal read runs — the anonymous door only over a publicly-declared lens) and serves
+  the bytes only if the resolved view actually contains a `BytesView` whose content address is `<ref>`.
+  Every failure — unknown ref, wrong `from`, a lens the caller may not read — collapses to a UNIFORM 404,
+  so a stranger learns nothing. No oracle, no store scan (the re-resolution IS the lookup), and the
+  consumer always has the lens+entity because it just rendered them. §11 erasure then falls out for free:
+  a purged source delta is no longer in the live re-resolved view, so the ref 404s by construction — the
+  door never caches the bytes. (This is the settled contract the T9 build ticket implements.)
 
-### 23.8 The public-door tension — a declaration is not a probe (RECOMMENDATION)
+### 23.8 The public-door tension — a declaration is not a probe (DECIDED, Myk 2026-07-15)
 
 §17 deliberately narrowed the anonymous door: the PUBLIC projection serves only the LATEST version per
 declared name, because an anonymous `@hash` probe was a registration-existence oracle across the whole
@@ -263,7 +270,7 @@ The anonymous door refuses `@hash` probes because a stranger learns what version
 OPERATOR names a version in a public declaration, the operator CHOSE to reveal exactly that version —
 that is not the stranger probing history, it is the operator publishing a version. So:
 
-**RECOMMENDED §12/§17 amendment.** The `loam.public` declaration's vocabulary grows from `[schemaName]`
+**The §12/§17 amendment (DECIDED, Myk 2026-07-15).** The `loam.public` declaration's vocabulary grows from `[schemaName]`
 to `[schemaName | schemaName@version]`. A bare name still means "the latest version, served anonymously"
 (unchanged). A pinned `name@version` means "exactly this version, served anonymously — because I
 declared it." The anonymous door serves a pinned version IFF the operator publicly declared that pin;
@@ -438,3 +445,20 @@ bundle is UNMOUNTED (404) not a 500, and `prepareRoute` pre-loads on the serve p
 residual — a bundle runs SYNCHRONOUSLY with no timeout, on the anonymous door with an attacker-chosen
 entity — is the deferred §23.9/§24 sandbox work, documented in `serveRoute` and accepted as v1's
 operator-authored-in-a-governed-store trust model.
+
+**Queued build slices — design firmed (Myk, 2026-07-15), authored as coldstart-clean tickets so a fresh
+session can build each end-to-end.** (1) **T9 — the byte-door + bytes-in-views (§23.7)**: the envelope +
+`GET /:mount/bytes/<ref>?from=<lens>/<entity>` under PROOF-OF-READ discipline (the fetch names the lens
+it read the ref from; the door re-resolves that view under the caller's access and serves only what it
+contains — no oracle, no scan, erasure 404s by construction). (2) **T10 — pinned-public (§23.8)**: a
+`loam.public` declaration may name `Name@vN`, frozen to the version's content address, so the anonymous
+door serves a pinned renderer route because a declaration is publication, not a probe. (3) **T11 — the
+renderer sandbox + timeout (§23.9)**: each render runs in a Node `worker_threads` Worker with a HARD
+timeout (terminate on overrun) + `resourceLimits` — closing the panel's wedge-the-process residual; the
+honest scope is that a Worker bounds the HANG/crash/memory, while no-fs/no-net object-capability isolation
+(SES-in-worker or isolated-vm) is a further hardening, deferred. (4) **T12 — write-enabled renderers
+(§23.3)**: the headless granted-author path — a rendered `<form>` POSTs and the store signs the delta
+under a per-renderer GRANTED AUTHOR (§6's runner-identity custody: provision the pen, grant it standing,
+revoke by striking the grant); the user's-own-pen variant defers to the browser-host slice. The live
+browser React host itself remains a design-stage unit (hydration, the client bundle, the live subscription
+transport) — a design pass before a build.
