@@ -68,9 +68,9 @@ const staged = async (): Promise<Gateway> => {
 describe("§23.8: the anonymous door serves a pinned route IFF the operator declared that pin", () => {
   it("declare Name@v1 → the anonymous door serves the v1-pinned renderer (rail a)", async () => {
     const gw = await staged();
-    expect(gw.serveRoute("pinned", FERN, "public").status).toBe(404); // not declared yet
+    expect((await gw.serveRoute("pinned", FERN, "public")).status).toBe(404); // not declared yet
     await gw.declarePublic(["Plant@v1"]);
-    const out = gw.serveRoute("pinned", FERN, "public");
+    const out = await gw.serveRoute("pinned", FERN, "public");
     expect(out.status).toBe(200);
     expect(out.body).toContain("height: 30");
     await gw.close();
@@ -80,34 +80,34 @@ describe("§23.8: the anonymous door serves a pinned route IFF the operator decl
     const gw = await staged();
     await gw.declarePublic(["Plant@v1"]); // declares v1 — but a v2-pin (were there one) stays dark
     // The v1 pin is declared and serves; declaring it does NOT open the bare latest route.
-    expect(gw.serveRoute("pinned", FERN, "public").status).toBe(200);
-    expect(gw.serveRoute("latest", FERN, "public").status).toBe(404); // bare name never declared
+    expect((await gw.serveRoute("pinned", FERN, "public")).status).toBe(200);
+    expect((await gw.serveRoute("latest", FERN, "public")).status).toBe(404); // bare name never declared
     await gw.close();
   });
 
   it("a bare Name declaration serves only the latest — the pinned route stays 404 anon (rail c)", async () => {
     const gw = await staged();
     await gw.declarePublic(["Plant"]); // bare: the latest, unchanged
-    expect(gw.serveRoute("latest", FERN, "public").status).toBe(200);
-    expect(gw.serveRoute("pinned", FERN, "public").status).toBe(404); // a bare declaration is not a pin
+    expect((await gw.serveRoute("latest", FERN, "public")).status).toBe(200);
+    expect((await gw.serveRoute("pinned", FERN, "public")).status).toBe(404); // a bare declaration is not a pin
     await gw.close();
   });
 
   it("withdraw the declared version's registration → the anon pinned route 404s, uniform (rail d)", async () => {
     const gw = await staged();
     await gw.declarePublic(["Plant@v1"]);
-    expect(gw.serveRoute("pinned", FERN, "public").status).toBe(200);
+    expect((await gw.serveRoute("pinned", FERN, "public")).status).toBe(200);
     const v1 = v1DeltaId(gw);
     await gw.append([signClaims(makeNegationClaims(OP, 9_000_000, v1, "withdraw v1"), OP_SEED)]);
     // The declaration still names Plant@<v1>, but the version is gone — so it 404s exactly like a never-
     // declared pin: no oracle distinguishes "withdrawn" from "never existed" to a stranger.
-    expect(gw.serveRoute("pinned", FERN, "public").status).toBe(404);
+    expect((await gw.serveRoute("pinned", FERN, "public")).status).toBe(404);
     await gw.close();
   });
 
   it("the operator (full) door serves the pinned route regardless of declaration (rail e)", async () => {
     const gw = await staged();
-    expect(gw.serveRoute("pinned", FERN, "full").status).toBe(200); // no declaration at all
+    expect((await gw.serveRoute("pinned", FERN, "full")).status).toBe(200); // no declaration at all
     await gw.close();
   });
 });

@@ -329,3 +329,9 @@ _(one entry per PR that grew the village; newest last)_
   regardless; and withdrawing the declared version darkens the anonymous route by construction (§23.6), a
   uniform 404 with no withdrawn-vs-never oracle. The pin is frozen to the version's content address at
   declare time, so it never slides.
+- **EVERY RENDERED ROUTE IS NOW SANDBOXED (SPEC §23.9)** — no new act; a property that now holds under all
+  three renderer acts above. Each render runs in a Node `worker_threads` Worker with a hard timeout +
+  memory limits (`src/gateway/render-worker.ts`), so a hanging or heavy bundle folds to a clean 500 and
+  every other route keeps answering — the anonymous door can no longer be wedged by an infinite-loop
+  bundle. The renders in phase23 / phase-bytes / phase-pinned all cross that boundary now. Honest scope: a
+  Worker bounds the hang/crash/memory, not fs/net — true object-capability isolation is §24's work.

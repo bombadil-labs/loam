@@ -490,13 +490,32 @@ a pin-only public store (no bare-name declaration) does not yet serve its pinned
 §23.7 byte-door — `serveBytes` uses the bare public surface — which is more-restrictive, not a leak; a
 future refinement can teach the byte-door the pinned-public set.
 
+**§23.9 RENDERER SANDBOX + TIMEOUT — v1 BUILT** [#104](https://github.com/bombadil-labs/loam/pull/104)
+(realizes ticket T11). This closes the capability-security panel's headline residual on #99: `serveRoute`
+ran the author's bundle SYNCHRONOUSLY on the event loop with no timeout, so an infinite-loop bundle wedged
+EVERY mount — on the anonymous door, with an attacker-chosen entity. Each render now runs in a Node
+`worker_threads` Worker (`src/gateway/render-worker.ts`) with a HARD timeout (default 500ms — `terminate()`
+on overrun, which `node:vm`'s timeout cannot guarantee against an async escape) and `resourceLimits`
+(memory bounds so a bundle cannot OOM the host). `Gateway.serveRoute` became `async`; every caller awaits
+(the HTTP `app` verb already ran async). The read-discipline + resolve stay on the main thread — authority
+never crosses the boundary — and only the untrusted render runs in the worker; §23.7's envelope makes the
+node JSON/clone-safe to post across. Every failure — timeout, throw, crash, non-string, OOM-reclaim —
+folds into a CLEAN 500 that leaks nothing of the bundle's internals. **Honest scope, stated in code and
+here:** a Worker bounds the HANG / crash / memory — it is NOT full object-capability isolation; a worker
+can still reach `node:fs` or the network. True no-fs/no-net ocap (SES-in-worker or isolated-vm) is a
+FURTHER hardening, deferred to §24 / a deeper slice. v1 spawns a worker per render (~ms, noted); a small
+warm pool is the obvious follow-on. The browser peer never serves a rendered route, so a shared esbuild
+plugin (`scripts/esbuild-stub-render-worker.mjs`) keeps this Node-only module out of the zero-`node:`
+browser and site bundles. Additive/non-breaking → no §20 migration. Tests
+`test/gateway/render-sandbox.test.ts` (4: the happy path unchanged; an infinite-loop bundle times out to a
+500 while a second route STILL answers — the event loop is not wedged; a throwing bundle is a clean 500
+that leaks nothing; a memory-hog is bounded and the host survives). Executable/capability surface → Myk's
+merge (P6).
+
 **Queued build slices — design firmed (Myk, 2026-07-15), authored as coldstart-clean tickets so a fresh
 session can build each end-to-end.** (1) **T9 — the byte-door + bytes-in-views (§23.7)** — BUILT (above).
 (2) **T10 — pinned-public (§23.8)** — BUILT (above). (3) **T11 — the
-renderer sandbox + timeout (§23.9)**: each render runs in a Node `worker_threads` Worker with a HARD
-timeout (terminate on overrun) + `resourceLimits` — closing the panel's wedge-the-process residual; the
-honest scope is that a Worker bounds the HANG/crash/memory, while no-fs/no-net object-capability isolation
-(SES-in-worker or isolated-vm) is a further hardening, deferred. (4) **T12 — write-enabled renderers
+renderer sandbox + timeout (§23.9)** — BUILT (above). (4) **T12 — write-enabled renderers
 (§23.3)**: the headless granted-author path — a rendered `<form>` POSTs and the store signs the delta
 under a per-renderer GRANTED AUTHOR (§6's runner-identity custody: provision the pen, grant it standing,
 revoke by striking the grant); the user's-own-pen variant defers to the browser-host slice. The live
