@@ -87,11 +87,16 @@ export {
   parseRegistrationInput,
   readRegistrations,
   registrationClaims,
+  registrationDeltaClaims,
   schemaEntityFor,
+  schemaLivingEntityFor,
+  versionedSchemaEntityFor,
+  versionedSchemaHash,
   type ClaimPointerTemplate,
   type ClaimTemplate,
   type ClaimTemplates,
   type Registration,
+  type RegistrationDeltaClaims,
   type RegistrationInput,
 } from "./gateway/registration.js";
 export {

@@ -37,7 +37,7 @@ Person entities are the only shared vocabulary; everything else composes by fede
 
 ```sh
 node demos/village/phase0.mjs   # groundwork: homes, operators, registrations (all 3 surfaces)
-node demos/village/phase1.mjs   # …through phase17.mjs — each phase is a runnable act with checks
+node demos/village/phase1.mjs   # …through phase21.mjs — each phase is a runnable act with checks
 node demos/village/village.mjs  # the living village: all stores + pulse + simulator + dashboard
                            #   → watch it at http://127.0.0.1:4400
 ```
@@ -270,3 +270,17 @@ _(one entry per PR that grew the village; newest last)_
   writes while `memo` is read-only at the door — assert and clear both refused, though the ground
   stays open. Removal and write-discipline, at last, through the surface — the dual of reading:
   negate your own contributions, let the Policy re-resolve.
+- **THE SCHEMA IS A CITIZEN (SPEC §21 slice 2)** (phase21.mjs, 4/4, re-runnable — clears its own
+  Ledger21 stage): the resolution Schema stops riding inline in the registration and becomes a
+  first-class entity in the ground. Registering `Ledger21` on the almanac plants a living
+  `schema:Ledger21` node — read straight back out of the store as a domain object, `{amount}` and
+  all, no longer a blob buried in a delta — and a frozen, content-addressed VersionedSchema snapshot
+  (`schema:Ledger21@<hash>`) beside it. Evolve the lens (add `memo`) and a NEW snapshot is minted while
+  the OLD one still loads, undisturbed: two readings coexist, neither struck — backwards-compatibility
+  as a property of content addressing, not a courtesy the operator remembers. And it lands where it
+  counts, through the REST door: `/rest/v1/` answers `memo` as a scalar (v1's DEFAULT over the same
+  fact) where `/rest/v2/` answers it as a list — each version resolving against its OWN frozen
+  snapshot, which IS §17's per-version freezing, now standing on named, pinnable entities. (Genesis
+  itself changed shape here: a registration is five deltas now — marker aside, hyperschema + living
+  Schema + snapshot + binding — checked in phase0.3b.) The demonstrable §21 story so far; coexisting
+  lenses and the `name@hash` URL wait for the coexistence slice.

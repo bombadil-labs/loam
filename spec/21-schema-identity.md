@@ -198,13 +198,21 @@ a Schema is an entity in an open store, so a foreign peer may hold its own Schem
 `(hyperschema, name)` pair — whose reading binds is a question of law (§7), the same as every other
 delta; the registry keys locally, and federation resolves globally.
 
-**Provenance.** Design accepted (Myk, 2026-07-13); **landing in slices.** Slice 1 — the
+**Provenance.** Design accepted (Myk, 2026-07-13); **landed in slices.** Slice 1 — the
 `schema:`→`hyperschema:` entity rename + the §14 immutable-by-default flip in one §20 migration —
-landed [#92](https://github.com/bombadil-labs/loam/pull/92). Slice 2 (in progress) lifts the Schema to
-a first-class entity via 0.5.0's `SCHEMA_SCHEMA` and mints the per-version VersionedSchema snapshots
-that serve §17's freezing (single-lens, `Schema.name = hyperschema.name`). **Coexistence** — two lenses
-over one hyperschema — is deferred to its own design-stage slice: this section pins the registry key
-`(hyperschema, schema-name)`, but the SERVING surface (the GraphQL type/mutation/hooks keying, and the
-`schema.name == hyperschema.name` single-lens naming) is unspecified and needs a design pass before
-build. The `VersionedHyperSchema` rung above is symmetric and substrate-ready (`termHash`), built when
-§23 needs it.
+landed [#92](https://github.com/bombadil-labs/loam/pull/92). Slice 2 lifted the Schema to a first-class
+entity via 0.5.0's `SCHEMA_SCHEMA` (`publishSchemaClaims`/`loadSchema` at `schema:<name>`) and minted
+the per-version, content-addressed VersionedSchema snapshots that serve §17's freezing; the
+registration became a binding (`schema` → the living entity, `schemaVersion` → the frozen snapshot),
+carried forward for stores on disk by the `inline-schema-to-entity` §20 migration (`src/migrate/`) —
+single-lens, `Schema.name = hyperschema.name`. That landing also hardened the migration chain against
+0.5.0's reuse of the `rhizomatic.schema.*` vocabulary and the `schema:` prefix for resolution Schemas:
+the 0.3 role-realignment step now skips a store that already speaks `rhizomatic.hyperschema.*`, and the
+slice-1 entity rename is role-scoped to genuine hyperschema references — so re-migrating a §21 store is
+a no-op rather than a corruption. The implementation lives in `src/gateway/registration.ts`
+(`registrationDeltaClaims`, `versionedSchemaEntityFor`), `src/gateway/gateway.ts`, and
+`src/gateway/genesis.ts`. **Coexistence** — two lenses over one hyperschema — remains deferred to its
+own design-stage slice: this section pins the registry key `(hyperschema, schema-name)`, but the
+SERVING surface (the GraphQL type/mutation/hooks keying, and the `schema.name == hyperschema.name`
+single-lens naming) is unspecified and needs a design pass before build. The `VersionedHyperSchema`
+rung above is symmetric and substrate-ready (`termHash`), built when §23 needs it.
