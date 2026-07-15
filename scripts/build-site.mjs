@@ -6,6 +6,7 @@ import { cpSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
+import { stubRenderWorker } from "./esbuild-stub-render-worker.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const out = join(root, "site-dist");
@@ -24,6 +25,7 @@ await build({
     "@bombadil/loam/browser": join(root, "src", "browser", "index.ts"),
     "node:http": join(root, "scripts", "client-node-http-stub.mjs"),
   },
+  plugins: [stubRenderWorker()],
   legalComments: "none",
   logLevel: "silent",
 });

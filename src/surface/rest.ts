@@ -42,14 +42,27 @@ const refuse = (status: number, ...errors: string[]): RestResult => ({
 // REGISTERED AS DATA; a process-lifetime register() call has no registration delta, no true
 // name, and therefore no version here — its door is GraphQL.)
 function versionsFor(gateway: Gateway, door: "full" | "public"): RegistrationVersion[] {
-  const surface = gateway.surface(door);
-  if (surface === undefined) return [];
-  const admitted = new Set(surface.registered.map((r) => r.hyperschema.name));
-  const versions = gateway.registrationVersions().filter((v) => admitted.has(v.hyperschema.name));
-  if (door === "full") return versions;
+  const all = gateway.registrationVersions();
+  if (door === "full") {
+    const surface = gateway.surface("full");
+    if (surface === undefined) return [];
+    const admitted = new Set(surface.registered.map((r) => r.hyperschema.name));
+    return all.filter((v) => admitted.has(v.hyperschema.name));
+  }
+  // Public: the LATEST version of each bare-declared name (unchanged) PLUS any specifically PINNED-public
+  // version (SPEC §23.8 — a declaration is publication, so the operator's declared `Name@<deltaId>` pin is
+  // anonymously answerable at the REST `@<deltaId>` door, symmetric to the pinned renderer route). Pins
+  // are appended after the latest, so a bare-declared name keeps its natural highest vN alias; the pin's
+  // stable access is its `@<deltaId>`. With no pins declared this is exactly the old latest-only set.
+  const surface = gateway.surface("public");
+  const bare = new Set((surface?.registered ?? []).map((r) => r.hyperschema.name));
   const latest = new Map<string, RegistrationVersion>();
-  for (const v of versions) latest.set(v.hyperschema.name, v); // ascending order: last one wins
-  return [...latest.values()];
+  for (const v of all) if (bare.has(v.hyperschema.name)) latest.set(v.hyperschema.name, v);
+  const out = [...latest.values()];
+  for (const v of all) {
+    if (gateway.isPublicPin(v.hyperschema.name, v.deltaId) && !out.includes(v)) out.push(v);
+  }
+  return out;
 }
 
 // vN aliases are PER SCHEMA NAME: Film v1 and Book v1 coexist. Ground order within a name.
@@ -296,11 +309,9 @@ export async function handleRest(
 
   // Resolve the version the path names — alias or true name.
   let pinned: RegistrationVersion | undefined;
-  let isLatest = false;
   if (/^v[1-9]\d*$/.test(vTag)) {
     const n = Number(vTag.slice(1));
     pinned = family?.[n - 1];
-    isLatest = family !== undefined && n === family.length;
     if (pinned === undefined) return refuse(404, `no version ${vTag} of ${schemaName} survives`);
   } else if (vTag.startsWith("@")) {
     const hash = vTag.slice(1);
@@ -322,14 +333,22 @@ export async function handleRest(
       }
       return refuse(404, `no version @${hash.slice(0, 12)}… of ${schemaName} survives`);
     }
-    isLatest = family !== undefined && family[family.length - 1]?.deltaId === pinned.deltaId;
   } else {
     return refuse(404, "a version is v<N> or @<registration-hash>");
   }
 
-  const surface = gateway.surface(door);
-  if (surface === undefined) return refuse(404, "nothing here is public");
-  const hooks: SurfaceHooks = surface.hooks;
+  // The warm path (the door's live `hooks.resolve`) is valid ONLY when the named version is the store's
+  // CURRENT latest AND the door's live surface actually serves this lens (a bare-name public declaration,
+  // or the full door). A declared PIN (§23.8) — even one that happens to be the latest — otherwise answers
+  // through pinned resolution, which needs no live surface, so a pin-only public store still serves it.
+  const liveSurface = gateway.surface(door);
+  const servesLive =
+    liveSurface?.registered.some((r) => r.hyperschema.name === schemaName) ?? false;
+  const trueLatest = gateway
+    .registrationVersions()
+    .filter((v) => v.hyperschema.name === schemaName)
+    .at(-1);
+  const isLatest = servesLive && pinned.deltaId === trueLatest?.deltaId;
 
   if (method === "GET") {
     // The latest version answers through the warm path — the same resolve GraphQL uses, so
@@ -337,14 +356,22 @@ export async function handleRest(
     // Every gateway throw folds into a structured refusal, exactly as handleGraphql folds
     // them: a resolver error must not become a 500 that leaks internals on any door.
     try {
-      const node = isLatest
-        ? hooks.resolve(schemaName, entity, asOf)
-        : gateway.resolvePinned(pinned, entity, asOf);
+      // The latest reading rides the live surface; a pinned version answers through pinned resolution,
+      // which needs no live surface — so a store that declared ONLY a pin (§23.8) still serves it.
+      // Membership in versionsFor already enforced the declaration: an undeclared @hash never reached here.
+      const node =
+        isLatest && liveSurface !== undefined
+          ? liveSurface.hooks.resolve(schemaName, entity, asOf)
+          : gateway.resolvePinned(pinned, entity, asOf);
       return { status: 200, body: nodeBody(node) };
     } catch (err) {
       return refuse(400, err instanceof Error ? err.message : String(err));
     }
   }
+
+  // Writes need the live surface + its hooks (a pinned write still re-resolves through them).
+  if (liveSurface === undefined) return refuse(404, "nothing here is public");
+  const hooks: SurfaceHooks = liveSurface.hooks;
 
   if (method === "POST") {
     if (door === "public") return refuse(403, "the public door is a smaller world: read-only");

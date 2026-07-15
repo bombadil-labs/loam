@@ -44,7 +44,7 @@ describe("§23: a renderer serves HTML rendered from the store's live view", () 
     const gw = await boot();
     await gw.append([observed(FERN, "height", 42, 1000, OP_SEED)]);
     await gw.publishRenderer(spec());
-    const out = gw.serveRoute("plant", FERN, "full");
+    const out = await gw.serveRoute("plant", FERN, "full");
     expect(out.status).toBe(200);
     expect(out.contentType).toContain("text/html");
     expect(out.body).toBe('<p class="h">height: 42</p>');
@@ -55,15 +55,15 @@ describe("§23: a renderer serves HTML rendered from the store's live view", () 
     const gw = await boot();
     await gw.append([observed(FERN, "height", 10, 1000, OP_SEED)]);
     await gw.publishRenderer(spec());
-    expect(gw.serveRoute("plant", FERN, "full").body).toContain("height: 10");
+    expect((await gw.serveRoute("plant", FERN, "full")).body).toContain("height: 10");
     await gw.append([observed(FERN, "height", 77, 2000, OP_SEED)]);
-    expect(gw.serveRoute("plant", FERN, "full").body).toContain("height: 77");
+    expect((await gw.serveRoute("plant", FERN, "full")).body).toContain("height: 77");
     await gw.close();
   });
 
   it("an unknown route is a 404", async () => {
     const gw = await boot();
-    expect(gw.serveRoute("nope", FERN, "full").status).toBe(404);
+    expect((await gw.serveRoute("nope", FERN, "full")).status).toBe(404);
     await gw.close();
   });
 });
@@ -109,7 +109,7 @@ describe("§23.5: latest per route, and pinned versions", () => {
       spec({ bundle: "export default (n) => `<b>${n.view.height}cm</b>`;" }),
     );
     expect(gw.renderers().filter((r) => r.route === "plant")).toHaveLength(1);
-    expect(gw.serveRoute("plant", FERN, "full").body).toBe("<b>5cm</b>");
+    expect((await gw.serveRoute("plant", FERN, "full")).body).toBe("<b>5cm</b>");
     await gw.close();
   });
 
@@ -140,7 +140,7 @@ describe("§23.5: latest per route, and pinned versions", () => {
       }),
     );
     // v1 froze before `note`, so its view has no note — the renderer paints 'none'
-    expect(gw.serveRoute("plantV1", FERN, "full").body).toBe("<i>none</i>");
+    expect((await gw.serveRoute("plantV1", FERN, "full")).body).toBe("<i>none</i>");
     await gw.close();
   });
 });
@@ -181,7 +181,7 @@ describe("§23.4 + §17: a pin is the version's CONTENT ADDRESS, durable against
         bundle: "export default (n) => `<i>${JSON.stringify(n.view.note)}</i>`;",
       }),
     );
-    const before = gw.serveRoute("pinned2", FERN, "full").body;
+    const before = (await gw.serveRoute("pinned2", FERN, "full")).body;
     expect(before).toBe('<i>["hi"]</i>'); // v2 sees `note` as a list
 
     // withdraw v1 — the numeric alias would now renumber v2 to "v1", but the pin is by content address
@@ -190,7 +190,7 @@ describe("§23.4 + §17: a pin is the version's CONTENT ADDRESS, durable against
       signClaims(makeNegationClaims(OP, 9_000_000, v1.deltaId, "withdraw v1"), OP_SEED),
     ]);
     // the pinned renderer STILL resolves v2's frozen reading — it never slid to a different version
-    expect(gw.serveRoute("pinned2", FERN, "full").body).toBe('<i>["hi"]</i>');
+    expect((await gw.serveRoute("pinned2", FERN, "full")).body).toBe('<i>["hi"]</i>');
     await gw.close();
   });
 
@@ -228,7 +228,7 @@ describe("§23.6: an app never outlives its source", () => {
         OP_SEED,
       ),
     ]);
-    const out = gw.serveRoute("ghost", FERN, "full");
+    const out = await gw.serveRoute("ghost", FERN, "full");
     expect(out.status).toBe(404);
     expect(out.body).toBe("no such route");
     await gw.close();
@@ -238,7 +238,7 @@ describe("§23.6: an app never outlives its source", () => {
     const gw = await boot();
     await gw.append([observed(FERN, "height", 9, 1000, OP_SEED)]);
     await gw.publishRenderer(spec());
-    expect(gw.serveRoute("plant", FERN, "full").status).toBe(200);
+    expect((await gw.serveRoute("plant", FERN, "full")).status).toBe(200);
     const binding = gw.renderers().find((r) => r.route === "plant")!;
     await gw.append([
       signClaims(
@@ -246,7 +246,7 @@ describe("§23.6: an app never outlives its source", () => {
         OP_SEED,
       ),
     ]);
-    expect(gw.serveRoute("plant", FERN, "full").status).toBe(404); // gone with its source
+    expect((await gw.serveRoute("plant", FERN, "full")).status).toBe(404); // gone with its source
     await gw.close();
   });
 });
@@ -257,14 +257,14 @@ describe("§23: read discipline on the anonymous door (§17)", () => {
     await gw.append([observed(FERN, "height", 21, 1000, OP_SEED)]);
     await gw.publishRenderer(spec());
     // not declared public yet → the anonymous door refuses (uniform 404, no oracle)
-    expect(gw.serveRoute("plant", FERN, "public").status).toBe(404);
+    expect((await gw.serveRoute("plant", FERN, "public")).status).toBe(404);
     // declare Plant public → the anonymous door serves it
     await gw.append([signClaims(publicClaims(["Plant"], OP, 2000), OP_SEED)]);
-    const out = gw.serveRoute("plant", FERN, "public");
+    const out = await gw.serveRoute("plant", FERN, "public");
     expect(out.status).toBe(200);
     expect(out.body).toContain("height: 21");
     // ...but the operator door serves it regardless
-    expect(gw.serveRoute("plant", FERN, "full").status).toBe(200);
+    expect((await gw.serveRoute("plant", FERN, "full")).status).toBe(200);
     await gw.close();
   });
 
@@ -273,8 +273,8 @@ describe("§23: read discipline on the anonymous door (§17)", () => {
     await gw.append([observed(FERN, "height", 8, 1000, OP_SEED)]);
     await gw.append([signClaims(publicClaims(["Plant"], OP, 2000), OP_SEED)]);
     await gw.publishRenderer(spec({ route: "pinned", version: 1 }));
-    expect(gw.serveRoute("pinned", FERN, "public").status).toBe(404); // no pinned-public in v1
-    expect(gw.serveRoute("pinned", FERN, "full").status).toBe(200); // full door is fine
+    expect((await gw.serveRoute("pinned", FERN, "public")).status).toBe(404); // no pinned-public in v1
+    expect((await gw.serveRoute("pinned", FERN, "full")).status).toBe(200); // full door is fine
     await gw.close();
   });
 });
@@ -286,7 +286,7 @@ describe("§23: a faulting renderer refuses cleanly", () => {
     await gw.publishRenderer(
       spec({ bundle: "export default () => { throw new Error('boom secret internals'); };" }),
     );
-    const out = gw.serveRoute("plant", FERN, "full");
+    const out = await gw.serveRoute("plant", FERN, "full");
     expect(out.status).toBe(500);
     expect(out.body).not.toContain("secret internals"); // the operator's fault, not leaked
     await gw.close();
@@ -296,7 +296,7 @@ describe("§23: a faulting renderer refuses cleanly", () => {
     const gw = await boot();
     await gw.append([observed(FERN, "height", 1, 1000, OP_SEED)]);
     await gw.publishRenderer(spec({ bundle: "export default () => 42;" }));
-    const out = gw.serveRoute("plant", FERN, "full");
+    const out = await gw.serveRoute("plant", FERN, "full");
     expect(out.status).toBe(500);
     expect(out.body).toMatch(/did not return HTML/);
     await gw.close();
@@ -331,10 +331,10 @@ describe("§23: an unloaded bundle is UNMOUNTED (404), and prepareRoute loads it
       ),
     ]);
     // the binding is live, but its bundle is not in the ESM cache → unmounted, a clean 404 (never a 500)
-    expect(gw.serveRoute("raw", FERN, "full").status).toBe(404);
+    expect((await gw.serveRoute("raw", FERN, "full")).status).toBe(404);
     // prepareRoute (the async serve-path step) loads it, and then it mounts
     await gw.prepareRoute("raw");
-    expect(gw.serveRoute("raw", FERN, "full").status).toBe(200);
+    expect((await gw.serveRoute("raw", FERN, "full")).status).toBe(200);
     await gw.close();
   });
 });

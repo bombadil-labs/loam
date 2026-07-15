@@ -469,17 +469,77 @@ and erasing the avatar darkens the door. Capability-security review: the door re
 `surface(door)` + resolve discipline, so it opens no read path GraphQL/REST don't already (the mount is the
 read boundary, §7); the fs/net confinement of executable consumers remains the §23.9/§24 work.
 
+**§23.8 PINNED-PUBLIC — v1 BUILT** [#103](https://github.com/bombadil-labs/loam/pull/103) (realizes ticket
+T10). A `loam.public` declaration entry grows from `[Name]` to `[Name | Name@vN]`. A bare name still means
+"the latest, served anonymously" (unchanged); a `Name@vN` pin is FROZEN at declare time to the version's
+content address (`Name@<deltaId>`, the same freeze a renderer does, §23.6) via the new operator-only
+`Gateway.declarePublic`, so the pin never slides when an earlier version is withdrawn. `readPublicSchemas`
+keeps returning a flat `Set<string>` — a `@` distinguishes a pin from a bare name — and two predicates
+(`Gateway.isPublicLatest` / `isPublicPin`) read it. `serveRoute`'s pinned branch now serves the anonymous
+door IFF the operator declared THAT pin; the full door serves any surviving registered version. The REST
+public door is symmetric: `versionsFor` admits declared pins so `GET /rest/@<deltaId>` answers on the
+anonymous door, and a pinned GET resolves through `resolvePinned` (no live surface needed, so a store that
+declared ONLY a pin still serves it) — the warm live path is used only when the version is the store's true
+latest AND the door's live surface serves that lens. Every UNdeclared `@hash` stays a UNIFORM 404 (history
+un-probable), and the 410 withdrawn-vs-never distinction stays FULL-door-only. Additive/non-breaking (a
+bare-name declaration is exactly the old behavior) → no §20 migration. Tests
+`test/gateway/pinned-public.test.ts` (10: rails a–e + the freeze/authority guards + the REST `@<deltaId>`
+symmetry); village act `demos/village/phase-pinned.mjs` (A DECLARATION IS PUBLICATION, 3/3). This is the
+§12/§17 amendment §23.8 describes, and it is the operator's to accept (P6). **Known composition follow-up:**
+a pin-only public store (no bare-name declaration) does not yet serve its pinned view's bytes through the
+§23.7 byte-door — `serveBytes` uses the bare public surface — which is more-restrictive, not a leak; a
+future refinement can teach the byte-door the pinned-public set.
+
+**§23.9 RENDERER SANDBOX + TIMEOUT — v1 BUILT** [#104](https://github.com/bombadil-labs/loam/pull/104)
+(realizes ticket T11). This closes the capability-security panel's headline residual on #99: `serveRoute`
+ran the author's bundle SYNCHRONOUSLY on the event loop with no timeout, so an infinite-loop bundle wedged
+EVERY mount — on the anonymous door, with an attacker-chosen entity. Each render now runs in a Node
+`worker_threads` Worker (`src/gateway/render-worker.ts`) with a HARD timeout (default 500ms — `terminate()`
+on overrun, which `node:vm`'s timeout cannot guarantee against an async escape) and `resourceLimits`
+(memory bounds so a bundle cannot OOM the host). `Gateway.serveRoute` became `async`; every caller awaits
+(the HTTP `app` verb already ran async). The read-discipline + resolve stay on the main thread — authority
+never crosses the boundary — and only the untrusted render runs in the worker; §23.7's envelope makes the
+node JSON/clone-safe to post across. Every failure — timeout, throw, crash, non-string, OOM-reclaim —
+folds into a CLEAN 500 that leaks nothing of the bundle's internals. **Honest scope, stated in code and
+here:** a Worker bounds the HANG / crash / memory — it is NOT full object-capability isolation; a worker
+can still reach `node:fs` or the network. True no-fs/no-net ocap (SES-in-worker or isolated-vm) is a
+FURTHER hardening, deferred to §24 / a deeper slice. v1 spawns a worker per render (~ms, noted); a small
+warm pool is the obvious follow-on. The browser peer never serves a rendered route, so a shared esbuild
+plugin (`scripts/esbuild-stub-render-worker.mjs`) keeps this Node-only module out of the zero-`node:`
+browser and site bundles. Additive/non-breaking → no §20 migration. Tests
+`test/gateway/render-sandbox.test.ts` (4: the happy path unchanged; an infinite-loop bundle times out to a
+500 while a second route STILL answers — the event loop is not wedged; a throwing bundle is a clean 500
+that leaks nothing; a memory-hog is bounded and the host survives). Executable/capability surface → Myk's
+merge (P6).
+
+**§23.3 WRITE-ENABLED RENDERERS (headless, granted-author) — v1 BUILT**
+[#105](https://github.com/bombadil-labs/loam/pull/105) (realizes ticket T12). A rendered route can WRITE, not
+just read. A renderer binding gains an optional `writable` (the fields its forms may write) and `pen` (a
+granted-author identity), both plumbed at rest like `consumes` (parse/claims/read in `src/gateway/renderers.ts`)
+— both-or-neither, absent → read-only (v1's default). `Gateway.writeRoute` handles `POST /:mount/app/<route>/<entity>`
+(the HTTP `app` verb now takes GET or POST; a browser `<form>` posts `application/x-www-form-urlencoded`, a
+programmatic caller posts JSON): it re-checks the route is visible on this door (a stranger writes only where
+they could read), refuses a field outside the renderer's `writable`, and signs the delta AS THE PEN — never
+the caller's token — via the normal §14 `mutateEntity`. **The custody model is §6's two keys, exactly:** the
+pen's SEED is provisioned in config (`GatewayOptions.pens`, keyed by the binding's `pen` name — never on the
+ground; the binding carries only the name), and the pen must ALSO hold an operator GRANT of write standing.
+Provisioning is custody; the grant is authorization; a provisioned-but-ungranted pen writes nothing (the
+`append`→`authorize` path refuses it), and REVOCATION is striking the grant (past writes stay attributed to the
+pen). No anonymous write by default (§12): a public renderer's form writes only if the operator BOTH declared
+the lens public AND provisioned+granted a pen. **The §19 write-path label `renderer` is realized as the pen's
+authorship** — a renderer write is distinguished by its pen author (a formal §19 four-way label enum is not yet
+represented on deltas anywhere; that is separate future work). The USER'S-OWN-PEN (non-custodial client
+signing) variant needs the browser host and is DEFERRED to that slice. Additive/non-breaking (a renderer with
+no pen is the pre-§23.3 shape) → no §20 migration. Tests `test/gateway/write-renderers.test.ts` (7: pen
+authorship, the writable door-gate, read-only refusal, provisioned-but-ungranted refused, revocation with
+past-attribution preserved, and the anonymous-write gate both directions); village act
+`demos/village/phase-guestbook.mjs` (A FACE THAT WRITES, 2/2): an anonymous form POST signed by the pen over
+real HTTP, then revocation blocking the next write while the first entry stays attributed. New write path +
+pen-custody model → Myk's merge (P6).
+
 **Queued build slices — design firmed (Myk, 2026-07-15), authored as coldstart-clean tickets so a fresh
 session can build each end-to-end.** (1) **T9 — the byte-door + bytes-in-views (§23.7)** — BUILT (above).
-(2) **T10 — pinned-public (§23.8)**: a
-`loam.public` declaration may name `Name@vN`, frozen to the version's content address, so the anonymous
-door serves a pinned renderer route because a declaration is publication, not a probe. (3) **T11 — the
-renderer sandbox + timeout (§23.9)**: each render runs in a Node `worker_threads` Worker with a HARD
-timeout (terminate on overrun) + `resourceLimits` — closing the panel's wedge-the-process residual; the
-honest scope is that a Worker bounds the HANG/crash/memory, while no-fs/no-net object-capability isolation
-(SES-in-worker or isolated-vm) is a further hardening, deferred. (4) **T12 — write-enabled renderers
-(§23.3)**: the headless granted-author path — a rendered `<form>` POSTs and the store signs the delta
-under a per-renderer GRANTED AUTHOR (§6's runner-identity custody: provision the pen, grant it standing,
-revoke by striking the grant); the user's-own-pen variant defers to the browser-host slice. The live
-browser React host itself remains a design-stage unit (hydration, the client bundle, the live subscription
-transport) — a design pass before a build.
+(2) **T10 — pinned-public (§23.8)** — BUILT (above). (3) **T11 — the
+renderer sandbox + timeout (§23.9)** — BUILT (above). (4) **T12 — write-enabled renderers (§23.3)** — BUILT
+(above); the user's-own-pen (non-custodial) variant and the live browser React host (hydration, the client
+bundle, the live subscription transport) remain design-stage units — a design pass before a build.

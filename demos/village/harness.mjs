@@ -77,7 +77,7 @@ export function operatorOf(store) {
 
 // Open a store from its home (idempotent boot: genesis re-lands the same marker), serve it.
 // The gateway is in-process (so tests may introspect); the HTTP surface is real.
-export async function openStore(name) {
+export async function openStore(name, opts = {}) {
   const cfg = STORES[name];
   const home = homeOf(name);
   initHome(home);
@@ -102,6 +102,9 @@ export async function openStore(name) {
   const gateway = await Gateway.open(backend, {
     seed,
     ...(cfg.lens === undefined ? {} : { offeredLens: cfg.lens }),
+    // Provisioned renderer-pen seeds (SPEC §23.3) — custody in config, so a write-enabled renderer act
+    // can sign form-submits as a granted author. Passed by the act, never persisted to the ground.
+    ...(opts.pens === undefined ? {} : { pens: opts.pens }),
   });
   await gateway.append(assembleGenesis({ operatorSeed: seed }).deltas);
   const handle = await serve({
