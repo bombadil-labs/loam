@@ -101,7 +101,9 @@ export function parseEmitTemplate(raw: unknown): EmitTemplate {
 // here) — parsePred accepts all four, evalPred THROWS on each, and one such spec would kill
 // every future translate() pass for every source. Refused structurally, on the JSON form:
 // those constructs only ever appear as object KEYS, so key-walking cannot false-positive on
-// constant strings.
+// constant strings. 0.6.0's difference/intersect need no entry: they are Term operators
+// (dset-sort, bare-evaluable like union), not Pred constructs — the only door from a Pred into
+// a Term is inView, which this set already refuses at its threshold.
 const UNRUNNABLE_KEYS = new Set(["inView", "aliased", "hole", "var"]);
 function assertRunnableRecognizer(raw: unknown, path = "recognize"): void {
   if (Array.isArray(raw)) {

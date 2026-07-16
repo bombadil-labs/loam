@@ -130,6 +130,47 @@ describe("§24.8 erasure reaches the quarantine — the law, no evasion", () => 
     await primary.close();
   });
 
+  it("no COMPOSED read scope resurrects a purged byte — primary ⊎ pool holds zero bytes of it (§24.8 assert 4)", async () => {
+    // §23.9's opt-in interop lets a primary-side query deliberately include an active quarantine in its
+    // scope. The widest scope such a read could EVER assemble is the union of both grounds — so this rail
+    // asserts, byte-for-byte, that after an erasure that union contains nothing of the forgotten content:
+    // not the delta id, not the content string, in neither reactor nor either backend's at-rest bytes.
+    // DESIGN RAIL: when the first-class scope surface lands (§23.9 opt-in interop / §27.6's membership
+    // select/watch), re-point this test at it — the assertion must hold through THAT door too. Today it
+    // pins the strongest form available: the bytes exist nowhere, so no scope over these stores can show them.
+    const FORGOTTEN = "the-exact-bytes-to-be-forgotten-everywhere";
+    const primaryBackend = new MemoryBackend();
+    const primary = await Gateway.boot(
+      primaryBackend,
+      assembleGenesis({
+        operatorSeed: OP_SEED,
+        registrations: [
+          { hyperschema: PLANT, schema: SCHEMA, roots: [FERN], writable: ["height", "message"] },
+        ],
+      }),
+    );
+    const secret = observed(FERN, "message", FORGOTTEN, 2000, OP_SEED);
+    await primary.append([secret]);
+    const poolBackend = new MemoryBackend();
+    const q = await primary.openQuarantine({ backend: poolBackend });
+    expect(holds(q.gateway, secret.id)).toBe(true); // the pool held the secret before the erasure
+
+    await primary.erase(secret.id, { reason: "forgotten everywhere, or nowhere" });
+
+    // The widest composable scope: every surviving delta of BOTH grounds, unioned.
+    const composed = [...primary.reactor.snapshot(), ...q.gateway.reactor.snapshot()];
+    expect(composed.some((d) => d.id === secret.id)).toBe(false);
+    expect(JSON.stringify(composed)).not.toContain(FORGOTTEN);
+    // And at the byte tier: neither backend retains the content at rest.
+    for (const backend of [primaryBackend, poolBackend]) {
+      const atRest = await backend.deltasSince(new Set());
+      expect(atRest.some((d) => d.id === secret.id)).toBe(false);
+      expect(JSON.stringify(atRest)).not.toContain(FORGOTTEN);
+    }
+    await q.drop();
+    await primary.close();
+  });
+
   it("a purge in the primary reaches EVERY attached pool", async () => {
     const primary = await bootPrimary();
     const secret = observed(FERN, "message", "erase me everywhere", 2500, OP_SEED);

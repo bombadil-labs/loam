@@ -253,14 +253,19 @@ entry per binding, and the duplicate refusal keeps doing its real job: refusing 
 answering to one name. No substrate change, no rhizomatic conversation, no workaround vocabulary —
 the wall was Loam's own habit of building the registry from a per-binding list.
 
-The sharing runs deeper than the registry, and it is a feature: the reactor's materialization is
-keyed by the HYPERSCHEMA (the gather is the hyperschema's; only resolution differs per lens), so two
-lenses share one materialization, kept hot over the UNION of their bindings' roots — roots are
-liveness and ride each binding (§21), and a shared gather warms for whoever declared it. The
-GraphQL surface already speaks this language: `_hviewHex` documents that "two lenses over the same
-body and root share it while their `_hex` may differ" — one gathering of evidence, two adjudications.
-Resolution stays a universal function of the data either way; sharing the gather changes cost, never
-answers.
+The sharing runs deeper than the registry, and it is a feature — but unlike the registry dedup, it is
+NOT free (honesty note, from a fact-check of this memo against the code): the reactor's materialization
+is keyed by the HYPERSCHEMA's name (the gather is the hyperschema's; only resolution differs per lens),
+which is exactly what lets two lenses share one materialization — and exactly what makes today's
+one-register-per-binding habit THROW (`duplicate materialization`, rhizomatic's reactor) the moment a
+second binding names the same hyperschema. The implementing slice therefore does the same dedup twice:
+build the SchemaRegistry from the deduplicated hyperschema set (above), and register ONE materialization
+per gather program, kept hot over the UNION of its bindings' roots — roots are liveness and ride each
+binding (§21), and a shared gather warms for whoever declared it. Neither exists in the code today; both
+are the gateway's own list-building to fix, no substrate change. The GraphQL surface already speaks the
+sharing's language: `_hviewHex` documents that "two lenses over the same body and root share it while
+their `_hex` may differ" — one gathering of evidence, two adjudications. Resolution stays a universal
+function of the data either way; sharing the gather changes cost, never answers.
 
 **The registry's key, read from the bytes that were always there.** Bindings for both lenses file
 under the same registration entity (`registration:<hyperschemaEntity>` — the hyperschema's family),

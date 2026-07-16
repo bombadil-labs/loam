@@ -2108,6 +2108,59 @@ full ocap, a read-side capability slice. Residual noted in spec/24: the fan-out 
 failing pool makes `erase` reject rather than silently evade). New capability/federation/erasure surface →
 Myk's merge (P6).
 
+## 2026-07-16 — T5 closes its design stage: §24 in full, reconciled with §27 (PR pending Myk)
+
+The quarantine's full design memo, on branch `design/24-quarantine-full`. Most of §24 was already drafted
+(#108) and its foundation built (#109); what this pass adds is the part that could only exist NOW — the
+reconciliation with §27, which landed after the draft and reframed the quarantine as a container. New
+§24.10 pins it clause by clause: the separate-store proof is BOUNDED to the untrusted domain by §27.1's
+property-vs-wall spectrum (not weakened — a quarantine is definitionally the wall case); slice 1's `admit`
+predicate is the degenerate form of §27.6's membership-is-a-query; promote-outputs (#111) IS §27.3's
+adoption-merge, and scope-merge never applies behind the glass; §24.2's one-way tree and §27.4's
+live-tree/frozen-DAG rule are one law (a frozen quarantine is a module version, no longer a quarantine).
+Flagged precisely: rhizomatic 0.6.0's `difference`/`intersect` are Term-layer operators — they compose
+scopes at the seeding edge; they are NOT usable inside `inView` predicates, whose depth-1 stratification
+is unchanged.
+
+The §24.8 rail grew a seventh test (green, 7/7): the widest scope any §23.9 opt-in interop read could ever
+assemble — primary ⊎ pool, both reactors and both backends at rest — holds zero bytes of a purged delta,
+asserted byte-for-byte by content string, not just by id. A design rail: when the first-class scope
+surface lands, the test re-points at it. Premortem finding folded into §24.8: the erasure fan-out reaches
+pools attached IN-PROCESS; a durable pool that outlives the primary's process and is never re-attached is
+a replica no fan-out reaches — so a durable quarantine must be REGISTERED for boot-time re-attachment or
+it may not be durable. Learning: every replica-shaped feature must answer "who re-attaches you after a
+restart?" before it earns a durable backend.
+## 2026-07-16 — T14: rhizomatic 0.6.0 adopted — the set algebra is whole
+
+The substrate bump §27 was waiting on. `@bombadil/rhizomatic` ^0.5.0 → ^0.6.0 (package.json + lock;
+`node_modules/@bombadil/rhizomatic` verified at 0.6.0), purely additive exactly as claimed: no `alg`
+bump, no §20 migration, every pre-existing test green untouched. 0.6.0 gives `union` its missing
+company — two new dset-sort Term operators, keyed by content-addressed id, nestable to any depth:
+`{ op: "difference", of, without }` (asymmetric, of ∖ without) and `{ op: "intersect", left, right }`.
+They enter under the fail-closed parse rule: an older witness meets the unknown `op` and rejects at
+parse time, loudly.
+
+The proof is a smoke/rail test (test/spike/set-algebra.test.ts, 3 tests) asserting against real
+evaluation through Loam's actual substrate surface (JSON `op` profile → `parseTerm` → `evalTerm` over
+a two-delta ground): difference leaves exactly the complement, intersect exactly the crossing, and —
+the thing the old depth-1 `select(not(inView(...)))` idiom could never do — a difference whose
+`without` is itself a difference evaluates correctly. Containers defined relative to one another now
+compose. `npm run check` green: 58 files, 611 tests (608 + the 3 new).
+
+The UNRUNNABLE_KEYS question (src/federation/translate.ts:105) answered from 0.6.0's real shape: NO
+entry needed. That set guards recognizers, which are Preds run by bare `evalPred`; difference and
+intersect are Term operators — bare-evaluable by `evalTerm` like union — and the only door from a
+Pred into a Term is `inView`, which the set already refuses at its threshold. (Mechanically they
+could never match anyway: in the JSON profile they ride the `op` VALUE, and the key-walk matches
+KEYS.) Recorded as a comment on the set.
+
+Two learnings worth keeping. (1) 0.6.0 still restricts `inView.term` to `input | select | union |
+mask` — a difference/intersect may NOT ride inside an `inView` predicate; the new algebra composes
+at the Term layer, not the Pred layer. The §27 follow-on should design with that boundary in mind.
+(2) The village is untouched on purpose: a substrate bump has no user-visible behavior until the
+§27 membership/scope-merge work builds on it — that follow-on act is where the operators go on
+stage.
+
 ## 2026-07-16 — §21.7 coexistence: the serving surface (design pass, T2 slice 2b)
 
 The deferred remainder of T2 opened at the design stage: two lenses over one hyperschema, the
