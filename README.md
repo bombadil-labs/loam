@@ -521,6 +521,7 @@ village.
 - **`.adlc/tickets.json`** — the backlog: unbuilt and partially-designed work, as ADLC tickets.
   The next thing to build is drawn from here, and its landing PR adds its `spec/` section file.
 - **[JOURNAL.md](JOURNAL.md)** — the append-only record: one entry per step, what was done and why.
+  An index over [`journal/`](journal/), one file per entry.
 - **[CLAUDE.md](CLAUDE.md)** — the process this repo runs by (the ADLC lifecycle).
 
 ## Development
