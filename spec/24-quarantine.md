@@ -335,6 +335,26 @@ The test's whole point: erase in the primary ⇒ forgotten in the quarantine too
 back. A quarantine that fails any of the four is an erasure-evasion channel inside the operator's own
 walls, and §11 forbids it.
 
+**The fan-out re-derives its own reach (corrected, [#120](https://github.com/bombadil-labs/loam/pull/120)).**
+Audit 2 found slice 1's fan-out TRUSTING three conditions it should have RE-DERIVED, and the corrected
+contract is now law, built and railed:
+
+- **The tombstone crosses the glass regardless of the pool's TRUST policy.** Trust (§8) is admission
+  configuration — whose data do I want; erasure (§11) is law, and the pool is the operator's OWN replica
+  (§24.1). A `closed` pool is still inside the operator's walls, so the fan-out delivers the tombstone
+  past the pool's own door with an explicit admit. Authorization is untouched and checked FIRST: a forged
+  or foreign tombstone is refused loudly, without purging — the correction removed a trust filter, never
+  a check.
+- **The tombstone crosses regardless of the SEEDING filter.** A §24.2 `admit` narrows what a pool SEES,
+  never what it must FORGET: the seeding edge passes the operator's tombstones through unconditionally,
+  so a pool seeded past a pre-attachment erasure inherits the holes along with the ground, and a lagging
+  peer's re-send of the purged bytes is refused at its door.
+- **The fan-out is TRANSITIVE.** A pool of a pool is still the operator's replica; `eraseReplica` recurses
+  into its own attached pools (cycle-guarded), so P → Q → R forgets at every depth.
+- **Failure is LOUD.** After authorization and the admit override, the only way a lawful tombstone does
+  not land is the pool's store itself failing — and that THROWS, making `erase` reject, so the operator
+  learns the erasure did not complete. Never a silent success.
+
 ### 24.9 What v1 builds, and what it only describes
 
 This section describes the whole; the build slice that follows it is deliberately narrow, and the
@@ -489,3 +509,16 @@ erased-stays-dead, and the three law refusals — grant-shaped, forged-adoption,
 slices:** promote-LAW (bless a schema/renderer via the ordinary publish path, §24.4) and endorse-import
 (attribution-preserving federation) are their own tickets; the fork/PR village demo is a fast follow-on.
 New capability/provenance surface → Myk's merge (P6).
+
+**T16 FAN-OUT CORRECTION** [#120](https://github.com/bombadil-labs/loam/pull/120) (realizes ticket T16;
+audit 2's HIGH + two MED, 2026-07-16) — the §24.8 fan-out now RE-DERIVES ITS OWN REACH (the corrected
+contract stated in §24.8 above). One mistake, three faces, all in `eraseReplica` / `openQuarantine`
+(`src/gateway/gateway.ts`): the tombstone now crosses past the pool's trust policy (an explicit admit —
+authorization via `eraseDefect` checked first, explicitly, refusing loudly without purging), past the
+seeding `admit` filter (tombstones pass the edge unconditionally), and TRANSITIVELY into nested pools
+(cycle-guarded recursion), and a lawful tombstone that still cannot land makes `erase` THROW instead of
+silently succeeding. Rails `test/gateway/erasure-fanout.test.ts` (5: closed-trust byte-at-rest, loud
+failure against an honestly-failing backend, transitive P→Q→R byte-at-rest, pre-attachment-erasure
+inheritance through a filtered seed, the narrowing knob unbroken) — the three finding rails each failed on
+the pre-fix code; slice 1's forged-tombstone rail survives with its byte assertion verbatim, extended to
+assert the refusal is loud. No migration (no delta changes shape). Erasure surface → Myk's merge (P6).
