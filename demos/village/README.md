@@ -345,7 +345,7 @@ _(one entry per PR that grew the village; newest last)_
   record, still attributed to the pen. The anonymous write lands only because the operator did all three:
   declared the lens public, provisioned the pen's seed, and granted it write standing (§12 — no anonymous
   writes by default). The user's-own-pen (non-custodial) variant awaits the browser host.
-- **A PLACE WHERE UNTRUSTED LAW MAY BIND (SPEC §24, slice 1)** (phase-quarantine.mjs, 4/4, re-runnable):
+- **A PLACE WHERE UNTRUSTED LAW MAY BIND (SPEC §24, slice 1)** (phase-quarantine.mjs, 6/6, re-runnable):
   today foreign law is inert-by-default — safe, but untestable. The quarantine closes that gap. The almanac
   stands up a QUARANTINE POOL — a second store over its own ground, seeded ONE-WAY from the primary — that
   resolves the primary's LIVING ground (a real lens over real ground, where a stranger's whole app could run
@@ -354,5 +354,9 @@ _(one entry per PR that grew the village; newest last)_
   glass (erase a fact in the primary and the byte is gone from the quarantine too, so a forgotten record can
   never hide in a staging area inside the operator's own walls — §24.8, the non-negotiable law); and DROP is
   consequence-free (discard the whole pool and the primary's coherence is untouched — its title still reads
-  true). Promotion (the door OUT), the resource envelope, the sequestered renderer frame, and the full ocap
-  are §24's later slices.
+  true). Then the T16 correction ([#120](https://github.com/bombadil-labs/loam/pull/120)): the fan-out
+  RE-DERIVES ITS OWN REACH. The operator CLOSES the almanac's trust door — the exact posture where the old
+  fan-out went silent — and nests a pool inside a pool (P → Q → R); one erase in the primary and the byte is
+  gone from every tier of the tree, content-string-at-rest: trust policy is admission configuration, erasure
+  is LAW, and depth is no shelter. Promotion (the door OUT), the resource envelope, the sequestered renderer
+  frame, and the full ocap are §24's later slices.

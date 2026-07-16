@@ -118,13 +118,15 @@ describe("§24.8 erasure reaches the quarantine — the law, no evasion", () => 
     await primary.append([fact]);
     const q = await primary.openQuarantine();
     expect(holds(q.gateway, fact.id)).toBe(true);
-    // A tombstone signed by a NON-operator: federate's eraseDefect rejects it, so eraseReplica must NOT purge.
+    // A tombstone signed by a NON-operator: eraseDefect refuses it, so eraseReplica must NOT purge.
+    // The refusal is loud (a hostile direct caller handed over a forgery), but the INVARIANT is the
+    // byte: the forged order leaves it untouched. The fix removed a TRUST filter, never this CHECK.
     const ALT_SEED = "a1".repeat(32);
     const forged = signClaims(
       eraseClaims(fact.id, OP, authorForSeed(ALT_SEED), 3000, "i'll forget this for you"),
       ALT_SEED,
     );
-    await q.gateway.eraseReplica(forged, fact.id);
+    await expect(q.gateway.eraseReplica(forged, fact.id)).rejects.toThrow(/operator/);
     expect(holds(q.gateway, fact.id)).toBe(true); // the byte survives — no unauthorized removal
     await q.drop();
     await primary.close();

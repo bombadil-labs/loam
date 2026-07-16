@@ -78,3 +78,4 @@ entry is a NEW FILE and two concurrent landings never touch the same one (the sa
 | 2026-07-16 | [the arc lands whole; the queue restocked for what follows](journal/2026-07-16-the-arc-lands-whole-the-queue.md) |
 | 2026-07-16 | [Audit 2: the composed system, four angles, one HIGH](journal/2026-07-16-audit-2-the-composed-system-four.md) |
 | 2026-07-16 | [The journal becomes a folder, for the reason the spec did](journal/2026-07-16-the-journal-becomes-a-folder.md) |
+| 2026-07-16 | [T16: the fan-out re-derives its own reach](journal/2026-07-16-t16-the-fan-out-re-derives.md) |

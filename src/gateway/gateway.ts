@@ -1236,7 +1236,8 @@ export class Gateway {
     // ground): the same tombstone lands there and the byte is purged there too, so a forgotten record can
     // never live on in a staging area inside the operator's own walls. §11 reaches through the one-way
     // glass unconditionally; a quarantine that could hide a purged byte would be an erasure-evasion channel.
-    for (const pool of this.quarantinePools) await pool.eraseReplica(tombstone, id);
+    const seen = new Set<Gateway>([this]);
+    for (const pool of this.quarantinePools) await pool.eraseReplica(tombstone, id, seen);
     return { erased: id, citations };
   }
 
@@ -1256,8 +1257,17 @@ export class Gateway {
     }
     const backend = opts.backend ?? new MemoryBackend();
     const pool = await Gateway.open(backend, { seed: this.options.seed });
+    // A membership filter narrows what the pool SEES, never what it must FORGET (§24.8): the
+    // operator's tombstones pass the seeding edge unconditionally, exactly as `eraseReplica`
+    // delivers them live — a quarantine inherits the holes along with the ground. (A forged
+    // tombstone slipping this wrapper is still refused inside federate by eraseDefect; the
+    // authorization gate is unchanged.)
+    const base = opts.admit;
     const reseed = (): Promise<FederationReport> =>
-      pool.federate(this.offeredDeltas(), opts.admit ? { admit: opts.admit } : {});
+      pool.federate(
+        this.offeredDeltas(),
+        base === undefined ? {} : { admit: (d) => isTombstone(d.claims) || base(d) },
+      );
     await reseed(); // one-way INBOUND seeding; the reverse leg is never wired
     // Bind the operator's federated schemas so the pool RESOLVES the seeded ground — the dry-run reads a
     // living lens, not raw deltas. (Foreign, non-operator law federated in binds nothing until promoted.)
@@ -1366,18 +1376,42 @@ export class Gateway {
 
   // Honor an erasure DECIDED by the primary operator (SPEC §24.8), called on a pool by the primary's fan-out:
   // land the operator's tombstone (so the pool remembers the hole and refuses re-entry — the federation door
-  // already enforces that, §11), purge the byte, and re-seat. No local target need exist; the erasure was
-  // decided upstream, and the shared operator makes the tombstone lawful here. This is what keeps a pool from
-  // becoming a place a forgotten byte can hide.
-  async eraseReplica(tombstone: Delta, id: string): Promise<void> {
-    await this.federate([tombstone]); // stores the operator's tombstone (or no-ops if already dead)
+  // already enforces that, §11), purge the byte, re-seat, and fan the same order into any pools of THIS pool
+  // (the law is transitive — a nested replica is still the operator's replica). No local target need exist;
+  // the erasure was decided upstream, and the shared operator makes the tombstone lawful here. This is what
+  // keeps a pool from becoming a place a forgotten byte can hide.
+  //
+  // A FAN-OUT MUST RE-DERIVE ITS OWN REACH. The purge re-checks the tombstone's lawfulness itself
+  // (eraseDefect — the authorization gate, checked FIRST and explicitly); the tombstone crosses the
+  // federation door past the pool's own TRUST policy (an explicit admit — trust is admission
+  // configuration, whose data do I want; erasure is LAW, §11 through the one-way glass
+  // unconditionally, and a `closed` pool is still the operator's own replica); and if the lawful
+  // tombstone STILL did not land, the only remaining cause is the store itself failing — so it
+  // THROWS, and the primary's `erase` rejects. Best-effort-and-loud, never a silent success.
+  async eraseReplica(tombstone: Delta, id: string, seen: Set<Gateway> = new Set()): Promise<void> {
+    // Authorization first, on its own: a forged or foreign removal-order is refused WITHOUT purging
+    // — loudly, since only a hostile direct caller can reach this branch (the primary's fan-out only
+    // ever hands over the tombstone its own erase door just validated).
+    const defect = eraseDefect(tombstone, this.reactor, this.operatorAuthor);
+    if (defect !== undefined) {
+      throw new Error(`a replica purge is the operator's alone: ${defect}`);
+    }
+    await this.federate([tombstone], { admit: () => true }); // lawful (checked above) — trust policy does not apply
     await this.flush();
-    // Purge ONLY if the operator's tombstone actually landed here (federate's eraseDefect gate rejects a
-    // forged or foreign tombstone). A purge is §11 removal — the operator's alone — so a rejected tombstone
-    // must never trigger one: no unauthorized caller can use this path to forget a record it does not own.
-    if (!readTombstones(this.reactor, this.operatorAuthor).has(id)) return;
+    if (!readTombstones(this.reactor, this.operatorAuthor).has(id)) {
+      throw new Error(
+        `the erasure did not complete: the operator's tombstone for ${id} could not land in an attached pool`,
+      );
+    }
     await this.backend.purge([id]);
     await this.reseat();
+    // Transitive: a pool of a pool holds the operator's bytes too. `seen` guards the walk — a cycle
+    // among pools cannot arise from openQuarantine (each pool is a fresh gateway), but a fan-out
+    // that could infinite-loop would be a worse bug than the one this fixed.
+    seen.add(this);
+    for (const pool of this.quarantinePools) {
+      if (!seen.has(pool)) await pool.eraseReplica(tombstone, id, seen);
+    }
   }
 
   // A fresh reactor replayed from the backend as it stands NOW — how open() built the first
