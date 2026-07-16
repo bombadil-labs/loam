@@ -28,25 +28,36 @@ its own right. Nothing new: it is what §24 built. What makes it a *primitive* r
 quarantine is that its behavior is a small vector of knobs, and the arc's features are settings of that
 vector:
 
-- **Membership** — which deltas are inside. A lens over a ground (what the quarantine federates), or an
-  explicitly curated set ("populate it with specific things"). A shippable module wants curation plus a
-  MANIFEST: which schemas / renderers / entities are its PUBLIC SURFACE versus internal deltas it needs but
-  does not export (§27.6).
+- **Membership** — which deltas are inside. **This is a delta-query** (DECIDED, §27.6): a `Term → dset`, the
+  shape `offeredLens` already is — static (freeze to a version) or live (a subscription), over a local or
+  remote store. A shippable module adds a MANIFEST atop the query: which schemas / renderers / entities are
+  its PUBLIC SURFACE versus internal deltas it needs but does not export (still open, §27.6).
 - **Seeding** — how it is populated: one-way inbound federation from a primary (the quarantine), an
   explicit import of a shipped module, or hand-authored deltas.
 - **Trust posture** — foreign law inside binds nothing until blessed (inert-by-default, §8/§12). The
   container is the safe staging area for untrusted law; "installing" a trusted module is load + a promotion
-  of its law (§27.3). Quarantine and trusted-import differ only in this knob.
+  of its law (§27.3). This knob also decides whether "excluded/sandboxed" can be a PROPERTY or must be a
+  WALL (below).
 - **Boundary** — reference or merge (§27.3): does the container stay a distinct unit you point at, or
-  dissolve into your ground?
+  dissolve into your ground? (And merge splits by trust — scope-flip vs adoption, §27.3.)
 - **Identity** — a living name that mints frozen versions (§27.2).
 
-"A separate container, not a mark" is not a new argument here — §24.1 already proved it (*you cannot discard
-a mark*: a "sandboxed" flag on canonical deltas would demand every reader honor it forever, and erasing a
-marked set means negating it delta-by-delta with residue). It generalizes verbatim: a module has to be a
-separate addressable unit you *reference*, not a namespace tag smeared across one ground, precisely so you
-can unload, version, and swap it. The grow-only union has no native boundary; the only boundary is a
-distinct container.
+**A container is itself an ENTITY, and its knobs are CLAIMS about it** — so a store's own organization is
+data, negatable and forkable like everything else (trust is data, §8, arriving at *structure* is data). In
+particular the sandbox/exclusion is a **property**: a claim "container C is excluded," and merging C in is
+negating that claim (§27.3's scope-merge — flip the flag, no re-sign).
+
+**When exclusion is a property, and when it must be a wall.** §24.1 proved *you cannot discard a mark* — a
+"sandboxed" flag on canonical deltas that every reader must honor forever, discarded only by negating each
+delta with residue. That argument is about UNTRUSTED foreign law, and there it stands: a stranger's law needs
+a separate store (structural isolation) for discard-with-zero-trace and erasure-evasion resistance. But for
+YOUR OWN containers — deltas you or your grantees authored, organized into semi-permanent scopes — a property
+is exactly right: you never need to discard-with-zero-trace (you re-include or exclude), the deltas were
+always yours, and exclusion is a scope choice the read query honors, not a security boundary a stranger might
+evade. So "excluded" is a SPECTRUM keyed on trust: a flippable property for your own containers; a separate
+store for untrusted ones. The grow-only union still has no *canonical* boundary — only a distinct container
+gives isolation of foreign law — but among your own deltas, a container is a named region of the scope
+algebra, and exclusion is a claim.
 
 ### 27.2 The living → frozen ladder (DECIDED — Myk, 2026-07-15)
 
@@ -90,6 +101,28 @@ survives forever, per fact, cryptographically. This is exactly what makes **fork
   resolves whether to bless them. Because provenance is intrinsic, the creator sees EXACTLY what changed and
   WHO you are — not a reconstruction, a signature. Merge is union; disagreement, if any, is a read-time lens
   (§13/§14), never a write-time conflict to hand-resolve.
+
+**The two merges (DECIDED, Myk, 2026-07-15) — re-signing is the trust-crossing, not the merge.** Merge-load
+splits by trust relationship, and the split dissolves what first looked like a conflict in the promotion
+story ("do we re-sign to merge, or not?"). The answer is: it depends on whose deltas they are.
+
+- **Scope-merge** — a container in your OWN trust domain (deltas you or your grantees authored). "Merging"
+  is INCLUDING the container in your primary scope: flip the exclusion property (§27.1). **No re-signing** —
+  the authorship never changed, so re-signing would pointlessly rewrite your own claims and churn their
+  content addresses. Trivial, and provenance is already intact (it was always yours). This is the merge for
+  the sandbox-as-a-property model: excluded → included is a flag.
+- **Adoption-merge** — a container across a TRUST BOUNDARY (a stranger's law or outputs). Here you must
+  RE-AUTHOR to bind, because foreign authorship binds nothing (inert-by-default, §8/§12): the operator
+  re-signs the content as their own claim with a `loam.adoption` record keeping the stranger's authorship on
+  the trail (§24.3, built as promote-outputs). This is the merge for a stranger's fork.
+
+So **re-signing is not the merge mechanism — it is the trust-boundary-crossing mechanism.** Within a trust
+domain, merge is scope inclusion (flip the flag, no re-sign); across one, merge is adoption (re-sign, with
+provenance). The two are the same §27 reference→merge lever, keyed on whether the deltas are already yours —
+and "excluded/sandboxed" is therefore a spectrum: for your own containers a PROPERTY (a flippable claim, see
+§27.1); for untrusted foreign law a separate store (only structural isolation gives discard-with-zero-trace
+and erasure-evasion resistance, §24.1). The trust posture picks whether exclusion can be a flag or must be a
+wall.
 
 ### 27.4 What a "branch" is, once containers and resolvers are separate
 
@@ -159,11 +192,42 @@ Each is impossible in git, and each is a *consequence of the atom*, not a bolted
 whole rhetorical point: the familiarity is the hook, the removed constraint is the payload, and there is
 only ever one idea to have first.
 
-### 27.6 The genuinely open questions (where the design work is)
+### 27.6 Membership is a delta-query (DECIDED — Myk, 2026-07-15), and the questions that remain
 
-1. **Membership and the manifest.** What is *in* a module, and what does it *export*? A curated set plus a
-   manifest naming its public surface (which schemas / renderers / entities are visible to a consumer versus
-   internal). This is where a module stops being "a bag of deltas" and becomes a package with an interface.
+**Membership is a query (DECIDED).** A container's contents are defined by a delta-query — a rhizomatic
+`Term` that evaluates to a `dset` (a set of whole deltas), exactly the shape `offeredLens` already uses. This
+is the SCOPE axis of §27.4, made concrete: the query IS the container; the Schema resolves it. It ranges
+across two dimensions the substrate already gives:
+
+- **Static or live.** Evaluate once and freeze the `dset` → a frozen MODULE VERSION (content-addressed,
+  §27.2); or re-evaluate as the ground grows → a LIVING container (the quarantine is exactly this — seeded by
+  a live membership lens).
+- **Local or remote.** The query runs over your ground, or a peer's (federation carries the remote deltas in,
+  filtered by the membership query on the way — again, the quarantine's inbound edge).
+
+And it is already EXPRESSIVE today (verified against rhizomatic): membership by author (`match{field: author}`),
+by time range (`and` of two `timestamp` matches), by an explicit id set (`match{field: id, cmp: inSet}`), by
+touching an entity (`hasPointer{targetEntity}`), by context (`hasPointer{context}`), and any boolean
+combination (`and`/`or`/`not`, term-level `union`). So the membership primitive needs no substrate change to
+select — it is a `Term → dset`, and the Loam-side work is only to EXPOSE that evaluation as a first-class
+`select(term)` / live `watch(term)` surface (a parameterized `offeredDeltas`, nearly free).
+
+The one gap is **set difference** — "the scope is the union of active containers MINUS the excluded ones,"
+which the sandbox-as-a-property model (§27.1/§27.3) needs. `union` is a first-class `Term` op; `difference`
+and `intersect` are not. Single-level exclusion by delta id is expressible today via the reflective idiom
+`select(not(inView(T, id)))` = `input ∖ T`, so the property model WORKS now for excluding one container — but
+that idiom is depth-1 stratified (the excluded term may not itself be a difference), so containers defined
+RELATIVE to one another do not compose. Composable, nestable set-difference (and intersection, to complete
+the `∪`/`∩`/`∖` algebra) is filed as **rhizomatic#16**, expected in substrate 0.6.0. Until it lands, build the
+single-level exclusion; the general container algebra arrives with 0.6.0. (Containers are, at bottom, set
+algebra over deltas: membership a query, exclusion a property, composition the boolean operators.)
+
+The questions that DO remain open:
+
+1. **The manifest.** A membership query says what is *in* a container; a module still needs to say what it
+   *exports* — which schemas / renderers / entities are its public surface versus internal deltas it needs
+   but does not expose. This is where a module stops being "a query's output" and becomes a package with an
+   interface. (Membership: decided. Manifest: open.)
 2. **Identity as a Merkle-set.** The canonical, order-free content address over member deltas — the keystone
    everything else hangs on. Buildable on the §22.3/§23.10 ladder, but it is the piece that turns "a
    container" into "a nameable, verifiable, pinnable module version."
@@ -183,11 +247,23 @@ primitive is the north star; promotion is the next commit; the two are the same 
 
 **Provenance.** **Design-stage DRAFT (Claude, 2026-07-15)** — this section names a primitive the arc
 converged on and fixes its two decided questions; it BUILDS nothing and awaits **Myk's sign-off in chat
-(P6)** before it shapes implementation. DECIDED by Myk (2026-07-15): the living→frozen laddered identity
-(§27.2) and always-kept provenance, including on merge, which makes fork and pull-request native (§27.3). The
-branch formalism (§27.4) sanity-checks Myk's "a branch is chosen at query time" into `(scope × resolution)`,
-both query-time, and states the live-tree / frozen-DAG rule. The git mapping (§27.5) is the canonical way to
-explain Loam to anyone who groks git, and the source of the "impossible" demo set. Rides §8 (federation), §11
-(erasure), §13/§14 (read-time conflict), §17 (N lenses), §21 (the living→version ladder), §22.3/§23.10 (the
-content-address economics ladder), and §24 (the container's first instance, and promotion as its first
-operation). Realizes no ticket yet; the follow-on tickets are promotion first, then the `Container` lifting.
+(P6)** before it shapes implementation. DECIDED by Myk (2026-07-15), across this session's design
+conversation: (1) the living→frozen laddered identity (§27.2); (2) always-kept provenance, including on
+merge, which makes fork and pull-request native (§27.3); (3) **membership is a delta-query** — a `Term →
+dset`, static-or-live, local-or-remote (§27.6), which is the SCOPE axis of the branch formalism made concrete;
+(4) **the two merges** — scope-merge (flip the exclusion property, no re-sign, own trust domain) vs
+adoption-merge (re-sign with `loam.adoption` provenance, across a trust boundary), so re-signing is the
+trust-crossing not the merge (§27.3); and (5) **sandbox/exclusion is a spectrum keyed on trust** — a
+flippable PROPERTY (a claim about the container entity) for your own containers, a separate STORE for
+untrusted foreign law (§27.1). The branch formalism (§27.4) sanity-checks Myk's "a branch is chosen at query
+time" into `(scope × resolution)`, both query-time, with the live-tree / frozen-DAG rule. The git mapping
+(§27.5) is the canonical way to explain Loam to anyone who groks git, and the source of the "impossible" demo
+set. **Substrate dependency:** the general (composable, nestable) container set-algebra needs first-class set
+DIFFERENCE (and intersection) in rhizomatic's `Term` — `union` exists, difference/intersect do not; filed as
+**rhizomatic#16**, expected in substrate 0.6.0. Single-level exclusion is expressible today (`select(not
+(inView(T, id)))`), so the near-term build is not blocked. Rides §8 (federation), §11 (erasure), §13/§14
+(read-time conflict), §17 (N lenses), §21 (the living→version ladder), §22.3/§23.10 (the content-address
+economics ladder), and §24 (the container's first instance; promotion/promote-outputs as its first
+operation, built #111). Follow-on tickets: the first-class membership `select`/`watch` surface and
+scope-merge (both on today's substrate); the composable container set-algebra (on 0.6.0 / rhizomatic#16); the
+manifest and Merkle-set identity (§27.6); then the full `Container` lifting.
