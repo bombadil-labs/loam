@@ -84,11 +84,19 @@ describe("§23.9: a bounded worker keeps a bad bundle from wedging the host", ()
   });
 
   it(
-    "a memory-hungry bundle is bounded and the host survives to serve the next route (rail d)",
+    "a memory-hungry bundle is reclaimed by the MEMORY bound — distinguishably from the timeout (rail d)",
     async () => {
       const gw = await staged();
       const hog = await gw.serveRoute("hog", FERN, "full");
-      expect(hog.status).toBe(500); // bounded — timed out or reclaimed by resourceLimits, never a crash
+      expect(hog.status).toBe(500); // bounded, never a crash
+      // The two bounds have DIFFERENT signatures, and this asserts the memory one: a worker the
+      // resourceLimits reclaim dies on the error/exit path and folds to "the renderer faulted";
+      // only the timer produces "the renderer timed out". The hog allocates ~8MB per iteration
+      // against a 128MB old-gen ceiling, so V8 kills it well inside the 500ms timer — if the
+      // timer had won the race instead, this assertion reads "timed out" and fails. That is the
+      // §23.9 claim ("memory bounds so a bundle cannot OOM the host") actually observed, not
+      // inferred from a status code both paths share.
+      expect(hog.body).toBe("the renderer faulted");
       expect((await gw.serveRoute("ok", FERN, "full")).status).toBe(200); // the host is unharmed
       await gw.close();
     },

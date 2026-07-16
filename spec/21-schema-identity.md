@@ -59,7 +59,11 @@ authored like any other fact, not a coordinate the system hands out.
 hyperschema alone. That is the whole unlock: `Film` and `FilmClassic` are distinct keys over one
 gather program, so they coexist instead of colliding, and the duplicate-name refusal narrows from
 "one lens per hyperschema" to its honest form — "one LIVING lens per name per hyperschema," which is
-just what it means for a name to name something. Two operators may still bind different Schemas under
+just what it means for a name to name something. **Honesty note (ticket T2 builds this):** the key is
+this design's accepted CONTRACT, not yet the code's behavior — today's registry still groups by
+registration entity alone and latest-wins evicts the sibling
+(`src/gateway/registration.ts`); §21.7 below is the accepted serving design whose implementation is
+queued as ticket T2. Two operators may still bind different Schemas under
 the same pair on their own stores; that is federation, resolved by whose law binds (§7), not a
 registry collision.
 
@@ -190,7 +194,7 @@ The ladder exists to be climbed, and §22–§23 are why it must hold weight:
   a gap no test exercises — and turns real at §23, where a renderer's "works forever" needs the gather
   frozen too. Build it when §23 needs it; the rung is symmetric and unblocked.
 
-### §21.7 Coexistence — the serving surface *(DRAFT — design-stage, pending Myk's P6; no provenance until it lands)*
+### §21.7 Coexistence — the serving surface *(design ACCEPTED — landed [#114](https://github.com/bombadil-labs/loam/pull/114), 2026-07-16; the implementation is queued as ticket T2 — coexistence is NOT yet in the code)*
 
 Slice 2prime pinned the registry key — `(hyperschema, schema-name)` — and stopped at the door. This
 subsection opens it: when `Film` and `FilmClassic` both read one gather program, what does each look
