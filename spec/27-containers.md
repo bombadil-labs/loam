@@ -218,9 +218,11 @@ and `intersect` are not. Single-level exclusion by delta id is expressible today
 `select(not(inView(T, id)))` = `input ∖ T`, so the property model WORKS now for excluding one container — but
 that idiom is depth-1 stratified (the excluded term may not itself be a difference), so containers defined
 RELATIVE to one another do not compose. Composable, nestable set-difference (and intersection, to complete
-the `∪`/`∩`/`∖` algebra) is filed as **rhizomatic#16**, expected in substrate 0.6.0. Until it lands, build the
-single-level exclusion; the general container algebra arrives with 0.6.0. (Containers are, at bottom, set
-algebra over deltas: membership a query, exclusion a property, composition the boolean operators.)
+the `∪`/`∩`/`∖` algebra) shipped in **rhizomatic 0.6.0** (2026-07-15, issue **#16**): `difference` and
+`intersect` are now first-class `Term` ops, symmetric with `union` and nestable to any depth. Loam's bump to
+0.6.0 is queued as **T14**; until it lands the single-level exclusion idiom still works, and the general
+container algebra unlocks the moment it does. (Containers are, at bottom, set algebra over deltas: membership
+a query, exclusion a property, composition the boolean operators.)
 
 The questions that DO remain open:
 
@@ -258,10 +260,11 @@ flippable PROPERTY (a claim about the container entity) for your own containers,
 untrusted foreign law (§27.1). The branch formalism (§27.4) sanity-checks Myk's "a branch is chosen at query
 time" into `(scope × resolution)`, both query-time, with the live-tree / frozen-DAG rule. The git mapping
 (§27.5) is the canonical way to explain Loam to anyone who groks git, and the source of the "impossible" demo
-set. **Substrate dependency:** the general (composable, nestable) container set-algebra needs first-class set
-DIFFERENCE (and intersection) in rhizomatic's `Term` — `union` exists, difference/intersect do not; filed as
-**rhizomatic#16**, expected in substrate 0.6.0. Single-level exclusion is expressible today (`select(not
-(inView(T, id)))`), so the near-term build is not blocked. Rides §8 (federation), §11 (erasure), §13/§14
+set. **Substrate dependency (satisfied):** the general (composable, nestable) container set-algebra needs
+first-class set DIFFERENCE (and intersection) in rhizomatic's `Term` — `union` existed, difference/intersect
+did not; filed as **rhizomatic#16** and **landed in rhizomatic 0.6.0** (2026-07-15). Adoption is queued as
+**T14** (top of the build queue); single-level exclusion was expressible even before it (`select(not
+(inView(T, id)))`), so the near-term build was never blocked. Rides §8 (federation), §11 (erasure), §13/§14
 (read-time conflict), §17 (N lenses), §21 (the living→version ladder), §22.3/§23.10 (the content-address
 economics ladder), and §24 (the container's first instance; promotion/promote-outputs as its first
 operation, built #111). Follow-on tickets: the first-class membership `select`/`watch` surface and
