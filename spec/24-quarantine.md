@@ -380,7 +380,7 @@ hiding place. "Run a stranger's whole app against your real ground" never means 
 touch your real ground": the pool catches every write, discard is erase-by-construction, and promotion is
 the only door out.
 
-### 24.10 The quarantine is a container — reconciling with §27 (DRAFT, added 2026-07-16)
+### 24.10 The quarantine is a container — reconciling with §27 (added 2026-07-16, accepted with [#115](https://github.com/bombadil-labs/loam/pull/115))
 
 §27 (design-stage, merged after this section's first draft) named the primitive underneath this whole
 section: a quarantine is a **container** — a referenceable, content-addressable pool of deltas — with its
@@ -427,10 +427,12 @@ subsection reconciles them explicitly, clause by clause:
   identity, the merges, the algebra. When §27.7's `Container` lifting lands, `openQuarantine` becomes the
   quarantine PRESET of the container constructor, with no semantic change to anything this section fixes.
 
-**Provenance.** **Design-stage DRAFT (Claude, 2026-07-15)** — this section holds the design for
-acceptance, NOT yet built. It fixes the shapes and answers the eight design questions; it awaits **Myk's
-sign-off in chat (P6)** and lands as this file's realized form, with an implementation note appended,
-when §24 is built. Questions 1 (separate-store posture) and 6 (quarantine-first workflow) are DECIDED by
+**Provenance.** **Design ACCEPTED — landed [#115](https://github.com/bombadil-labs/loam/pull/115)
+(Myk's P6, merged 2026-07-16).** Drafted Claude 2026-07-15 as the decision memo fixing the shapes and
+answering the eight design questions; the merge is the acceptance. What is BUILT within it is what the
+notes below say (slice 1 #109, promote-outputs #111, the T16 fan-out correction #120) — the later slices
+(resource envelope, sequestered renderer frame, promote-LAW, membership select/watch) are queued as their
+own tickets. Questions 1 (separate-store posture) and 6 (quarantine-first workflow) are DECIDED by
 Myk (2026-07-12) and proved here; questions 3, 4, 5, 7 carry reasoned RECOMMENDATIONS for his review;
 question 2 (the one-way glass) is now largely DECIDED (Myk, 2026-07-15): writes land LIVE in the pool and
 the app reads them back (read view = `primary-ground ⊎ pool-writes`), reproducibility comes from pinning
@@ -473,11 +475,12 @@ flagged, promote-outputs identified with §27.3's adoption-merge, the one tree r
 normative split); amended §24.2's honesty note to cite the built `admit` knob; and strengthened the §24.8
 rail with a composed-scope, byte-for-byte assertion (`test/gateway/quarantine.test.ts` — the widest scope
 any §23.9 opt-in interop read could assemble, primary ⊎ pool, holds zero bytes of a purged delta; to be
-re-pointed at the first-class scope surface when it lands). §24.3 promote-outputs is BUILT and open as
-[#111](https://github.com/bombadil-labs/loam/pull/111), awaiting the same P6. This whole section remains
-a DRAFT awaiting Myk's sign-off; questions 1 and 6 are his decisions proved, 2 largely his decisions with
-one residual recommendation (all-or-nothing read granularity), 3/4/5/7 reasoned recommendations, 8 a hard
-requirement pinned green against slice 1.
+re-pointed at the first-class scope surface when it lands). §24.3 promote-outputs is BUILT and landed as
+[#111](https://github.com/bombadil-labs/loam/pull/111) (merged 2026-07-16, the same day's P6 as the
+design pass #115 — this section's DRAFT status ended with those merges); questions 1 and 6 are his
+decisions proved, 2 largely his decisions with one residual recommendation (all-or-nothing read
+granularity), 3/4/5/7 reasoned recommendations he accepted at the merge, 8 a hard requirement pinned
+green against slice 1.
 
 **PROMOTE-OUTPUTS BUILT** [#111](https://github.com/bombadil-labs/loam/pull/111) (the first §24.9
 follow-on slice; retires ticket T5 alongside the design pass #115) — promotion's first strength (§24.3), and the FIRST
