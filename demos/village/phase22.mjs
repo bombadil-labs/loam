@@ -38,7 +38,7 @@ try {
   const readAmount = async (alias) =>
     (
       await (
-        await rest(`/rest/${alias}/Ledger22/${encodeURIComponent("ledger:almanac")}`, opToken("almanac"))
+        await rest(`/rest/${alias}/Ledger22/${encodeURIComponent("ledger:lens22")}`, opToken("almanac"))
       ).json()
     ).view?.amount;
 
@@ -58,7 +58,7 @@ try {
   await almanac.gateway.publishRegistration(
     LEDGER,
     SCHEMA,
-    ["ledger:almanac"],
+    ["ledger:lens22"],
     undefined,
     undefined,
     undefined,
@@ -71,7 +71,7 @@ try {
         timestamp: ts,
         author: operator,
         pointers: [
-          { role: "subject", target: { kind: "entity", entity: { id: "ledger:almanac", context: "amount" } } },
+          { role: "subject", target: { kind: "entity", entity: { id: "ledger:lens22", context: "amount" } } },
           { role: "value", target: { kind: "primitive", value: v } },
         ],
       },
@@ -114,7 +114,7 @@ try {
   await almanac.gateway.publishRegistration(
     LEDGER,
     SCHEMA,
-    ["ledger:almanac"],
+    ["ledger:lens22"],
     undefined,
     undefined,
     undefined,

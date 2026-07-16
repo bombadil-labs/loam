@@ -43,14 +43,17 @@ const expandThrough = (role, schema) => ({
 });
 
 // The specs are authored flat for brevity; the register format is the nested shape every door
-// takes — { hyperschema: { name, alg, body }, schema, roots } — so emit that.
-const write = (file, { name, alg, body, policy, roots, entity, mutations }) => {
+// takes — { hyperschema: { name, alg, body }, schema, roots, writable? } — so emit that.
+// `writable` is the §14/§21 immutable-by-default knob: NAME the fields the phases actually write
+// through mutations, and only those — silence means "you may look, not touch". A lens whose writes
+// all arrive as signed relation deltas (appendAs) or derived emissions (the mill) names nothing.
+const write = (file, { name, alg, body, policy, roots, entity, writable }) => {
   const spec = {
     hyperschema: { name, alg: alg ?? 1, body },
     schema: policy,
     roots,
     ...(entity ? { entity } : {}),
-    ...(mutations ? { mutations } : {}),
+    ...(writable ? { writable } : {}),
   };
   writeFileSync(join(SCHEMAS, file), JSON.stringify(spec, null, 2) + "\n");
   console.log(`  wrote ${file}`);
@@ -69,6 +72,7 @@ write("person.json", {
   body: GATHER,
   policy: PERSON_POLICY,
   roots: PEOPLE,
+  writable: ["name", "bio"],
 });
 write("circle.json", {
   name: "Circle",
@@ -85,6 +89,7 @@ write("film.json", {
   body: GATHER,
   policy: { props: { title: PICK, year: PICK, director: PICK }, default: PICK },
   roots: FILMS,
+  writable: ["title", "year", "director"],
 });
 const SCREENING_V1_POLICY = {
   props: { film: PICK, date: PICK, venue: PICK, rating: PICK, note: PICK, with: ALL },
@@ -96,6 +101,7 @@ write("screening-v1.json", {
   body: GATHER,
   policy: SCREENING_V1_POLICY,
   roots: SCREENINGS,
+  writable: ["date", "venue", "rating", "note"],
 });
 write("screening-v2.json", {
   name: "Screening",
@@ -106,6 +112,7 @@ write("screening-v2.json", {
     default: PICK, // ...and the policy trades `note` for `rewatch`
   },
   roots: SCREENINGS,
+  writable: ["date", "venue", "rating", "rewatch"],
 });
 write("screening-classic.json", {
   name: "ScreeningClassic",
@@ -113,7 +120,10 @@ write("screening-classic.json", {
   body: GATHER,
   policy: SCREENING_V1_POLICY,
   roots: SCREENINGS,
-  entity: "schema:ScreeningClassic", // v1's shape, its own entity: old law, concurrently served
+  // Its own name IS its own entity (hyperschema:ScreeningClassic by default): old law,
+  // concurrently served. The former explicit `entity: "schema:ScreeningClassic"` predated §21's
+  // rename — `schema:<name>` now belongs to the living resolution Schema, not the hyperschema.
+  writable: ["date", "venue", "rating", "note"],
 });
 write("reel-person.json", {
   name: "Person",
@@ -121,6 +131,7 @@ write("reel-person.json", {
   body: GATHER,
   policy: PERSON_POLICY,
   roots: PEOPLE,
+  writable: ["name", "bio"],
 });
 write("film-night.json", {
   name: "FilmNight",
@@ -137,6 +148,7 @@ write("colony.json", {
   body: GATHER,
   policy: { props: { queen: PICK, frames: PICK, yield: PICK, grumbles: ALL }, default: PICK },
   roots: ["colony:1"],
+  writable: ["queen", "frames", "yield", "grumbles"],
 });
 write("gathering.json", {
   name: "Gathering",
@@ -144,6 +156,7 @@ write("gathering.json", {
   body: GATHER,
   policy: { props: { date: PICK, honey: PICK, attendee: ALL }, default: PICK },
   roots: GATHERINGS,
+  writable: ["date", "honey"],
 });
 
 // -- almanac ------------------------------------------------------------------------------------
@@ -166,6 +179,7 @@ write("dossier.json", {
   body: GATHER,
   policy: { props: DOSSIER_PROPS, default: PICK },
   roots: PEOPLE,
+  writable: ["name", "bio"],
 });
 write("presence.json", {
   name: "Presence",
@@ -205,6 +219,7 @@ write("almanac-person.json", {
   body: GATHER,
   policy: PERSON_POLICY,
   roots: PEOPLE,
+  writable: ["name", "bio"],
 });
 
 console.log("schemas generated.");
