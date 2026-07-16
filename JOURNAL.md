@@ -2161,6 +2161,70 @@ at the Term layer, not the Pred layer. The §27 follow-on should design with tha
 §27 membership/scope-merge work builds on it — that follow-on act is where the operators go on
 stage.
 
+## 2026-07-15 — §24.3 promote-outputs: the first container operation
+
+The quarantine can run and discard; promotion is the door OUT — and §27 reframed it as the first CONTAINER
+operation (merge-load with kept provenance). `Gateway.promote(source, deltaId)` adopts a delta a quarantine
+produced by RE-SIGNING its content as the operator's own claim into the primary, with a separate
+`loam.adoption` record (`src/gateway/adopt.ts`) carrying the trail (adopted-from / source-delta / produced-by
+/ adopted-by / at). Because the value crosses by re-assertion — authored fresh, not federated — the pool can
+be dropped wholesale and the adopted value survives in the operator's voice, its origin kept forever. That
+kept-forever provenance is exactly what makes fork and pull-request native (§27): a fork is your deltas on
+top of theirs; a PR is offering them back; and the maintainer, on adopting, keeps a cryptographic trail to
+who made it and where.
+
+The rails caught a real modeling bug in the first cut, and the fix is the section's own idiom. I first put
+the provenance pointers ON the re-signed content delta (as the §24.3 draft literally said). But the content
+delta files under the entity it's about (FERN/message), so that field's gather picked up ALL the delta's
+non-filing pointers — the value AND the provenance — and `candidateValue` returned a compound object instead
+of the string. The fix: land TWO deltas, the clean re-signed content and a SEPARATE adoption record citing
+it — exactly §11's tombstone-is-separate-from-content discipline, now applied to adoption. Learning: any
+delta that carries both "the thing" and "metadata about the thing" will pollute the thing's own resolution
+if they share a filing; provenance belongs on a companion record that points back, never smeared onto the
+content. (spec/24 §24.3's claim shape was corrected to say this.)
+
+Reference closure is enforced (§27): a promotion whose delta-ref pointer would dangle in the primary is
+refused — adopt the closure or refuse, never half a thing. `Gateway.adoptions()` reads the trail live: the
+read side of promotion and the seed of §27's "review what's in a container" interface.
+
+`npm run check` green — 612 tests (test/gateway/promotion.test.ts 4: adopt a stranger's pool fact + resolve
+it under the operator; the readable provenance trail; survives dropping the pool; reference-closure refuses a
+dangling promotion). Additive → no §20 migration. Scope: promote-OUTPUTS only; promote-LAW (§24.4) and
+endorse-import are their own follow-on tickets, as is the fork/PR village demo. New capability/provenance
+surface → Myk's merge (P6).
+
+## 2026-07-16 — #111 hardened: a fresh-eyes review pass, three real findings, three fixes
+
+Myk asked for a review of the week's open PRs, and a fresh-eyes pass on #111 (one reviewer agent, findings
+verified against the code) caught three substantive defects in the first cut of promote-outputs. All three
+are fixed on the branch, each with its rail:
+
+1. **The closure remedy was impossible.** "Adopt its closure first" could never succeed: promoting A mints
+   A′ under a NEW id, so B's citation of A's pool id dangled forever — every multi-delta output (exactly
+   the fork/PR case §27 celebrates) was unpromotable. Fix: the adoption trail is the bridge — a citation of
+   an already-adopted pool delta is REWRITTEN to its adopted counterpart, so chains promote in dependency
+   order and no pool id ever enters the primary. (Rail: promote A then B-citing-A; B′ cites A′.)
+2. **The fresh timestamp contradicted §11 and reopened erased content.** §11 rung 2 pins that a
+   reassertion "inherits the source timestamp, so it is content-addressed and idempotent" — and §24.3
+   claims exactly that kinship. The first cut stamped `nextTimestamp()`, so a re-promotion after erasure
+   minted a fresh id the tombstone could not refuse. Fix: inherit the source timestamp. Idempotence,
+   erasure-holds, and honest byTimestamp ordering all fall out of the one property, exactly as the doctrine
+   said they would. (Rails: promote-twice converges; erase-then-repromote is refused by the tombstone.)
+3. **Promote-outputs was promote-anything.** No shape screening stood between `reactor.get` and `append`,
+   and operator authorship is force — a guest's grant-shaped, tombstone-shaped, or `loam.adoption`-shaped
+   "output," promoted blind by id, became operator LAW (including a forgeable audit trail). Fix:
+   `promotionRefusal` refuses reserved vocabularies (`loam.*`/`rhizomatic.*` contexts, `loam:` entities)
+   and negations — facts cross by adoption, law crosses only by §24.4's own ceremony. (Rails: the three
+   refusals.) Named residual for Myk at §24.4: may a DOMAIN negation ever cross by adoption?
+
+Plus the one-liner: `readAdoptions(reactor)` with no operator filter returned [] always — the optional
+filter now filters instead of emptying, and `Gateway.adoptions()` states its unoperated-store behavior.
+
+Learning, and it is the §24 lesson again: the door that crosses a boundary must re-derive EVERYTHING from
+what is recorded, never from what the caller implies — the purge re-checked the tombstone (slice 1's catch),
+and now promotion re-checks the shape, the closure through the trail, and the id the content itself mints.
+A crossing is a re-derivation, not a copy.
+
 ## 2026-07-16 — §21.7 coexistence: the serving surface (design pass, T2 slice 2b)
 
 The deferred remainder of T2 opened at the design stage: two lenses over one hyperschema, the
