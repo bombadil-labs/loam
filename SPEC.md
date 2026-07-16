@@ -53,14 +53,20 @@ name begins with that number.
 | §21 | [Schema identity & versioning — the lens ladder](spec/21-schema-identity.md) |
 | §22 | [Custom resolvers — the last step of the lens becomes programmable](spec/22-resolvers.md) |
 | §23 | [Renderers — push deltas, get software](spec/23-renderers.md) |
-| §24 | [The quarantine — a place where untrusted law may bind](spec/24-quarantine.md) *(design-stage draft)* |
+| §24 | [The quarantine — a place where untrusted law may bind](spec/24-quarantine.md) |
 | §25 | [Hardening — namespacing, entity-IDs, brick-proofing, repair](spec/25-hardening.md) |
 | §26 | [As-of reads — the temporal promise, kept](spec/26-as-of-reads.md) |
 | §27 | [Containers — the primitive under sandboxes, modules, and federation (Loam as git for signed claims)](spec/27-containers.md) *(design-stage draft)* |
 
-_**§21** and **§22** are **fully landed** — design accepted and implemented (see each Provenance
-footer). **§25** and **§26** are **design-landed** — the accepted design brief is recorded here,
-implementation pending. **§23** (renderers) is **design-drafted** — this section holds the design for
-acceptance, not yet built (its Provenance footer says so). Reserved **§24** (quarantine) is still in
-flight — see the backlog in `.adlc/tickets.json`. A reserved number lands here as its own
-`spec/NN-*.md` file when its work merges._
+_**§21**, **§22**, **§25**, and **§26** are **landed** — design accepted and implemented (see each
+Provenance footer; §21.7's coexistence design is accepted with its implementation queued as ticket T2).
+**§23** (renderers) is **built** across five merged slices
+([#99](https://github.com/bombadil-labs/loam/pull/99),
+[#102](https://github.com/bombadil-labs/loam/pull/102)–[#105](https://github.com/bombadil-labs/loam/pull/105)
+— the host contract, the byte door, pinned-public, the sandboxed worker, and write-enabled renderers).
+**§24** (quarantine) has its full design decided ([#115](https://github.com/bombadil-labs/loam/pull/115))
+with slice 1 and promote-outputs built ([#109](https://github.com/bombadil-labs/loam/pull/109),
+[#111](https://github.com/bombadil-labs/loam/pull/111)); later slices are queued in
+`.adlc/tickets.json`. **§27** (containers) is a **design-stage draft** — the decided layer is recorded,
+implementation queued. A reserved number lands here as its own `spec/NN-*.md` file when its work
+merges._
