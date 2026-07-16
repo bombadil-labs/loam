@@ -53,6 +53,35 @@ export function adoptionRecordClaims(
   };
 }
 
+// Promote-outputs adopts DOMAIN FACTS; it never adopts LAW, because operator authorship is exactly
+// what gives a delta force here. A quarantined app's "output" that is shaped like law — a grant, a
+// trust edge, a registration, a tombstone, a schema definition, an adoption record (the trail must
+// not be forgeable through its own door) — is refused: law crosses only by §24.4's own ceremony
+// (promote-law via the ordinary publish path), never blind by id. Likewise a NEGATION: re-signed by
+// the operator it would strike a canonical claim, and a retraction is the operator's own deliberate
+// §14 act, not an adoptable output. The reserved namespaces are the law/data boundary the spec
+// already draws: `loam.*` / `rhizomatic.*` contexts and `loam:` entity ids are vocabulary, not facts.
+export function promotionRefusal(claims: Claims): string | undefined {
+  for (const p of claims.pointers) {
+    if (p.role === "negates" && p.target.kind === "delta") {
+      return "it is a negation — a retraction is the operator's own §14 act, never an adopted output";
+    }
+    const ctx =
+      p.target.kind === "entity"
+        ? p.target.entity.context
+        : p.target.kind === "delta"
+          ? p.target.deltaRef.context
+          : undefined;
+    if (ctx !== undefined && (ctx.startsWith("loam.") || ctx.startsWith("rhizomatic."))) {
+      return `it declares the reserved context ${ctx} — law crosses by promote-law (§24.4), not adoption`;
+    }
+    if (p.target.kind === "entity" && p.target.entity.id.startsWith("loam:")) {
+      return `it points at the reserved entity ${p.target.entity.id} — law crosses by promote-law (§24.4), not adoption`;
+    }
+  }
+  return undefined;
+}
+
 // Is this delta an adoption (promote-outputs)? It declares the loam.adoption context.
 export function isAdoption(claims: Claims): boolean {
   return claims.pointers.some(
@@ -65,11 +94,12 @@ export function isAdoption(claims: Claims): boolean {
 
 // The adoptions the operator has made (SPEC §24.3), read live for audit/review — the visible trail from a
 // canonical value back to the quarantine that produced it (the raw material of a "review what's in here"
-// interface, §27).
+// interface, §27). `operator` filters the trail to one author's adoptions; absent, every adoption record
+// in the ground is read (an optional filter filters — it never empties).
 export function readAdoptions(reactor: Reactor, operator?: string): Adoption[] {
   const out: Adoption[] = [];
   for (const d of reactor.snapshot()) {
-    if (operator === undefined || d.claims.author !== operator || !isAdoption(d.claims)) continue;
+    if ((operator !== undefined && d.claims.author !== operator) || !isAdoption(d.claims)) continue;
     const prim = (role: string): string | undefined => {
       const p = d.claims.pointers.find((x) => x.role === role);
       return p?.target.kind === "primitive" ? String(p.target.value) : undefined;
