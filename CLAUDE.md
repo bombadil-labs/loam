@@ -5,8 +5,8 @@ design is in **[SPEC.md](SPEC.md)** and the usage in **[README.md](README.md)** 
 writing code. **Get up to speed on what Loam is and how it works from SPEC.md.** This file is the
 **process**. The backlog of unbuilt/partial design now lives as **ADLC tickets** in
 `.adlc/tickets.json` — the contract every gate reads (it replaced the old `TODO.md` +
-`CURRENT_WORK.md` hand-tracked pair). **[JOURNAL.md](JOURNAL.md)** remains the append-only record;
-keep it current as you make decisions.
+`CURRENT_WORK.md` hand-tracked pair). **[JOURNAL.md](JOURNAL.md)** remains the append-only record —
+an index over **[`journal/`](journal/)**, one file per entry; keep it current as you make decisions.
 
 **SPEC.md is the record of what IS.** It is only ever grown by a **landing PR**, and every section
 carries a `**Provenance.**` footer linking the PR(s) that landed it and naming the implementation —
@@ -85,8 +85,9 @@ The phases, with Loam's own craft folded into each:
    file** — the whole section, closed by its `**Provenance.**` footer (the PR link(s) + a short
    implementation note) — adds its row to the `SPEC.md` index, and removes the realized ticket from
    `.adlc/tickets.json`. The spec grows only here, never speculatively; a new file is the default,
-   editing an existing section the rare exception. Append a record to `JOURNAL.md` (what was done +
-   any novel learning).
+   editing an existing section the rare exception. Append a record to the journal — a **new
+   `journal/<date>-<slug>.md` file** (what was done + any novel learning) plus its row in the
+   `JOURNAL.md` index, the same new-file-per-landing discipline the spec runs on.
 8. **The village.** Extend `demos/village/` — the living demonstration, see
    `demos/village/README.md` — so the village *exercises the behavior this ticket added*,
    end-to-end and ambitiously: new acts, new stores, new lenses, whatever makes the feature visible
@@ -152,12 +153,14 @@ busy.
 ## Standing rules
 
 - **Root holds exactly four markdown docs** — `README.md` (the vision), `CLAUDE.md` (the process),
-  `SPEC.md` (the spec **index**: preamble + the section table), `JOURNAL.md` (the append-only
-  record). The spec itself is the **`spec/`** folder — one `NN-slug.md` file per section, what IS,
-  grown only by landings, each file footered with its provenance. The backlog is not a doc anymore:
-  it is `.adlc/tickets.json` (a committed contract — don't reformat it; it's machine-written, and
-  becomes a frozen rail once any ticket declares `rails`). Do not accumulate more root markdown;
-  fold, don't add — and a new spec section is a new file in `spec/`, never a new root doc.
+  `SPEC.md` (the spec **index**: preamble + the section table), `JOURNAL.md` (the journal **index**:
+  preamble + the entry table). Both indexes front a folder, for the same reason: **`spec/`** is one
+  `NN-slug.md` file per section (what IS, grown only by landings, each footered with its provenance),
+  and **`journal/`** is one `<date>-<slug>.md` file per entry (append-only, newest last). A new
+  section is a new file in `spec/`; a new entry is a new file in `journal/` plus its index row —
+  never a new root doc. The backlog is not a doc anymore: it is `.adlc/tickets.json` (a committed
+  contract — don't reformat it; it's machine-written, and becomes a frozen rail once any ticket
+  declares `rails`). Do not accumulate more root markdown; fold, don't add.
 - **Strict in PRs, creative and aggressive in execution.** Ship real vertical slices; don't
   gold-plate; don't reward-hack a green bar.
 - **Match rhizomatic's vocabulary** — the concepts are HyperSchema / HyperView / View / Schema /

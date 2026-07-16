@@ -11,4 +11,4 @@
    the store (stigmergy).
 
 **Provenance.** Foundational framing — no single landing PR; the three-layer split is the invariant
-every later section obeys, realized across the whole build (steps 0–9, PRs [#1](https://github.com/bombadil-labs/loam/pull/1)–[#10](https://github.com/bombadil-labs/loam/pull/10)). Full narrative in the [Journal](JOURNAL.md).
+every later section obeys, realized across the whole build (steps 0–9, PRs [#1](https://github.com/bombadil-labs/loam/pull/1)–[#10](https://github.com/bombadil-labs/loam/pull/10)). Full narrative in the [Journal](../JOURNAL.md).

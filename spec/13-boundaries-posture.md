@@ -31,4 +31,4 @@ their own opposition.
     reader picks. Failed coordination costs one translation delta, written after the fact,
     with provenance.
 
-**Provenance.** Foundational — a posture record, not a build. Drafted 2026-07-10 in the same red-team night session that also spawned §11 (erasure, [#34](https://github.com/bombadil-labs/loam/pull/34)/[#36](https://github.com/bombadil-labs/loam/pull/36)) and §12 (the open door, [#43](https://github.com/bombadil-labs/loam/pull/43)), whose landings are this section's evidence rather than its own PR. These are boundaries stated proudly and held, not code shipped. Full narrative in the [Journal](JOURNAL.md).
+**Provenance.** Foundational — a posture record, not a build. Drafted 2026-07-10 in the same red-team night session that also spawned §11 (erasure, [#34](https://github.com/bombadil-labs/loam/pull/34)/[#36](https://github.com/bombadil-labs/loam/pull/36)) and §12 (the open door, [#43](https://github.com/bombadil-labs/loam/pull/43)), whose landings are this section's evidence rather than its own PR. These are boundaries stated proudly and held, not code shipped. Full narrative in the [Journal](../JOURNAL.md).
