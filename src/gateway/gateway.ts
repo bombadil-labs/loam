@@ -42,11 +42,12 @@ import { graphql, parse, subscribe, type ExecutionResult, type GraphQLSchema } f
 import type { StoreBackend } from "../store/backend.js";
 import { isRepairable } from "../store/quarantine.js";
 import { authorize } from "./accounts.js";
-import { adoptionRecordClaims, promotionRefusal, readAdoptions, type Adoption } from "./adopt.js";
+import { promoteImpl, readAdoptions, type Adoption } from "./adopt.js";
 import {
   ERASE_ENTITY,
-  eraseClaims,
   eraseDefect,
+  eraseImpl,
+  eraseReplicaImpl,
   forgottenSince,
   isTombstone,
   readTombstones,
@@ -81,8 +82,11 @@ import {
 import { applyResolvers, loadResolvers, newResolverMemo, type ResolverMemo } from "./resolvers.js";
 import { bytesEnvelope, findBytesByRef } from "./bytes.js";
 import { renderInWorker } from "./render-worker.js";
-import { MemoryBackend } from "../store/memory.js";
-import type { QuarantineOptions, QuarantinePool } from "./quarantine-pool.js";
+import {
+  openQuarantineImpl,
+  type QuarantineOptions,
+  type QuarantinePool,
+} from "./quarantine-pool.js";
 import {
   loadRenderers,
   loadedRenderer,
@@ -160,6 +164,16 @@ interface Bound extends Registration {
   readonly origin: "manual" | "store";
 }
 
+// ── The internals seam (ticket T19) ─────────────────────────────────────────────────────────────
+// The Gateway's behaviors are decomposed into concern modules (erase.ts, quarantine-pool.ts,
+// adopt.ts, …): each public method stays on the class with its exact signature as a THIN DELEGATE,
+// and its body lives in the module that owns the concern's vocabulary. A module function cannot use
+// `private` fields from outside the class body, so the members those bodies reach are marked
+// `/** @internal — T19 seam */` below: public to the compiler, internal by contract — not API, not
+// for callers, pinned by no rail (test/cli/pack.test.ts pins what the PACKAGE exports; these ride
+// no export). The seam is deliberately explicit: what a concern module touches is greppable as
+// `gw.<member>` in its module, and a module needing a member NOT yet marked is a real finding about
+// coupling — widen the seam loudly, here, or question the boundary.
 export class Gateway {
   private registered: Bound[] = [];
   // The resolver memo (SPEC §22.5): (resolver-content-address, bucket-delta-set) → value. Keyed on the
@@ -192,7 +206,8 @@ export class Gateway {
   // a future DerivationHost's emissions ride it into the ground).
   private readonly justPersisted = new Set<string>();
   private lastMutationTs = 0;
-  private readonly operatorAuthor: string | undefined;
+  /** @internal — T19 seam (erase.ts, adopt.ts) */
+  readonly operatorAuthor: string | undefined;
   // When a runner animates the gateway, ingest routes through its DerivationHost (ingest + drain
   // derivations); otherwise straight to the reactor. Passive vs animate is exactly this hook.
   private ingestVia: (d: Delta) => IngestResult = (d) => this.reactor.ingest(d);
@@ -205,9 +220,11 @@ export class Gateway {
   }
 
   private constructor(
-    private readonly backend: StoreBackend,
+    /** @internal — T19 seam (erase.ts) */
+    readonly backend: StoreBackend,
     reactor: Reactor,
-    private readonly options: GatewayOptions,
+    /** @internal — T19 seam (erase.ts, quarantine-pool.ts, adopt.ts) */
+    readonly options: GatewayOptions,
   ) {
     this._reactor = reactor;
     this.operatorAuthor = options.seed === undefined ? undefined : authorForSeed(options.seed);
@@ -287,7 +304,8 @@ export class Gateway {
   // answerable version's, so both the warm path and a pinned version-door read find their functions
   // synchronously. Async (a `data:` import); idempotent (the cache dedups by content address). Called
   // after every (re)bind and every publish, so a newly-arrived resolver is runnable by the next read.
-  private async preloadResolvers(): Promise<void> {
+  /** @internal — T19 seam (quarantine-pool.ts) */
+  async preloadResolvers(): Promise<void> {
     const specs: Array<ResolverSpecs | undefined> = [
       ...this.registered.map((r) => r.resolvers),
       ...this.registrationVersions().map((v) => v.resolvers),
@@ -520,7 +538,8 @@ export class Gateway {
   // millisecond). One that never resolves — or whose body cannot materialize — is left
   // unbound rather than crashing the boot. A purely-additive change binds incrementally under
   // the current generation; only a change or a retirement pays for a rebind.
-  private replayRegistrations(): void {
+  /** @internal — T19 seam (quarantine-pool.ts) */
+  replayRegistrations(): void {
     const manual = this.registered.filter((r) => r.origin === "manual");
     const accepted: Bound[] = [...manual];
     let pending: Bound[] = readRegistrations(this.reactor, this.operatorAuthor).map((r) => ({
@@ -1191,179 +1210,32 @@ export class Gateway {
 
   // --- erasure (SPEC §11) ------------------------------------------------------------------------
 
-  // Erase one delta: verify authority WHILE THE TARGET EXISTS, show the blast radius, land the
-  // tombstone (through authorize — the door validates it against the live target), purge every
-  // tier, and re-seat the gateway on the post-purge ground. The store remembers THAT it forgot
-  // — never what. Live subscriptions re-attach exactly as they do after a schema evolution or
-  // a crash; an animated gateway's runner must be re-attached (the host holds the old
-  // reactor).
+  // Erase one delta (SPEC §11): the body lives beside the tombstone vocabulary in erase.ts.
   async erase(
     id: string,
     opts: { reason?: string } = {},
   ): Promise<{ erased: string; citations: string[] }> {
-    // Erasure is the operator's alone (SPEC §11): destructive, so the only signer is the store's
-    // own operator. A data subject's request is honored BY the operator, never by the subject
-    // directly — there is no actor override here on purpose.
-    const seed = this.options.seed;
-    if (seed === undefined || this.operatorAuthor === undefined) {
-      throw new Error("erasure is the instance operator's alone, and this store has no operator");
-    }
-    const target = this.reactor.get(id);
-    if (target === undefined) {
-      throw new Error(`nothing to erase: ${id} is not held here`);
-    }
-    if (isTombstone(target.claims)) {
-      // The erasure log is the record of what was forgotten; it stays append-only. Un-erasure
-      // is striking the tombstone (forgiveness), never erasing it.
-      throw new Error("the erasure log is append-only: a tombstone cannot itself be erased");
-    }
-    // The manifest: every delta citing the id (negations, provenance links) — the holes the
-    // cut will leave, enumerated before it is made. Cascade is the caller's choice.
-    const citations = [...this.reactor.snapshot()]
-      .filter((d) =>
-        d.claims.pointers.some((p) => p.target.kind === "delta" && p.target.deltaRef.delta === id),
-      )
-      .map((d) => d.id);
-    const tombstone = signClaims(
-      eraseClaims(id, target.claims.author, this.operatorAuthor, this.nextTimestamp(), opts.reason),
-      seed,
-    );
-    await this.append([tombstone]);
-    await this.flush(); // the tombstone must be ground before the target stops being ground
-    await this.backend.purge([id]);
-    await this.reseat();
-    // §24.8 — the erasure reaches every attached QUARANTINE POOL (the operator's own replicas of this
-    // ground): the same tombstone lands there and the byte is purged there too, so a forgotten record can
-    // never live on in a staging area inside the operator's own walls. §11 reaches through the one-way
-    // glass unconditionally; a quarantine that could hide a purged byte would be an erasure-evasion channel.
-    const seen = new Set<Gateway>([this]);
-    for (const pool of this.quarantinePools) await pool.eraseReplica(tombstone, id, seen);
-    return { erased: id, citations };
+    return eraseImpl(this, id, opts);
   }
 
   // The quarantine pools attached to this store (SPEC §24.8): the operator's own one-way replicas that an
   // erasure here must fan out to. Live Gateway handles registered by `openQuarantine`, dropped on `drop`.
-  private readonly quarantinePools = new Set<Gateway>();
+  /** @internal — T19 seam (erase.ts, quarantine-pool.ts) */
+  readonly quarantinePools = new Set<Gateway>();
 
-  // Open a QUARANTINE POOL over this store (SPEC §24): a second gateway on its OWN backend, seeded ONE-WAY
-  // from here by federation, sharing THIS operator (§24.1 — the pool is the operator's own staging store, so
-  // the operator's erasure stays authoritative there, §24.8; the one sanctioned shared-seed case). The edge
-  // is inbound only — nothing is ever wired back, so a pool write can never reach this store. The operator's
-  // seeded law binds in the pool (it resolves a real, living lens over the real ground); foreign law stays
-  // inert until promoted. Drop the pool and this store is untouched (discard = erase-by-construction).
+  // Open a QUARANTINE POOL over this store (SPEC §24): the body lives in quarantine-pool.ts.
   async openQuarantine(opts: QuarantineOptions = {}): Promise<QuarantinePool> {
-    if (this.options.seed === undefined) {
-      throw new Error("only an operated store can open a quarantine pool (§24.1)");
-    }
-    const backend = opts.backend ?? new MemoryBackend();
-    const pool = await Gateway.open(backend, { seed: this.options.seed });
-    // A membership filter narrows what the pool SEES, never what it must FORGET (§24.8): the
-    // operator's tombstones pass the seeding edge unconditionally, exactly as `eraseReplica`
-    // delivers them live — a quarantine inherits the holes along with the ground. (A forged
-    // tombstone slipping this wrapper is still refused inside federate by eraseDefect; the
-    // authorization gate is unchanged.)
-    const base = opts.admit;
-    const reseed = (): Promise<FederationReport> =>
-      pool.federate(
-        this.offeredDeltas(),
-        base === undefined ? {} : { admit: (d) => isTombstone(d.claims) || base(d) },
-      );
-    await reseed(); // one-way INBOUND seeding; the reverse leg is never wired
-    // Bind the operator's federated schemas so the pool RESOLVES the seeded ground — the dry-run reads a
-    // living lens, not raw deltas. (Foreign, non-operator law federated in binds nothing until promoted.)
-    pool.replayRegistrations();
-    await pool.preloadResolvers();
-    this.quarantinePools.add(pool);
-    return {
-      gateway: pool,
-      reseed,
-      drop: async () => {
-        this.quarantinePools.delete(pool);
-        await pool.close();
-      },
-    };
+    return openQuarantineImpl(this, opts);
   }
 
-  // Promote a delta a quarantine produced into THIS store (SPEC §24.3 — promote-outputs, the first container
-  // operation of §27): the operator RE-SPEAKS the source delta's content as their OWN claim, carrying
-  // `loam.adoption` provenance back to the pool. The re-assertion INHERITS the source timestamp (§11 rung 2's
-  // translation trick), so promotion is content-addressed and idempotent: promoting the same output twice
-  // converges on one adopted delta, and an adopted delta the operator later ERASED stays dead — its tombstone
-  // refuses the very id a re-promotion would mint. The value crosses by re-assertion, never federation — so
-  // the pool can be dropped wholesale and the adopted value survives in the operator's voice. This is
-  // MERGE-load with kept provenance: where an interpretation in a sandbox becomes a claim in your canonical
-  // history, and always remembers where it came from (which is what makes fork/pull-request native).
+  // Promote a delta a quarantine produced into THIS store (SPEC §24.3 — promote-outputs): the body
+  // lives beside the loam.adoption vocabulary in adopt.ts.
   async promote(
     source: Gateway,
     deltaId: string,
     opts: { from?: string } = {},
   ): Promise<{ promoted: string }> {
-    if (this.options.seed === undefined || this.operatorAuthor === undefined) {
-      throw new Error(
-        "only an operated store may promote (an adoption is the operator's own claim)",
-      );
-    }
-    const src = source.reactor.get(deltaId);
-    if (src === undefined) {
-      throw new Error(`nothing to promote: ${deltaId} is not held in the source`);
-    }
-    // Promote-OUTPUTS adopts domain facts only. Law-shaped deltas — grants, trust, registrations,
-    // tombstones, schema definitions, adoption records, negations — are refused here; operator
-    // authorship is force, and law crosses only by §24.4's own ceremony.
-    const refusal = promotionRefusal(src.claims);
-    if (refusal !== undefined) {
-      throw new Error(`promotion refused: ${deltaId} — ${refusal}`);
-    }
-    // Reference closure (§24.3/§27): a promoted delta must resolve in its new home. A cited delta the
-    // primary holds passes as-is; one the primary knows only THROUGH AN ADOPTION is REWRITTEN to cite its
-    // adopted counterpart (promotion re-signs, so a pool id can never appear in the primary — the trail is
-    // the bridge). A citation satisfying neither is refused: adopt the cited delta first, then this one.
-    const trail = new Map(this.adoptions().map((a) => [a.sourceDelta, a.adoptedDelta]));
-    const pointers = src.claims.pointers.map((p) => {
-      if (p.target.kind !== "delta") return p;
-      const cited = p.target.deltaRef.delta;
-      if (this.reactor.get(cited) !== undefined) return p;
-      const counterpart = trail.get(cited);
-      if (counterpart !== undefined && this.reactor.get(counterpart) !== undefined) {
-        return {
-          ...p,
-          target: { ...p.target, deltaRef: { ...p.target.deltaRef, delta: counterpart } },
-        };
-      }
-      throw new Error(
-        `promotion would dangle: ${deltaId} cites ${cited}, not held here — promote ${cited} first ` +
-          `and its adopted counterpart will be cited in its place`,
-      );
-    });
-    // Land TWO deltas: the source's content RE-SPOKEN by the operator (clean, so it resolves as itself),
-    // and a separate loam.adoption RECORD citing it with the provenance trail (kept off the content so it
-    // never pollutes the value's own gather — §11's tombstone-is-separate discipline, applied to adoption).
-    const adopted = signClaims(
-      {
-        timestamp: src.claims.timestamp, // inherited — content-addressed, idempotent, honest ordering
-        author: this.operatorAuthor,
-        pointers,
-      },
-      this.options.seed,
-    );
-    // Idempotence: an adoption that already stands is returned, never re-landed — one output, one
-    // adopted delta, one trail record, however many times the operator says yes.
-    if (trail.get(deltaId) === adopted.id && this.reactor.get(adopted.id) !== undefined) {
-      return { promoted: adopted.id };
-    }
-    const record = signClaims(
-      adoptionRecordClaims(
-        adopted.id,
-        opts.from ?? "quarantine",
-        deltaId,
-        src.claims.author, // the granted-author it wrote under in the pool
-        this.operatorAuthor,
-        this.nextTimestamp(),
-      ),
-      this.options.seed,
-    );
-    await this.append([adopted, record]);
-    return { promoted: adopted.id };
+    return promoteImpl(this, source, deltaId, opts);
   }
 
   // The adoptions this store's operator has made (SPEC §24.3) — the visible trail from a canonical value
@@ -1374,51 +1246,18 @@ export class Gateway {
     return readAdoptions(this.reactor, this.operatorAuthor);
   }
 
-  // Honor an erasure DECIDED by the primary operator (SPEC §24.8), called on a pool by the primary's fan-out:
-  // land the operator's tombstone (so the pool remembers the hole and refuses re-entry — the federation door
-  // already enforces that, §11), purge the byte, re-seat, and fan the same order into any pools of THIS pool
-  // (the law is transitive — a nested replica is still the operator's replica). No local target need exist;
-  // the erasure was decided upstream, and the shared operator makes the tombstone lawful here. This is what
-  // keeps a pool from becoming a place a forgotten byte can hide.
-  //
-  // A FAN-OUT MUST RE-DERIVE ITS OWN REACH. The purge re-checks the tombstone's lawfulness itself
-  // (eraseDefect — the authorization gate, checked FIRST and explicitly); the tombstone crosses the
-  // federation door past the pool's own TRUST policy (an explicit admit — trust is admission
-  // configuration, whose data do I want; erasure is LAW, §11 through the one-way glass
-  // unconditionally, and a `closed` pool is still the operator's own replica); and if the lawful
-  // tombstone STILL did not land, the only remaining cause is the store itself failing — so it
-  // THROWS, and the primary's `erase` rejects. Best-effort-and-loud, never a silent success.
+  // Honor an erasure DECIDED by the primary operator (SPEC §24.8), called on a pool by the primary's
+  // fan-out: the body — and the fan-out's re-derive-its-own-reach doctrine — lives in erase.ts.
   async eraseReplica(tombstone: Delta, id: string, seen: Set<Gateway> = new Set()): Promise<void> {
-    // Authorization first, on its own: a forged or foreign removal-order is refused WITHOUT purging
-    // — loudly, since only a hostile direct caller can reach this branch (the primary's fan-out only
-    // ever hands over the tombstone its own erase door just validated).
-    const defect = eraseDefect(tombstone, this.reactor, this.operatorAuthor);
-    if (defect !== undefined) {
-      throw new Error(`a replica purge is the operator's alone: ${defect}`);
-    }
-    await this.federate([tombstone], { admit: () => true }); // lawful (checked above) — trust policy does not apply
-    await this.flush();
-    if (!readTombstones(this.reactor, this.operatorAuthor).has(id)) {
-      throw new Error(
-        `the erasure did not complete: the operator's tombstone for ${id} could not land in an attached pool`,
-      );
-    }
-    await this.backend.purge([id]);
-    await this.reseat();
-    // Transitive: a pool of a pool holds the operator's bytes too. `seen` guards the walk — a cycle
-    // among pools cannot arise from openQuarantine (each pool is a fresh gateway), but a fan-out
-    // that could infinite-loop would be a worse bug than the one this fixed.
-    seen.add(this);
-    for (const pool of this.quarantinePools) {
-      if (!seen.has(pool)) await pool.eraseReplica(tombstone, id, seen);
-    }
+    return eraseReplicaImpl(this, tombstone, id, seen);
   }
 
   // A fresh reactor replayed from the backend as it stands NOW — how open() built the first
   // one. Every registered schema rebinds under a new generation (rebind), persistence
   // re-attaches, and any animating host is detached (it watched the old reactor — the caller
   // re-attaches its runner, as the village does after the crash).
-  private async reseat(): Promise<void> {
+  /** @internal — T19 seam (erase.ts) */
+  async reseat(): Promise<void> {
     // End live subscriptions first: a parked reader must not keep serving a view built on the
     // pre-erase ground (the removed record could still sit in its last snapshot). They wake
     // with `done` and resubscribe against the fresh reactor — the same reconnect a crash
@@ -1550,7 +1389,8 @@ export class Gateway {
     return this.registered.some((r) => r.hyperschema.name === name) ? this.matName(name) : name;
   }
 
-  private nextTimestamp(): number {
+  /** @internal — T19 seam (erase.ts, adopt.ts) */
+  nextTimestamp(): number {
     this.lastMutationTs = Math.max(Date.now(), this.lastMutationTs + 1);
     return this.lastMutationTs;
   }

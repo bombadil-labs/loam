@@ -20,9 +20,10 @@
 
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
-import { Reactor } from "@bombadil/rhizomatic";
+import { Reactor, signClaims } from "@bombadil/rhizomatic";
 import type { Claims, Delta } from "@bombadil/rhizomatic";
 import { lawfulNegated } from "./registration.js";
+import type { Gateway } from "./gateway.js";
 
 export const ERASE_ENTITY = "loam:erasure";
 export const CTX_ERASE = "loam.erasure";
@@ -195,4 +196,107 @@ export function tombstonesIn(deltas: Iterable<Delta>, operator: string | undefin
 // you choose, no new cryptography.
 export function sealCommitment(salt: string, author: string): string {
   return bytesToHex(sha256(new TextEncoder().encode(`${salt}\u0000${author}`)));
+}
+
+// --- the Gateway's erasure behaviors (ticket T19: the body lives beside its vocabulary) ---------
+// These are the implementations behind `Gateway.erase` / `Gateway.eraseReplica` — thin delegating
+// methods on the class, bodies here where the tombstone vocabulary and its readers already live.
+// They reach the gateway only through its declared internals seam (the `@internal` members on the
+// class — see the seam note in gateway.ts).
+
+// Erase one delta (the body of `Gateway.erase`): verify authority WHILE THE TARGET EXISTS, show the
+// blast radius, land the tombstone (through authorize — the door validates it against the live
+// target), purge every tier, and re-seat the gateway on the post-purge ground. The store remembers
+// THAT it forgot — never what. Live subscriptions re-attach exactly as they do after a schema
+// evolution or a crash; an animated gateway's runner must be re-attached (the host holds the old
+// reactor).
+export async function eraseImpl(
+  gw: Gateway,
+  id: string,
+  opts: { reason?: string } = {},
+): Promise<{ erased: string; citations: string[] }> {
+  // Erasure is the operator's alone (SPEC §11): destructive, so the only signer is the store's
+  // own operator. A data subject's request is honored BY the operator, never by the subject
+  // directly — there is no actor override here on purpose.
+  const seed = gw.options.seed;
+  if (seed === undefined || gw.operatorAuthor === undefined) {
+    throw new Error("erasure is the instance operator's alone, and this store has no operator");
+  }
+  const target = gw.reactor.get(id);
+  if (target === undefined) {
+    throw new Error(`nothing to erase: ${id} is not held here`);
+  }
+  if (isTombstone(target.claims)) {
+    // The erasure log is the record of what was forgotten; it stays append-only. Un-erasure
+    // is striking the tombstone (forgiveness), never erasing it.
+    throw new Error("the erasure log is append-only: a tombstone cannot itself be erased");
+  }
+  // The manifest: every delta citing the id (negations, provenance links) — the holes the
+  // cut will leave, enumerated before it is made. Cascade is the caller's choice.
+  const citations = [...gw.reactor.snapshot()]
+    .filter((d) =>
+      d.claims.pointers.some((p) => p.target.kind === "delta" && p.target.deltaRef.delta === id),
+    )
+    .map((d) => d.id);
+  const tombstone = signClaims(
+    eraseClaims(id, target.claims.author, gw.operatorAuthor, gw.nextTimestamp(), opts.reason),
+    seed,
+  );
+  await gw.append([tombstone]);
+  await gw.flush(); // the tombstone must be ground before the target stops being ground
+  await gw.backend.purge([id]);
+  await gw.reseat();
+  // §24.8 — the erasure reaches every attached QUARANTINE POOL (the operator's own replicas of this
+  // ground): the same tombstone lands there and the byte is purged there too, so a forgotten record can
+  // never live on in a staging area inside the operator's own walls. §11 reaches through the one-way
+  // glass unconditionally; a quarantine that could hide a purged byte would be an erasure-evasion channel.
+  const seen = new Set<Gateway>([gw]);
+  for (const pool of gw.quarantinePools) await pool.eraseReplica(tombstone, id, seen);
+  return { erased: id, citations };
+}
+
+// Honor an erasure DECIDED by the primary operator (the body of `Gateway.eraseReplica`, SPEC §24.8),
+// called on a pool by the primary's fan-out: land the operator's tombstone (so the pool remembers the
+// hole and refuses re-entry — the federation door already enforces that, §11), purge the byte, re-seat,
+// and fan the same order into any pools of THIS pool (the law is transitive — a nested replica is still
+// the operator's replica). No local target need exist; the erasure was decided upstream, and the shared
+// operator makes the tombstone lawful here. This is what keeps a pool from becoming a place a forgotten
+// byte can hide.
+//
+// A FAN-OUT MUST RE-DERIVE ITS OWN REACH. The purge re-checks the tombstone's lawfulness itself
+// (eraseDefect — the authorization gate, checked FIRST and explicitly); the tombstone crosses the
+// federation door past the pool's own TRUST policy (an explicit admit — trust is admission
+// configuration, whose data do I want; erasure is LAW, §11 through the one-way glass
+// unconditionally, and a `closed` pool is still the operator's own replica); and if the lawful
+// tombstone STILL did not land, the only remaining cause is the store itself failing — so it
+// THROWS, and the primary's `erase` rejects. Best-effort-and-loud, never a silent success.
+export async function eraseReplicaImpl(
+  gw: Gateway,
+  tombstone: Delta,
+  id: string,
+  seen: Set<Gateway>,
+): Promise<void> {
+  // Authorization first, on its own: a forged or foreign removal-order is refused WITHOUT purging
+  // — loudly, since only a hostile direct caller can reach this branch (the primary's fan-out only
+  // ever hands over the tombstone its own erase door just validated).
+  const defect = eraseDefect(tombstone, gw.reactor, gw.operatorAuthor);
+  if (defect !== undefined) {
+    throw new Error(`a replica purge is the operator's alone: ${defect}`);
+  }
+  await gw.federate([tombstone], { admit: () => true }); // lawful (checked above) — trust policy does not apply
+  await gw.flush();
+  if (!readTombstones(gw.reactor, gw.operatorAuthor).has(id)) {
+    throw new Error(
+      `the erasure did not complete: the operator's tombstone for ${id} could not land in an attached pool`,
+    );
+  }
+  await gw.backend.purge([id]);
+  await gw.reseat();
+  // Transitive: a pool of a pool holds the operator's bytes too. `seen` guards the walk — a cycle
+  // among pools cannot arise from openQuarantine (each pool is a fresh gateway), but a fan-out
+  // that could infinite-loop would be a worse bug than the one this fixed.
+  seen.add(gw);
+  for (const pool of gw.quarantinePools) {
+    if (!seen.has(pool)) await pool.eraseReplica(tombstone, id, seen);
+  }
 }

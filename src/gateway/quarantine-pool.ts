@@ -18,7 +18,9 @@
 
 import type { Delta } from "@bombadil/rhizomatic";
 import type { StoreBackend } from "../store/backend.js";
-import type { FederationReport, Gateway } from "./gateway.js";
+import { MemoryBackend } from "../store/memory.js";
+import { isTombstone } from "./erase.js";
+import { Gateway, type FederationReport } from "./gateway.js";
 
 // A live quarantine pool (returned by `Gateway.openQuarantine`). `gateway` is the pool's own gateway — its
 // own backend, the operator's seed, seeded one-way from the primary. `reseed` re-pulses the one-way inbound
@@ -38,4 +40,48 @@ export interface QuarantineOptions {
   // narrowing knob that EXISTS today (there are no read-side capability slices, §7) — the operator hand-picks
   // what the quarantine SEES by filtering at the edge, rather than what a piece of code may see once in.
   readonly admit?: (d: Delta) => boolean;
+}
+
+// Open a QUARANTINE POOL over a store (the body of `Gateway.openQuarantine`, SPEC §24 — a thin delegating
+// method on the class, its body here beside the pool's own vocabulary, ticket T19): a second gateway on
+// its OWN backend, seeded ONE-WAY from the primary by federation, sharing THE PRIMARY's operator (§24.1 —
+// the pool is the operator's own staging store, so the operator's erasure stays authoritative there,
+// §24.8; the one sanctioned shared-seed case). The edge is inbound only — nothing is ever wired back, so
+// a pool write can never reach the primary. The operator's seeded law binds in the pool (it resolves a
+// real, living lens over the real ground); foreign law stays inert until promoted. Drop the pool and the
+// primary is untouched (discard = erase-by-construction).
+export async function openQuarantineImpl(
+  gw: Gateway,
+  opts: QuarantineOptions = {},
+): Promise<QuarantinePool> {
+  if (gw.options.seed === undefined) {
+    throw new Error("only an operated store can open a quarantine pool (§24.1)");
+  }
+  const backend = opts.backend ?? new MemoryBackend();
+  const pool = await Gateway.open(backend, { seed: gw.options.seed });
+  // A membership filter narrows what the pool SEES, never what it must FORGET (§24.8): the
+  // operator's tombstones pass the seeding edge unconditionally, exactly as `eraseReplica`
+  // delivers them live — a quarantine inherits the holes along with the ground. (A forged
+  // tombstone slipping this wrapper is still refused inside federate by eraseDefect; the
+  // authorization gate is unchanged.)
+  const base = opts.admit;
+  const reseed = (): Promise<FederationReport> =>
+    pool.federate(
+      gw.offeredDeltas(),
+      base === undefined ? {} : { admit: (d) => isTombstone(d.claims) || base(d) },
+    );
+  await reseed(); // one-way INBOUND seeding; the reverse leg is never wired
+  // Bind the operator's federated schemas so the pool RESOLVES the seeded ground — the dry-run reads a
+  // living lens, not raw deltas. (Foreign, non-operator law federated in binds nothing until promoted.)
+  pool.replayRegistrations();
+  await pool.preloadResolvers();
+  gw.quarantinePools.add(pool);
+  return {
+    gateway: pool,
+    reseed,
+    drop: async () => {
+      gw.quarantinePools.delete(pool);
+      await pool.close();
+    },
+  };
 }
