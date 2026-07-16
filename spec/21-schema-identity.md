@@ -258,14 +258,45 @@ NOT free (honesty note, from a fact-check of this memo against the code): the re
 is keyed by the HYPERSCHEMA's name (the gather is the hyperschema's; only resolution differs per lens),
 which is exactly what lets two lenses share one materialization — and exactly what makes today's
 one-register-per-binding habit THROW (`duplicate materialization`, rhizomatic's reactor) the moment a
-second binding names the same hyperschema. The implementing slice therefore does the same dedup twice:
-build the SchemaRegistry from the deduplicated hyperschema set (above), and register ONE materialization
-per gather program, kept hot over the UNION of its bindings' roots — roots are liveness and ride each
-binding (§21), and a shared gather warms for whoever declared it. Neither exists in the code today; both
-are the gateway's own list-building to fix, no substrate change. The GraphQL surface already speaks the
-sharing's language: `_hviewHex` documents that "two lenses over the same body and root share it while
-their `_hex` may differ" — one gathering of evidence, two adjudications. Resolution stays a universal
-function of the data either way; sharing the gather changes cost, never answers.
+second binding names the same hyperschema.
+
+**The build shape: dedup is a data structure, not a discipline.** The naive reading of the above is
+"remember to deduplicate in two places" — the SchemaRegistry build and the materialization register —
+and that is a loaded footgun: the flat per-binding list (`Bound[]`) is consumed at four sites today
+(`SchemaRegistry.build` and `reactor.register`, each in both the fixpoint and the rebind paths), and
+every future consumer keyed on the program would inherit the same silent obligation. The memo therefore
+pins the implementation shape: the gateway derives **ONE grouped reading** — the serving surface —
+
+    programs: Map<hyperschemaName, {
+      hyperschema,                    // ONE definition (all bindings must agree, see below)
+      roots,                          // the UNION of the member bindings' roots
+      lenses: Map<lensName, binding>  // the §21.7 group key, read from the binding's own bytes
+    }>
+
+computed in one place from the surviving bindings, and **every consumer iterates the groups**: the
+SchemaRegistry builds from `programs` (one hyperschema each — dedup is a non-event), the reactor
+registers ONE materialization per program over the union roots, GraphQL builds one family per lens by
+walking `lenses`. There is no dedup left to forget, because no consumer ever sees the flat list; the
+invariant lives in the one constructor. Two consequences fall out at that single seam, both of which
+the flat list hides:
+
+- **Same name, different body is refused AT GROUPING, loudly.** Two bindings naming one hyperschema
+  whose definitions disagree (different `termHash`) cannot share a group — that is the registry's own
+  "one name, one gather program" law, now enforced once, before any state changes, instead of surfacing
+  as a mid-rebind registry throw.
+- **Widening the roots is a REBIND, not an addition.** The reactor has no deregister and refuses a
+  duplicate materialization, so a new lens whose roots are a subset of its program's existing union
+  rides the cheap additive path — but one that WIDENS the union must re-register the shared
+  materialization, which means a generation bump (the existing `rebind` machinery, §17). The grouped
+  model makes this decidable at the seam (compare the new union to the old); the per-binding model
+  could not even ask the question.
+
+Roots are liveness and ride each binding (§21); a shared gather warms for whoever declared it. None of
+this exists in the code today; all of it is the gateway's own list-building to fix, no substrate change.
+The GraphQL surface already speaks the sharing's language: `_hviewHex` documents that "two lenses over
+the same body and root share it while their `_hex` may differ" — one gathering of evidence, two
+adjudications. Resolution stays a universal function of the data either way; sharing the gather changes
+cost, never answers.
 
 **The registry's key, read from the bytes that were always there.** Bindings for both lenses file
 under the same registration entity (`registration:<hyperschemaEntity>` — the hyperschema's family),
