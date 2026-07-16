@@ -42,6 +42,7 @@ import { graphql, parse, subscribe, type ExecutionResult, type GraphQLSchema } f
 import type { StoreBackend } from "../store/backend.js";
 import { isRepairable } from "../store/quarantine.js";
 import { authorize } from "./accounts.js";
+import { adoptionRecordClaims, promotionRefusal, readAdoptions, type Adoption } from "./adopt.js";
 import {
   ERASE_ENTITY,
   eraseClaims,
@@ -1271,6 +1272,96 @@ export class Gateway {
         await pool.close();
       },
     };
+  }
+
+  // Promote a delta a quarantine produced into THIS store (SPEC §24.3 — promote-outputs, the first container
+  // operation of §27): the operator RE-SPEAKS the source delta's content as their OWN claim, carrying
+  // `loam.adoption` provenance back to the pool. The re-assertion INHERITS the source timestamp (§11 rung 2's
+  // translation trick), so promotion is content-addressed and idempotent: promoting the same output twice
+  // converges on one adopted delta, and an adopted delta the operator later ERASED stays dead — its tombstone
+  // refuses the very id a re-promotion would mint. The value crosses by re-assertion, never federation — so
+  // the pool can be dropped wholesale and the adopted value survives in the operator's voice. This is
+  // MERGE-load with kept provenance: where an interpretation in a sandbox becomes a claim in your canonical
+  // history, and always remembers where it came from (which is what makes fork/pull-request native).
+  async promote(
+    source: Gateway,
+    deltaId: string,
+    opts: { from?: string } = {},
+  ): Promise<{ promoted: string }> {
+    if (this.options.seed === undefined || this.operatorAuthor === undefined) {
+      throw new Error(
+        "only an operated store may promote (an adoption is the operator's own claim)",
+      );
+    }
+    const src = source.reactor.get(deltaId);
+    if (src === undefined) {
+      throw new Error(`nothing to promote: ${deltaId} is not held in the source`);
+    }
+    // Promote-OUTPUTS adopts domain facts only. Law-shaped deltas — grants, trust, registrations,
+    // tombstones, schema definitions, adoption records, negations — are refused here; operator
+    // authorship is force, and law crosses only by §24.4's own ceremony.
+    const refusal = promotionRefusal(src.claims);
+    if (refusal !== undefined) {
+      throw new Error(`promotion refused: ${deltaId} — ${refusal}`);
+    }
+    // Reference closure (§24.3/§27): a promoted delta must resolve in its new home. A cited delta the
+    // primary holds passes as-is; one the primary knows only THROUGH AN ADOPTION is REWRITTEN to cite its
+    // adopted counterpart (promotion re-signs, so a pool id can never appear in the primary — the trail is
+    // the bridge). A citation satisfying neither is refused: adopt the cited delta first, then this one.
+    const trail = new Map(this.adoptions().map((a) => [a.sourceDelta, a.adoptedDelta]));
+    const pointers = src.claims.pointers.map((p) => {
+      if (p.target.kind !== "delta") return p;
+      const cited = p.target.deltaRef.delta;
+      if (this.reactor.get(cited) !== undefined) return p;
+      const counterpart = trail.get(cited);
+      if (counterpart !== undefined && this.reactor.get(counterpart) !== undefined) {
+        return {
+          ...p,
+          target: { ...p.target, deltaRef: { ...p.target.deltaRef, delta: counterpart } },
+        };
+      }
+      throw new Error(
+        `promotion would dangle: ${deltaId} cites ${cited}, not held here — promote ${cited} first ` +
+          `and its adopted counterpart will be cited in its place`,
+      );
+    });
+    // Land TWO deltas: the source's content RE-SPOKEN by the operator (clean, so it resolves as itself),
+    // and a separate loam.adoption RECORD citing it with the provenance trail (kept off the content so it
+    // never pollutes the value's own gather — §11's tombstone-is-separate discipline, applied to adoption).
+    const adopted = signClaims(
+      {
+        timestamp: src.claims.timestamp, // inherited — content-addressed, idempotent, honest ordering
+        author: this.operatorAuthor,
+        pointers,
+      },
+      this.options.seed,
+    );
+    // Idempotence: an adoption that already stands is returned, never re-landed — one output, one
+    // adopted delta, one trail record, however many times the operator says yes.
+    if (trail.get(deltaId) === adopted.id && this.reactor.get(adopted.id) !== undefined) {
+      return { promoted: adopted.id };
+    }
+    const record = signClaims(
+      adoptionRecordClaims(
+        adopted.id,
+        opts.from ?? "quarantine",
+        deltaId,
+        src.claims.author, // the granted-author it wrote under in the pool
+        this.operatorAuthor,
+        this.nextTimestamp(),
+      ),
+      this.options.seed,
+    );
+    await this.append([adopted, record]);
+    return { promoted: adopted.id };
+  }
+
+  // The adoptions this store's operator has made (SPEC §24.3) — the visible trail from a canonical value
+  // back to the quarantine that produced it. The read side of promotion, for audit and review (§27).
+  // An unoperated store has no operator and therefore no adoptions of its own.
+  adoptions(): Adoption[] {
+    if (this.operatorAuthor === undefined) return [];
+    return readAdoptions(this.reactor, this.operatorAuthor);
   }
 
   // Honor an erasure DECIDED by the primary operator (SPEC §24.8), called on a pool by the primary's fan-out:

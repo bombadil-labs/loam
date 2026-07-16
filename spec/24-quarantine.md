@@ -458,3 +458,34 @@ re-pointed at the first-class scope surface when it lands). §24.3 promote-outpu
 a DRAFT awaiting Myk's sign-off; questions 1 and 6 are his decisions proved, 2 largely his decisions with
 one residual recommendation (all-or-nothing read granularity), 3/4/5/7 reasoned recommendations, 8 a hard
 requirement pinned green against slice 1.
+
+**PROMOTE-OUTPUTS BUILT** [#111](https://github.com/bombadil-labs/loam/pull/111) (the first §24.9
+follow-on slice; retires ticket T5 alongside the design pass #115) — promotion's first strength (§24.3), and the FIRST
+cross-container operation of §27 (merge-load with kept provenance, the thing that makes fork/pull-request
+native). `Gateway.promote(source, deltaId, opts?)` adopts a delta a quarantine produced by RE-SIGNING its
+content as the operator's OWN claim into the primary, plus a separate `loam.adoption` RECORD
+(`src/gateway/adopt.ts`) citing it with the trail: adopted-from, source-delta, produced-by (the
+granted-author it wrote under), adopted-by, at. The re-assertion **inherits the source timestamp** (§11
+rung 2's translation trick), so promotion is content-addressed and IDEMPOTENT — promote twice, converge on
+one adopted delta and one record — and **erasure holds**: an adopted delta the operator later erased
+re-mints the SAME id on any re-promotion attempt, which its tombstone refuses. The value crosses by
+re-assertion (never federation), so the pool can be dropped wholesale and the adopted value survives in the
+operator's voice. `Gateway.adoptions()` reads the trail (the raw material of §27's "review what's in
+here"). Reference CLOSURE is enforced and the trail is the bridge: a citation of an already-adopted pool
+delta is REWRITTEN to its adopted counterpart (so chains promote in dependency order and no pool id ever
+enters the primary's ground); a citation satisfying neither is refused (§27). And promote-outputs adopts
+FACTS, never LAW: a delta declaring a reserved vocabulary (`loam.*` / `rhizomatic.*` contexts, `loam:`
+entities) or carrying a negation is refused — operator authorship is force, and law crosses only by
+§24.4's own ceremony (`promotionRefusal`, `src/gateway/adopt.ts`), which also keeps the adoption trail
+unforgeable through its own door. A build-time correction worth recording: the provenance must ride a
+SEPARATE record delta, not the content delta — co-mingling made the content's own gather pick the
+provenance up as part of the value, resolving a `pick` field to a compound object; the fix is §11's
+tombstone-is-separate discipline applied to adoption. Named residual (Myk, §24.4's design): whether a
+DOMAIN negation (a quarantined app retracting a domain fact) may ever cross by adoption, and whether the
+free-text `from` label should harden to the pool's store identity. Additive → no §20 migration. Tests
+`test/gateway/promotion.test.ts` (11: adopt + resolve under the operator, the provenance trail,
+survives-drop, reference-closure-refused, chain-rewrite, idempotence + inherited timestamp,
+erased-stays-dead, and the three law refusals — grant-shaped, forged-adoption, negation). **Follow-on
+slices:** promote-LAW (bless a schema/renderer via the ordinary publish path, §24.4) and endorse-import
+(attribution-preserving federation) are their own tickets; the fork/PR village demo is a fast follow-on.
+New capability/provenance surface → Myk's merge (P6).
