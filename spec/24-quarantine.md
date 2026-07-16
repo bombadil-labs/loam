@@ -112,7 +112,9 @@ what the quarantine admits), so the operator can stand up a quarantine over a HA
 primary's ground rather than the whole store. The honest granularity is therefore "which deltas you let
 INTO the quarantine at all," pre-filtered at the edge with existing machinery — not "which deltas a given
 piece of code may see once they are in." A future read-side capability slice can narrow the second; v1
-narrows the first and says so.
+narrows the first and says so. (Slice 1 BUILT this knob as `QuarantineOptions.admit` — a per-delta
+predicate on the inbound edge, `src/gateway/quarantine-pool.ts`; §24.10 reconciles it with §27.6's
+membership-is-a-query and names the rhizomatic 0.6.0 set-algebra that generalizes it.)
 
 **The dependency tree — why "drop" stays consequence-free (DECIDED, Myk, 2026-07-15).** The property that
 makes the quarantine trustworthy is structural, not vigilance-based: the dependency graph is a ONE-WAY
@@ -304,7 +306,14 @@ SAME operator's store — so the operator's tombstone is authoritative there (no
    active quarantine pools and purge the byte there too. **Flag (a build requirement, not new doctrine):**
    §11's purge fan-out and its blast-radius manifest must learn about active quarantine pools — they
    register as replicas of the ground the erase reaches. This is an extension of §11's existing every-tier
-   fan-out, surfaced here so it is built, not discovered.
+   fan-out, surfaced here so it is built, not discovered. **And the enumeration must survive a restart
+   (premortem finding, 2026-07-16):** slice 1's fan-out reaches pools ATTACHED IN-PROCESS via
+   `openQuarantine`; a pool on a DURABLE backend that outlives the primary's process and is never
+   re-attached is a replica no fan-out reaches — the forgotten byte survives in its backend file. The
+   build rule: a durable quarantine must be REGISTERED (a record the primary reads at boot, re-attaching
+   the pool to the fan-out) or it may not be durable; an unregistered durable pool is an erasure-evasion
+   channel and the erase operation must refuse to report completeness it cannot deliver. (In-memory pools
+   die with the process and carry no such risk — which is why slice 1's default backend is in-memory.)
 3. **`heal()` in the quarantine consults tombstones** and never resurrects a purged id (§11's crash-in-
    reverse discipline), exactly as in the primary.
 
@@ -351,6 +360,53 @@ hiding place. "Run a stranger's whole app against your real ground" never means 
 touch your real ground": the pool catches every write, discard is erase-by-construction, and promotion is
 the only door out.
 
+### 24.10 The quarantine is a container — reconciling with §27 (DRAFT, added 2026-07-16)
+
+§27 (design-stage, merged after this section's first draft) named the primitive underneath this whole
+section: a quarantine is a **container** — a referenceable, content-addressable pool of deltas — with its
+knobs set to the posture UNTRUSTED · one-way-seeded · live · droppable. The quarantine pool of slice 1
+(#109) is that primitive's first and only built instance. The two framings must not drift, so this
+subsection reconciles them explicitly, clause by clause:
+
+- **The separate-store proof is BOUNDED by §27, not weakened.** §24.1's "you cannot discard a mark" is an
+  argument about UNTRUSTED FOREIGN law, and §27.1 says exactly that: among your OWN deltas, exclusion may
+  be a flippable property (a claim about the container entity); only across a trust boundary must it be a
+  wall (a separate store — the only thing that gives discard-with-zero-trace and erasure-evasion
+  resistance). A quarantine is *definitionally* the untrusted case, so it always sits at the wall end of
+  §27.1's spectrum: a separate store, never a mark, never a property. The proof holds within its domain,
+  and §27 names the domain. Nothing in §24.1 moves.
+- **Seeding is a membership query, and slice 1 built its degenerate form.** §27.6 decided that a
+  container's contents are a delta-query — a rhizomatic `Term → dset`, static or live, local or remote.
+  The quarantine's inbound edge is the LIVE, REMOTE-over-federation case, and slice 1's
+  `QuarantineOptions.admit` (a per-delta predicate filtering the pulse) is that query's degenerate form.
+  When the first-class membership `select`/`watch` surface lands (§27's follow-on), the quarantine's edge
+  filter becomes a membership `Term` — the same knob, generalized, no new mechanism. Composition of what a
+  quarantine sees is then the container set-algebra: rhizomatic 0.6.0's `difference`/`intersect` (adoption
+  queued as T14) complete the `∪`/`∩`/`∖` operators, so a quarantine can be seeded over "these containers
+  minus those" with nestable exclusions. **Boundary flag (0.6.0, stated precisely):** `difference` and
+  `intersect` are **Term-layer operators only** — they compose delta-sets at the scope level; they are NOT
+  usable *inside* `inView` predicates, whose depth-1 stratification is unchanged. Scoping what a
+  quarantine admits is Term-level algebra at the EDGE, exactly where §24.2 already put the narrowing knob;
+  this section invents no predicate-level machinery and no parallel mechanism.
+- **Promotion is the container operation, named twice.** §24.3's promote-outputs (re-sign with
+  `loam.adoption` provenance) IS §27.3's **adoption-merge** — the trust-boundary crossing, built as the
+  primitive's first cross-container operation (PR #111). §27.3's *scope-merge* (flip the exclusion
+  property, no re-sign) NEVER applies to a quarantine's foreign outputs: they are across a trust boundary
+  by definition, so they cross only by re-authoring. And §27.3's reference-load *is what a quarantine is*;
+  merge-loading a quarantine wholesale is exactly what §24.3's reference-closure rule already forbids —
+  promotion is always "adopt THESE specific outputs," never "take the pool."
+- **The tree rule is one rule.** §24.2's one-way dependency tree (DECIDED, Myk 2026-07-15) and §27.4's
+  "live containers stay a tree; frozen module-versions can be a pinned DAG" are the same law seen from
+  both sides. A quarantine is live by definition, so it lives under the tree clause forever. The DAG
+  clause never reaches it: freezing a quarantine's contents into a content-addressed module version
+  (§27.2) mints a NEW, immutable thing that may be pinned in a DAG — but that thing is a module version,
+  no longer a quarantine. Probation ends where freezing begins; the LAW under test was always frozen
+  (§22.3's snapshot doctrine), the POOL never is.
+- **Normative split, so neither section drifts.** §24 stays normative for the quarantine POLICY — the
+  glass, promotion, resource discipline, the erasure law. §27 is normative for the PRIMITIVE — membership,
+  identity, the merges, the algebra. When §27.7's `Container` lifting lands, `openQuarantine` becomes the
+  quarantine PRESET of the container constructor, with no semantic change to anything this section fixes.
+
 **Provenance.** **Design-stage DRAFT (Claude, 2026-07-15)** — this section holds the design for
 acceptance, NOT yet built. It fixes the shapes and answers the eight design questions; it awaits **Myk's
 sign-off in chat (P6)** and lands as this file's realized form, with an implementation note appended,
@@ -389,3 +445,16 @@ renderer frame; the full no-fs/no-net ocap; and a read-side capability slice. **
 erasure fan-out is best-effort-and-loud — a pool whose `eraseReplica` throws makes `erase` REJECT (the
 operator learns the erasure did not fully complete) rather than silently evade; a future slice can make it
 transactional. New capability/federation/erasure surface → Myk's merge (P6).
+
+**T5 full-design pass (Claude, 2026-07-16)** — the decision-memo PR closing ticket T5's design stage.
+Added §24.10 (the explicit §27 reconciliation: the separate-store proof bounded to the untrusted domain,
+seeding as a membership query with `admit` as its built degenerate form, the 0.6.0 Term-layer boundary
+flagged, promote-outputs identified with §27.3's adoption-merge, the one tree rule, and the §24/§27
+normative split); amended §24.2's honesty note to cite the built `admit` knob; and strengthened the §24.8
+rail with a composed-scope, byte-for-byte assertion (`test/gateway/quarantine.test.ts` — the widest scope
+any §23.9 opt-in interop read could assemble, primary ⊎ pool, holds zero bytes of a purged delta; to be
+re-pointed at the first-class scope surface when it lands). §24.3 promote-outputs is BUILT and open as
+[#111](https://github.com/bombadil-labs/loam/pull/111), awaiting the same P6. This whole section remains
+a DRAFT awaiting Myk's sign-off; questions 1 and 6 are his decisions proved, 2 largely his decisions with
+one residual recommendation (all-or-nothing read granularity), 3/4/5/7 reasoned recommendations, 8 a hard
+requirement pinned green against slice 1.
