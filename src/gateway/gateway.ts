@@ -16,16 +16,13 @@ import {
   authorForSeed,
   computeId,
   evalTerm,
-  hviewCanonicalHex,
   loadHyperSchema,
   makeDelta,
   schemaToJson,
   publishHyperSchemaClaims,
-  resolveView,
   signClaims,
   termHash,
   verifyDelta,
-  viewCanonicalHex,
   type Delta,
   type HView,
   type HyperSchema,
@@ -34,9 +31,8 @@ import {
   type Schema,
   type Primitive,
   type Term,
-  type View,
 } from "@bombadil/rhizomatic";
-import { graphql, parse, subscribe, type ExecutionResult, type GraphQLSchema } from "graphql";
+import { graphql, type GraphQLSchema } from "graphql";
 import type { StoreBackend } from "../store/backend.js";
 import { isRepairable } from "../store/quarantine.js";
 import { authorize } from "./accounts.js";
@@ -46,7 +42,6 @@ import {
   eraseDefect,
   eraseImpl,
   eraseReplicaImpl,
-  forgottenSince,
   isTombstone,
   readTombstones,
 } from "./erase.js";
@@ -76,7 +71,7 @@ import {
   type RegistrationVersion,
   type WithdrawnRegistration,
 } from "./registration.js";
-import { applyResolvers, loadResolvers, newResolverMemo, type ResolverMemo } from "./resolvers.js";
+import { loadResolvers, newResolverMemo, type ResolverMemo } from "./resolvers.js";
 import {
   openQuarantineImpl,
   type QuarantineOptions,
@@ -100,6 +95,13 @@ import {
   removeEntityImpl,
   severEntityImpl,
 } from "./mutate.js";
+import {
+  gatherImpl,
+  resolvedNodeImpl,
+  resolvePinnedImpl,
+  subscribeViaImpl,
+  watchEntityImpl,
+} from "./reads.js";
 import { readTrustPolicy } from "./trust.js";
 
 export interface AppendReceipt {
@@ -185,8 +187,10 @@ export class Gateway {
   // The resolver memo (SPEC §22.5): (resolver-content-address, bucket-delta-set) → value. Keyed on the
   // surviving bucket, so it invalidates by construction when the ground moves — an erased fact drops
   // from the bucket and its old value can never be served again. A pure cache; safe to clear anytime.
-  private readonly resolverMemo: ResolverMemo = newResolverMemo();
-  private registry = SchemaRegistry.build([]);
+  /** @internal — T19 seam (reads.ts) */
+  readonly resolverMemo: ResolverMemo = newResolverMemo();
+  /** @internal — T19 seam (reads.ts) */
+  registry = SchemaRegistry.build([]);
   private gql: GraphQLSchema | undefined;
   // Materialization names are generation-qualified (see matName): the reactor has no
   // deregister, so an evolved schema binds a FRESH materialization under a bumped generation
@@ -204,9 +208,11 @@ export class Gateway {
   // number of sinks (the reactor has no unsubscribe; the fan-out set is ours, so leaving a
   // subscription only empties our set). Lazily-registered materializations — for entities not
   // in any registered root list — are cached and reused for the gateway's lifetime.
-  private readonly sinks = new Map<string, Set<(c: MaterializationChange) => void>>();
+  /** @internal — T19 seam (reads.ts) */
+  readonly sinks = new Map<string, Set<(c: MaterializationChange) => void>>();
   private readonly lazyMats = new Set<string>();
-  private readonly channels = new Set<Channel<PatchNode>>();
+  /** @internal — T19 seam (reads.ts) */
+  readonly channels = new Set<Channel<PatchNode>>();
   // Ids append() has already persisted this tick: the raw-stream subscriber skips them, so a
   // direct append is written exactly once (the raw stream still catches every OTHER emitter —
   // a future DerivationHost's emissions ride it into the ground).
@@ -399,58 +405,9 @@ export class Gateway {
     return readWithdrawnRegistrations(this.reactor, this.operatorAuthor);
   }
 
-  // Pinned resolution (SPEC §17 versioning): answer under an ARBITRARY registration — an old
-  // version's policy over TODAY's ground — through the same gather the live lens uses when no
-  // materialization is warm (reactor.eval). The _hex of a pinned view is as real as the live
-  // one's: same ground, an older lens, an honest content address. Cross-schema refs resolve
-  // via the live registry (a version pins the named lens, not the whole world's).
-  //
-  // The two pins are orthogonal (SPEC §26): with an `asOf`, this becomes an OLD lens over an OLD
-  // ground — full time travel — resolving the pinned body against the ground as it stood at T
-  // (the same gather the live as-of read uses, only the schema is pinned rather than the latest).
+  // Pinned resolution (SPEC §17 versioning × §26 as-of): the body lives in reads.ts.
   resolvePinned(reg: Registered, entity: string, asOf?: number): ResolvedNode {
-    const result =
-      asOf === undefined
-        ? this.reactor.eval(reg.hyperschema.body, entity, this.registry)
-        : evalTerm(reg.hyperschema.body, this.groundAsOf(asOf), entity, this.registry);
-    if (result.sort !== "hview") {
-      throw new Error(`schema ${reg.hyperschema.name} does not evaluate to a hyperview`);
-    }
-    // The pinned version's OWN resolvers apply (SPEC §22) — a version freezes its resolver with its
-    // schema, so an old lens keeps computing exactly as it did. Pre-loaded across all versions at bind.
-    const view = applyResolvers(
-      reg.resolvers,
-      resolveView(reg.schema, result.hview) as Record<string, View>,
-      result.hview,
-      entity,
-      this.resolverMemo,
-    );
-    return this.annotate(
-      {
-        entity,
-        view,
-        hex: viewCanonicalHex(view),
-        hviewHex: hviewCanonicalHex(result.hview),
-      },
-      asOf,
-    );
-  }
-
-  // The moment as a delta set (SPEC §26): the surviving snapshot filtered to the deltas IN FORCE
-  // at T — author-timestamp `≤ T`, and a negation counts only if ITS OWN timestamp is `≤ T` (a
-  // fact un-negated at T reads present; a retraction not yet spoken at T leaves the fact
-  // standing). Because negations are themselves timestamped deltas, one filter — `timestamp ≤ T`
-  // — is exactly both rules. It reads the SURVIVING ground, so purged content can never reappear,
-  // no matter how far back T points: erasure is the stronger promise (§11).
-  private groundAsOf(asOf: number): DeltaSet {
-    return DeltaSet.from([...this.reactor.snapshot()].filter((d) => d.claims.timestamp <= asOf));
-  }
-
-  // Ride the erasure annotation on an as-of node, beside the view (like `_hex`), never inside the
-  // resolved data. A present read (no `asOf`) carries neither pin nor mark.
-  private annotate(node: ResolvedNode, asOf: number | undefined): ResolvedNode {
-    if (asOf === undefined) return node;
-    return { ...node, asOf, forgotten: forgottenSince(this.reactor, this.operatorAuthor, asOf) };
+    return resolvePinnedImpl(this, reg, entity, asOf);
   }
 
   // Every claim template must be VISIBLE to its own schema: substitute sentinels for the arg
@@ -1192,11 +1149,13 @@ export class Gateway {
   // Generation-qualified (see the class note): an evolved schema binds a fresh materialization
   // under the bumped generation; a superseded one is left behind, and a stream still attached
   // to it keeps watching the old shape until it resubscribes.
-  private matName(name: string): string {
+  /** @internal — T19 seam (reads.ts) */
+  matName(name: string): string {
     return ["", `g${this.generation}`, name].join(NUL);
   }
 
-  private lazyMatName(name: string, entity: string): string {
+  /** @internal — T19 seam (reads.ts) */
+  lazyMatName(name: string, entity: string): string {
     return [this.matName(name), entity].join(NUL);
   }
 
@@ -1207,7 +1166,8 @@ export class Gateway {
   // never the authenticated surface. Cleared wherever lazyMats is.
   private readonly publicLazyMats = new Set<string>();
 
-  private matFor(name: string, entity: string, door: "full" | "public" = "full"): string {
+  /** @internal — T19 seam (reads.ts: a watch binds to the materialization this names) */
+  matFor(name: string, entity: string, door: "full" | "public" = "full"): string {
     const def = this.def(name);
     if (def.roots.includes(entity)) return this.matName(name);
     const matName = this.lazyMatName(name, entity);
@@ -1237,53 +1197,15 @@ export class Gateway {
     return matName;
   }
 
-  // Gather the HView for (schema, entity): the live materialization when one is watching —
-  // registered root or lazy — and batch evaluation otherwise (the spike proved them identical).
-  // An `asOf` read (SPEC §26) can use NEITHER warm path — the materialization IS the present by
-  // construction — so it takes the one honest path: evaluate the same body over the ground as it
-  // stood at T (groundAsOf). Same gather, a narrower ground; nothing about resolution is time-cased.
+  // Gather the HView for (schema, entity): the body lives in reads.ts.
   /** @internal — T19 seam (mutate.ts: retraction reads the hview to find the caller's own claims) */
   gather(name: string, entity: string, asOf?: number): HView {
-    if (asOf !== undefined) {
-      const def = this.def(name);
-      const result = evalTerm(def.hyperschema.body, this.groundAsOf(asOf), entity, this.registry);
-      if (result.sort !== "hview") {
-        throw new Error(`schema ${name} does not evaluate to a hyperview`);
-      }
-      return result.hview;
-    }
-    const live =
-      this.reactor.materializedView(this.matName(name), entity) ??
-      this.reactor.materializedView(this.lazyMatName(name, entity), entity);
-    if (live !== undefined) return live;
-    const def = this.def(name);
-    const result = this.reactor.eval(def.hyperschema.body, entity, this.registry);
-    if (result.sort !== "hview") throw new Error(`schema ${name} does not evaluate to a hyperview`);
-    return result.hview;
+    return gatherImpl(this, name, entity, asOf);
   }
 
   /** @internal — T19 seam (mutate.ts: every write verb answers with the re-resolved node) */
   resolvedNode(name: string, entity: string, asOf?: number): ResolvedNode {
-    const def = this.def(name);
-    const hview = this.gather(name, entity, asOf);
-    // The lens's resolvers apply as the final step (SPEC §22): the Policy computes the value, then a
-    // resolver — if the field declares one — overrides its representation over the same bucket.
-    const view = applyResolvers(
-      def.resolvers,
-      resolveView(def.schema, hview) as Record<string, View>,
-      hview,
-      entity,
-      this.resolverMemo,
-    );
-    return this.annotate(
-      {
-        entity,
-        view,
-        hex: viewCanonicalHex(view),
-        hviewHex: hviewCanonicalHex(hview),
-      },
-      asOf,
-    );
+    return resolvedNodeImpl(this, name, entity, asOf);
   }
 
   // --- the write seam --------------------------------------------------------------------------
@@ -1353,90 +1275,14 @@ export class Gateway {
 
   // --- the live seam ---------------------------------------------------------------------------
 
-  // A dynamic view of (schema, entity): an initial snapshot, then a patch per relevant change.
-  // Built on a Channel, so leaving the stream (return/throw) detaches immediately — even while
-  // the reader is parked waiting for an event that never comes. A slow reader coalesces: at
-  // most one pending patch, its hex chain and changed-set kept honest by the merge. A sink that
-  // cannot re-resolve fails ITS OWN stream and detaches — it never aborts the fan-out or the
-  // writer whose ingest triggered it. A change that leaves the resolved view identical (same
-  // hex) is no patch at all.
-  //
-  // The stream CAPTURES its shape at subscribe time — the policy and the materialization it
-  // was born watching. An evolution rebinds the query surface, but this stream keeps resolving
-  // the shape it promised its reader (triggered by, and reading from, the same superseded
-  // materialization) until the reader resubscribes. Trigger and resolution must agree: the
-  // current def would re-resolve through the NEW materialization while the OLD one decides
-  // when to fire — silently missing what only the new shape gathers.
+  // A dynamic view of (schema, entity) — snapshot, then patches: the body (and the
+  // captured-shape doctrine) lives in reads.ts.
   private watchEntity(
     name: string,
     entity: string,
     door: "full" | "public" = "full",
   ): AsyncGenerator<PatchNode, void, unknown> {
-    const bound = this.def(name);
-    const matName = this.matFor(name, entity, door);
-    const resolveCaptured = (): ResolvedNode => {
-      const hview = this.reactor.materializedView(matName, entity);
-      if (hview === undefined) {
-        throw new Error(`the materialization backing this stream is gone — resubscribe`);
-      }
-      // Resolvers apply on the stream too (SPEC §22), so a live frame reads exactly as a query does.
-      const view = applyResolvers(
-        bound.resolvers,
-        resolveView(bound.schema, hview) as Record<string, View>,
-        hview,
-        entity,
-        this.resolverMemo,
-      );
-      return {
-        entity,
-        view,
-        hex: viewCanonicalHex(view),
-        hviewHex: hviewCanonicalHex(hview),
-      };
-    };
-    let sinks = this.sinks.get(matName);
-    if (sinks === undefined) {
-      const set = new Set<(c: MaterializationChange) => void>();
-      this.sinks.set(matName, set);
-      this.reactor.subscribe(matName, (c) => {
-        for (const sink of [...set]) sink(c);
-      });
-      sinks = set;
-    }
-
-    const liveSinks = sinks;
-    const sink = (c: MaterializationChange): void => {
-      if (c.root !== entity) return;
-      try {
-        const node = resolveCaptured();
-        if (node.hex === lastHex) return; // the view did not move: silence, not a no-op patch
-        channel.push({ ...node, fromHex: lastHex, changed: [...c.changedProps] });
-        lastHex = node.hex;
-      } catch (err) {
-        channel.fail(toError(err)); // onClose detaches this sink; others are untouched
-      }
-    };
-    const channel = new Channel<PatchNode>(
-      () => {
-        liveSinks.delete(sink);
-        this.channels.delete(channel);
-      },
-      (pending, incoming) =>
-        pending.fromHex === null && pending.changed === null
-          ? { ...incoming, fromHex: null, changed: null } // still the snapshot — just a newer one
-          : {
-              ...incoming,
-              fromHex: pending.fromHex,
-              changed: [...new Set([...(pending.changed ?? []), ...(incoming.changed ?? [])])],
-            },
-    );
-
-    const initial = resolveCaptured();
-    let lastHex = initial.hex;
-    liveSinks.add(sink);
-    this.channels.add(channel);
-    channel.push({ ...initial, fromHex: null, changed: null });
-    return channel;
+    return watchEntityImpl(this, name, entity, door);
   }
 
   // --- the GraphQL surface ---------------------------------------------------------------------
@@ -1543,43 +1389,7 @@ export class Gateway {
     source: string,
     variables?: Record<string, unknown>,
   ): Promise<AsyncGenerator<Record<string, unknown>>> {
-    const result = await subscribe({
-      schema,
-      document: parse(source),
-      ...(variables === undefined ? {} : { variableValues: variables }),
-    });
-    if (!(Symbol.asyncIterator in result)) {
-      throw new Error(
-        `subscription failed: ${(result.errors ?? []).map((e) => e.message).join("; ") || "unknown"}`,
-      );
-    }
-    // A pass-through, not a generator: return() must reach the source immediately, even while
-    // a read is parked (a suspended generator would hold the return until the next event).
-    const upstream = result as AsyncGenerator<ExecutionResult, void, unknown>;
-    const mapped: AsyncGenerator<Record<string, unknown>, void, unknown> = {
-      async next() {
-        const item = await upstream.next();
-        if (item.done === true) return { value: undefined, done: true };
-        const ev = item.value;
-        if (ev.errors !== undefined && ev.errors.length > 0) {
-          await upstream.return(undefined);
-          throw new Error(ev.errors.map((e) => e.message).join("; "));
-        }
-        return { value: ev.data as Record<string, unknown>, done: false };
-      },
-      async return() {
-        await upstream.return(undefined);
-        return { value: undefined, done: true };
-      },
-      async throw(error?: unknown) {
-        await upstream.return(undefined);
-        throw error instanceof Error ? error : new Error(String(error));
-      },
-      [Symbol.asyncIterator]() {
-        return this;
-      },
-    };
-    return mapped;
+    return subscribeViaImpl(schema, source, variables);
   }
 
   // Await every write the raw stream has queued; surface the first write-through failure.
