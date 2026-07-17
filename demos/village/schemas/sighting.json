@@ -1,22 +1,61 @@
 {
-  "name": "Sighting",
-  "alg": 1,
-  "body": {
-    "op": "group",
-    "key": "byTargetContext",
-    "in": {
-      "op": "select",
-      "pred": { "hasPointer": { "targetEntity": { "var": "root" } } },
-      "in": { "op": "mask", "policy": "drop", "in": "input" }
+  "hyperschema": {
+    "name": "Sighting",
+    "alg": 1,
+    "body": {
+      "op": "group",
+      "key": "byTargetContext",
+      "in": {
+        "op": "select",
+        "pred": {
+          "hasPointer": {
+            "targetEntity": {
+              "var": "root"
+            }
+          }
+        },
+        "in": {
+          "op": "mask",
+          "policy": "drop",
+          "in": "input"
+        }
+      }
     }
   },
-  "policy": {
+  "schema": {
     "props": {
-      "species": { "pick": { "order": { "byTimestamp": "desc" } } },
-      "where": { "pick": { "order": { "byTimestamp": "desc" } } },
-      "note": { "all": { "order": { "byTimestamp": "asc" } } }
+      "species": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      },
+      "where": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      },
+      "note": {
+        "all": {
+          "order": {
+            "byTimestamp": "asc"
+          }
+        }
+      }
     },
-    "default": { "pick": { "order": { "byTimestamp": "desc" } } }
+    "default": {
+      "pick": {
+        "order": {
+          "byTimestamp": "desc"
+        }
+      }
+    }
   },
-  "roots": ["sighting:1", "sighting:2"]
+  "roots": [
+    "sighting:1",
+    "sighting:2"
+  ]
 }

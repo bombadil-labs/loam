@@ -92,5 +92,11 @@
     "screening:s2",
     "screening:s3",
     "screening:s4"
+  ],
+  "writable": [
+    "date",
+    "venue",
+    "rating",
+    "rewatch"
   ]
 }

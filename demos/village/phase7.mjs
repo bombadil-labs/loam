@@ -4,7 +4,7 @@
 import {
   publishSchemaClaims,
   makeNegationClaims,
-  parseTerm,
+  parseSchema,
   signClaims,
   VOCAB_PREFIX,
 } from "@bombadil/rhizomatic";
@@ -22,11 +22,15 @@ import {
 } from "./harness.mjs";
 
 const stores = {};
-const byRole = {
-  name: "Trap",
+// Mallory's rival READING of the dossier — a real resolution Schema (0.3.0's L5 realignment:
+// `publishSchemaClaims` takes a Schema, props as a Map), oldest-wins so that if it ever BOUND,
+// wren's dossier would visibly reshape and 7.2's _hex assertion would catch it.
+const rivalReading = parseSchema({
+  name: "Dossier",
   alg: 1,
-  body: parseTerm({ op: "group", key: "byRole", in: "input" }),
-};
+  props: { name: { pick: { order: { byTimestamp: "asc" } } } },
+  default: { pick: { order: { byTimestamp: "asc" } } },
+});
 const findDefinition = (gateway, entity) =>
   [...gateway.reactor.snapshot()].find((d) =>
     d.claims.pointers.some(
@@ -89,7 +93,7 @@ try {
     await gql(almanac.base, opToken("almanac"), `{ dossier(entity: "person:wren") { _hex } }`)
   ).body?.data?.dossier?._hex;
   const rivalDef = signClaims(
-    publishSchemaClaims(byRole, "schema:Dossier", AUTHORS.mallory, now + 10_000_000),
+    publishSchemaClaims(rivalReading, "schema:Dossier", AUTHORS.mallory, now + 10_000_000),
     SEEDS.mallory,
   );
   await almanac.gateway.federate([rivalDef]);
@@ -111,7 +115,7 @@ try {
   );
 
   // 7.3 — a foreign negation of the commons' own Person definition
-  const personDef = findDefinition(commons.gateway, "schema:Person");
+  const personDef = findDefinition(commons.gateway, "hyperschema:Person");
   const rivalNegation = signClaims(
     makeNegationClaims(AUTHORS.mallory, now + 10_000_001, personDef.id),
     SEEDS.mallory,

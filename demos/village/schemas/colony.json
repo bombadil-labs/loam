@@ -63,5 +63,11 @@
   },
   "roots": [
     "colony:1"
+  ],
+  "writable": [
+    "queen",
+    "frames",
+    "yield",
+    "grumbles"
   ]
 }

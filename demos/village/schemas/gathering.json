@@ -57,5 +57,9 @@
   "roots": [
     "gathering:harvest-1",
     "gathering:harvest-2"
+  ],
+  "writable": [
+    "date",
+    "honey"
   ]
 }

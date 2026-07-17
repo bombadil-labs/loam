@@ -58,5 +58,10 @@
     "film:the-secret-garden",
     "film:solaris",
     "film:local-hero"
+  ],
+  "writable": [
+    "title",
+    "year",
+    "director"
   ]
 }

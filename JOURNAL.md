@@ -80,3 +80,4 @@ entry is a NEW FILE and two concurrent landings never touch the same one (the sa
 | 2026-07-16 | [The journal becomes a folder, for the reason the spec did](journal/2026-07-16-the-journal-becomes-a-folder.md) |
 | 2026-07-16 | [T16: the fan-out re-derives its own reach](journal/2026-07-16-t16-the-fan-out-re-derives.md) |
 | 2026-07-16 | [T17: the index tells the truth, the memory rail stops being hollow](journal/2026-07-16-t17-the-index-tells-the-truth.md) |
+| 2026-07-16 | [T20: the village tells fresh-run truth again](journal/2026-07-16-t20-the-village-tells-fresh-run-truth.md) |

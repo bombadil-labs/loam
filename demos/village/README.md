@@ -46,6 +46,24 @@ node demos/village/village.mjs  # the living village: all stores + pulse + simul
 there (resolution eliding the anchor pointer, `_hex` covering the whole view, the byAuthorRank
 tie surprise) drove real Loam and rhizomatic changes.
 
+**The fresh-run ritual.** The standing `homes/` are the village's living world — long-lived,
+untracked, and comfortable. That comfort can hide drift: a schema change that only bites a store
+registered from scratch will never surface against homes that predate it (this happened — the §14
+immutable-by-default flip left every schema file without its `writable` list, and the standing
+homes masked it for weeks; ticket T20 was the repair). So before trusting the village as a
+regression net — a refactor slice, a serving-surface change — run it from a clean seed, in
+numeric order:
+
+```sh
+rm -rf demos/village/homes
+for i in $(seq 0 23); do node demos/village/phase$i.mjs; done
+node demos/village/phase-bytes.mjs && node demos/village/phase-pinned.mjs \
+  && node demos/village/phase-guestbook.mjs && node demos/village/phase-quarantine.mjs
+```
+
+All 28 acts green from fresh, in order, is the bar (certified 2026-07-16). The standing-homes
+workflow stays — it is the living world — but it is the demo, not the witness.
+
 ## Growing a new store (demo item 7)
 
 `grow.mjs` bootstraps a new sovereign store into the running village — its own home and

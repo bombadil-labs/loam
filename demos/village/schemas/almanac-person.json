@@ -59,5 +59,9 @@
     "person:miles",
     "person:odile",
     "person:petra"
+  ],
+  "writable": [
+    "name",
+    "bio"
   ]
 }

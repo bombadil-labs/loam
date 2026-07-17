@@ -84,7 +84,7 @@ try {
   check(
     "4.3",
     "republish at the same entity: 200, no restart",
-    evolved.status === 200 && evolved.body?.entity === "schema:Screening",
+    evolved.status === 200 && evolved.body?.entity === "hyperschema:Screening",
     JSON.stringify(evolved.body),
   );
 
@@ -163,7 +163,7 @@ try {
   );
 
   // 4.8 — deprecation is negation
-  const classicDef = findDefinition(reel.gateway, "schema:ScreeningClassic");
+  const classicDef = findDefinition(reel.gateway, "hyperschema:ScreeningClassic");
   const retirement = signClaims(
     makeNegationClaims(reel.operator, Date.now(), classicDef.id),
     reel.seed,

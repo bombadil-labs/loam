@@ -81,5 +81,10 @@
     "screening:s3",
     "screening:s4"
   ],
-  "entity": "schema:ScreeningClassic"
+  "writable": [
+    "date",
+    "venue",
+    "rating",
+    "note"
+  ]
 }
