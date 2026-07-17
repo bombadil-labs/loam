@@ -65,9 +65,12 @@ export function gatherImpl(gw: Gateway, name: string, entity: string, asOf?: num
     }
     return result.hview;
   }
+  // Sibling lenses share ONE materialization per PROGRAM (§21.7): the mat is keyed by the
+  // hyperschema's name, while `name` here is the LENS the door asked for.
+  const program = gw.def(name).hyperschema.name;
   const live =
-    gw.reactor.materializedView(gw.matName(name), entity) ??
-    gw.reactor.materializedView(gw.lazyMatName(name, entity), entity);
+    gw.reactor.materializedView(gw.matName(program), entity) ??
+    gw.reactor.materializedView(gw.lazyMatName(program, entity), entity);
   if (live !== undefined) return live;
   const def = gw.def(name);
   const result = gw.reactor.eval(def.hyperschema.body, entity, gw.registry);

@@ -150,8 +150,11 @@ export function matForImpl(
   door: "full" | "public" = "full",
 ): string {
   const def = gw.def(name);
-  if (def.roots.includes(entity)) return matNameImpl(gw, name);
-  const matName = lazyMatNameImpl(gw, name, entity);
+  // One materialization per PROGRAM (§21.7): sibling lenses watch the same gather, so the mat —
+  // registered and lazy alike — keys on the hyperschema's name, not the lens the caller named.
+  const program = def.hyperschema.name;
+  if (def.roots.includes(entity)) return matNameImpl(gw, program);
+  const matName = lazyMatNameImpl(gw, program, entity);
   if (!gw.lazyMats.has(matName)) {
     // The reactor has no deregister, so every watched entity costs memory and per-ingest CPU
     // for the gateway's lifetime. The cap keeps an unauthenticated reader from growing the

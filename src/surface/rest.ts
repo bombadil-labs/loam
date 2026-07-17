@@ -20,6 +20,7 @@
 import type { Primitive } from "@bombadil/rhizomatic";
 import { bytesEnvelope } from "../gateway/bytes.js";
 import type { Gateway } from "../gateway/gateway.js";
+import { lensOf } from "../gateway/registration.js";
 import type { RegistrationVersion } from "../gateway/registration.js";
 import type { SurfaceHooks } from "./surface.js";
 
@@ -46,8 +47,8 @@ function versionsFor(gateway: Gateway, door: "full" | "public"): RegistrationVer
   if (door === "full") {
     const surface = gateway.surface("full");
     if (surface === undefined) return [];
-    const admitted = new Set(surface.registered.map((r) => r.hyperschema.name));
-    return all.filter((v) => admitted.has(v.hyperschema.name));
+    const admitted = new Set(surface.registered.map((r) => lensOf(r)));
+    return all.filter((v) => admitted.has(lensOf(v)));
   }
   // Public: the LATEST version of each bare-declared name (unchanged) PLUS any specifically PINNED-public
   // version (SPEC §23.8 — a declaration is publication, so the operator's declared `Name@<deltaId>` pin is
@@ -55,12 +56,12 @@ function versionsFor(gateway: Gateway, door: "full" | "public"): RegistrationVer
   // are appended after the latest, so a bare-declared name keeps its natural highest vN alias; the pin's
   // stable access is its `@<deltaId>`. With no pins declared this is exactly the old latest-only set.
   const surface = gateway.surface("public");
-  const bare = new Set((surface?.registered ?? []).map((r) => r.hyperschema.name));
+  const bare = new Set((surface?.registered ?? []).map((r) => lensOf(r)));
   const latest = new Map<string, RegistrationVersion>();
-  for (const v of all) if (bare.has(v.hyperschema.name)) latest.set(v.hyperschema.name, v);
+  for (const v of all) if (bare.has(lensOf(v))) latest.set(lensOf(v), v);
   const out = [...latest.values()];
   for (const v of all) {
-    if (gateway.isPublicPin(v.hyperschema.name, v.deltaId) && !out.includes(v)) out.push(v);
+    if (gateway.isPublicPin(lensOf(v), v.deltaId) && !out.includes(v)) out.push(v);
   }
   return out;
 }
@@ -69,8 +70,8 @@ function versionsFor(gateway: Gateway, door: "full" | "public"): RegistrationVer
 function aliased(versions: readonly RegistrationVersion[]): Map<string, RegistrationVersion[]> {
   const byName = new Map<string, RegistrationVersion[]>();
   for (const v of versions) {
-    const list = byName.get(v.hyperschema.name);
-    if (list === undefined) byName.set(v.hyperschema.name, [v]);
+    const list = byName.get(lensOf(v));
+    if (list === undefined) byName.set(lensOf(v), [v]);
     else list.push(v);
   }
   return byName;
@@ -315,7 +316,7 @@ export async function handleRest(
     if (pinned === undefined) return refuse(404, `no version ${vTag} of ${schemaName} survives`);
   } else if (vTag.startsWith("@")) {
     const hash = vTag.slice(1);
-    pinned = versions.find((v) => v.deltaId === hash && v.hyperschema.name === schemaName);
+    pinned = versions.find((v) => v.deltaId === hash && lensOf(v) === schemaName);
     if (pinned === undefined) {
       // Withdrawn is not never-existed — but ONLY the full door is owed that distinction,
       // and only for a hash that really was a LAWFUL registration of THIS schema, since
@@ -346,7 +347,7 @@ export async function handleRest(
     liveSurface?.registered.some((r) => r.hyperschema.name === schemaName) ?? false;
   const trueLatest = gateway
     .registrationVersions()
-    .filter((v) => v.hyperschema.name === schemaName)
+    .filter((v) => lensOf(v) === schemaName)
     .at(-1);
   const isLatest = servesLive && pinned.deltaId === trueLatest?.deltaId;
 
