@@ -306,6 +306,8 @@ export function loadedRenderer(bundle: string): RenderFn | undefined {
 // governed store binds only operator law); the schema it reads must be REGISTERED and, if version-pinned,
 // that version must EXIST; every field it declares consuming must be a property the schema names; and its
 // bundle must LOAD to a function. Only then does the binding persist and the route go live.
+const DEFAULT_MAX_PUBLIC_RENDERS = 16;
+
 export async function publishRendererImpl(
   gw: Gateway,
   input: unknown,
@@ -431,6 +433,30 @@ export async function serveRouteImpl(
   // the serve path). The read-discipline + resolve above stayed on THIS thread (authority never leaves
   // it); only the untrusted render runs in the bounded worker (SPEC §23.9).
   if (loadedRenderer(binding.bundle) === undefined) return gone;
+  // The anonymous render fan is CAPPED (SPEC §23.9, ticket T18): the slot is acquired only here —
+  // after every refusal that costs nothing — and covers exactly the worker execution, released in
+  // finally so a completed (or timed-out, or faulted) render always gives its slot back. Over the
+  // cap: a clean 503 that names no route, no lens, no entity — the refusal leaks nothing.
+  if (door === "public") {
+    const cap = gw.options.maxPublicRenders ?? DEFAULT_MAX_PUBLIC_RENDERS;
+    if (gw.publicRendersInFlight >= cap) {
+      return {
+        status: 503,
+        contentType: "text/plain; charset=utf-8",
+        body: "the renderer is busy",
+      };
+    }
+    gw.publicRendersInFlight += 1;
+    try {
+      return await renderInWorker(binding.bundle, {
+        entity,
+        view: bytesEnvelope(node.view) as Record<string, unknown>,
+        hex: node.hex,
+      });
+    } finally {
+      gw.publicRendersInFlight -= 1;
+    }
+  }
   // Execute the renderer in a worker_threads Worker with a hard timeout + resourceLimits: a hanging or
   // heavy bundle cannot wedge the event loop or OOM the host, and every route keeps answering. The
   // renderer is a view consumer like gql/REST — hand it the §23.7 envelope (a bytes leaf becomes

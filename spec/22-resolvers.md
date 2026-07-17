@@ -236,3 +236,15 @@ exactly the purity its signed definition names. v1 executes the operator's OWN r
 store (only operator law binds, §7); confinement for UNTRUSTED executable law is §24's quarantine and
 §23's renderer trust. Additive/non-breaking: a binding without resolvers is the pre-§22 shape, so no
 §20 migration. Realizes ADLC ticket T3.
+
+**§22.6 THE DECLARED TYPE BINDS** [#133](https://github.com/bombadil-labs/loam/pull/133) (ticket
+T18, audit-2 MED, 2026-07-17) — the two-doors-agree promise this section made became enforced
+behavior: `applyResolvers` validates every resolver's returned value against its declared
+`ResolverOutputType` at the apply seam, ONCE, where every door inherits it (`matchesDeclaredType`,
+`src/gateway/resolvers.ts` — all six types including the §23.7 `bytes` envelope). A mismatch does
+exactly what a throwing resolver has always done: the field falls back to its Policy value, blast
+radius of one field, and the rails assert the equivalence directly (mismatch ≡ throw, at the
+GraphQL door and the REST door — `test/gateway/resolver-typing.test.ts`). Residual, named honestly:
+each door serializes the FALLBACK through its own contract (GraphQL's declared String coerces a
+numeric Policy value; REST emits it raw) — an asymmetry that pre-exists for throwing resolvers and
+is deliberately not widened here.

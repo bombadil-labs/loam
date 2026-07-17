@@ -84,3 +84,4 @@ entry is a NEW FILE and two concurrent landings never touch the same one (the sa
 | 2026-07-17 | [T19: the god-class becomes a spine](journal/2026-07-17-t19-the-god-class-becomes-a-spine.md) |
 | 2026-07-17 | [T2: one gather, many readings](journal/2026-07-17-t2-one-gather-many-readings.md) |
 | 2026-07-17 | [T15: the scope is a query](journal/2026-07-17-t15-the-scope-is-a-query.md) |
+| 2026-07-17 | [T18: the door learns to say busy](journal/2026-07-17-t18-the-door-learns-to-say-busy.md) |

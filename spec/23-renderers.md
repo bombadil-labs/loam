@@ -543,3 +543,14 @@ session can build each end-to-end.** (1) **T9 — the byte-door + bytes-in-views
 renderer sandbox + timeout (§23.9)** — BUILT (above). (4) **T12 — write-enabled renderers (§23.3)** — BUILT
 (above); the user's-own-pen (non-custodial) variant and the live browser React host (hydration, the client
 bundle, the live subscription transport) remain design-stage units — a design pass before a build.
+
+**§23.9 RENDER CAP BUILT** [#133](https://github.com/bombadil-labs/loam/pull/133) (ticket T18,
+audit-2 MED, 2026-07-17) — the anonymous render fan is CAPPED: `GatewayOptions.maxPublicRenders`
+(default 16), the `maxPublicStreams` discipline applied to a strictly more expensive resource. The
+slot is acquired only around the worker execution — every free refusal stays free — and released in
+`finally`, so a completed, timed-out, or faulted render always gives its slot back (railed by the
+cap+1-sequential test). Over the cap the public door refuses a clean 503 naming no route, lens, or
+entity; the full (token) door is not the anonymous fan and renders past the public cap. §23.9's
+honest-scope residual list narrows accordingly: the hang is bounded (the timeout), the memory is
+bounded (resourceLimits, distinguishably railed by T17), the FAN is now bounded (this cap) — the
+remaining residual is the no-fs/no-net ocap, still its own named work.

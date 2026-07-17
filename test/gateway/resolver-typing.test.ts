@@ -46,19 +46,35 @@ const gqlHeight = async (gw: Gateway): Promise<unknown> =>
 
 const restHeight = async (gw: Gateway): Promise<unknown> => {
   const res = await handleRest(gw, "full", "GET", ["v1", "Plant", FERN], undefined);
-  return (JSON.parse(String(res.body)) as { height?: unknown }).height;
+  return (res.body as { view?: { height?: unknown } }).view?.height; // props ride under body.view
 };
 
 describe("§22.6: the resolver's declared type binds at the apply seam — two doors, one answer", () => {
-  it("a resolver declaring `string` but returning an OBJECT falls back per-field, and BOTH doors agree", async () => {
-    const gw = await bootWith({
+  it("a mismatch behaves EXACTLY like a throw: both doors serve the Policy value, identically to the throwing case", async () => {
+    // The decided shape: a type mismatch does what a throwing resolver already does — per-field
+    // fallback to the Policy value. So the invariant asserted here is EQUIVALENCE with the throw
+    // case, at both doors. (Residual, named: each door serializes the fallback through its own
+    // contract — GraphQL's declared String coerces the numeric Policy value to "42", REST emits
+    // the raw 42. That asymmetry pre-exists for THROWING resolvers and is not widened here; the
+    // VALUE agrees, and mismatch ≡ throw is the promise §22.6 now keeps.)
+    const mismatch = await bootWith({
       height: { rung: "a", type: "string", code: "export default () => ({ oops: true });" },
     });
-    const viaGql = await gqlHeight(gw);
-    const viaRest = await restHeight(gw);
-    expect(viaGql).toBe(42); // the Policy value — the mismatch narrowed to its own field
-    expect(viaRest).toBe(42); // the SAME answer — that is the §17 invariant, asserted directly
-    await gw.close();
+    const throwing = await bootWith({
+      height: {
+        rung: "a",
+        type: "string",
+        code: 'export default () => { throw new Error("x"); };',
+      },
+    });
+    const viaGqlMismatch = await gqlHeight(mismatch);
+    const viaRestMismatch = await restHeight(mismatch);
+    expect(viaGqlMismatch).toBe(await gqlHeight(throwing)); // mismatch ≡ throw at the GraphQL door
+    expect(viaRestMismatch).toBe(await restHeight(throwing)); // and at the REST door
+    expect(viaRestMismatch).toBe(42); // the Policy value stands — never the mistyped object
+    expect(viaGqlMismatch).toBe("42"); // GraphQL speaks its declared String of the same value
+    await mismatch.close();
+    await throwing.close();
   });
 
   it("each declared type accepts its own valid value", async () => {

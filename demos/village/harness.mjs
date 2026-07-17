@@ -105,6 +105,8 @@ export async function openStore(name, opts = {}) {
     // Provisioned renderer-pen seeds (SPEC §23.3) — custody in config, so a write-enabled renderer act
     // can sign form-submits as a granted author. Passed by the act, never persisted to the ground.
     ...(opts.pens === undefined ? {} : { pens: opts.pens }),
+    // The §23.9 anonymous-render cap, when an act wants a small one to demonstrate the refusal.
+    ...(opts.maxPublicRenders === undefined ? {} : { maxPublicRenders: opts.maxPublicRenders }),
   });
   await gateway.append(assembleGenesis({ operatorSeed: seed }).deltas);
   const handle = await serve({

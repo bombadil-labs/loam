@@ -375,6 +375,11 @@ _(one entry per PR that grew the village; newest last)_
   re-evaluate the same Term live (new entries cross, new drafts stay home), proves §24.8's erasure
   reaches byte-for-byte through the Term-scoped glass, and drops the trial wholesale. select/watch
   are the first-class doors; the quarantine's admit predicate is the same knob's degenerate form.
+- **THE DOOR THAT SAYS BUSY (SPEC §23.9)** (phase-rendercap.mjs, 3/3, re-runnable): the public
+  square's rendered notice board meets a crowd — six anonymous readers against a cap of two workers.
+  The door serves what it can, refuses the rest with a clean "busy" that names no route, lens, or
+  entity, returns every slot when a render finishes (four polite readers in a row all served), and
+  the operator's token door renders past the cap — the discipline is the anonymous fan's alone.
 - **A PLACE WHERE UNTRUSTED LAW MAY BIND (SPEC §24, slice 1)** (phase-quarantine.mjs, 6/6, re-runnable):
   today foreign law is inert-by-default — safe, but untestable. The quarantine closes that gap. The almanac
   stands up a QUARANTINE POOL — a second store over its own ground, seeded ONE-WAY from the primary — that

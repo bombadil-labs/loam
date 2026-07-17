@@ -130,6 +130,14 @@ export interface GatewayOptions {
   // pen still needs an operator GRANT of write standing (§6's two keys), and revocation strikes that grant.
   // A store that compromises this config can sign as the pen — the same trust as the operator seed here.
   readonly pens?: Readonly<Record<string, string>>;
+  // The in-flight cap on ANONYMOUS renders (SPEC §23.9, ticket T18) — the same discipline as
+  // maxPublicStreams, on a strictly more expensive resource: every render spawns a worker thread
+  // with a ~160MB memory ceiling for up to its 500ms timeout. Default 16: bounds the anonymous
+  // door's worst case at a few transient GB while serving heavy legitimate load; raising it is a
+  // deploy decision, not a default. Public-door-scoped, following the SSE precedent — the threat
+  // is the anonymous fan; the token door is the operator's own. Over the cap the door refuses a
+  // clean 503 that leaks nothing, never queues unboundedly.
+  readonly maxPublicRenders?: number;
 }
 
 export interface FederationReport {
@@ -183,6 +191,8 @@ export interface Bound extends Registration {
 export class Gateway {
   /** @internal — T19 seam (renderers.ts) */
   registered: Bound[] = [];
+  /** @internal — T19 seam (renderers.ts: the §23.9 anonymous-render cap's in-flight count) */
+  publicRendersInFlight = 0;
   // The resolver memo (SPEC §22.5): (resolver-content-address, bucket-delta-set) → value. Keyed on the
   // surviving bucket, so it invalidates by construction when the ground moves — an erased fact drops
   // from the bucket and its old value can never be served again. A pure cache; safe to clear anytime.
