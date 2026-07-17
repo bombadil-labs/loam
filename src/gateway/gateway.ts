@@ -22,7 +22,6 @@ import {
   publishHyperSchemaClaims,
   signClaims,
   termHash,
-  verifyDelta,
   type Delta,
   type HView,
   type HyperSchema,
@@ -35,18 +34,11 @@ import {
 import { graphql, type GraphQLSchema } from "graphql";
 import type { StoreBackend } from "../store/backend.js";
 import { isRepairable } from "../store/quarantine.js";
-import { authorize } from "./accounts.js";
 import { promoteImpl, readAdoptions, type Adoption } from "./adopt.js";
-import {
-  ERASE_ENTITY,
-  eraseDefect,
-  eraseImpl,
-  eraseReplicaImpl,
-  isTombstone,
-  readTombstones,
-} from "./erase.js";
+import { eraseImpl, eraseReplicaImpl } from "./erase.js";
 import { Channel } from "./channel.js";
 import { STORE_ENTITY, operatorMarkerClaims, type Genesis } from "./genesis.js";
+import { admitForImpl, appendImpl, federateImpl, offeredDeltasImpl } from "./ingest.js";
 import {
   buildGqlSchema,
   type ClaimPointerSpec,
@@ -55,8 +47,7 @@ import {
   type Registered,
   type ResolvedNode,
 } from "./gql.js";
-import { budgetRefusal } from "./budget.js";
-import { declarePublicImpl, publicDefect, readPublicSchemas } from "./public.js";
+import { declarePublicImpl, readPublicSchemas } from "./public.js";
 import {
   lawfulSnapshot,
   parseClaimTemplates,
@@ -102,7 +93,6 @@ import {
   subscribeViaImpl,
   watchEntityImpl,
 } from "./reads.js";
-import { readTrustPolicy } from "./trust.js";
 
 export interface AppendReceipt {
   readonly accepted: number;
@@ -203,7 +193,8 @@ export class Gateway {
   // before ingesting it, and flush/close surface the failure. A gateway that cannot persist
   // must not quietly widen the gap between the live view and the ground.
   private writes: Promise<void> = Promise.resolve();
-  private writeFailure: Error | undefined;
+  /** @internal — T19 seam (ingest.ts: both doors refuse when the gateway can no longer persist) */
+  writeFailure: Error | undefined;
   // Live subscriptions: one reactor subscription per materialization name, fanned out to any
   // number of sinks (the reactor has no unsubscribe; the fan-out set is ours, so leaving a
   // subscription only empties our set). Lazily-registered materializations — for entities not
@@ -216,13 +207,15 @@ export class Gateway {
   // Ids append() has already persisted this tick: the raw-stream subscriber skips them, so a
   // direct append is written exactly once (the raw stream still catches every OTHER emitter —
   // a future DerivationHost's emissions ride it into the ground).
-  private readonly justPersisted = new Set<string>();
+  /** @internal — T19 seam (ingest.ts) */
+  readonly justPersisted = new Set<string>();
   private lastMutationTs = 0;
   /** @internal — T19 seam (erase.ts, adopt.ts) */
   readonly operatorAuthor: string | undefined;
   // When a runner animates the gateway, ingest routes through its DerivationHost (ingest + drain
   // derivations); otherwise straight to the reactor. Passive vs animate is exactly this hook.
-  private ingestVia: (d: Delta) => IngestResult = (d) => this.reactor.ingest(d);
+  /** @internal — T19 seam (ingest.ts: both doors write through it; animate/reseat re-point it) */
+  ingestVia: (d: Delta) => IngestResult = (d) => this.reactor.ingest(d);
 
   // Mutable behind a getter: erase() re-seats the gateway on a fresh reactor replayed from the
   // post-purge backend (the substrate is grow-only; forgetting in-process is a rebuild).
@@ -614,64 +607,7 @@ export class Gateway {
   // are unowned — trust is the reader's). Authorization reads the state as it stands before
   // the batch — a batch cannot bootstrap its own permissions.
   async append(deltas: Iterable<Delta>): Promise<AppendReceipt> {
-    if (this.writeFailure !== undefined) {
-      throw new Error(`this gateway can no longer persist: ${this.writeFailure.message}`);
-    }
-    const batch = [...deltas];
-    // The door remembers the hole (SPEC §11): an erased id is refused re-entry — through
-    // append as through federation — until its tombstone is lawfully struck (forgiveness).
-    const dead = readTombstones(this.reactor, this.operatorAuthor);
-    for (const d of batch) {
-      if (computeId(d.claims) !== d.id || verifyDelta(d) !== "verified") {
-        throw new Error(
-          `append rejected: delta ${d.id} is unsigned or not what it claims to be — ` +
-            `the gateway accepts only verified authorship`,
-        );
-      }
-      if (dead.has(d.id)) {
-        throw new Error(
-          `append rejected: delta ${d.id} was erased — a tombstone at ${ERASE_ENTITY} refuses ` +
-            `its return (strike the tombstone to forgive it)`,
-        );
-      }
-      // Governance begins with the operator: a gateway holding no operator identity is an
-      // ungoverned local store (any verified delta is welcome); one holding an operator
-      // enforces capabilities on everyone but the operator. Deployed gateways (step 6) are
-      // always governed.
-      if (this.operatorAuthor !== undefined) {
-        const verdict = authorize(this.reactor, d, this.operatorAuthor);
-        if (!verdict.ok) {
-          throw new Error(`append rejected: ${verdict.refusal}`);
-        }
-      }
-    }
-    // Door resource budgets (SPEC §25): a granted author the operator has metered may not append
-    // past their volume quota — deployment config, re-resolved live from `loam:budget`, layered
-    // above §12's stranger floor. Absent a budget the author is unmetered (today's behavior); the
-    // operator sets budgets and is never metered. Checked once for the whole batch, on the state
-    // as it stands before it — the same discipline authorize() reads under.
-    if (this.operatorAuthor !== undefined) {
-      const overBudget = budgetRefusal(this.reactor, this.operatorAuthor, batch);
-      if (overBudget !== undefined) {
-        throw new Error(`append rejected: ${overBudget}`);
-      }
-    }
-    await this.backend.append(batch); // a throw here means NOTHING was ingested or served
-    let accepted = 0;
-    let duplicates = 0;
-    for (const d of batch) this.justPersisted.add(d.id);
-    try {
-      for (const d of batch) {
-        const result = this.ingestVia(d);
-        if (result.status === "accepted") accepted += 1;
-        else duplicates += 1; // "rejected" is unreachable: the batch was validated above
-      }
-    } finally {
-      // Always cleared — duplicates never hit the raw stream, and a mid-ingest throw must not
-      // leave stale ids silently exempting future raw-stream writes.
-      for (const d of batch) this.justPersisted.delete(d.id);
-    }
-    return { accepted, duplicates };
+    return appendImpl(this, deltas);
   }
 
   // Meta-resolve schema-defining deltas via HYPER_SCHEMA_SCHEMA into a HyperSchema. The definition is
@@ -1008,74 +944,20 @@ export class Gateway {
   // `federate` and `pullFrom` use this when no explicit admit is given; an explicit predicate
   // always wins.
   admitFor(): (d: Delta) => boolean {
-    const policy = readTrustPolicy(this.reactor, this.operatorAuthor);
-    if (policy.mode === "open") return () => true;
-    if (policy.mode === "closed") return () => false;
-    return (d) => d.claims.author === this.operatorAuthor || policy.roster.has(d.claims.author);
+    return admitForImpl(this);
   }
 
   // The surviving deltas this store offers a peer — everything, or what the offered lens selects.
   offeredDeltas(): Delta[] {
-    const lens = this.options.offeredLens;
-    if (lens === undefined) return [...this.reactor.snapshot()];
-    const result = evalTerm(lens, this.reactor.snapshot());
-    if (result.sort !== "dset") throw new Error("an offered lens must select a delta set");
-    return [...result.set];
+    return offeredDeltasImpl(this);
   }
 
-  // Admit a batch of peer deltas: verify each (a forgery or an unsigned delta is refused, and
-  // one bad delta does not spoil the rest), apply the admission predicate, then ingest + write
-  // through. Idempotent — union dedups, so re-pulling accepts nothing new.
+  // Admit a batch of peer deltas (SPEC §8): the body lives in ingest.ts.
   async federate(
     deltas: Iterable<Delta>,
     opts: { admit?: (d: Delta) => boolean } = {},
   ): Promise<FederationReport> {
-    if (this.writeFailure !== undefined) {
-      throw new Error(`this gateway can no longer persist: ${this.writeFailure.message}`);
-    }
-    const all = [...deltas];
-    const admit = opts.admit ?? this.admitFor(); // the store's trust policy, unless overridden
-    // The door remembers the hole (SPEC §11): a tombstoned id is refused re-entry even past an
-    // explicit admit override — un-erasure is striking the tombstone, never a lucky re-send.
-    const dead = readTombstones(this.reactor, this.operatorAuthor);
-    const admitted: Delta[] = [];
-    let rejected = 0;
-    for (const d of all) {
-      // A tombstone is a removal-order, not an inert claim — so it faces the same validator at
-      // this door as at the append door (eraseDefect), and an unauthorized or malformed one is
-      // refused rather than stored. Likewise a public-read declaration: it OPENS a door, so a
-      // malformed one is refused here exactly as at append (publicDefect) — the two doors must
-      // not disagree about what lawful loam:public data is. Everything the readers trust
-      // downstream passed a door here.
-      if (
-        computeId(d.claims) !== d.id ||
-        verifyDelta(d) !== "verified" ||
-        dead.has(d.id) ||
-        publicDefect(d.claims) !== undefined ||
-        (isTombstone(d.claims) &&
-          eraseDefect(d, this.reactor, this.operatorAuthor) !== undefined) ||
-        !admit(d)
-      ) {
-        rejected += 1;
-        continue;
-      }
-      admitted.push(d);
-    }
-    let accepted = 0;
-    if (admitted.length > 0) {
-      await this.backend.append(admitted);
-      for (const d of admitted) this.justPersisted.add(d.id);
-      try {
-        for (const d of admitted) {
-          if (this.ingestVia(d).status === "accepted") accepted += 1;
-        }
-      } finally {
-        for (const d of admitted) this.justPersisted.delete(d.id);
-      }
-    }
-    // "accepted" counts deltas NEWLY ingested — a duplicate verified but merged into what was
-    // already there, so a re-pull accepts nothing (union is idempotent).
-    return { offered: all.length, accepted, rejected };
+    return federateImpl(this, deltas, opts);
   }
 
   // The operator's author, so a peer (the runner) can gate on it without holding the seed.
