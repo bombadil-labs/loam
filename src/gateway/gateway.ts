@@ -31,7 +31,14 @@ import { promoteImpl, readAdoptions, type Adoption } from "./adopt.js";
 import { eraseImpl, eraseReplicaImpl } from "./erase.js";
 import { Channel } from "./channel.js";
 import { STORE_ENTITY, operatorMarkerClaims, type Genesis } from "./genesis.js";
-import { admitForImpl, appendImpl, federateImpl, offeredDeltasImpl } from "./ingest.js";
+import {
+  admitForImpl,
+  appendImpl,
+  federateImpl,
+  offeredDeltasImpl,
+  selectImpl,
+  watchImpl,
+} from "./ingest.js";
 import {
   boundKey,
   lazyMatNameImpl,
@@ -647,6 +654,18 @@ export class Gateway {
   // The surviving deltas this store offers a peer — everything, or what the offered lens selects.
   offeredDeltas(): Delta[] {
     return offeredDeltasImpl(this);
+  }
+
+  // Membership is a query, first-class (SPEC §27.6): evaluate a membership Term over this
+  // store's ground, once. The body lives in ingest.ts — select is offeredDeltas, parameterized.
+  select(term: unknown): Delta[] {
+    return selectImpl(this, term);
+  }
+
+  // The same Term, live: the current members, then a fresh evaluation whenever the membership
+  // moves. The body lives in ingest.ts.
+  watch(term: unknown): AsyncGenerator<Delta[], void, unknown> {
+    return watchImpl(this, term);
   }
 
   // Admit a batch of peer deltas (SPEC §8): the body lives in ingest.ts.

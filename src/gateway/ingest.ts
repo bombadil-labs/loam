@@ -18,10 +18,11 @@
 // — thin delegating methods on the class, bodies here. They reach the gateway only through its
 // declared internals seam (the `@internal` members on the class — see the seam note in gateway.ts).
 
-import { computeId, evalTerm, verifyDelta, type Delta } from "@bombadil/rhizomatic";
+import { computeId, evalTerm, parseTerm, verifyDelta, type Delta } from "@bombadil/rhizomatic";
 import { authorize } from "./accounts.js";
 import { budgetRefusal } from "./budget.js";
 import { ERASE_ENTITY, eraseDefect, isTombstone, readTombstones } from "./erase.js";
+import { Channel } from "./channel.js";
 import type { AppendReceipt, FederationReport, Gateway } from "./gateway.js";
 import { publicDefect } from "./public.js";
 import { readTrustPolicy } from "./trust.js";
@@ -115,6 +116,60 @@ export function offeredDeltasImpl(gw: Gateway): Delta[] {
   const result = evalTerm(lens, gw.reactor.snapshot());
   if (result.sort !== "dset") throw new Error("an offered lens must select a delta set");
   return [...result.set];
+}
+
+// Membership is a query, first-class (SPEC §27.6, the body of `Gateway.select`): evaluate a
+// rhizomatic Term — the JSON `op` profile — over this store's SURVIVING ground, once. The Term
+// must select a DELTA SET (`difference`/`intersect` compose here, at the Term layer, to any
+// depth — never inside `inView` predicates, whose depth-1 stratification §24.10 pins); anything
+// else is refused loudly at the door. This is `offeredDeltas` parameterized: the same reading a
+// federation peer gets, under a scope the caller names.
+export function selectImpl(gw: Gateway, term: unknown): Delta[] {
+  const parsed = parseTerm(term);
+  const result = evalTerm(parsed, gw.reactor.snapshot());
+  if (result.sort !== "dset") {
+    throw new Error(
+      `select: the membership term must evaluate to a delta set (dset), not a ${result.sort} — ` +
+        `a container's membership is a set of deltas, whatever shape a reader later lifts it into`,
+    );
+  }
+  return [...result.set];
+}
+
+// The same Term, LIVE (the body of `Gateway.watch`): the current members, then a fresh evaluation
+// whenever the ground moves and the membership actually changed. Built on the same Channel the
+// entity streams ride — leaving the stream detaches immediately, a slow reader coalesces to the
+// newest membership. §27.6's "nearly free": every pulse re-evaluates the one Term.
+export function watchImpl(gw: Gateway, term: unknown): AsyncGenerator<Delta[], void, unknown> {
+  const parsed = parseTerm(term);
+  const initial = evalTerm(parsed, gw.reactor.snapshot());
+  if (initial.sort !== "dset") {
+    throw new Error(
+      `watch: the membership term must evaluate to a delta set (dset), not a ${initial.sort}`,
+    );
+  }
+  let closed = false;
+  let lastIds = new Set([...initial.set].map((d) => d.id));
+  const channel = new Channel<Delta[]>(
+    () => {
+      closed = true;
+    },
+    (_pending, incoming) => incoming, // a slow reader gets the newest membership, nothing stale
+  );
+  // The reactor has no unsubscribe; the closed flag makes a detached watcher inert (the same
+  // discipline the entity-stream sinks run).
+  gw.reactor.subscribeRaw(() => {
+    if (closed) return;
+    const next = evalTerm(parsed, gw.reactor.snapshot());
+    if (next.sort !== "dset") return; // the term's sort is content-independent; unreachable
+    const members = [...next.set];
+    const ids = new Set(members.map((d) => d.id));
+    if (ids.size === lastIds.size && [...ids].every((id) => lastIds.has(id))) return;
+    lastIds = ids;
+    channel.push(members);
+  });
+  channel.push([...initial.set]);
+  return channel;
 }
 
 // Admit a batch of peer deltas (the body of `Gateway.federate`): verify each (a forgery or an

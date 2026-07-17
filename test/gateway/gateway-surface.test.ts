@@ -37,6 +37,9 @@ const PUBLIC_METHODS = [
   "federate",
   "admitFor",
   "offeredDeltas",
+  // membership is a query (§27.6, ticket T15 — deliberate API growth, added with the ticket)
+  "select",
+  "watch",
   // lifecycle & binding
   "register",
   "publishRegistration",
