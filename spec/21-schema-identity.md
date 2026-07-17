@@ -59,11 +59,11 @@ authored like any other fact, not a coordinate the system hands out.
 hyperschema alone. That is the whole unlock: `Film` and `FilmClassic` are distinct keys over one
 gather program, so they coexist instead of colliding, and the duplicate-name refusal narrows from
 "one lens per hyperschema" to its honest form — "one LIVING lens per name per hyperschema," which is
-just what it means for a name to name something. **Honesty note (ticket T2 builds this):** the key is
-this design's accepted CONTRACT, not yet the code's behavior — today's registry still groups by
-registration entity alone and latest-wins evicts the sibling
-(`src/gateway/registration.ts`); §21.7 below is the accepted serving design whose implementation is
-queued as ticket T2. Two operators may still bind different Schemas under
+just what it means for a name to name something. **Built** ([#131](https://github.com/bombadil-labs/loam/pull/131),
+realizing ticket T2): `readRegistrations` keys latest-wins per (registration entity, lens) — the lens
+name read from the binding's own `schema:<name>` pointer — and the grouped serving surface
+(`groupPrograms`, `src/gateway/lifecycle.ts`) derives one program per hyperschema with a lens map,
+exactly as §21.7 below pins. Two operators may still bind different Schemas under
 the same pair on their own stores; that is federation, resolved by whose law binds (§7), not a
 registry collision.
 
@@ -194,7 +194,7 @@ The ladder exists to be climbed, and §22–§23 are why it must hold weight:
   a gap no test exercises — and turns real at §23, where a renderer's "works forever" needs the gather
   frozen too. Build it when §23 needs it; the rung is symmetric and unblocked.
 
-### §21.7 Coexistence — the serving surface *(design ACCEPTED — landed [#114](https://github.com/bombadil-labs/loam/pull/114), 2026-07-16; the implementation is queued as ticket T2 — coexistence is NOT yet in the code)*
+### §21.7 Coexistence — the serving surface *(design landed [#114](https://github.com/bombadil-labs/loam/pull/114); BUILT [#131](https://github.com/bombadil-labs/loam/pull/131), 2026-07-17)*
 
 Slice 2prime pinned the registry key — `(hyperschema, schema-name)` — and stopped at the door. This
 subsection opens it: when `Film` and `FilmClassic` both read one gather program, what does each look
@@ -373,3 +373,19 @@ own design-stage slice: this section pins the registry key `(hyperschema, schema
 SERVING surface (the GraphQL type/mutation/hooks keying, and the `schema.name == hyperschema.name`
 single-lens naming) is unspecified and needs a design pass before build. The `VersionedHyperSchema`
 rung above is symmetric and substrate-ready (`termHash`), built when §23 needs it.
+
+**§21.7 BUILT** [#131](https://github.com/bombadil-labs/loam/pull/131) (realizes ticket T2,
+2026-07-17) — the grouped serving surface, exactly as designed: `groupPrograms`
+(`src/gateway/lifecycle.ts`) derives one PROGRAM per hyperschema — the gather, the union of member
+roots, a lens map — computed in one place from the surviving bindings; the registry takes one
+hyperschema per group, the reactor registers one materialization per program, and every door keys
+per LENS (`lensOf`, `src/gateway/registration.ts`): the GraphQL family, REST's path segment, the
+`loam.public` admission, and the §17 ladder. Latest-wins narrowed to latest-per-lens; the rival-body
+termHash refusal fires at grouping before any state changes; the rebind rule (subset-rooted lenses
+ride the additive path, a widened union rebinds the generation) decides at the program level. The
+degenerate single-lens case is BYTE-IDENTICAL, held by snapshot rails
+(`test/gateway/coexistence.test.ts`, 10 — which caught one mid-build SDL wording drift and forced
+its revert) and zero collateral across the suite. No §20 migration — the lens name was already in
+the binding's bytes (slice 2prime); nothing at rest moved. The village demonstrates it live
+(`demos/village/phase-coexistence.mjs`: the Townbook and FirstImpressions lenses over one gather,
+one public, one not). Serving-loop surface → Myk's merge (P6).

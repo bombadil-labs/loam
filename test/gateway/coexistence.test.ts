@@ -167,6 +167,40 @@ describe("§21.7 coexistence — two lenses over one hyperschema", () => {
     await gw.close();
   });
 
+  it("the §17 version ladder runs per (entity, lens): each sibling counts its own versions", async () => {
+    const gw = await bootSingle();
+    await gw.publishRegistration(PLANT, ARCHIVAL, [FERN], undefined, undefined, undefined, [
+      "height",
+    ]);
+    const evolved: Schema = parseSchema({
+      name: "PlantClassic",
+      alg: 1,
+      props: { message: { pick: { order: { byTimestamp: "asc" } } } },
+      default: { pick: { order: { byTimestamp: "asc" } } },
+    });
+    await gw.publishRegistration(PLANT, evolved, [FERN], undefined, undefined, undefined, [
+      "message",
+    ]);
+    const versions = gw.registrationVersions();
+    const ladder = (lens: string): number =>
+      versions.filter((v) => (v.lensName ?? v.hyperschema.name) === lens).length;
+    expect(ladder("PlantClassic")).toBe(2); // the archival lens carries its own two rungs
+    expect(ladder("Plant")).toBeGreaterThanOrEqual(1); // the broad lens's ladder is untouched by them
+    await gw.close();
+  });
+
+  it("REST speaks the lens in its path segment: both siblings answer at their own doors", async () => {
+    const gw = await bootSingle();
+    await gw.publishRegistration(PLANT, ARCHIVAL, [FERN], undefined, undefined, undefined, [
+      "height",
+    ]);
+    const doc = buildOpenApi(gw, "full", "store") as { paths?: Record<string, unknown> };
+    const paths = Object.keys(doc.paths ?? {});
+    expect(paths.some((p) => p.includes("/Plant/"))).toBe(true);
+    expect(paths.some((p) => p.includes("/PlantClassic/"))).toBe(true);
+    await gw.close();
+  });
+
   it("writability honesty: a field writable through one sibling lens is writable (§14's posture)", async () => {
     const gw = await bootSingle();
     // The archival lens opens NO fields; the broad lens opens height. A write through the broad
