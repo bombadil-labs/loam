@@ -19,7 +19,6 @@ import {
   hviewCanonicalHex,
   loadHyperSchema,
   makeDelta,
-  makeNegationClaims,
   schemaToJson,
   publishHyperSchemaClaims,
   resolveView,
@@ -28,7 +27,6 @@ import {
   verifyDelta,
   viewCanonicalHex,
   type Delta,
-  type HVEntry,
   type HView,
   type HyperSchema,
   type IngestResult,
@@ -65,7 +63,6 @@ import {
 import { budgetRefusal } from "./budget.js";
 import { publicClaims, publicDefect, readPublicSchemas } from "./public.js";
 import {
-  edgeRoles,
   lawfulSnapshot,
   parseClaimTemplates,
   readRegistrations,
@@ -95,6 +92,14 @@ import {
   writeRouteImpl,
   type RendererBinding,
 } from "./renderers.js";
+import {
+  claimEntityImpl,
+  clearEntityImpl,
+  linkEntityImpl,
+  mutateEntityImpl,
+  removeEntityImpl,
+  severEntityImpl,
+} from "./mutate.js";
 import { readTrustPolicy } from "./trust.js";
 
 export interface AppendReceipt {
@@ -1174,7 +1179,8 @@ export class Gateway {
 
   // --- the read seam ---------------------------------------------------------------------------
 
-  private def(name: string): Bound {
+  /** @internal — T19 seam (mutate.ts) */
+  def(name: string): Bound {
     const def = this.registered.find((r) => r.hyperschema.name === name);
     if (def === undefined) throw new Error(`no registered schema named ${name}`);
     return def;
@@ -1236,7 +1242,8 @@ export class Gateway {
   // An `asOf` read (SPEC §26) can use NEITHER warm path — the materialization IS the present by
   // construction — so it takes the one honest path: evaluate the same body over the ground as it
   // stood at T (groundAsOf). Same gather, a narrower ground; nothing about resolution is time-cased.
-  private gather(name: string, entity: string, asOf?: number): HView {
+  /** @internal — T19 seam (mutate.ts: retraction reads the hview to find the caller's own claims) */
+  gather(name: string, entity: string, asOf?: number): HView {
     if (asOf !== undefined) {
       const def = this.def(name);
       const result = evalTerm(def.hyperschema.body, this.groundAsOf(asOf), entity, this.registry);
@@ -1255,7 +1262,8 @@ export class Gateway {
     return result.hview;
   }
 
-  private resolvedNode(name: string, entity: string, asOf?: number): ResolvedNode {
+  /** @internal — T19 seam (mutate.ts: every write verb answers with the re-resolved node) */
+  resolvedNode(name: string, entity: string, asOf?: number): ResolvedNode {
     const def = this.def(name);
     const hview = this.gather(name, entity, asOf);
     // The lens's resolvers apply as the final step (SPEC §22): the Policy computes the value, then a
@@ -1280,9 +1288,7 @@ export class Gateway {
 
   // --- the write seam --------------------------------------------------------------------------
 
-  // One signed property-claim delta per provided property, signed as the ACTOR (or the
-  // operator when no actor is named), appended through the same validated, capability-enforced
-  // path as everything else.
+  // One signed property-claim delta per provided property (SPEC §14): the body lives in mutate.ts.
   /** @internal — T19 seam (renderers.ts: writeRoute signs as the pen through the normal §14 mutate) */
   async mutateEntity(
     name: string,
@@ -1290,99 +1296,20 @@ export class Gateway {
     props: Record<string, Primitive>,
     actorSeed?: string,
   ): Promise<ResolvedNode> {
-    const seed = actorSeed ?? this.options.seed;
-    if (seed === undefined) {
-      throw new Error("this gateway holds no signing seed and cannot write");
-    }
-    const entries = Object.entries(props);
-    if (entries.length === 0) {
-      throw new Error(`mutation of ${entity} names no properties to claim`);
-    }
-    this.assertWritable(name, Object.keys(props));
-    const author = authorForSeed(seed);
-    // Strictly monotonic WITHIN THIS INSTANCE: two mutations from one running gateway never tie
-    // on timestamp, so pick-byTimestamp between them is an ordering, not a coin flip on
-    // delta-id hashes. Across restarts (or gateways) the wall clock is the only witness.
-    const timestamp = this.nextTimestamp();
-    const deltas = entries.map(([prop, value]) =>
-      signClaims(
-        {
-          timestamp,
-          author,
-          pointers: [
-            { role: "subject", target: { kind: "entity", entity: { id: entity, context: prop } } },
-            { role: "value", target: { kind: "primitive", value } },
-          ],
-        },
-        seed,
-      ),
-    );
-    await this.append(deltas);
-    return this.resolvedNode(name, entity);
+    return mutateEntityImpl(this, name, entity, props, actorSeed);
   }
 
-  // Retraction, the DUAL of resolution (SPEC §14): negate the caller's OWN surviving contributions
-  // that `keep` selects, and re-resolve — one mechanism, correct across every Policy because the
-  // read side already does the Policy work (the pick falls to the next survivor, an `all` list loses
-  // your value, a `merge` withdraws your addend, a field only you spoke for goes ABSENT, rendered
-  // per its own absentAs). The negations sign and append through the same standing-checked path as
-  // every write.
-  //
-  // The `claims.author === author` filter is the SINGLE load-bearing check of the retract-your-own
-  // invariant (Myk, 2026-07-12): `append` only proves the negation's author holds write standing,
-  // NOT that the target is theirs — so a future refactor must never loosen this into negating a
-  // foreign delta. (`claims.author` is signature-bound by verifyDelta at append, not self-assertable.
-  // To keep OTHERS' claims out of a view you narrow the schema Policy, not the ground.) The `keep`
-  // predicate stays lens-agnostic: each DOOR refuses an unknown field against the version it
-  // addressed, so this never throws on a field an older version named that the latest lens dropped —
-  // its contributions are still real on the ground; a field with no bucket simply retracts nothing.
-  private async retract(
-    name: string,
-    entity: string,
-    actorSeed: string | undefined,
-    keep: (field: string, entry: HVEntry) => boolean,
-  ): Promise<ResolvedNode> {
-    const seed = actorSeed ?? this.options.seed;
-    if (seed === undefined) {
-      throw new Error("this gateway holds no signing seed and cannot write");
-    }
-    this.def(name); // refuses an unknown schema
-    const author = authorForSeed(seed);
-    const hview = this.gather(name, entity);
-    const targets = new Set<string>();
-    for (const [field, entries] of hview.props) {
-      for (const entry of entries) {
-        if (entry.delta.claims.author === author && !entry.negated && keep(field, entry)) {
-          targets.add(entry.delta.id);
-        }
-      }
-    }
-    if (targets.size > 0) {
-      const timestamp = this.nextTimestamp();
-      const negations = [...targets].map((id) =>
-        signClaims(makeNegationClaims(author, timestamp, id), seed),
-      );
-      await this.append(negations);
-    }
-    return this.resolvedNode(name, entity);
-  }
-
-  // Clear whole fields: retract every one of the caller's contributions to each named field.
+  // Clear whole fields (SPEC §14): the body lives in mutate.ts.
   private clearEntity(
     name: string,
     entity: string,
     fields: readonly string[],
     actorSeed?: string,
   ): Promise<ResolvedNode> {
-    if (fields.length === 0) throw new Error(`clear of ${entity} names no fields to retract`);
-    this.assertWritable(name, fields);
-    const set = new Set(fields);
-    return this.retract(name, entity, actorSeed, (field) => set.has(field));
+    return clearEntityImpl(this, name, entity, fields, actorSeed);
   }
 
-  // Remove ONE value (SPEC §14 amendment): retract only the caller's own contribution(s) to `field`
-  // whose claimed value is one of `values` — withdraw the single tag you added, a specific `merge`
-  // addend. The rest of the field, yours and everyone's, stands.
+  // Remove ONE value (SPEC §14 amendment): the body lives in mutate.ts.
   private removeEntity(
     name: string,
     entity: string,
@@ -1390,51 +1317,10 @@ export class Gateway {
     values: readonly Primitive[],
     actorSeed?: string,
   ): Promise<ResolvedNode> {
-    if (values.length === 0) {
-      throw new Error(`remove from ${field} of ${entity} names no values to retract`);
-    }
-    this.assertWritable(name, [field]);
-    const wanted = new Set(values.map((v) => JSON.stringify(v)));
-    return this.retract(
-      name,
-      entity,
-      actorSeed,
-      (f, entry) =>
-        f === field &&
-        entry.delta.claims.pointers.some(
-          (p) =>
-            p.role === "value" &&
-            p.target.kind === "primitive" &&
-            wanted.has(JSON.stringify(p.target.value)),
-        ),
-    );
+    return removeEntityImpl(this, name, entity, field, values, actorSeed);
   }
 
-  // The edge role a gather declares for `field` (SPEC §14 edge verbs): the pointer role an edge
-  // write must carry so the body's `expand` follows it into the child's view. Read from the
-  // PUBLISHED hyperschema gather, never the resolution Schema. A gather with no `expand` resolves no
-  // edges — link/sever are meaningless there and refuse. One expand role covers a byTargetContext
-  // gather's fields; a body with several distinct edge roles disambiguates by the field's own name.
-  private edgeRoleFor(name: string, field: string): string {
-    const roles = edgeRoles(this.def(name).hyperschema.body);
-    if (roles.length === 0) {
-      throw new Error(
-        `schema ${name} resolves no edges: its gather has no \`expand\`, so "${field}" takes a ` +
-          `value, not a relation`,
-      );
-    }
-    if (roles.length === 1) return roles[0]!;
-    if (roles.includes(field)) return field;
-    throw new Error(
-      `schema ${name} declares several edge roles (${roles.join(", ")}); wave A links a gather ` +
-        `whose edge role is unambiguous for "${field}"`,
-    );
-  }
-
-  // Link an edge (SPEC §14 edge verbs): assert ONE edge delta — the same per-prop write shape, its
-  // value pointer made an ENTITY target the gather's `expand` follows. Pure sugar over assert: no
-  // new delta shape, nothing new on the wire. The subject pointer files the edge into the `field`
-  // bucket (byTargetContext); the edge-role pointer is what `expand` resolves into the child view.
+  // Link an edge (SPEC §14 edge verbs): the body lives in mutate.ts.
   private async linkEntity(
     name: string,
     entity: string,
@@ -1443,38 +1329,10 @@ export class Gateway {
     context: string | undefined,
     actorSeed?: string,
   ): Promise<ResolvedNode> {
-    const seed = actorSeed ?? this.options.seed;
-    if (seed === undefined) {
-      throw new Error("this gateway holds no signing seed and cannot write");
-    }
-    if (!this.def(name).schema.props.has(field)) {
-      throw new Error(`schema ${name} has no field "${field}" to link`);
-    }
-    this.assertWritable(name, [field]);
-    const role = this.edgeRoleFor(name, field);
-    const author = authorForSeed(seed);
-    const delta = signClaims(
-      {
-        timestamp: this.nextTimestamp(),
-        author,
-        pointers: [
-          { role: "subject", target: { kind: "entity", entity: { id: entity, context: field } } },
-          {
-            role,
-            target: { kind: "entity", entity: { id: target, context: context ?? field } },
-          },
-        ],
-      },
-      seed,
-    );
-    await this.append([delta]);
-    return this.resolvedNode(name, entity);
+    return linkEntityImpl(this, name, entity, field, target, context, actorSeed);
   }
 
-  // Sever an edge (SPEC §14 edge verbs): retract YOUR OWN edge deltas in `field` — the dual of link,
-  // the same retract-your-own reach clear/remove already have. With `targets`, only edges whose
-  // edge-role pointer lands on one of them are withdrawn (value-scoped, like remove); without,
-  // every edge you authored in the field. Never touches another author's edge.
+  // Sever an edge (SPEC §14 edge verbs): the body lives in mutate.ts.
   private severEntity(
     name: string,
     entity: string,
@@ -1482,88 +1340,15 @@ export class Gateway {
     targets: readonly string[] | undefined,
     actorSeed?: string,
   ): Promise<ResolvedNode> {
-    if (!this.def(name).schema.props.has(field)) {
-      throw new Error(`schema ${name} has no field "${field}" to sever`);
-    }
-    this.assertWritable(name, [field]);
-    const role = this.edgeRoleFor(name, field);
-    const wanted = targets !== undefined && targets.length > 0 ? new Set(targets) : undefined;
-    return this.retract(
-      name,
-      entity,
-      actorSeed,
-      (f, entry) =>
-        f === field &&
-        entry.delta.claims.pointers.some(
-          (p) =>
-            p.role === role &&
-            p.target.kind === "entity" &&
-            (wanted === undefined || wanted.has(p.target.entity.id)),
-        ),
-    );
+    return severEntityImpl(this, name, entity, field, targets, actorSeed);
   }
 
-  // Writability is front-door discipline (SPEC §14, immutable-by-default): a registration names its
-  // `writable` fields, and ONLY those accept a surface write — assert, clear, remove, link, AND
-  // sever refuse the rest with a reason. Silence (no `writable`) now means "you may not": absent a
-  // list, NOTHING is writable (§21's wave flipped the old permissive default, so every registration
-  // Loam mints names its writable fields explicitly). It disciplines the SURFACE, never the ground:
-  // a hand-signed or federated delta may still assert into a "read-only" context, and a reader who
-  // wants the guarantee enforces it with a lens.
-  private assertWritable(name: string, fields: readonly string[]): void {
-    const allowed = new Set(this.def(name).writable ?? []);
-    for (const field of fields) {
-      if (!allowed.has(field)) {
-        throw new Error(
-          `field "${field}" of ${name} is read-only: the registration does not open it for writes`,
-        );
-      }
-    }
-  }
-
-  // One signed MULTI-POINTER delta from an explicit pointer list — what every claim template
-  // is sugar for. The actor signs (or the operator, when none is named); standing is asked by
-  // append like everywhere else. Returns the receipt: the delta id.
+  // One signed MULTI-POINTER delta from an explicit pointer list (SPEC §14): the body lives in mutate.ts.
   private async claimEntity(
     pointers: readonly ClaimPointerSpec[],
     actorSeed?: string,
   ): Promise<{ delta: string }> {
-    const seed = actorSeed ?? this.options.seed;
-    if (seed === undefined) {
-      throw new Error("this gateway holds no signing seed and cannot write");
-    }
-    if (pointers.length === 0) {
-      throw new Error("a claim carries at least one pointer");
-    }
-    const mapped = pointers.map((p, i) => {
-      if (typeof p.role !== "string" || p.role === "") {
-        throw new Error(`claim pointer ${i}: a pointer names a role`);
-      }
-      const hasAt = p.at !== undefined;
-      const hasValue = p.value !== undefined;
-      if (hasAt === hasValue) {
-        throw new Error(`claim pointer ${i} ("${p.role}"): exactly one of at/value`);
-      }
-      if (hasAt) {
-        if (p.at === "") {
-          throw new Error(`claim pointer ${i} ("${p.role}"): an entity pointer wants an id`);
-        }
-        if (p.context === undefined || p.context === "") {
-          throw new Error(`claim pointer ${i} ("${p.role}"): an entity pointer wants a context`);
-        }
-        return {
-          role: p.role,
-          target: { kind: "entity" as const, entity: { id: p.at, context: p.context } },
-        };
-      }
-      return { role: p.role, target: { kind: "primitive" as const, value: p.value as Primitive } };
-    });
-    const delta = signClaims(
-      { timestamp: this.nextTimestamp(), author: authorForSeed(seed), pointers: mapped },
-      seed,
-    );
-    await this.append([delta]);
-    return { delta: delta.id };
+    return claimEntityImpl(this, pointers, actorSeed);
   }
 
   // --- the live seam ---------------------------------------------------------------------------
