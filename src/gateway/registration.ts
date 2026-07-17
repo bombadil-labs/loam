@@ -148,6 +148,12 @@ export function parseResolvers(raw: unknown): ResolverSpecs {
   return out;
 }
 
+// The serving key (§21.7): the LENS name when the binding carries one, the hyperschema name in
+// the degenerate case. Every door keys on this — never on the hyperschema name, which sibling
+// lenses share.
+export const lensOf = (r: { lensName?: string; hyperschema: { name: string } }): string =>
+  r.lensName ?? r.hyperschema.name;
+
 export interface Registration {
   readonly hyperschema: HyperSchema;
   readonly schema: Schema;

@@ -54,6 +54,7 @@ import {
 } from "./gql.js";
 import { declarePublicImpl, readPublicSchemas } from "./public.js";
 import {
+  lensOf,
   readRegistrationVersions,
   readWithdrawnRegistrations,
   type ResolverSpecs,
@@ -370,7 +371,7 @@ export class Gateway {
   ): { registered: readonly Registered[]; hooks: GqlHooks } | undefined {
     if (door === "public") {
       this.publicOpen ??= readPublicSchemas(this.reactor, this.operatorAuthor);
-      const defs = this.registered.filter((r) => this.publicOpen!.has(r.hyperschema.name));
+      const defs = this.registered.filter((r) => this.publicOpen!.has(lensOf(r)));
       if (defs.length === 0) return undefined;
       return { registered: defs, hooks: this.gqlHooks("public") };
     }
@@ -668,7 +669,8 @@ export class Gateway {
   // NOTE: the resolution is AS OF NOW — after an evolution, work bound to the superseded
   // generation keeps watching the old shape until it re-attaches.
   materializationFor(name: string): string {
-    return this.registered.some((r) => r.hyperschema.name === name) ? this.matName(name) : name;
+    const hit = this.registered.find((r) => lensOf(r) === name || r.hyperschema.name === name);
+    return hit !== undefined ? this.matName(hit.hyperschema.name) : name;
   }
 
   /** @internal — T19 seam (erase.ts, adopt.ts) */
@@ -681,7 +683,7 @@ export class Gateway {
 
   /** @internal — T19 seam (mutate.ts) */
   def(name: string): Bound {
-    const def = this.registered.find((r) => r.hyperschema.name === name);
+    const def = this.registered.find((r) => lensOf(r) === name);
     if (def === undefined) throw new Error(`no registered schema named ${name}`);
     return def;
   }
@@ -827,7 +829,7 @@ export class Gateway {
     this.publicOpen ??= readPublicSchemas(this.reactor, this.operatorAuthor);
     const open = this.publicOpen;
     if (open.size === 0) return undefined;
-    const defs = this.registered.filter((r) => open.has(r.hyperschema.name));
+    const defs = this.registered.filter((r) => open.has(lensOf(r)));
     if (defs.length === 0) return undefined; // declared but not (yet) registered: nothing binds
     const key = defs.map((r) => boundKey(r)).join(NUL);
     if (this.publicCache?.key !== key) {
