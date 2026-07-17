@@ -399,8 +399,11 @@ subsection reconciles them explicitly, clause by clause:
   container's contents are a delta-query — a rhizomatic `Term → dset`, static or live, local or remote.
   The quarantine's inbound edge is the LIVE, REMOTE-over-federation case, and slice 1's
   `QuarantineOptions.admit` (a per-delta predicate filtering the pulse) is that query's degenerate form.
-  When the first-class membership `select`/`watch` surface lands (§27's follow-on), the quarantine's edge
-  filter becomes a membership `Term` — the same knob, generalized, no new mechanism. Composition of what a
+  **Landed** ([#132](https://github.com/bombadil-labs/loam/pull/132), ticket T15): the first-class
+  membership `select`/`watch` surface serves, and the quarantine's edge filter takes a membership
+  `Term` (`QuarantineOptions.membership` — give it OR `admit`, never both) — the same knob,
+  generalized, no new mechanism, re-evaluated on every pulse, with the T16 law intact (a scope
+  narrows what a pool SEES, never what it must FORGET: operator tombstones pass unconditionally). Composition of what a
   quarantine sees is then the container set-algebra: rhizomatic 0.6.0's `difference`/`intersect` (adoption
   queued as T14) complete the `∪`/`∩`/`∖` operators, so a quarantine can be seeded over "these containers
   minus those" with nestable exclusions. **Boundary flag (0.6.0, stated precisely):** `difference` and
