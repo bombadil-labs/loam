@@ -15,7 +15,7 @@ import {
   printSchema,
   type IntrospectionQuery,
 } from "graphql";
-import { parseSchema, parseTerm, type Policy, type Schema } from "@bombadil/rhizomatic";
+import { parseSchema, parseTerm, type Schema } from "@bombadil/rhizomatic";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
@@ -24,7 +24,6 @@ import { PLANT } from "./fixtures.js";
 import { FERN, observed } from "../spike/garden.js";
 
 const OP_SEED = "0e".repeat(32);
-const pick: Policy = { kind: "pick", order: { kind: "byTimestamp", dir: "desc" } };
 
 // The broad reading: every field. The narrow archival sibling: height only, its own clock.
 const BROAD: Schema = parseSchema({
