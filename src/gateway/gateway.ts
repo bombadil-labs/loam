@@ -56,7 +56,7 @@ import {
   type ResolvedNode,
 } from "./gql.js";
 import { budgetRefusal } from "./budget.js";
-import { publicClaims, publicDefect, readPublicSchemas } from "./public.js";
+import { declarePublicImpl, publicDefect, readPublicSchemas } from "./public.js";
 import {
   lawfulSnapshot,
   parseClaimTemplates,
@@ -862,45 +862,10 @@ export class Gateway {
     return readRenderers(this.reactor, this.operatorAuthor);
   }
 
-  // Declare lenses public (SPEC §12/§17, amended by §23.8). Each entry is a BARE name (the latest
-  // version, served anonymously — unchanged) or a `Name@vN` PIN, which this FREEZES to the version's
-  // content address (`Name@<deltaId>`) at declare time, exactly as a renderer pins (§23.6): the operator
-  // named a version for convenience, and the true name that cannot slide when an earlier version is
-  // withdrawn is the deltaId. A declaration is publication, not a probe — so a pinned version becomes
-  // anonymously servable BECAUSE the operator chose to reveal it; every other `@hash` stays 404. Operator
-  // only, exactly like any `loam.public` write (a governed store binds only operator law).
+  // Declare lenses public (SPEC §12/§17/§23.8): the body — bare names pass, `Name@vN` freezes to the
+  // version's content address — lives beside the loam.public vocabulary in public.ts.
   async declarePublic(entries: readonly string[], context?: RequestContext): Promise<void> {
-    const seed = context?.actor ?? this.options.seed;
-    if (seed === undefined) {
-      throw new Error("this gateway holds no signing seed and cannot declare a lens public");
-    }
-    if (this.operatorAuthor !== undefined && authorForSeed(seed) !== this.operatorAuthor) {
-      throw new Error("append rejected: only the operator may declare a lens public");
-    }
-    const resolved = entries.map((entry) => this.freezePublicEntry(entry));
-    await this.append([
-      signClaims(publicClaims(resolved, authorForSeed(seed), this.nextTimestamp()), seed),
-    ]);
-  }
-
-  // Resolve one declaration entry to the string that goes on the record. A bare name and an already-frozen
-  // `Name@<deltaId>` pass through unchanged (idempotent re-declare); a `Name@vN` is resolved to the Nth
-  // surviving version's deltaId — the same filter-then-index publishRenderer uses — and refused if absent.
-  private freezePublicEntry(entry: string): string {
-    const at = entry.indexOf("@");
-    if (at < 0) return entry;
-    const name = entry.slice(0, at);
-    const ver = entry.slice(at + 1);
-    const m = /^v([1-9]\d*)$/.exec(ver);
-    if (m === null) return entry; // already an @<deltaId> (or opaque): freeze it as given
-    const versions = this.registrationVersions().filter((v) => v.hyperschema.name === name);
-    const pinned = versions[Number(m[1]) - 1];
-    if (pinned === undefined) {
-      throw new Error(
-        `public: schema "${name}" has no version v${m[1]} (it has ${versions.length})`,
-      );
-    }
-    return `${name}@${pinned.deltaId}`;
+    return declarePublicImpl(this, entries, context);
   }
 
   // Publish a renderer as data (SPEC §23): the body lives beside the binding vocabulary in renderers.ts.
@@ -1294,6 +1259,13 @@ export class Gateway {
     return this.gql;
   }
 
+  // T19 NOTE (a boundary judged, not forced): the public-door READERS — surface, isPublicLatest,
+  // isPublicPin, publicSurface, hasPublicSurface — stay on the class deliberately. They are thin
+  // veneers over two caches (publicOpen, publicCache) whose INVALIDATION is wired into the write
+  // path (attachPersistence drops publicOpen on any accepted delta) and the reseat cycle; moving
+  // the veneers across the seam while the cache lifecycle stays here would be indirection, not
+  // separation. The DECLARATION side (declarePublic) moved to public.ts, where the vocabulary is.
+  //
   // The restricted schema the anonymous door serves (SPEC §12): the query + subscription
   // fields of every REGISTERED schema the operator's surviving `loam:public` declarations
   // open, and no Mutation type at all — a tokenless write is a validation impossibility, not
