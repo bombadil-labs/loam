@@ -80,8 +80,6 @@ import {
   type WithdrawnRegistration,
 } from "./registration.js";
 import { applyResolvers, loadResolvers, newResolverMemo, type ResolverMemo } from "./resolvers.js";
-import { bytesEnvelope, findBytesByRef } from "./bytes.js";
-import { renderInWorker } from "./render-worker.js";
 import {
   openQuarantineImpl,
   type QuarantineOptions,
@@ -89,10 +87,12 @@ import {
 } from "./quarantine-pool.js";
 import {
   loadRenderers,
-  loadedRenderer,
-  parseRendererInput,
+  prepareRouteImpl,
+  publishRendererImpl,
   readRenderers,
-  rendererBindingClaims,
+  serveBytesImpl,
+  serveRouteImpl,
+  writeRouteImpl,
   type RendererBinding,
 } from "./renderers.js";
 import { readTrustPolicy } from "./trust.js";
@@ -175,7 +175,8 @@ interface Bound extends Registration {
 // `gw.<member>` in its module, and a module needing a member NOT yet marked is a real finding about
 // coupling — widen the seam loudly, here, or question the boundary.
 export class Gateway {
-  private registered: Bound[] = [];
+  /** @internal — T19 seam (renderers.ts) */
+  registered: Bound[] = [];
   // The resolver memo (SPEC §22.5): (resolver-content-address, bucket-delta-set) → value. Keyed on the
   // surviving bucket, so it invalidates by construction when the ground moves — an erased fact drops
   // from the bucket and its old value can never be served again. A pure cache; safe to clear anytime.
@@ -940,267 +941,43 @@ export class Gateway {
     return `${name}@${pinned.deltaId}`;
   }
 
-  // Publish a renderer as data (SPEC §23), so a UI route survives reopen with no code. PROVEN AT PUSH,
-  // not hoped at runtime (§23.4): the operator alone may publish (a governed store binds only operator
-  // law); the schema it reads must be REGISTERED and, if version-pinned, that version must EXIST; every
-  // field it declares consuming must be a property the schema names; and its bundle must LOAD to a
-  // function. Only then does the binding persist and the route go live.
+  // Publish a renderer as data (SPEC §23): the body lives beside the binding vocabulary in renderers.ts.
   async publishRenderer(input: unknown, context?: RequestContext): Promise<void> {
-    const seed = context?.actor ?? this.options.seed;
-    if (seed === undefined) {
-      throw new Error("this gateway holds no signing seed and cannot publish a renderer");
-    }
-    if (this.operatorAuthor !== undefined && authorForSeed(seed) !== this.operatorAuthor) {
-      throw new Error("append rejected: only the operator may publish a renderer");
-    }
-    const spec = parseRendererInput(input); // one shape for every door (HTTP / CLI / MCP / direct)
-    // The schema must be registered — a renderer over a lens the store does not serve mounts nothing.
-    const bound = this.registered.find((r) => r.hyperschema.name === spec.schemaName);
-    if (bound === undefined) {
-      throw new Error(
-        `renderer: no registered schema "${spec.schemaName}" — a renderer reads a lens the store serves`,
-      );
-    }
-    // FREEZE the pin to the version's CONTENT ADDRESS, not the numeric vN (SPEC §17/§23.6): the author
-    // names a vN for convenience, and we resolve it — at push — to that surviving registration version's
-    // true name (its deltaId), which cannot slide when an earlier version is later withdrawn. The pinned
-    // version's own schema is also what field-coverage is checked against, so the guarantee holds for the
-    // reading the renderer will ACTUALLY resolve, not the latest.
-    let versionId: string | undefined;
-    let coverage = bound.schema;
-    if (spec.version !== undefined) {
-      const versions = this.registrationVersions().filter(
-        (v) => v.hyperschema.name === spec.schemaName,
-      );
-      const pinned = versions[spec.version - 1];
-      if (pinned === undefined) {
-        throw new Error(
-          `renderer: schema "${spec.schemaName}" has no version v${spec.version} (it has ${versions.length})`,
-        );
-      }
-      versionId = pinned.deltaId;
-      coverage = pinned.schema;
-    }
-    // Field coverage (§23.4): every consumed field must be one the PINNED reading names — refuse a
-    // renderer that reads what its lens can never fill, at push, rather than painting undefined at serve.
-    for (const field of spec.consumes) {
-      if (!coverage.props.has(field)) {
-        throw new Error(
-          `renderer: consumes "${field}", but ${
-            spec.version === undefined ? "the latest" : `v${spec.version} of`
-          } schema "${spec.schemaName}" has no such field`,
-        );
-      }
-    }
-    // The bundle must load to a function NOW (loud here, never a serve-time surprise), and pre-load into
-    // the content-addressed cache so the synchronous serve path finds it.
-    await loadRenderers([spec.bundle]);
-    const author = authorForSeed(seed);
-    await this.append([
-      signClaims(rendererBindingClaims(spec, versionId, author, this.nextTimestamp()), seed),
-    ]);
+    return publishRendererImpl(this, input, context);
   }
 
-  // Ensure a route's bundle is loaded (SPEC §23) — async, so a renderer binding that arrived by any path
-  // (a raw `/append`, a fresh reactor in another process) is runnable before the synchronous serveRoute.
-  // Idempotent (the ESM cache dedups by content address). A no-op for an unknown route.
+  // Ensure a route's bundle is loaded (SPEC §23): the body lives in renderers.ts.
   async prepareRoute(route: string): Promise<void> {
-    const binding = this.renderers().find((r) => r.route === route);
-    if (binding !== undefined) await loadRenderers([binding.bundle]);
+    return prepareRouteImpl(this, route);
   }
 
-  // Serve a route (SPEC §23): resolve the renderer's node under the door's discipline and execute its
-  // bundle to HTML. Read-only in v1 — a renderer receives the resolved view and nothing else (§23.2).
-  // Every refusal is a UNIFORM 404 "no such route" (unknown route, a lens this door may not read, a
-  // withdrawn/erased pin, an unmounted bundle) — an anonymous prober learns nothing about what exists
-  // (§17). Synchronous, so the bundle must already be loaded (see prepareRoute); an unloaded bundle is
-  // treated as UNMOUNTED (404), never a 500. A faulting bundle refuses cleanly without leaking.
-  //
-  // KNOWN RESIDUAL (SPEC §23.9 / §24, surfaced by the capability-security panel): the bundle runs
-  // SYNCHRONOUSLY on the event loop with no timeout, on the anonymous door with an attacker-chosen
-  // entity — a hanging operator bundle would wedge every mount. v1's trust model is operator-authored
-  // bundles in a governed store (only operator law binds, §7); the compute budget + object-capability
-  // confinement (SES / Worker / wasm) that would bound an untrusted or buggy bundle is the named §24
-  // quarantine / §23.9 hardening work, deliberately NOT invented here.
+  // Serve a route (SPEC §23): the body — and the door-discipline doctrine — lives in renderers.ts.
   async serveRoute(
     route: string,
     entity: string,
     door: "full" | "public",
   ): Promise<{ status: number; contentType: string; body: string }> {
-    // One refusal, everywhere — history is not anonymous, and neither is "which routes exist" (§17).
-    const gone = { status: 404, contentType: "text/plain; charset=utf-8", body: "no such route" };
-    const binding = this.renderers().find((r) => r.route === route);
-    if (binding === undefined) return gone;
-    let node: ResolvedNode;
-    try {
-      if (binding.versionId === undefined) {
-        // A LATEST renderer: its lens must be in THIS door's surface — registered (full) or bare-name
-        // publicly declared (public). A schema withdrawn after the renderer was published thus darkens the
-        // route too — the app is a view over surviving law (§23.6). No 404-vs-error oracle.
-        const surface = this.surface(door);
-        if (
-          surface === undefined ||
-          !surface.registered.some((r) => r.hyperschema.name === binding.schemaName)
-        ) {
-          return gone;
-        }
-        node = surface.hooks.resolve(binding.schemaName, entity);
-      } else {
-        // A PINNED renderer. The anonymous door serves it IFF the operator publicly declared THAT pin
-        // (§23.8 — a declaration is publication, not a probe); every undeclared pin stays a uniform 404,
-        // so history is not anonymously probable. The full door serves any surviving registered version.
-        if (door === "public" && !this.isPublicPin(binding.schemaName, binding.versionId))
-          return gone;
-        // Pinned by the version's CONTENT ADDRESS: resolve the exact surviving version, or — if it was
-        // withdrawn or erased — go dark (§23.6, an app never outlives its source).
-        const pinned = this.registrationVersions().find((v) => v.deltaId === binding.versionId);
-        if (pinned === undefined) return gone;
-        node = this.resolvePinned(pinned, entity);
-      }
-    } catch (err) {
-      // A resolve fault is unusual (the lens is registered); leak the reason only to the full (token)
-      // door, never to a stranger.
-      if (door === "public")
-        return { ...gone, status: 400, body: "the route could not be rendered" };
-      return {
-        status: 400,
-        contentType: "text/plain; charset=utf-8",
-        body: err instanceof Error ? err.message : String(err),
-      };
-    }
-    // The bundle must be loadable (unloaded → unmounted, a 404, not a 500 — prepareRoute pre-loads it on
-    // the serve path). The read-discipline + resolve above stayed on THIS thread (authority never leaves
-    // it); only the untrusted render runs in the bounded worker (SPEC §23.9).
-    if (loadedRenderer(binding.bundle) === undefined) return gone;
-    // Execute the renderer in a worker_threads Worker with a hard timeout + resourceLimits: a hanging or
-    // heavy bundle cannot wedge the event loop or OOM the host, and every route keeps answering. The
-    // renderer is a view consumer like gql/REST — hand it the §23.7 envelope (a bytes leaf becomes
-    // { mime, ref, base64url? }, primitives pass through), which is also what makes the node JSON/clone-safe
-    // to cross the thread boundary. renderInWorker never rejects; every fault folds to a clean refusal.
-    return renderInWorker(binding.bundle, {
-      entity,
-      view: bytesEnvelope(node.view) as Record<string, unknown>,
-      hex: node.hex,
-    });
+    return serveRouteImpl(this, route, entity, door);
   }
 
-  // May THIS door serve THIS renderer's route (SPEC §23.5/§23.8)? The same read discipline serveRoute
-  // applies — a latest renderer's lens must be in the door's surface (public = a bare-name declaration); a
-  // pinned renderer's version must be publicly declared (public) or simply survive (full). writeRoute
-  // reuses it so a stranger can only POST to a route they could GET, and an undeclared route stays 404.
-  private routeServableOn(binding: RendererBinding, door: "full" | "public"): boolean {
-    if (binding.versionId === undefined) {
-      const surface = this.surface(door);
-      return (
-        surface !== undefined &&
-        surface.registered.some((r) => r.hyperschema.name === binding.schemaName)
-      );
-    }
-    if (door === "public") return this.isPublicPin(binding.schemaName, binding.versionId);
-    return this.registrationVersions().some((v) => v.deltaId === binding.versionId);
-  }
-
-  // Write through a rendered route (SPEC §23.3): a form on a mounted renderer POSTs its fields, and the
-  // STORE signs the resulting delta as the renderer's PEN — a granted-author identity whose seed is
-  // provisioned in config (options.pens), NEVER the caller's token. Provenance thus shows the mediating
-  // code (the pen author is the §19 write attribution), and revocation is striking the pen's grant. The
-  // write runs the gateway's normal §14 mutate — assertWritable (the schema's own writable) AND authorize
-  // (the pen must actually HOLD write standing: provisioning ≠ authorization, §6's two keys). A field
-  // outside the renderer's OWN `writable` allow-list is refused at the door. On the anonymous door a
-  // public renderer's form writes ONLY if the operator BOTH declared the lens public AND provisioned+
-  // granted a pen — no anonymous writes by default (§12).
+  // Write through a rendered route (SPEC §23.3): the body lives in renderers.ts.
   async writeRoute(
     route: string,
     entity: string,
     fields: Record<string, Primitive>,
     door: "full" | "public",
   ): Promise<{ status: number; contentType: string; body: string }> {
-    const text = "text/plain; charset=utf-8";
-    const gone = { status: 404, contentType: text, body: "no such route" };
-    const binding = this.renderers().find((r) => r.route === route);
-    if (binding === undefined) return gone;
-    // Visible on this door (the same discipline as a GET), so a stranger can only write where they could
-    // read, and an undeclared route stays a uniform 404 rather than revealing itself.
-    if (!this.routeServableOn(binding, door)) return gone;
-    // A read-only renderer (no pen/writable) declared no way to author — refuse the write, not the route.
-    if (
-      binding.pen === undefined ||
-      binding.writable === undefined ||
-      binding.writable.length === 0
-    ) {
-      return { status: 405, contentType: text, body: "this route is read-only" };
-    }
-    const posted = Object.keys(fields);
-    if (posted.length === 0)
-      return { status: 400, contentType: text, body: "the form wrote no fields" };
-    // Every posted field must be in the renderer's OWN writable allow-list (§14/§21 at the renderer door),
-    // narrower than (and atop) the schema's own writable, which mutateEntity re-checks.
-    for (const f of posted) {
-      if (!binding.writable.includes(f)) {
-        return {
-          status: 400,
-          contentType: text,
-          body: `field "${f}" is not writable by this renderer`,
-        };
-      }
-    }
-    // The pen must be PROVISIONED (its seed in config) — custody. Absent → refuse (nothing to sign with).
-    const penSeed = this.options.pens?.[binding.pen];
-    if (penSeed === undefined) {
-      return { status: 403, contentType: text, body: "this renderer's pen is not provisioned" };
-    }
-    try {
-      // Sign AS the pen (not the caller). append→authorize checks the pen's GRANT — provisioning is not
-      // authorization; a pen with no surviving write grant is refused here exactly as any actor would be.
-      await this.mutateEntity(binding.schemaName, entity, fields, penSeed);
-    } catch (err) {
-      // A refused write leaks its reason only to the full (token) door; a stranger gets a uniform refusal.
-      if (door === "public")
-        return { status: 403, contentType: text, body: "the write was refused" };
-      return {
-        status: 403,
-        contentType: text,
-        body: err instanceof Error ? err.message : String(err),
-      };
-    }
-    // Re-render the now-updated route so a browser form submit lands on the fresh page (§23.3).
-    return this.serveRoute(route, entity, door);
+    return writeRouteImpl(this, route, entity, fields, door);
   }
 
-  // The byte-door (SPEC §23.7): serve the raw bytes a caller names by content address `ref`, but only
-  // by PROOF OF READ — the fetch names the lens+entity it got the ref from, and this RE-RESOLVES that
-  // view under this door's own discipline (full: any registered lens; public: only a declared one, §17)
-  // and serves the bytes only if the resolved view actually contains a BytesView whose content address
-  // is `ref`. A bare ref→bytes endpoint would be exactly the content-address existence oracle §17 closed;
-  // this is not — the re-resolution IS the lookup (no store scan), and every failure (unknown ref, wrong
-  // `from`, a lens this door may not read) collapses to the SAME uniform 404, so a stranger learns
-  // nothing. §11 erasure then falls out for free: a purged source delta is no longer in the live
-  // re-resolved view, so its ref 404s by construction — the door NEVER caches the bytes.
+  // The byte-door (SPEC §23.7): the body lives in renderers.ts.
   serveBytes(
     ref: string,
     fromLens: string,
     fromEntity: string,
     door: "full" | "public",
   ): { status: number; contentType: string; body: Uint8Array } {
-    const gone = {
-      status: 404,
-      contentType: "text/plain; charset=utf-8",
-      body: new TextEncoder().encode("no such bytes"),
-    };
-    const surface = this.surface(door);
-    if (surface === undefined || !surface.registered.some((r) => r.hyperschema.name === fromLens)) {
-      return gone;
-    }
-    let node: ResolvedNode;
-    try {
-      node = surface.hooks.resolve(fromLens, fromEntity);
-    } catch {
-      // A resolve fault collapses to the same silence — the door reveals nothing a normal read wouldn't.
-      return gone;
-    }
-    const found = findBytesByRef(node.view, ref);
-    if (found === undefined) return gone;
-    return { status: 200, contentType: found.mime, body: found.value };
+    return serveBytesImpl(this, ref, fromLens, fromEntity, door);
   }
 
   // Animate the gateway: route ingest through a runner's DerivationHost so bindings fire.
@@ -1506,7 +1283,8 @@ export class Gateway {
   // One signed property-claim delta per provided property, signed as the ACTOR (or the
   // operator when no actor is named), appended through the same validated, capability-enforced
   // path as everything else.
-  private async mutateEntity(
+  /** @internal — T19 seam (renderers.ts: writeRoute signs as the pen through the normal §14 mutate) */
+  async mutateEntity(
     name: string,
     entity: string,
     props: Record<string, Primitive>,
