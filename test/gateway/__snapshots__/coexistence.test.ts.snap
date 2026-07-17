@@ -1,0 +1,320 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`§21.7 pinning — the degenerate single-lens case is byte-identical > the single-lens OpenAPI document never moves 1`] = `
+"{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "loam: store",
+    "version": "live",
+    "description": "A materialized surface over a Loam store (SPEC §17). Every version listed here stays answerable; @<registration-hash> addresses a version by its true name."
+  },
+  "paths": {
+    "/store/rest/v1/Plant/{entity}": {
+      "parameters": [
+        {
+          "name": "entity",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "summary": "resolve a Plant view (version 1)",
+        "description": "Version alias v1 of Plant; its true name is the registration delta 1e2090cd6b17c41e213192936aa740768cf6ab1b48137a4dc4af61c2e087033dc629. Aliases shift when a version is withdrawn; the hash never lies.",
+        "responses": {
+          "200": {
+            "description": "the resolved view",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "entity": {
+                      "type": "string"
+                    },
+                    "view": {
+                      "type": "object",
+                      "properties": {
+                        "height": {
+                          "description": "resolved by policy kind \\"pick\\""
+                        },
+                        "message": {
+                          "description": "resolved by policy kind \\"pick\\""
+                        }
+                      }
+                    },
+                    "_hex": {
+                      "type": "string",
+                      "description": "the content address of this resolved view"
+                    },
+                    "_hviewHex": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "write Plant properties through the door (version 1)",
+        "description": "Each property becomes one signed claim through the same capability discipline as every other door — the mutation compiles to claims.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "height": {
+                    "description": "a primitive claim value (string | number | boolean)"
+                  },
+                  "message": {
+                    "description": "a primitive claim value (string | number | boolean)"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "the resolved view",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "entity": {
+                      "type": "string"
+                    },
+                    "view": {
+                      "type": "object",
+                      "properties": {
+                        "height": {
+                          "description": "resolved by policy kind \\"pick\\""
+                        },
+                        "message": {
+                          "description": "resolved by policy kind \\"pick\\""
+                        }
+                      }
+                    },
+                    "_hex": {
+                      "type": "string",
+                      "description": "the content address of this resolved view"
+                    },
+                    "_hviewHex": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "retract your own Plant contributions (version 1)",
+        "description": "Clearing is retraction, not deletion of the ground: each named field is cleared of the caller's OWN contributions (empty body clears all), falling to what survives or to absence. A clear never touches another author's claim. An object body \`{ field: [values] }\` removes only those specific values.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "field names to clear; omit or empty to clear all"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "array"
+                    },
+                    "description": "field → specific values to remove (retract your own)"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "the resolved view",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "entity": {
+                      "type": "string"
+                    },
+                    "view": {
+                      "type": "object",
+                      "properties": {
+                        "height": {
+                          "description": "resolved by policy kind \\"pick\\""
+                        },
+                        "message": {
+                          "description": "resolved by policy kind \\"pick\\""
+                        }
+                      }
+                    },
+                    "_hex": {
+                      "type": "string",
+                      "description": "the content address of this resolved view"
+                    },
+                    "_hviewHex": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}"
+`;
+
+exports[`§21.7 pinning — the degenerate single-lens case is byte-identical > the single-lens REST path list never moves 1`] = `
+[
+  "/store/rest/v1/Plant/{entity}",
+]
+`;
+
+exports[`§21.7 pinning — the degenerate single-lens case is byte-identical > the single-lens SDL never moves 1`] = `
+"type Query {
+  """Resolve Plant at an entity. Absence is an answer, not an error."""
+  plant(
+    entity: ID!
+
+    """
+    Resolve against the ground as it stood at this moment (a millisecond timestamp). Omit to read the present. Erasure still wins: purged content never reappears (§11).
+    """
+    asOf: Float
+  ): PlantView!
+}
+
+"""The Plant hyperschema, resolved under its registered policy."""
+type PlantView {
+  """The root entity this view is about."""
+  _entity: ID!
+
+  """The content address of the resolved view — the snapshot, the answer."""
+  _hex: String!
+
+  """
+  The content address of the gathered hyperview — the evidence before any policy. Two lenses over the same body and root share it while their _hex may differ. On live streams, frames are emitted when the ANSWER moves — between frames the evidence may have grown without changing it; query for the current value.
+  """
+  _hviewHex: String!
+
+  """The whole resolved view, dynamic properties included."""
+  _view: ViewValue!
+
+  """
+  The time pin (SPEC §26): the moment T this view was resolved against, on an AS-OF read; null on a present-tense read (the live materialization by construction).
+  """
+  _asOf: Float
+
+  """
+  The erasure annotation (SPEC §26/§11): on an as-of read, the sorted timestamps at which this ground lawfully forgot something SINCE the moment T — each moment flags a discontinuity where this reconstruction of the past may be missing a since-erased fact (the content stays forgotten; only THAT and WHEN an erasure fell in the window is revealed; the count is the list's length). Null on a present read.
+  """
+  _forgotten: [Float!]
+  height: ViewValue
+  message: ViewValue
+}
+
+"""
+A resolved view value — primitive, list, nested view, or a bytes envelope (§23.7).
+"""
+scalar ViewValue
+
+type Mutation {
+  """
+  Claim properties of an entity under Plant: every provided argument becomes one signed delta. Returns the re-resolved view.
+  """
+  plant(entity: ID!, height: PrimitiveValue, message: PrimitiveValue): PlantView!
+
+  """
+  Retract YOUR OWN contributions to the named fields of a Plant entity — each falls to what survives, or to absence. Returns the re-resolved view.
+  """
+  clearPlant(entity: ID!, fields: [String!]!): PlantView!
+
+  """
+  Retract YOUR OWN contribution(s) of specific values to one field of a Plant entity — the rest of the field stands. Returns the re-resolved view.
+  """
+  removePlant(entity: ID!, field: String!, values: [PrimitiveValue!]!): PlantView!
+
+  """
+  Emit one signed delta from an explicit pointer list — the general form every template is sugar for. Each pointer is entity (at + context) or primitive (value).
+  """
+  _claim(pointers: [PointerInput!]!): ClaimReceipt!
+}
+
+"""A claimable value: string, number, or boolean."""
+scalar PrimitiveValue
+
+"""The signed delta a claim landed as."""
+type ClaimReceipt {
+  delta: ID!
+}
+
+input PointerInput {
+  role: String!
+
+  """entity pointer target id (wants context too)"""
+  at: ID
+  context: String
+  value: PrimitiveValue
+}
+
+type Subscription {
+  """Hold Plant live at an entity: a snapshot, then patches."""
+  plant(entity: ID!): PlantPatch!
+}
+
+"""A live Plant view: an initial snapshot, then one patch per change."""
+type PlantPatch {
+  """The root entity this view is about."""
+  _entity: ID!
+
+  """The content address of the resolved view — the snapshot, the answer."""
+  _hex: String!
+
+  """
+  The content address of the gathered hyperview — the evidence before any policy. Two lenses over the same body and root share it while their _hex may differ. On live streams, frames are emitted when the ANSWER moves — between frames the evidence may have grown without changing it; query for the current value.
+  """
+  _hviewHex: String!
+
+  """The whole resolved view, dynamic properties included."""
+  _view: ViewValue!
+
+  """
+  The time pin (SPEC §26): the moment T this view was resolved against, on an AS-OF read; null on a present-tense read (the live materialization by construction).
+  """
+  _asOf: Float
+
+  """
+  The erasure annotation (SPEC §26/§11): on an as-of read, the sorted timestamps at which this ground lawfully forgot something SINCE the moment T — each moment flags a discontinuity where this reconstruction of the past may be missing a since-erased fact (the content stays forgotten; only THAT and WHEN an erasure fell in the window is revealed; the count is the list's length). Null on a present read.
+  """
+  _forgotten: [Float!]
+  height: ViewValue
+  message: ViewValue
+
+  """The prior snapshot's content address; null on the initial snapshot."""
+  _fromHex: String
+
+  """The properties this patch moved; null on the initial snapshot."""
+  _changed: [String!]
+}"
+`;
