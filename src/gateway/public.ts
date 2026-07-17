@@ -10,7 +10,9 @@
 // — with no operator there is no lawful voice to open a door with, and anonymous read is an
 // explicit grant, never a default.
 
+import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import type { Claims, Reactor } from "@bombadil/rhizomatic";
+import type { Gateway, RequestContext } from "./gateway.js";
 import { lawfulNegated, lawfulSnapshot } from "./registration.js";
 
 export const PUBLIC_ENTITY = "loam:public";
@@ -96,4 +98,50 @@ export function readPublicSchemas(reactor: Reactor, operator?: string): Readonly
     }
   }
   return open;
+}
+
+// --- the Gateway's public-declaration behavior (ticket T19: the body lives beside its vocabulary) ---
+
+// Declare lenses public (the body of `Gateway.declarePublic`, SPEC §12/§17, amended by §23.8). Each
+// entry is a BARE name (the latest version, served anonymously — unchanged) or a `Name@vN` PIN, which
+// this FREEZES to the version's content address (`Name@<deltaId>`) at declare time, exactly as a
+// renderer pins (§23.6): the operator named a version for convenience, and the true name that cannot
+// slide when an earlier version is withdrawn is the deltaId. A declaration is publication, not a
+// probe — so a pinned version becomes anonymously servable BECAUSE the operator chose to reveal it;
+// every other `@hash` stays 404. Operator only, exactly like any `loam.public` write (a governed
+// store binds only operator law).
+export async function declarePublicImpl(
+  gw: Gateway,
+  entries: readonly string[],
+  context?: RequestContext,
+): Promise<void> {
+  const seed = context?.actor ?? gw.options.seed;
+  if (seed === undefined) {
+    throw new Error("this gateway holds no signing seed and cannot declare a lens public");
+  }
+  if (gw.operatorAuthor !== undefined && authorForSeed(seed) !== gw.operatorAuthor) {
+    throw new Error("append rejected: only the operator may declare a lens public");
+  }
+  const resolved = entries.map((entry) => freezePublicEntry(gw, entry));
+  await gw.append([
+    signClaims(publicClaims(resolved, authorForSeed(seed), gw.nextTimestamp()), seed),
+  ]);
+}
+
+// Resolve one declaration entry to the string that goes on the record. A bare name and an already-frozen
+// `Name@<deltaId>` pass through unchanged (idempotent re-declare); a `Name@vN` is resolved to the Nth
+// surviving version's deltaId — the same filter-then-index publishRenderer uses — and refused if absent.
+function freezePublicEntry(gw: Gateway, entry: string): string {
+  const at = entry.indexOf("@");
+  if (at < 0) return entry;
+  const name = entry.slice(0, at);
+  const ver = entry.slice(at + 1);
+  const m = /^v([1-9]\d*)$/.exec(ver);
+  if (m === null) return entry; // already an @<deltaId> (or opaque): freeze it as given
+  const versions = gw.registrationVersions().filter((v) => v.hyperschema.name === name);
+  const pinned = versions[Number(m[1]) - 1];
+  if (pinned === undefined) {
+    throw new Error(`public: schema "${name}" has no version v${m[1]} (it has ${versions.length})`);
+  }
+  return `${name}@${pinned.deltaId}`;
 }
