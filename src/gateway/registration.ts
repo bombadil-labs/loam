@@ -152,6 +152,12 @@ export interface Registration {
   readonly hyperschema: HyperSchema;
   readonly schema: Schema;
   readonly roots: readonly string[];
+  // The LENS name (§21.7 coexistence): the resolution Schema's own semantic name, read from the
+  // binding's bytes (the `schema` pointer's target minus the `schema:` prefix). Defaults to the
+  // hyperschema's name — today's 1:1 reading, forever the degenerate case. Serving keys on THIS
+  // (GraphQL family, REST path segment, loam.public admission, the §17 ladder), never on the
+  // hyperschema name, which many sibling lenses share.
+  readonly lensName?: string;
   // The hyperschema entity the definition lives at (`hyperschema:<Name>` by default). Identity is
   // the ENTITY, not the name: republishing here evolves; a different entity is a different schema.
   readonly entity?: string;
@@ -655,11 +661,30 @@ function survivingCandidates(
   return groups;
 }
 
+// The gateway's NUL alphabet, restated locally (this module must not import gateway.ts).
+const NUL_SEP = String.fromCharCode(0);
+
+// The lens name a binding carries in its own bytes: the living `schema:<name>` pointer's target,
+// minus the prefix (slice 2prime put it there). A binding predating the prefix convention falls
+// back to the whole id — one name per entity, the conservative pre-coexistence regrouping.
+const lensNameOf = (cand: Candidate): string =>
+  cand.livingEntity.startsWith("schema:")
+    ? cand.livingEntity.slice("schema:".length)
+    : cand.livingEntity;
+
 export function readRegistrations(reactor: Reactor, operator?: string): Registration[] {
   const lawful = lawfulSnapshot(reactor, operator);
   const groups = survivingCandidates(reactor, operator);
+  // Latest-wins narrows to latest-PER-LENS (§21.7): within one registration entity's group, each
+  // lens name (the living `schema:<name>` pointer, in the bytes since slice 2prime) keeps its own
+  // latest survivor — registering FilmClassic no longer evicts Film. A pre-coexistence store's
+  // bindings all carry one lens name per entity, so this reads exactly as the old latest-wins did.
   const latest = new Map<string, Candidate>();
-  for (const [key, group] of groups) latest.set(key, group[group.length - 1]!);
+  for (const [key, group] of groups) {
+    for (const cand of group) {
+      latest.set([key, lensNameOf(cand)].join(NUL_SEP), cand); // ground order: last write wins
+    }
+  }
 
   // Loosely dependency-ordered by timestamp so refs tend to resolve on replay; the gateway's
   // fixpoint handles what order cannot (ties, forward refs).
@@ -685,6 +710,7 @@ export function readRegistrations(reactor: Reactor, operator?: string): Registra
         schema,
         roots: cand.roots,
         entity: cand.schemaEntity,
+        lensName: lensNameOf(cand),
         ...(cand.mutations === undefined ? {} : { mutations: cand.mutations }),
         ...(cand.writable === undefined ? {} : { writable: cand.writable }),
         ...(cand.resolvers === undefined ? {} : { resolvers: cand.resolvers }),
@@ -740,6 +766,7 @@ export function readRegistrationVersions(
         schema,
         roots: cand.roots,
         entity: cand.schemaEntity,
+        lensName: lensNameOf(cand),
         ...(cand.mutations === undefined ? {} : { mutations: cand.mutations }),
         ...(cand.writable === undefined ? {} : { writable: cand.writable }),
         ...(cand.resolvers === undefined ? {} : { resolvers: cand.resolvers }),
