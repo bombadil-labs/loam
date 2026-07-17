@@ -6,9 +6,15 @@
       "category": "build",
       "duration": 3,
       "scope": [
-        "src/gateway/**",
-        "src/surface/**",
-        "test/**",
+        "src/gateway/lifecycle.ts",
+        "src/gateway/registration.ts",
+        "src/gateway/gql.ts",
+        "src/gateway/reads.ts",
+        "src/gateway/public.ts",
+        "src/gateway/gateway.ts",
+        "src/surface/rest.ts",
+        "test/gateway/**",
+        "test/surface/**",
         "spec/21-schema-identity.md"
       ],
       "rails": [],
@@ -21,9 +27,13 @@
       "category": "build",
       "duration": 3,
       "scope": [
-        "src/gateway/**",
+        "src/gateway/ingest.ts",
+        "src/gateway/quarantine-pool.ts",
+        "src/gateway/erase.ts",
+        "src/gateway/gateway.ts",
         "src/federation/**",
-        "test/**",
+        "test/gateway/**",
+        "test/federation/**",
         "spec/27-containers.md",
         "spec/24-quarantine.md"
       ],
@@ -38,6 +48,7 @@
       "duration": 2,
       "scope": [
         "src/gateway/render-worker.ts",
+        "src/gateway/renderers.ts",
         "src/gateway/resolvers.ts",
         "src/gateway/gateway.ts",
         "src/server/http.ts",
