@@ -7,6 +7,6 @@ rm -rf demos/village/homes
 for i in $(seq 0 23); do
   echo "== phase$i: $(timeout 180 node demos/village/phase$i.mjs 2>&1 | tail -1)"
 done
-for n in bytes pinned guestbook quarantine; do
+for n in bytes pinned guestbook quarantine coexistence; do
   echo "== phase-$n: $(timeout 180 node demos/village/phase-$n.mjs 2>&1 | tail -1)"
 done

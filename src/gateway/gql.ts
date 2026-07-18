@@ -32,7 +32,7 @@ import {
 } from "graphql";
 import type { Primitive, Policy } from "@bombadil/rhizomatic";
 import { bytesEnvelope } from "./bytes.js";
-import { edgeRoles, type ClaimTemplates, type ResolverOutputType } from "./registration.js";
+import { lensOf, edgeRoles, type ClaimTemplates, type ResolverOutputType } from "./registration.js";
 import type {
   ClaimPointerSpec,
   PatchNode,
@@ -299,22 +299,20 @@ export function buildGqlSchema(
     for (const [prop] of def.schema.props) {
       const name = legal(prop);
       if (seen.has(name) || name === "__proto__") {
-        throw new Error(
-          `schema ${def.hyperschema.name}: property "${prop}" collides with field "${name}"`,
-        );
+        throw new Error(`schema ${lensOf(def)}: property "${prop}" collides with field "${name}"`);
       }
       seen.add(name);
     }
 
-    const typeName = legal(def.hyperschema.name);
+    const typeName = legal(lensOf(def));
     const viewType = new GraphQLObjectType<ResolvedNode>({
       name: `${typeName}View`,
-      description: `The ${def.hyperschema.name} hyperschema, resolved under its registered policy.`,
+      description: `The ${lensOf(def)} hyperschema, resolved under its registered policy.`,
       fields: () => ({ ...metaFields<ResolvedNode>(), ...propFields<ResolvedNode>(def) }),
     });
     const patchType = new GraphQLObjectType<PatchNode>({
       name: `${typeName}Patch`,
-      description: `A live ${def.hyperschema.name} view: an initial snapshot, then one patch per change.`,
+      description: `A live ${lensOf(def)} view: an initial snapshot, then one patch per change.`,
       fields: () => ({
         ...metaFields<PatchNode>(),
         ...propFields<PatchNode>(def),
@@ -335,7 +333,7 @@ export function buildGqlSchema(
     // Own properties only: a schema named "toString" collides with nothing but itself.
     if (Object.hasOwn(queryFields, fieldName)) {
       throw new Error(
-        `schema ${def.hyperschema.name}: its query field "${fieldName}" collides with an earlier schema`,
+        `schema ${lensOf(def)}: its query field "${fieldName}" collides with an earlier schema`,
       );
     }
 
@@ -343,7 +341,7 @@ export function buildGqlSchema(
 
     queryFields[fieldName] = {
       type: new GraphQLNonNull(viewType),
-      description: `Resolve ${def.hyperschema.name} at an entity. Absence is an answer, not an error.`,
+      description: `Resolve ${lensOf(def)} at an entity. Absence is an answer, not an error.`,
       // The time pin (SPEC §26): an optional field argument, exactly like any other. Omit it and
       // the read is present-tense; supply a timestamp and it resolves the ground as it stood at T.
       // It rides the READ, not the connection — one query may pin different moments per field.
@@ -357,14 +355,14 @@ export function buildGqlSchema(
         },
       },
       resolve: (_src, args: { entity: string; asOf?: number }) =>
-        hooks.resolve(def.hyperschema.name, args.entity, args.asOf ?? undefined),
+        hooks.resolve(lensOf(def), args.entity, args.asOf ?? undefined),
     };
 
     subscriptionFields[fieldName] = {
       type: new GraphQLNonNull(patchType),
-      description: `Hold ${def.hyperschema.name} live at an entity: a snapshot, then patches.`,
+      description: `Hold ${lensOf(def)} live at an entity: a snapshot, then patches.`,
       args: entityArg,
-      subscribe: (_src, args: { entity: string }) => hooks.watch(def.hyperschema.name, args.entity),
+      subscribe: (_src, args: { entity: string }) => hooks.watch(lensOf(def), args.entity),
       resolve: (payload: PatchNode) => payload,
     };
 
@@ -385,13 +383,13 @@ export function buildGqlSchema(
     // template landing on this schema's field name).
     if (Object.hasOwn(mutationFields, fieldName)) {
       throw new Error(
-        `schema ${def.hyperschema.name}: its mutation field "${fieldName}" collides with an existing mutation`,
+        `schema ${lensOf(def)}: its mutation field "${fieldName}" collides with an existing mutation`,
       );
     }
     mutationFields[fieldName] = {
       type: new GraphQLNonNull(viewType),
       description:
-        `Claim properties of an entity under ${def.hyperschema.name}: every provided argument ` +
+        `Claim properties of an entity under ${lensOf(def)}: every provided argument ` +
         `becomes one signed delta. Returns the re-resolved view.`,
       args: { ...entityArg, ...propArgs },
       resolve: (_src, args: Record<string, unknown>, ctx: unknown) => {
@@ -402,7 +400,7 @@ export function buildGqlSchema(
           const v = args[legal(prop)];
           if (v !== undefined && v !== null) props[prop] = v as Primitive;
         }
-        return hooks.mutate(def.hyperschema.name, args["entity"] as string, props, actor);
+        return hooks.mutate(lensOf(def), args["entity"] as string, props, actor);
       },
     };
 
@@ -412,13 +410,13 @@ export function buildGqlSchema(
     const clearField = `clear${typeName}`;
     if (Object.hasOwn(mutationFields, clearField)) {
       throw new Error(
-        `schema ${def.hyperschema.name}: its mutation field "${clearField}" collides with an existing mutation`,
+        `schema ${lensOf(def)}: its mutation field "${clearField}" collides with an existing mutation`,
       );
     }
     mutationFields[clearField] = {
       type: new GraphQLNonNull(viewType),
       description:
-        `Retract YOUR OWN contributions to the named fields of a ${def.hyperschema.name} ` +
+        `Retract YOUR OWN contributions to the named fields of a ${lensOf(def)} ` +
         `entity — each falls to what survives, or to absence. Returns the re-resolved view.`,
       args: {
         ...entityArg,
@@ -431,10 +429,10 @@ export function buildGqlSchema(
         // clear when nothing was cleared. (REST does the same against its addressed version.)
         for (const field of fields) {
           if (!def.schema.props.has(field)) {
-            throw new Error(`schema ${def.hyperschema.name} has no field "${field}" to clear`);
+            throw new Error(`schema ${lensOf(def)} has no field "${field}" to clear`);
           }
         }
-        return hooks.clear(def.hyperschema.name, args["entity"] as string, fields, actor);
+        return hooks.clear(lensOf(def), args["entity"] as string, fields, actor);
       },
     };
 
@@ -443,14 +441,14 @@ export function buildGqlSchema(
     const removeField = `remove${typeName}`;
     if (Object.hasOwn(mutationFields, removeField)) {
       throw new Error(
-        `schema ${def.hyperschema.name}: its mutation field "${removeField}" collides with an existing mutation`,
+        `schema ${lensOf(def)}: its mutation field "${removeField}" collides with an existing mutation`,
       );
     }
     mutationFields[removeField] = {
       type: new GraphQLNonNull(viewType),
       description:
         `Retract YOUR OWN contribution(s) of specific values to one field of a ` +
-        `${def.hyperschema.name} entity — the rest of the field stands. Returns the re-resolved view.`,
+        `${lensOf(def)} entity — the rest of the field stands. Returns the re-resolved view.`,
       args: {
         ...entityArg,
         field: { type: new GraphQLNonNull(GraphQLString) },
@@ -460,10 +458,10 @@ export function buildGqlSchema(
         const actor = (ctx as { actor?: string } | undefined)?.actor;
         const field = args["field"] as string;
         if (!def.schema.props.has(field)) {
-          throw new Error(`schema ${def.hyperschema.name} has no field "${field}"`);
+          throw new Error(`schema ${lensOf(def)} has no field "${field}"`);
         }
         return hooks.remove(
-          def.hyperschema.name,
+          lensOf(def),
           args["entity"] as string,
           field,
           args["values"] as Primitive[],
@@ -480,13 +478,13 @@ export function buildGqlSchema(
       const linkField = `link${typeName}`;
       if (Object.hasOwn(mutationFields, linkField)) {
         throw new Error(
-          `schema ${def.hyperschema.name}: its mutation field "${linkField}" collides with an existing mutation`,
+          `schema ${lensOf(def)}: its mutation field "${linkField}" collides with an existing mutation`,
         );
       }
       mutationFields[linkField] = {
         type: new GraphQLNonNull(viewType),
         description:
-          `Link an edge on a ${def.hyperschema.name} entity: assert that \`field\` points at the ` +
+          `Link an edge on a ${lensOf(def)} entity: assert that \`field\` points at the ` +
           `\`target\` entity, resolved into its child view. Returns the re-resolved view.`,
         args: {
           ...entityArg,
@@ -501,10 +499,10 @@ export function buildGqlSchema(
           const actor = (ctx as { actor?: string } | undefined)?.actor;
           const field = args["field"] as string;
           if (!def.schema.props.has(field)) {
-            throw new Error(`schema ${def.hyperschema.name} has no field "${field}" to link`);
+            throw new Error(`schema ${lensOf(def)} has no field "${field}" to link`);
           }
           return hooks.link(
-            def.hyperschema.name,
+            lensOf(def),
             args["entity"] as string,
             field,
             args["target"] as string,
@@ -517,13 +515,13 @@ export function buildGqlSchema(
       const severField = `sever${typeName}`;
       if (Object.hasOwn(mutationFields, severField)) {
         throw new Error(
-          `schema ${def.hyperschema.name}: its mutation field "${severField}" collides with an existing mutation`,
+          `schema ${lensOf(def)}: its mutation field "${severField}" collides with an existing mutation`,
         );
       }
       mutationFields[severField] = {
         type: new GraphQLNonNull(viewType),
         description:
-          `Sever edges on a ${def.hyperschema.name} entity: retract YOUR OWN edges in \`field\` — ` +
+          `Sever edges on a ${lensOf(def)} entity: retract YOUR OWN edges in \`field\` — ` +
           `all of them, or only those pointing at a named \`target\`. Returns the re-resolved view.`,
         args: {
           ...entityArg,
@@ -534,10 +532,10 @@ export function buildGqlSchema(
           const actor = (ctx as { actor?: string } | undefined)?.actor;
           const field = args["field"] as string;
           if (!def.schema.props.has(field)) {
-            throw new Error(`schema ${def.hyperschema.name} has no field "${field}" to sever`);
+            throw new Error(`schema ${lensOf(def)} has no field "${field}" to sever`);
           }
           return hooks.sever(
-            def.hyperschema.name,
+            lensOf(def),
             args["entity"] as string,
             field,
             (args["targets"] as string[] | undefined) ?? undefined,
@@ -551,10 +549,10 @@ export function buildGqlSchema(
     for (const [templateName, template] of Object.entries(def.mutations ?? {})) {
       if (Object.hasOwn(mutationFields, templateName)) {
         throw new Error(
-          `schema ${def.hyperschema.name}: template "${templateName}" collides with an existing mutation`,
+          `schema ${lensOf(def)}: template "${templateName}" collides with an existing mutation`,
         );
       }
-      const argSpec = templateArgs(def.hyperschema.name, templateName, template);
+      const argSpec = templateArgs(lensOf(def), templateName, template);
       const gqlArgs: Record<string, { type: GraphQLInputType }> = {};
       for (const [arg, meta] of argSpec) {
         const base: GraphQLInputType = meta.kind === "entity" ? GraphQLID : PrimitiveValue;
@@ -567,7 +565,7 @@ export function buildGqlSchema(
       mutationFields[templateName] = {
         type: new GraphQLNonNull(ClaimReceipt),
         description:
-          `${def.hyperschema.name}'s "${templateName}" claim: one call, one signed delta, ` +
+          `${lensOf(def)}'s "${templateName}" claim: one call, one signed delta, ` +
           `exactly the declared shape.`,
         args: gqlArgs,
         resolve: (_src, args: Record<string, unknown>, ctx: unknown) => {

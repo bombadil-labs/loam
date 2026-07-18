@@ -33,6 +33,7 @@ import {
 import { NUL, type Bound, type Gateway, type RequestContext } from "./gateway.js";
 import { buildGqlSchema } from "./gql.js";
 import {
+  lensOf,
   lawfulSnapshot,
   parseClaimTemplates,
   readRegistrations,
@@ -150,8 +151,11 @@ export function matForImpl(
   door: "full" | "public" = "full",
 ): string {
   const def = gw.def(name);
-  if (def.roots.includes(entity)) return matNameImpl(gw, name);
-  const matName = lazyMatNameImpl(gw, name, entity);
+  // One materialization per PROGRAM (§21.7): sibling lenses watch the same gather, so the mat —
+  // registered and lazy alike — keys on the hyperschema's name, not the lens the caller named.
+  const program = def.hyperschema.name;
+  if (def.roots.includes(entity)) return matNameImpl(gw, program);
+  const matName = lazyMatNameImpl(gw, program, entity);
   if (!gw.lazyMats.has(matName)) {
     // The reactor has no deregister, so every watched entity costs memory and per-ingest CPU
     // for the gateway's lifetime. The cap keeps an unauthenticated reader from growing the
@@ -178,19 +182,74 @@ export function matForImpl(
   return matName;
 }
 
+// ── The grouped serving surface (§21.7) — dedup is a data structure, not a discipline ──────────
+// ONE derivation from the surviving bindings; every consumer iterates the groups. A PROGRAM is a
+// hyperschema plus every lens bound over it: the registry takes one hyperschema per group, the
+// reactor registers one materialization per program over the UNION of its members' roots, and the
+// doors (GraphQL family, REST segment, loam.public, the §17 ladder) key per LENS.
+export interface Program {
+  readonly hyperschema: HyperSchema;
+  readonly roots: readonly string[]; // the union of member bindings' roots
+  readonly lenses: Map<string, Bound>; // lens name -> its binding
+}
+
+// Group a bound set into programs. THE REFUSAL AT THE SEAM: two bindings naming one hyperschema
+// with DIFFERENT bodies (termHash mismatch) are refused loudly, before any state changes — one
+// name, one gather; a rival body is a different schema wanting a different name.
+export function groupPrograms(regs: readonly Bound[]): Map<string, Program> {
+  const programs = new Map<
+    string,
+    { hyperschema: HyperSchema; hash: string; roots: Set<string>; lenses: Map<string, Bound> }
+  >();
+  for (const reg of regs) {
+    const name = reg.hyperschema.name;
+    const hash = termHash(reg.hyperschema.body);
+    const lens = lensOf(reg);
+    const group = programs.get(name);
+    if (group === undefined) {
+      programs.set(name, {
+        hyperschema: reg.hyperschema,
+        hash,
+        roots: new Set(reg.roots),
+        lenses: new Map([[lens, reg]]),
+      });
+      continue;
+    }
+    if (group.hash !== hash) {
+      throw new Error(
+        `hyperschema "${name}": two bindings carry DIFFERENT bodies (termHash ${group.hash.slice(0, 12)}… vs ` +
+          `${hash.slice(0, 12)}…) — one name, one gather; a rival body is a different schema and wants a different name`,
+      );
+    }
+    for (const r of reg.roots) group.roots.add(r);
+    group.lenses.set(lens, reg); // latest-per-lens upstream keeps this single-valued
+  }
+  const out = new Map<string, Program>();
+  for (const [name, g] of programs) {
+    out.set(name, { hyperschema: g.hyperschema, roots: [...g.roots], lenses: g.lenses });
+  }
+  return out;
+}
+
+// One hyperschema per program — what SchemaRegistry.build takes (it refuses duplicate names, so
+// the flat lens list can never be handed to it directly once siblings exist).
+const programHyperschemas = (regs: readonly Bound[]): HyperSchema[] =>
+  [...groupPrograms(regs).values()].map((p) => p.hyperschema);
+
 // Bind a whole desired set at once, under a fresh generation of materializations. The set was
 // validated by the caller (the fixpoint), so nothing here can half-apply. Superseded
 // materializations stay behind (the reactor has no deregister); superseded lazy watches stop
 // counting against the cap.
 export function rebindImpl(gw: Gateway, next: Bound[]): void {
-  const registry = SchemaRegistry.build(next.map((r) => r.hyperschema));
+  const programs = groupPrograms(next); // refuses a rival body before any state changes
+  const registry = SchemaRegistry.build([...programs.values()].map((p) => p.hyperschema));
   const gql = buildGqlSchema(next, gw.gqlHooks());
   gw.generation += 1;
-  for (const reg of next) {
+  for (const program of programs.values()) {
     gw.reactor.register(
-      matNameImpl(gw, reg.hyperschema.name),
-      reg.hyperschema.body,
-      reg.roots,
+      matNameImpl(gw, program.hyperschema.name),
+      program.hyperschema.body,
+      program.roots,
       registry,
     );
   }
@@ -224,7 +283,7 @@ export function replayRegistrationsImpl(gw: Gateway): void {
       const attempt = (candidate: Bound): boolean => {
         try {
           const trial = [...accepted, candidate];
-          const registry = SchemaRegistry.build(trial.map((r) => r.hyperschema)); // dups, refs, cycles
+          const registry = SchemaRegistry.build(programHyperschemas(trial)); // groups: one hyperschema per program; a rival body throws here
           assertMaterializable(candidate.hyperschema, registry); // reactor.register would throw
           assertTemplatesVisible(
             candidate.hyperschema,
@@ -268,16 +327,35 @@ export function replayRegistrationsImpl(gw: Gateway): void {
     return; // nothing moved
   }
   if ([...currentKeys].every((k) => acceptedKeys.has(k))) {
-    // Purely additive: bind just the newcomers under the current generation — no rebind, no
-    // abandoned materializations. (The same registry-visibility semantics as register().)
-    const additions = accepted.filter((r) => !currentKeys.has(boundKey(r)));
-    const registry = SchemaRegistry.build(accepted.map((r) => r.hyperschema));
+    // Purely additive at the BINDING level. THE REBIND RULE (§21.7) decides at the PROGRAM level:
+    // a new lens whose roots are a SUBSET of its program's existing union rides this additive
+    // path (the shared materialization already gathers them); one that WIDENS the union — or a
+    // program the reactor has never seen — needs its materialization (re)registered, and a
+    // widened EXISTING program forces a generation rebind (the reactor has no deregister).
+    const prior = groupPrograms(gw.registered);
+    const next = groupPrograms(accepted); // refuses a rival body before any state changes
+    let widened = false;
+    const fresh: Program[] = [];
+    for (const [name, program] of next) {
+      const before = prior.get(name);
+      if (before === undefined) {
+        fresh.push(program);
+        continue;
+      }
+      const covered = new Set(before.roots);
+      if (!program.roots.every((r) => covered.has(r))) widened = true;
+    }
+    if (widened) {
+      rebindImpl(gw, accepted);
+      return;
+    }
+    const registry = SchemaRegistry.build([...next.values()].map((p) => p.hyperschema));
     const gql = buildGqlSchema(accepted, gw.gqlHooks());
-    for (const reg of additions) {
+    for (const program of fresh) {
       gw.reactor.register(
-        matNameImpl(gw, reg.hyperschema.name),
-        reg.hyperschema.body,
-        reg.roots,
+        matNameImpl(gw, program.hyperschema.name),
+        program.hyperschema.body,
+        program.roots,
         registry,
       );
     }
@@ -315,16 +393,20 @@ export function registerImpl(
       schema,
       roots,
       origin: "manual",
+      lensName: schema.name ?? hyperschema.name,
       ...(templates ? { mutations: templates } : {}),
       ...(writable ? { writable } : {}),
     },
   ];
-  const registry = SchemaRegistry.build(next.map((r) => r.hyperschema)); // refuses dups + bad refs
+  const registry = SchemaRegistry.build(programHyperschemas(next)); // groups: refs + the rival-body refusal
   assertMaterializable(hyperschema, registry); // refuses a body that yields no hyperview
   assertTemplatesVisible(hyperschema, templates, registry, gw.operatorAuthor ?? "loam:specimen"); // refuses invisible writes
   const gql = buildGqlSchema(next, gw.gqlHooks()); // refuses collisions
-  // Incremental: only the NEW materialization registers, under the current generation.
-  gw.reactor.register(matNameImpl(gw, hyperschema.name), hyperschema.body, roots, registry);
+  // Incremental: the PROGRAM's materialization registers over its (possibly union-widened) roots,
+  // under the current generation. register() is the in-process path; the replay's rebind rule
+  // governs the durable one.
+  const program = groupPrograms(next).get(hyperschema.name)!;
+  gw.reactor.register(matNameImpl(gw, hyperschema.name), hyperschema.body, program.roots, registry);
   gw.registered = next;
   gw.registry = registry;
   gw.gql = gql;
@@ -420,8 +502,13 @@ export async function publishRegistrationImpl(
     // resolver the doors cannot run" — the same loud-here/quiet-on-replay discipline as templates.
     await loadResolvers([resolvers]);
   }
-  const survivors = gw.registered.filter((r) => r.hyperschema.name !== hyperschema.name);
-  const trialRegistry = SchemaRegistry.build([...survivors.map((r) => r.hyperschema), hyperschema]);
+  const lensName = schema.name ?? hyperschema.name;
+  const survivors = gw.registered.filter(
+    (r) => !(r.hyperschema.name === hyperschema.name && lensOf(r) === lensName),
+  );
+  const trialRegistry = SchemaRegistry.build(
+    programHyperschemas([...survivors, { hyperschema, schema, roots, origin: "store", lensName }]),
+  ); // groups: one hyperschema per program, and the rival-body refusal fires HERE, loudly
   assertMaterializable(hyperschema, trialRegistry);
   assertTemplatesVisible(
     hyperschema,
@@ -436,6 +523,7 @@ export async function publishRegistrationImpl(
         hyperschema,
         schema,
         roots,
+        lensName,
         ...(templates ? { mutations: templates } : {}),
         ...(writable ? { writable } : {}),
         ...(resolvers ? { resolvers } : {}),
@@ -457,7 +545,7 @@ export async function publishRegistrationImpl(
   // together so `loadSchema` finds the entities the binding names.
   const { living, snapshot, binding } = registrationDeltaClaims(
     schemaEntity,
-    hyperschema.name,
+    lensName, // the LIVING entity is schema:<lens> — the name in the bytes IS the grouping key
     schema,
     roots,
     author,
@@ -476,7 +564,11 @@ export async function publishRegistrationImpl(
   // Success must mean BOUND. The deltas are down either way (append-only ground), but a
   // publish the replay could not bind — a name already answered for by another entity, a
   // collision with a manual registration — is not to be reported as a served surface.
-  if (!gw.registered.some((r) => r.origin === "store" && r.entity === schemaEntity)) {
+  if (
+    !gw.registered.some(
+      (r) => r.origin === "store" && r.entity === schemaEntity && lensOf(r) === lensName,
+    )
+  ) {
     throw new Error(
       `the registration persisted but did not bind: another hyperschema already answers to ` +
         `"${hyperschema.name}" — negate the old definition first, or choose a different name`,

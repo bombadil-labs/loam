@@ -21,6 +21,9 @@ export interface Registered {
   readonly hyperschema: HyperSchema;
   readonly schema: Schema;
   readonly roots: readonly string[];
+  // The LENS name (§21.7): what a generator keys its family on — sibling lenses share the
+  // hyperschema, never the lens. Absent means the degenerate 1:1 reading (the hyperschema's name).
+  readonly lensName?: string;
   readonly mutations?: ClaimTemplates;
   // Front-door writability (SPEC §14, immutable-by-default): the fields that accept a surface write;
   // the rest are read-only (assert / clear / remove / link / sever refused). Absent → NO field is

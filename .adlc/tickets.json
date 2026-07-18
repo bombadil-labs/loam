@@ -1,27 +1,6 @@
 {
   "tickets": [
     {
-      "id": "T2",
-      "title": "§21.7 — Coexistence: build the grouped serving surface (two lenses over one hyperschema)",
-      "category": "build",
-      "duration": 3,
-      "scope": [
-        "src/gateway/lifecycle.ts",
-        "src/gateway/registration.ts",
-        "src/gateway/gql.ts",
-        "src/gateway/reads.ts",
-        "src/gateway/public.ts",
-        "src/gateway/gateway.ts",
-        "src/surface/rest.ts",
-        "test/gateway/**",
-        "test/surface/**",
-        "spec/21-schema-identity.md"
-      ],
-      "rails": [],
-      "edges": [],
-      "body": "IMPLEMENTATION-READY (design landed 2026-07-16, #114 — §21.7 in spec/21-schema-identity.md; implement to it, don't re-litigate). Build coexistence: two lenses (resolution Schemas) served over one hyperschema, per-lens at every door, with the degenerate single-lens case BYTE-IDENTICAL.\n\nTHE SHAPE (pinned by §21.7 — dedup is a data structure, not a discipline): derive ONE grouped serving surface — programs: Map<hyperschemaName, { hyperschema, roots: UNION of member bindings' roots, lenses: Map<lensName, binding> }> — computed in ONE place from the surviving bindings; every consumer iterates the groups, none sees the flat Bound[] list. Consumers: SchemaRegistry.build takes one hyperschema per group; the reactor registers ONE materialization per program over the union roots; GraphQL builds one family per LENS (types <LensName>View/<LensName>Patch, query/subscription field, mutation family, hooks dispatch keyed on lens name); REST's path segment is the lens; loam.public admits lens by lens; the §17 version ladder runs per (registration entity, lens).\n\nTHE GROUPING KEY is read from the binding's own bytes: lens name = the `schema` pointer's target id minus the `schema:` prefix (in the bytes since slice 2prime). Latest-wins narrows to latest-PER-LENS — registering FilmClassic no longer evicts Film. A pre-coexistence store regroups conservatively (one lens name per hyperschema = one group = today's reading).\n\nREFUSALS AT THE SEAM: (a) two bindings naming one hyperschema with DIFFERENT bodies (termHash mismatch) are refused at grouping, loudly, before any state changes; (b) two lens names legalizing to the same GraphQL identifier are already refused by the existing collision checks (gql.ts:336) — verify the refusal now guards the lens namespace. REBIND RULE: a new lens whose roots are a SUBSET of its program's union rides the additive path; one that WIDENS the union forces a generation rebind (the reactor has no deregister). Decide by comparing unions at the seam.\n\nNO §20 MIGRATION — §21.7's on-wire verdict is nothing breaks (no delta grows/loses a role, no entity id renamed); the register input's one non-default is schema.name naming the lens, defaulting to hyperschema.name (today's behavior, forever the degenerate case).\n\nRAILS THE TICKET DEMANDS: byte-identical single-lens SDL/OpenAPI/introspection/REST paths (snapshot-compare against main); latest-per-lens (register two lenses, both serve, each evolves alone); the grouping refusals (same-name-different-body; same-legalized-name); the rebind rule (subset-rooted additive, widening rebinds); per-lens §17 versions; per-lens loam.public (publishing Film reveals nothing of FilmClassic — uniform 404); writability honesty (a field writable through one sibling lens is writable — §14's posture, assert it as BEHAVIOR, not as a bypass-guard).\n\nCODE ANCHORS: registration.ts:661 (the latest-wins take), registration.ts:556-564 (survivingCandidates grouping), gateway.ts:525-619 (fixpoint + additive path + rebind — the flat-list consumption sites), gateway.ts:1447-1449 (matName), gql.ts:309-311/334-340 (name keying + collision refusal), src/surface/rest.ts:49-73.\n\nVILLAGE: an act where one hyperschema carries two living lenses — the broad public reading and a narrow archival one — served simultaneously, evolving on their own clocks, one publicly declared and one not.\n\nFUTURE (not this ticket): VersionedHyperSchema (Film@termHash — build when a pin needs the gather frozen).\n\nMERGE: no capability/auth/federation/erasure surface and no migration, but it rewires the gateway's core serving loop — if the classifier hesitates, it is Myk's merge (P6)."
-    },
-    {
       "id": "T15",
       "title": "§27 — Membership is a query, first-class: select/watch + composable set-algebra scoping",
       "category": "build",

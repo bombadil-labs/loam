@@ -363,6 +363,12 @@ _(one entry per PR that grew the village; newest last)_
   record, still attributed to the pen. The anonymous write lands only because the operator did all three:
   declared the lens public, provisioned the pen's seed, and granted it write standing (§12 — no anonymous
   writes by default). The user's-own-pen (non-custodial) variant awaits the browser host.
+- **ONE GATHER, MANY READINGS (SPEC §21.7)** (phase-coexistence.mjs, 3/3, re-runnable): the symmetry
+  §4 promised, finally served — the almanac's Townbook gather carries TWO living lenses at once: the
+  broad latest-wins reading, and FirstImpressions, the archival oldest-wins sibling that keeps the
+  first thing anyone said. They serve simultaneously (the pre-§21.7 registry EVICTED the elder), evolve
+  on their own clocks (the archive drops its field; the broad lens never flinches), and the anonymous
+  door opens lens by lens — Townbook is declared public, FirstImpressions stays the town's own.
 - **A PLACE WHERE UNTRUSTED LAW MAY BIND (SPEC §24, slice 1)** (phase-quarantine.mjs, 6/6, re-runnable):
   today foreign law is inert-by-default — safe, but untestable. The quarantine closes that gap. The almanac
   stands up a QUARANTINE POOL — a second store over its own ground, seeded ONE-WAY from the primary — that
