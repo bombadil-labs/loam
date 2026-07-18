@@ -23,7 +23,7 @@ import { importEsm, loadedEsm } from "./esm.js";
 import type { Gateway, RequestContext } from "./gateway.js";
 import type { ResolvedNode } from "./gql.js";
 import { renderInWorker } from "./render-worker.js";
-import { lawfulNegated, lawfulSnapshot } from "./registration.js";
+import { lawfulNegated, lawfulSnapshot, lensOf } from "./registration.js";
 
 export const CTX_RENDERER = "loam.renderer";
 
@@ -322,7 +322,7 @@ export async function publishRendererImpl(
   }
   const spec = parseRendererInput(input); // one shape for every door (HTTP / CLI / MCP / direct)
   // The schema must be registered — a renderer over a lens the store does not serve mounts nothing.
-  const bound = gw.registered.find((r) => r.hyperschema.name === spec.schemaName);
+  const bound = gw.registered.find((r) => lensOf(r) === spec.schemaName);
   if (bound === undefined) {
     throw new Error(
       `renderer: no registered schema "${spec.schemaName}" — a renderer reads a lens the store serves`,
@@ -336,9 +336,7 @@ export async function publishRendererImpl(
   let versionId: string | undefined;
   let coverage = bound.schema;
   if (spec.version !== undefined) {
-    const versions = gw
-      .registrationVersions()
-      .filter((v) => v.hyperschema.name === spec.schemaName);
+    const versions = gw.registrationVersions().filter((v) => lensOf(v) === spec.schemaName);
     const pinned = versions[spec.version - 1];
     if (pinned === undefined) {
       throw new Error(
@@ -403,7 +401,7 @@ export async function serveRouteImpl(
       const surface = gw.surface(door);
       if (
         surface === undefined ||
-        !surface.registered.some((r) => r.hyperschema.name === binding.schemaName)
+        !surface.registered.some((r) => lensOf(r) === binding.schemaName)
       ) {
         return gone;
       }
@@ -477,8 +475,7 @@ function routeServableOn(gw: Gateway, binding: RendererBinding, door: "full" | "
   if (binding.versionId === undefined) {
     const surface = gw.surface(door);
     return (
-      surface !== undefined &&
-      surface.registered.some((r) => r.hyperschema.name === binding.schemaName)
+      surface !== undefined && surface.registered.some((r) => lensOf(r) === binding.schemaName)
     );
   }
   if (door === "public") return gw.isPublicPin(binding.schemaName, binding.versionId);
