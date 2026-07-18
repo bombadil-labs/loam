@@ -16,6 +16,7 @@ export default tseslint.config(
       "demos/village/**",
       "demos/larder/**",
       "demos/planner/**",
+      "demos/pachyderm/**",
       "scripts/**",
       ".adlc/**",
     ],

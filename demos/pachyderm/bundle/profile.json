@@ -1,0 +1,90 @@
+{
+  "hyperschema": {
+    "name": "PachyProfile",
+    "alg": 1,
+    "body": {
+      "op": "group",
+      "key": "byTargetContext",
+      "in": {
+        "op": "select",
+        "pred": {
+          "hasPointer": {
+            "targetEntity": {
+              "var": "root"
+            }
+          }
+        },
+        "in": {
+          "op": "mask",
+          "policy": "drop",
+          "in": "input"
+        }
+      }
+    }
+  },
+  "schema": {
+    "name": "Profile",
+    "alg": 1,
+    "props": {
+      "handle": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      },
+      "bio": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      }
+    },
+    "default": {
+      "pick": {
+        "order": {
+          "byTimestamp": "desc"
+        }
+      }
+    }
+  },
+  "roots": [],
+  "writable": ["handle", "bio"],
+  "mutations": {
+    "handle": {
+      "pointers": [
+        {
+          "role": "subject",
+          "at": {
+            "arg": "person"
+          },
+          "context": "handle"
+        },
+        {
+          "role": "value",
+          "value": {
+            "arg": "name"
+          }
+        }
+      ]
+    },
+    "bioIs": {
+      "pointers": [
+        {
+          "role": "subject",
+          "at": {
+            "arg": "person"
+          },
+          "context": "bio"
+        },
+        {
+          "role": "value",
+          "value": {
+            "arg": "text"
+          }
+        }
+      ]
+    }
+  }
+}

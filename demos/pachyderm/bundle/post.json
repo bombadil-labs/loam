@@ -1,0 +1,147 @@
+{
+  "hyperschema": {
+    "name": "PachyPost",
+    "alg": 1,
+    "body": {
+      "op": "group",
+      "key": "byTargetContext",
+      "in": {
+        "op": "select",
+        "pred": {
+          "hasPointer": {
+            "targetEntity": {
+              "var": "root"
+            }
+          }
+        },
+        "in": {
+          "op": "mask",
+          "policy": "drop",
+          "in": "input"
+        }
+      }
+    }
+  },
+  "schema": {
+    "name": "Post",
+    "alg": 1,
+    "props": {
+      "text": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      },
+      "at": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      },
+      "re": {
+        "all": {
+          "order": {
+            "byTimestamp": "asc"
+          }
+        }
+      },
+      "boost": {
+        "all": {
+          "order": {
+            "byTimestamp": "asc"
+          }
+        }
+      }
+    },
+    "default": {
+      "pick": {
+        "order": {
+          "byTimestamp": "desc"
+        }
+      }
+    }
+  },
+  "roots": [],
+  "writable": ["text", "at", "re", "boost"],
+  "resolvers": {
+    "text": {
+      "rung": "a",
+      "type": "string",
+      "code": "export default (b) => { const e = b[b.length - 1]; return e ? `${String(e.value)} \u2014 @${String(e.author).slice(-8)}` : \"\"; };"
+    }
+  },
+  "mutations": {
+    "say": {
+      "pointers": [
+        {
+          "role": "subject",
+          "at": {
+            "arg": "post"
+          },
+          "context": "text"
+        },
+        {
+          "role": "value",
+          "value": {
+            "arg": "text"
+          }
+        }
+      ]
+    },
+    "stamp": {
+      "pointers": [
+        {
+          "role": "subject",
+          "at": {
+            "arg": "post"
+          },
+          "context": "at"
+        },
+        {
+          "role": "value",
+          "value": {
+            "arg": "at"
+          }
+        }
+      ]
+    },
+    "replyTo": {
+      "pointers": [
+        {
+          "role": "subject",
+          "at": {
+            "arg": "post"
+          },
+          "context": "re"
+        },
+        {
+          "role": "re",
+          "at": {
+            "arg": "parent"
+          },
+          "context": "post"
+        }
+      ]
+    },
+    "boost": {
+      "pointers": [
+        {
+          "role": "subject",
+          "at": {
+            "arg": "post"
+          },
+          "context": "boost"
+        },
+        {
+          "role": "boost",
+          "at": {
+            "arg": "original"
+          },
+          "context": "post"
+        }
+      ]
+    }
+  }
+}
