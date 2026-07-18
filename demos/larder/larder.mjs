@@ -14,7 +14,15 @@ import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { authorForSeed } from "@bombadil/rhizomatic";
-import { Gateway, SqliteBackend, assembleGenesis, grantClaims, initHome, pullFrom, serve } from "../../dist/index.js";
+import {
+  Gateway,
+  SqliteBackend,
+  assembleGenesis,
+  grantClaims,
+  initHome,
+  pullFrom,
+  serve,
+} from "../../dist/index.js";
 import { readSeed } from "../../dist/cli/config.js";
 import { signClaims } from "@bombadil/rhizomatic";
 
@@ -68,7 +76,10 @@ async function installLarder(member) {
   for (const file of ["item.json", "pantry.json", "grocery-list.json"]) {
     const s = spec(file);
     await gateway.publishRegistration(
-      { ...s.hyperschema, body: (await import("@bombadil/rhizomatic")).parseTerm(s.hyperschema.body) },
+      {
+        ...s.hyperschema,
+        body: (await import("@bombadil/rhizomatic")).parseTerm(s.hyperschema.body),
+      },
       (await import("@bombadil/rhizomatic")).parseSchema(s.schema),
       s.roots,
       undefined,
@@ -89,7 +100,10 @@ async function installLarder(member) {
 // ---- the daily verbs, exactly as Claude drives them (the claim templates via GraphQL) ----------
 const q = (g, src) => g.query(src);
 const addItem = async (g, item, name) => {
-  await q(g, `mutation { linkGroceries(entity: "list:groceries", field: "item", target: "${item}") { item } }`);
+  await q(
+    g,
+    `mutation { linkGroceries(entity: "list:groceries", field: "item", target: "${item}") { item } }`,
+  );
   await q(g, `mutation { called(item: "${item}", name: "${name}") { delta } }`);
   await q(g, `mutation { needIt(item: "${item}", at: ${Date.now()}) { delta } }`);
 };
@@ -105,13 +119,17 @@ try {
   // INSTALL — the same bundle, both stores. The app now EXISTS twice, sovereign both times.
   await installLarder(ann);
   await installLarder(ben);
-  check("larder.1", "the bundle installs: schemas, two lenses, two renderers, a granted pen — all deltas", true);
+  check(
+    "larder.1",
+    "the bundle installs: schemas, two lenses, two renderers, a granted pen — all deltas",
+    true,
+  );
 
   // ANN ADDS — milk and eggs, through the claim templates (the protocol Claude speaks).
   await addItem(ann.gateway, "item:milk", "milk");
   await addItem(ann.gateway, "item:eggs", "eggs");
   const annList = await q(ann.gateway, `{ groceries(entity: "list:groceries") { item } }`);
-  const annItems = (annList.data?.groceries?.item ?? []);
+  const annItems = annList.data?.groceries?.item ?? [];
   check(
     "larder.2",
     "Ann's list holds what she added, expanded through the item lens",
@@ -122,7 +140,7 @@ try {
   // BEN FEDERATES — one pull, and the shared list exists with no server between them.
   await pullFrom(ben.gateway, ann.base, "op-ann");
   const benList = await q(ben.gateway, `{ groceries(entity: "list:groceries") { item } }`);
-  const benItems = (benList.data?.groceries?.item ?? []);
+  const benItems = benList.data?.groceries?.item ?? [];
   check(
     "larder.3",
     "Ben pulls once and the list is SHARED — two sovereign stores, one reality, no middleman",

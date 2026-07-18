@@ -1,14 +1,8 @@
 {
   "route": "tick",
   "schema": "Item",
-  "consumes": [
-    "name",
-    "need",
-    "got"
-  ],
+  "consumes": ["name", "need", "got"],
   "bundle": "export default (n) => {\n  const needed = (n.view.need ?? 0) > (n.view.got ?? 0);\n  return `<!doctype html><html><head><meta charset=\"utf-8\"><title>Larder</title>\n<style>body{font-family:system-ui;max-width:28rem;margin:2rem auto;padding:0 1rem}</style></head><body>\n<h1>${n.view.name ?? n.entity}</h1>\n<p>${needed ? \"Still needed.\" : \"In the basket.\"}</p>\n${needed ? `<form method=\"post\"><input type=\"hidden\" name=\"got\" value=\"${Date.now()}\"><button>Got it</button></form>` : \"\"}\n</body></html>`;\n};\n",
-  "writable": [
-    "got"
-  ],
+  "writable": ["got"],
   "pen": "larder-pen"
 }

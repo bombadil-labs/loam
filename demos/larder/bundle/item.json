@@ -71,13 +71,7 @@
     }
   },
   "roots": [],
-  "writable": [
-    "name",
-    "need",
-    "got",
-    "have",
-    "note"
-  ],
+  "writable": ["name", "need", "got", "have", "note"],
   "mutations": {
     "needIt": {
       "pointers": [
