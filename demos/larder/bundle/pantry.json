@@ -1,0 +1,46 @@
+{
+  "hyperschema": {
+    "name": "LarderItem",
+    "alg": 1,
+    "body": {
+      "op": "group",
+      "key": "byTargetContext",
+      "in": {
+        "op": "select",
+        "pred": {
+          "hasPointer": {
+            "targetEntity": {
+              "var": "root"
+            }
+          }
+        },
+        "in": {
+          "op": "mask",
+          "policy": "drop",
+          "in": "input"
+        }
+      }
+    }
+  },
+  "schema": {
+    "name": "Pantry",
+    "alg": 1,
+    "props": {
+      "have": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      }
+    },
+    "default": {
+      "pick": {
+        "order": {
+          "byTimestamp": "desc"
+        }
+      }
+    }
+  },
+  "roots": []
+}

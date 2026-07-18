@@ -1,0 +1,54 @@
+{
+  "hyperschema": {
+    "name": "GroceryList",
+    "alg": 1,
+    "body": {
+      "op": "expand",
+      "role": {
+        "exact": "item"
+      },
+      "schema": "LarderItem",
+      "in": {
+        "op": "group",
+        "key": "byTargetContext",
+        "in": {
+          "op": "select",
+          "pred": {
+            "hasPointer": {
+              "targetEntity": {
+                "var": "root"
+              }
+            }
+          },
+          "in": {
+            "op": "mask",
+            "policy": "drop",
+            "in": "input"
+          }
+        }
+      }
+    }
+  },
+  "schema": {
+    "name": "Groceries",
+    "alg": 1,
+    "props": {
+      "item": {
+        "all": {
+          "order": {
+            "byTimestamp": "asc"
+          }
+        }
+      }
+    },
+    "default": {
+      "pick": {
+        "order": {
+          "byTimestamp": "desc"
+        }
+      }
+    }
+  },
+  "roots": ["list:groceries"],
+  "writable": ["item"]
+}
