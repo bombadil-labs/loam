@@ -17,19 +17,16 @@
     },
     {
       "id": "T25",
-      "title": "§22 resolvers do not reach EXPANDED children — decide: design limit (document) or defect (fix)",
+      "title": "§22 resolvers vs expanded children — BLOCKED on rhizomatic#23 (expand names a reading); meanwhile spec/22 documents the boundary",
       "category": "build",
       "duration": 2,
       "scope": [
-        "src/gateway/reads.ts",
-        "src/gateway/resolvers.ts",
-        "src/gateway/gql.ts",
-        "test/gateway/**",
-        "spec/22-resolvers.md"
+        "spec/22-resolvers.md",
+        "demos/pachyderm/pachyderm.mjs"
       ],
       "rails": [],
       "edges": [],
-      "body": "FOUND 2026-07-18 building Pachyderm (T24): a field resolver declared on a lens applies at the lens DOOR (resolvedNode/resolvePinned apply the binding's resolvers) but NOT to that entity when it appears as an EXPANDED CHILD of another lens's gather — nested expansion resolves through the SchemaRegistry, which carries hyperschemas/schemas but no binding context, so the child's declared resolvers silently do not run. Pachyderm's signed-attribution resolver on Post.text shows on a direct post read and vanishes in the Feed's expanded children (see the honest note in demos/pachyderm/pachyderm.mjs, pachy.2). DECIDE FIRST, build second: (a) DESIGN LIMIT — resolvers are per-binding door decoration; nested children are the registry's plain resolution; then spec/22 documents it loudly (§22.6 gains the boundary) and the demo note points at it; or (b) DEFECT — the child SHOULD resolve through its own binding's lens (which one, with sibling lenses? presumably the lens the expand names... but expand names a HYPERSCHEMA, so lens choice is ambiguous — this ambiguity is evidence FOR (a), or an argument that expand should learn to name a LENS post-§21.7, which would be a §21 design amendment, Myk's call). If (b), the fix likely threads resolver specs into the registry or resolves children via def() lookups in reads.ts, with rails for both the direct and the expanded read agreeing. NO src change until the (a)/(b) decision is made in chat or in a design-stage PR — the ambiguity around WHICH sibling lens resolves a child is genuinely a design question, not a bugfix."
+      "body": "DECIDED with Myk in chat (2026-07-18): patch rhizomatic — the substrate needs to reason at the READING level, without learning what a resolver is. The precise ask is filed as https://github.com/bombadil-labs/rhizomatic/issues/23, grounded in a mechanism-read of the dist: eval.js's expand stores child HVIEWS on entries; resolution.js's renderTarget resolves an expansion with THE PARENT'S OWN Schema (resolveView(schema, expansion)) — the child's own reading is unstatable, and always was; coexistence only exposed it. The ask, three resolver-agnostic pieces: (1) expand gains an optional `reading` reference (name or pinned hash — Schemas are content-addressed since 0.5.0); (2) the registry learns to hold/look up resolution Schemas; (3) renderTarget resolves through the named reading when present, else the parent's (today's path verbatim — absent field, byte-identical hashes). Host-side decoration then needs NO output annotation: Loam statically inspects the parent body for each expand's reading and applies that binding's resolvers to the child views.\n\nTHIS TICKET'S BUILDABLE HALF, NOW: spec/22 documents the boundary honestly (§22.6 gains: 'a resolver applies at the lens door; an entity embedded as an expanded child resolves through the PARENT's Schema and carries no binding decoration — until rhizomatic#23 lands'), citing the Pachyderm discovery (demos/pachyderm/pachyderm.mjs pachy.2's note). The heuristic (degenerate-lens post-decoration) is REJECTED, on the record — it would silently pick a winner among sibling readings.\n\nWHEN rhizomatic#23 LANDS (its own version bump): the Loam half becomes a fresh ticket — adopt the version, thread `reading` through the register input/publish path, apply resolvers to expanded children by static term inspection in reads.ts, rails asserting direct-read and expanded-read AGREE, Pachyderm's timeline gains its attributions, and spec/22's boundary note converts to the landed truth. DO NOT edit rhizomatic from this repo, ever (the standing wall)."
     }
   ]
 }
