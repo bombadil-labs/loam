@@ -1,0 +1,54 @@
+{
+  "hyperschema": {
+    "name": "PachyFeed",
+    "alg": 1,
+    "body": {
+      "op": "expand",
+      "role": {
+        "exact": "post"
+      },
+      "schema": "PachyPost",
+      "in": {
+        "op": "group",
+        "key": "byTargetContext",
+        "in": {
+          "op": "select",
+          "pred": {
+            "hasPointer": {
+              "targetEntity": {
+                "var": "root"
+              }
+            }
+          },
+          "in": {
+            "op": "mask",
+            "policy": "drop",
+            "in": "input"
+          }
+        }
+      }
+    }
+  },
+  "schema": {
+    "name": "Feed",
+    "alg": 1,
+    "props": {
+      "post": {
+        "all": {
+          "order": {
+            "byTimestamp": "asc"
+          }
+        }
+      }
+    },
+    "default": {
+      "pick": {
+        "order": {
+          "byTimestamp": "desc"
+        }
+      }
+    }
+  },
+  "roots": ["feed:main"],
+  "writable": ["post"]
+}

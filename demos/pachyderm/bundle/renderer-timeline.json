@@ -1,0 +1,6 @@
+{
+  "route": "timeline",
+  "schema": "Feed",
+  "consumes": ["post"],
+  "bundle": "export default (n) => {\n  const posts = (n.view.post ?? []).filter((p) => p && p.text).sort((a, b) => (b.at ?? 0) - (a.at ?? 0));\n  const li = (p) => `<li><p>${p.text}</p>${(p.boost ?? []).length ? `<small>boosts: ${(p.boost ?? []).length}</small>` : \"\"}</li>`;\n  return `<!doctype html><html><head><meta charset=\"utf-8\"><title>Pachyderm</title>\n<style>body{font-family:system-ui;max-width:32rem;margin:2rem auto;padding:0 1rem}\nh1{font-size:1.3rem}ul{list-style:none;padding:0}\nli{padding:.7rem .8rem;border-bottom:1px solid #eee}p{margin:.2rem 0}small{color:#888}</style></head><body>\n<h1>Pachyderm</h1><ul>${posts.map(li).join(\"\")}</ul></body></html>`;\n};\n"
+}

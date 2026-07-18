@@ -1,0 +1,6 @@
+{
+  "route": "profile",
+  "schema": "Profile",
+  "consumes": ["handle", "bio"],
+  "bundle": "export default (n) => `<!doctype html><html><head><meta charset=\"utf-8\"><title>@${n.view.handle ?? n.entity}</title>\n<style>body{font-family:system-ui;max-width:28rem;margin:2rem auto;padding:0 1rem}</style></head><body>\n<h1>@${n.view.handle ?? n.entity}</h1><p>${n.view.bio ?? \"\"}</p></body></html>`;\n"
+}
