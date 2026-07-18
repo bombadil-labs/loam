@@ -1,0 +1,6 @@
+{
+  "route": "planner",
+  "schema": "Planner",
+  "consumes": ["plan"],
+  "bundle": "export default (n) => {\n  const seen = new Map();\n  for (const p of n.view.plan ?? []) {\n    const key = p.title ?? \"(untitled)\";\n    if (!seen.has(key)) seen.set(key, p);\n  }\n  const plans = [...seen.values()].sort((a, b) => (a.when ?? 0) - (b.when ?? 0));\n  const now = Date.now();\n  const li = (p) => {\n    const when = p.when ? new Date(p.when).toLocaleString() : \"sometime\";\n    const past = (p.when ?? Infinity) < now;\n    return `<li${past ? ' class=\"past\"' : \"\"}><strong>${p.title ?? \"(untitled)\"}</strong> \u2014 ${when}${p.where ? ` @ ${p.where}` : \"\"}${p.rsvp?.length ? ` <em>(${p.rsvp.length} RSVP)</em>` : \"\"}</li>`;\n  };\n  return `<!doctype html><html><head><meta charset=\"utf-8\"><title>Planner</title>\n<style>body{font-family:system-ui;max-width:30rem;margin:2rem auto;padding:0 1rem}\nh1{font-size:1.4rem}ul{list-style:none;padding:0}\nli{padding:.5rem .6rem;border-bottom:1px solid #eee}.past{color:#aaa}</style></head><body>\n<h1>Planner</h1><ul>${plans.map(li).join(\"\")}</ul></body></html>`;\n};\n"
+}
