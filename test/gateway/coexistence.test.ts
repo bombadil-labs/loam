@@ -201,6 +201,26 @@ describe("§21.7 coexistence — two lenses over one hyperschema", () => {
     await gw.close();
   });
 
+  it("a renderer binds to a LENS by its own name — found by Larder, the first real app", async () => {
+    // T2's sweep missed the renderer path: publishRenderer and the serve-surface membership
+    // checks still keyed on the hyperschema's name, so a renderer over a non-degenerate lens
+    // ("PlantClassic" here; "Groceries" in the app that found it) was refused as unregistered.
+    const gw = await bootSingle();
+    await gw.publishRegistration(PLANT, ARCHIVAL, [FERN], undefined, undefined, undefined, [
+      "height",
+    ]);
+    await gw.publishRenderer({
+      route: "classic",
+      schema: "PlantClassic",
+      consumes: ["height"],
+      bundle: "export default (n) => `<p>first height: ${n.view.height}</p>`;",
+    });
+    const page = await gw.serveRoute("classic", FERN, "full");
+    expect(page.status).toBe(200);
+    expect(page.body).toContain("first height: 42"); // the archival lens's oldest-wins reading
+    await gw.close();
+  });
+
   it("writability honesty: a field writable through one sibling lens is writable (§14's posture)", async () => {
     const gw = await bootSingle();
     // The archival lens opens NO fields; the broad lens opens height. A write through the broad
