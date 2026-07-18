@@ -1,0 +1,168 @@
+{
+  "hyperschema": {
+    "name": "LarderItem",
+    "alg": 1,
+    "body": {
+      "op": "group",
+      "key": "byTargetContext",
+      "in": {
+        "op": "select",
+        "pred": {
+          "hasPointer": {
+            "targetEntity": {
+              "var": "root"
+            }
+          }
+        },
+        "in": {
+          "op": "mask",
+          "policy": "drop",
+          "in": "input"
+        }
+      }
+    }
+  },
+  "schema": {
+    "name": "Item",
+    "alg": 1,
+    "props": {
+      "need": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      },
+      "got": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      },
+      "have": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      },
+      "note": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      },
+      "name": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      }
+    },
+    "default": {
+      "pick": {
+        "order": {
+          "byTimestamp": "desc"
+        }
+      }
+    }
+  },
+  "roots": [],
+  "writable": [
+    "name",
+    "need",
+    "got",
+    "have",
+    "note"
+  ],
+  "mutations": {
+    "needIt": {
+      "pointers": [
+        {
+          "role": "subject",
+          "at": {
+            "arg": "item"
+          },
+          "context": "need"
+        },
+        {
+          "role": "value",
+          "value": {
+            "arg": "at"
+          }
+        }
+      ]
+    },
+    "gotIt": {
+      "pointers": [
+        {
+          "role": "subject",
+          "at": {
+            "arg": "item"
+          },
+          "context": "got"
+        },
+        {
+          "role": "value",
+          "value": {
+            "arg": "at"
+          }
+        }
+      ]
+    },
+    "stocked": {
+      "pointers": [
+        {
+          "role": "subject",
+          "at": {
+            "arg": "item"
+          },
+          "context": "have"
+        },
+        {
+          "role": "value",
+          "value": {
+            "arg": "qty"
+          }
+        }
+      ]
+    },
+    "noteFor": {
+      "pointers": [
+        {
+          "role": "subject",
+          "at": {
+            "arg": "item"
+          },
+          "context": "note"
+        },
+        {
+          "role": "value",
+          "value": {
+            "arg": "text"
+          }
+        }
+      ]
+    },
+    "called": {
+      "pointers": [
+        {
+          "role": "subject",
+          "at": {
+            "arg": "item"
+          },
+          "context": "name"
+        },
+        {
+          "role": "value",
+          "value": {
+            "arg": "name"
+          }
+        }
+      ]
+    }
+  }
+}
