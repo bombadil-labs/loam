@@ -1,26 +1,6 @@
 {
   "tickets": [
     {
-      "id": "T15",
-      "title": "§27 — Membership is a query, first-class: select/watch + composable set-algebra scoping",
-      "category": "build",
-      "duration": 3,
-      "scope": [
-        "src/gateway/ingest.ts",
-        "src/gateway/quarantine-pool.ts",
-        "src/gateway/erase.ts",
-        "src/gateway/gateway.ts",
-        "src/federation/**",
-        "test/gateway/**",
-        "test/federation/**",
-        "spec/27-containers.md",
-        "spec/24-quarantine.md"
-      ],
-      "rails": [],
-      "edges": [],
-      "body": "BUILD-READY. The first §27 implementation slice (design DECIDED and landed — #110/#112; the 0.6.0 substrate landed — #113): make a container's membership a first-class delta-query, exactly §27.6's decided shape (a rhizomatic Term → dset, static or live, local or remote).\n\nDO: (1) Expose the evaluation as a gateway surface — select(term): evaluate a JSON op-profile Term (parseTerm → evalTerm, dset-sort required) over this store's ground, once; watch(term): the same, live (re-evaluated on pulse — a parameterized offeredDeltas, which spec/27.6 calls 'nearly free'). Refuse a non-dset Term loudly at the door. (2) Generalize the quarantine's seeding edge: QuarantineOptions gains a membership Term alternative to the admit predicate (admit stays as the degenerate case, per §24.10 — same knob, generalized, no new mechanism); the inbound federation filters the pulse by the Term. (3) Prove the composable scoping 0.6.0 bought: a pool seeded over a difference ('author X's deltas MINUS container Y's members'), including a NESTED difference, live-follows correctly — the exact composition the depth-1 select(not(inView(...))) idiom could never express.\n\nBOUNDARY (0.6.0, pinned in §24.10 — do not fight it): difference/intersect are Term-layer operators ONLY; they may NOT ride inside inView predicates (depth-1 stratification unchanged). Compose scopes at the seeding/reading EDGE; invent no predicate-level machinery, no parallel vocabulary.\n\nDO NOT BUILD (each its own later ticket): the module manifest (§27.6 question 1 — still OPEN, needs design); Merkle-set identity (§27.6 question 2); trust-on-load (§27.6 question 3); the full Container lifting with the five-knob vector (§27.7 — comes when a SECOND policy wants the object); scope-merge's container-entity exclusion claims (needs the container-as-entity model); promote-LAW (§24.4).\n\nRAILS: select returns exactly the Term's dset over a real ground; watch follows a pulse; a membership-Term-seeded pool admits exactly the members (and its erasure fan-out still holds — reuse the §24.8 rail against a Term-seeded pool); the nested-difference scope evaluates through the seeding edge; a non-dset Term is refused.\n\nCODE ANCHORS: quarantine-pool.ts (QuarantineOptions.admit — the degenerate form being generalized); test/spike/set-algebra.test.ts (the 0.6.0 operators' proven reach, reuse its idioms); gateway.federate + offeredDeltas (the pulse being filtered); UNRUNNABLE_KEYS at src/federation/translate.ts:105 (difference/intersect need NO entry — they are Term ops, recorded there; do not add one).\n\nVILLAGE: an act where the operator stands up a trial pool over a hand-picked scope — one author's claims minus an excluded container — watches it live-follow, and drops it. MERGE: touches the federation/quarantine seeding surface → Myk's merge (P6), never self-merge."
-    },
-    {
       "id": "T18",
       "title": "§23.9/§22.6 — cap the anonymous render fan, and make the resolver's declared type bind",
       "category": "build",

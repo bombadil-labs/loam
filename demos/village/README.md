@@ -369,6 +369,12 @@ _(one entry per PR that grew the village; newest last)_
   first thing anyone said. They serve simultaneously (the pre-§21.7 registry EVICTED the elder), evolve
   on their own clocks (the archive drops its field; the broad lens never flinches), and the anonymous
   door opens lens by lens — Townbook is declared public, FirstImpressions stays the town's own.
+- **THE SCOPE IS A QUERY (SPEC §27.6)** (phase-membership.mjs, 4/4, re-runnable): membership stops
+  being a config file. The operator stands up a TRIAL POOL over a hand-picked scope said as algebra —
+  the trial ledger's claims MINUS the drafts, a difference over a select — watches the pulse
+  re-evaluate the same Term live (new entries cross, new drafts stay home), proves §24.8's erasure
+  reaches byte-for-byte through the Term-scoped glass, and drops the trial wholesale. select/watch
+  are the first-class doors; the quarantine's admit predicate is the same knob's degenerate form.
 - **A PLACE WHERE UNTRUSTED LAW MAY BIND (SPEC §24, slice 1)** (phase-quarantine.mjs, 6/6, re-runnable):
   today foreign law is inert-by-default — safe, but untestable. The quarantine closes that gap. The almanac
   stands up a QUARANTINE POOL — a second store over its own ground, seeded ONE-WAY from the primary — that

@@ -40,6 +40,13 @@ export interface QuarantineOptions {
   // narrowing knob that EXISTS today (there are no read-side capability slices, §7) — the operator hand-picks
   // what the quarantine SEES by filtering at the edge, rather than what a piece of code may see once in.
   readonly admit?: (d: Delta) => boolean;
+  // The same knob, GENERALIZED (§24.10 / §27.6, ticket T15): a MEMBERSHIP TERM — the JSON `op`
+  // profile of a rhizomatic Term selecting a delta set over the primary's ground. The pool is
+  // seeded with exactly the members, re-evaluated on every pulse, so the composed set algebra
+  // (difference/intersect, nested to any depth — Term-layer ONLY, never inside `inView`) scopes
+  // what a quarantine sees. `admit` is this knob's degenerate predicate form; give one or the
+  // other, never both.
+  readonly membership?: unknown;
 }
 
 // Open a QUARANTINE POOL over a store (the body of `Gateway.openQuarantine`, SPEC §24 — a thin delegating
@@ -64,12 +71,30 @@ export async function openQuarantineImpl(
   // delivers them live — a quarantine inherits the holes along with the ground. (A forged
   // tombstone slipping this wrapper is still refused inside federate by eraseDefect; the
   // authorization gate is unchanged.)
-  const base = opts.admit;
-  const reseed = (): Promise<FederationReport> =>
-    pool.federate(
-      gw.offeredDeltas(),
-      base === undefined ? {} : { admit: (d) => isTombstone(d.claims) || base(d) },
+  if (opts.admit !== undefined && opts.membership !== undefined) {
+    throw new Error(
+      "openQuarantine: give a membership Term OR an admit predicate, not both — admit is the " +
+        "degenerate form of the same knob (§24.10)",
     );
+  }
+  // A membership Term is proven at the door (parse + dset-sort, via the same select the reading
+  // surface serves) and re-evaluated on every pulse — the scope is LIVE, like the ground it cuts.
+  if (opts.membership !== undefined) gw.select(opts.membership);
+  const base = opts.admit;
+  const memberAdmit = (): ((d: Delta) => boolean) | undefined => {
+    if (opts.membership === undefined) return base === undefined ? undefined : base;
+    const members = new Set(gw.select(opts.membership).map((d) => d.id));
+    return (d) => members.has(d.id);
+  };
+  const reseed = (): Promise<FederationReport> => {
+    const admit = memberAdmit();
+    return pool.federate(
+      gw.offeredDeltas(),
+      // A scope narrows what the pool SEES, never what it must FORGET (§24.8): the operator's
+      // tombstones pass the seeding edge unconditionally, membership and predicate alike.
+      admit === undefined ? {} : { admit: (d) => isTombstone(d.claims) || admit(d) },
+    );
+  };
   await reseed(); // one-way INBOUND seeding; the reverse leg is never wired
   // Bind the operator's federated schemas so the pool RESOLVES the seeded ground — the dry-run reads a
   // living lens, not raw deltas. (Foreign, non-operator law federated in binds nothing until promoted.)

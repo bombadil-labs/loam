@@ -270,3 +270,18 @@ economics ladder), and §24 (the container's first instance; promotion/promote-o
 operation, built #111). Follow-on tickets: the first-class membership `select`/`watch` surface and
 scope-merge (both on today's substrate); the composable container set-algebra (on 0.6.0 / rhizomatic#16); the
 manifest and Merkle-set identity (§27.6); then the full `Container` lifting.
+
+**§27.6 MEMBERSHIP BUILT** [#132](https://github.com/bombadil-labs/loam/pull/132) (realizes ticket
+T15, 2026-07-17) — the decided shape's first implementation slice: `Gateway.select(term)` evaluates
+a rhizomatic Term (the JSON `op` profile) over the store's surviving ground, once, refusing any
+non-dset result loudly; `Gateway.watch(term)` is the same Term live — the current members, then a
+fresh evaluation whenever the membership moves, on the entity-stream Channel machinery (the
+"parameterized `offeredDeltas`" this section called nearly free — and it is: both live in
+`src/gateway/ingest.ts` beside `offeredDeltas` itself). The quarantine's seeding edge generalizes to
+`QuarantineOptions.membership` (a Term; the `admit` predicate is the degenerate form, one or the
+other), re-evaluated per pulse, erasure law intact. The composed scoping 0.6.0 bought is proven at
+the edge: a nested difference (difference against difference — the depth-1 `inView` idiom's
+impossible case) seeds a pool and live-follows (`test/gateway/membership.test.ts`, 6 rails;
+`demos/village/phase-membership.mjs`, 4/4). Deferred, still open as designed: the module manifest
+(question 1), Merkle-set identity (question 2), trust-on-load (question 3), the §27.7 `Container`
+lifting. Federation/quarantine seeding surface → Myk's merge (P6).
