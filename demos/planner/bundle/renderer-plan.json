@@ -1,0 +1,8 @@
+{
+  "route": "plan",
+  "schema": "Plan",
+  "consumes": ["title", "when", "where", "note", "guest", "rsvp"],
+  "bundle": "export default (n) => {\n  const v = n.view;\n  const when = v.when ? new Date(v.when).toLocaleString() : \"sometime\";\n  const guests = (v.guest ?? []).map((g) => `<li>${g}</li>`).join(\"\");\n  const rsvps = (v.rsvp ?? []).map((r) => `<li>${r}</li>`).join(\"\");\n  return `<!doctype html><html><head><meta charset=\"utf-8\"><title>${v.title ?? n.entity}</title>\n<style>body{font-family:system-ui;max-width:30rem;margin:2rem auto;padding:0 1rem}\nh1{font-size:1.4rem}h2{font-size:1rem;color:#666}ul{padding-left:1.2rem}</style></head><body>\n<h1>${v.title ?? n.entity}</h1>\n<p>${when}${v.where ? ` @ ${v.where}` : \"\"}</p>${v.note ? `<p><em>${v.note}</em></p>` : \"\"}\n<h2>Guests</h2><ul>${guests || \"<li>nobody yet</li>\"}</ul>\n<h2>RSVPs (signed)</h2><ul>${rsvps || \"<li>none yet</li>\"}</ul>\n<form method=\"post\"><input type=\"hidden\" name=\"rsvp\" value=\"yes\"><button>I'm in</button></form>\n</body></html>`;\n};\n",
+  "writable": ["rsvp"],
+  "pen": "planner-pen"
+}

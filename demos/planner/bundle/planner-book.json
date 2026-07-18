@@ -1,0 +1,54 @@
+{
+  "hyperschema": {
+    "name": "PlannerBook",
+    "alg": 1,
+    "body": {
+      "op": "expand",
+      "role": {
+        "exact": "plan"
+      },
+      "schema": "PlannerPlan",
+      "in": {
+        "op": "group",
+        "key": "byTargetContext",
+        "in": {
+          "op": "select",
+          "pred": {
+            "hasPointer": {
+              "targetEntity": {
+                "var": "root"
+              }
+            }
+          },
+          "in": {
+            "op": "mask",
+            "policy": "drop",
+            "in": "input"
+          }
+        }
+      }
+    }
+  },
+  "schema": {
+    "name": "Planner",
+    "alg": 1,
+    "props": {
+      "plan": {
+        "all": {
+          "order": {
+            "byTimestamp": "asc"
+          }
+        }
+      }
+    },
+    "default": {
+      "pick": {
+        "order": {
+          "byTimestamp": "desc"
+        }
+      }
+    }
+  },
+  "roots": ["planner:mine"],
+  "writable": ["plan"]
+}

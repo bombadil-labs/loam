@@ -1,0 +1,194 @@
+{
+  "hyperschema": {
+    "name": "PlannerPlan",
+    "alg": 1,
+    "body": {
+      "op": "group",
+      "key": "byTargetContext",
+      "in": {
+        "op": "select",
+        "pred": {
+          "hasPointer": {
+            "targetEntity": {
+              "var": "root"
+            }
+          }
+        },
+        "in": {
+          "op": "mask",
+          "policy": "drop",
+          "in": "input"
+        }
+      }
+    }
+  },
+  "schema": {
+    "name": "Plan",
+    "alg": 1,
+    "props": {
+      "title": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      },
+      "when": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      },
+      "where": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      },
+      "note": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      },
+      "guest": {
+        "all": {
+          "order": {
+            "byTimestamp": "asc"
+          }
+        }
+      },
+      "rsvp": {
+        "all": {
+          "order": {
+            "byTimestamp": "asc"
+          }
+        }
+      }
+    },
+    "default": {
+      "pick": {
+        "order": {
+          "byTimestamp": "desc"
+        }
+      }
+    }
+  },
+  "roots": [],
+  "writable": ["title", "when", "where", "note", "rsvp", "guest"],
+  "resolvers": {
+    "rsvp": {
+      "rung": "a",
+      "type": "list",
+      "code": "export default (bucket) => bucket.map((e) => `${String(e.author).slice(-8)}: ${e.value}`);"
+    }
+  },
+  "mutations": {
+    "planIt": {
+      "pointers": [
+        {
+          "role": "subject",
+          "at": {
+            "arg": "plan"
+          },
+          "context": "title"
+        },
+        {
+          "role": "value",
+          "value": {
+            "arg": "title"
+          }
+        }
+      ]
+    },
+    "scheduleIt": {
+      "pointers": [
+        {
+          "role": "subject",
+          "at": {
+            "arg": "plan"
+          },
+          "context": "when"
+        },
+        {
+          "role": "value",
+          "value": {
+            "arg": "when"
+          }
+        }
+      ]
+    },
+    "whereAt": {
+      "pointers": [
+        {
+          "role": "subject",
+          "at": {
+            "arg": "plan"
+          },
+          "context": "where"
+        },
+        {
+          "role": "value",
+          "value": {
+            "arg": "where"
+          }
+        }
+      ]
+    },
+    "noteOn": {
+      "pointers": [
+        {
+          "role": "subject",
+          "at": {
+            "arg": "plan"
+          },
+          "context": "note"
+        },
+        {
+          "role": "value",
+          "value": {
+            "arg": "text"
+          }
+        }
+      ]
+    },
+    "rsvp": {
+      "pointers": [
+        {
+          "role": "subject",
+          "at": {
+            "arg": "plan"
+          },
+          "context": "rsvp"
+        },
+        {
+          "role": "value",
+          "value": {
+            "arg": "answer"
+          }
+        }
+      ]
+    },
+    "invite": {
+      "pointers": [
+        {
+          "role": "subject",
+          "at": {
+            "arg": "plan"
+          },
+          "context": "guest"
+        },
+        {
+          "role": "guest",
+          "at": {
+            "arg": "person"
+          },
+          "context": "person"
+        }
+      ]
+    }
+  }
+}
