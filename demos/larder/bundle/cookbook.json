@@ -1,0 +1,62 @@
+{
+  "hyperschema": {
+    "name": "LarderCookbook",
+    "alg": 1,
+    "body": {
+      "op": "expand",
+      "role": {
+        "exact": "recipe"
+      },
+      "schema": "LarderRecipe",
+      "reading": "Recipe",
+      "in": {
+        "op": "group",
+        "key": "byTargetContext",
+        "in": {
+          "op": "select",
+          "pred": {
+            "hasPointer": {
+              "targetEntity": {
+                "var": "root"
+              }
+            }
+          },
+          "in": {
+            "op": "mask",
+            "policy": "drop",
+            "in": "input"
+          }
+        }
+      }
+    }
+  },
+  "schema": {
+    "name": "Cookbook",
+    "alg": 1,
+    "props": {
+      "recipe": {
+        "all": {
+          "order": {
+            "byTimestamp": "asc"
+          }
+        }
+      }
+    },
+    "default": {
+      "pick": {
+        "order": {
+          "byTimestamp": "desc"
+        }
+      }
+    }
+  },
+  "roots": ["book:recipes"],
+  "writable": ["recipe"],
+  "resolvers": {
+    "recipe": {
+      "code": "export default (bucket) => bucket.map((e) => {\n  const r = e.value || {};\n  const raw = r.ingredient;\n  const lines = Array.isArray(raw) ? raw : raw ? [raw] : [];\n  const short = lines\n    .map((x) => {\n      const item = x.ingredient || (x.name !== undefined || x.have !== undefined ? x : {});\n      return { name: item.name ?? '?', have: Number(item.have ?? 0), need: Number(x.qty ?? 1) };\n    })\n    .filter((x) => x.have < x.need);\n  const title = r.title ?? '(untitled)';\n  return short.length === 0\n    ? `${title} \\u2014 MAKEABLE`\n    : `${title} \\u2014 need ${short.map((x) => `${x.need - x.have} ${x.name}`).join(', ')}`;\n});",
+      "rung": "a",
+      "type": "list"
+    }
+  }
+}

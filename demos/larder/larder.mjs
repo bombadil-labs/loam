@@ -73,7 +73,15 @@ async function openMember(name, port) {
 // ---- install the bundle: the app IS these deltas (what SKILL.md walks a Claude through) --------
 async function installLarder(member) {
   const { gateway } = member;
-  for (const file of ["item.json", "pantry.json", "grocery-list.json"]) {
+  // Order matters only for readability; the fixpoint would sort it out. Recipe expands Item, and
+  // Cookbook expands Recipe — two levels of lens, each naming the reading below it.
+  for (const file of [
+    "item.json",
+    "pantry.json",
+    "grocery-list.json",
+    "recipe.json",
+    "cookbook.json",
+  ]) {
     const s = spec(file);
     await gateway.publishRegistration(
       {
@@ -86,11 +94,12 @@ async function installLarder(member) {
       undefined,
       s.mutations,
       s.writable,
+      s.resolvers,
     );
   }
   await gateway.publishRenderer(spec("renderer-list.json"));
   await gateway.publishRenderer(spec("renderer-tick.json"));
-  await gateway.declarePublic(["Groceries", "Item"]);
+  await gateway.declarePublic(["Groceries", "Item", "Cookbook"]);
   // The pen's write standing (SPEC §6's two keys: provisioning is custody, THIS is authority).
   await gateway.append([
     signClaims(grantClaims("loam:store", PEN, "write", member.operator, Date.now()), member.seed),
@@ -190,6 +199,96 @@ try {
     "the Pantry lens reads the same ground a different way — the BBQ bundle will ask it about beer",
     pantry.data?.pantry?.have === 6,
     `beer on hand: ${pantry.data?.pantry?.have}`,
+  );
+
+  // ---- BOTH DIRECTIONS ---------------------------------------------------------------------
+  // A recipe names what it needs; the pantry says what is there. Point the same edge two ways and
+  // you get the two questions people actually ask: what does this dish need, and what can I cook?
+
+  // Ann writes down two dishes. `needsIngredient` files a line under the recipe AND names the item,
+  // so the gather expands each line into that item's real Item view — stock included.
+  const recipe = async (g, id, title, lines) => {
+    await q(g, `mutation { recipeCalled(recipe: "${id}", title: "${title}") { delta } }`);
+    for (const [item, qty] of lines) {
+      await q(
+        g,
+        `mutation { needsIngredient(recipe: "${id}", item: "${item}", qty: ${qty}) { delta } }`,
+      );
+    }
+    await q(
+      g,
+      `mutation { linkCookbook(entity: "book:recipes", field: "recipe", target: "${id}") { recipe } }`,
+    );
+  };
+
+  // The pantry as it stands: flour enough for one loaf, no eggs at all.
+  await q(ann.gateway, `mutation { called(item: "item:flour", name: "flour") { delta } }`);
+  await q(ann.gateway, `mutation { stocked(item: "item:flour", qty: 3) { delta } }`);
+  await q(ann.gateway, `mutation { called(item: "item:egg", name: "eggs") { delta } }`);
+  await q(ann.gateway, `mutation { stocked(item: "item:egg", qty: 0) { delta } }`);
+
+  await recipe(ann.gateway, "recipe:flatbread", "flatbread", [["item:flour", 2]]);
+  await recipe(ann.gateway, "recipe:pasta", "fresh pasta", [
+    ["item:flour", 2],
+    ["item:egg", 3],
+  ]);
+
+  // FORWARD — recipe to ingredients. Each line is computed against the pantry, not typed in.
+  const pastaView = await q(ann.gateway, `{ recipe(entity: "recipe:pasta") { title ingredient } }`);
+  const lines = pastaView.data?.recipe?.ingredient ?? [];
+  check(
+    "larder.8",
+    "FORWARD — a recipe reads its own ingredients against the pantry: each line computed from the " +
+      "item's real stock, because the gather expanded it (§22.8)",
+    lines.length === 2 &&
+      lines.some((l) => /flour: have 3, need 2$/.test(l)) &&
+      lines.some((l) => /eggs: have 0, need 3 .* short 3$/.test(l)),
+    JSON.stringify(lines),
+  );
+
+  // REVERSE — the whole question, answered as a READ. The cookbook weighs every recipe against the
+  // pantry two levels down: a cookbook link expands to a Recipe view, whose ingredient lines carry
+  // each item's stock.
+  const beforeShopping = await q(ann.gateway, `{ cookbook(entity: "book:recipes") { recipe } }`);
+  const verdicts = beforeShopping.data?.cookbook?.recipe ?? [];
+  check(
+    "larder.9",
+    "REVERSE — given what I have, what can I make? The cookbook answers by reading, not by " +
+      "remembering: flatbread is on, pasta is three eggs short",
+    verdicts.some((v) => /flatbread .* MAKEABLE/.test(v)) &&
+      verdicts.some((v) => /fresh pasta .* need 3 eggs/.test(v)),
+    JSON.stringify(verdicts),
+  );
+
+  // AND IT IS LIVE. Buy the eggs and ask again — nothing re-derived, nothing re-ground. The answer
+  // moves because the pantry moved, which is the whole reason this is an interpretation and not a
+  // remembered fact: a cookbook that says "pasta" over eggs you already ate is the bug.
+  await q(ann.gateway, `mutation { stocked(item: "item:egg", qty: 12) { delta } }`);
+  const afterShopping = await q(ann.gateway, `{ cookbook(entity: "book:recipes") { recipe } }`);
+  const nowMakeable = (afterShopping.data?.cookbook?.recipe ?? []).filter((v) =>
+    /MAKEABLE/.test(v),
+  );
+  check(
+    "larder.10",
+    "the answer is LIVE: buy a dozen eggs and pasta becomes makeable on the next read — no runner, " +
+      "no re-derivation, nothing stale to invalidate",
+    nowMakeable.length === 2,
+    JSON.stringify(afterShopping.data?.cookbook?.recipe ?? []),
+  );
+
+  // AND IT COMPOSES BACK. What a recipe is short of is exactly what belongs on the grocery list —
+  // the same edge, read the third way. Ben (federated) sees the shortfall land on the shared list.
+  await q(ann.gateway, `mutation { stocked(item: "item:egg", qty: 0) { delta } }`);
+  await addItem(ann.gateway, "item:egg", "eggs");
+  await pullFrom(ben.gateway, ann.base, "op-ann");
+  const bensList = await q(ben.gateway, `{ groceries(entity: "list:groceries") { item } }`);
+  const bensEggs = (bensList.data?.groceries?.item ?? []).find((i) => i?.name === "eggs");
+  check(
+    "larder.11",
+    "and it closes the loop: what the cookbook says you are short of goes on the shared list, and " +
+      "Ben sees it on his own store — one edge, read three ways",
+    bensEggs !== undefined,
+    `ben sees eggs: ${bensEggs !== undefined}`,
   );
 } finally {
   await ann?.close().catch(() => {});

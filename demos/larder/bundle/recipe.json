@@ -1,0 +1,112 @@
+{
+  "hyperschema": {
+    "name": "LarderRecipe",
+    "alg": 1,
+    "body": {
+      "op": "expand",
+      "role": {
+        "exact": "ingredient"
+      },
+      "schema": "LarderItem",
+      "reading": "Item",
+      "in": {
+        "op": "group",
+        "key": "byTargetContext",
+        "in": {
+          "op": "select",
+          "pred": {
+            "hasPointer": {
+              "targetEntity": {
+                "var": "root"
+              }
+            }
+          },
+          "in": {
+            "op": "mask",
+            "policy": "drop",
+            "in": "input"
+          }
+        }
+      }
+    }
+  },
+  "schema": {
+    "name": "Recipe",
+    "alg": 1,
+    "props": {
+      "title": {
+        "pick": {
+          "order": {
+            "byTimestamp": "desc"
+          }
+        }
+      },
+      "ingredient": {
+        "all": {
+          "order": {
+            "byTimestamp": "asc"
+          }
+        }
+      }
+    },
+    "default": {
+      "pick": {
+        "order": {
+          "byTimestamp": "desc"
+        }
+      }
+    }
+  },
+  "roots": [],
+  "writable": ["title"],
+  "mutations": {
+    "recipeCalled": {
+      "pointers": [
+        {
+          "role": "subject",
+          "at": {
+            "arg": "recipe"
+          },
+          "context": "title"
+        },
+        {
+          "role": "value",
+          "value": {
+            "arg": "title"
+          }
+        }
+      ]
+    },
+    "needsIngredient": {
+      "pointers": [
+        {
+          "role": "subject",
+          "at": {
+            "arg": "recipe"
+          },
+          "context": "ingredient"
+        },
+        {
+          "role": "ingredient",
+          "at": {
+            "arg": "item"
+          },
+          "context": "in"
+        },
+        {
+          "role": "qty",
+          "value": {
+            "arg": "qty"
+          }
+        }
+      ]
+    }
+  },
+  "resolvers": {
+    "ingredient": {
+      "code": "export default (bucket) => bucket.map((e) => {\n  const v = e.value || {};\n  const item = v.ingredient || (v.name !== undefined || v.have !== undefined ? v : {});\n  const need = Number(v.qty ?? 1);\n  const have = Number(item.have ?? 0);\n  const name = item.name ?? '?';\n  return have >= need\n    ? `${name}: have ${have}, need ${need}`\n    : `${name}: have ${have}, need ${need} \\u2014 short ${need - have}`;\n});",
+      "rung": "a",
+      "type": "list"
+    }
+  }
+}
