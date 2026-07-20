@@ -403,3 +403,10 @@ _(one entry per PR that grew the village; newest last)_
   `expandThrough` emits the reading. The fresh-sweep certifies it end-to-end (circle and film-night
   green), and every store that held a pre-0.8 expand body is carried forward by the §20
   `expand-reading` migration. Host-level resolvers reaching those children is the next step (T26).
+- **RESOLVERS REACH EXPANDED CHILDREN (SPEC §22.7)** (ticket T26): the follow-on to T25. The
+  village's `Circle`/`FilmNight` expands now run through `decorateChildren` — the seam that applies a
+  CHILD reading's §22 resolvers to each expanded child — and since Person/Film carry no resolvers,
+  the village certifies the pass-through case (an undecorated child is returned exactly as it was).
+  The WITH-resolver case is demonstrated federated end-to-end by **Pachyderm** (`demos/pachyderm/`):
+  a post's computed byline, which used to appear only on a direct read, now rides every post embedded
+  in the timeline — the same value in both places, the gap pachy.2 documented now closed.

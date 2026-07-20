@@ -28,10 +28,12 @@ node demos/pachyderm/pachyderm.mjs   # Alice, Bob, Carol — 7 checks, three sov
   her request with his own operator's erasure. No delete-request pretending to be a guarantee —
   the protocol tells you exactly what forgetting means, and the demo asserts all three states.
 - **Attribution is computed, not claimed.** A post's byline comes from a §22 resolver reading
-  the claim's cryptographic authorship. (Found while building: that resolver applies on direct
-  reads but not yet to posts as *expanded children* of the feed — filed as a platform ticket
-  with a genuine design question inside it. The demo says so in its own comments; honesty is
-  house style.)
+  the claim's cryptographic authorship — and it reaches the **timeline**, not just a direct post
+  read. (Building this surfaced a real platform gap: the resolver applied to a post read on its
+  own but not to posts as *expanded children* of the feed. That drove [rhizomatic#23](https://github.com/bombadil-labs/rhizomatic/issues/23)
+  — an `expand` now names the child's reading — and Loam's §22.7 / ticket T26, so the child
+  resolves through its own reading and the byline rides every post in the feed. Closed, and the
+  demo asserts it.)
 - **A boost is a claim citing the original** — provenance rides forever; a reply is an edge. No
   quote-tweet screenshot laundering: the citation is structural.
 

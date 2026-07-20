@@ -263,13 +263,21 @@ and `reading` (the resolution Schema it resolves through) — and a legacy readi
 resolve, loudly, with no parent-Schema fallback. So an expanded child is now resolved through its OWN
 reading's Policies, named in the term and validated at registration.
 
-What this section's HOST-LEVEL resolvers do across that boundary is the next step, not this one: a
-§22 resolver rides a binding, and `applyResolvers` decorates a lens's top-level fields only — it does
-not yet descend into expanded children to apply the CHILD reading's resolvers. So a Pachyderm post
-read directly carries its computed byline; the same post embedded in the timeline does not, yet. That
-enrichment is ticket **T26**, and it stands on exactly the primitive this ticket adopted: because the
-child's reading is now named in the term, the host can find it and apply its resolvers. Named here so
-the boundary is a documented line, not a silent surprise.
+And this section's HOST-LEVEL resolvers now reach across that boundary too (ticket T26,
+[#140](https://github.com/bombadil-labs/loam/pull/140)). A §22 resolver rides a binding, and
+`applyResolvers` decorates a lens's top-level fields; `decorateChildren` then reaches one level down
+and repeats, applying the CHILD reading's resolvers to each expanded child — recursively, to
+grandchildren and beyond. So a Pachyderm post read directly and the SAME post embedded in the timeline
+now carry the identical computed byline. The mechanism avoids reimplementing any of rhizomatic's
+ordering: the same hview is resolved a second time with every expansion stripped, so each formerly
+expanded pointer renders as the child's entity ID in the identical Policy order — that alignment is the
+child's identity, letting the host splice the decorated child back into the exact position it holds.
+The reading's own resolvers are looked up by name (a reading's name IS its lens name), and the child's
+resolver memo invalidates on the child's own erasure exactly as a top-level field's does (§11): the
+child bucket keys the memo. **v1 boundary, named honestly:** decoration reaches a child embedded as a
+single expansion pointer (a feed's post, a plan's guest) — the common shape; a child buried inside a
+MULTI-pointer object value is left undecorated (the alignment can't name it), a rung deferred until a
+consumer needs it.
 
 **Provenance.** rhizomatic 0.8 adoption landed [#139](https://github.com/bombadil-labs/loam/pull/139)
 (ticket T25), realizing [rhizomatic#23](https://github.com/bombadil-labs/rhizomatic/issues/23). Loam
@@ -281,4 +289,12 @@ old stores forward — it fills each `expand`'s `reading` from the child hypersc
 (pre-0.8 stores are single-lens, so the pairing is mechanical), re-signing the definition and negating
 the old (`src/migrate/migrate.ts`, the `expand-reading` step; `test/migrate/expand-reading.test.ts`).
 The jump from 0.6 also adopts 0.7's strict Ed25519 acceptance criterion (rhizomatic#20) — transparent
-for every honest signature. Host-level resolvers reaching expanded children remains ticket T26.
+for every honest signature. Host-level resolvers reaching expanded children landed
+[#140](https://github.com/bombadil-labs/loam/pull/140) (ticket T26): `decorateChildren`
+(`src/gateway/resolvers.ts`), wired into every read path — query, pinned version, and the live watch
+stream (`src/gateway/reads.ts`) — so a door, a version door, and a subscription all attribute a
+timeline the same way. Rails: a post read directly and as an expanded child resolve to the same
+byline, a child reading with no resolvers passes through untouched, and the child memo invalidates on
+child erasure (`test/gateway/child-resolvers.test.ts`). Additive, no wire change, no migration — the
+enrichment is pure read-path. Pachyderm's timeline (`demos/pachyderm/`) now carries its attributions,
+closing the gap pachy.2 documented.

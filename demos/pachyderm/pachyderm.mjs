@@ -121,13 +121,16 @@ try {
   const direct = await q(alice.gateway, `{ post(entity: "post:a1") { text } }`);
   check(
     "pachy.2",
-    "Alice's posts land on her feed; a DIRECT post read carries the resolver's signed attribution",
-    aliceTL.length === 2 && String(direct.data?.post?.text ?? "").includes("@"),
-    `posts: ${aliceTL.length}; direct: ${JSON.stringify(direct.data?.post?.text)}`,
+    "attribution is computed, not typed — and it reaches the TIMELINE: every post in the feed carries " +
+      "its author's signed byline, exactly as a direct post read does (§22.7, ticket T26)",
+    aliceTL.length === 2 &&
+      aliceTL.every((t) => t.includes("@")) &&
+      String(direct.data?.post?.text ?? "").includes("@"),
+    `timeline attributed: ${aliceTL.every((t) => t.includes("@"))}; direct: ${JSON.stringify(direct.data?.post?.text)}`,
   );
-  // (Found while building: the attribution resolver does NOT reach posts as EXPANDED children of
-  // the feed — §22 resolvers ride the binding, and nested expansion resolves through the registry
-  // without binding context. Filed as a platform ticket; the timeline renders raw text meanwhile.)
+  // Once an `expand` names the child's reading (rhizomatic 0.8 / #23), the child resolves through its
+  // OWN reading — so Post's §22 attribution resolver now decorates each post EMBEDDED in the feed, not
+  // only a post read on its own. The gap pachy.2 used to document honestly is closed (T26).
 
   // BOB FOLLOWS ALICE — following IS pulling. The well-known feed entity means her posts land on
   // HIS feed:main: the union is the timeline.
