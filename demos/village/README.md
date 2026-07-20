@@ -395,3 +395,11 @@ _(one entry per PR that grew the village; newest last)_
   gone from every tier of the tree, content-string-at-rest: trust policy is admission configuration, erasure
   is LAW, and depth is no shelter. Promotion (the door OUT), the resource envelope, the sequestered renderer
   frame, and the full ocap are §24's later slices.
+- **AN `expand` NAMES THE CHILD'S READING (rhizomatic 0.8, issue #23)** (ticket T25): the village's
+  `Circle` and `FilmNight` both `expand` a role into a child's view — a friend's Person view, a
+  night's Film view. Before 0.8 that child was resolved through the PARENT's Schema, a coincidence
+  that held only while their fields aligned; now the gather body names the child's own `reading`
+  (`Person`, `Film`), so `gen-schemas.mjs` names every resolution Schema after its hyperschema and
+  `expandThrough` emits the reading. The fresh-sweep certifies it end-to-end (circle and film-night
+  green), and every store that held a pre-0.8 expand body is carried forward by the §20
+  `expand-reading` migration. Host-level resolvers reaching those children is the next step (T26).
