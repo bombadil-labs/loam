@@ -142,4 +142,38 @@ describe("expand reading refs bind at the door (issue #23)", () => {
     expect(await bedPlants(gateway)).toMatchObject({ height: 34 });
     await gateway.close();
   });
+
+  it("evolving a lens moves the reading an expand resolves through", async () => {
+    // A lens evolves through `publishRegistration`, which drops the superseded binding for that lens
+    // before rebuilding. The readings must follow the SAME latest-per-lens rule the surface serves,
+    // so a child resolves through the CURRENT reading rather than whichever Schema happened to sort
+    // last in a flat array — which is why they are now read off the grouping instead of re-derived.
+    // Everything here is PUBLISHED: an in-process `register` of the same lens would survive the
+    // replay as a manual binding and shadow the published one (see ticket T28's diagnosis note).
+    const gateway = await Gateway.open(new MemoryBackend(), { seed: KEEPER_SEED });
+    await gateway.append(governedBootstrap(KEEPER_SEED));
+    await gateway.append([...garden, planting]);
+    const heightBy = (dir: "asc" | "desc") => ({
+      ...PLANT_READING,
+      props: new Map([
+        ["height", { kind: "pick" as const, order: { kind: "byTimestamp" as const, dir } }],
+      ]),
+    });
+
+    await gateway.publishRegistration(PLANT, heightBy("desc"), [FERN], { actor: KEEPER_SEED });
+    await gateway.publishRegistration(
+      { name: "BedWithPlants", alg: 1, body: bedBody("Plant") },
+      bedSchema("BedWithPlants"),
+      [BED],
+      { actor: KEEPER_SEED },
+    );
+    expect(await bedPlants(gateway)).toMatchObject({ height: 34 }); // the fern's LATEST height
+
+    // Evolve the Plant lens: same lens name, a Schema that reads the EARLIEST height instead.
+    await gateway.publishRegistration(PLANT, heightBy("asc"), [FERN], { actor: KEEPER_SEED });
+
+    // The bed's child now resolves through the EVOLVED reading — 30, the fern's first measurement.
+    expect(await bedPlants(gateway)).toMatchObject({ height: 30 });
+    await gateway.close();
+  });
 });
