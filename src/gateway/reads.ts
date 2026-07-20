@@ -26,9 +26,19 @@ import { forgottenSince } from "./erase.js";
 import type { Gateway } from "./gateway.js";
 import type { PatchNode, ResolvedNode } from "./gql.js";
 import type { Registered } from "./gql.js";
-import { applyResolvers } from "./resolvers.js";
+import { lensOf, type ResolverSpecs } from "./registration.js";
+import { applyResolvers, decorateChildren } from "./resolvers.js";
 
 const toError = (err: unknown): Error => (err instanceof Error ? err : new Error(String(err)));
+
+// The resolvers a named READING carries (SPEC §22.7, ticket T26) — for decorating expanded children
+// through their own reading's resolvers. A reading's name IS its lens name, so this is the live
+// binding whose lens matches. Children resolve through the LIVE reading even under a pinned parent:
+// a version pins the lens the door asked for, not the whole world's readings.
+const readingResolversOf =
+  (gw: Gateway) =>
+  (name: string): ResolverSpecs | undefined =>
+    gw.registered.find((r) => lensOf(r) === name)?.resolvers;
 
 // The moment as a delta set (SPEC §26): the surviving snapshot filtered to the deltas IN FORCE
 // at T — author-timestamp `≤ T`, and a negation counts only if ITS OWN timestamp is `≤ T` (a
@@ -89,11 +99,17 @@ export function resolvedNodeImpl(
 ): ResolvedNode {
   const def = gw.def(name);
   const hview = gatherImpl(gw, name, entity, asOf);
-  const view = applyResolvers(
-    def.resolvers,
-    resolveView(def.schema, hview) as Record<string, View>,
+  const view = decorateChildren(
+    applyResolvers(
+      def.resolvers,
+      resolveView(def.schema, hview) as Record<string, View>,
+      hview,
+      entity,
+      gw.resolverMemo,
+    ),
     hview,
-    entity,
+    def.schema,
+    readingResolversOf(gw),
     gw.resolverMemo,
   );
   return annotateImpl(
@@ -132,11 +148,17 @@ export function resolvePinnedImpl(
   }
   // The pinned version's OWN resolvers apply (SPEC §22) — a version freezes its resolver with its
   // schema, so an old lens keeps computing exactly as it did. Pre-loaded across all versions at bind.
-  const view = applyResolvers(
-    reg.resolvers,
-    resolveView(reg.schema, result.hview) as Record<string, View>,
+  const view = decorateChildren(
+    applyResolvers(
+      reg.resolvers,
+      resolveView(reg.schema, result.hview) as Record<string, View>,
+      result.hview,
+      entity,
+      gw.resolverMemo,
+    ),
     result.hview,
-    entity,
+    reg.schema,
+    readingResolversOf(gw),
     gw.resolverMemo,
   );
   return annotateImpl(
@@ -178,12 +200,19 @@ export function watchEntityImpl(
     if (hview === undefined) {
       throw new Error(`the materialization backing this stream is gone — resubscribe`);
     }
-    // Resolvers apply on the stream too (SPEC §22), so a live frame reads exactly as a query does.
-    const view = applyResolvers(
-      bound.resolvers,
-      resolveView(bound.schema, hview) as Record<string, View>,
+    // Resolvers apply on the stream too (SPEC §22), so a live frame reads exactly as a query does —
+    // including the child-reading resolvers on expanded children (§22.7).
+    const view = decorateChildren(
+      applyResolvers(
+        bound.resolvers,
+        resolveView(bound.schema, hview) as Record<string, View>,
+        hview,
+        entity,
+        gw.resolverMemo,
+      ),
       hview,
-      entity,
+      bound.schema,
+      readingResolversOf(gw),
       gw.resolverMemo,
     );
     return {
