@@ -321,6 +321,27 @@ export function rebindImpl(gw: Gateway, next: Bound[]): void {
 // body cannot materialize — is left unbound rather than crashing the boot. A purely-additive
 // change binds incrementally under the current generation; only a change or a retirement pays
 // for a rebind.
+// Why a candidate failed to bind, remembered per gateway. The fixpoint MUST swallow these — a
+// registration that cannot bind is left unbound rather than crashing a boot, and one bad candidate
+// may not take the others down. But swallowing the error and then GUESSING at the cause is how an
+// operator gets told something false about their own store: the publish path used to answer every
+// failure with "another hyperschema already answers to <name>", which is wrong whenever the real
+// cause was anything else (a missing reading, a manual binding shadowing the published one, a body
+// that will not materialize). So the reason is kept here, and the one caller that can act on it —
+// publishRegistration, which just wrote to append-only ground — reports it verbatim.
+const bindFailures = new WeakMap<Gateway, Map<string, string>>();
+const failureKey = (entity: string, lens: string): string => [entity, lens].join(NUL);
+const rememberBindFailure = (gw: Gateway, key: string, err: unknown): void => {
+  const seen = bindFailures.get(gw) ?? new Map<string, string>();
+  bindFailures.set(gw, seen);
+  seen.set(key, err instanceof Error ? err.message : String(err));
+};
+const forgetBindFailure = (gw: Gateway, key: string): void => {
+  bindFailures.get(gw)?.delete(key);
+};
+const lastBindFailure = (gw: Gateway, key: string): string | undefined =>
+  bindFailures.get(gw)?.get(key);
+
 export function replayRegistrationsImpl(gw: Gateway): void {
   const manual = gw.registered.filter((r) => r.origin === "manual");
   const accepted: Bound[] = [...manual];
@@ -346,8 +367,12 @@ export function replayRegistrationsImpl(gw: Gateway): void {
           );
           buildGqlSchema(trial, gw.gqlHooks()); // GraphQL name collisions
           accepted.push(candidate);
+          forgetBindFailure(gw, failureKey(candidate.entity ?? "", lensOf(candidate)));
           return true;
-        } catch {
+        } catch (err) {
+          // Swallowed on purpose (one bad candidate must not fail the boot) — but REMEMBERED, so
+          // publishRegistration can tell the operator what actually happened instead of guessing.
+          rememberBindFailure(gw, failureKey(candidate.entity ?? "", lensOf(candidate)), err);
           return false;
         }
       };
@@ -632,9 +657,13 @@ export async function publishRegistrationImpl(
       (r) => r.origin === "store" && r.entity === schemaEntity && lensOf(r) === lensName,
     )
   ) {
+    const why = lastBindFailure(gw, failureKey(schemaEntity, lensName));
     throw new Error(
-      `the registration persisted but did not bind: another hyperschema already answers to ` +
-        `"${hyperschema.name}" — negate the old definition first, or choose a different name`,
+      `the registration persisted but did not bind` +
+        (why === undefined
+          ? `: it was not among the registrations the store re-derived — check that the operator ` +
+            `authored it and that its definition survives`
+          : `: ${why}`),
     );
   }
 }
