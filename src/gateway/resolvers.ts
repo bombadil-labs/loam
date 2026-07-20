@@ -25,7 +25,9 @@ import { isBytesView } from "./bytes.js";
 import {
   contentAddress,
   resolveView,
+  schemaHash,
   type Delta,
+  type HVEntry,
   type HView,
   type Policy,
   type Schema,
@@ -52,10 +54,32 @@ export type ResolveFn = (bucket: readonly BucketEntry[]) => View;
 export const resolverAddress = (code: string): string =>
   contentAddress(new TextEncoder().encode(code));
 
-// Render one non-filing pointer target to a value, mirroring rhizomatic's candidateValue (R1) closely
-// enough for a flat bucket: primitives pass through, entity/delta targets render to their id, bytes to
-// a {mime,value} leaf. Expansions (nested child views) are an edge story rung (a) does not reach into.
-const renderTarget = (t: Delta["claims"]["pointers"][number]["target"]): View => {
+// Render one non-filing pointer target to a value, mirroring rhizomatic's candidateValue (R1):
+// primitives pass through, entity/delta targets render to their id, bytes to a {mime,value} leaf.
+//
+// EXCEPT when the pointer was EXPANDED (SPEC §22.8, ticket T31). Then it renders as the CHILD'S OWN
+// RESOLVED VIEW, through the reading the `expand` named — not as a bare entity id. This is what lets a
+// resolver compute over what its own gather already gathered: a recipe that expands its ingredients
+// has the pantry's stock sitting in its hyperview, and before this the resolver could only see
+// `["item:flour"]`. It stays rung (a) — §22.1 defines bucket-pure as "a function of the SELECTED
+// deltas only … it cannot observe anything the algebra did not already gather", and an expansion is
+// precisely something the algebra already gathered (`expand` is a gather-side operator, and the child
+// hview is sitting on this very entry). No sibling fields, no store access, no effects.
+//
+// The child is POLICY-resolved, not resolver-decorated: a resolver sees the child's Schema applied to
+// the child's evidence, and never another resolver's output. That keeps rung (a) free of
+// resolver-calls-resolver reentrancy and ordering, and it is stated in §22.8 rather than left to be
+// discovered.
+const renderTarget = (
+  e: HVEntry,
+  i: number,
+  t: Delta["claims"]["pointers"][number]["target"],
+): View => {
+  const expansion = e.expanded?.get(i);
+  const reading = e.readings?.get(i);
+  if (expansion !== undefined && reading !== undefined) {
+    return resolveView(reading, expansion);
+  }
   switch (t.kind) {
     case "primitive":
       return t.value;
@@ -70,12 +94,12 @@ const renderTarget = (t: Delta["claims"]["pointers"][number]["target"]): View =>
 
 // The value the Policy would see for a bucket entry: the pointers that do NOT file the delta under the
 // root entity. One → that value; none → the bare fact of the edge (`true`); many → an object by role.
-const candidateValue = (delta: Delta, root: string): View => {
+const candidateValue = (e: HVEntry, root: string): View => {
   const nonFiling: Array<[string, View]> = [];
-  for (const p of delta.claims.pointers) {
-    if (p.target.kind === "entity" && p.target.entity.id === root) continue;
-    nonFiling.push([p.role, renderTarget(p.target)]);
-  }
+  e.delta.claims.pointers.forEach((p, i) => {
+    if (p.target.kind === "entity" && p.target.entity.id === root) return;
+    nonFiling.push([p.role, renderTarget(e, i, p.target)]);
+  });
   if (nonFiling.length === 0) return true;
   if (nonFiling.length === 1) return nonFiling[0]![1];
   const obj: Record<string, View> = {};
@@ -88,8 +112,46 @@ const candidateValue = (delta: Delta, root: string): View => {
   return obj;
 };
 
+// A reading's content address, memoized per Schema object (stable per binding), so the memo key can
+// name WHICH reading resolved a child without hashing it on every read.
+const readingIds = new WeakMap<Schema, string>();
+const readingId = (schema: Schema): string => {
+  let id = readingIds.get(schema);
+  if (id === undefined) {
+    id = schemaHash(schema);
+    readingIds.set(schema, id);
+  }
+  return id;
+};
+
+// Everything a bucket entry's VALUE depends on, as memo-key material. Its own delta id, and — since
+// §22.8 projects an expanded pointer as the child's resolved view — the child's reading and every
+// surviving delta in the child's hview, transitively.
+//
+// This is not optional detail: a recipe's `ingredient` bucket is the LINK deltas, and those do not
+// change when the flour's stock does. A child-aware projection with the old key would serve a stale
+// answer — "yes, you can make pasta" over flour that is gone — which is exactly §22.5's promise
+// (the memo invalidates precisely when the ground does) and §11's (never serve a value distilled from
+// bytes that no longer exist) broken in one stroke. The reading is in the key too, because a child
+// lens that evolves changes the child's view without touching a single delta id.
+const dependencyIds = (e: HVEntry, into: string[]): void => {
+  into.push(e.delta.id);
+  if (e.expanded === undefined) return;
+  for (const [i, child] of e.expanded) {
+    const reading = e.readings?.get(i);
+    if (reading !== undefined) into.push(readingId(reading));
+    for (const entries of child.props.values()) {
+      for (const childEntry of entries) {
+        if (childEntry.negated) continue; // the SURVIVING child ground, mirroring the projection
+        dependencyIds(childEntry, into);
+      }
+    }
+  }
+};
+
 // The surviving bucket for one field: the non-negated gathered deltas, each projected to a BucketEntry.
-// This IS the "selected delta set" §22.5 keys the cache on — an erased delta simply is not here.
+// This IS the "selected delta set" §22.5 keys the cache on — an erased delta simply is not here — now
+// reaching through expansions, so a child's ground counts as part of what the value was distilled from.
 export function bucketOf(
   hview: HView,
   field: string,
@@ -100,11 +162,11 @@ export function bucketOf(
   for (const e of hview.props.get(field) ?? []) {
     if (e.negated) continue;
     entries.push({
-      value: candidateValue(e.delta, root),
+      value: candidateValue(e, root),
       timestamp: e.delta.claims.timestamp,
       author: e.delta.claims.author,
     });
-    deltaIds.push(e.delta.id);
+    dependencyIds(e, deltaIds);
   }
   return { entries, deltaIds };
 }

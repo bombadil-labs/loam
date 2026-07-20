@@ -319,3 +319,50 @@ beside other pointers is decorated too. The rails drive the query door; the pinn
 doors share the same seam but are not separately railed. Additive, no wire change, no migration — the
 enrichment is pure read-path. Pachyderm's timeline (`demos/pachyderm/`) now carries its attributions,
 closing the gap pachy.2 documented.
+
+**§22.8 A RESOLVER SEES WHAT ITS OWN GATHER GATHERED**
+[#145](https://github.com/bombadil-labs/loam/pull/145) (ticket T31). §22.7 let a resolver reach DOWN into
+an expanded child. This is the other direction: it lets a resolver reach ACROSS its own bucket into the
+children that bucket already contains.
+
+The gap was found by an ordinary question — a pantry app asking *given what I have, what can I make?*
+A recipe whose gather `expand`s its `ingredient` role already pulls each item's whole hview, stock and
+all, into the recipe's hyperview. Yet a resolver over that field saw `["item:flour"]`: `candidateValue`
+rendered an entity target as its bare id and never reached into the expansion. So a resolver could not
+compute over evidence its own gather had already gathered — while a `DerivedFn`, the WRITE side,
+receives the HyperView and could read exactly that. The read side was strictly weaker than the write
+side about the same evidence.
+
+**The rule.** A bucket entry's value for an EXPANDED pointer is the child's **resolved view**, through
+the reading the `expand` named — not the child's entity id. Everything else about the projection is
+unchanged.
+
+**It stays rung (a).** §22.1 defines bucket-pure as "a function of the SELECTED deltas only … it cannot
+observe anything the algebra did not already gather." An expansion is precisely something the algebra
+already gathered — `expand` is a gather-side operator and the child hview sits on the bucket entry
+itself. This is not sibling-field access (rung b) and not a store query (rung c); it is the same
+field's own bucket, projected truthfully. Deterministic, reproducible on any peer, cacheable.
+
+**The child is POLICY-resolved, not resolver-decorated.** A resolver sees the child's Schema applied to
+the child's evidence, never another resolver's output. That keeps rung (a) free of
+resolver-calls-resolver reentrancy and ordering questions. Stated here rather than left to be
+discovered; §22.7's decoration still applies to what the DOOR serves.
+
+**The memo must reach through the expansion, and this is not optional.** A recipe's `ingredient` bucket
+is the LINK deltas — and those do not change when the flour does. A child-aware projection over the old
+key would serve a stale answer: *yes, make pasta*, over flour that is gone. That would break §22.5's
+promise (the memo invalidates exactly when the ground does) and §11's (never serve a value distilled
+from bytes that no longer exist) in one stroke. So the memo key carries, per expanded pointer, the
+child's reading identity and every SURVIVING delta in the child's hview, transitively. The reading is
+in the key because a child lens that evolves changes the child's view without touching any delta id.
+
+**Provenance.** Landed [#145](https://github.com/bombadil-labs/loam/pull/145) (ticket T31), on the
+question Myk asked of Larder ("not just recipes → ingredients, but given-what-I-have-what-can-I-make?")
+and his call that makeability is an INTERPRETATION, not a claim — a remembered answer that says *pasta*
+when the flour is gone is the bug such an app is judged on. `renderTarget`/`candidateValue`/`bucketOf`
+in `src/gateway/resolvers.ts`; the dependency walk keys the memo. Rails
+(`test/gateway/bucket-expansions.test.ts`): a bucket entry for an expanded pointer IS the child's
+resolved view; a change to the CHILD's ground recomputes the parent's resolver, and recomputes back
+when the stock is used up; and a field with no resolver is unchanged. The staleness rail was
+mutation-tested — truncating the dependency walk makes the pantry lie about the pantry. Additive: a
+resolver over a field with no expansions sees exactly what it saw before, so no §20 migration.
