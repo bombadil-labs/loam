@@ -88,6 +88,39 @@ const say = (post: string, text: string, at: number): Delta =>
     SEED,
   );
 
+// A third level: an author, whose own reading computes a display name. A post expands its author, a
+// feed expands its posts — so decoration must recurse twice to reach it.
+const AUTHOR_H = { name: "AuthorH", alg: 1, body: parseTerm(GATHER) };
+const AUTHOR_S = { name: "Author", alg: 1, props: new Map([["handle", PICK]]), default: PICK };
+const HANDLE = {
+  handle: {
+    code: "export default (bucket) => bucket.map((e) => `@${e.value}`).join('');",
+    rung: "a" as const,
+    type: "string" as const,
+  },
+};
+// A post that expands its `author` role, so the chain is feed -> post -> author.
+const POST_WITH_AUTHOR_H = {
+  name: "PostH",
+  alg: 1,
+  body: parseTerm({
+    op: "expand",
+    role: { exact: "author" },
+    schema: "AuthorH",
+    reading: "Author",
+    in: GATHER,
+  }),
+};
+const POST_WITH_AUTHOR_S = {
+  name: "Post",
+  alg: 1,
+  props: new Map([
+    ["text", PICK],
+    ["author", PICK],
+  ]),
+  default: PICK,
+};
+
 async function feedGateway(withResolver: boolean): Promise<Gateway> {
   const gw = await Gateway.open(new MemoryBackend(), { seed: SEED });
   await gw.append([signClaims(operatorMarkerClaims(OP), SEED)]);
@@ -227,6 +260,100 @@ describe("resolvers reach expanded children (T26)", () => {
       .feed.post[0]!;
     expect(entry.pinnedAt).toBe(1700); // the sibling pointer rode along untouched
     expect(entry.post.text).toBe(`${SIG6}: hello`); // ...and the child inside it IS attributed
+    await gw.close();
+  });
+
+  it("the PINNED version door decorates children exactly as the live query does", async () => {
+    // §22.7 claims a door, a version door and a subscription all attribute a timeline the same way.
+    // The version door resolves an OLD registration over TODAY's ground, through the same seam.
+    const gw = await feedGateway(true);
+    const live = post0(await gw.query(FEED_Q)).text;
+
+    const feedVersion = gw.registrationVersions().find((v) => v.hyperschema.name === "FeedH");
+    const pinned = gw.resolvePinned(feedVersion!, "feed:main");
+    const pinnedPost = (pinned.view as { post: Record<string, unknown>[] }).post[0]!;
+    expect(pinnedPost.text).toBe(live);
+    expect(pinnedPost.text).toBe(`${SIG6}: hello`);
+    await gw.close();
+  });
+
+  it("the live WATCH stream decorates children too — a frame reads as a query does", async () => {
+    const gw = await feedGateway(true);
+    const events = await gw.subscribe(`subscription { feed(entity: "feed:main") { post } }`);
+    const first = (await events.next()).value as { feed: { post: Record<string, unknown>[] } };
+    // The initial snapshot is resolved through the same seam as a query, decoration included.
+    expect(first.feed.post[0]!.text).toBe(`${SIG6}: hello`);
+    await events.return?.(undefined);
+    await gw.close();
+  });
+
+  it("decoration RECURSES: a feed's post's author is decorated through the author's own reading", async () => {
+    const gw = await Gateway.open(new MemoryBackend(), { seed: SEED });
+    await gw.append([signClaims(operatorMarkerClaims(OP), SEED)]);
+    // person:ann has a handle; post:a1 names her as author; the feed carries the post.
+    await gw.append([
+      signClaims(
+        {
+          timestamp: 5,
+          author: OP,
+          pointers: [
+            {
+              role: "subject",
+              target: { kind: "entity", entity: { id: "person:ann", context: "handle" } },
+            },
+            { role: "handle", target: { kind: "primitive", value: "ann" } },
+          ],
+        },
+        SEED,
+      ),
+      signClaims(
+        {
+          timestamp: 6,
+          author: OP,
+          pointers: [
+            {
+              role: "subject",
+              target: { kind: "entity", entity: { id: "post:a1", context: "author" } },
+            },
+            {
+              role: "author",
+              target: { kind: "entity", entity: { id: "person:ann", context: "by" } },
+            },
+          ],
+        },
+        SEED,
+      ),
+      link("post:a1"),
+      say("post:a1", "hello", 20),
+    ]);
+    await gw.publishRegistration(
+      AUTHOR_H,
+      AUTHOR_S,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      ["handle"],
+      HANDLE,
+    );
+    await gw.publishRegistration(
+      POST_WITH_AUTHOR_H,
+      POST_WITH_AUTHOR_S,
+      ["post:a1"],
+      undefined,
+      undefined,
+      undefined,
+      ["text"],
+      ATTRIBUTION,
+    );
+    await gw.publishRegistration(FEED_H, FEED_S, ["feed:main"]);
+
+    const feed = await gw.query(FEED_Q);
+    const post = post0(feed) as { text: string; author: { handle: string } };
+    // Level two: the post's own byline, decorated through the Post reading.
+    expect(post.text).toBe(`${SIG6}: hello`);
+    // Level THREE: the author inside that post, decorated through the Author reading.
+    expect(post.author.handle).toBe("@ann");
     await gw.close();
   });
 });
