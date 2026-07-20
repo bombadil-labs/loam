@@ -83,6 +83,17 @@ const BOOK_POLICY = {
 // lesson 5 files on Alice's side, so her card shows the film she was your guest at.
 const PERSON_POLICY = { props: { name: PICK, follows: ALL, guestAt: ALL }, default: PICK };
 
+// The naming lesson's miniature: one guestbook gather, two readings of it. `Fresh` keeps the newest
+// word (pick desc), `Founding` keeps the first (pick asc) — the village's Townbook/FirstImpressions
+// shape, shrunk to two notes so the square is legible.
+const BOARD = "board:main";
+const OLDEST = { pick: { order: { byTimestamp: "asc" } } };
+const FRESH_POLICY = { name: "Fresh", props: { note: PICK }, default: PICK };
+const FOUNDING_POLICY = { name: "Founding", props: { note: OLDEST }, default: OLDEST };
+// The evolution: Fresh's `note` becomes the WHOLE list (all the words, oldest first) — a new version
+// of the living reading, while Founding never moves. Same gather underneath; only this rung changes.
+const FRESH_POLICY_V2 = { name: "Fresh", props: { note: ALL }, default: PICK };
+
 // ---- small delta grammar --------------------------------------------------------------------
 
 const entity = (role, id, context) => ({
@@ -1081,6 +1092,95 @@ world you declared. Ask for Person as the stranger and the window shows nothing 
 
     {
       id: 16,
+      title: "Name the lens: the shape you've been wearing",
+      copy: `One word has carried this whole tutorial, and you've never had to define it: the LENS.
+It isn't a type you can hold — it's the whole reading-side assembly, the path from ground to answer.
+See it plainly now, on the smallest thing. Lay ONE gather — a guestbook — and wear TWO readings over
+it: Fresh keeps the newest word, Founding keeps the first. Same ground, two answers. Then evolve the
+fresh reading (give it a full list) and leave the founding one untouched. Watch the square come apart
+and hold: the two readings share their gather down to the byte — they AGREE at that rung — and diverge
+only at the resolution, each with its own content address the store already minted. Nothing here is a
+new API; it's the shape of everything you've built, finally named.`,
+      steps: [
+        {
+          label: "Lay one gather, wear two readings",
+          look: `Two readings answer one guestbook: Fresh shows the newest word, Founding the first.
+Same two notes underneath — the lens decides which one you see.`,
+          run: async (ctx) => {
+            await ctx.gateway.publishRegistration(
+              { name: "Guestbook", alg: 1, body: loam.parseTerm(GATHER) },
+              loam.parseSchema(FRESH_POLICY),
+              [BOARD],
+              undefined,
+              undefined,
+              undefined,
+              ["note"],
+            );
+            await ctx.gateway.publishRegistration(
+              { name: "Guestbook", alg: 1, body: loam.parseTerm(GATHER) },
+              loam.parseSchema(FOUNDING_POLICY),
+              [BOARD],
+              undefined,
+              undefined,
+              undefined,
+              ["note"],
+            );
+            // Two notes, oldest first — ctx.ts() climbs, so Fresh (pick desc) and Founding (pick asc)
+            // will disagree about which is "the" note.
+            await ctx.gateway.append([
+              say(loam, ctx, [entity("subject", BOARD, "note"), prim("first foot in the door")]),
+            ]);
+            await ctx.gateway.append([
+              say(loam, ctx, [entity("subject", BOARD, "note"), prim("still here, years on")]),
+            ]);
+          },
+        },
+        {
+          label: "Evolve one reading, leave the other",
+          look: `Fresh's "note" became the WHOLE list — every word, oldest first — while Founding
+still shows just the founding one. The living reading evolved on its own clock; same gather beneath,
+only the resolution rung changed. The old reading is still right there, still answering.`,
+          run: async (ctx) => {
+            await ctx.gateway.publishRegistration(
+              { name: "Guestbook", alg: 1, body: loam.parseTerm(GATHER) },
+              loam.parseSchema(FRESH_POLICY_V2),
+              [BOARD],
+              undefined,
+              undefined,
+              undefined,
+              ["note"],
+            );
+          },
+        },
+      ],
+      // The divergence moment, made checkable: the two readings AGREE at the gather (one shared
+      // hyperschema entity — rung 1) and DIVERGE at the resolution (two distinct lens names, each a
+      // version with its own content-addressed `deltaId` — rung 3). And they answer differently over
+      // the very same ground: after the evolution Fresh shows the whole list, Founding just the first.
+      check: async (ctx) => {
+        const fresh = await view(ctx, `{ fresh(entity: "${BOARD}") { note } }`);
+        const founding = await view(ctx, `{ founding(entity: "${BOARD}") { note } }`);
+        const guestbook = ctx.gateway
+          .registrationVersions()
+          .filter((v) => v.hyperschema.name === "Guestbook");
+        const gathers = new Set(guestbook.map((v) => v.entity)); // shared gather entity: rung 1
+        const readings = new Set(guestbook.map((v) => v.schema.name)); // distinct readings: rung 3
+        const addresses = new Set(guestbook.map((v) => v.deltaId)); // one content address per version
+        return (
+          Array.isArray(fresh.fresh?.note) && // Fresh evolved to the whole list
+          fresh.fresh.note.includes("first foot in the door") &&
+          fresh.fresh.note.includes("still here, years on") &&
+          founding.founding?.note === "first foot in the door" && // Founding never moved
+          gathers.size === 1 && // both readings share one gather (rung 1)
+          readings.has("Fresh") &&
+          readings.has("Founding") && // two distinct readings (rung 3)
+          addresses.size === guestbook.length // each version its own content address
+        );
+      },
+    },
+
+    {
+      id: 17,
       title: "The same store, now on your machine",
       copy: `This store is real, but a browser is a small home: it can't listen for peers, and
 "clear site data" is an extinction event. So walk it out. Export writes one file — your records,
@@ -1117,7 +1217,7 @@ export function buildExport(loam, ctx) {
 }
 
 // The page calls this after the localhost fetch matches _hex for _hex: the homecoming becomes
-// one more signed claim, and lesson 16's check reads it back — progress is the store, all the
+// one more signed claim, and lesson 17's check reads it back — progress is the store, all the
 // way to the end.
 export async function recordHomecoming(loam, ctx, matchedHex) {
   await ctx.gateway.append([

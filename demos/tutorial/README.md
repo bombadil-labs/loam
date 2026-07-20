@@ -4,7 +4,7 @@ Deployed at <https://bombadil-labs.github.io/loam/> by `.github/workflows/pages.
 push to main. No signup, no server, nothing installed until the last step: the page boots a
 real governed store in the visitor's browser and teaches by doing.
 
-- **`lessons.mjs`** — the whole curriculum as data + functions: sixteen lessons, each a
+- **`lessons.mjs`** — the whole curriculum as data + functions: seventeen lessons, each a
   SEQUENCE of `steps` (`{ label, look, run }`) plus a `check(ctx)` (a REAL read of the
   learner's store — never a quiz answer). A learner clicks one step at a time, only the next
   un-run step live, and each step's `look` says which pane just changed and what to notice —
