@@ -50,10 +50,6 @@
       }
     }
   },
-  "roots": [
-    "list:groceries"
-  ],
-  "writable": [
-    "item"
-  ]
+  "roots": ["list:groceries"],
+  "writable": ["item"]
 }

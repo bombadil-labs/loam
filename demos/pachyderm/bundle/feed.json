@@ -50,10 +50,6 @@
       }
     }
   },
-  "roots": [
-    "feed:main"
-  ],
-  "writable": [
-    "post"
-  ]
+  "roots": ["feed:main"],
+  "writable": ["post"]
 }

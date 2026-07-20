@@ -50,10 +50,6 @@
       }
     }
   },
-  "roots": [
-    "planner:mine"
-  ],
-  "writable": [
-    "plan"
-  ]
+  "roots": ["planner:mine"],
+  "writable": ["plan"]
 }

@@ -63,7 +63,11 @@ async function buildCircle() {
       registrations: [
         {
           hyperschema: { name: "Person", alg: 1, body: parseTerm(GATHER) },
-          schema: parseSchema({ name: "Person", props: { name: PICK, follows: ALL }, default: PICK }),
+          schema: parseSchema({
+            name: "Person",
+            props: { name: PICK, follows: ALL },
+            default: PICK,
+          }),
           roots: PEOPLE,
         },
         {

@@ -50,7 +50,5 @@
       }
     }
   },
-  "roots": [
-    "feed:main"
-  ]
+  "roots": ["feed:main"]
 }

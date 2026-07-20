@@ -525,7 +525,10 @@ export async function publishRegistrationImpl(
   const survivors = gw.registered.filter(
     (r) => !(r.hyperschema.name === hyperschema.name && lensOf(r) === lensName),
   );
-  const trialLenses: Bound[] = [...survivors, { hyperschema, schema, roots, origin: "store", lensName }];
+  const trialLenses: Bound[] = [
+    ...survivors,
+    { hyperschema, schema, roots, origin: "store", lensName },
+  ];
   const trialRegistry = SchemaRegistry.build(
     programHyperschemas(trialLenses),
     programReadings(trialLenses),
