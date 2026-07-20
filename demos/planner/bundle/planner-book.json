@@ -8,6 +8,7 @@
         "exact": "plan"
       },
       "schema": "PlannerPlan",
+      "reading": "Plan",
       "in": {
         "op": "group",
         "key": "byTargetContext",
@@ -49,6 +50,10 @@
       }
     }
   },
-  "roots": ["planner:mine"],
-  "writable": ["plan"]
+  "roots": [
+    "planner:mine"
+  ],
+  "writable": [
+    "plan"
+  ]
 }

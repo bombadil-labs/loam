@@ -34,6 +34,12 @@ export const PLANT_POLICY: Schema = {
   default: pickLatest,
 };
 
+// The SAME resolution program, but NAMED "Plant" — a reading a Bed's `expand … reading: "Plant"`
+// can resolve its children through (issue #23). Kept separate from the anonymous PLANT_POLICY on
+// purpose: PLANT_POLICY is reused under other hyperschemas (Ledger, Plant2) whose lens name must
+// stay their own; a schema's name IS its lens name, so naming the shared one would collide them.
+export const PLANT_READING: Schema = { ...PLANT_POLICY, name: "Plant" };
+
 // The Plant schema's full field list. Under immutable-by-default (SPEC §14/§21) a registration must
 // name its writable fields explicitly; this is "everything writable," the pre-flip surface.
 export const PLANT_WRITABLE: readonly string[] = ["height", "tag", "watered", "readings"];

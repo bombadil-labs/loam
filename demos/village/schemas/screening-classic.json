@@ -23,6 +23,8 @@
     }
   },
   "schema": {
+    "name": "ScreeningClassic",
+    "alg": 1,
     "props": {
       "film": {
         "pick": {

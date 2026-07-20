@@ -8,6 +8,7 @@
         "exact": "film"
       },
       "schema": "Film",
+      "reading": "Film",
       "in": {
         "op": "group",
         "key": "byTargetContext",
@@ -30,6 +31,8 @@
     }
   },
   "schema": {
+    "name": "FilmNight",
+    "alg": 1,
     "props": {
       "date": {
         "pick": {

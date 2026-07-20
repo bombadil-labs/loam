@@ -23,6 +23,8 @@
     }
   },
   "schema": {
+    "name": "Gathering",
+    "alg": 1,
     "props": {
       "date": {
         "pick": {

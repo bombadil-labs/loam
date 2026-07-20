@@ -23,6 +23,8 @@
     }
   },
   "schema": {
+    "name": "Screening",
+    "alg": 1,
     "props": {
       "film": {
         "pick": {

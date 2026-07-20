@@ -8,6 +8,7 @@
         "exact": "post"
       },
       "schema": "PachyPost",
+      "reading": "Post",
       "in": {
         "op": "group",
         "key": "byTargetContext",
@@ -49,6 +50,10 @@
       }
     }
   },
-  "roots": ["feed:main"],
-  "writable": ["post"]
+  "roots": [
+    "feed:main"
+  ],
+  "writable": [
+    "post"
+  ]
 }

@@ -8,6 +8,7 @@
         "exact": "friend"
       },
       "schema": "Person",
+      "reading": "Person",
       "in": {
         "op": "group",
         "key": "byTargetContext",
@@ -30,6 +31,8 @@
     }
   },
   "schema": {
+    "name": "Circle",
+    "alg": 1,
     "props": {
       "name": {
         "pick": {

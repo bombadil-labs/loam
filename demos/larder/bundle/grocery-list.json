@@ -8,6 +8,7 @@
         "exact": "item"
       },
       "schema": "LarderItem",
+      "reading": "Item",
       "in": {
         "op": "group",
         "key": "byTargetContext",
@@ -49,6 +50,10 @@
       }
     }
   },
-  "roots": ["list:groceries"],
-  "writable": ["item"]
+  "roots": [
+    "list:groceries"
+  ],
+  "writable": [
+    "item"
+  ]
 }

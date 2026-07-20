@@ -23,6 +23,8 @@
     }
   },
   "schema": {
+    "name": "Film",
+    "alg": 1,
     "props": {
       "title": {
         "pick": {
