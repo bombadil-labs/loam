@@ -88,9 +88,10 @@ export function gatherImpl(gw: Gateway, name: string, entity: string, asOf?: num
   return result.hview;
 }
 
-// Resolve (schema, entity) to its node: gather, resolve through the Schema, apply the lens's §22
-// resolvers as the final step (the Policy computes the value, then a resolver — if the field
-// declares one — overrides its representation over the same bucket), and annotate an as-of read.
+// Resolve (schema, entity) to its node: gather, resolve through the Schema, decorate expanded children
+// through their OWN readings (§22.7), then apply THIS lens's §22 resolvers as the final step — the
+// Policy computes the value, the child decoration fills in nested views, and a resolver the lens
+// declares on a field has the last word over both. Finally, annotate an as-of read.
 export function resolvedNodeImpl(
   gw: Gateway,
   name: string,
@@ -99,17 +100,17 @@ export function resolvedNodeImpl(
 ): ResolvedNode {
   const def = gw.def(name);
   const hview = gatherImpl(gw, name, entity, asOf);
-  const view = decorateChildren(
-    applyResolvers(
-      def.resolvers,
+  const view = applyResolvers(
+    def.resolvers,
+    decorateChildren(
       resolveView(def.schema, hview) as Record<string, View>,
       hview,
-      entity,
+      def.schema,
+      readingResolversOf(gw),
       gw.resolverMemo,
     ),
     hview,
-    def.schema,
-    readingResolversOf(gw),
+    entity,
     gw.resolverMemo,
   );
   return annotateImpl(
@@ -148,17 +149,17 @@ export function resolvePinnedImpl(
   }
   // The pinned version's OWN resolvers apply (SPEC §22) — a version freezes its resolver with its
   // schema, so an old lens keeps computing exactly as it did. Pre-loaded across all versions at bind.
-  const view = decorateChildren(
-    applyResolvers(
-      reg.resolvers,
+  const view = applyResolvers(
+    reg.resolvers,
+    decorateChildren(
       resolveView(reg.schema, result.hview) as Record<string, View>,
       result.hview,
-      entity,
+      reg.schema,
+      readingResolversOf(gw),
       gw.resolverMemo,
     ),
     result.hview,
-    reg.schema,
-    readingResolversOf(gw),
+    entity,
     gw.resolverMemo,
   );
   return annotateImpl(
@@ -202,17 +203,17 @@ export function watchEntityImpl(
     }
     // Resolvers apply on the stream too (SPEC §22), so a live frame reads exactly as a query does —
     // including the child-reading resolvers on expanded children (§22.7).
-    const view = decorateChildren(
-      applyResolvers(
-        bound.resolvers,
+    const view = applyResolvers(
+      bound.resolvers,
+      decorateChildren(
         resolveView(bound.schema, hview) as Record<string, View>,
         hview,
-        entity,
+        bound.schema,
+        readingResolversOf(gw),
         gw.resolverMemo,
       ),
       hview,
-      bound.schema,
-      readingResolversOf(gw),
+      entity,
       gw.resolverMemo,
     );
     return {

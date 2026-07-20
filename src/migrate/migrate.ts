@@ -14,9 +14,11 @@
 // at a time. Output is deduplicated by content address, so re-migrating is a no-op.
 
 import {
+  DeltaSet,
   authorForSeed,
   cborToJson,
   decode,
+  loadSchema,
   parseSchema,
   parseTerm,
   signClaims,
@@ -441,13 +443,35 @@ const hasReadinglessExpand = (json: unknown): boolean => {
   return false;
 };
 
-// The child-hyperschema-name → reading-name map, read from the store's bindings. A binding names its
-// `hyperschema` entity (`hyperschema:<Name>`) and its living resolution Schema entity (`schema:<Name>`);
-// the reading NAME is that living entity's suffix, which is exactly the Schema's own name. Collected
-// into a set per hyperschema so an (impossible, pre-0.8) multi-lens ambiguity is detectable, not silent.
-const readingMap = (deltas: readonly Delta[]): Map<string, Set<string>> => {
+// The child-hyperschema-name → reading-name map, read from the store's bindings.
+//
+// THE TRUST RULE, and why it is strict: this map decides the `reading` string the operator will
+// RE-SIGN UNDER THEIR OWN KEY. The author/verify gate in `additions` protects only WHICH delta is
+// re-expressed — it says nothing about the CONTENT injected into it — so a map built from raw deltas
+// would let any unsigned, unlawful, or foreign delta choose that string (or, by adding a second
+// candidate, silently veto the migration). Every downstream reader of bindings is stricter than that:
+// `lawfulSnapshot` filters to the operator's own law and `survivingCandidates` drops negated ones. A
+// migrator must be no more trusting than the readers it migrates FOR, so this admits a binding only
+// when all four hold: the operator authored it, the SIGNATURE proves it, it is a genuine binding
+// (filed in the constitutional registration context — not merely two pointers wearing those role
+// names), and it has not been negated. The reading NAME is then read off the published Schema itself
+// rather than off the entity id, because `lookupReading` resolves against `Schema.name`; the two agree
+// for everything Loam mints, and reading the Schema closes the gap for anything hand-authored.
+const readingMap = (deltas: readonly Delta[], operator: string): Map<string, Set<string>> => {
+  const lawful = deltas.filter(
+    (d) => d.claims.author === operator && verifyDelta(d) === "verified",
+  );
+  // Retired bindings speak for nothing: collect what the operator's own verified negations struck.
+  const negated = new Set<string>();
+  for (const d of lawful) {
+    for (const p of d.claims.pointers) {
+      if (p.role === "negates" && p.target.kind === "delta") negated.add(p.target.deltaRef.delta);
+    }
+  }
+  const dset = DeltaSet.from(lawful); // Schemas resolve against the operator's law alone
   const map = new Map<string, Set<string>>();
-  for (const d of deltas) {
+  for (const d of lawful) {
+    if (negated.has(d.id) || !isRegistration(d.claims)) continue;
     const hyper = d.claims.pointers.find(
       (p) => p.role === "hyperschema" && p.target.kind === "entity",
     );
@@ -461,8 +485,14 @@ const readingMap = (deltas: readonly Delta[]): Map<string, Set<string>> => {
     ) {
       continue;
     }
+    let readingName: string | undefined;
+    try {
+      readingName = loadSchema(dset, schemaId).name; // the name `lookupReading` will resolve against
+    } catch {
+      continue; // no loadable Schema at that entity: it names no reading we can vouch for
+    }
+    if (readingName === undefined) continue; // an anonymous Schema can never be a reading
     const hyperName = hyperId.slice(HYPERSCHEMA_ENTITY_PREFIX.length);
-    const readingName = schemaId.slice(SCHEMA_LIVING_PREFIX.length);
     (map.get(hyperName) ?? map.set(hyperName, new Set()).get(hyperName)!).add(readingName);
   }
   return map;
@@ -487,12 +517,20 @@ const fillReadings = (json: unknown, readings: Map<string, Set<string>>): unknow
   return json;
 };
 
-// A definition delta whose body carries a readingless `expand` that we CAN fill — i.e. re-encoding
-// the reading-filled body actually changes the blob. Returns the new ROLE_TERM hex, or undefined.
+// A definition delta whose body carries a readingless `expand` that we can fill COMPLETELY — every
+// such `expand` in it, not merely some. Returns the new ROLE_TERM hex, or undefined.
+//
+// Completeness is the whole safety property. Filling SOME expands still leaves the body refusing to
+// resolve, but it changes the bytes — so a byte-inequality test would re-sign a still-broken body,
+// emit a supersession that RETIRES the working original, and report the step as applied. The store
+// would then hold a definition that throws on every read, with the only surviving diagnosis being a
+// type that quietly failed to bind. A migration must heal a definition or leave it entirely alone;
+// there is no useful middle. So: fill, then demand that nothing readingless remains.
 const filledTermHex = (claims: Claims, readings: Map<string, Set<string>>): string | undefined => {
   const body = definitionBody(claims);
   if (body === undefined || !hasReadinglessExpand(body)) return undefined;
   const filled = fillReadings(body, readings);
+  if (hasReadinglessExpand(filled)) return undefined; // a partial fill heals nothing — leave it
   try {
     const hex = termCanonicalHex(parseTerm(filled));
     return hex === primitiveValue(claims, HS_TERM) ? undefined : hex; // nothing actually filled
@@ -506,13 +544,19 @@ const EXPAND_READING: Migration = {
   reason:
     "migrated to rhizomatic 0.8 (issue #23): each `expand` names the child's `reading` — the single " +
     "resolution Schema its child hyperschema was bound to — so a legacy readingless body resolves again",
+  // A cheap, operator-independent trigger: is there any definition body still carrying a readingless
+  // `expand`? The authoritative work — whose bindings may name a reading, and whether the fill is
+  // complete — happens in `additions`, which knows the operator. A trigger that fires with nothing
+  // fillable is harmless: `additions` returns nothing and the driver reports nothing.
   applies(deltas) {
-    const readings = readingMap(deltas);
-    return deltas.some((d) => filledTermHex(d.claims, readings) !== undefined);
+    return deltas.some((d) => {
+      const body = definitionBody(d.claims);
+      return body !== undefined && hasReadinglessExpand(body);
+    });
   },
   additions(deltas, seed) {
     const operator = authorForSeed(seed);
-    const readings = readingMap(deltas);
+    const readings = readingMap(deltas, operator);
     const added: Delta[] = [];
     for (const d of deltas) {
       // Operator-authored and signature-proven only — re-signing an unverified delta would make the

@@ -170,7 +170,7 @@ describe("the tutorial arc, headless", () => {
       expect(laptopView.film._hex).toBe(tabView.film._hex);
       await laptop.close();
 
-      // The honest homecoming: the match verified, the page records it, and lesson 12's
+      // The honest homecoming: the match verified, the page records it, and the finale's
       // check reads it back from the ground — progress is the store, all the way to the end.
       const finale = buildArc(loam).find((l) => l.id === 17)!;
       expect(await finale.check(ctx)).toBe(false);

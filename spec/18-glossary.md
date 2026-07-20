@@ -36,7 +36,9 @@
   lens evolves and is what the latest door serves; a **pinned** lens reads through frozen rungs forever
   (§17, §23). §26's `asOf` pins the *ground* — orthogonal to both. Forking at *any* rung yields a
   different lens: §21.7's coexistence is the rung-3 case (two Schemas over one gather), and a lens's
-  identity is a tuple of content addresses, one per rung — the system already mints every one.
+  identity is a tuple of content addresses, one per rung — every rung the system BUILDS already mints
+  its own (the gather body's termHash, the Schema's `name@hash`, the binding's delta id). Rung 2 mints
+  nothing yet, because nothing builds it: that is exactly what the pencil in the drawing means.
 
   It stays prose because naming it as a type would tempt a fork of the vocabulary into near-synonyms;
   when you mean the Schema, write `Schema` (the standing rule in `CLAUDE.md` cites exactly this). See

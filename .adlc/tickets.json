@@ -1,3 +1,58 @@
 {
-  "tickets": []
+  "tickets": [
+    {
+      "id": "T27",
+      "phase": "P1",
+      "status": "todo",
+      "edges": [],
+      "rails": [],
+      "title": "§22: state (and rail) what bucket a resolver sees — the annotate-mask divergence",
+      "scope": [
+        "spec/22-resolvers.md",
+        "src/gateway/resolvers.ts",
+        "test/gateway/"
+      ],
+      "body": "SURFACED by the 2026-07-20 prosecution of the reading arc; deliberately NOT fixed there, because it changes resolver semantics and predates the arc.\n\n`bucketOf` (src/gateway/resolvers.ts) SKIPS entries with `e.negated`. rhizomatic's `applyPolicy` does NOT — `resolveView` feeds every entry, negated or not, to the Policy. Under a `mask policy: \"drop\"` gather (the common idiom) there is no divergence: negated deltas never enter the hview. Under `mask policy: \"annotate\"` they DO, carrying `negated: true` — and then a resolver computes over a strictly SMALLER bucket than the Policy value it replaces. A field's advertised value and the ground the door claims it was distilled from disagree, and switching the mask policy silently changes what a resolver sees. Child decoration (§22.7) applies `bucketOf` to every expanded child, so the divergence now spreads across a whole read tree rather than one field.\n\nTHE DECISION (Myk's): which is right?\n(a) SURVIVING-ONLY is right and the rule is merely unstated — argued from §22.5/§11: the memo keys on the surviving bucket precisely so an erased or retracted fact can never influence a computed value; a resolver seeing negated claims would contradict that erasure story. If so: STATE the rule in §22 (\"a resolver sees the SURVIVING bucket, whatever the gather's mask policy\") and rail it under an annotate mask.\n(b) MATCH THE POLICY is right — a resolver overrides representation, not selection, so it should see exactly what the Policy saw. If so: `bucketOf` honors `negated` the way applyPolicy does. Note this changes memo keys and existing values for any annotate-mask store.\n\nRecommendation: (a). It is the current behavior, it is defensible from the erasure story, and it costs one paragraph plus one rail instead of a behavior change. Either way the outcome is a STATED rule with a test, not silence."
+    },
+    {
+      "id": "T28",
+      "phase": "P1",
+      "status": "todo",
+      "edges": [],
+      "rails": [],
+      "title": "publishRegistration reads a STALE bound set — a wrong diagnosis when a reading vanishes",
+      "scope": [
+        "src/gateway/lifecycle.ts",
+        "src/gateway/gateway.ts",
+        "test/gateway/"
+      ],
+      "body": "SURFACED by the 2026-07-20 prosecution; pre-existing staleness that the reading work made reachable in a new way.\n\n`publishRegistrationImpl` builds its trial registry from `gw.registered` — the LIVE bound set — but `append()` never refreshes it (`appendImpl` does not call replayRegistrations; only open/boot/publish/quarantine do). So: append a lawful negation retiring lens `Plant`, then publish a body naming `reading: \"Plant\"`. The trial passes against the stale survivors, every delta persists on append-only ground, and the replay two lines later drops Plant and quietly fails the new body's `attempt()`. The operator is then told `the registration persisted but did not bind: another hyperschema already answers to \"Bed\"` — which is FALSE. The real cause (the reading no longer exists) is swallowed by the bare `catch {}` in the fixpoint and never surfaces.\n\nTWO PARTS, separable: (1) make the post-publish failure diagnosis honest — capture WHY the candidate failed to bind (the caught error) and report that instead of guessing a fixed reason; (2) decide whether publish should refresh the bound set first (correct, but a wider change) or whether the honest diagnosis suffices. Recommendation: do (1) always — a wrong error message on an irreversible append is the worst part — and treat (2) as its own call.\n\nRAIL: retire a reading by negation, publish a body naming it, and assert the error names the MISSING READING rather than a name collision."
+    },
+    {
+      "id": "T29",
+      "phase": "P1",
+      "status": "todo",
+      "edges": [],
+      "rails": [],
+      "title": "Assert the invariant that makes the reading registry's last-wins dedup safe",
+      "scope": [
+        "src/gateway/lifecycle.ts",
+        "test/gateway/"
+      ],
+      "body": "SURFACED by the 2026-07-20 prosecution. Low severity, unreachable through Loam's own doors today — filed because the invariant that makes it safe is asserted NOWHERE, so drift would be silent.\n\n`programReadings` dedups readings by lens name, last-wins. Which Schema wins is call-site-order-dependent (publish orders `[...survivors, new]`; replay orders manual-then-store-by-timestamp; rebind takes whatever order arrives). Loam's own paths keep two different Schemas from ever sharing a lens name — `registerImpl` sets lensName from schema.name, `registrationDeltaClaims` re-stamps schema.name from lensName, and `buildGqlSchema` refuses two bindings sharing a lens name — so the collision requires a binding whose living-entity name and whose snapshot Schema name disagree (hand-planted, or written by a non-Loam tool against the same delta vocabulary). If it ever happens, every `expand ... reading: \"X\"` in the store silently resolves children through whichever Schema sorted last, and two peers over identical deltas can render different values.\n\nDO: either REFUSE a genuine collision (two DIFFERENT Schemas claiming one lens name) the way `SchemaRegistry.build` would have, or assert the invariant with a rail so drift fails loudly instead of silently picking. Recommendation: refuse — `build` already throws `duplicate reading name`, and deduping before it is exactly what hid that."
+    },
+    {
+      "id": "T30",
+      "phase": "P1",
+      "status": "todo",
+      "edges": [],
+      "rails": [],
+      "title": "Rail the child-decoration seam on the pinned-version and watch doors, and at depth",
+      "scope": [
+        "test/gateway/child-resolvers.test.ts",
+        "spec/22-resolvers.md"
+      ],
+      "body": "SURFACED by the 2026-07-20 prosecution: §22.7 claims decoration is wired into query, pinned version, AND the live watch stream, \"so a door, a version door, and a subscription all attribute a timeline the same way\", and that it recurses \"to grandchildren and beyond\". All three claims are TRUE OF THE CODE (`decorateChildren` is called at all three sites in src/gateway/reads.ts and recurses through `decorateOne`) — but the rails only drive the QUERY door, at one and two levels. A regression in the pinned or watch call site, or in the recursion, breaks no test. The Provenance now says so honestly; this ticket closes the gap rather than the wording.\n\nDO: (1) a pinned-version read (`resolvePinned`, the §17 version door) of a feed asserts the same attributed byline as the live query; (2) a `watchEntity` frame asserts the same — the live seam re-resolves per patch, so this also guards the patch hex chain; (3) a GRANDCHILD rail: a feed expands posts, a post expands its author, and the author's own reading's resolver reaches the third level. Cheap, and they pin the three sentences the spec already commits to."
+    }
+  ]
 }

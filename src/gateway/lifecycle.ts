@@ -35,6 +35,7 @@ import { buildGqlSchema } from "./gql.js";
 import {
   lensOf,
   lawfulSnapshot,
+  readinglessExpandRole,
   parseClaimTemplates,
   readRegistrations,
   registrationDeltaClaims,
@@ -107,6 +108,25 @@ function assertMaterializable(schema: HyperSchema, registry: SchemaRegistry): vo
         `deltas), not a ${trial.sort}`,
     );
   }
+}
+
+// Every `expand` must NAME the child's reading (rhizomatic 0.8 / issue #23) — refused here, at the
+// door, because nothing else catches it in time. An UNKNOWN reading name is refused by
+// SchemaRegistry.build; an ABSENT one is refused by nothing: `parseTerm` accepts the legacy shape,
+// `collectReadingRefs` has no ref to resolve, and `assertMaterializable` trial-evals over an EMPTY
+// delta set, so no expansion is ever produced and no error is raised. Such a body would persist on
+// append-only ground, bind, advertise its type — and then throw on the first read of an entity that
+// actually carries a child pointer, permanently and un-appendably. The absent case now gets the same
+// loud refusal the wrong-name case always had; a store holding such a body from before 0.8 is healed
+// by the §20 `expand-reading` migration instead of being served broken.
+function assertReadingsNamed(schema: HyperSchema): void {
+  const role = readinglessExpandRole(schema.body);
+  if (role === undefined) return;
+  throw new Error(
+    `schema ${schema.name}: its \`expand\` of role "${role}" names no \`reading\` — an expanded ` +
+      `child resolves through its OWN resolution Schema (rhizomatic issue #23), so the gather must ` +
+      `name it; a pre-0.8 body is migrated (SPEC §20), not served`,
+  );
 }
 
 // Everything that shapes the surface, as one comparable key.
@@ -245,7 +265,18 @@ const programHyperschemas = (regs: readonly Bound[]): HyperSchema[] =>
 // included, not one-per-program: a feed in one program expands posts whose reading lives in ANOTHER.
 const programReadings = (regs: readonly Bound[]): Schema[] => {
   const byName = new Map<string, Schema>();
-  for (const r of regs) if (r.schema.name !== undefined) byName.set(r.schema.name, r.schema);
+  for (const r of regs) {
+    // Key on the LENS name, not `schema.name`. Everything else in the system identifies a lens by
+    // `lensOf` (every GraphQL type and field, and reads.ts's reading-resolver lookup), and a Schema
+    // may be anonymous — `register(PLANT, PLANT_POLICY, …)` binds and serves lens `Plant` with an
+    // unnamed Schema. Keying on `schema.name` dropped exactly those: a lens you could serve, query,
+    // and decorate, but that no body could ever name as a `reading`. It also split publish from
+    // replay — `registrationDeltaClaims` persists the Schema re-stamped with its lens name, so the
+    // same binding contributed no reading at publish and one after a reboot. Re-stamping here makes
+    // the in-process and from-store paths the same function of the same bindings.
+    const lens = lensOf(r);
+    byName.set(lens, r.schema.name === lens ? r.schema : { ...r.schema, name: lens });
+  }
   return [...byName.values()];
 };
 
@@ -300,6 +331,7 @@ export function replayRegistrationsImpl(gw: Gateway): void {
         try {
           const trial = [...accepted, candidate];
           const registry = SchemaRegistry.build(programHyperschemas(trial), programReadings(trial)); // groups: one hyperschema per program; a rival body throws here
+          assertReadingsNamed(candidate.hyperschema); // a readingless expand can never resolve
           assertMaterializable(candidate.hyperschema, registry); // reactor.register would throw
           assertTemplatesVisible(
             candidate.hyperschema,
@@ -418,6 +450,7 @@ export function registerImpl(
     },
   ];
   const registry = SchemaRegistry.build(programHyperschemas(next), programReadings(next)); // groups: refs + the rival-body refusal
+  assertReadingsNamed(hyperschema); // refuses an expand that names no child reading (#23)
   assertMaterializable(hyperschema, registry); // refuses a body that yields no hyperview
   assertTemplatesVisible(hyperschema, templates, registry, gw.operatorAuthor ?? "loam:specimen"); // refuses invisible writes
   const gql = buildGqlSchema(next, gw.gqlHooks()); // refuses collisions
@@ -533,6 +566,7 @@ export async function publishRegistrationImpl(
     programHyperschemas(trialLenses),
     programReadings(trialLenses),
   ); // groups: one hyperschema per program, and the rival-body refusal fires HERE, loudly
+  assertReadingsNamed(hyperschema); // loud HERE: append-only ground cannot take it back
   assertMaterializable(hyperschema, trialRegistry);
   assertTemplatesVisible(
     hyperschema,

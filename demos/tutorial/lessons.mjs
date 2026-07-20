@@ -1163,18 +1163,22 @@ only the resolution rung changed. The old reading is still right there, still an
         const guestbook = ctx.gateway
           .registrationVersions()
           .filter((v) => v.hyperschema.name === "Guestbook");
-        const gathers = new Set(guestbook.map((v) => v.entity)); // shared gather entity: rung 1
-        const readings = new Set(guestbook.map((v) => v.schema.name)); // distinct readings: rung 3
-        const addresses = new Set(guestbook.map((v) => v.deltaId)); // one content address per version
+        // Rung 1 — the gather itself, compared as a program rather than by the name we filtered on:
+        // every version's body must be the SAME term. (Filtering by hyperschema name and then
+        // asserting the name matches would prove nothing; this compares what the gather IS.)
+        const bodies = new Set(guestbook.map((v) => JSON.stringify(v.hyperschema.body)));
+        // Rung 3 — the readings, which must genuinely DIFFER, not merely be two names: compare the
+        // resolution programs themselves.
+        const readings = new Map(guestbook.map((v) => [v.schema.name, JSON.stringify(v.schema)]));
         return (
           Array.isArray(fresh.fresh?.note) && // Fresh evolved to the whole list
           fresh.fresh.note.includes("first foot in the door") &&
           fresh.fresh.note.includes("still here, years on") &&
           founding.founding?.note === "first foot in the door" && // Founding never moved
-          gathers.size === 1 && // both readings share one gather (rung 1)
+          bodies.size === 1 && // one gather, byte for byte (rung 1: they AGREE)
           readings.has("Fresh") &&
-          readings.has("Founding") && // two distinct readings (rung 3)
-          addresses.size === guestbook.length // each version its own content address
+          readings.has("Founding") &&
+          readings.get("Fresh") !== readings.get("Founding") // (rung 3: they DIVERGE)
         );
       },
     },
