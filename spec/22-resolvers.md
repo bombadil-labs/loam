@@ -250,7 +250,7 @@ numeric Policy value; REST emits it raw) — an asymmetry that pre-exists for th
 is deliberately not widened here.
 
 **§22.7 RESOLVERS AND EXPANDED CHILDREN — the reading is named**
-[#PR](https://github.com/bombadil-labs/loam/pull/PR) (ticket T25). A resolver applies at the lens
+[#139](https://github.com/bombadil-labs/loam/pull/139) (ticket T25). A resolver applies at the lens
 door, over a top-level field's bucket. An entity embedded as an EXPANDED CHILD of another lens's
 gather (a feed's posts, a plan's guests, a bed's plants) is a different matter: the child is a whole
 little view, resolved on its own. Building the first real apps surfaced the question of WHICH reading
@@ -271,7 +271,7 @@ enrichment is ticket **T26**, and it stands on exactly the primitive this ticket
 child's reading is now named in the term, the host can find it and apply its resolvers. Named here so
 the boundary is a documented line, not a silent surprise.
 
-**Provenance.** rhizomatic 0.8 adoption landed [#PR](https://github.com/bombadil-labs/loam/pull/PR)
+**Provenance.** rhizomatic 0.8 adoption landed [#139](https://github.com/bombadil-labs/loam/pull/139)
 (ticket T25), realizing [rhizomatic#23](https://github.com/bombadil-labs/rhizomatic/issues/23). Loam
 threads every bound resolution Schema into `SchemaRegistry.build` as a reading (`programReadings`,
 `src/gateway/lifecycle.ts`), so an `expand`'s `reading` resolves at eval time and an unknown reading
