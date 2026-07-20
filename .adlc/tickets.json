@@ -40,34 +40,6 @@
         "test/gateway/"
       ],
       "body": "SURFACED by the 2026-07-20 prosecution. Low severity, unreachable through Loam's own doors today — filed because the invariant that makes it safe is asserted NOWHERE, so drift would be silent.\n\n`programReadings` dedups readings by lens name, last-wins. Which Schema wins is call-site-order-dependent (publish orders `[...survivors, new]`; replay orders manual-then-store-by-timestamp; rebind takes whatever order arrives). Loam's own paths keep two different Schemas from ever sharing a lens name — `registerImpl` sets lensName from schema.name, `registrationDeltaClaims` re-stamps schema.name from lensName, and `buildGqlSchema` refuses two bindings sharing a lens name — so the collision requires a binding whose living-entity name and whose snapshot Schema name disagree (hand-planted, or written by a non-Loam tool against the same delta vocabulary). If it ever happens, every `expand ... reading: \"X\"` in the store silently resolves children through whichever Schema sorted last, and two peers over identical deltas can render different values.\n\nDO: either REFUSE a genuine collision (two DIFFERENT Schemas claiming one lens name) the way `SchemaRegistry.build` would have, or assert the invariant with a rail so drift fails loudly instead of silently picking. Recommendation: refuse — `build` already throws `duplicate reading name`, and deduping before it is exactly what hid that."
-    },
-    {
-      "id": "T30",
-      "phase": "P1",
-      "status": "todo",
-      "edges": [],
-      "rails": [],
-      "title": "Rail the child-decoration seam on the pinned-version and watch doors, and at depth",
-      "scope": [
-        "test/gateway/child-resolvers.test.ts",
-        "spec/22-resolvers.md"
-      ],
-      "body": "SURFACED by the 2026-07-20 prosecution: §22.7 claims decoration is wired into query, pinned version, AND the live watch stream, \"so a door, a version door, and a subscription all attribute a timeline the same way\", and that it recurses \"to grandchildren and beyond\". All three claims are TRUE OF THE CODE (`decorateChildren` is called at all three sites in src/gateway/reads.ts and recurses through `decorateOne`) — but the rails only drive the QUERY door, at one and two levels. A regression in the pinned or watch call site, or in the recursion, breaks no test. The Provenance now says so honestly; this ticket closes the gap rather than the wording.\n\nDO: (1) a pinned-version read (`resolvePinned`, the §17 version door) of a feed asserts the same attributed byline as the live query; (2) a `watchEntity` frame asserts the same — the live seam re-resolves per patch, so this also guards the patch hex chain; (3) a GRANDCHILD rail: a feed expands posts, a post expands its author, and the author's own reading's resolver reaches the third level. Cheap, and they pin the three sentences the spec already commits to."
-    },
-    {
-      "id": "T31",
-      "phase": "P1",
-      "status": "todo",
-      "edges": [],
-      "rails": [],
-      "title": "A resolver should see what its own gather gathered: expanded children in the bucket (+ the memo key)",
-      "scope": [
-        "spec/22-resolvers.md",
-        "src/gateway/resolvers.ts",
-        "test/gateway/",
-        "demos/larder/"
-      ],
-      "body": "SURFACED building Larder's bidirectional pantry-recipes ask (Myk, 2026-07-20): \"not just recipes -> ingredients, but given-what-I-have-what-can-I-make?\". The forward direction works today. The REVERSE direction is blocked, and the block is one narrow asymmetry.\n\nTHE WALL, confirmed by running it. A Recipe gather that `expand`s its `ingredient` role already pulls each item's whole hview — stock included — into the recipe's hyperview. But a §22 resolver on that field sees `[\"item:flour\"]`, the bare entity id: `candidateValue` (src/gateway/resolvers.ts) renders an entity target as `t.entity.id` and never reaches into `e.expanded`. So a resolver cannot compute over what its own gather already gathered. Meanwhile a DerivedFn — the WRITE side — receives the HyperView itself and CAN read those expansions (entries carry `.expanded` since rhizomatic 0.8). The read side is strictly weaker than the write side about the very same evidence, and T26 sharpened the contrast: the read path now resolves children richly (`decorateChildren`) while a resolver's view of its own bucket still flattens them to ids.\n\nTHE PROPOSAL: for an EXPANDED pointer, a `BucketEntry`'s value becomes the child's RESOLVED VIEW (through the reading the expand names) instead of its bare id. Everything else about the projection is unchanged.\n\nIT STAYS RUNG (a). §22.1 defines bucket-pure as \"a function of the SELECTED deltas only ... it cannot observe anything the algebra did not already gather.\" An expansion IS something the algebra already gathered — `expand` is a gather-side operator, and the child hview is sitting on the bucket entry. This is not sibling-field access (rung b) and not a store query (rung c): it is the same field's own bucket, projected more truthfully. Deterministic, reproducible on any peer, cacheable.\n\nTHE CATCH THAT MUST SHIP WITH IT — the memo. The memo key is (resolver address, root, bucket delta ids). A recipe's ingredient bucket is the LINK deltas; those do not change when flour's stock changes. So with a child-aware projection and an unchanged key, the memo would serve a STALE makeability — exactly the bug the feature exists to avoid, and a violation of §22.5's promise that the memo invalidates precisely when the ground does (and of §11: a value distilled from erased bytes could be re-served). The key must therefore extend to cover the expanded children's delta ids as well. Any implementation that does the projection without the key is worse than not doing it.\n\nWHY IT MATTERS BEYOND LARDER: it is the difference between makeability as an INTERPRETATION (recomputed per read, always true of the current pantry) and as a derived CLAIM (written by a runner, stale until the next grind). §22.2 poses exactly that question — claim or interpretation? — and for \"what can I make RIGHT NOW\" the honest answer is interpretation: a remembered answer that says pasta when the flour is gone is the bug a pantry app would be judged on. Loam can ship the derived-fact version today (the Runner + village-mill machinery is built and would demonstrate the animate store), but it should ship the read-side version because the read-side version is the correct one.\n\nDECIDE (Myk): (a) take the extension — narrow, argued rung-(a), must ship with the memo-key change; (b) ship Larder's reverse direction as a derived fact via a Runner and accept re-grind staleness, leaving the asymmetry documented; (c) both — derived now, extension later. Recommendation: (a)."
     }
   ]
 }

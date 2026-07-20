@@ -315,8 +315,9 @@ directly and as an expanded child resolve to the same byline; a child reading wi
 through untouched; the child resolver RE-RUNS when its bucket changes under a RETRACTION (deliberately
 not an erasure, which reseats and clears the whole memo and so could never observe the key at all); a
 resolver the parent lens declares on an expanding field wins over the decoration; and a child embedded
-beside other pointers is decorated too. The rails drive the query door; the pinned-version and watch
-doors share the same seam but are not separately railed. Additive, no wire change, no migration — the
+beside other pointers is decorated too. The pinned-version door and the live watch stream are railed
+against the query door directly (all three attribute a timeline identically), and the recursion is
+railed to a third level — a feed's post's author, decorated through the author's own reading. Additive, no wire change, no migration — the
 enrichment is pure read-path. Pachyderm's timeline (`demos/pachyderm/`) now carries its attributions,
 closing the gap pachy.2 documented.
 
