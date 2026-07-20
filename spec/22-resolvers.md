@@ -275,9 +275,12 @@ child's identity, letting the host splice the decorated child back into the exac
 The reading's own resolvers are looked up by name (a reading's name IS its lens name), and the child's
 resolver memo invalidates on the child's own erasure exactly as a top-level field's does (§11): the
 child bucket keys the memo. **v1 boundary, named honestly:** decoration reaches a child embedded as a
-single expansion pointer (a feed's post, a plan's guest) — the common shape; a child buried inside a
-MULTI-pointer object value is left undecorated (the alignment can't name it), a rung deferred until a
-consumer needs it.
+single expansion pointer (a feed's post, a plan's guest) under a `pick` or `all` Policy — the common
+shape. Two cases are left resolved-but-undecorated, never mis-decorated: a child buried inside a
+MULTI-pointer object value (the alignment can't name it), and a field whose Policy is `conflicts` or
+`merge` (they dedup by canonical hex or fold to primitives, so the stripped-id resolve and the full
+resolve can diverge — the alignment holds only for the position-preserving policies). Both are rungs
+deferred until a consumer needs them.
 
 **Provenance.** rhizomatic 0.8 adoption landed [#139](https://github.com/bombadil-labs/loam/pull/139)
 (ticket T25), realizing [rhizomatic#23](https://github.com/bombadil-labs/rhizomatic/issues/23). Loam
