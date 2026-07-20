@@ -17,16 +17,47 @@
     },
     {
       "id": "T25",
-      "title": "§22 resolvers vs expanded children — BLOCKED on rhizomatic#23 (expand names a reading); meanwhile spec/22 documents the boundary",
-      "category": "build",
-      "duration": 2,
-      "scope": [
-        "spec/22-resolvers.md",
-        "demos/pachyderm/pachyderm.mjs"
-      ],
-      "rails": [],
+      "phase": "P4",
+      "status": "todo",
       "edges": [],
-      "body": "DECIDED with Myk in chat (2026-07-18): patch rhizomatic — the substrate needs to reason at the READING level, without learning what a resolver is. The precise ask is filed as https://github.com/bombadil-labs/rhizomatic/issues/23, grounded in a mechanism-read of the dist: eval.js's expand stores child HVIEWS on entries; resolution.js's renderTarget resolves an expansion with THE PARENT'S OWN Schema (resolveView(schema, expansion)) — the child's own reading is unstatable, and always was; coexistence only exposed it. The ask, three resolver-agnostic pieces: (1) expand gains an optional `reading` reference (name or pinned hash — Schemas are content-addressed since 0.5.0); (2) the registry learns to hold/look up resolution Schemas; (3) renderTarget resolves through the named reading when present, else the parent's (today's path verbatim — absent field, byte-identical hashes). Host-side decoration then needs NO output annotation: Loam statically inspects the parent body for each expand's reading and applies that binding's resolvers to the child views.\n\nTHIS TICKET'S BUILDABLE HALF, NOW: spec/22 documents the boundary honestly (§22.6 gains: 'a resolver applies at the lens door; an entity embedded as an expanded child resolves through the PARENT's Schema and carries no binding decoration — until rhizomatic#23 lands'), citing the Pachyderm discovery (demos/pachyderm/pachyderm.mjs pachy.2's note). The heuristic (degenerate-lens post-decoration) is REJECTED, on the record — it would silently pick a winner among sibling readings.\n\nWHEN rhizomatic#23 LANDS (its own version bump): the Loam half becomes a fresh ticket — adopt the version, thread `reading` through the register input/publish path, apply resolvers to expanded children by static term inspection in reads.ts, rails asserting direct-read and expanded-read AGREE, Pachyderm's timeline gains its attributions, and spec/22's boundary note converts to the landed truth. DO NOT edit rhizomatic from this repo, ever (the standing wall)."
+      "title": "Adopt rhizomatic 0.8 — `expand` names the child's reading (registry + migration + every expand body)",
+      "body": "rhizomatic 0.8.0 landed the substrate ask from #23 (Loam's own filing): an `expand` term now names BOTH halves of the child's lens — `schema` (how the child gathers) and the new required `reading` (the resolution Schema the child resolves through). Resolving an expansion under a legacy body (no `reading`) is a LOUD ERROR — there is no fallback to the parent's Schema (which was the pre-0.8 behavior, correct only in narrow edge cases). This ticket is the compatibility floor: adopt 0.8 so Loam does not crash, and migrate every store that holds an expand body. The FEATURE payoff (resolvers actually reaching expanded children — attributed timeline posts) is a SEPARATE ticket, T26, that depends on this one.\n\nThe jump is 0.6.0 → 0.8.0, so it also pulls in 0.7.0's strict Ed25519 acceptance criterion (#20): transparent for every honest signature Loam produces, but it is a federation-relevant verification change — name it in the PR for Myk's merge.\n\nSCOPE (blast radius mapped 2026-07-18):\n1. Version bump `@bombadil/rhizomatic` ^0.6.0 → ^0.8.0 in package.json; regenerate lockfile.\n2. Thread `readings` into ALL SchemaRegistry.build call sites — 6 in src (lifecycle.ts:245, :286, :352, :401, :509; gateway.ts:202 empty default) + test/spike/schema.test.ts:102. Source the readings map (reading-name → Schema) from the bound Schemas already on each Program/Bound, keyed by lensName — add a `programReadings` helper beside `programHyperschemas` (lifecycle.ts:236).\n3. Import the new 0.8 symbols where used (absent everywhere today): `schemaHash`, `resolveReading`, `getReading`, `collectReadingRefs` — chiefly in lifecycle.ts, registration.ts, migrate.ts. CONFIRM against the installed 0.8 dist whether `resolveView` (reads.ts:94/137/184) needs a registry/readings arg to resolve a nested child, or whether the self-describing hview carries the reading content address and resolveView stays 2-arg (the changelog says the resolve API surface is untouched and serialized hviews carry the reading's content address — verify).\n4. Add `reading` to EVERY expand body: demos/pachyderm/bundle/{feed,latest}.json (reading \"Post\"), demos/larder/bundle/grocery-list.json (the child Schema of role item — confirm its Schema NAME from item.json), demos/planner/bundle/planner-book.json (the Plan reading), demos/village/schemas/{circle,film-night}.json + the generator demos/village/gen-schemas.mjs (expandThrough must emit reading), scripts/gen-packets.mjs, demos/tutorial/lessons.mjs (FILM_EXPAND_BODY), and test fixtures test/spike/schema.test.ts, test/gateway/{genesis,read,link}.test.ts (the `expand role plant schema Plant` bodies gain reading \"Plant\").\n5. §20 MIGRATION step (this is a breaking on-wire change → mandatory, same PR): a 4th entry in MIGRATIONS (src/migrate/migrate.ts). It shape-detects a hyperschema DEFINITION delta whose body contains an `expand` lacking `reading`, and re-signs the definition with `reading` filled from the child Schema name — MECHANICAL because pre-0.8 stores are single-lens-per-hyperschema (the changelog's own migration checklist: exactly one candidate reading per hyperschema, since coexistence postdates them). It must be idempotent: the discriminator is 'expand present AND reading absent' (distinct by construction once reading is filled), mirroring the naive-shape caveat comment at migrate.ts:57. Walk pinned `{pinned:<hash>}` refs too if Loam pins any body hashes (it pins VersionedSchema snapshots by hash, but those are resolution Schemas, not hyperschema bodies — CONFIRM no body-hash pin exists that would break).\n6. spec/22 LANDS the resolved behavior (this realizes the old T25 spec-doc half): the boundary note is REPLACED by the landed truth — an expand names the child's reading, the child resolves through its own Schema. The Provenance footer cites this PR and rhizomatic#23 / 0.8.0.\n7. Village: fresh-run the village end-to-end; the reading-bearing schemas must certify green. Update demos/village/README.md's ledger.\n\nRAILS to freeze (P3, write first): a store carrying a pre-0.8 expand body, run through migrate, resolves its expansions without the loud error (the migration filled reading); a village/demo expand read still returns the child view; the SchemaRegistry.build readings arg is exercised (an unknown reading ref fails registry build LOUDLY at publish, caught quietly on replay). MERGE: Myk's — breaking on-wire change + migration + federation-relevant (0.7 strict sig).",
+      "scope": [
+        "package.json",
+        "src/gateway/lifecycle.ts",
+        "src/gateway/reads.ts",
+        "src/gateway/registration.ts",
+        "src/migrate/migrate.ts",
+        "src/gateway/gateway.ts",
+        "demos/pachyderm/bundle/feed.json",
+        "demos/pachyderm/bundle/latest.json",
+        "demos/larder/bundle/grocery-list.json",
+        "demos/planner/bundle/planner-book.json",
+        "demos/village/gen-schemas.mjs",
+        "demos/village/schemas/circle.json",
+        "demos/village/schemas/film-night.json",
+        "scripts/gen-packets.mjs",
+        "demos/tutorial/lessons.mjs",
+        "spec/22-resolvers.md"
+      ],
+      "rails": []
+    },
+    {
+      "id": "T26",
+      "phase": "P3",
+      "status": "todo",
+      "edges": [
+        "T25"
+      ],
+      "title": "Resolvers reach expanded children — attributed timeline posts, closing pachy.2",
+      "body": "With rhizomatic 0.8 adopted (T25), an `expand` names the child's reading, so rhizomatic resolves an expanded child through the child's own Policies. But Loam's §22 host-level RESOLVERS (the attribution byline, the RSVP provenance) are applied by applyResolvers (src/gateway/resolvers.ts:177) only to a lens's OWN top-level fields — it explicitly does NOT descend into expanded children (see the renderTarget comment at resolvers.ts:49: 'Expansions … an edge story rung (a) does not reach into'). This ticket makes resolvers reach expanded children: for each field that is an expansion, look up the child reading's ResolverSpecs (Loam holds these per-lens, keyed by lensName in registration.ts) and recurse applyResolvers into the child view with the child hview and child root. The reading name for each expanded field is now knowable — it is on the expand term (static in the body) and on the self-describing hview entry's reading content address.\n\nPAYOFF: this closes the gap Pachyderm documented honestly at pachyderm.mjs pachy.2 — the attribution resolver (post.json's `text`, which signs the byline from cryptographic authorship) applies on a DIRECT post read but not to posts as expanded children of the feed. After this ticket, the timeline itself carries attributed posts. Update pachy.2's comment from documenting the gap to asserting the fix, and strengthen the check to require attribution in the EXPANDED (timeline) read, not only the direct read.\n\nRAILS (P3, write first): a direct read of an entity and the SAME entity read as an expanded child of a feed produce the SAME resolver-decorated value (attribution present in both) — the test that would have caught the original gap; the memo still invalidates on erasure for a child-applied resolver (the child bucket's delta-set keys the memo, same as top-level); a lens whose child reading has NO resolvers is unchanged (the raw child view passes through). No new wire bytes — this is a pure read-path enrichment, so no migration. MERGE: rides T25's PR or stacks on it; Myk's merge because it lands atop the breaking change and touches the read path across every door.",
+      "scope": [
+        "src/gateway/resolvers.ts",
+        "src/gateway/reads.ts",
+        "demos/pachyderm/pachyderm.mjs",
+        "spec/22-resolvers.md"
+      ],
+      "rails": []
     }
   ]
 }
