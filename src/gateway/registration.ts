@@ -65,6 +65,32 @@ export function edgeRoles(body: Term): string[] {
   return [...roles];
 }
 
+// The first `expand` in a gather that names NO `reading` (rhizomatic 0.8 / issue #23), reported by its
+// role so the refusal can point at it — or undefined when every expansion names the child's reading.
+// Shares `edgeRoles`' traversal exactly, including `union`'s two arms, so no branch of a body escapes
+// the check. A wildcard role has no single name; it prints as `*`.
+export function readinglessExpandRole(body: Term): string | undefined {
+  const walk = (t: Term): string | undefined => {
+    switch (t.kind) {
+      case "expand":
+        if (t.reading === undefined) return t.role.kind === "exact" ? t.role.value : "*";
+        return walk(t.of);
+      case "select":
+      case "mask":
+      case "group":
+      case "prune":
+      case "resolve":
+        return walk(t.of);
+      case "union":
+        return walk(t.left) ?? walk(t.right);
+      case "input":
+      case "fix":
+        return undefined; // input gathers nothing; fix invokes another schema, checked on its own
+    }
+  };
+  return walk(body);
+}
+
 // The write discipline (step 12): a claim template is a pointer skeleton with argument holes.
 // `at` + `context` make an entity pointer (the hole takes an id; `each` takes a list of them);
 // `value` takes a primitive hole or a fixed literal. One template call emits ONE delta shaped

@@ -8,7 +8,13 @@
 // still invalidates when the child's own ground is erased.
 
 import { describe, expect, it } from "vitest";
-import { authorForSeed, parseTerm, signClaims, type Delta } from "@bombadil/rhizomatic";
+import {
+  authorForSeed,
+  makeNegationClaims,
+  parseTerm,
+  signClaims,
+  type Delta,
+} from "@bombadil/rhizomatic";
 import { operatorMarkerClaims } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
@@ -100,6 +106,8 @@ async function feedGateway(withResolver: boolean): Promise<Gateway> {
   return gw;
 }
 
+const FEED_Q = `{ feed(entity: "feed:main") { post } }`;
+
 const post0 = (r: { data?: unknown }): Record<string, unknown> =>
   (r.data as { feed: { post: Record<string, unknown>[] } }).feed.post[0]!;
 
@@ -107,7 +115,7 @@ describe("resolvers reach expanded children (T26)", () => {
   it("a post read directly and the same post read as an expanded child resolve to the SAME byline", async () => {
     const gw = await feedGateway(true);
     const direct = await gw.query(`{ post(entity: "post:a1") { text } }`);
-    const feed = await gw.query(`{ feed(entity: "feed:main") { post } }`);
+    const feed = await gw.query(FEED_Q);
     const directText = (direct.data as { post: { text: string } }).post.text;
 
     // The resolver computed the byline from cryptographic authorship, not from what was typed.
@@ -119,24 +127,106 @@ describe("resolvers reach expanded children (T26)", () => {
 
   it("a child reading with no resolvers passes through untouched (raw text)", async () => {
     const gw = await feedGateway(false);
-    const feed = await gw.query(`{ feed(entity: "feed:main") { post } }`);
+    const feed = await gw.query(FEED_Q);
     expect(post0(feed).text).toBe("hello"); // the Policy value, undecorated
     await gw.close();
   });
 
-  it("the child resolver's memo invalidates when the child's own ground is erased", async () => {
+  it("the child resolver RE-RUNS when the child's own bucket changes (a retraction, not a reseat)", async () => {
     const gw = await feedGateway(true);
-    const before = await gw.query(`{ feed(entity: "feed:main") { post } }`);
-    expect(post0(before).text).toBe(`${SIG6}: hello`);
+    expect(post0(await gw.query(FEED_Q)).text).toBe(`${SIG6}: hello`);
 
-    // Forget the post's text delta: the child's bucket changes, so the child resolver must re-run
-    // over the surviving (now empty) ground — the stale byline can never be served again.
+    // RETRACT the post's text. Deliberately not `erase()`: erasure reseats the gateway, which clears
+    // the entire resolver memo (gateway.ts), so an erasure-based test passes even with the memo key
+    // reverted to the resolver address alone — it can never observe the bucket keying it names. A
+    // negation changes the child's surviving bucket while the memo stays warm, which is the real test.
     const textDelta = [...gw.reactor.snapshot()].find((d) =>
       d.claims.pointers.some((p) => p.target.kind === "primitive" && p.target.value === "hello"),
     );
-    await gw.erase(textDelta!.id, { reason: "thought better of it" });
-    const after = await gw.query(`{ feed(entity: "feed:main") { post } }`);
-    expect(post0(after).text).not.toBe(`${SIG6}: hello`); // the forgotten byline is gone from the child
+    await gw.append([signClaims(makeNegationClaims(OP, 99, textDelta!.id), SEED)]);
+
+    // POSITIVE: the resolver re-ran over the surviving (now empty) bucket and joined nothing. A
+    // negative assertion would also be satisfied by the field vanishing, which proves nothing.
+    expect(post0(await gw.query(FEED_Q)).text).toBe("");
+    await gw.close();
+  });
+
+  it("a resolver the PARENT lens declares on an expanding field wins over the child decoration", async () => {
+    // Precedence: decorate children first, then let this lens's own resolvers have the last word on
+    // its own fields. With the order inverted, the decoration overwrites the parent's declared
+    // resolver and the field silently serves child views the lens never asked for.
+    const gw = await Gateway.open(new MemoryBackend(), { seed: SEED });
+    await gw.append([signClaims(operatorMarkerClaims(OP), SEED)]);
+    await gw.append([link("post:a1"), say("post:a1", "hello", 20)]);
+    await gw.publishRegistration(
+      POST_H,
+      POST_S,
+      ["post:a1"],
+      undefined,
+      undefined,
+      undefined,
+      ["text"],
+      ATTRIBUTION,
+    );
+    await gw.publishRegistration(
+      FEED_H,
+      FEED_S,
+      ["feed:main"],
+      undefined,
+      undefined,
+      undefined,
+      ["post"],
+      {
+        post: {
+          code: "export default (bucket) => bucket.map(() => 'the lens decided');",
+          rung: "a" as const,
+          type: "list" as const,
+        },
+      },
+    );
+    const feed = await gw.query(FEED_Q);
+    expect((feed.data as { feed: { post: unknown } }).feed.post).toEqual(["the lens decided"]);
+    await gw.close();
+  });
+
+  it("a child embedded BESIDE other pointers is decorated too (a multi-pointer entry)", async () => {
+    // candidateValue renders an entry with several non-filing pointers as an object keyed by role, in
+    // BOTH the full and the stripped resolve — so the splice must recurse key-by-key to reach the
+    // child. Otherwise the same post reads attributed on its own and raw inside the feed.
+    const gw = await Gateway.open(new MemoryBackend(), { seed: SEED });
+    await gw.append([signClaims(operatorMarkerClaims(OP), SEED)]);
+    const richLink = signClaims(
+      {
+        timestamp: 10,
+        author: OP,
+        pointers: [
+          {
+            role: "feed",
+            target: { kind: "entity", entity: { id: "feed:main", context: "post" } },
+          },
+          { role: "post", target: { kind: "entity", entity: { id: "post:a1", context: "in" } } },
+          { role: "pinnedAt", target: { kind: "primitive", value: 1700 } },
+        ],
+      },
+      SEED,
+    );
+    await gw.append([richLink, say("post:a1", "hello", 20)]);
+    await gw.publishRegistration(
+      POST_H,
+      POST_S,
+      ["post:a1"],
+      undefined,
+      undefined,
+      undefined,
+      ["text"],
+      ATTRIBUTION,
+    );
+    await gw.publishRegistration(FEED_H, FEED_S, ["feed:main"]);
+    const feed = await gw.query(FEED_Q);
+    const entry = (feed.data as { feed: { post: { post: { text: string }; pinnedAt: number }[] } })
+      .feed.post[0]!;
+    expect(entry.pinnedAt).toBe(1700); // the sibling pointer rode along untouched
+    expect(entry.post.text).toBe(`${SIG6}: hello`); // ...and the child inside it IS attributed
     await gw.close();
   });
 });

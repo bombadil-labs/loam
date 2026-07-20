@@ -273,14 +273,28 @@ ordering: the same hview is resolved a second time with every expansion stripped
 expanded pointer renders as the child's entity ID in the identical Policy order — that alignment is the
 child's identity, letting the host splice the decorated child back into the exact position it holds.
 The reading's own resolvers are looked up by name (a reading's name IS its lens name), and the child's
-resolver memo invalidates on the child's own erasure exactly as a top-level field's does (§11): the
-child bucket keys the memo. **v1 boundary, named honestly:** decoration reaches a child embedded as a
-single expansion pointer (a feed's post, a plan's guest) under a `pick` or `all` Policy — the common
-shape. Two cases are left resolved-but-undecorated, never mis-decorated: a child buried inside a
-MULTI-pointer object value (the alignment can't name it), and a field whose Policy is `conflicts` or
-`merge` (they dedup by canonical hex or fold to primitives, so the stripped-id resolve and the full
-resolve can diverge — the alignment holds only for the position-preserving policies). Both are rungs
-deferred until a consumer needs them.
+resolver memo invalidates on the child's own retraction or erasure exactly as a top-level field's does
+(§11): the child bucket keys the memo. The memo key carries the ROOT as well as the bucket, because the
+bucket's projection is root-dependent — one delta naming two entities lands in BOTH their buckets, and
+without the root those two reads collide on a single key; sharing one memo across a whole read tree is
+what made that reachable inside a single query.
+
+A child is identified the way the term itself identifies it — by the POINTER that expanded it, role and
+target together. So an entry that expands the same entity under two roles through two different
+readings resolves each through its own, and a child embedded BESIDE other pointers (an entry whose
+value renders as an object keyed by role) is reached by recursing into that object key by key.
+
+**Precedence.** Decoration happens BEFORE the lens's own resolvers, so a resolver a lens declares on an
+expanding field has the last word over the child views rather than being silently overwritten by them.
+The order is: the Policy resolves, children are decorated through their own readings, then this lens's
+resolvers speak.
+
+**v1 boundary, named honestly:** decoration is gated to fields whose Policy is `pick` or `all`
+(transparently through `absentAs`). `conflicts` and `merge` dedup by canonical hex or fold to
+primitives, so the stripped-id resolve and the full resolve can diverge — the alignment holds only for
+the position-preserving policies, and under any other the child is left resolved-but-undecorated:
+honest, never mis-decorated. A position whose reading is genuinely ambiguous (one entity expanded under
+one role through two different readings) is skipped for the same reason.
 
 **Provenance.** rhizomatic 0.8 adoption landed [#139](https://github.com/bombadil-labs/loam/pull/139)
 (ticket T25), realizing [rhizomatic#23](https://github.com/bombadil-labs/rhizomatic/issues/23). Loam
@@ -296,8 +310,12 @@ for every honest signature. Host-level resolvers reaching expanded children land
 [#140](https://github.com/bombadil-labs/loam/pull/140) (ticket T26): `decorateChildren`
 (`src/gateway/resolvers.ts`), wired into every read path — query, pinned version, and the live watch
 stream (`src/gateway/reads.ts`) — so a door, a version door, and a subscription all attribute a
-timeline the same way. Rails: a post read directly and as an expanded child resolve to the same
-byline, a child reading with no resolvers passes through untouched, and the child memo invalidates on
-child erasure (`test/gateway/child-resolvers.test.ts`). Additive, no wire change, no migration — the
+timeline the same way. Rails (`test/gateway/child-resolvers.test.ts`): a post read
+directly and as an expanded child resolve to the same byline; a child reading with no resolvers passes
+through untouched; the child resolver RE-RUNS when its bucket changes under a RETRACTION (deliberately
+not an erasure, which reseats and clears the whole memo and so could never observe the key at all); a
+resolver the parent lens declares on an expanding field wins over the decoration; and a child embedded
+beside other pointers is decorated too. The rails drive the query door; the pinned-version and watch
+doors share the same seam but are not separately railed. Additive, no wire change, no migration — the
 enrichment is pure read-path. Pachyderm's timeline (`demos/pachyderm/`) now carries its attributions,
 closing the gap pachy.2 documented.
