@@ -49,3 +49,24 @@ anticipating either sequel — which is the whole point.
 *Born 2026-07-18 as the celebration app for the §21→§27 arc — and within its first minute of
 existing it found a real gap in the platform (a renderer couldn't bind to a non-degenerate lens
 name; fixed the same hour). Using what you ship finds what shipping missed.*
+
+## Both directions
+
+A recipe names what it needs; the pantry says what is there. Those are the same edge, and Larder
+reads it from both ends:
+
+- **What does this dish need?** — a recipe expands each ingredient into that item's real Item view,
+  so every line is computed: `eggs: have 0, need 3 — short 3`. Nothing is typed in twice.
+- **What can I make?** — the cookbook weighs every recipe on the shelf against the pantry, two
+  levels down: `flatbread — MAKEABLE`, `fresh pasta — need 3 eggs`.
+
+Both are **reads**, not remembered facts. Buy the eggs and the next read says MAKEABLE — no runner,
+no re-derivation, nothing to invalidate. That is deliberate: a cookbook that says "pasta!" over eggs
+you already ate is the bug such an app is judged on, so makeability is an *interpretation* (SPEC
+§22.2's question, answered) and never a stored claim.
+
+This is also the feature that found a hole in the platform. A recipe's gather already pulled each
+ingredient's stock into its own hyperview, but a resolver over that bucket could only see
+`["item:flour"]` — the bare id. SPEC §22.8 closed it: a bucket entry for an expanded pointer is now
+the child's resolved view, and the resolver memo reaches through the expansion so a change to the
+CHILD's ground recomputes the parent. An ordinary grocery question, and it moved the substrate.
