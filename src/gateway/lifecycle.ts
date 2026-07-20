@@ -265,17 +265,22 @@ const programHyperschemas = (regs: readonly Bound[]): HyperSchema[] =>
 // included, not one-per-program: a feed in one program expands posts whose reading lives in ANOTHER.
 const programReadings = (regs: readonly Bound[]): Schema[] => {
   const byName = new Map<string, Schema>();
-  for (const r of regs) {
-    // Key on the LENS name, not `schema.name`. Everything else in the system identifies a lens by
-    // `lensOf` (every GraphQL type and field, and reads.ts's reading-resolver lookup), and a Schema
-    // may be anonymous — `register(PLANT, PLANT_POLICY, …)` binds and serves lens `Plant` with an
-    // unnamed Schema. Keying on `schema.name` dropped exactly those: a lens you could serve, query,
-    // and decorate, but that no body could ever name as a `reading`. It also split publish from
-    // replay — `registrationDeltaClaims` persists the Schema re-stamped with its lens name, so the
-    // same binding contributed no reading at publish and one after a reboot. Re-stamping here makes
-    // the in-process and from-store paths the same function of the same bindings.
-    const lens = lensOf(r);
-    byName.set(lens, r.schema.name === lens ? r.schema : { ...r.schema, name: lens });
+  // Read the winning lens from the GROUPING, not from the flat list. Both would agree today — the
+  // flat list is append-ordered and `groupPrograms` keeps latest-per-lens — but agreeing by
+  // coincidence is not the same as having one rule. It matters because a flat list legitimately
+  // holds TWO bindings for one lens: `registerImpl` evolves a lens in place with
+  // `[...gw.registered, theNewOne]`, so the old and new Schemas are both present. Anything that
+  // "refused a duplicate lens name" here would break evolution; anything that picked by array order
+  // would be picking the same winner for a different, unstated reason. Deferring to the grouping
+  // means the reading an `expand` resolves through is BY CONSTRUCTION the lens the surface serves.
+  for (const program of groupPrograms(regs).values()) {
+    for (const [lens, bound] of program.lenses) {
+      // Key on the LENS name, and re-stamp it: a Schema may be anonymous (`register(PLANT,
+      // PLANT_POLICY, …)` binds and serves lens `Plant` with an unnamed Schema), and everything else
+      // in the system identifies a lens by `lensOf`. Keying on `schema.name` dropped exactly those —
+      // a lens you could serve, query and decorate, but that no body could name as a `reading`.
+      byName.set(lens, bound.schema.name === lens ? bound.schema : { ...bound.schema, name: lens });
+    }
   }
   return [...byName.values()];
 };
