@@ -17,7 +17,7 @@ import { grantClaims } from "../../src/gateway/accounts.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
-import { PLANT, PLANT_POLICY, PLANT_WRITABLE, pickLatest } from "./fixtures.js";
+import { PLANT, PLANT_POLICY, PLANT_READING, PLANT_WRITABLE, pickLatest } from "./fixtures.js";
 
 const OPERATOR_SEED = "0e".repeat(32);
 const OPERATOR = authorForSeed(OPERATOR_SEED);
@@ -439,6 +439,7 @@ describe("evolution is append: the surface follows the surviving definitions", (
         op: "expand",
         role: { exact: "plant" },
         schema: "Plant",
+        reading: "Plant", // issue #23: the child resolves through its own Plant reading
         in: {
           op: "group",
           key: "byTargetContext",
@@ -459,7 +460,8 @@ describe("evolution is append: the surface follows the surviving definitions", (
           schema: { props: new Map(), default: pickLatest },
           roots: [BED],
         },
-        { hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN], writable: [...PLANT_WRITABLE] },
+        // Plant registered under its NAMED reading (issue #23) so the Bed's `reading: "Plant"` resolves.
+        { hyperschema: PLANT, schema: PLANT_READING, roots: [FERN], writable: [...PLANT_WRITABLE] },
       ],
     });
     const gateway = await Gateway.boot(new MemoryBackend(), genesis);

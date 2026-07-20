@@ -16,7 +16,7 @@ import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
 import {
   PLANT,
-  PLANT_POLICY,
+  PLANT_READING,
   PLANT_WRITABLE,
   garden,
   governedBootstrap,
@@ -33,6 +33,7 @@ const bedBody = parseTerm({
   op: "expand",
   role: { exact: "plant" },
   schema: "Plant",
+  reading: "Plant", // issue #23: the child resolves through its own Plant reading
   in: {
     op: "group",
     key: "byTargetContext",
@@ -61,7 +62,7 @@ async function bedGateway(backend = new MemoryBackend()): Promise<Gateway> {
   const gateway = await Gateway.open(backend, { seed: KEEPER_SEED });
   await gateway.append(governedBootstrap(KEEPER_SEED));
   await gateway.append(world);
-  gateway.register(PLANT, PLANT_POLICY, [FERN, MOSS], undefined, PLANT_WRITABLE);
+  gateway.register(PLANT, PLANT_READING, [FERN, MOSS], undefined, PLANT_WRITABLE);
   gateway.register(BED_SCHEMA, BED_POLICY, [BED], undefined, ["plants", "name"]);
   return gateway;
 }
@@ -185,7 +186,7 @@ describe("link / sever (§14 edge verbs): assert and retract an edge, named", ()
   it("a seedless, actorless gateway cannot link any more than it can assert", async () => {
     const gateway = await Gateway.open(new MemoryBackend());
     await gateway.append(world);
-    gateway.register(PLANT, PLANT_POLICY, [FERN, MOSS], undefined, PLANT_WRITABLE);
+    gateway.register(PLANT, PLANT_READING, [FERN, MOSS], undefined, PLANT_WRITABLE);
     gateway.register(BED_SCHEMA, BED_POLICY, [BED], undefined, ["plants", "name"]);
     const result = await gateway.query(link(BED, "plants", FERN));
     expect(result.errors?.join(" ")).toMatch(/no signing seed/);
@@ -196,7 +197,7 @@ describe("link / sever (§14 edge verbs): assert and retract an edge, named", ()
     const gateway = await Gateway.open(new MemoryBackend(), { seed: KEEPER_SEED });
     await gateway.append(governedBootstrap(KEEPER_SEED));
     await gateway.append(world);
-    gateway.register(PLANT, PLANT_POLICY, [FERN, MOSS], undefined, PLANT_WRITABLE);
+    gateway.register(PLANT, PLANT_READING, [FERN, MOSS], undefined, PLANT_WRITABLE);
     // Only `name` is writable; `plants` is read-only at the surface.
     gateway.register(BED_SCHEMA, BED_POLICY, [BED], undefined, ["name"]);
     const linkRes = await gateway.query(link(BED, "plants", FERN), undefined, {

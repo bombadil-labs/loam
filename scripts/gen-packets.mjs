@@ -63,7 +63,11 @@ async function buildCircle() {
       registrations: [
         {
           hyperschema: { name: "Person", alg: 1, body: parseTerm(GATHER) },
-          schema: parseSchema({ props: { name: PICK, follows: ALL }, default: PICK }),
+          schema: parseSchema({
+            name: "Person",
+            props: { name: PICK, follows: ALL },
+            default: PICK,
+          }),
           roots: PEOPLE,
         },
         {
@@ -74,6 +78,7 @@ async function buildCircle() {
               op: "expand",
               role: { exact: "friend" },
               schema: "Person",
+              reading: "Person", // issue #23: friends resolve through the Person reading
               in: GATHER,
             }),
           },

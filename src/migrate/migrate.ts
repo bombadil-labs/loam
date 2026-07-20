@@ -15,8 +15,13 @@
 
 import {
   authorForSeed,
+  cborToJson,
+  decode,
   parseSchema,
+  parseTerm,
   signClaims,
+  termCanonicalHex,
+  termToJson,
   verifyDelta,
   type Claims,
   type Delta,
@@ -385,13 +390,164 @@ const INLINE_SCHEMA_TO_ENTITY: Migration = {
   },
 };
 
+// ---- the 0.8 step: an `expand` names the child's reading (rhizomatic issue #23) ----------------
+//
+// rhizomatic 0.8 gave `expand` a second half: besides `schema` (how the child GATHERS) it now names
+// `reading` (the resolution Schema the child RESOLVES through). A legacy body — an `expand` with no
+// `reading` — no longer falls back to the parent's Schema; it REFUSES to resolve, loudly. So every
+// hyperschema DEFINITION whose gather body expands must be re-signed with `reading` filled in.
+//
+// The choice is mechanical, and provably so: a pre-0.8 store is single-lens (multi-lens coexistence
+// postdates 0.8), so each child hyperschema was bound to exactly ONE resolution Schema. We recover
+// that pairing from the store's own bindings — a binding names its `hyperschema` entity and its living
+// `schema:<name>` entity — and fill each `expand`'s `reading` with the reading its child hyperschema
+// was serving. If a child has zero or (impossibly, pre-0.8) several candidate readings, that `expand`
+// is left untouched: better an honest refusal at resolve than a guessed reading.
+//
+// Shape-detected like every step: the old shape is a definition body carrying a `reading`-less
+// `expand`; once filled, the same body is not detected again (idempotent), and the negation drops the
+// readingless definition from `loadHyperSchema`'s bucket so the reading-bearing one is what binds.
+
+const HS_TERM = `${NEW_PREFIX}term`; // rhizomatic.hyperschema.term — the body blob role
+const SCHEMA_LIVING_PREFIX = "schema:";
+const HYPERSCHEMA_ENTITY_PREFIX = "hyperschema:";
+
+const hexToBytes = (hex: string): Uint8Array => {
+  const out = new Uint8Array(hex.length >> 1);
+  for (let i = 0; i < out.length; i += 1) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  return out;
+};
+
+// A definition delta's body, decoded to JSON (termToJson form), or undefined if this is not a
+// definition delta (no `rhizomatic.hyperschema.term` blob) or the blob will not decode.
+const definitionBody = (claims: Claims): unknown => {
+  const hex = primitiveValue(claims, HS_TERM);
+  if (hex === undefined) return undefined;
+  try {
+    return termToJson(parseTerm(cborToJson(decode(hexToBytes(hex)))));
+  } catch {
+    return undefined;
+  }
+};
+
+// Does this body-JSON carry an `expand` with no `reading`? (The shape the 0.8 step migrates.)
+const hasReadinglessExpand = (json: unknown): boolean => {
+  if (Array.isArray(json)) return json.some(hasReadinglessExpand);
+  if (json !== null && typeof json === "object") {
+    const o = json as Record<string, unknown>;
+    if (o.op === "expand" && o.reading === undefined) return true;
+    return Object.values(o).some(hasReadinglessExpand);
+  }
+  return false;
+};
+
+// The child-hyperschema-name → reading-name map, read from the store's bindings. A binding names its
+// `hyperschema` entity (`hyperschema:<Name>`) and its living resolution Schema entity (`schema:<Name>`);
+// the reading NAME is that living entity's suffix, which is exactly the Schema's own name. Collected
+// into a set per hyperschema so an (impossible, pre-0.8) multi-lens ambiguity is detectable, not silent.
+const readingMap = (deltas: readonly Delta[]): Map<string, Set<string>> => {
+  const map = new Map<string, Set<string>>();
+  for (const d of deltas) {
+    const hyper = d.claims.pointers.find(
+      (p) => p.role === "hyperschema" && p.target.kind === "entity",
+    );
+    const schema = d.claims.pointers.find((p) => p.role === "schema" && p.target.kind === "entity");
+    if (hyper?.target.kind !== "entity" || schema?.target.kind !== "entity") continue;
+    const hyperId = hyper.target.entity.id;
+    const schemaId = schema.target.entity.id;
+    if (
+      !hyperId.startsWith(HYPERSCHEMA_ENTITY_PREFIX) ||
+      !schemaId.startsWith(SCHEMA_LIVING_PREFIX)
+    ) {
+      continue;
+    }
+    const hyperName = hyperId.slice(HYPERSCHEMA_ENTITY_PREFIX.length);
+    const readingName = schemaId.slice(SCHEMA_LIVING_PREFIX.length);
+    (map.get(hyperName) ?? map.set(hyperName, new Set()).get(hyperName)!).add(readingName);
+  }
+  return map;
+};
+
+// Fill each `expand`'s `reading` from the reading map (keyed by the expand's `schema` = child
+// hyperschema name). An `expand` whose child has no single candidate reading is left as-is.
+const fillReadings = (json: unknown, readings: Map<string, Set<string>>): unknown => {
+  if (Array.isArray(json)) return json.map((v) => fillReadings(v, readings));
+  if (json !== null && typeof json === "object") {
+    const o = json as Record<string, unknown>;
+    const filled: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(o)) filled[k] = fillReadings(v, readings);
+    if (o.op === "expand" && o.reading === undefined && typeof o.schema === "string") {
+      const candidates = readings.get(o.schema);
+      if (candidates !== undefined && candidates.size === 1) {
+        filled.reading = [...candidates][0];
+      }
+    }
+    return filled;
+  }
+  return json;
+};
+
+// A definition delta whose body carries a readingless `expand` that we CAN fill — i.e. re-encoding
+// the reading-filled body actually changes the blob. Returns the new ROLE_TERM hex, or undefined.
+const filledTermHex = (claims: Claims, readings: Map<string, Set<string>>): string | undefined => {
+  const body = definitionBody(claims);
+  if (body === undefined || !hasReadinglessExpand(body)) return undefined;
+  const filled = fillReadings(body, readings);
+  try {
+    const hex = termCanonicalHex(parseTerm(filled));
+    return hex === primitiveValue(claims, HS_TERM) ? undefined : hex; // nothing actually filled
+  } catch {
+    return undefined;
+  }
+};
+
+const EXPAND_READING: Migration = {
+  id: "expand-reading",
+  reason:
+    "migrated to rhizomatic 0.8 (issue #23): each `expand` names the child's `reading` — the single " +
+    "resolution Schema its child hyperschema was bound to — so a legacy readingless body resolves again",
+  applies(deltas) {
+    const readings = readingMap(deltas);
+    return deltas.some((d) => filledTermHex(d.claims, readings) !== undefined);
+  },
+  additions(deltas, seed) {
+    const operator = authorForSeed(seed);
+    const readings = readingMap(deltas);
+    const added: Delta[] = [];
+    for (const d of deltas) {
+      // Operator-authored and signature-proven only — re-signing an unverified delta would make the
+      // migrator a signing oracle (the guard every step shares).
+      if (d.claims.author !== operator || verifyDelta(d) !== "verified") continue;
+      const hex = filledTermHex(d.claims, readings);
+      if (hex === undefined) continue;
+      const reExpressed = signClaims(
+        {
+          timestamp: d.claims.timestamp,
+          author: d.claims.author,
+          pointers: d.claims.pointers.map((p) =>
+            p.role === HS_TERM ? { ...p, target: { kind: "primitive" as const, value: hex } } : p,
+          ),
+        },
+        seed,
+      );
+      const negation = signClaims(
+        supersession(operator, d.claims.timestamp, d.id, reExpressed.id, this.reason),
+        seed,
+      );
+      added.push(reExpressed, negation);
+    }
+    return added;
+  },
+};
+
 // The chain, in order. Add one entry per breaking on-wire format change, forever composable. A store
 // several versions back runs each in turn: hyperschema-roles (vocabulary), then the entity rename +
-// writability flip, then the inline-Schema lift.
+// writability flip, then the inline-Schema lift, then the expand-reading fill.
 export const MIGRATIONS: readonly Migration[] = [
   HYPERSCHEMA_ROLES,
   SCHEMA_ENTITY_RENAME,
   INLINE_SCHEMA_TO_ENTITY,
+  EXPAND_READING,
 ];
 
 // ---- the driver --------------------------------------------------------------------------------

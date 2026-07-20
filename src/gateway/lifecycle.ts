@@ -236,13 +236,29 @@ export function groupPrograms(regs: readonly Bound[]): Map<string, Program> {
 const programHyperschemas = (regs: readonly Bound[]): HyperSchema[] =>
   [...groupPrograms(regs).values()].map((p) => p.hyperschema);
 
+// The registry's SECOND half since rhizomatic 0.8 / issue #23: the readings — every bound resolution
+// Schema, by name — so an `expand` term that names its child's reading (`reading: "Post"`) resolves
+// that name at eval time. A reading is a lens: its name is the lens name, distinct within a program
+// (latest-per-lens keeps it single-valued), so keying by name dedups cleanly and the registry never
+// sees a spurious `duplicate reading name`. An anonymous Schema cannot be referenced as a reading, so
+// it is dropped here rather than handed to a build that would reject it. EVERY lens's Schema is
+// included, not one-per-program: a feed in one program expands posts whose reading lives in ANOTHER.
+const programReadings = (regs: readonly Bound[]): Schema[] => {
+  const byName = new Map<string, Schema>();
+  for (const r of regs) if (r.schema.name !== undefined) byName.set(r.schema.name, r.schema);
+  return [...byName.values()];
+};
+
 // Bind a whole desired set at once, under a fresh generation of materializations. The set was
 // validated by the caller (the fixpoint), so nothing here can half-apply. Superseded
 // materializations stay behind (the reactor has no deregister); superseded lazy watches stop
 // counting against the cap.
 export function rebindImpl(gw: Gateway, next: Bound[]): void {
   const programs = groupPrograms(next); // refuses a rival body before any state changes
-  const registry = SchemaRegistry.build([...programs.values()].map((p) => p.hyperschema));
+  const registry = SchemaRegistry.build(
+    [...programs.values()].map((p) => p.hyperschema),
+    programReadings(next),
+  );
   const gql = buildGqlSchema(next, gw.gqlHooks());
   gw.generation += 1;
   for (const program of programs.values()) {
@@ -283,7 +299,7 @@ export function replayRegistrationsImpl(gw: Gateway): void {
       const attempt = (candidate: Bound): boolean => {
         try {
           const trial = [...accepted, candidate];
-          const registry = SchemaRegistry.build(programHyperschemas(trial)); // groups: one hyperschema per program; a rival body throws here
+          const registry = SchemaRegistry.build(programHyperschemas(trial), programReadings(trial)); // groups: one hyperschema per program; a rival body throws here
           assertMaterializable(candidate.hyperschema, registry); // reactor.register would throw
           assertTemplatesVisible(
             candidate.hyperschema,
@@ -349,7 +365,10 @@ export function replayRegistrationsImpl(gw: Gateway): void {
       rebindImpl(gw, accepted);
       return;
     }
-    const registry = SchemaRegistry.build([...next.values()].map((p) => p.hyperschema));
+    const registry = SchemaRegistry.build(
+      [...next.values()].map((p) => p.hyperschema),
+      programReadings(accepted),
+    );
     const gql = buildGqlSchema(accepted, gw.gqlHooks());
     for (const program of fresh) {
       gw.reactor.register(
@@ -398,7 +417,7 @@ export function registerImpl(
       ...(writable ? { writable } : {}),
     },
   ];
-  const registry = SchemaRegistry.build(programHyperschemas(next)); // groups: refs + the rival-body refusal
+  const registry = SchemaRegistry.build(programHyperschemas(next), programReadings(next)); // groups: refs + the rival-body refusal
   assertMaterializable(hyperschema, registry); // refuses a body that yields no hyperview
   assertTemplatesVisible(hyperschema, templates, registry, gw.operatorAuthor ?? "loam:specimen"); // refuses invisible writes
   const gql = buildGqlSchema(next, gw.gqlHooks()); // refuses collisions
@@ -506,8 +525,13 @@ export async function publishRegistrationImpl(
   const survivors = gw.registered.filter(
     (r) => !(r.hyperschema.name === hyperschema.name && lensOf(r) === lensName),
   );
+  const trialLenses: Bound[] = [
+    ...survivors,
+    { hyperschema, schema, roots, origin: "store", lensName },
+  ];
   const trialRegistry = SchemaRegistry.build(
-    programHyperschemas([...survivors, { hyperschema, schema, roots, origin: "store", lensName }]),
+    programHyperschemas(trialLenses),
+    programReadings(trialLenses),
   ); // groups: one hyperschema per program, and the rival-body refusal fires HERE, loudly
   assertMaterializable(hyperschema, trialRegistry);
   assertTemplatesVisible(

@@ -23,6 +23,8 @@
     }
   },
   "schema": {
+    "name": "Colony",
+    "alg": 1,
     "props": {
       "queen": {
         "pick": {

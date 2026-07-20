@@ -23,6 +23,8 @@
     }
   },
   "schema": {
+    "name": "Person",
+    "alg": 1,
     "props": {
       "name": {
         "pick": {

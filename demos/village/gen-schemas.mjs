@@ -35,10 +35,15 @@ const gatherWithout = (context) => ({
   },
 });
 
-const expandThrough = (role, schema) => ({
+// Since rhizomatic 0.8 / issue #23, an `expand` names BOTH halves of the child's lens: `schema`
+// (how the child gathers) and `reading` (the resolution Schema it resolves through). The village
+// names every resolution Schema after its hyperschema (see `write`), so the child's reading name
+// coincides with the child hyperschema name — hence `reading` defaults to `schema`.
+const expandThrough = (role, schema, reading = schema) => ({
   op: "expand",
   role: { exact: role },
   schema,
+  reading,
   in: GATHER,
 });
 
@@ -50,7 +55,10 @@ const expandThrough = (role, schema) => ({
 const write = (file, { name, alg, body, policy, roots, entity, writable }) => {
   const spec = {
     hyperschema: { name, alg: alg ?? 1, body },
-    schema: policy,
+    // Name the resolution Schema after its hyperschema (issue #23): a named reading is referenceable
+    // as an `expand`'s `reading`, and — since lensName is `schema.name ?? hyperschema.name` — naming
+    // it the hyperschema's own name leaves lens identity (and thus §21.7 grouping) exactly as it was.
+    schema: { name, alg: alg ?? 1, ...policy },
     roots,
     ...(entity ? { entity } : {}),
     ...(writable ? { writable } : {}),

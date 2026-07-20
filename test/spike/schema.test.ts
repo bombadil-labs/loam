@@ -19,6 +19,7 @@ import {
   signClaims,
   termHash,
   type HyperSchema,
+  type Schema,
   type View,
 } from "@bombadil/rhizomatic";
 import { FERN, GARDENER, GARDENER_SEED, PLANT_BODY, SURVEYOR_SEED, observed } from "./garden.js";
@@ -89,6 +90,7 @@ describe("spike: schema refs — the recursion step 3's nested GraphQL types sta
     op: "expand",
     role: { exact: "plant" },
     schema: "Plant",
+    reading: "Plant", // issue #23: the child resolves through its OWN reading, named here
     in: {
       op: "group",
       key: "byTargetContext",
@@ -99,7 +101,18 @@ describe("spike: schema refs — the recursion step 3's nested GraphQL types sta
       },
     },
   });
-  const registry = SchemaRegistry.build([PLANT, { name: "BedWithPlants", alg: 1, body: BED_BODY }]);
+  // The child's reading (issue #23): a resolution Schema named "Plant", passed as a reading so the
+  // registry can resolve the expand's `reading: "Plant"`. Empty props + pick-desc default reproduce
+  // exactly the child view the pre-0.8 parent-Schema recursion produced — the change is who NAMES it.
+  const PLANT_READING: Schema = {
+    props: new Map(),
+    default: { kind: "pick", order: { kind: "byTimestamp", dir: "desc" } },
+    name: "Plant",
+  };
+  const registry = SchemaRegistry.build(
+    [PLANT, { name: "BedWithPlants", alg: 1, body: BED_BODY }],
+    [PLANT_READING],
+  );
 
   const planting = signClaims(
     {

@@ -36,6 +36,7 @@ const FILM_EXPAND_BODY = {
   op: "expand",
   role: { exact: "screening" },
   schema: "Screening",
+  reading: "Screening", // issue #23: each screening resolves through the Screening reading
   in: GATHER,
 };
 const PICK = { pick: { order: { byTimestamp: "desc" } } };
@@ -69,7 +70,7 @@ const filmPolicyTrusted = (author) => ({
     title: { pick: { order: { chain: [{ byAuthorRank: [author] }, { byTimestamp: "desc" }] } } },
   },
 });
-const SCREENING_POLICY = { props: { date: PICK }, default: PICK };
+const SCREENING_POLICY = { name: "Screening", props: { date: PICK }, default: PICK };
 const BOOK_POLICY = {
   props: {
     title: PICK,

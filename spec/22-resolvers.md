@@ -248,3 +248,37 @@ GraphQL door and the REST door — `test/gateway/resolver-typing.test.ts`). Resi
 each door serializes the FALLBACK through its own contract (GraphQL's declared String coerces a
 numeric Policy value; REST emits it raw) — an asymmetry that pre-exists for throwing resolvers and
 is deliberately not widened here.
+
+**§22.7 RESOLVERS AND EXPANDED CHILDREN — the reading is named**
+[#139](https://github.com/bombadil-labs/loam/pull/139) (ticket T25). A resolver applies at the lens
+door, over a top-level field's bucket. An entity embedded as an EXPANDED CHILD of another lens's
+gather (a feed's posts, a plan's guests, a bed's plants) is a different matter: the child is a whole
+little view, resolved on its own. Building the first real apps surfaced the question of WHICH reading
+resolves that child — and found the substrate had no answer. Before rhizomatic 0.8, an expanded child
+was resolved through the PARENT's Schema (a recursion that only produced sensible output when the two
+schemas' fields happened to align); a child's intended reading was unstatable in the gather program.
+Loam filed that as [rhizomatic#23](https://github.com/bombadil-labs/rhizomatic/issues/23), and 0.8
+answered it: an `expand` now names BOTH halves of the child's lens — `schema` (how the child gathers)
+and `reading` (the resolution Schema it resolves through) — and a legacy readingless body refuses to
+resolve, loudly, with no parent-Schema fallback. So an expanded child is now resolved through its OWN
+reading's Policies, named in the term and validated at registration.
+
+What this section's HOST-LEVEL resolvers do across that boundary is the next step, not this one: a
+§22 resolver rides a binding, and `applyResolvers` decorates a lens's top-level fields only — it does
+not yet descend into expanded children to apply the CHILD reading's resolvers. So a Pachyderm post
+read directly carries its computed byline; the same post embedded in the timeline does not, yet. That
+enrichment is ticket **T26**, and it stands on exactly the primitive this ticket adopted: because the
+child's reading is now named in the term, the host can find it and apply its resolvers. Named here so
+the boundary is a documented line, not a silent surprise.
+
+**Provenance.** rhizomatic 0.8 adoption landed [#139](https://github.com/bombadil-labs/loam/pull/139)
+(ticket T25), realizing [rhizomatic#23](https://github.com/bombadil-labs/rhizomatic/issues/23). Loam
+threads every bound resolution Schema into `SchemaRegistry.build` as a reading (`programReadings`,
+`src/gateway/lifecycle.ts`), so an `expand`'s `reading` resolves at eval time and an unknown reading
+is refused loudly at publish (`test/gateway/reading-refs.test.ts`); every shipped `expand` body names
+its child's reading. Because a readingless body is a breaking on-wire change, a §20 migration carries
+old stores forward — it fills each `expand`'s `reading` from the child hyperschema's single bound lens
+(pre-0.8 stores are single-lens, so the pairing is mechanical), re-signing the definition and negating
+the old (`src/migrate/migrate.ts`, the `expand-reading` step; `test/migrate/expand-reading.test.ts`).
+The jump from 0.6 also adopts 0.7's strict Ed25519 acceptance criterion (rhizomatic#20) — transparent
+for every honest signature. Host-level resolvers reaching expanded children remains ticket T26.

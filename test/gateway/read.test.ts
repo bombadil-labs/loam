@@ -24,6 +24,7 @@ import { FERN, GARDENER, GARDENER_SEED, PLANT_BODY, observed } from "../spike/ga
 import {
   PLANT,
   PLANT_POLICY,
+  PLANT_READING,
   PLANT_WRITABLE,
   garden,
   governedBootstrap,
@@ -53,7 +54,7 @@ type PlantRow = {
 async function openGateway(deltas: readonly Delta[] = garden): Promise<Gateway> {
   const gateway = await Gateway.open(new MemoryBackend());
   await gateway.append(deltas);
-  gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
+  gateway.register(PLANT, PLANT_READING, [FERN], undefined, PLANT_WRITABLE);
   return gateway;
 }
 
@@ -201,6 +202,7 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Schema)", () => {
       op: "expand",
       role: { exact: "plant" },
       schema: "Plant",
+      reading: "Plant", // issue #23: the child resolves through its own Plant reading
       in: {
         op: "group",
         key: "byTargetContext",
