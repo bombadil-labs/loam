@@ -176,4 +176,31 @@ describe("expand reading refs bind at the door (issue #23)", () => {
     expect(await bedPlants(gateway)).toMatchObject({ height: 30 });
     await gateway.close();
   });
+
+  it("a registration that persisted but did not bind reports the REAL reason", async () => {
+    // Ticket T28. The fixpoint must swallow a candidate's failure — one bad registration cannot be
+    // allowed to fail a boot — but swallowing it and then GUESSING the cause tells the operator
+    // something false about their own store, on ground they cannot take back.
+    //
+    // The case that exposed it: bind a lens in-process with `register()`, then publish the SAME
+    // lens. The publish's trial passes (its survivors filter drops the match), the deltas persist,
+    // and then the replay re-seeds from the MANUAL binding and shadows the published one. The old
+    // message blamed a hyperschema name collision — "negate the old definition first, or choose a
+    // different name" — and every clause of that was wrong.
+    const gateway = await keeperGarden(); // binds Plant in-process, via register()
+    await expect(
+      gateway.publishRegistration(PLANT, PLANT_READING, [FERN], { actor: KEEPER_SEED }),
+    ).rejects.toThrow(/did not bind/);
+
+    // The reason must be the PROXIMATE one the fixpoint actually caught, not a guess.
+    const why = await gateway
+      .publishRegistration(PLANT, PLANT_READING, [FERN], { actor: KEEPER_SEED })
+      .then(
+        () => "",
+        (e: Error) => e.message,
+      );
+    expect(why).toMatch(/collides with an earlier schema/);
+    expect(why).not.toMatch(/another hyperschema already answers/);
+    await gateway.close();
+  });
 });
