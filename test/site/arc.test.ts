@@ -1,6 +1,6 @@
 // The tutorial's anti-rot guarantee (SPEC §19): the whole arc, headless. This suite drives
 // the EXACT functions the page calls — demos/tutorial/lessons.mjs `buildArc(loam)` over the
-// browser barrel — through all sixteen lessons IN ORDER, asserting every check green, that no
+// browser barrel — through all seventeen lessons IN ORDER, asserting every check green, that no
 // check is vacuously green before its lesson runs, that a revisit (reboot from the same
 // origin) re-verifies every green from the ground alone, that lesson 6's evolution leaves an
 // already-open subscription's SHAPE untouched (a subscription is a pinned lens), and the
@@ -75,11 +75,11 @@ beforeAll(() => {
 });
 
 describe("the tutorial arc, headless", () => {
-  it("runs all sixteen lessons in order; every check earns its green", async () => {
+  it("runs all seventeen lessons in order; every check earns its green", async () => {
     const storage = new MemStorage();
     const ctx = await makeCtx(storage);
     const arc = buildArc(loam);
-    expect(arc).toHaveLength(16);
+    expect(arc).toHaveLength(17);
 
     for (const lesson of arc) {
       // No lesson may be green before it runs — a vacuous check teaches nothing and can lie.
@@ -101,12 +101,12 @@ describe("the tutorial arc, headless", () => {
         ).rejects.toThrow(loam.NothingPublic);
       }
       await runLesson(lesson, ctx);
-      if (lesson.id === 16) {
+      if (lesson.id === 17) {
         // The finale's green is earned OUTSIDE the tab: perform alone must not grant it. The
         // page records the homecoming after a verified localhost match (the honest path is
         // driven whole by the second test); here we take the side door the copy celebrates —
         // the record itself is the check's subject, and it reads back from the ground.
-        expect(await lesson.check(ctx), "lesson 16 green without a homecoming").toBe(false);
+        expect(await lesson.check(ctx), "lesson 17 green without a homecoming").toBe(false);
         await recordHomecoming(loam, ctx, "side-door");
       }
       expect(await lesson.check(ctx), `lesson ${lesson.id} (${lesson.title})`).toBe(true);
@@ -172,7 +172,7 @@ describe("the tutorial arc, headless", () => {
 
       // The honest homecoming: the match verified, the page records it, and lesson 12's
       // check reads it back from the ground — progress is the store, all the way to the end.
-      const finale = buildArc(loam).find((l) => l.id === 16)!;
+      const finale = buildArc(loam).find((l) => l.id === 17)!;
       expect(await finale.check(ctx)).toBe(false);
       await recordHomecoming(loam, ctx, laptopView.film._hex);
       expect(await finale.check(ctx)).toBe(true);

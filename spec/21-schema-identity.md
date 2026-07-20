@@ -21,6 +21,23 @@ program) carries many living Schemas; a living Schema throws off many VersionedS
 a VersionedSchema is served through many APIs (GraphQL, REST, whatever a §17 generator derives). What
 follows walks the ladder from the bottom, because each rung explains the one above it.
 
+**The lens, drawn.** The ladder is the *vertical* view — one column, bottom to top. The other view is
+horizontal: the two definitions each generate their product against a second input, and each reifies
+to a frozen snapshot. That is the **lens** — the reading-side assembly, not any one type in it:
+
+```
+  living:   HyperSchema ──× ground──▶ HyperView ──× Schema──▶ View
+                │ reifies                            │ reifies
+  frozen:   VersionedHyperSchema  (pencil)        VersionedSchema  (name@hash)
+```
+
+`VersionedSchema` is built (this section); `VersionedHyperSchema` is drawn in pencil — the deferred
+rung, built when a pin needs the gather itself frozen. A lens is one choice of program per rung plus
+the binding's stance; forking at any rung (§21.7's coexistence forks the Schema, rung 3) yields a
+different lens with its own tuple of content addresses. The full treatment — the five rungs, the
+generating arrows, the prose-not-a-type rule — lives in the §18 glossary; this is the same picture,
+placed beside the ladder it completes.
+
 ### The Schema becomes a first-class entity
 
 **A Schema is a domain node like any other** — its own id, its own deltas, resolved from the ground by
