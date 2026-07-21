@@ -54,14 +54,27 @@ and the difference is whether the gate's value is JUDGMENT or INDEPENDENCE:
   explicitly WITHOUT the author's reasoning. That is not a workaround for a missing tool; it is the
   implementation.
 
-**Known environment gap, so nobody re-discovers it the hard way:** `adlc review` shells out to
-`npx adversarial-review`, which is **not installed in this repo** — the command fails
-`spawnSync ENOENT`. And `adlc prosecute` is an evidence RECORDER (`--input passes.json`): it writes
-down what it is handed and never verifies a review occurred. So the two compose into a gate that
-could record clean prosecutions off a reviewer that was never there — an operation reporting a
-success it did not achieve, which is hazard **H7** at the process layer. Until `adversarial-review`
-is installed, **subagent review IS P5**, and `prosecute` may only record what a subagent actually
-returned.
+**THE TOOLING WAS NEVER TURNED ON — fixed 2026-07-21, and here is what to use.** For two weeks this
+repo ran ADLC's *advisory* half (`merge-forecast`, `coldstart`, `hollow-test`) and none of its
+*enforcing* half. What was actually wrong, so nobody assumes it again:
+
+- The `adlc` **plugin** was pinned at 0.2.0 while upstream was 1.5.1 (35 commits). Its **discovery
+  skill**, its `/adlc:*` commands, its **PreToolUse rails + buildgate hooks**, its **SessionStart
+  preflight hook**, and its **seven prosecutor agents** were all installed and none were loading.
+- `@adlc/cli` was 1.3.0 against 1.5.1; `adversarial-review` was **never installed at all**.
+
+All updated. **`adlc:prosecutor-{correctness,security,tests,contract,diff}` and
+`adlc:prosecutor-verifier` are real agent types** — that panel IS P5's independent reviewer, and it
+is what the "spawn a subagent" rule above means in practice. Use them; do not hand-roll review
+prompts beside a shipped panel (that mistake cost a day).
+
+**One residual, upstream:** `adlc review` still fails `spawnSync npx ENOENT` on Windows — it spawns
+bare `npx` where Windows needs `npx.cmd` or `shell: true`. `adversarial-review` itself runs fine
+directly (`adversarial-review --base main`). And `adlc prosecute` is an evidence RECORDER
+(`--input passes.json`): it writes down what it is handed and never verifies a review occurred, so
+it may only record what a prosecutor actually returned. Feeding it unearned passes would be an
+operation reporting a success it did not achieve — hazard **H7** at the process layer, which is
+exactly what the old convention produced.
 
 The phases, with Loam's own craft folded into each:
 
