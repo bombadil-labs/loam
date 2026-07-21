@@ -53,6 +53,47 @@ export interface MigrationReport {
   readonly after: number;
 }
 
+// Does this delta still SURVIVE, in the operator's own reckoning (ticket T41)?
+//
+// Every step below RE-SIGNS law into a new form: a new content address, plus a supersession
+// negating the OLD id. The operator's own retraction of that law also points at the old id — and
+// nothing points at the re-expression. So without this check a migration RESURRECTS anything the
+// operator had withdrawn: it comes back live, in the operator's voice, wearing a new id, and a §17
+// 410 door quietly becomes a 200 (served ANONYMOUSLY if the lens was ever declared public).
+//
+// Operator-scoped, because inert-by-default (§8/§12) means a federated stranger's strike retires
+// nothing the operator planted — and if a foreign negation could suppress a migration, any peer
+// could delete an operator's lens by shipping one before an upgrade. Signature-checked for the same
+// reason the re-sign is: `author` is self-asserted content, so an unverified "negation" would be a
+// suppression oracle.
+//
+// TRANSITIVE, because a struck strike REVIVES: stopping at one link would wrongly skip law that was
+// withdrawn and then restored — the same class of error, mirrored. Acyclic by content addressing (a
+// negation cannot precede its target), and memoized, exactly as `lawfulNegated` does it.
+const survivorsOf = (deltas: readonly Delta[], operator: string): ((id: string) => boolean) => {
+  const strikesOn = new Map<string, string[]>();
+  for (const d of deltas) {
+    if (d.claims.author !== operator || verifyDelta(d) !== "verified") continue;
+    for (const p of d.claims.pointers) {
+      if (p.role !== "negates" || p.target.kind !== "delta") continue;
+      const target = p.target.deltaRef.delta;
+      const held = strikesOn.get(target);
+      if (held === undefined) strikesOn.set(target, [d.id]);
+      else held.push(d.id);
+    }
+  }
+  const memo = new Map<string, boolean>();
+  const struck = (id: string): boolean => {
+    const seen = memo.get(id);
+    if (seen !== undefined) return seen;
+    memo.set(id, false); // in-progress: treat as surviving (acyclic by construction)
+    const verdict = (strikesOn.get(id) ?? []).some((s) => !struck(s));
+    memo.set(id, verdict);
+    return verdict;
+  };
+  return (id) => !struck(id);
+};
+
 // ---- the 0.2 → 0.3 step: the L5 vocabulary realignment -----------------------------------------
 
 const OLD_PREFIX = "rhizomatic.schema.";
@@ -109,6 +150,7 @@ const HYPERSCHEMA_ROLES: Migration = {
   applies: (deltas) => deltas.some(isOldSchemaDef) && !deltas.some(speaksHyperschemaVocab),
   additions(deltas, seed) {
     const operator = authorForSeed(seed);
+    const survives = survivorsOf(deltas, operator);
     const added: Delta[] = [];
     for (const d of deltas) {
       // Only the operator's own definitions: we can re-sign only what our seed authored, and a
@@ -120,6 +162,9 @@ const HYPERSCHEMA_ROLES: Migration = {
       // author, shaped like an old definition, would get its attacker-chosen pointers re-signed
       // under the operator's real key. Re-sign only what the operator provably authored.
       if (verifyDelta(d) !== "verified") continue;
+      // ...and only what the operator has not WITHDRAWN (T41): re-expressing struck law
+      // resurrects it under a new id that its retraction never named.
+      if (!survives(d.id)) continue;
       const reExpressed = signClaims(toNewForm(d.claims), seed);
       const negation = signClaims(
         supersession(operator, d.claims.timestamp, d.id, reExpressed.id, this.reason),
@@ -241,6 +286,7 @@ const SCHEMA_ENTITY_RENAME: Migration = {
   applies: (deltas) => deltas.some(touchesOldPrefix),
   additions(deltas, seed) {
     const operator = authorForSeed(seed);
+    const survives = survivorsOf(deltas, operator);
     const added: Delta[] = [];
     for (const d of deltas) {
       // Only the operator's own definitions/registrations, and only when the SIGNATURE proves it
@@ -248,6 +294,9 @@ const SCHEMA_ENTITY_RENAME: Migration = {
       // signing oracle, exactly as guarded in the 0.3 step). A foreign registration is inert anyway.
       if (d.claims.author !== operator || !touchesOldPrefix(d)) continue;
       if (verifyDelta(d) !== "verified") continue;
+      // ...and only what the operator has not WITHDRAWN (T41): re-expressing struck law
+      // resurrects it under a new id that its retraction never named.
+      if (!survives(d.id)) continue;
       const reExpressed = signClaims(toRenamedForm(d.claims), seed);
       const negation = signClaims(
         supersession(operator, d.claims.timestamp, d.id, reExpressed.id, this.reason),
@@ -361,11 +410,15 @@ const INLINE_SCHEMA_TO_ENTITY: Migration = {
   applies: (deltas) => deltas.some((d) => inlineRegistration(d) !== undefined),
   additions(deltas, seed) {
     const operator = authorForSeed(seed);
+    const survives = survivorsOf(deltas, operator);
     const added: Delta[] = [];
     for (const d of deltas) {
       // Operator-authored and signature-proven only (author is self-asserted content — re-signing an
       // unverified delta would make the migrator a signing oracle, the guard every step shares).
       if (d.claims.author !== operator || verifyDelta(d) !== "verified") continue;
+      // ...and only what the operator has not WITHDRAWN (T41): re-expressing struck law
+      // resurrects it under a new id that its retraction never named.
+      if (!survives(d.id)) continue;
       const inline = inlineRegistration(d);
       if (inline === undefined) continue;
       // Reuse the LIVE planting path so the lifted entities are byte-identical to a fresh publish:
@@ -556,12 +609,16 @@ const EXPAND_READING: Migration = {
   },
   additions(deltas, seed) {
     const operator = authorForSeed(seed);
+    const survives = survivorsOf(deltas, operator);
     const readings = readingMap(deltas, operator);
     const added: Delta[] = [];
     for (const d of deltas) {
       // Operator-authored and signature-proven only — re-signing an unverified delta would make the
       // migrator a signing oracle (the guard every step shares).
       if (d.claims.author !== operator || verifyDelta(d) !== "verified") continue;
+      // ...and only what the operator has not WITHDRAWN (T41): re-expressing struck law
+      // resurrects it under a new id that its retraction never named.
+      if (!survives(d.id)) continue;
       const hex = filledTermHex(d.claims, readings);
       if (hex === undefined) continue;
       const reExpressed = signClaims(
