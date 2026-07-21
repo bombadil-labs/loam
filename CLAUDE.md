@@ -37,9 +37,31 @@ next.
 Work is run through the **Agentic Development Lifecycle**: phases with explicit, machine-checkable
 **gates**. Each gate is a CLI whose **exit code is the verdict** — `0` pass, `2` fail, `1`
 operational error. **Trust the gate over your own sense that a change is "done"** — defeating
-premature satisfaction is the point. Inside Claude Code *you are the model*: run any LLM-backed gate
-with `--prompt-only`, answer the printed prompt yourself, and apply the judgment (no API keys
-needed). Route with the `adlc` discovery skill; `adlc <tool> --help` for a tool's exact flags.
+premature satisfaction is the point. Route with the `adlc` discovery skill; `adlc <tool> --help` for
+a tool's exact flags.
+
+**WHO ANSWERS AN LLM-BACKED GATE — and it is NOT always you** (corrected 2026-07-21). The old rule
+here said *"inside Claude Code you are the model: run any LLM-backed gate with `--prompt-only`,
+answer the printed prompt yourself."* That is right for some gates and **defeats others entirely**,
+and the difference is whether the gate's value is JUDGMENT or INDEPENDENCE:
+
+- **Self-answer** where the question is about the ARTIFACT and the author is a competent judge of it:
+  `coldstart` (is this ticket executable?), `model-router`, `merge-forecast`, `spec-lint`.
+- **NEVER self-answer** where the whole product is a SECOND SET OF EYES: `review` / `prosecute`,
+  `premortem`, `parallax`, `adversarial-review`. Self-answering these converts an adversarial
+  reviewer into a mirror — it shares the ticket's premise, which is exactly the failure mode P5 now
+  exists to defeat. **Spawn a subagent** with the diff, `src/gateway/SUBSTRATE-HAZARDS.md`, and
+  explicitly WITHOUT the author's reasoning. That is not a workaround for a missing tool; it is the
+  implementation.
+
+**Known environment gap, so nobody re-discovers it the hard way:** `adlc review` shells out to
+`npx adversarial-review`, which is **not installed in this repo** — the command fails
+`spawnSync ENOENT`. And `adlc prosecute` is an evidence RECORDER (`--input passes.json`): it writes
+down what it is handed and never verifies a review occurred. So the two compose into a gate that
+could record clean prosecutions off a reviewer that was never there — an operation reporting a
+success it did not achieve, which is hazard **H7** at the process layer. Until `adversarial-review`
+is installed, **subagent review IS P5**, and `prosecute` may only record what a subagent actually
+returned.
 
 The phases, with Loam's own craft folded into each:
 
