@@ -20,6 +20,7 @@ import type { Delta } from "@bombadil/rhizomatic";
 import type { StoreBackend } from "../store/backend.js";
 import { MemoryBackend } from "../store/memory.js";
 import { isTombstone } from "./erase.js";
+import { withNegationClosure } from "./ingest.js";
 import { Gateway, type FederationReport } from "./gateway.js";
 
 // A live quarantine pool (returned by `Gateway.openQuarantine`). `gateway` is the pool's own gateway — its
@@ -83,7 +84,12 @@ export async function openQuarantineImpl(
   const base = opts.admit;
   const memberAdmit = (): ((d: Delta) => boolean) | undefined => {
     if (opts.membership === undefined) return base === undefined ? undefined : base;
-    const members = new Set(gw.select(opts.membership).map((d) => d.id));
+    // The members are the Term's dset PLUS its negation closure (§28.4, T38). A scope may narrow
+    // what the pool sees; it may never resurrect what was struck, and `negated` ranging over the
+    // operand set means a claim admitted without its retraction reads as live inside. `select()`
+    // itself stays exactly the Term's dset — the closure belongs to this edge, not to the reading
+    // surface a caller asks "what does this Term select".
+    const members = new Set(withNegationClosure(gw, gw.select(opts.membership)).map((d) => d.id));
     return (d) => members.has(d.id);
   };
   const reseed = (): Promise<FederationReport> => {

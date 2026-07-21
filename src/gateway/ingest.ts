@@ -109,13 +109,49 @@ export function admitForImpl(gw: Gateway): (d: Delta) => boolean {
   return (d) => d.claims.author === gw.operatorAuthor || policy.roster.has(d.claims.author);
 }
 
-// The surviving deltas this store offers a peer — everything, or what the offered lens selects.
+// A filter narrows what you SEE; it must never resurrect what was STRUCK (SPEC §28.4, ticket T38).
+//
+// rhizomatic's `negated(d, D)` ranges over the OPERAND SET (SPEC-2 §4.3): suppression is a property
+// of the set being evaluated, not of the delta. So filtering a delta-set and keeping a claim while
+// dropping the negation that struck it hands the reader a claim that reads as LIVE — the substrate's
+// own `select-then-mask-scopes-to-operand` vector, correct behavior punishing a careless filter.
+// Loam had exactly that hole in both of its filters (the membership seeding edge inward, the offered
+// lens outward) until T38.
+//
+// The remedy is a closure, and its DIRECTION is the whole of its safety: from an admitted delta to
+// the negations OF it, transitively — never the reverse. Following negations forward preserves what
+// survives; following them backward would drag in targets the filter deliberately excluded, turning
+// a scope into a leak. Transitive because a struck strike REVIVES: carrying one link would leave a
+// revived claim wrongly suppressed, which is the same failure mirrored.
+//
+// Terminates because the output set only grows and is bounded by the snapshot (and the chain is
+// acyclic anyway — content addressing means a negation cannot precede its target).
+export function withNegationClosure(gw: Gateway, admitted: readonly Delta[]): Delta[] {
+  const byId = new Map([...gw.reactor.snapshot()].map((d) => [d.id, d]));
+  const out = new Map(admitted.map((d) => [d.id, d]));
+  const pending = [...out.keys()];
+  while (pending.length > 0) {
+    const id = pending.pop() as string;
+    for (const negationId of gw.reactor.negationsOf(id)) {
+      if (out.has(negationId)) continue;
+      const negation = byId.get(negationId);
+      if (negation === undefined) continue; // purged (§11) — the hole is the point
+      out.set(negationId, negation);
+      pending.push(negationId);
+    }
+  }
+  return [...out.values()];
+}
+
+// The surviving deltas this store offers a peer — everything, or what the offered lens selects,
+// plus whatever struck it (above): offering a claim while withholding its retraction would
+// republish something the operator had struck.
 export function offeredDeltasImpl(gw: Gateway): Delta[] {
   const lens = gw.options.offeredLens;
   if (lens === undefined) return [...gw.reactor.snapshot()];
   const result = evalTerm(lens, gw.reactor.snapshot());
   if (result.sort !== "dset") throw new Error("an offered lens must select a delta set");
-  return [...result.set];
+  return withNegationClosure(gw, [...result.set]);
 }
 
 // Membership is a query, first-class (SPEC §27.6, the body of `Gateway.select`): evaluate a
