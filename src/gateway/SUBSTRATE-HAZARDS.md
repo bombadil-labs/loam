@@ -131,10 +131,37 @@ check passes, and resolution then proceeds by lens name against the *full* regis
 it must be `lensOf(r)`. `hyperschema.name` answers "what program is this over," which is almost never
 the authorization question.
 
-**Cost so far.** Three sites, one of them an anonymous-door bypass: the byte-door gate
-(`renderers.ts`, T42), `servesLive` in `surface/rest.ts` (T42), and `Name@vN` public-pin resolution
-(`public.ts`, T47). Every *other* door check in `renderers.ts` uses `lensOf` — so the tell is a
+**Cost so far.** Six sites — four doors, plus the mint side and the 410 side found 2026-07-21.
+`assembleGenesis` stamps every genesis lens with the PROGRAM name (`genesis.ts`, T56), and
+`readWithdrawnRegistrations` records a struck registration under the program name while the §17 door
+compares it to a LENS name from the URL (`registration.ts:835`, T59) — so a withdrawn sibling reading
+answers 404 where the spec promises 410, and a request naming the program can draw a 410 that
+confirms a hash was lawful for a different reading. Two further plausible sites are recorded in the
+ledger (`gateway.ts:717`, `lifecycle.ts:153`). The four doors, one of them an anonymous-door bypass:
+the byte-door gate
+(`renderers.ts`, T42), `servesLive` in `surface/rest.ts` (T42), `Name@vN` public-pin resolution
+(`public.ts`, T47), and the route door authorizing the pair `(lens, versionId)` then resolving by
+`versionId` alone (`renderers.ts:413`, T47 — the pair is the key, and half of it was discarded before
+use). Every *other* door check in `renderers.ts` uses `lensOf` — so the tell is a
 `hyperschema.name ===` sitting among siblings that don't.
+
+**Why it hides, and why a rail against it is easy to get wrong** (learned T42, 2026-07-21).
+`lensOf(r)` is `r.lensName ?? r.hyperschema.name`, so for the ordinary single-reading case the two
+names **coincide** and the wrong comparison computes the identical boolean. The bug is invisible
+until a coexisting sibling exists — which means:
+
+- A fixture whose lens name equals its program name **cannot see this hazard at all**, and will pass
+  identically with the fix present or reverted. The first T42 rail was written that way.
+- **Genesis currently DISCARDS the declared lens name** — `assembleGenesis` passes the hyperschema's
+  name into the lens slot and drops `Registration.lensName`, alone among the three mint paths. That
+  is a **defect (T56), not a law**: two genesis readings over one hyperschema collapse silently and
+  array order decides which one serves. Rails route their readings through `publishRegistration`
+  today because of the bug, not because genesis is inherently single-lens. When T56 lands, revisit.
+- Two coexisting readings **always carry the same field set**: `resolveView` covers every HView
+  property and falls back to `schema.default`, so a Schema cannot omit a field. A "redacted sibling"
+  is not expressible. Readings differ in *how* they resolve — the §21.7 fixture differs by `asc` vs
+  `desc`, and two values at different timestamps is the cheapest way to make two readings genuinely
+  diverge so that a 200 and a 404 mean different things.
 
 ---
 

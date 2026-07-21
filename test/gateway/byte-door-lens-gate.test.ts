@@ -1,40 +1,17 @@
-// §12/§17 — the anonymous byte-door must gate on the LENS it will actually resolve (ticket T42).
+// §12/§17 — the anonymous byte-door gates on the LENS it will resolve, not the PROGRAM it is over
+// (hazard H6, see src/gateway/SUBSTRATE-HAZARDS.md).
 //
-// Audit 3 found `serveBytesImpl` testing `r.hyperschema.name === fromLens` while every sibling door
-// check in the same file uses `lensOf(r)`, and while resolution proceeds by LENS name against the
-// whole registered set. Since §21.7 coexistence, one HyperSchema carries several readings — so the
-// two names differ, and gating on the program name authorizes EVERY reading over that program,
-// including ones the operator never declared. That is hazard H6.
+// Fixture note, because the obvious fixture cannot express this bug. Coexisting readings always carry
+// the SAME FIELD SET — `resolveView` covers every HView property and falls back to `schema.default` —
+// so a "redacted sibling that drops a field" does not exist. Readings differ in HOW they resolve. Here:
+// two bytes values at different timestamps, the broad reading picking the newest and the archival one
+// the oldest, only the archival declared public. So the newest bytes are reachable through the
+// UNDECLARED reading and through no public one, which is what makes a 200 and a 404 mean different
+// things. A lens whose name equals its program name is equally blind to it, and genesis can currently
+// mint only those (T56) — hence `publishRegistration`.
 //
-// HOW THE READINGS DIFFER, and why the first version of this file could not see the bug. A Schema
-// cannot omit a property: `resolveView` covers every HView property and falls back to `schema.default`
-// for any the Schema does not name, so two readings over one gather always carry the SAME FIELD SET.
-// A "redacted sibling that drops a field" is not expressible. Coexisting readings differ in HOW they
-// resolve — §21.7's own fixture differs by `asc` vs `desc` — and that is the lever used here: two
-// bytes values observed at different times, a BROAD reading picking the newest and an ARCHIVAL one
-// picking the oldest. Only the archival reading is declared public, so the newest bytes have a
-// content address that is reachable through the UNDECLARED reading and through no public one. That
-// gap is what makes a 200 and a 404 mean different things at this door.
-//
-// BOTH LEVELS (CLAUDE.md P3). Delta level: what the public surface actually BINDS —
-// `surface('public').registered` through `lensOf` — deliberately NOT the declaration accessor, which
-// would only prove the fixture said what it said (see the comment at the assertion). Object level:
-// what the door actually SERVES — the exploit rail demands a 404 for bytes the fixture proves are otherwise
-// reachable, and the admission rail demands a 200 carrying the exact declared bytes.
-
-// FROZEN AHEAD OF THE BUILD, AND THEREFORE SKIPPED (ADLC P3). This rail lands BEFORE the fix it
-// describes, so `rails-guard` has a real freeze baseline on main and any later edit to it is a
-// visible, audited act rather than an invisible one. It is `describe.skip` for exactly one reason:
-// it FAILS against main's current code — which is the point of a rail, written to fail until the
-// build makes it pass — and a red bar may not land on main. Verified: 3 of 5 fail against main.
-//
-// The build PR un-skips it in the same change that fixes the gate, and that un-skip should be the
-// ONLY rail edit it contains. Its sibling `test/surface/rest-lens-gate.test.ts` lands live rather
-// than skipped, because everything that file asserts already holds on main.
-//
-// This is not dead code. `test/gateway/promote-survival-probe.test.ts` (T39) rides the same
-// convention. If you are reading this and the fix HAS landed while this is still skipped, that is a
-// bug: un-skip it and check it passes.
+// Both levels: what the public surface BINDS (`surface('public')` through `lensOf`), and what the door
+// SERVES.
 
 import { describe, expect, it } from "vitest";
 import {
@@ -112,27 +89,20 @@ const boot = async (): Promise<Gateway> => {
 const REF_NEW = contentAddress(NEW_BYTES);
 const REF_OLD = contentAddress(OLD_BYTES);
 
-describe.skip("§12 — the anonymous byte-door honours the lens, not the program", () => {
+describe("§12 — the anonymous byte-door honours the lens, not the program", () => {
   it("PRECONDITION: the two readings share a hyperschema name and resolve to DIFFERENT bytes", async () => {
     const gw = await boot();
-    // Delta level — the same program, two lenses. That gap is what the old gate could not see.
     const names = gw.registered.map((r) => ({ program: r.hyperschema.name, lens: lensOf(r) }));
     const plants = names.filter((n) => n.program === "Plant");
     expect(plants.length).toBeGreaterThanOrEqual(2);
     expect(new Set(plants.map((n) => n.lens)).size).toBeGreaterThanOrEqual(2);
 
-    // The operator declared EXACTLY the archival reading — asserted against the public SURFACE,
-    // not against the declaration record. `isPublicLatest` is bare string-set membership over the
-    // literal handed to `declarePublic` in this same file, so asserting it would only prove the
-    // fixture said what it said; no implementation of the door could make it fail. What matters is
-    // which registrations that string BINDS to, and `surface()` binds it with `lensOf` — the very
-    // distinction this ticket is about. A `surface()` matching the program name would put BOTH
-    // readings on the public door and pass a membership check verbatim.
+    // The operator declared EXACTLY the archival reading, asserted against the public SURFACE.
+    // Not `isPublicLatest`: that is membership over the declaration string. What decides service is
+    // which registrations the string BINDS to, and `surface()` binds with `lensOf`.
     expect(gw.surface("public")?.registered.map(lensOf)).toEqual(["PlantPublic"]);
 
-    // Object level — the readings genuinely diverge. Without this the fixture cannot express the
-    // leak at all: if both lenses resolved the same bytes, the door would answer identically whether
-    // it honoured the lens or the program, and no assertion below could tell the two apart.
+    // The readings must genuinely diverge, or nothing below can tell lens from program.
     expect(gw.serveBytes(REF_NEW, "Plant", FERN, "full").status).toBe(200);
     expect(gw.serveBytes(REF_NEW, "PlantPublic", FERN, "full").status).toBe(404);
     await gw.close();
@@ -140,11 +110,8 @@ describe.skip("§12 — the anonymous byte-door honours the lens, not the progra
 
   it("THE EXPLOIT: the anonymous door refuses bytes reachable only through an UNDECLARED reading", async () => {
     const gw = await boot();
-    // The attacker names the private reading and a content address they already hold. Under the old
-    // gate the membership test passed — the PUBLIC registration's `hyperschema.name` is also "Plant"
-    // — the door then resolved the UNDECLARED broad reading on the tokenless door, found REF_NEW in
-    // its view, and served it. The precondition above proves those bytes really are reachable that
-    // way, so this 404 is a refusal and not an accident of the fixture.
+    // The bytes the precondition proved reachable through the private reading. This 404 is a
+    // refusal, not a fixture accident.
     const refused = gw.serveBytes(REF_NEW, "Plant", FERN, "public");
     expect(refused.status).toBe(404);
     expect(out(refused)).toBe(UNIFORM_REFUSAL);
@@ -153,8 +120,7 @@ describe.skip("§12 — the anonymous byte-door honours the lens, not the progra
 
   it("ADMISSION: the DECLARED reading still serves its bytes — a door that refuses everything fails here", async () => {
     const gw = await boot();
-    // The positive leg. Without it, replacing the whole door body with an unconditional refusal
-    // would pass every other assertion in this file.
+    // The positive leg: without it a door that refused everything would pass this file.
     const served = gw.serveBytes(REF_OLD, "PlantPublic", FERN, "public");
     expect(served.status).toBe(200);
     expect(served.contentType).toBe("image/png");
@@ -166,16 +132,13 @@ describe.skip("§12 — the anonymous byte-door honours the lens, not the progra
     const gw = await boot();
     const undeclared = gw.serveBytes(REF_NEW, "Plant", FERN, "public");
     const nonsense = gw.serveBytes(REF_NEW, "NoSuchLensAtAll", FERN, "public");
-    // §12/§13: a refusal must not tell a stranger which of their guesses was closer, or the door is
-    // an oracle for what the operator has registered privately. Compare the WHOLE tuple, not just
-    // the body — a differentiated status would be just as much of an oracle.
+    // §12/§13: a refusal must not tell a stranger which guess was closer. Whole tuple, not just the
+    // body — a differentiated status is an oracle too.
     expect({ ...undeclared, body: [...undeclared.body] }).toEqual({
       ...nonsense,
       body: [...nonsense.body],
     });
-    // Pinned as an exact constant rather than as two negations: the whole-tuple equality above
-    // already fails on any body that echoes the caller's lens or entity, so `not.toContain` could
-    // not fail while it passed. This states the no-oracle contract independently instead.
+    // The exact uniform constant — the whole-tuple equality above cannot fail on an echoing body.
     expect(out(undeclared)).toBe(UNIFORM_REFUSAL);
     await gw.close();
   });
