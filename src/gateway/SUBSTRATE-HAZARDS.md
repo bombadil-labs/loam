@@ -116,6 +116,49 @@ suite to surface it; a term that is only built on an uncommon path will not be e
 
 ---
 
+## H6. A PROGRAM name is not a LENS name (`hyperschema.name` ≠ `lensOf(r)`)
+
+**The property.** Since §21.7 coexistence, one HyperSchema may carry several readings. A registration
+therefore has **two** names: the program it is over (`r.hyperschema.name`) and the reading it *is*
+(`lensOf(r)`). Before coexistence they coincided, so the codebase is full of places where either
+would have worked — and a few where the wrong one was chosen.
+
+**The hazard.** Gate on the program name and you authorize **every reading over that program**,
+including ones the operator never declared. The failure is silent and it favors the attacker: the
+check passes, and resolution then proceeds by lens name against the *full* registered set.
+
+**Ask.** *Is this comparing a name to decide what a door may serve, or which version is meant?* Then
+it must be `lensOf(r)`. `hyperschema.name` answers "what program is this over," which is almost never
+the authorization question.
+
+**Cost so far.** Three sites, one of them an anonymous-door bypass: the byte-door gate
+(`renderers.ts`, T42), `servesLive` in `surface/rest.ts` (T42), and `Name@vN` public-pin resolution
+(`public.ts`, T47). Every *other* door check in `renderers.ts` uses `lensOf` — so the tell is a
+`hyperschema.name ===` sitting among siblings that don't.
+
+---
+
+## H7. An idempotence short-circuit must prove it actually landed something
+
+**The property.** Loam is full of operations that are idempotent by content address — publish,
+promote, migrate. It is tempting to short-circuit them: *"the output already exists, return
+success."*
+
+**The hazard.** The check is usually a **presence** test over a **derived index**. If either is
+stale, the operation returns success and lands nothing, and the caller has no way to tell. This is
+worse than an error, because the record then disagrees with what the caller believes happened.
+
+**Ask.** *Does this path return success without writing?* Then: is what it checked still valid
+(survival, not presence — see H1), and does the caller learn which of the two happened? An operation
+with two outcomes should answer which one it was.
+
+**Cost so far.** Twice, in the same shape. `publish` returned success on a no-op — fixed in
+[#151](https://github.com/bombadil-labs/loam/pull/151) ("publish answers its outcome"). `promote`
+does it today over a stale adoption trail (T46), permanently refusing to re-establish provenance the
+operator withdrew, while reporting success. Two occurrences is why this is a hazard and not a bugfix.
+
+---
+
 ## Adding to this file
 
 An entry earns its place by having **cost something** — a bug, a near-miss caught in review, or a
