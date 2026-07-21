@@ -47,6 +47,7 @@ import {
   matNameImpl,
   preloadResolversImpl,
   publishRegistrationImpl,
+  type PublishOutcome,
   rebindImpl,
   registerImpl,
   replayRegistrationsImpl,
@@ -491,7 +492,7 @@ export class Gateway {
     mutations?: ClaimTemplates,
     writable?: readonly string[],
     resolvers?: ResolverSpecs,
-  ): Promise<void> {
+  ): Promise<PublishOutcome> {
     return publishRegistrationImpl(
       this,
       hyperschema,

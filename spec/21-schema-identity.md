@@ -406,3 +406,39 @@ its revert) and zero collateral across the suite. No §20 migration — the lens
 the binding's bytes (slice 2prime); nothing at rest moved. The village demonstrates it live
 (`demos/village/phase-coexistence.mjs`: the Townbook and FirstImpressions lenses over one gather,
 one public, one not). Serving-loop surface → Myk's merge (P6).
+
+**§21.8 PUBLISHING ANSWERS TWO QUESTIONS, AND ONLY ONE OF THEM CAN REFUSE**
+[#151](https://github.com/bombadil-labs/loam/pull/151) (ticket T28). `publishRegistration` was
+conflating them, and the conflation showed up as an error message that told operators something false
+about their own store.
+
+- **Is this VALID LAW?** Answered BEFORE anything persists. A body that will not materialize, an
+  `expand` naming no reading, templates whose own reads could never show them, a GraphQL surface that
+  will not build — all refused, nothing written, the caller gets a throw. This is the registration
+  path's opening promise and it is unchanged.
+- **Is it SHAPING THIS STORE'S SURFACE?** A DOWNSTREAM effect of a valid claim, and a different
+  question entirely. A registration is a CLAIM; binding is one store's local realization of it. A
+  process-local `register()` holding that lens, or an existing lens already answering that GraphQL
+  field, can leave a perfectly good claim unbound HERE while a peer that pulls the very same deltas
+  binds them without trouble.
+
+**So the second question can never refuse the write.** Letting it would mean one process's transient
+memory could veto durable, shareable law — a store declining to record a fact because a reader in this
+process cannot currently display it. That is backwards in a system whose ground is append-only claims
+and whose views are perspectival (§13).
+
+`publishRegistration` therefore returns a **`PublishOutcome`**: reaching a return means `persisted`
+(invalid law never gets that far), and `bound` says whether the surface moved, with `reason` naming the
+proximate cause when it did not. Neither a throw nor silence — a throw would call a successful write a
+failure, and silence would hide a surface the caller is about to query.
+
+**Provenance.** Landed [#151](https://github.com/bombadil-labs/loam/pull/151) (ticket T28), on Myk's
+framing: *"a valid change should be persisted first, then any effects from that are downstream of the
+change propagating out, and could fail."* Two earlier attempts are recorded because both were wrong in
+instructive ways: swallowing the failure silently (rejected under review — a manual binding carries no
+resolvers, so "the same law" cannot be established, and a publish shipping resolvers would have read as
+a benign duplicate while serving none of them), and refusing before persisting (rejected here — it lets
+process-local state veto federated law). `PublishOutcome` in `src/gateway/lifecycle.ts`; rails in
+`test/gateway/genesis.test.ts` and `test/gateway/reading-refs.test.ts` assert `persisted`/`bound`/
+`reason` for a process-local override and for a rival body. Additive for callers that ignore the
+return; no §20 migration — nothing on the wire changes.

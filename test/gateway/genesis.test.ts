@@ -316,9 +316,13 @@ describe("evolution is append: the surface follows the surviving definitions", (
   it("a store registration colliding with a manual name persists but does not bind — and says so", async () => {
     const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
     gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE); // manual, this process's own
-    await expect(gateway.publishRegistration(PLANT_V2, PLANT_POLICY, [FERN])).rejects.toThrow(
-      /did not bind/,
-    );
+    // The claim is VALID law and is written; whether it shapes THIS store's surface is a downstream
+    // effect, and it is reported rather than thrown. (A peer that pulls these deltas, holding no such
+    // manual binding, binds them fine — which is why one process's memory must not veto the write.)
+    const out = await gateway.publishRegistration(PLANT_V2, PLANT_POLICY, [FERN]);
+    expect(out.persisted).toBe(true);
+    expect(out.bound).toBe(false);
+    expect(out.reason).toMatch(/DIFFERENT bodies|collides/i);
     await gateway.close();
   });
 
