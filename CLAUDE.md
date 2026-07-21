@@ -150,12 +150,20 @@ that genuinely needs him. The loop, per unblocked ticket:
    as it goes. Independent unblocked tickets run **in parallel in per-ticket git worktrees**, up to
    the forecast width (this §21–§24 arc is width-1, so it runs sequentially).
 3. Open a PR carrying the gate evidence. Then **merge by risk**:
-   - **The model self-merges** a PR only when *all* hold: `npm run check` green **and** P5 prosecute
-     clean, **and** it is a non-breaking **build** ticket touching no trust-root / capability / auth
-     / federation / erasure surface (§6/§7/§8/§11/§12) and shipping **no** §20 migration.
-   - **Myk merges** everything else: every **design-stage** spec section (T2–T7), anything touching
-     capabilities/auth/federation/erasure, and **any breaking on-wire change** (it ships a migration
-     → it is his call). This is P6.
+   - **The model self-merges** a PR when *all* hold: `npm run check` green, **P5 prosecute clean**,
+     **and the post-work AUDIT clean** (P5 above — it is now standing, and it is the gate that earns
+     this). **WIDENED (Myk, 2026-07-21): the reserved-surface list no longer bars a self-merge.** The
+     old rule held back anything touching trust-root / capability / auth / federation / erasure
+     (§6/§7/§8/§11/§12) or shipping a §20 migration; Myk lifted that in chat, explicitly and twice,
+     with "stack them up" as the fallback if the harness blocks a merge mechanically. So a
+     **bugfix restoring behavior the spec already states** may self-merge on any surface — T40's
+     erasure fix is the archetype.
+   - **Myk still merges**: every **design-stage** spec section; anything that CHANGES WHAT THE SYSTEM
+     PROMISES rather than restoring a stated promise (new capability, a widened door, a trust-model
+     change); and any **breaking on-wire change** shipping a migration. This is P6. The test is not
+     "which file did it touch" but "does this decide something, or repair something."
+   - If a merge is blocked mechanically rather than by this rule, **stack the PRs** and say so —
+     do not work around the block.
 4. **Design-stage tickets never self-merge.** The model drafts the full `spec/NN-*.md` section,
    answers every open **"(Myk)"** question with a *reasoned recommendation*, and opens the PR — that
    PR is Myk's decision + merge (P6), batching his input into one review instead of chat interrupts.
