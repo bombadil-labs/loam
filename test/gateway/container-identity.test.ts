@@ -12,7 +12,7 @@
 // DISAGREEMENT between two independently-reached ids, never the shape of one.
 
 import { describe, expect, it } from "vitest";
-import { type Policy, type Schema } from "@bombadil/rhizomatic";
+import { authorForSeed, signClaims, type Policy, type Schema } from "@bombadil/rhizomatic";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
@@ -192,7 +192,10 @@ describe("§27.2 freeze — a membership Term becomes a content-addressed module
     expect(freezeSaid).toBe(selectSaid);
     expect(freezeSaid).not.toMatch(/is not a function/); // the door's voice, not a missing method
 
-    // And where select admits, freeze admits — over exactly select's members.
+    // And where select admits, freeze admits. NOTE the members may EXCEED select's: freeze carries
+    // the negation closure (hazard H1, T38) because a version is shipped, while select is the
+    // reading surface and answers exactly what the Term picked. With no negations in play the two
+    // coincide, which is what this asserts; the divergence has its own rail below.
     expect(() => gw.freeze(admitted)).not.toThrow();
     expect(
       gw
@@ -205,6 +208,37 @@ describe("§27.2 freeze — a membership Term becomes a content-addressed module
         .map((d) => d.id)
         .sort(),
     );
+    await gw.close();
+  });
+
+  it("a version carries the NEGATION CLOSURE — it never ships a claim without what struck it", async () => {
+    const gw = await boot();
+    const claim = observed(FERN, "height", 30, 1000, OP_SEED);
+    await gw.append([claim]);
+    const retraction = signClaims(
+      {
+        timestamp: 1100,
+        author: authorForSeed(OP_SEED),
+        pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: claim.id } } }],
+      },
+      OP_SEED,
+    );
+    await gw.append([retraction]);
+
+    // The Term names only the claim. select() answers exactly that — it is the reading surface.
+    expect(gw.select(byIds([claim.id])).map((d) => d.id)).toEqual([claim.id]);
+
+    // freeze() carries the closure, because a version is SHIPPED: a consumer loading it must not
+    // read a withdrawn claim as live (hazard H1, T38).
+    const version = gw.freeze(byIds([claim.id]));
+    expect(version.members.map((d) => d.id).sort()).toEqual([claim.id, retraction.id].sort());
+
+    // And the address reflects it: freezing the same Term BEFORE the retraction existed is a
+    // different version, because it is a different set. That is the address working, not a wart.
+    const other = await boot();
+    await other.append([claim]);
+    expect(other.freeze(byIds([claim.id])).id).not.toBe(version.id);
+    await other.close();
     await gw.close();
   });
 

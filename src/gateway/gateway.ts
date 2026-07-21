@@ -38,6 +38,7 @@ import {
   offeredDeltasImpl,
   selectImpl,
   watchImpl,
+  withNegationClosure,
 } from "./ingest.js";
 import { freezeMembers, type ModuleVersion } from "./container-identity.js";
 import {
@@ -686,7 +687,12 @@ export class Gateway {
   // Order-free by construction, so two stores that froze the same members agree without
   // coordinating (container-identity.ts holds the address; the refusal voice stays in select).
   freeze(term: unknown): ModuleVersion {
-    return freezeMembers(selectImpl(this, term));
+    // ...plus the negation closure of what it selects (hazard H1, T38). A version exists to be
+    // SHIPPED, so a version carrying a claim without the retraction that struck it would hand its
+    // consumer a withdrawn claim reading as live. The address is over whatever the members ARE, so
+    // two stores freezing the same Term where only one holds a retraction get DIFFERENT addresses —
+    // correct, not a wart: they are genuinely different sets, and the address says so.
+    return freezeMembers(withNegationClosure(this, selectImpl(this, term)));
   }
 
   // Admit a batch of peer deltas (SPEC §8): the body lives in ingest.ts.
