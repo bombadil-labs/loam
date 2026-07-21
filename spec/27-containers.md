@@ -230,9 +230,10 @@ The questions that DO remain open:
    *exports* — which schemas / renderers / entities are its public surface versus internal deltas it needs
    but does not expose. This is where a module stops being "a query's output" and becomes a package with an
    interface. (Membership: decided. Manifest: open.)
-2. **Identity as a Merkle-set.** The canonical, order-free content address over member deltas — the keystone
-   everything else hangs on. Buildable on the §22.3/§23.10 ladder, but it is the piece that turns "a
-   container" into "a nameable, verifiable, pinnable module version."
+2. ~~**Identity as a Merkle-set.**~~ **CLOSED** — see the identity provenance below. The order-free content
+   address is BUILT at rung 2 of the §22.3/§23.10 ladder (a hash over the sorted member ids), which is what
+   turns "a container" into a nameable, verifiable, pinnable module version. The Merkle rung remains the
+   named next step, and the reason it is not yet needed is recorded there rather than here.
 3. **Trust on load, precisely.** A loaded module carries law (schemas, renderers, grants). Inert-by-default
    says it binds nothing until blessed; "install a module" is load + a scoped promotion of its law. What is
    the smallest safe blessing — the whole module's law, or a per-export grant?
@@ -284,4 +285,40 @@ the edge: a nested difference (difference against difference — the depth-1 `in
 impossible case) seeds a pool and live-follows (`test/gateway/membership.test.ts`, 6 rails;
 `demos/village/phase-membership.mjs`, 4/4). Deferred, still open as designed: the module manifest
 (question 1), Merkle-set identity (question 2), trust-on-load (question 3), the §27.7 `Container`
-lifting. Federation/quarantine seeding surface → Myk's merge (P6).
+lifting. Federation/quarantine seeding surface → Myk's merge (P6). *(Question 2 was subsequently
+closed at rung 2 by T29 — see the identity provenance below.)*
+
+**§27.2 IDENTITY BUILT** (realizes ticket T29, 2026-07-20) — the keystone, and the third rung of the
+same ladder `select` and `watch` already climbed. `Gateway.freeze(term)` evaluates a membership Term
+ONCE and names the result: a `ModuleVersion` of `{ id, members }` whose id is a content address over
+the members (`src/gateway/container-identity.ts`). §27.2 had already decided the property that
+matters — the address is ORDER-FREE, because the members are a CRDT set — and this fixes the rung at
+**2** of the §22.3/§23.10 economics ladder: a hash over the SORTED member ids, domain-tagged so a
+module-version address can never collide with another content address computed elsewhere over the
+same bytes. Nothing about how a member was reached enters the address: not the naming Term, not
+which side of a union it arrived on, not the store it came from, not the wall clock. Only which
+deltas are in. That is what lets two consumers who froze the same members agree WITHOUT
+COORDINATING — the dedup, verification and reproducibility §27.2 promised, i.e. a package hash.
+
+**Rung 3 (the Merkle-set) is deferred, and here is why it is not yet needed:** it buys exactly one
+thing over rung 2 — INCREMENTAL sharing, "ship me only the members I do not already have" — and
+nothing in the arc consumes that today. Reference-load pulls by federation (§27.3) and merge-load
+re-signs (§24.3, built [#111](https://github.com/bombadil-labs/loam/pull/111)); neither diffs two
+versions to find the delta. When something does — a module registry, an incremental pull — rung 3 is
+the named next step, and it stays cheap to take because the id is OPAQUE behind one helper: no call
+site parses it, so the rung changes without any of them moving.
+
+**No new on-wire shape.** The address is computed as a pure function and recorded nowhere, so this
+ships **no §20 migration** — nothing in the bytes any store already holds changed. The first delta
+that CITES a module version (a manifest, question 1; a pinned dependency, §27.4's frozen DAG) is
+where that question arrives, and it arrives with the vocabulary decisions of T32.
+
+Rails: `test/gateway/container-identity.test.ts` (8) — order-freedom proved by construction rather
+than asserted (the same members named by three differently-ordered Terms, and by a union from either
+side, agree); cross-store determinism (two independent gateways, each holding ground the other does
+not, freeze the same members to the same id); sensitivity; NON-DRIFT (a version frozen against a
+live Term is unmoved as the ground grows underneath it — the living→frozen ladder made a test); the
+address is over members and not over WHEN; an empty membership is a lawful and stable version; and
+`freeze` neither widens nor narrows what `select` accepts, asserted as an equivalence between the
+two doors rather than against a pinned error string. Village: `demos/village/phase-membership.mjs`
+freezes a living container and watches the ground move past it.

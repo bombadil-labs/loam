@@ -39,6 +39,7 @@ import {
   selectImpl,
   watchImpl,
 } from "./ingest.js";
+import { freezeMembers, type ModuleVersion } from "./container-identity.js";
 import {
   boundKey,
   lazyMatNameImpl,
@@ -677,6 +678,15 @@ export class Gateway {
   // moves. The body lives in ingest.ts.
   watch(term: unknown): AsyncGenerator<Delta[], void, unknown> {
     return watchImpl(this, term);
+  }
+
+  // The same Term, FROZEN (SPEC §27.2): evaluate the membership once and name the result with a
+  // content address over its members. `select` is the living reading, `watch` the live one, and
+  // this is the third rung of the same ladder — the version you ship, pin, verify, and reproduce.
+  // Order-free by construction, so two stores that froze the same members agree without
+  // coordinating (container-identity.ts holds the address; the refusal voice stays in select).
+  freeze(term: unknown): ModuleVersion {
+    return freezeMembers(selectImpl(this, term));
   }
 
   // Admit a batch of peer deltas (SPEC §8): the body lives in ingest.ts.

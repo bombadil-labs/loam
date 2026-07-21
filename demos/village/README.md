@@ -369,12 +369,17 @@ _(one entry per PR that grew the village; newest last)_
   first thing anyone said. They serve simultaneously (the pre-§21.7 registry EVICTED the elder), evolve
   on their own clocks (the archive drops its field; the broad lens never flinches), and the anonymous
   door opens lens by lens — Townbook is declared public, FirstImpressions stays the town's own.
-- **THE SCOPE IS A QUERY (SPEC §27.6)** (phase-membership.mjs, 4/4, re-runnable): membership stops
-  being a config file. The operator stands up a TRIAL POOL over a hand-picked scope said as algebra —
-  the trial ledger's claims MINUS the drafts, a difference over a select — watches the pulse
-  re-evaluate the same Term live (new entries cross, new drafts stay home), proves §24.8's erasure
-  reaches byte-for-byte through the Term-scoped glass, and drops the trial wholesale. select/watch
-  are the first-class doors; the quarantine's admit predicate is the same knob's degenerate form.
+- **THE SCOPE IS A QUERY (SPEC §27.6), AND A VERSION IS THAT QUERY FROZEN (SPEC §27.2)**
+  (phase-membership.mjs, 6/6, re-runnable): membership stops being a config file. The operator stands
+  up a TRIAL POOL over a hand-picked scope said as algebra — the trial ledger's claims MINUS the
+  drafts, a difference over a select — watches the pulse re-evaluate the same Term live (new entries
+  cross, new drafts stay home), proves §24.8's erasure reaches byte-for-byte through the Term-scoped
+  glass, and drops the trial wholesale. select/watch are the first-class doors; the quarantine's
+  admit predicate is the same knob's degenerate form. And the same scope is FROZEN mid-phase into a
+  content-addressed module version, held while the ground grows underneath it: the living scope
+  re-reads to three members, the version minted at two is unmoved, and freezing again now yields a
+  different id. The village shows the ladder in one act — read it living, or pin it and keep what you
+  pinned.
 - **THE DOOR THAT SAYS BUSY (SPEC §23.9)** (phase-rendercap.mjs, 3/3, re-runnable): the public
   square's rendered notice board meets a crowd — six anonymous readers against a cap of two workers.
   The door serves what it can, refuses the rest with a clean "busy" that names no route, lens, or

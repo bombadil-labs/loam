@@ -57,6 +57,18 @@ try {
     `members: ${members.length} — entry in, drafts out`,
   );
 
+  // MEMBER.1b — the SAME scope, FROZEN (§27.2): evaluate once and name the result. This is the
+  // living→frozen ladder — `select` reads the container as it is now, `freeze` mints the version
+  // you ship. Held here, across MEMBER.3's growth, to prove the version does not drift.
+  const version = gw.freeze(scope);
+  const sameAgain = gw.freeze(scope);
+  check(
+    "member.1b",
+    "freezing the scope mints a content-addressed module version, and freezing it again agrees (§27.2)",
+    version.id === sameAgain.id && version.members.length === members.length,
+    `version ${version.id.slice(0, 12)}… over ${version.members.length} members`,
+  );
+
   // MEMBER.2 — the trial pool seeds over the SAME term; the drafts never cross the glass.
   pool = await gw.openQuarantine({ membership: scope });
   check(
@@ -77,6 +89,19 @@ try {
     "the scope live-follows: the pulse re-evaluates the term — new entries cross, new drafts stay home",
     holds(pool.gateway, later.id) && !holds(pool.gateway, laterDraft.id),
     `after the pulse — later entry: ${holds(pool.gateway, later.id)}, later draft: ${holds(pool.gateway, laterDraft.id)}`,
+  );
+
+  // MEMBER.3b — and the frozen version did NOT move while the living one did. The ground grew a
+  // member under MEMBER.3; the living scope re-reads it, the version minted before the growth is
+  // unchanged, and freezing NOW yields a different id. That gap is the whole point of a version:
+  // the thing you pinned stays the thing you pinned (§27.2).
+  const nowVersion = gw.freeze(scope);
+  const stillHeld = gw.select(scope).length;
+  check(
+    "member.3b",
+    "the frozen version does not drift as the ground grows — the living scope re-reads, the version stays put (§27.2)",
+    version.members.length < stillHeld && nowVersion.id !== version.id,
+    `frozen at ${version.members.length} members (${version.id.slice(0, 12)}…), living now ${stillHeld} (${nowVersion.id.slice(0, 12)}…)`,
   );
 
   // MEMBER.4 — the law reaches through the scoped glass (§24.8): erase in the primary, and the
