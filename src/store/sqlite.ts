@@ -55,6 +55,23 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("busy_timeout = 5000");
     this.db.pragma("synchronous = NORMAL");
+    // §11 is a promise about BYTES, not rows (ticket T40). SQLite's `secure_delete` defaults OFF,
+    // so a DELETE unlinks the row while its content stays legible in freelist pages — after a
+    // COMPLETED erasure, `strings store.db` still yielded the delta's claims. Every erasure rail we
+    // had asserted at the API level (`get(id)` is undefined), which stays true across that leak,
+    // which is why it survived until an audit read the file. ON makes SQLite zero the freed pages
+    // as it frees them: the cost is paid on delete, which is rare here, rather than on every read.
+    this.db.pragma("secure_delete = ON");
+    // ...but `secure_delete` is CONNECTION-level and governs only pages freed FROM NOW ON. A store
+    // that erased anything before this shipped keeps that plaintext in its freelist forever, and no
+    // amount of future purging scrubs it — probed: reopening such a store and running fresh
+    // appends/purges/checkpoints still yields the old content; only VACUUM clears it. Shipping a
+    // §11 fix that leaves every existing store in violation is not a fix, so rebuild once when
+    // there is inherited freelist to scrub. `freelist_count` is a cheap header read and is 0 on a
+    // fresh store, so this is a no-op for anything created after this change. The cost is a
+    // one-time rebuild on first open of a store that has erased before; correctness wins.
+    const freelist = this.db.pragma("freelist_count", { simple: true }) as number;
+    if (freelist > 0) this.db.exec("VACUUM");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS deltas (
         seq    INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -176,6 +193,30 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
         this.onDisk.delete(id); // and never mark a purged id durable
       }
       this.db.exec("COMMIT");
+      // `secure_delete` zeroes the freed pages in the DATABASE; in WAL mode the delete is first
+      // recorded in the -wal file, which still holds the pre-delete page images until a checkpoint
+      // folds them in. So a purge is not complete until the WAL is checkpointed and TRUNCATED —
+      // otherwise the bytes we just promised to forget sit beside the store in a file any backup
+      // copies. TRUNCATE rather than PASSIVE: we want the -wal emptied, not merely applied.
+      //
+      // And CHECK THE RESULT. `wal_checkpoint` does not throw on contention — it RETURNS
+      // `{busy, log, checkpointed}`, and a discarded return value is hazard H7 verbatim: an
+      // operation with two outcomes reporting only the happy one. Probed with a second handle
+      // holding a read transaction: `busy_timeout` is honored, then it gives up with `busy: 1`,
+      // and the plaintext stays in `store.db-wal` while `purge` cheerfully returns its count.
+      // §11 does not permit reporting a completeness we did not deliver, so this refuses loudly.
+      // The rows ARE already deleted by then, so the message says exactly that — the caller holds
+      // a partial erasure to retry, not a failed one to redo.
+      if (removed > 0) {
+        const [status] = this.db.pragma("wal_checkpoint(TRUNCATE)") as Array<{ busy: number }>;
+        if (status !== undefined && status.busy !== 0) {
+          throw new Error(
+            "purge: the rows were deleted but the write-ahead log could not be truncated (a " +
+              "concurrent reader held it past busy_timeout). Their plaintext may remain in the " +
+              "-wal sidecar, so this erasure is INCOMPLETE (§11). Retry once the other handle is idle.",
+          );
+        }
+      }
     } catch (err) {
       try {
         this.db.exec("ROLLBACK");

@@ -74,12 +74,30 @@ The phases, with Loam's own craft folded into each:
    ever stylistic. **Budget: one careful review pass per PR** (self-review directly for small
    mechanical diffs); a 2–3-angle panel only for the riskiest tickets (capabilities/auth,
    federation — the §23 renderer ticket names its own panel). Token spend must last the whole
-   backlog. **Audits are paused** (Myk, 2026-07-09): audit 1 cost ~5% of the total token budget — no
-   further audit panels until the arc and its landings are done. Retro to apply before any future
-   audit: the per-finding verify stage was ~80% of the cost and refuted only 1 of 24 candidates (the
-   finders were already precise), and three findings were found by multiple overlapping angles — so
-   a future audit is 3–4 tightly-scoped finder angles, **no** verify stage (the fixer verifies while
-   fixing), findings capped per angle.
+   backlog. ~~**Audits are paused**~~ — **UNPAUSED, and now STANDING: audit after every piece of
+   major work** (Myk, 2026-07-21). Audit 1's pause was a cost decision; audit 3 justified reversing
+   it by finding **13 real issues in one pass**, two of them probed to certainty (a completed
+   erasure left the plaintext recoverable from the sqlite file; `migrate` resurrected withdrawn
+   operator law, turning a §17 410 into a 200 and potentially serving it anonymously) and one of
+   them a build rule §24.8 had already written and nobody had built.
+
+   **Run the RETRO SHAPE, which is what makes this affordable:** 3–4 tightly-scoped finder angles,
+   **no verify stage** (the fixer verifies while fixing — the verify stage was ~80% of audit 1's
+   cost and refuted 1 of 24 candidates), findings capped per angle, and every angle told that **a
+   clean result is a valid result** so it does not pad. Scale the angles to the work: 3–4 over the
+   whole tree after an arc lands; **1–2 scoped to the diff** after a single ticket. Tell each angle
+   what is ALREADY KNOWN so it does not re-find it, and require CONFIRMED-vs-PLAUSIBLE on every
+   finding.
+
+   **Pick angles from what has actually bitten**, not from a generic checklist — audit 3's angles
+   were drawn from real bugs found hours earlier and every one landed. `src/gateway/SUBSTRATE-HAZARDS.md`
+   is the running list; a hazard there that keeps recurring is next audit's angle.
+
+   **Why this is worth the tokens, stated plainly:** the gates verify conformance to the ticket, and
+   they cannot verify that the ticket is right. Rails are downstream of the spec, so a wrong premise
+   produces perfect rails around a real bug — which is exactly how all three of the negation-closure
+   sites shipped green. The audit is the only step that reads the code without the ticket's
+   assumptions, and that is a different question from every other gate.
 7. **P6 — Integrate (the human gate).** Myk decides. Surface the evidence (`adlc gate-manifest
    show`, behavior diffs). **The landing PR writes the ticket's design as a new `spec/NN-slug.md`
    file** — the whole section, closed by its `**Provenance.**` footer (the PR link(s) + a short
@@ -132,12 +150,20 @@ that genuinely needs him. The loop, per unblocked ticket:
    as it goes. Independent unblocked tickets run **in parallel in per-ticket git worktrees**, up to
    the forecast width (this §21–§24 arc is width-1, so it runs sequentially).
 3. Open a PR carrying the gate evidence. Then **merge by risk**:
-   - **The model self-merges** a PR only when *all* hold: `npm run check` green **and** P5 prosecute
-     clean, **and** it is a non-breaking **build** ticket touching no trust-root / capability / auth
-     / federation / erasure surface (§6/§7/§8/§11/§12) and shipping **no** §20 migration.
-   - **Myk merges** everything else: every **design-stage** spec section (T2–T7), anything touching
-     capabilities/auth/federation/erasure, and **any breaking on-wire change** (it ships a migration
-     → it is his call). This is P6.
+   - **The model self-merges** a PR when *all* hold: `npm run check` green, **P5 prosecute clean**,
+     **and the post-work AUDIT clean** (P5 above — it is now standing, and it is the gate that earns
+     this). **WIDENED (Myk, 2026-07-21): the reserved-surface list no longer bars a self-merge.** The
+     old rule held back anything touching trust-root / capability / auth / federation / erasure
+     (§6/§7/§8/§11/§12) or shipping a §20 migration; Myk lifted that in chat, explicitly and twice,
+     with "stack them up" as the fallback if the harness blocks a merge mechanically. So a
+     **bugfix restoring behavior the spec already states** may self-merge on any surface — T40's
+     erasure fix is the archetype.
+   - **Myk still merges**: every **design-stage** spec section; anything that CHANGES WHAT THE SYSTEM
+     PROMISES rather than restoring a stated promise (new capability, a widened door, a trust-model
+     change); and any **breaking on-wire change** shipping a migration. This is P6. The test is not
+     "which file did it touch" but "does this decide something, or repair something."
+   - If a merge is blocked mechanically rather than by this rule, **stack the PRs** and say so —
+     do not work around the block.
 4. **Design-stage tickets never self-merge.** The model drafts the full `spec/NN-*.md` section,
    answers every open **"(Myk)"** question with a *reasoned recommendation*, and opens the PR — that
    PR is Myk's decision + merge (P6), batching his input into one review instead of chat interrupts.

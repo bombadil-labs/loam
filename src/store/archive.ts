@@ -178,6 +178,18 @@ export class ArchiveBackend implements StoreBackend {
     const fans = readdirSync(this.root, { withFileTypes: true })
       .filter((f) => f.isDirectory())
       .map((f) => f.name);
+    // Read each fan ONCE, not once per id. `heal` passes the entire accumulated tombstone set as
+    // `dead` (mirror.ts), so a store with 1,000 historical erasures would otherwise do ~256,000
+    // directory reads per heal, growing forever. A fan that vanishes between listing and reading is
+    // tolerated — the old `existsSync` path was ENOENT-safe and this must stay so.
+    const namesByFan = new Map<string, readonly string[]>();
+    for (const fan of fans) {
+      try {
+        namesByFan.set(fan, readdirSync(join(this.root, fan)));
+      } catch {
+        namesByFan.set(fan, []);
+      }
+    }
     let removed = 0;
     for (const id of ids) {
       let found = false;
@@ -185,6 +197,18 @@ export class ArchiveBackend implements StoreBackend {
         const target = join(this.root, fan, `${id}.json`);
         if (existsSync(target)) {
           rmSync(target, { force: true, maxRetries: 5, retryDelay: 100 });
+          found = true;
+        }
+        // ...and every `.tmp` STRAGGLER for the same id (ticket T40). `append` writes
+        // `<id>.json.<pid>.tmp`, fsyncs, then renames; a crash in that window leaves the complete
+        // delta on disk under a name reads ignore. "Reads ignore it" is the right bound for
+        // correctness and the WRONG one for §11, where the promise is that the byte is REMOVED, not
+        // that it is unread — a `.tmp` is a plain file any backup, rsync, or tar sweeps up. Purge is
+        // the one operation that must see them, so it matches by prefix rather than exact name.
+        const prefix = `${id}.json.`;
+        for (const name of namesByFan.get(fan) ?? []) {
+          if (!name.startsWith(prefix) || !name.endsWith(".tmp")) continue;
+          rmSync(join(this.root, fan, name), { force: true, maxRetries: 5, retryDelay: 100 });
           found = true;
         }
       }
