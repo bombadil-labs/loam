@@ -1,3 +1,163 @@
 {
-  "tickets": []
+  "tickets": [
+    {
+      "id": "T29",
+      "phase": "P1",
+      "status": "todo",
+      "edges": [
+        {
+          "to": "T30",
+          "contract": "T29 makes a container's contents addressable; the manifest then says which of those contents are PUBLIC. If the manifest is itself member deltas (T30's strong prior), T29's address covers it for free and a module version pins its own interface — so the address must exist before the manifest can ride it."
+        },
+        {
+          "to": "T32",
+          "contract": "T29 builds the `identity` knob of the §27.1 vector. The lifting cannot express static-vs-live containers as one primitive until freezing a membership Term to a named version exists."
+        }
+      ],
+      "rails": [],
+      "title": "§27.6 q2: module-version identity — the content address that makes a container pinnable",
+      "scope": [
+        "spec/27-containers.md",
+        "src/gateway/container-identity.ts",
+        "src/gateway/gateway.ts",
+        "test/gateway/"
+      ],
+      "body": "The keystone §27.6 named and did not build. §27.2 already DECIDED the shape: a MODULE VERSION is an immutable, content-addressed delta-set, and its identity is a content address over its member deltas — ORDER-FREE, because the members are a CRDT set. What remains open is only which rung of the §22.3/§23.10 economics ladder (`inline → content-addressed ref → Merkle-chunked tree`) v1 stands on. Membership itself is BUILT (#132): `Gateway.select(term)` already evaluates a Term to the member `dset`.\n\nBUILD: freeze a membership Term to a MODULE VERSION and name it. `Gateway.freeze(term)` evaluates the Term once (reusing `select`), canonicalizes the resulting member-id set, and returns a version id that is a pure function of the members — so two stores that froze the same members get the SAME id, with no coordination. That is the whole promise: dedup, verification, reproducibility, a package hash.\n\nTHE RUNG DECISION (recommendation, not a Myk-reserved call): ship rung 2 — a hash over the SORTED member ids. It is order-free by construction (sort before hash), it is a handful of lines, and it satisfies every property §27.2 asks for except INCREMENTAL sharing. The Merkle-set (rung 3) buys only that increment — 'ship me the members I do not already have' — and nothing in the arc consumes it yet: reference-load pulls by federation, and merge-load re-signs. Build rung 2, state in §27.2's prose that rung 3 is the named next step and WHY it is not needed yet, and leave the id opaque behind a helper so the rung can change without a call site touching it.\n\nRAILS the ticket must exhibit:\n- Order-freedom, proved not asserted: freeze the same members reached by two DIFFERENT Terms whose evaluation order differs, get the same id.\n- Determinism across stores: two independent gateways holding the same member deltas freeze to the same id.\n- Sensitivity: adding or removing one member changes the id.\n- A frozen version does NOT drift — the ground grows underneath it and the frozen member set and id are unchanged (this is the living/frozen ladder of §27.2; a living container re-evaluates, a version does not).\n- The id is over MEMBERS, not over evaluation metadata: freezing at two different wall-clock moments with the same members yields the same id. (No timestamps in the address.)\n\nEDGES / CARE: this mints a NEW on-wire shape if the version is recorded as a delta. Prefer computing the id as a pure function first and recording it only where a version must be cited; if this PR does land a new delta kind, it needs a §20 migration step in the SAME PR and a shape unambiguously distinct from all prior versions (CLAUDE.md's corollary). Say plainly in the PR which of the two it did.\n\nNOT in scope: the manifest (T30 — what a module EXPORTS, as opposed to what it CONTAINS), trust-on-load (T31), the `Container` lifting (T32)."
+    },
+    {
+      "id": "T30",
+      "phase": "P1",
+      "status": "todo",
+      "edges": [
+        {
+          "to": "T31",
+          "contract": "Trust-on-load asks whether the smallest safe blessing is whole-module or PER-EXPORT. That question is unanswerable until the manifest has decided what an export IS and what it names — T31's recommended shape is a function of T30's answer to its questions 2 and 3."
+        },
+        {
+          "to": "T32",
+          "contract": "The manifest is the second policy §27.7 waited for: it is what distinguishes a shippable module from a quarantine pool, and therefore what justifies lifting the hard-wired pool into a knob vector at all."
+        }
+      ],
+      "rails": [],
+      "title": "§27.6 q1: the manifest — where a container stops being a query's output and becomes a package",
+      "scope": [
+        "spec/27-containers.md",
+        "test/gateway/"
+      ],
+      "body": "DESIGN-STAGE. The first deliverable is drafted SPEC prose amending §27.6 (staged into spec/27-containers.md, which already exists — this is the rare edit-an-existing-section case, and it should read as the open question CLOSING, not as a new section) plus answered design questions. Then STOP and wait for Myk's word in chat before writing implementation code.\n\nTHE QUESTION, as §27.6 states it: a membership query says what is IN a container; a module still needs to say what it EXPORTS — which schemas / renderers / entities are its PUBLIC SURFACE versus internal deltas it needs but does not expose. Membership is decided and built (#132); the manifest is what turns a delta-set into a package with an INTERFACE.\n\nDESIGN QUESTIONS TO ANSWER (each with a reasoned recommendation; none is reserved to Myk unless it turns out to touch capabilities, in which case say so and stop):\n1. Is the manifest a SEPARATE artifact, or is it itself deltas inside the container? Strong prior: deltas — everything else in Loam is (trust is data, §8; a Schema is a publishable entity, §21; a container's knobs are claims about it, §27.1). If the manifest is a member delta then T29's content address covers it for free, and a module version pins its own interface. Argue it or overturn it.\n2. What can be exported? §27.6 names schemas, renderers, entities. Is that the closed list? What about a resolver binding (§22) — it is law, and law is exactly what trust-on-load (T31) has to bless.\n3. What does an export NAME? A raw delta id is content-addressed and brittle to re-authoring; an entity is stable but unowned. Recommend the shape a consumer writes when they say 'give me this module's Feed schema'.\n4. Is a non-exported member READABLE by the consumer, or only unadvertised? Reference-load (§27.3) puts the whole container behind glass the consumer can read through by opt-in (§23.9/§24.2), so 'private' cannot mean unreadable without a read-side capability slice (§24.2's honesty note, explicitly deferred). Recommend what 'internal' honestly means in v1 — likely NOT-ADVERTISED rather than NOT-READABLE — and say so in the prose rather than implying a confidentiality the build does not deliver. This one matters most; the §24 arc has been careful never to promise a boundary it does not enforce.\n5. Does the manifest carry a compat statement about what it needs from the HOST (a rhizomatic version, a Loam section)? Or is that a later concern?\n\nWRITE IT so that a reader who has just read §27.6's 'Membership: decided. Manifest: open.' finds the sentence that closes it. Provenance footer per CLAUDE.md."
+    },
+    {
+      "id": "T31",
+      "phase": "P1",
+      "status": "todo",
+      "edges": [
+        {
+          "to": "T32",
+          "contract": "The `trust` knob is one of the five in §27.1's vector, and it is the knob that decides whether exclusion may be a PROPERTY or must be a WALL. T32 cannot set that knob correctly until T31 has decided what blessing a container's law actually means."
+        },
+        {
+          "to": "T33",
+          "contract": "promote-LAW is the built form of the blessing T31 designs. If T31 recommends a per-export shape, T33 builds that shape rather than inventing a parallel one — so the design must land first or the two mechanisms drift."
+        }
+      ],
+      "rails": [],
+      "title": "§27.6 q3: trust on load — the smallest safe blessing for a module's law",
+      "scope": [
+        "spec/27-containers.md",
+        "test/gateway/"
+      ],
+      "body": "DESIGN-STAGE, and it lands on the CAPABILITY surface — so this PR is Myk's merge (P6) regardless of how clean it is. Deliverable: drafted SPEC prose amending §27.6 plus answered questions, then STOP for Myk in chat.\n\nTHE QUESTION, as §27.6 states it: a loaded module carries LAW (schemas, renderers, grants). Inert-by-default (§8/§12) says it binds nothing until blessed; 'install a module' is load + a scoped promotion of its law (§27.3, and §24.4 says promotion-of-law is the ordinary publish path remembering its probation). What is the SMALLEST SAFE BLESSING — the whole module's law at once, or a per-export grant?\n\nRecommendation to argue from, not to assume: PER-EXPORT, because the whole-module blessing is the thing §6 spent the arc refusing — authority never rides in on data, and 'I trust this package' is exactly the ambient grant that makes supply chains dangerous. But argue the cost honestly: per-export blessing means a module with twenty exports is twenty operator acts, and an install flow nobody completes is its own security failure. The interesting middle is a blessing that is per-export in the RECORD (so an audit can say which export bound and who blessed it) while being one operator act at the UI (§24.7's promotion controls at the frame's edge). Say whether that middle is honest or a fig leaf.\n\nQUESTIONS TO ANSWER:\n1. Whole-module vs per-export vs the recorded-per-export/one-act middle. Recommend one.\n2. Does blessing a module's law inherit §6's two-authority discipline — blessing the CODE and granting its PEN are different keys (§23.3, restated in §24.4)? Presume yes; state where the seam is for a module.\n3. What does UNBLESSING look like? A blessed export is a published registration in the operator's own voice (§24.4), so withdrawal is negation — but the module version it came from is immutable. Does unblessing one export leave the rest bound? (This is where per-export earns or loses its keep.)\n4. Does a module version pin the law it was blessed WITH — i.e. does upgrading to a new module version RE-REQUIRE blessing? Presume yes and say why: a new version is a new content address, so anything else is a silent authority upgrade.\n5. What does the quarantine posture (§24) give here for free? A module loaded by REFERENCE into a container is already the probation story; blessing is promotion out. State the identity explicitly so the two do not drift into parallel mechanisms.\n\nDo NOT decide a reserved '(Myk)' call unilaterally. If any question above turns out to need his sentence rather than a recommendation, name it as such in the PR and leave it open."
+    },
+    {
+      "id": "T32",
+      "phase": "P1",
+      "status": "todo",
+      "edges": [
+        {
+          "to": "T33",
+          "contract": "T32 refactors quarantine-pool.ts into the general Container. promote-LAW touches the same pool surface, so landing it first would mean writing the promotion path twice — once against the hard-wired pool, once against the lifted primitive."
+        },
+        {
+          "to": "T34",
+          "contract": "The resource envelope is a per-CONTAINER budget. Attaching it to the hard-wired quarantine pool would hard-wire one more knob that T32 then has to generalize; after the lifting it is a knob on the vector."
+        },
+        {
+          "to": "T35",
+          "contract": "The sequestered frame mounts a renderer against a container's handles and offers promotion controls at its edge. Both the handle scoping and the promotion door are Container surface, so the frame should be built against the lifted primitive."
+        }
+      ],
+      "rails": [],
+      "title": "§27.7: the Container lifting — quarantine becomes one preset of a named primitive",
+      "scope": [
+        "spec/27-containers.md",
+        "src/gateway/quarantine-pool.ts",
+        "src/gateway/container.ts",
+        "src/gateway/gateway.ts",
+        "test/gateway/"
+      ],
+      "body": "The move §27.7 named and deliberately deferred until a SECOND policy wanted the same object. T29–T31 supply it: a module version is that second policy, and once it exists the quarantine's hard-wired knobs are an embarrassment rather than a simplification.\n\nBUILD: generalize `quarantine-pool.ts` into a named `Container` carrying the §27.1 knob vector — `{membership, seeding, trust, boundary, identity}` — and re-express the quarantine as ONE PRESET of it (UNTRUSTED · one-way-seeded · live · droppable). `openQuarantine` keeps working, unchanged at the call site, implemented over the general primitive.\n\nTHE KNOBS, and where each already exists:\n- membership — BUILT (#132): a Term, `QuarantineOptions.membership`, re-evaluated per pulse. Lifts as-is.\n- identity — T29: static (freeze → module version) or live (re-evaluate → living container). This is §27.2's ladder, and the lifting is where the two stop being separate code paths.\n- seeding — one-way inbound federation from a primary (built), explicit import of a shipped module (new), hand-authored deltas.\n- trust — UNTRUSTED (foreign law inert, separate store) vs CURATED. This knob decides whether exclusion may be a PROPERTY or must be a WALL (§27.1's spectrum). Get this one exactly right; §24.10 is the normative reconciliation and it must not drift.\n- boundary — reference or merge (§27.3). Merge splits by trust: scope-merge (flip the exclusion property, NO re-sign) vs adoption-merge (re-sign with `loam.adoption`, built as promote-outputs, #111).\n\nTHE VOCABULARY DOES NOT EXIST YET, and minting it is part of this ticket. §27.1 says a container is itself an ENTITY and its knobs are CLAIMS about it, and that exclusion is 'a claim that container C is excluded' — but nothing under `loam:` or `loam.*` names a container today (grep confirms: no `loam:container`, no `loam.container.*`). So T32 mints reserved vocabulary. That triggers CLAUDE.md's rules in full: the shape must be unambiguously distinct from every prior version so shape-detection stays sufficient, and if it changes bytes older stores already hold it ships a §20 migration step in the SAME PR. Name the vocabulary deliberately and state it in §27.1's prose — it is the at-rest form of the whole knob vector, so a careless name here is one every later section has to live with. Follow the `loam:trust` / `loam:budget` precedent (a declaration re-resolved from live deltas, so changing a knob is a delta and not a restart).\n\nSCOPE-MERGE IS THE NEW OPERATION and the one worth the most care: §27.3 decided it is flipping an exclusion claim on your OWN container, with no re-signing, because authorship never changed. It needs the composable set-algebra rhizomatic 0.6.0 landed (`difference`/`intersect` as first-class Term ops, adopted in T14) — the scope is `union of active containers MINUS the excluded ones`, nestable, which the old depth-1 `select(not(inView(T, id)))` idiom could not express.\n\nRAILS:\n- The quarantine preset is behaviorally IDENTICAL to today: re-point `test/gateway/quarantine.test.ts` at the lifted implementation and it stays green with no assertion softened. In particular §24.8's erasure law (tombstone + purge fan-out, the byte-level composed-scope assertion) must hold through the lifting, untouched.\n- A CURATED container admits the property model: exclude it, the primary's read view loses its deltas; re-include it, they return; no delta was re-signed and no content address churned (assert the ids before and after are the SAME).\n- An UNTRUSTED container refuses the property model — it is a separate store, and there is no flag that merges it. Assert the refusal, loudly.\n- Nested exclusion composes: a container defined RELATIVE to another (difference against difference) resolves correctly. This is the case that was impossible before 0.6.0 and is the reason the algebra was worth adopting.\n\nCARE: this is a refactor of a store-boundary/erasure/federation surface, so it is Myk's merge (P6) even though it is a build ticket. It must ship no behavior change to the quarantine — if it does, that is a finding, not a feature. §24's remaining slices (T33–T35) land ON the lifted primitive, which is why they queue behind it."
+    },
+    {
+      "id": "T33",
+      "phase": "P1",
+      "status": "todo",
+      "edges": [
+        {
+          "to": "T35",
+          "contract": "The frame's promotion controls offer BOTH doors — adopt an output (built, #111) and bless the law. The second door has to exist before the frame can put a button on it."
+        },
+        {
+          "to": "T34",
+          "contract": "Ordering, not logic: the two are independent in design but the forecast scores them a scope-overlap VETO (both amend spec/24-quarantine.md's provenance and both land tests under the same quarantine surface). At width 1 they run sequentially anyway; this edge makes that explicit rather than leaving a known-conflicting pair nominally concurrent. promote-LAW goes first because it completes a §24.3/§24.4 story already half-built, where the envelope opens a new one."
+        }
+      ],
+      "rails": [],
+      "title": "§24.4: promote-LAW — the graduation is an ordinary publish that remembers its probation",
+      "scope": [
+        "src/gateway/adopt.ts",
+        "src/gateway/gateway.ts",
+        "spec/24-quarantine.md",
+        "test/gateway/"
+      ],
+      "body": "The second strength of promotion, on §24.9's DESCRIBE list, and the last unbuilt half of §24.3/§24.4. Promote-OUTPUTS is built (#111): a quarantine's FACTS cross by re-signing with a `loam.adoption` record, and it explicitly REFUSES law (a delta declaring a reserved vocabulary is rejected). This ticket builds the door that refusal points at.\n\nWHAT §24.4 RECOMMENDED, and it is the whole design: promotion-of-law needs NO special quarantine machinery. It reuses the ORDINARY publish path verbatim — `publishSchemaClaims`/`loadSchema` for a §21 Schema, the §22 binding publish for a resolver, the §23 renderer binding publish for a renderer. The quarantine was the PROBATION; the ordinary publish is the GRADUATION. Blessing is a promotion out of a visible staging area, never a boolean flipped in the dark.\n\nBUILD: `Gateway.promoteLaw(source, deltaId, opts?)` (name it as the codebase wants) which (1) recognizes what KIND of law it is looking at, (2) routes it to that kind's existing publish path under the OPERATOR's authorship — because foreign authorship binds nothing (§8/§12), the operator re-authors to bless, exactly as promote-outputs does for facts — and (3) attaches the quarantine record as PROVENANCE on the blessed thing: a `loam.adoption`-style pointer back to the pool id, the trial, who promoted, when. 'This law was vetted in quarantine before it bound' must be on the record and auditable like any other provenance.\n\n§6'S TWO-AUTHORITY DISCIPLINE IS THE TRAP HERE, and §24.4 flags it: blessing the CODE and granting its PEN are DIFFERENT KEYS (§23.3). Promoting a renderer's law must NOT confer the granted author that lets it write. A rail must prove that: promote a renderer's law out of a pool, then assert it has no pen in the primary until a separate, deliberate grant. If the implementation makes those one act, the ticket has failed even with green tests.\n\nOTHER RAILS:\n- Idempotence, matching promote-outputs: promote the same law twice, converge on one registration and one provenance record.\n- Erasure holds: a promoted law the operator later erased cannot be silently re-promoted past its tombstone (the same re-mints-the-same-id property #111 relies on).\n- The blessed thing actually BINDS: after promotion, a read through the primary's governed door resolves THROUGH the promoted Schema/resolver/renderer. Assert the behavior, not the registration record — a test that only checks the record was written is hollow.\n- Provenance survives: `Gateway.adoptions()` (or its law-side equivalent) shows the trail back to the pool.\n\nCARE: capability + federation surface → Myk's merge (P6). If T31 (trust-on-load) recommended a per-export blessing shape, this is where that shape gets built — reconcile with it rather than inventing a parallel mechanism, and say in the PR which way the reconciliation went."
+    },
+    {
+      "id": "T34",
+      "phase": "P1",
+      "status": "todo",
+      "edges": [
+        {
+          "to": "T35",
+          "contract": "The frame runs a stranger's renderer for real, statefully, against real ground — which is exactly the workload the envelope bounds. Mounting that frame without a budget is the unbounded case §24.5 exists to close."
+        }
+      ],
+      "rails": [],
+      "title": "§24.5: the quarantine resource envelope — a budget that cannot starve the primary's doors",
+      "scope": [
+        "src/gateway/render-worker.ts",
+        "src/gateway/budget.ts",
+        "src/gateway/quarantine-pool.ts",
+        "spec/24-quarantine.md",
+        "test/gateway/"
+      ],
+      "body": "§24.9's BUILD list item that slice 1 deferred. §23.9 built the confinement — an operator's bundle runs in a `worker_threads` Worker with a hard timeout and memory `resourceLimits`, bounding HANG, CRASH, and MEMORY. §24.5 says the quarantine needs that worker to run in ITS OWN POOL with ITS OWN budget, and states the hard constraint plainly: the quarantine's budget must not degrade the primary store's doors.\n\nWHERE IT LIVES: `src/gateway/render-worker.ts` is §23.9's implementation and already carries the two comments this ticket acts on — its HONEST SCOPE note (a Worker bounds hang/crash/memory, NOT fs/net; true ocap is 'deferred to §24') and its 'v1 spawns a worker per render (~ms) … a small warm pool is the obvious follow-on'. The slot/concurrency knob below is that follow-on, scoped per pool. `src/gateway/budget.ts` is the neighboring precedent for the shape: door budgets are DATA, one operator-authored declaration re-resolved from the live deltas each request, so raising a quota is a delta and not a restart. Follow that pattern unless there is a stated reason not to — an envelope that needs a restart to tune would be the odd one out in this codebase.\n\nBUILD: a per-quarantine resource envelope — the pool owns a worker budget (timeout, memory, and concurrency/slot count) charged against the QUARANTINE, not the primary. A stranger's app burning its whole envelope must leave the primary's doors answering at full speed.\n\nTHE RAIL THAT MATTERS, and it is a real one, not a proxy: with a quarantined workload deliberately exhausting its envelope (spin to timeout, allocate to the memory cap, saturate every slot), a concurrent read through the PRIMARY's door still completes within its normal bound. Make the rail concrete rather than impressionistic: establish the primary's baseline latency with the pool idle, then assert the under-load latency stays within a stated multiple of it (pick the multiple, justify it, and make it generous enough not to flake on CI — the failure this catches is 'the primary blocks until the quarantine's timeout fires', which is an order-of-magnitude effect, not a percentage one). Measure the primary's behavior under quarantine load. A test that merely asserts 'the pool's worker was configured with limits' is HOLLOW — it passes without the isolation existing. §18's door-busy work (T18, 'the door learns to say busy') is the neighboring machinery; reuse rather than parallel it.\n\nOTHER RAILS:\n- The envelope is per-POOL: two quarantines cannot borrow each other's budget, and one exhausting itself does not starve the other.\n- Exhaustion is LOUD and attributable — the operator learns which pool hit which limit, not a generic failure.\n- Dropping a pool releases its envelope (no leak across the drop that §24.1 promises is consequence-free).\n\nTHE HONESTY FLAG IS PART OF THE DELIVERABLE. §24.5 states it and the PR must not quietly outgrow it: until the full ocap layer ships (no-fs/no-net — SES-in-worker or isolated-vm, §23.9's named further work), a quarantine that admits rung (d) EFFECTFUL code bounds resource exhaustion but does NOT bound ambient-authority reach — a worker can still reach `node:fs` and the network. This ticket builds the resource half ONLY. Do not let the PR's prose imply the quarantine now safely runs a stranger's effectful app; that promise depends on the ocap slice, which stays deferred and should be re-stated as still-open in §24.5's provenance. Shipping the budget and overstating the confinement would be exactly the theater §24 exists to refuse.\n\nNOT in scope: the ocap confinement itself. That is its own ticket once the SES-vs-isolated-vm choice is made — a dependency conversation, and it needs Myk."
+    },
+    {
+      "id": "T35",
+      "phase": "P1",
+      "status": "todo",
+      "edges": [],
+      "rails": [],
+      "title": "§24.7: the sequestered frame — a stranger's app running against your real ground, visibly on probation",
+      "scope": [
+        "src/gateway/renderers.ts",
+        "src/gateway/render-worker.ts",
+        "src/gateway/quarantine-pool.ts",
+        "demos/village/",
+        "spec/24-quarantine.md",
+        "test/gateway/"
+      ],
+      "body": "The vivid case, and the one that makes §24 legible to a person rather than to a spec reader. §23 built most of the path: §23.3 decided a sandboxed renderer writes under a per-renderer granted author into the SANDBOX POOL, never canonical, and §23.9 built the confinement. §24.1 supplied the pool. What §24.7 adds is the FRAME.\n\nBUILD, in the three parts §24.7 names:\nFIRST, A CORRECTION TO CARRY INTO THE WORK: §24.7's prose says 'the stock React host (§23.2)', and that phrase does not map onto built code. There is no React host component in Loam. §23.2 is the host CONTRACT — the capability-scoped handles injected into a render function — and the serving path is `serveRouteImpl` in `src/gateway/renderers.ts`, which runs the bundle in the §23.9 worker and returns rendered output. So 'the frame' is chrome the SERVING PATH wraps around a quarantined route's output, not a React component to write. Build it there, and amend §24.7's wording in the same PR so the spec stops describing a host that does not exist.\n\n1. HANDLES SCOPED TO THE POOL — the serving path, mounting a quarantined renderer, injects handles whose writes land IN the quarantine (§23.3's pen-into-pool) and whose reads see `primary-ground ⊎ its-own-writes` (§24.2). The point is that a probationary app is genuinely RUNNING, statefully: the operator watches it DO things, not paint a frozen preview.\n2. A VISIBLY-SEQUESTERED FRAME — chrome that says without ambiguity: this is probation; its writes are LIVE HERE and quarantined from your store; promotion is the only crossing. §24.7 is emphatic about the failure mode: the frame must NOT say 'its writes go nowhere.' That would be a LIE — they go into the pool, and that is the whole point of a dry-run. A user must be fooled neither into thinking a probationary face is load-bearing NOR into thinking it is inert.\n3. PROMOTION CONTROLS AT THE FRAME'S EDGE — bless the law (§24.4 / T33), adopt an output (§24.3, built #111). The only door out, and it is visible.\n\nRAILS:\n- A write from the quarantined renderer lands in the POOL and is absent from the primary, asserted at the store level, not the UI level.\n- The app reads its own write back (it is stateful and live, not a preview) — this is the assertion that distinguishes §24.7 from a screenshot.\n- Dropping the pool while the frame is mounted is consequence-free, and the frame says so.\n- The frame's copy is itself under test for the §24.7 lie: assert the sequestration language does not claim writes go nowhere. (A string test is weak, but the failure mode IS a copy failure, so test the copy.)\n- Erasure reaches through the mounted frame (§24.8 holds while a renderer is live, not only at rest).\n\nTHE VILLAGE (CLAUDE.md step 8): extend `demos/village/phase-quarantine.mjs` or add a new act so the village RUNS a stranger's face against real ground, writes into the pool, shows the frame, promotes one output, and drops the rest — end-to-end and visible. Update the demonstration ledger in `demos/village/README.md`. This is the act that shows what the whole §24/§27 arc was for; make it ambitious.\n\nCARE: renderer + capability surface → Myk's merge (P6)."
+    }
+  ]
 }
