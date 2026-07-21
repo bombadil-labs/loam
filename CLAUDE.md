@@ -68,9 +68,16 @@ All updated. **`adlc:prosecutor-{correctness,security,tests,contract,diff}` and
 is what the "spawn a subagent" rule above means in practice. Use them; do not hand-roll review
 prompts beside a shipped panel (that mistake cost a day).
 
-**One residual, upstream:** `adlc review` still fails `spawnSync npx ENOENT` on Windows — it spawns
-bare `npx` where Windows needs `npx.cmd` or `shell: true`. `adversarial-review` itself runs fine
-directly (`adversarial-review --base main`). And `adlc prosecute` is an evidence RECORDER
+**`adlc review` works on Windows via a LOCAL PATCH — re-apply it after any adlc upgrade:**
+`npm run adlc:patch` (`scripts/patch-adlc-npx.mjs`). Upstream's `runExternal` spawns bare `npx`,
+which on Windows needs BOTH `npx.cmd` AND `shell: true` — naming the `.cmd` alone turns `ENOENT`
+into `EINVAL`, because Node ≥18.20.2 refuses to spawn `.bat`/`.cmd` without a shell
+(CVE-2024-27980). The script is idempotent, completes a half-applied patch, and REFUSES rather than
+guessing if upstream restructures the call. It patches a GLOBAL package, so `npm i -g @adlc/cli`
+wipes it — that is the whole reason it is a script and not a hand-edit. Delete it once a released
+`@adlc/cli` spawns correctly on Windows.
+
+**And `adlc prosecute` is an evidence RECORDER**
 (`--input passes.json`): it writes down what it is handed and never verifies a review occurred, so
 it may only record what a prosecutor actually returned. Feeding it unearned passes would be an
 operation reporting a success it did not achieve — hazard **H7** at the process layer, which is
