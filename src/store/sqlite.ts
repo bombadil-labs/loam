@@ -55,6 +55,13 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("busy_timeout = 5000");
     this.db.pragma("synchronous = NORMAL");
+    // §11 is a promise about BYTES, not rows (ticket T40). SQLite's `secure_delete` defaults OFF,
+    // so a DELETE unlinks the row while its content stays legible in freelist pages — after a
+    // COMPLETED erasure, `strings store.db` still yielded the delta's claims. Every erasure rail we
+    // had asserted at the API level (`get(id)` is undefined), which stays true across that leak,
+    // which is why it survived until an audit read the file. ON makes SQLite zero the freed pages
+    // as it frees them: the cost is paid on delete, which is rare here, rather than on every read.
+    this.db.pragma("secure_delete = ON");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS deltas (
         seq    INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -176,6 +183,12 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
         this.onDisk.delete(id); // and never mark a purged id durable
       }
       this.db.exec("COMMIT");
+      // `secure_delete` zeroes the freed pages in the DATABASE; in WAL mode the delete is first
+      // recorded in the -wal file, which still holds the pre-delete page images until a checkpoint
+      // folds them in. So a purge is not complete until the WAL is checkpointed and TRUNCATED —
+      // otherwise the bytes we just promised to forget sit beside the store in a file any backup
+      // copies. TRUNCATE rather than PASSIVE: we want the -wal emptied, not merely applied.
+      if (removed > 0) this.db.pragma("wal_checkpoint(TRUNCATE)");
     } catch (err) {
       try {
         this.db.exec("ROLLBACK");

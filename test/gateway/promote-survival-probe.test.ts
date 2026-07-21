@@ -83,7 +83,6 @@ describe.skip("T39 — promotion respects a retraction made inside the pool (FAI
       refusal = (e as Error).message;
     }
 
-    // eslint-disable-next-line no-console
     console.log(
       `PROBE — promotion of a struck pool output: ${
         refusal === undefined ? `ADOPTED as ${adopted}` : `refused (${refusal})`
