@@ -369,7 +369,7 @@ when the stock is used up; and a field with no resolver is unchanged. The stalen
 mutation-tested — truncating the dependency walk makes the pantry lie about the pantry. Additive: a
 resolver over a field with no expansions sees exactly what it saw before, so no §20 migration.
 
-**§22.9 A RESOLVER SEES EXACTLY WHAT THE POLICY SEES** [#PR](https://github.com/bombadil-labs/loam/pull/PR)
+**§22.9 A RESOLVER SEES EXACTLY WHAT THE POLICY SEES** [#150](https://github.com/bombadil-labs/loam/pull/150)
 (ticket T27). §22 opens by dividing the work: a **Policy SELECTS** — which claims count — and a
 resolver **only re-represents** what survived. "Selection is trust-and-provenance work and MUST remain
 in the closed algebra." The bucket a resolver was handed did not honour that. It silently dropped
@@ -401,7 +401,7 @@ set moves on its own; under `annotate` the entry stays with the SAME id and mere
 key built from ids alone would not move and the pre-retraction value would be served forever. The
 dependency walk therefore records whether each entry is retracted.
 
-**Provenance.** Landed [#PR](https://github.com/bombadil-labs/loam/pull/PR) (ticket T27), on Myk's
+**Provenance.** Landed [#150](https://github.com/bombadil-labs/loam/pull/150) (ticket T27), on Myk's
 question of whether this wanted a new argument — it did not; the mask is the argument.
 `bucketOf`/`BucketEntry`/`dependencyIds` in `src/gateway/resolvers.ts`. Rail
 (`test/gateway/bucket-expansions.test.ts`): under an annotate gather a resolver reports `2 seen, 0

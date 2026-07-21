@@ -1,20 +1,6 @@
 {
   "tickets": [
     {
-      "id": "T27",
-      "phase": "P1",
-      "status": "todo",
-      "edges": [],
-      "rails": [],
-      "title": "§22: state (and rail) what bucket a resolver sees — the annotate-mask divergence",
-      "scope": [
-        "spec/22-resolvers.md",
-        "src/gateway/resolvers.ts",
-        "test/gateway/"
-      ],
-      "body": "SURFACED by the 2026-07-20 prosecution of the reading arc; deliberately NOT fixed there, because it changes resolver semantics and predates the arc.\n\n`bucketOf` (src/gateway/resolvers.ts) SKIPS entries with `e.negated`. rhizomatic's `applyPolicy` does NOT — `resolveView` feeds every entry, negated or not, to the Policy. Under a `mask policy: \"drop\"` gather (the common idiom) there is no divergence: negated deltas never enter the hview. Under `mask policy: \"annotate\"` they DO, carrying `negated: true` — and then a resolver computes over a strictly SMALLER bucket than the Policy value it replaces. A field's advertised value and the ground the door claims it was distilled from disagree, and switching the mask policy silently changes what a resolver sees. Child decoration (§22.7) applies `bucketOf` to every expanded child, so the divergence now spreads across a whole read tree rather than one field.\n\nTHE DECISION (Myk's): which is right?\n(a) SURVIVING-ONLY is right and the rule is merely unstated — argued from §22.5/§11: the memo keys on the surviving bucket precisely so an erased or retracted fact can never influence a computed value; a resolver seeing negated claims would contradict that erasure story. If so: STATE the rule in §22 (\"a resolver sees the SURVIVING bucket, whatever the gather's mask policy\") and rail it under an annotate mask.\n(b) MATCH THE POLICY is right — a resolver overrides representation, not selection, so it should see exactly what the Policy saw. If so: `bucketOf` honors `negated` the way applyPolicy does. Note this changes memo keys and existing values for any annotate-mask store.\n\nRecommendation: (a). It is the current behavior, it is defensible from the erasure story, and it costs one paragraph plus one rail instead of a behavior change. Either way the outcome is a STATED rule with a test, not silence."
-    },
-    {
       "id": "T28",
       "phase": "P1",
       "status": "todo",
