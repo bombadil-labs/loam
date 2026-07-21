@@ -31,9 +31,11 @@ vector:
 - **Membership** — which deltas are inside. **This is a delta-query** (DECIDED, §27.6): a `Term → dset`, the
   shape `offeredLens` already is — static (freeze to a version) or live (a subscription), over a local or
   remote store. A shippable module adds a MANIFEST atop the query: which schemas / renderers / entities are
-  its PUBLIC SURFACE — the exports it promises to keep stable across versions (§27.8). Note the correction
-  §27.8 makes to the phrasing this bullet used to carry: an unexported member is NOT-ADVERTISED, never
-  NOT-READABLE. The manifest is an interface promise, not an access control.
+  its PUBLIC SURFACE — the exports it promises to keep stable across versions (§27.8), and the manifest is
+  what promotes a container to a MODULE. Note the correction §27.8 makes to the phrasing this bullet used to
+  carry: an unexported member is NOT-ADVERTISED, never NOT-READABLE, because any delta ingested into your
+  store is visible to you (the §27.8 invariant, DECIDED — Myk, 2026-07-21). The manifest is an interface
+  promise, not an access control.
 - **Seeding** — how it is populated: one-way inbound federation from a primary (the quarantine), an
   explicit import of a shipped module, or hand-authored deltas.
 - **Trust posture** — foreign law inside binds nothing until blessed (inert-by-default, §8/§12). The
@@ -249,7 +251,23 @@ same object (a trusted module import, a shipped app), generalize the pool into a
 `{membership, seeding, trust, boundary, identity}` vector and let **quarantine be one preset**. The Container
 primitive is the north star; promotion is the next commit; the two are the same direction.
 
-### 27.8 The manifest — a container's interface, and the honesty about what "internal" means
+### 27.8 The manifest — a module's interface, and the honesty about what "internal" means
+
+**A word on the words first, because this section is where they start colliding.** §27.1 named one primitive
+and several postures of it, and the prose has to keep them straight:
+
+- a **container** is the PRIMITIVE — a delta-set with the `{membership, seeding, trust, boundary, identity}`
+  knob vector;
+- a **quarantine** is a container in the posture UNTRUSTED · one-way-seeded · live · droppable;
+- a **module** is a container in the posture CURATED · frozen · content-addressed — **and the manifest is
+  exactly what promotes a container to one.** A container without a manifest is not a module; it is ground
+  you scoped;
+- a **module version** is the frozen, content-addressed delta-set itself (§27.2).
+
+Only two of those are type names. `ModuleVersion` is (built, §27.2) and `Container` will be (§27.7's
+lifting). **"Module" and "quarantine" are PROSE — names for settings of the vector, not exported types** —
+the same discipline "lens" runs under. Nothing should ever declare a `Module` type; a module is a container
+you can describe, and this section says what the description contains.
 
 Membership (§27.6) says what is IN a container. Identity (§27.2) names the frozen result. Neither says what
 a consumer may *rely on*, and that is the whole difference between a delta-set and a package. The manifest
@@ -301,21 +319,36 @@ what a consumer writes to say "give me this module's Feed schema."
 
 **And now the honesty, which matters more than the mechanism.** §27.6 framed the manifest as public surface
 "versus internal deltas it needs but does not expose," and that phrasing promises something this design does
-not deliver. It has to be corrected rather than inherited:
+not deliver. What replaces it is not a caveat about manifests but an INVARIANT ABOUT STORES (DECIDED — Myk,
+2026-07-21):
 
-> **"Internal" means NOT-ADVERTISED. It does not mean NOT-READABLE.**
+> **Any delta ingested into your store is visible to you.**
+>
+> Therefore: **"internal" means NOT-ADVERTISED. It never means NOT-READABLE.**
 
-A reference-loaded module (§27.3) is a container in your own store. You can query it — `select` is a
-first-class door (§27.6), and §23.9/§24.2's opt-in interop read is deliberate transparency through the
-glass. There is no read-side capability slice; §24.2 named that gap as an open honesty note and deferred it,
-and nothing since has closed it. So a non-exported member is a member you can plainly read.
+State it at the store level, because that is the level it is true at. A store has no compartments hidden from
+its own operator; ingestion IS visibility. This is the read-side dual of "trust is data" (§8) — nothing about
+your own ground is kept from you by law, only organized by it — and it is why a non-exported member is a
+member you can plainly read: `select` is a first-class door (§27.6), and §23.9/§24.2's opt-in interop read is
+deliberate transparency through the glass, not a leak.
 
-This is not a hole to be patched later, and it should not be described as one. **A module's internals are as
-private as a JavaScript bundle's — which is to say, not at all.** The reason is structural, not an
-implementation shortfall: a module you loaded is a module whose deltas are in a container you hold, and
-confidentiality of contents you hold is not something any manifest can grant. Genuine confidentiality would
-mean the deltas never arriving — a remote module you query rather than load, which is a different
-architecture (and one containers can express: §27.6's membership query is already local-or-remote).
+**The invariant is what keeps the container ONE primitive.** A quarantine and a module are the same object in
+two postures (§27.1). If a module could hide members while a quarantine could not, the two postures would
+carry opposite read rules and "container" would be a word covering two different things — exactly the drift
+§24.10 exists to prevent. So this is not a concession the manifest makes; it is a property the primitive
+requires.
+
+**A module's internals are therefore as private as a JavaScript bundle's — which is to say, not at all**, and
+that is structural rather than an implementation shortfall. Confidentiality of contents you HOLD is not
+something any manifest can grant. Genuine confidentiality means the deltas never arriving — a remote module
+you query rather than load, which is a different architecture, and one containers can already express
+(§27.6's membership query is local-or-remote).
+
+**What this narrows, usefully:** §24.2 deferred a read-side capability slice as an open honesty note. This
+invariant does not close that gap, but it fixes its shape — such a slice can only ever govern **what a door
+serves to OTHERS**, never what an operator sees in their own store. Any future design that reads as "hide
+these deltas from the store that holds them" is out of bounds by this invariant, not merely unbuilt.
+(§24.2's own note is a different axis — how much of the PRIMARY a container is given — and stays open.)
 
 So the manifest is an **interface promise, not an access control**. What it actually buys, stated without
 inflation: a consumer knows which names are stable across versions, which surface is meant to be depended
@@ -434,14 +467,26 @@ and never hold bytes — hash consing, which is what content addressing already 
 the shared representation, §11/§24.8 erasure correctness, and §27.4's composition all fall out of one
 choice.
 
-**The correction this section makes, flagged because it changes a promise:** §27.6 described a manifest as
-separating public surface from "internal deltas it needs but does not expose," which implies a
-confidentiality nothing here delivers. §27.8 states plainly that INTERNAL MEANS NOT-ADVERTISED, NOT
-NOT-READABLE — a reference-loaded module is a container in your own store, `select` is a first-class door,
-and there is no read-side capability slice (§24.2 deferred it and nothing since has closed it). A module's
-internals are as private as a JavaScript bundle's. That is structural rather than a shortfall: real
-confidentiality means the deltas never arriving, which is a remote-membership architecture, not a manifest
-field. Recorded here so no later section inherits the stronger reading.
+**THE VISIBILITY INVARIANT (DECIDED — Myk, 2026-07-21).** §27.6 had described a manifest as separating
+public surface from "internal deltas it needs but does not expose," which implies a confidentiality nothing
+here delivers. What replaced it is not a caveat but a store-level invariant in Myk's own words: **any delta
+ingested into your store is visible to you** — therefore "internal" means NOT-ADVERTISED and never
+NOT-READABLE. Stated at the store level because that is where it is true: ingestion IS visibility, and a
+store has no compartments hidden from its own operator. It is the read-side dual of "trust is data" (§8).
+
+Two consequences worth having on the record. First, **the invariant is what keeps the container ONE
+primitive** — a module that could hide members while a quarantine cannot would give two postures of one
+object opposite read rules, the drift §24.10 exists to prevent; so this is a property the primitive requires,
+not a concession the manifest makes. Second, **it fixes the shape of the deferred read-side capability
+slice**: such a slice can only ever govern what a door serves to OTHERS, never what an operator sees in
+their own store, so any future design reading as "hide these deltas from the store that holds them" is out of
+bounds rather than merely unbuilt. (§24.2's own note — how much of the primary a container is given — is a
+different axis and stays open.)
+
+**Vocabulary pinned here too**, because §27.8 is where the words start colliding: *container* is the
+primitive, *quarantine* and *module* are POSTURES of it and remain PROSE (never exported types, the
+discipline "lens" runs under), and the manifest is precisely what promotes a container to a module. Only
+`ModuleVersion` (built) and `Container` (§27.7, unbuilt) are type names.
 
 **Design-stage: awaits Myk (P6).** Question 3 (trust on load) remains open and now has a concrete domain —
 the four law rows above — as ticket T31.
