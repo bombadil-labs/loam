@@ -16,6 +16,7 @@ import { grantClaims } from "../../src/gateway/accounts.js";
 import {
   ERASE_ENTITY,
   eraseClaims,
+  isTombstone,
   readTombstones,
   sealCommitment,
   tombstonesIn,
@@ -303,6 +304,62 @@ describe("the erasure log stays append-only", () => {
       ),
     );
     await expect(gateway.erase(tombstone!.id)).rejects.toThrow(/append-only/);
+    await gateway.close();
+  });
+});
+
+// §11's promise is about BYTES, and the purge count is the only evidence they went (ticket T55).
+describe("erase refuses to report a completion it cannot evidence", () => {
+  it("a backend whose purge removes nothing makes erase throw rather than return erased", async () => {
+    const { gateway, backend, fact } = await grove();
+    // A store that accepts writes and silently removes nothing, AND still holds the bytes — the
+    // read-only-mount shape. Both halves matter: a 0 count alone is ambiguous (a completed earlier
+    // attempt returns 0 too), so the verdict is byte-presence and the fixture must supply it.
+    backend.purge = () => Promise.resolve(0);
+    await expect(gateway.erase(fact.id, { reason: "the subject asked" })).rejects.toThrow(
+      /STILL HELD by the store/,
+    );
+    await gateway.close();
+  });
+
+  it("a retry after a partial purge completes without minting a second tombstone", async () => {
+    const { gateway, backend, fact } = await grove();
+    // The documented partial-success: sqlite's purge deletes the rows and may still throw when it
+    // cannot truncate the WAL, leaving the caller "a partial erasure to retry, not a failed one to
+    // redo". Modelled here as a purge that removes the bytes and then refuses.
+    const real = backend.purge.bind(backend);
+    backend.purge = async (ids) => {
+      await real(ids);
+      throw new Error(
+        "purge: the rows were deleted but the write-ahead log could not be truncated",
+      );
+    };
+    await expect(gateway.erase(fact.id, { reason: "the subject asked" })).rejects.toThrow(
+      /wal|WAL|write-ahead/,
+    );
+    const tombstonesAfterFirst = [...gateway.reactor.snapshot()].filter((d) =>
+      isTombstone(d.claims),
+    ).length;
+
+    // The operator re-runs, exactly as the error instructs. The bytes are already gone, so purge
+    // now returns 0 — which must NOT read as failure, and must NOT append a second tombstone.
+    backend.purge = real;
+    await expect(gateway.erase(fact.id, { reason: "the subject asked" })).resolves.toMatchObject({
+      erased: fact.id,
+    });
+    expect([...gateway.reactor.snapshot()].filter((d) => isTombstone(d.claims)).length).toBe(
+      tombstonesAfterFirst,
+    );
+    await gateway.close();
+  });
+
+  it("the ordinary path still reports the erasure, and the bytes are actually gone", async () => {
+    const { gateway, fact } = await grove();
+    // The positive leg: without it, an erase that always threw would satisfy the rail above.
+    await expect(gateway.erase(fact.id, { reason: "the subject asked" })).resolves.toMatchObject({
+      erased: fact.id,
+    });
+    expect(gateway.reactor.get(fact.id)).toBeUndefined();
     await gateway.close();
   });
 });
