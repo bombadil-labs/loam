@@ -18,14 +18,17 @@
 // LATEST version by design — pinned resolution applies that version's own schema and its own
 // resolvers — so a rail cannot discriminate `servesLive` by comparing response bodies on the latest
 // version alone. What it CAN do, and now does, is make `pinned !== trueLatest` real: a second
-// version of one lens, so v1 and v2 answer under their own schemas and the older version is
-// addressable by its registration hash. That exercises the `@<hash>` branch (rest.ts:319) and its
-// own lens-vs-program comparison, which the first draft never reached.
+// version of one lens, so v1 and v2 answer under their own schemas, and the older version is also
+// addressed by its registration hash — which is what reaches the `@<hash>` branch (rest.ts:319) and
+// its own lens-vs-program comparison, a path the first draft never entered.
 //
-// THE RESIDUAL GAP, named rather than implied: no assertion here observes WHICH of the two
-// resolution paths ran for the latest version. Closing that needs a materialization or
-// resolver-invocation probe the gateway does not expose today. An honest-looking header over a
-// weaker test is how this defect class survives review, so this file states its limit instead.
+// THE RESIDUAL GAP, named rather than implied: **`servesLive` (rest.ts:346) is NOT railed by this
+// file and cannot be.** No assertion here observes WHICH of the two resolution paths ran, because
+// warm and pinned resolution return the identical view for the latest version by design; closing it
+// needs a materialization or resolver-invocation probe the gateway does not expose. This file rails
+// the SURROUNDING lens-vs-program behavior — per-lens addressing, the `@<hash>` comparison, and the
+// public admission filter — all of which do bite. An honest-looking header over a weaker test is how
+// this defect class survives review, so the limit is stated rather than glossed.
 
 import { describe, expect, it } from "vitest";
 import { parseSchema, type Schema } from "@bombadil/rhizomatic";
@@ -135,6 +138,28 @@ describe("§21.7 — the REST door addresses each coexisting reading under its o
     expect(v2.status).toBe(200);
     expect(viewOf(v1).height).toBe(10); // asc — the original archival policy, still answerable
     expect(viewOf(v2).height).toBe(99); // desc — the evolved one
+    await gw.close();
+  });
+
+  it("the @<hash> branch honours the lens: a sibling's registration hash is not addressable under this name", async () => {
+    const gw = await boot();
+    // rest.ts:319 compares BOTH halves — `v.deltaId === hash && lensOf(v) === schemaName`. This is
+    // the one comparison in the versioned path that the v<N> alias branch never reaches.
+    const versions = gw.registrationVersions();
+    const classic = versions.find((v) => lensOf(v) === "PlantClassic");
+    const live = versions.find((v) => lensOf(v) === "PlantLive");
+    expect(classic).toBeDefined();
+    expect(live).toBeDefined();
+
+    // Its own hash under its own lens resolves, and answers under that lens's policy (asc → 10).
+    const own = await get(gw, "full", `@${classic!.deltaId}`, "PlantClassic");
+    expect(own.status).toBe(200);
+    expect(viewOf(own).height).toBe(10);
+
+    // The SIBLING's hash under this lens must not resolve — the hash exists and is lawful, so a
+    // deltaId-only lookup would serve it. Both names must agree.
+    const crossed = await get(gw, "full", `@${live!.deltaId}`, "PlantClassic");
+    expect(crossed.status).toBe(404);
     await gw.close();
   });
 

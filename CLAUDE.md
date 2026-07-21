@@ -313,8 +313,11 @@ busy.
   without asking, on a feature branch (never `main`), with real messages (the poetry rule applies to
   commits too). The point is to churn autonomously and pull Myk in only where ADLC actually needs a
   human: **P1** (he keeps `.adlc/tickets.json` stocked — that is the approval of what to build) and
-  **P6** (accepting the merge). Open PRs; don't merge to `main` or self-approve the design-stage
-  "(Myk)" sign-offs unless he delegates that. Parallelism is per-ticket git worktrees, width bounded
+  **P6** (accepting the merge). ~~Open PRs; don't merge to `main`~~ — **SUPERSEDED 2026-07-21 by the
+  repair-vs-decide test in "merge by risk" above**: the model self-merges a REPAIR that restores
+  stated behavior (green + P5 + clean audit); anything that DECIDES what the system promises, and
+  every design-stage section, is still Myk's. Never self-approve the design-stage "(Myk)" sign-offs
+  unless he delegates that. Parallelism is per-ticket git worktrees, width bounded
   by `adlc merge-forecast`. (This replaced the deleted fleet-level control-pane rules; Loam is
   governed per-repo by this file.)
 - **v1 is fully multi-tenant** (SPEC §7) — tenant isolation is first-class in the genesis schemas

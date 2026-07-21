@@ -16,9 +16,10 @@
 // content address that is reachable through the UNDECLARED reading and through no public one. That
 // gap is what makes a 200 and a 404 mean different things at this door.
 //
-// BOTH LEVELS (CLAUDE.md P3). Delta level: the operator declared exactly one lens public, asserted
-// against the public-declaration accessors rather than assumed from the call. Object level: what the
-// door actually SERVES — the exploit rail demands a 404 for bytes the fixture proves are otherwise
+// BOTH LEVELS (CLAUDE.md P3). Delta level: what the public surface actually BINDS —
+// `surface('public').registered` through `lensOf` — deliberately NOT the declaration accessor, which
+// would only prove the fixture said what it said (see the comment at the assertion). Object level:
+// what the door actually SERVES — the exploit rail demands a 404 for bytes the fixture proves are otherwise
 // reachable, and the admission rail demands a 200 carrying the exact declared bytes.
 
 import { describe, expect, it } from "vitest";
