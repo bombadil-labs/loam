@@ -408,7 +408,7 @@ the binding's bytes (slice 2prime); nothing at rest moved. The village demonstra
 one public, one not). Serving-loop surface → Myk's merge (P6).
 
 **§21.8 PUBLISHING ANSWERS TWO QUESTIONS, AND ONLY ONE OF THEM CAN REFUSE**
-[#PR](https://github.com/bombadil-labs/loam/pull/PR) (ticket T28). `publishRegistration` was
+[#151](https://github.com/bombadil-labs/loam/pull/151) (ticket T28). `publishRegistration` was
 conflating them, and the conflation showed up as an error message that told operators something false
 about their own store.
 
@@ -432,7 +432,7 @@ and whose views are perspectival (§13).
 proximate cause when it did not. Neither a throw nor silence — a throw would call a successful write a
 failure, and silence would hide a surface the caller is about to query.
 
-**Provenance.** Landed [#PR](https://github.com/bombadil-labs/loam/pull/PR) (ticket T28), on Myk's
+**Provenance.** Landed [#151](https://github.com/bombadil-labs/loam/pull/151) (ticket T28), on Myk's
 framing: *"a valid change should be persisted first, then any effects from that are downstream of the
 change propagating out, and could fail."* Two earlier attempts are recorded because both were wrong in
 instructive ways: swallowing the failure silently (rejected under review — a manual binding carries no
