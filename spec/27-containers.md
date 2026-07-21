@@ -41,7 +41,13 @@ vector:
 - **Trust posture** — foreign law inside binds nothing until blessed (inert-by-default, §8/§12). The
   container is the safe staging area for untrusted law; "installing" a trusted module is load + a promotion
   of its law (§27.3). This knob also decides whether "excluded/sandboxed" can be a PROPERTY or must be a
-  WALL (below).
+  WALL (below). **This knob is being re-founded** (ticket T36, drafting as §28): trust turns out to be a
+  property of a CONTAINER rather than of the operator — a store is the root container, tenants are
+  containers within it, and containers nest — with ADMISSION delegating freely downward while
+  EFFECTIVENESS attenuates. Under that reading the "keyed on trust" spectrum below stops being a judgement
+  call and becomes a derivation: a container admitting what its parent does not trust MUST be a wall,
+  because otherwise a child's admission would place a stranger's bytes in the parent's store. Read this
+  bullet as provisional until §28 lands.
 - **Boundary** — reference or merge (§27.3): does the container stay a distinct unit you point at, or
   dissolve into your ground? (And merge splits by trust — scope-flip vs adoption, §27.3.)
 - **Identity** — a living name that mints frozen versions (§27.2).
