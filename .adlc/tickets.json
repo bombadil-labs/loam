@@ -480,6 +480,21 @@
       ],
       "status": "todo",
       "title": "Two completeness misreports with no ticket: federation pull hides unreconstructable deltas, and the runner drops malformed bindings from its accounting"
+    },
+    {
+      "body": "Myk, 2026-07-21: comments are too verbose, and much of what they carry is process history rather than explanation. That churns tokens on every read and leaves legacy cruft crowding the real signal. CLAUDE.md now carries the rule (Comments explain the code; HISTORY goes in the journal). This ticket applies it to what is already written.\n\nTHE TEST, applied file by file: if a comment names a PR, an audit, an earlier draft, or a person, it is history and belongs in JOURNAL.md, the commit message, or .adlc/findings.jsonl. If it explains what will bite whoever changes this code next - a non-obvious substrate behavior, an invariant, why not the obvious thing - it stays.\n\nMEASURED STARTING POINT (2026-07-21): the three files written that day run 33 percent comment lines. test/gateway/byte-door-lens-gate.test.ts was brought to 21 percent as the worked example; use its header as the target shape. Ten instances of explicit process narration were counted across src/ and test/ by grepping for phrases like an audit, a prosecutor, the first draft, was found hollow, caught my own, and PR numbers.\n\nKNOWN OFFENDERS, all authored 2026-07-21:\n- test/surface/rest-lens-gate.test.ts - the header narrates what an audit corrected and what an earlier draft got wrong. Keep only: what it rails, and that it does NOT rail servesLive and cannot.\n- scripts/patch-adlc-npx.mjs - 48 comment lines including a paragraph about a prosecutor pass and a paragraph about the author walking into the trap the header describes. Both are journal material. Keep the technical why: node against npx-cli.js rather than shell true, and what shell true would do to argv.\n- Assorted headers that restate hazards SUBSTRATE-HAZARDS.md already owns. Cite the hazard id in one line instead of re-explaining it.\n\nDO NOT over-correct. The repo rule that errors, help text and docs are first-class craft still stands, and a comment carrying a genuinely non-obvious substrate fact is worth its lines - the resolveView backfill note in the byte-door rail is the example of one to KEEP. The target is removing archaeology, not removing explanation.\n\nCARE: pure comment churn on frozen rails will trip rails-guard. Do it as its own PR so the diff is reviewable as text-only, and expect the rail-edit violations - they are legitimate here and the bypass should say so.",
+      "edges": [],
+      "id": "T61",
+      "phase": "P1",
+      "rails": [],
+      "scope": [
+        "src/",
+        "test/",
+        "scripts/",
+        "demos/"
+      ],
+      "status": "todo",
+      "title": "Strip process narration from source comments — history belongs in the journal, not in every read"
     }
   ]
 }

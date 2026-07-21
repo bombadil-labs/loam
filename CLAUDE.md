@@ -291,6 +291,16 @@ busy.
   `rhizomatic.hyperschema.*`. Don't parallel any of these with near-synonyms.
 - **The poetry is as important as the engineering** — errors, help text, commit messages, and docs
   are first-class craft. This holds for ticket bodies too: they are the record now.
+- **Comments explain the code; HISTORY goes in the journal** (Myk, 2026-07-21). A comment answers
+  *what will bite whoever changes this next* — a non-obvious substrate behavior, an invariant, why
+  not the obvious thing. It does **not** narrate how the code got here: what an audit found, what an
+  earlier draft got wrong, why a test was skipped, which PR changed it. That is `JOURNAL.md`, the
+  commit message, and `.adlc/findings.jsonl` — all of which a reader can reach, and none of which
+  costs context on every read of the file.
+  **The tell: if a comment names a PR, an audit, a draft, or a person, it is history in the wrong
+  file.** Don't restate a hazard `SUBSTRATE-HAZARDS.md` already owns — cite it (`H6`) in one line.
+  A test header says what the rail asserts and what it deliberately does not; not its rewrite
+  history. Legacy cruft is not free: it churns tokens forever and crowds the real signal.
 - **Every breaking on-wire change ships a migration** (Myk, 2026-07-12) — if a change alters the
   bytes/roles of any delta that older stores already hold, add a step to `src/migrate/` (the
   `MIGRATIONS` chain) in the SAME PR. A migration is grow-only: it re-signs each changed delta into
