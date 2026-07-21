@@ -22,7 +22,10 @@ const AUTHOR = authorForSeed(SEED);
 
 // A delta whose content is unmistakable in a hex dump — if any byte of this survives, we see it.
 const MARKER = "SUBJECT-ERASURE-CANARY-9f3a7c";
-const canary = (timestamp: number): Delta =>
+// A second marker for deltas that must SURVIVE a partial purge — so a rail can assert the target is
+// gone AND the neighbours remain, which is what stops a file-nuking "fix" from passing.
+const SURVIVOR = "BYSTANDER-CANARY-4b1e02";
+const canary = (mark: string, timestamp: number): Delta =>
   signClaims(
     {
       timestamp,
@@ -32,7 +35,7 @@ const canary = (timestamp: number): Delta =>
           role: "observed",
           target: { kind: "entity", entity: { id: "plant:fern", context: "secret" } },
         },
-        { role: "value", target: { kind: "primitive", value: MARKER } },
+        { role: "value", target: { kind: "primitive", value: mark } },
       ],
     },
     SEED,
@@ -64,24 +67,30 @@ describe("§11 at rest — sqlite", () => {
     const file = join(dir, "store.db");
     const store = new SqliteBackend(file);
 
-    const d = canary(1000);
-    await store.append([d]);
-    // Filler, so the purge frees a page rather than trivially truncating the file.
-    const filler: Delta[] = [];
-    for (let i = 0; i < 50; i += 1) filler.push(canary(2000 + i));
-    await store.append(filler);
+    // ERASE ONE SUBJECT, KEEP THE REST — the case §11 actually describes, and the one an
+    // all-of-them purge cannot express (it collapses into "the store is empty and clean", which the
+    // next test already asserts). Two markers, so the assertion can be two-sided.
+    const target = canary(MARKER, 1000);
+    const keep: Delta[] = [];
+    for (let i = 0; i < 50; i += 1) keep.push(canary(SURVIVOR, 2000 + i));
+    await store.append([target, ...keep]);
 
     // Look across the DIRECTORY, not just `store.db`: in WAL mode a fresh append lives in the
     // `-wal` sidecar until a checkpoint folds it in. Scoping the precondition to the main file
-    // would have made this rail pass for the wrong reason.
-    expect(anyFileContains(dir, MARKER)).toBeDefined(); // it really was written
+    // would have made this rail pass for the wrong reason (it did, once).
+    expect(anyFileContains(dir, MARKER)).toBeDefined();
 
-    expect(await store.purge([d.id, ...filler.map((f) => f.id)])).toBe(51);
+    expect(await store.purge([target.id])).toBe(1);
+
+    // SCAN BEFORE CLOSE. The last connection's close runs its own checkpoint and unlinks the
+    // `-wal`, so a scan after close is satisfied by the CLOSE rather than by the fix — reverting
+    // `wal_checkpoint(TRUNCATE)` left the old version of this rail green. Scanning a LIVE store is
+    // also the honest threat model: a backup or snapshot taken while the process runs.
+    expect(anyFileContains(dir, MARKER)).toBeUndefined();
+    // ...and the neighbours are untouched. Without this clause a "fix" that nuked the file passes.
+    expect(anyFileContains(dir, SURVIVOR)).toBeDefined();
+
     await store.close();
-
-    // THE ASSERTION: after a completed purge and a clean close, no byte of the content survives
-    // anywhere beside the store — main file, `-wal`, or `-shm`. `strings` must find nothing. An
-    // API-level check passes either way, which is exactly why this one reads the bytes.
     expect(anyFileContains(dir, MARKER)).toBeUndefined();
   });
 
@@ -91,7 +100,7 @@ describe("§11 at rest — sqlite", () => {
     const store = new SqliteBackend(file);
 
     const all: Delta[] = [];
-    for (let i = 0; i < 40; i += 1) all.push(canary(1000 + i));
+    for (let i = 0; i < 40; i += 1) all.push(canary(MARKER, 1000 + i));
     await store.append(all);
     expect(anyFileContains(dir, MARKER)).toBeDefined();
 
@@ -107,7 +116,7 @@ describe("§11 at rest — archive", () => {
     const dir = scratch();
     const store = new ArchiveBackend(dir);
 
-    const d = canary(1000);
+    const d = canary(MARKER, 1000);
     await store.append([d]);
 
     // Simulate the crash window `append` documents: written and fsynced under `<target>.<pid>.tmp`,

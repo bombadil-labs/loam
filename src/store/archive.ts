@@ -178,6 +178,18 @@ export class ArchiveBackend implements StoreBackend {
     const fans = readdirSync(this.root, { withFileTypes: true })
       .filter((f) => f.isDirectory())
       .map((f) => f.name);
+    // Read each fan ONCE, not once per id. `heal` passes the entire accumulated tombstone set as
+    // `dead` (mirror.ts), so a store with 1,000 historical erasures would otherwise do ~256,000
+    // directory reads per heal, growing forever. A fan that vanishes between listing and reading is
+    // tolerated — the old `existsSync` path was ENOENT-safe and this must stay so.
+    const namesByFan = new Map<string, readonly string[]>();
+    for (const fan of fans) {
+      try {
+        namesByFan.set(fan, readdirSync(join(this.root, fan)));
+      } catch {
+        namesByFan.set(fan, []);
+      }
+    }
     let removed = 0;
     for (const id of ids) {
       let found = false;
@@ -194,7 +206,7 @@ export class ArchiveBackend implements StoreBackend {
         // that it is unread — a `.tmp` is a plain file any backup, rsync, or tar sweeps up. Purge is
         // the one operation that must see them, so it matches by prefix rather than exact name.
         const prefix = `${id}.json.`;
-        for (const name of readdirSync(join(this.root, fan))) {
+        for (const name of namesByFan.get(fan) ?? []) {
           if (!name.startsWith(prefix) || !name.endsWith(".tmp")) continue;
           rmSync(join(this.root, fan, name), { force: true, maxRetries: 5, retryDelay: 100 });
           found = true;
