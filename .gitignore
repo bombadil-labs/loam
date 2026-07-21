@@ -7,7 +7,12 @@ dist/
 demos/village/homes/
 .claude/
 site-dist/
+# .adlc/ is scratch by default, but the ADLC evidence is the durable record and must be tracked:
+# tickets.json is the contract every gate reads, manifest.jsonl is the hash-chained gate evidence P6
+# surfaces, and findings.jsonl is P7's only input. An untracked ledger is machinery switched off.
 .adlc/*
 !.adlc/tickets.json
 !.adlc/specs/
+!.adlc/manifest.jsonl
+!.adlc/findings.jsonl
 .claude/settings.local.json
