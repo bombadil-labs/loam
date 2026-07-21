@@ -6,115 +6,165 @@
 // two names differ, and gating on the program name authorizes EVERY reading over that program,
 // including ones the operator never declared. That is hazard H6.
 //
-// The exploit needs only a known content address: register `Plant` with a broad reading and a narrow
-// one, declare ONLY the narrow one public, and ask the anonymous byte-door for `?from=<broad>`. The
-// membership test passes (the narrow registration carries `hyperschema.name === "Plant"`), and the
-// door then resolves the UNDECLARED broad reading, runs its §22 resolvers on the tokenless door, and
-// searches its full view for the ref.
+// HOW THE READINGS DIFFER, and why the first version of this file could not see the bug. A Schema
+// cannot omit a property: `resolveView` covers every HView property and falls back to `schema.default`
+// for any the Schema does not name, so two readings over one gather always carry the SAME FIELD SET.
+// A "redacted sibling that drops a field" is not expressible. Coexisting readings differ in HOW they
+// resolve — §21.7's own fixture differs by `asc` vs `desc` — and that is the lever used here: two
+// bytes values observed at different times, a BROAD reading picking the newest and an ARCHIVAL one
+// picking the oldest. Only the archival reading is declared public, so the newest bytes have a
+// content address that is reachable through the UNDECLARED reading and through no public one. That
+// gap is what makes a 200 and a 404 mean different things at this door.
 //
-// BOTH LEVELS (CLAUDE.md P3). Delta level: the operator declared exactly one lens public, and that
-// declaration is what the door must honour. Object level: what the door actually ANSWERS. The bug
-// is invisible at the delta level — the declarations are correct throughout — which is why the door
-// assertion is the load-bearing one here, and why the file says so rather than implying parity.
+// BOTH LEVELS (CLAUDE.md P3). Delta level: the operator declared exactly one lens public, asserted
+// against the public-declaration accessors rather than assumed from the call. Object level: what the
+// door actually SERVES — the exploit rail demands a 404 for bytes the fixture proves are otherwise
+// reachable, and the admission rail demands a 200 carrying the exact declared bytes.
 
 import { describe, expect, it } from "vitest";
-import { parseSchema, type Schema } from "@bombadil/rhizomatic";
+import {
+  contentAddress,
+  parseSchema,
+  signClaims,
+  type Delta,
+  type Schema,
+} from "@bombadil/rhizomatic";
+import { authorForSeed } from "@bombadil/rhizomatic";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { lensOf } from "../../src/gateway/registration.js";
 import { PLANT } from "./fixtures.js";
-import { FERN, observed } from "../spike/garden.js";
+import { FERN } from "../spike/garden.js";
 
 const OP_SEED = "0e".repeat(32);
+const OP = authorForSeed(OP_SEED);
 
-// Two readings over ONE hyperschema. `Plant` is the private, full reading; `PlantPublic` is the
-// redacted sibling the operator is willing to serve anonymously.
-const FULL: Schema = parseSchema({
+// Two readings over ONE hyperschema, differing the way §21.7 coexistence actually differs — by the
+// order their `pick` runs, not by their field set. BROAD ("Plant") resolves `avatar` to the NEWEST
+// bytes; ARCHIVAL ("PlantPublic") resolves it to the OLDEST.
+const BROAD: Schema = parseSchema({
   name: "Plant",
   alg: 1,
-  props: {
-    height: { pick: { order: { byTimestamp: "desc" } } },
-    message: { pick: { order: { byTimestamp: "desc" } } },
-  },
+  props: { avatar: { pick: { order: { byTimestamp: "desc" } } } },
   default: { pick: { order: { byTimestamp: "desc" } } },
 });
-const REDACTED: Schema = parseSchema({
+const ARCHIVAL: Schema = parseSchema({
   name: "PlantPublic",
   alg: 1,
-  props: { height: { pick: { order: { byTimestamp: "desc" } } } },
-  default: { pick: { order: { byTimestamp: "desc" } } },
+  props: { avatar: { pick: { order: { byTimestamp: "asc" } } } },
+  default: { pick: { order: { byTimestamp: "asc" } } },
 });
+
+const OLD_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47]); // the portrait the operator will serve
+const NEW_BYTES = new Uint8Array([0x47, 0x49, 0x46, 0x38]); // the one only the private reading reaches
+
+const bytesFact = (mime: string, value: Uint8Array, ts: number): Delta =>
+  signClaims(
+    {
+      timestamp: ts,
+      author: OP,
+      pointers: [
+        { role: "subject", target: { kind: "entity", entity: { id: FERN, context: "avatar" } } },
+        { role: "value", target: { kind: "bytes", mime, value } },
+      ],
+    },
+    OP_SEED,
+  );
 
 const boot = async (): Promise<Gateway> => {
   const gw = await Gateway.boot(
     new MemoryBackend(),
     assembleGenesis({
       operatorSeed: OP_SEED,
-      registrations: [
-        { hyperschema: PLANT, schema: FULL, roots: [FERN], writable: ["height", "message"] },
-      ],
+      registrations: [{ hyperschema: PLANT, schema: BROAD, roots: [FERN], writable: ["avatar"] }],
     }),
   );
   // The second reading arrives the way §21.7 coexistence actually happens — a later
   // `publishRegistration` over the SAME hyperschema, not a second genesis entry (genesis keeps one
   // registration per hyperschema, so listing both there silently yields one lens; the precondition
   // rail below exists because that is exactly how this fixture was wrong on the first attempt).
-  await gw.publishRegistration(PLANT, REDACTED, [FERN], undefined, undefined, undefined, [
-    "height",
+  await gw.publishRegistration(PLANT, ARCHIVAL, [FERN], undefined, undefined, undefined, [
+    "avatar",
   ]);
-  await gw.append([observed(FERN, "height", 42, 1000, OP_SEED)]);
-  // ONLY the redacted reading is offered anonymously.
+  await gw.append([bytesFact("image/png", OLD_BYTES, 1000)]);
+  await gw.append([bytesFact("image/gif", NEW_BYTES, 2000)]);
+  // ONLY the archival reading is offered anonymously.
   await gw.declarePublic(["PlantPublic"]);
   return gw;
 };
 
+const REF_NEW = contentAddress(NEW_BYTES);
+const REF_OLD = contentAddress(OLD_BYTES);
+
 describe("§12 — the anonymous byte-door honours the lens, not the program", () => {
-  it("the two readings really do share a hyperschema name (the precondition for the bug)", async () => {
+  it("PRECONDITION: the two readings share a hyperschema name and resolve to DIFFERENT bytes", async () => {
     const gw = await boot();
-    // If this ever stops being true the rails below prove nothing, so assert it rather than assume:
-    // both registrations carry the SAME `hyperschema.name` and DIFFERENT lens names. That gap is
-    // exactly what the old gate could not see.
+    // Delta level — the same program, two lenses. That gap is what the old gate could not see.
     const names = gw.registered.map((r) => ({ program: r.hyperschema.name, lens: lensOf(r) }));
     const plants = names.filter((n) => n.program === "Plant");
     expect(plants.length).toBeGreaterThanOrEqual(2);
     expect(new Set(plants.map((n) => n.lens)).size).toBeGreaterThanOrEqual(2);
+
+    // Delta level — the operator declared EXACTLY the archival reading, and not the broad one.
+    // Asserted rather than assumed: a fixture that silently declared both would make every rail
+    // below vacuous, which is the failure this file already made once.
+    expect(gw.isPublicLatest("PlantPublic")).toBe(true);
+    expect(gw.isPublicLatest("Plant")).toBe(false);
+
+    // Object level — the readings genuinely diverge. Without this the fixture cannot express the
+    // leak at all: if both lenses resolved the same bytes, the door would answer identically whether
+    // it honoured the lens or the program, and no assertion below could tell the two apart.
+    expect(gw.serveBytes(REF_NEW, "Plant", FERN, "full").status).toBe(200);
+    expect(gw.serveBytes(REF_NEW, "PlantPublic", FERN, "full").status).toBe(404);
     await gw.close();
   });
 
-  it("an anonymous byte-door request naming an UNDECLARED reading is refused", async () => {
+  it("THE EXPLOIT: the anonymous door refuses bytes reachable only through an UNDECLARED reading", async () => {
     const gw = await boot();
-    // The attacker names the private reading. Under the old gate this passed the membership test —
-    // because the PUBLIC registration's `hyperschema.name` is also "Plant" — and then resolved the
-    // private reading on the tokenless door.
-    const out = gw.serveBytes("anything", "Plant", FERN, "public");
+    // The attacker names the private reading and a content address they already hold. Under the old
+    // gate the membership test passed — the PUBLIC registration's `hyperschema.name` is also "Plant"
+    // — the door then resolved the UNDECLARED broad reading on the tokenless door, found REF_NEW in
+    // its view, and served it. The precondition above proves those bytes really are reachable that
+    // way, so this 404 is a refusal and not an accident of the fixture.
+    const out = gw.serveBytes(REF_NEW, "Plant", FERN, "public");
     expect(out.status).toBe(404);
+    expect([...out.body]).not.toEqual([...NEW_BYTES]);
     await gw.close();
   });
 
-  it("the refusal is uniform — it names no route, lens, or entity", async () => {
+  it("ADMISSION: the DECLARED reading still serves its bytes — a door that refuses everything fails here", async () => {
     const gw = await boot();
-    const undeclared = gw.serveBytes("some-ref", "Plant", FERN, "public");
-    const nonsense = gw.serveBytes("some-ref", "NoSuchLensAtAll", FERN, "public");
-    // §12/§13: a refusal must not tell a stranger which of their guesses was closer. If the
-    // undeclared-reading refusal differed from the never-existed refusal, the door would be an
-    // oracle for what the operator has registered privately.
-    expect(out(undeclared)).toBe(out(nonsense));
+    // The positive leg. Without it, replacing the whole door body with an unconditional refusal
+    // would pass every other assertion in this file.
+    const served = gw.serveBytes(REF_OLD, "PlantPublic", FERN, "public");
+    expect(served.status).toBe(200);
+    expect(served.contentType).toBe("image/png");
+    expect([...served.body]).toEqual([...OLD_BYTES]);
+    await gw.close();
+  });
+
+  it("the refusal is uniform — undeclared and never-existed are indistinguishable in every field", async () => {
+    const gw = await boot();
+    const undeclared = gw.serveBytes(REF_NEW, "Plant", FERN, "public");
+    const nonsense = gw.serveBytes(REF_NEW, "NoSuchLensAtAll", FERN, "public");
+    // §12/§13: a refusal must not tell a stranger which of their guesses was closer, or the door is
+    // an oracle for what the operator has registered privately. Compare the WHOLE tuple, not just
+    // the body — a differentiated status would be just as much of an oracle.
+    expect({ ...undeclared, body: [...undeclared.body] }).toEqual({
+      ...nonsense,
+      body: [...nonsense.body],
+    });
     expect(out(undeclared)).not.toContain("Plant");
     expect(out(undeclared)).not.toContain(FERN);
     await gw.close();
   });
 
-  it("the DECLARED reading still serves — the fix must not close the door it was meant to keep open", async () => {
+  it("the operator's own door still reaches the private reading, as it always could", async () => {
     const gw = await boot();
-    // A missing ref through the declared lens is still a clean 404, but it must reach resolution
-    // rather than being refused at the gate. Distinguishing those is what stops a "fix" that simply
-    // refuses everything from passing: the declared lens must be *admitted*.
-    const declared = gw.serveBytes("no-such-ref", "PlantPublic", FERN, "public");
-    expect(declared.status).toBe(404);
-    // The operator's own door reaches the private reading, as it always could.
-    const operatorSide = gw.serveBytes("no-such-ref", "Plant", FERN, "full");
-    expect(operatorSide.status).toBe(404);
+    const operatorSide = gw.serveBytes(REF_NEW, "Plant", FERN, "full");
+    expect(operatorSide.status).toBe(200);
+    expect([...operatorSide.body]).toEqual([...NEW_BYTES]);
     await gw.close();
   });
 });
