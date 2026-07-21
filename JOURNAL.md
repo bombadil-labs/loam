@@ -88,3 +88,4 @@ entry is a NEW FILE and two concurrent landings never touch the same one (the sa
 | 2026-07-20 | [T29: a membership query, frozen and named](journal/2026-07-20-t29-a-membership-query-frozen.md) |
 | 2026-07-21 | [Trust is a property of a container](journal/2026-07-21-trust-is-a-property-of-a-container.md) |
 | 2026-07-21 | [§28 drafted: trust becomes a tree](journal/2026-07-21-s28-trust-becomes-a-tree.md) |
+| 2026-07-21 | [Audit 3, and what it cost to believe a green bar](journal/2026-07-21-audit-3-and-what-it-cost-to-believe-green.md) |
