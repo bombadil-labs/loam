@@ -10,11 +10,13 @@
 // class of failure, and writing one would have produced a green bar over a leak (again).
 
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { SqliteBackend } from "../../src/store/sqlite.js";
+import { MemoryBackend } from "../../src/store/memory.js";
+import { MirrorBackend } from "../../src/store/mirror.js";
 import { ArchiveBackend } from "../../src/store/archive.js";
 
 const SEED = "0e".repeat(32);
@@ -135,5 +137,66 @@ describe("§11 at rest — archive", () => {
     // promise is that the byte is removed, not that it is unread. A .tmp file is a plain file any
     // backup, rsync, or tar sweeps up.
     expect(anyFileContains(dir, MARKER)).toBeUndefined();
+  });
+});
+
+// §11 reaching the COLD tier through heal (ticket T55).
+//
+// `heal` is documented as the operation that "finishes the forgetting on whatever tier the purge
+// originally missed". It can only do that if it actually calls `purge` — and `purge` is the one
+// operation that sees what reads cannot: a crash-left `<id>.json.<pid>.tmp` straggler, which
+// `deltasSince` skips by design. So a rail here MUST read the directory. An API-level assertion is
+// green across this entire leak.
+describe("§11 through heal — the cold tier", () => {
+  it("heal purges a straggler the mirror's reads cannot see", async () => {
+    const dir = scratch();
+    const vault = join(dir, "vault");
+    const primary = new MemoryBackend();
+    const mirror = new ArchiveBackend(vault);
+    const pair = new MirrorBackend(primary, mirror);
+
+    const target = canary(MARKER, 1000);
+    const bystander = canary(SURVIVOR, 2000);
+    await pair.append([target, bystander]);
+    await pair.heal();
+
+    // The crash `append` is written to survive: fsync landed, the RENAME did not. So the mirror holds
+    // a complete delta under a name `deltasSince` skips, and holds NO `.json` for it — which is what
+    // makes the straggler invisible to every read. Reproduced by removing the `.json` and leaving a
+    // `.tmp` behind, because a fixture that keeps both still satisfies heal's guard and proves
+    // nothing.
+    const fan = readdirSync(vault, { withFileTypes: true }).filter((f) => f.isDirectory())[0]!.name;
+    const targetJson = readdirSync(join(vault, fan)).find((n) => n.startsWith(target.id))!;
+    const bytes = readFileSync(join(vault, fan, targetJson));
+    writeFileSync(join(vault, fan, `${target.id}.json.31337.tmp`), bytes);
+    rmSync(join(vault, fan, targetJson));
+
+    expect(anyFileContains(vault, MARKER)).toBeDefined(); // the bytes really are still there
+    expect((await mirror.deltasSince(new Set())).some((d) => d.id === target.id)).toBe(false);
+
+    // The gateway hands heal the tombstoned ids. This is where the forgetting must finish.
+    await pair.heal(new Set([target.id]));
+
+    // BYTE LEVEL — no file under the vault may still carry the erased content.
+    expect(anyFileContains(vault, MARKER)).toBeUndefined();
+    // ...and the bystander survives, so a vault-nuking "fix" cannot pass.
+    expect(anyFileContains(vault, SURVIVOR)).toBeDefined();
+    await pair.close();
+  });
+
+  it("heal reports what it forgot, not just what it copied", async () => {
+    const dir = scratch();
+    const vault = join(dir, "vault");
+    const pair = new MirrorBackend(new MemoryBackend(), new ArchiveBackend(vault));
+    const target = canary(MARKER, 1000);
+    await pair.append([target]);
+    await pair.heal();
+
+    // A report that says only what it COPIED lets a caller believe the forgetting happened when it
+    // did not — the operator reads the healed line and concludes §11 reached the cold tier.
+    const report = await pair.heal(new Set([target.id]));
+    expect(report.purgedPrimary).toBeGreaterThanOrEqual(0);
+    expect(report.purgedMirror).toBeGreaterThanOrEqual(1);
+    await pair.close();
   });
 });
