@@ -657,6 +657,14 @@ export async function publishRegistrationImpl(
       (r) => r.origin === "store" && r.entity === schemaEntity && lensOf(r) === lensName,
     )
   ) {
+    // NOT swallowed when a process-local `register()` holds this lens. That was tried and reverted:
+    // a publish CAN be durably correct and merely shadowed, so returning quietly is tempting — but
+    // "same law" cannot be established. `registerImpl` takes no resolvers argument at all, so a manual
+    // binding NEVER carries any; a publish that ships resolvers, mutations, different roots or a
+    // different Schema would have been swallowed as "identical" and then served by a binding that
+    // implements none of it. A green publish over a surface that quietly lacks what was published is
+    // worse than a true sentence. So the sentence stays — it is accurate (the deltas DID persist), it
+    // names the cause the fixpoint actually caught, and the operator can act on it.
     const why = lastBindFailure(gw, failureKey(schemaEntity, lensName));
     throw new Error(
       `the registration persisted but did not bind` +

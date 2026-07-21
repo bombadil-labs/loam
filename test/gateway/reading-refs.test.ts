@@ -16,6 +16,7 @@
 import { describe, expect, it } from "vitest";
 import { parseTerm, signClaims } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
+import { lensOf } from "../../src/gateway/registration.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_READING, garden, governedBootstrap } from "./fixtures.js";
@@ -177,30 +178,59 @@ describe("expand reading refs bind at the door (issue #23)", () => {
     await gateway.close();
   });
 
-  it("a registration that persisted but did not bind reports the REAL reason", async () => {
-    // Ticket T28. The fixpoint must swallow a candidate's failure — one bad registration cannot be
-    // allowed to fail a boot — but swallowing it and then GUESSING the cause tells the operator
-    // something false about their own store, on ground they cannot take back.
-    //
-    // The case that exposed it: bind a lens in-process with `register()`, then publish the SAME
-    // lens. The publish's trial passes (its survivors filter drops the match), the deltas persist,
-    // and then the replay re-seeds from the MANUAL binding and shadows the published one. The old
-    // message blamed a hyperschema name collision — "negate the old definition first, or choose a
-    // different name" — and every clause of that was wrong.
-    const gateway = await keeperGarden(); // binds Plant in-process, via register()
-    await expect(
-      gateway.publishRegistration(PLANT, PLANT_READING, [FERN], { actor: KEEPER_SEED }),
-    ).rejects.toThrow(/did not bind/);
-
-    // The reason must be the PROXIMATE one the fixpoint actually caught, not a guess.
+  it("a publish shadowed by a process-local override still SAYS SO, with the real reason", async () => {
+    // Ticket T28. Swallowing this was tried and reverted: a manual binding carries no resolvers at
+    // all (`registerImpl` has no such parameter), so "the same law" cannot be established, and a
+    // publish shipping resolvers would have been reported as a benign duplicate while serving none
+    // of them. A true sentence beats a quiet wrong surface — so it throws, and names the cause the
+    // fixpoint actually caught rather than the old fixed guess about hyperschema names.
+    const gateway = await keeperGarden(); // binds Plant in-process with PLANT_READING
     const why = await gateway
       .publishRegistration(PLANT, PLANT_READING, [FERN], { actor: KEEPER_SEED })
       .then(
         () => "",
         (e: Error) => e.message,
       );
+    expect(why).toMatch(/did not bind/);
     expect(why).toMatch(/collides with an earlier schema/);
-    expect(why).not.toMatch(/another hyperschema already answers/);
+    expect(why).not.toMatch(/negate the old definition first/);
+    // ...and the message's "persisted" clause is TRUE: the deltas really are on the ground, with the
+    // lens, roots and Schema the publish named — not merely something bearing the right name. (A
+    // manual `register()` contributes nothing here: registrationVersions reads the reactor alone.)
+    const published = gateway
+      .registrationVersions()
+      .find((v) => v.hyperschema.name === "Plant" && lensOf(v) === "Plant");
+    expect(published).toBeDefined();
+    expect(published!.roots).toEqual([FERN]);
+    expect([...published!.schema.props.keys()].sort()).toEqual(
+      [...PLANT_READING.props.keys()].sort(),
+    );
+    await gateway.close();
+  });
+
+  it("a genuine RIVAL body still refuses, and names the reason the fixpoint caught", async () => {
+    // The other half, and the reason the override check is strict about "same law": a manual binding
+    // holding this NAME over a DIFFERENT body is not an override, it is a rival gather. That must
+    // still refuse — and the message must be the proximate cause, not the old fixed guess.
+    const gateway = await keeperGarden();
+    const rival = {
+      name: "Plant",
+      alg: 1,
+      body: parseTerm({
+        op: "group",
+        key: "byTargetContext",
+        in: { op: "mask", policy: "drop", in: "input" },
+      }),
+    };
+    const why = await gateway
+      .publishRegistration(rival, PLANT_READING, [FERN], { actor: KEEPER_SEED })
+      .then(
+        () => "",
+        (e: Error) => e.message,
+      );
+    expect(why).toMatch(/did not bind/);
+    expect(why).toMatch(/DIFFERENT bodies|rival/i);
+    expect(why).not.toMatch(/negate the old definition first/);
     await gateway.close();
   });
 });

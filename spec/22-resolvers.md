@@ -354,7 +354,8 @@ is the LINK deltas — and those do not change when the flour does. A child-awar
 key would serve a stale answer: *yes, make pasta*, over flour that is gone. That would break §22.5's
 promise (the memo invalidates exactly when the ground does) and §11's (never serve a value distilled
 from bytes that no longer exist) in one stroke. So the memo key carries, per expanded pointer, the
-child's reading identity and every SURVIVING delta in the child's hview, transitively. The reading is
+child's reading identity and every delta in the child's hview, transitively — each recorded with
+whether it is retracted, on the same rule §22.9 states for the top level. The reading is
 in the key because a child lens that evolves changes the child's view without touching any delta id.
 
 **Provenance.** Landed [#145](https://github.com/bombadil-labs/loam/pull/145) (ticket T31), on the
@@ -367,3 +368,45 @@ resolved view; a change to the CHILD's ground recomputes the parent's resolver, 
 when the stock is used up; and a field with no resolver is unchanged. The staleness rail was
 mutation-tested — truncating the dependency walk makes the pantry lie about the pantry. Additive: a
 resolver over a field with no expansions sees exactly what it saw before, so no §20 migration.
+
+**§22.9 A RESOLVER SEES EXACTLY WHAT THE POLICY SEES** [#150](https://github.com/bombadil-labs/loam/pull/150)
+(ticket T27). §22 opens by dividing the work: a **Policy SELECTS** — which claims count — and a
+resolver **only re-represents** what survived. "Selection is trust-and-provenance work and MUST remain
+in the closed algebra." The bucket a resolver was handed did not honour that. It silently dropped
+entries flagged `negated`, while rhizomatic's `applyPolicy` is handed every entry — so the resolver
+computed over a strictly smaller bucket than the value it was replacing, by a rule nobody declared and
+no signed definition named.
+
+**The rule: the bucket passes exactly what the Policy is passed**, retracted entries included, and a
+`BucketEntry` carries `negated` so a resolver that cares can decide for itself.
+
+**The knob already existed** — it is the gather's `mask`, one layer down and already part of the signed
+hyperschema. Under `mask: "drop"` a retracted delta never reaches the hview at all, so a resolver sees
+survivors only and this is bit-for-bit the old behaviour. That covers every lens Loam ships: the demo
+bundles all gather under `drop`, and the genesis lenses that use a `{ trust: … }` mask instead reach
+the same place by a different road — a trust mask also forks negated deltas out and returns an
+UNannotated set, so no negated entry can reach those hviews either. `annotate` is the only mask that
+puts one in front of a Policy, and nothing shipped uses it. Under
+`mask: "annotate"` it arrives flagged, and the lens that asked for annotation gets to use it. Adding a
+second switch at the resolver layer would have duplicated a decision the gather already makes.
+
+**No erasure risk, stated plainly:** erasure (§11) removes the BYTES, so an erased delta is absent from
+the hview whatever the mask says. This only ever concerned RETRACTION, and only under `annotate`.
+
+(§22.5's provenance footer describes the key as the "surviving-bucket-delta-set" — that was the
+key as it landed then; this section is the amendment.)
+
+**The memo keys on the flag, not just the id.** Under `drop` a negation removes the entry and the id
+set moves on its own; under `annotate` the entry stays with the SAME id and merely gains a flag, so a
+key built from ids alone would not move and the pre-retraction value would be served forever. The
+dependency walk therefore records whether each entry is retracted.
+
+**Provenance.** Landed [#150](https://github.com/bombadil-labs/loam/pull/150) (ticket T27), on Myk's
+question of whether this wanted a new argument — it did not; the mask is the argument.
+`bucketOf`/`BucketEntry`/`dependencyIds` in `src/gateway/resolvers.ts`. Rail
+(`test/gateway/bucket-expansions.test.ts`): under an annotate gather a resolver reports `2 seen, 0
+retracted`, then `2 seen, 1 retracted` after a retraction — mutation-tested by dropping the flag from
+the memo key, which serves the stale count. Worth recording for anyone writing such a gather: the
+annotate mask must feed its `group` DIRECTLY, because rhizomatic drops the tag channel through
+`select`/`union` (E14) while `group` threads it into entries (E7). No §20 migration: under `drop`,
+which is every shipped lens, nothing changes.
