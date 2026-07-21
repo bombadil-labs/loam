@@ -106,11 +106,14 @@ describe("§12 — the anonymous byte-door honours the lens, not the program", (
     expect(plants.length).toBeGreaterThanOrEqual(2);
     expect(new Set(plants.map((n) => n.lens)).size).toBeGreaterThanOrEqual(2);
 
-    // Delta level — the operator declared EXACTLY the archival reading, and not the broad one.
-    // Asserted rather than assumed: a fixture that silently declared both would make every rail
-    // below vacuous, which is the failure this file already made once.
-    expect(gw.isPublicLatest("PlantPublic")).toBe(true);
-    expect(gw.isPublicLatest("Plant")).toBe(false);
+    // The operator declared EXACTLY the archival reading — asserted against the public SURFACE,
+    // not against the declaration record. `isPublicLatest` is bare string-set membership over the
+    // literal handed to `declarePublic` in this same file, so asserting it would only prove the
+    // fixture said what it said; no implementation of the door could make it fail. What matters is
+    // which registrations that string BINDS to, and `surface()` binds it with `lensOf` — the very
+    // distinction this ticket is about. A `surface()` matching the program name would put BOTH
+    // readings on the public door and pass a membership check verbatim.
+    expect(gw.surface("public")?.registered.map(lensOf)).toEqual(["PlantPublic"]);
 
     // Object level — the readings genuinely diverge. Without this the fixture cannot express the
     // leak at all: if both lenses resolved the same bytes, the door would answer identically whether
@@ -127,9 +130,9 @@ describe("§12 — the anonymous byte-door honours the lens, not the program", (
     // — the door then resolved the UNDECLARED broad reading on the tokenless door, found REF_NEW in
     // its view, and served it. The precondition above proves those bytes really are reachable that
     // way, so this 404 is a refusal and not an accident of the fixture.
-    const out = gw.serveBytes(REF_NEW, "Plant", FERN, "public");
-    expect(out.status).toBe(404);
-    expect([...out.body]).not.toEqual([...NEW_BYTES]);
+    const refused = gw.serveBytes(REF_NEW, "Plant", FERN, "public");
+    expect(refused.status).toBe(404);
+    expect(out(refused)).toBe(UNIFORM_REFUSAL);
     await gw.close();
   });
 
@@ -155,8 +158,10 @@ describe("§12 — the anonymous byte-door honours the lens, not the program", (
       ...nonsense,
       body: [...nonsense.body],
     });
-    expect(out(undeclared)).not.toContain("Plant");
-    expect(out(undeclared)).not.toContain(FERN);
+    // Pinned as an exact constant rather than as two negations: the whole-tuple equality above
+    // already fails on any body that echoes the caller's lens or entity, so `not.toContain` could
+    // not fail while it passed. This states the no-oracle contract independently instead.
+    expect(out(undeclared)).toBe(UNIFORM_REFUSAL);
     await gw.close();
   });
 
@@ -170,3 +175,6 @@ describe("§12 — the anonymous byte-door honours the lens, not the program", (
 });
 
 const out = (r: { body: Uint8Array }): string => new TextDecoder().decode(r.body);
+
+// The single refusal body `serveBytesImpl` produces for every failure path (§12: one silence).
+const UNIFORM_REFUSAL = "no such bytes";
