@@ -178,22 +178,20 @@ describe("expand reading refs bind at the door (issue #23)", () => {
     await gateway.close();
   });
 
-  it("a publish shadowed by a process-local override still SAYS SO, with the real reason", async () => {
+  it("a publish shadowed by a process-local override is WRITTEN, and says it is not serving", async () => {
     // Ticket T28. Swallowing this was tried and reverted: a manual binding carries no resolvers at
     // all (`registerImpl` has no such parameter), so "the same law" cannot be established, and a
     // publish shipping resolvers would have been reported as a benign duplicate while serving none
     // of them. A true sentence beats a quiet wrong surface — so it throws, and names the cause the
     // fixpoint actually caught rather than the old fixed guess about hyperschema names.
     const gateway = await keeperGarden(); // binds Plant in-process with PLANT_READING
-    const why = await gateway
-      .publishRegistration(PLANT, PLANT_READING, [FERN], { actor: KEEPER_SEED })
-      .then(
-        () => "",
-        (e: Error) => e.message,
-      );
-    expect(why).toMatch(/did not bind/);
-    expect(why).toMatch(/collides with an earlier schema/);
-    expect(why).not.toMatch(/negate the old definition first/);
+    const out = await gateway.publishRegistration(PLANT, PLANT_READING, [FERN], {
+      actor: KEEPER_SEED,
+    });
+    expect(out.persisted).toBe(true); // the claim is valid law and was written
+    expect(out.bound).toBe(false); // ...and is shadowed HERE by the process-local override
+    expect(out.reason).toMatch(/collides with an earlier schema/);
+    expect(out.reason).not.toMatch(/negate the old definition first/);
     // ...and the message's "persisted" clause is TRUE: the deltas really are on the ground, with the
     // lens, roots and Schema the publish named — not merely something bearing the right name. (A
     // manual `register()` contributes nothing here: registrationVersions reads the reactor alone.)
@@ -208,7 +206,7 @@ describe("expand reading refs bind at the door (issue #23)", () => {
     await gateway.close();
   });
 
-  it("a genuine RIVAL body still refuses, and names the reason the fixpoint caught", async () => {
+  it("a genuine RIVAL body is written too, and names why it does not serve", async () => {
     // The other half, and the reason the override check is strict about "same law": a manual binding
     // holding this NAME over a DIFFERENT body is not an override, it is a rival gather. That must
     // still refuse — and the message must be the proximate cause, not the old fixed guess.
@@ -222,15 +220,13 @@ describe("expand reading refs bind at the door (issue #23)", () => {
         in: { op: "mask", policy: "drop", in: "input" },
       }),
     };
-    const why = await gateway
-      .publishRegistration(rival, PLANT_READING, [FERN], { actor: KEEPER_SEED })
-      .then(
-        () => "",
-        (e: Error) => e.message,
-      );
-    expect(why).toMatch(/did not bind/);
-    expect(why).toMatch(/DIFFERENT bodies|rival/i);
-    expect(why).not.toMatch(/negate the old definition first/);
+    const out = await gateway.publishRegistration(rival, PLANT_READING, [FERN], {
+      actor: KEEPER_SEED,
+    });
+    expect(out.persisted).toBe(true);
+    expect(out.bound).toBe(false);
+    expect(out.reason).toMatch(/DIFFERENT bodies|rival/i);
+    expect(out.reason).not.toMatch(/negate the old definition first/);
     await gateway.close();
   });
 });

@@ -129,6 +129,27 @@ function assertReadingsNamed(schema: HyperSchema): void {
   );
 }
 
+// What a publish DID (SPEC §21). Two different questions live here and used to be conflated:
+//
+//   • is this VALID LAW? — answered before anything persists. Invalid law (a body that will not
+//     materialize, an `expand` naming no reading, templates its own reads could never show, a
+//     GraphQL surface that will not build) is REFUSED, nothing is written, and the caller gets a
+//     throw. That discipline is this module's whole opening promise.
+//   • is it SHAPING THIS STORE'S SURFACE? — a DOWNSTREAM effect of a valid claim, and not the same
+//     question at all. A registration is a claim; binding is one store's local realization of it.
+//     A process-local `register()` holding the lens, or an existing lens answering to that GraphQL
+//     field, can leave a perfectly good claim unbound HERE while it binds fine on a peer that pulls
+//     it. Refusing to persist because of that would let one process's transient memory veto durable,
+//     shareable law — so the claim is written, and the outcome is REPORTED rather than thrown.
+//
+// Hence: reaching a return means `persisted` — always. `bound` says whether the surface moved.
+export interface PublishOutcome {
+  readonly persisted: true;
+  readonly bound: boolean;
+  /** When `bound` is false: the proximate cause the fixpoint actually caught. */
+  readonly reason?: string;
+}
+
 // Everything that shapes the surface, as one comparable key.
 export function boundKey(r: Bound): string {
   return [
@@ -547,7 +568,7 @@ export async function publishRegistrationImpl(
   mutations?: ClaimTemplates,
   writable?: readonly string[],
   resolvers?: ResolverSpecs,
-): Promise<void> {
+): Promise<PublishOutcome> {
   const seed = context?.actor ?? gw.options.seed;
   if (seed === undefined) {
     throw new Error("this gateway holds no signing seed and cannot publish a registration");
@@ -652,26 +673,21 @@ export async function publishRegistrationImpl(
   // Success must mean BOUND. The deltas are down either way (append-only ground), but a
   // publish the replay could not bind — a name already answered for by another entity, a
   // collision with a manual registration — is not to be reported as a served surface.
-  if (
-    !gw.registered.some(
-      (r) => r.origin === "store" && r.entity === schemaEntity && lensOf(r) === lensName,
-    )
-  ) {
-    // NOT swallowed when a process-local `register()` holds this lens. That was tried and reverted:
-    // a publish CAN be durably correct and merely shadowed, so returning quietly is tempting — but
-    // "same law" cannot be established. `registerImpl` takes no resolvers argument at all, so a manual
-    // binding NEVER carries any; a publish that ships resolvers, mutations, different roots or a
-    // different Schema would have been swallowed as "identical" and then served by a binding that
-    // implements none of it. A green publish over a surface that quietly lacks what was published is
-    // worse than a true sentence. So the sentence stays — it is accurate (the deltas DID persist), it
-    // names the cause the fixpoint actually caught, and the operator can act on it.
-    const why = lastBindFailure(gw, failureKey(schemaEntity, lensName));
-    throw new Error(
-      `the registration persisted but did not bind` +
-        (why === undefined
-          ? `: it was not among the registrations the store re-derived — check that the operator ` +
-            `authored it and that its definition survives`
-          : `: ${why}`),
-    );
-  }
+  const bound = gw.registered.some(
+    (r) => r.origin === "store" && r.entity === schemaEntity && lensOf(r) === lensName,
+  );
+  if (bound) return { persisted: true, bound: true };
+  // Valid law, written, not serving HERE. Reported, never thrown: the deltas exist and would bind on
+  // a peer that pulls them, or on a later boot without whatever shadows them. Throwing would call a
+  // successful write a failure; swallowing it silently would hide a surface the caller expects. The
+  // reason is the proximate one the fixpoint caught (a process-local override of this lens, a rival
+  // body, a GraphQL field already answered), not a guess.
+  return {
+    persisted: true,
+    bound: false,
+    reason:
+      lastBindFailure(gw, failureKey(schemaEntity, lensName)) ??
+      "it was not among the registrations the store re-derived — check that the operator authored " +
+        "it and that its definition survives",
+  };
 }
