@@ -657,6 +657,27 @@ export async function publishRegistrationImpl(
       (r) => r.origin === "store" && r.entity === schemaEntity && lensOf(r) === lensName,
     )
   ) {
+    // A process-local `register()` of the SAME LAW is an OVERRIDE, not a failure. The publish did
+    // exactly what it was asked: the definition, the living Schema, the snapshot and the binding are
+    // all durably on the ground, and on the next boot without the override they bind. Throwing would
+    // tell the operator their write failed when it succeeded — the opposite of the truth, about
+    // ground they cannot take back. So: succeed, and leave who-wins alone (an override is an override).
+    //
+    // "Same law" is deliberately strict — same lens, same hyperschema NAME, and the same BODY. A
+    // manual binding holding this name over a DIFFERENT body is not an override but a genuine rival
+    // (`groupPrograms`: "one name, one gather; a rival body is a different schema and wants a
+    // different name"), and that must still refuse, loudly, with the reason the fixpoint caught.
+    if (
+      gw.registered.some(
+        (r) =>
+          r.origin === "manual" &&
+          lensOf(r) === lensName &&
+          r.hyperschema.name === hyperschema.name &&
+          termHash(r.hyperschema.body) === termHash(hyperschema.body),
+      )
+    ) {
+      return;
+    }
     const why = lastBindFailure(gw, failureKey(schemaEntity, lensName));
     throw new Error(
       `the registration persisted but did not bind` +

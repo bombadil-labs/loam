@@ -12,6 +12,7 @@
 import { describe, expect, it } from "vitest";
 import {
   authorForSeed,
+  makeNegationClaims,
   parseSchema,
   parseTerm,
   signClaims,
@@ -152,6 +153,73 @@ describe("a resolver sees its own gather's expansions (T31)", () => {
     const value = (await pasta(gw)) as Record<string, unknown>[];
     expect(Array.isArray(value)).toBe(true);
     expect(value.map((v) => v.name).sort()).toEqual(["egg", "flour"]);
+    await gw.close();
+  });
+
+  it("a resolver sees exactly what the Policy sees — the gather's mask decides, not the resolver", async () => {
+    // SPEC §22.9. A Policy SELECTS; a resolver only re-represents the survivors. `bucketOf` used to
+    // drop negated entries on its own, which was the resolver layer performing a selection nobody
+    // declared — and it diverged from `applyPolicy`, which is handed every entry. The gather's `mask`
+    // is the declared knob: under `drop` a retracted delta never reaches the hview (so nothing
+    // changes), and under `annotate` it arrives flagged and the RESOLVER decides.
+    const gw = await Gateway.open(new MemoryBackend(), { seed: SEED });
+    await gw.append([signClaims(operatorMarkerClaims(OP), SEED)]);
+    // NOTE the shape: the annotate mask feeds the group DIRECTLY, with no `select` between them.
+    // rhizomatic drops the annotate tag channel through select/union (E14), so a select-in-the-middle
+    // gather computes the negation flags and then discards them; `group` threads them into entries
+    // (E7), and files by target context relative to the root, which is the scoping the select would
+    // otherwise have provided.
+    const ANNOTATED = {
+      op: "group",
+      key: "byTargetContext",
+      in: { op: "mask", policy: "annotate", in: "input" },
+    };
+    await gw.publishRegistration(
+      { name: "LedgerH", alg: 1, body: parseTerm(ANNOTATED) },
+      parseSchema({ name: "Ledger", props: { note: ALL }, default: PICK }),
+      ["ledger:1"],
+      undefined,
+      undefined,
+      undefined,
+      ["note"],
+      {
+        // Counts what it is given, and says how much of it was retracted — impossible to write at all
+        // if the bucket had already made the choice.
+        note: {
+          code: "export default (b) => `${b.length} seen, ${b.filter((e) => e.negated).length} retracted`;",
+          rung: "a" as const,
+          type: "string" as const,
+        },
+      },
+    );
+    const note = (n: number, text: string) =>
+      signClaims(
+        {
+          ...at(n),
+          pointers: [
+            {
+              role: "subject",
+              target: { kind: "entity", entity: { id: "ledger:1", context: "note" } },
+            },
+            { role: "note", target: { kind: "primitive", value: text } },
+          ],
+        },
+        SEED,
+      );
+    const first = note(10, "one");
+    await gw.append([first, note(11, "two")]);
+    const read = async () =>
+      (
+        (await gw.query(`{ ledger(entity: "ledger:1") { note } }`)).data as {
+          ledger: { note: string };
+        }
+      ).ledger.note;
+    expect(await read()).toBe("2 seen, 0 retracted");
+
+    // Retract one. Under an annotate mask it STAYS in the hview, flagged — and the resolver, which is
+    // handed what the Policy is handed, can now see and report it.
+    await gw.append([signClaims(makeNegationClaims(OP, 99, first.id), SEED)]);
+    expect(await read()).toBe("2 seen, 1 retracted");
     await gw.close();
   });
 });

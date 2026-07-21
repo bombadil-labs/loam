@@ -44,6 +44,13 @@ export interface BucketEntry {
   readonly value: View;
   readonly timestamp: number;
   readonly author: string;
+  /**
+   * Whether this claim has been RETRACTED (a negation names it). Present because the resolver sees
+   * exactly what the Policy sees (SPEC §22.9) — under a `mask: "drop"` gather this is always false,
+   * because negated deltas never enter the hview at all; under `mask: "annotate"` they do, flagged,
+   * and a resolver that cares can filter on this rather than having the decision made for it.
+   */
+  readonly negated: boolean;
 }
 
 // A rung-(a) resolver: the field's bucket in, the field's value out. Pure and synchronous.
@@ -135,23 +142,35 @@ const readingId = (schema: Schema): string => {
 // bytes that no longer exist) broken in one stroke. The reading is in the key too, because a child
 // lens that evolves changes the child's view without touching a single delta id.
 const dependencyIds = (e: HVEntry, into: string[]): void => {
-  into.push(e.delta.id);
+  // The id AND whether it is retracted. Under a `mask: "drop"` gather a negation removes the entry
+  // outright, so the id set changes on its own — but under `annotate` the entry STAYS, same id,
+  // merely flagged, and a key built from ids alone would not move. The resolver can see that flag
+  // (§22.9), so the memo must key on it too, or a retraction silently serves the pre-retraction value.
+  into.push(e.negated ? `${e.delta.id}!` : e.delta.id);
   if (e.expanded === undefined) return;
   for (const [i, child] of e.expanded) {
     const reading = e.readings?.get(i);
     if (reading !== undefined) into.push(readingId(reading));
     for (const entries of child.props.values()) {
       for (const childEntry of entries) {
-        if (childEntry.negated) continue; // the SURVIVING child ground, mirroring the projection
-        dependencyIds(childEntry, into);
+        dependencyIds(childEntry, into); // every entry the child's Policy sees, negated included
       }
     }
   }
 };
 
-// The surviving bucket for one field: the non-negated gathered deltas, each projected to a BucketEntry.
-// This IS the "selected delta set" §22.5 keys the cache on — an erased delta simply is not here — now
-// reaching through expansions, so a child's ground counts as part of what the value was distilled from.
+// The bucket for one field: the gathered entries, each projected to a BucketEntry. This IS the
+// "selected delta set" §22.5 keys the cache on — an erased delta simply is not here — now reaching
+// through expansions, so a child's ground counts as part of what the value was distilled from.
+//
+// It passes EXACTLY what the Policy is passed, negated entries included (SPEC §22.9). §22 is explicit
+// that a Policy SELECTS and a resolver only re-represents the survivors — "selection is
+// trust-and-provenance work and MUST remain in the closed algebra" — so filtering here would be the
+// resolver layer quietly performing its own selection, by a rule nobody declared. The declared knob is
+// the gather's `mask`: under `drop` a negated delta never reaches the hview at all (so this is
+// identical to filtering), and under `annotate` it arrives flagged and the resolver may decide. The
+// erasure story is untouched either way: erasure removes the BYTES, so an erased delta is absent
+// whatever the mask says.
 export function bucketOf(
   hview: HView,
   field: string,
@@ -160,11 +179,11 @@ export function bucketOf(
   const entries: BucketEntry[] = [];
   const deltaIds: string[] = [];
   for (const e of hview.props.get(field) ?? []) {
-    if (e.negated) continue;
     entries.push({
       value: candidateValue(e, root),
       timestamp: e.delta.claims.timestamp,
       author: e.delta.claims.author,
+      negated: e.negated,
     });
     dependencyIds(e, deltaIds);
   }
