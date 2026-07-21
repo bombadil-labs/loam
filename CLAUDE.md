@@ -61,6 +61,25 @@ The phases, with Loam's own craft folded into each:
    Freeze them as `rails` on the ticket; `adlc rails-guard` (and the plugin's PreToolUse rail hook)
    then protect them. Once any ticket declares `rails`, `.adlc/tickets.json` itself becomes a frozen
    trust root — edits need `ADLC_RAILS_BYPASS=1` (an audited, deliberate act).
+
+   **ASSERT AT BOTH LEVELS — DELTA AND OBJECT. It is not either/or** (Myk, 2026-07-21). A rail that
+   only checks one leaves the other open to nuanced bugs, and 2026-07-21 produced the failure in
+   *both* directions on the same day:
+   - **Object-level only** missed T40: `get(id)` returned undefined — the API said forgotten — while
+     the plaintext sat legible in the sqlite file. The store lied downward.
+   - **Delta-level only** missed T15/T38: the right deltas crossed the seeding edge, and a *reader*
+     still saw a retracted claim as live, because suppression is a property of the operand set
+     rather than of the delta. The store lied upward.
+
+   So a rail asks **both**: *what is actually in the store, in bytes or deltas?* **and** *what does a
+   reader resolve through a Schema, or a door serve?* Note the middle is not the top — asserting
+   `reactor.negationsOf(...)` is still delta-level structure; the object-level question is what a
+   **View** contains and what a **door** answers. When the two levels disagree, that disagreement is
+   usually the bug, and neither assertion alone can see it.
+
+   Where one level is genuinely out of scope (a unit-level migration step, say), **name the gap in
+   the test file** and say which rail would close it. Do not write a header that claims the stronger
+   assertion — an honest-looking comment over a weaker test is how this class keeps surviving review.
 5. **P4 — Build.** Write the code to make the tests pass. Concise, not cryptic — as small as it can
    be **without dropping a desired behavior**. The green bar is `npm run check` (format + lint +
    typecheck + **all** tests; read the counts, never trust a silent grep). If mid-build you loop or

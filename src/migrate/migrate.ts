@@ -510,21 +510,25 @@ const hasReadinglessExpand = (json: unknown): boolean => {
 // names), and it has not been negated. The reading NAME is then read off the published Schema itself
 // rather than off the entity id, because `lookupReading` resolves against `Schema.name`; the two agree
 // for everything Loam mints, and reading the Schema closes the gap for anything hand-authored.
-const readingMap = (deltas: readonly Delta[], operator: string): Map<string, Set<string>> => {
+const readingMap = (
+  deltas: readonly Delta[],
+  operator: string,
+  // The SAME survival rule the re-sign gate uses (ticket T41). This function used to derive its own
+  // one-link negated set, which is a WEAKER rule than `survivorsOf` — and the split was a silent
+  // skip, not a style wart: retract a binding, then retract the retraction (all operator-authored,
+  // all verified), and the binding is live by the real rule while the one-link set still calls it
+  // struck. The child then has zero candidate readings, `fillReadings` leaves the expand readingless,
+  // `filledTermHex` returns undefined, and the parent definition is quietly NOT migrated — left
+  // permanently unresolvable, with the step reporting nothing. One survival rule per file.
+  survives: (id: string) => boolean,
+): Map<string, Set<string>> => {
   const lawful = deltas.filter(
     (d) => d.claims.author === operator && verifyDelta(d) === "verified",
   );
-  // Retired bindings speak for nothing: collect what the operator's own verified negations struck.
-  const negated = new Set<string>();
-  for (const d of lawful) {
-    for (const p of d.claims.pointers) {
-      if (p.role === "negates" && p.target.kind === "delta") negated.add(p.target.deltaRef.delta);
-    }
-  }
   const dset = DeltaSet.from(lawful); // Schemas resolve against the operator's law alone
   const map = new Map<string, Set<string>>();
   for (const d of lawful) {
-    if (negated.has(d.id) || !isRegistration(d.claims)) continue;
+    if (!survives(d.id) || !isRegistration(d.claims)) continue;
     const hyper = d.claims.pointers.find(
       (p) => p.role === "hyperschema" && p.target.kind === "entity",
     );
@@ -610,7 +614,7 @@ const EXPAND_READING: Migration = {
   additions(deltas, seed) {
     const operator = authorForSeed(seed);
     const survives = survivorsOf(deltas, operator);
-    const readings = readingMap(deltas, operator);
+    const readings = readingMap(deltas, operator, survives);
     const added: Delta[] = [];
     for (const d of deltas) {
       // Operator-authored and signature-proven only — re-signing an unverified delta would make the
