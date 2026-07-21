@@ -576,7 +576,7 @@ export function serveBytesImpl(
     body: new TextEncoder().encode("no such bytes"),
   };
   const surface = gw.surface(door);
-  if (surface === undefined || !surface.registered.some((r) => r.hyperschema.name === fromLens)) {
+  if (surface === undefined || !surface.registered.some((r) => lensOf(r) === fromLens)) {
     return gone;
   }
   let node: ResolvedNode;

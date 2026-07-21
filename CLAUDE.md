@@ -37,9 +37,51 @@ next.
 Work is run through the **Agentic Development Lifecycle**: phases with explicit, machine-checkable
 **gates**. Each gate is a CLI whose **exit code is the verdict** — `0` pass, `2` fail, `1`
 operational error. **Trust the gate over your own sense that a change is "done"** — defeating
-premature satisfaction is the point. Inside Claude Code *you are the model*: run any LLM-backed gate
-with `--prompt-only`, answer the printed prompt yourself, and apply the judgment (no API keys
-needed). Route with the `adlc` discovery skill; `adlc <tool> --help` for a tool's exact flags.
+premature satisfaction is the point. Route with the `adlc` discovery skill; `adlc <tool> --help` for
+a tool's exact flags.
+
+**WHO ANSWERS AN LLM-BACKED GATE — and it is NOT always you** (corrected 2026-07-21). The old rule
+here said *"inside Claude Code you are the model: run any LLM-backed gate with `--prompt-only`,
+answer the printed prompt yourself."* That is right for some gates and **defeats others entirely**,
+and the difference is whether the gate's value is JUDGMENT or INDEPENDENCE:
+
+- **Self-answer** where the question is about the ARTIFACT and the author is a competent judge of it:
+  `coldstart` (is this ticket executable?), `model-router`, `merge-forecast`, `spec-lint`.
+- **NEVER self-answer** where the whole product is a SECOND SET OF EYES: `review` / `prosecute`,
+  `premortem`, `parallax`, `adversarial-review`. Self-answering these converts an adversarial
+  reviewer into a mirror — it shares the ticket's premise, which is exactly the failure mode P5 now
+  exists to defeat. **Spawn a subagent** with the diff, `src/gateway/SUBSTRATE-HAZARDS.md`, and
+  explicitly WITHOUT the author's reasoning. That is not a workaround for a missing tool; it is the
+  implementation.
+
+**THE TOOLING WAS NEVER TURNED ON — fixed 2026-07-21, and here is what to use.** For two weeks this
+repo ran ADLC's *advisory* half (`merge-forecast`, `coldstart`, `hollow-test`) and none of its
+*enforcing* half. What was actually wrong, so nobody assumes it again:
+
+- The `adlc` **plugin** was pinned at 0.2.0 while upstream was 1.5.1 (35 commits). Its **discovery
+  skill**, its `/adlc:*` commands, its **PreToolUse rails + buildgate hooks**, its **SessionStart
+  preflight hook**, and its **seven prosecutor agents** were all installed and none were loading.
+- `@adlc/cli` was 1.3.0 against 1.5.1; `adversarial-review` was **never installed at all**.
+
+All updated. **`adlc:prosecutor-{correctness,security,tests,contract,diff}` and
+`adlc:prosecutor-verifier` are real agent types** — that panel IS P5's independent reviewer, and it
+is what the "spawn a subagent" rule above means in practice. Use them; do not hand-roll review
+prompts beside a shipped panel (that mistake cost a day).
+
+**`adlc review` works on Windows via a LOCAL PATCH — re-apply it after any adlc upgrade:**
+`npm run adlc:patch` (`scripts/patch-adlc-npx.mjs`). Upstream's `runExternal` spawns bare `npx`,
+which on Windows needs BOTH `npx.cmd` AND `shell: true` — naming the `.cmd` alone turns `ENOENT`
+into `EINVAL`, because Node ≥18.20.2 refuses to spawn `.bat`/`.cmd` without a shell
+(CVE-2024-27980). The script is idempotent, completes a half-applied patch, and REFUSES rather than
+guessing if upstream restructures the call. It patches a GLOBAL package, so `npm i -g @adlc/cli`
+wipes it — that is the whole reason it is a script and not a hand-edit. Delete it once a released
+`@adlc/cli` spawns correctly on Windows.
+
+**And `adlc prosecute` is an evidence RECORDER**
+(`--input passes.json`): it writes down what it is handed and never verifies a review occurred, so
+it may only record what a prosecutor actually returned. Feeding it unearned passes would be an
+operation reporting a success it did not achieve — hazard **H7** at the process layer, which is
+exactly what the old convention produced.
 
 The phases, with Loam's own craft folded into each:
 
@@ -90,10 +132,40 @@ The phases, with Loam's own craft folded into each:
    authorization and correctness gaps; what inputs or states produce a wrong outcome" — rather than
    role-playing an opponent trying to defeat the system. The neutral framing finds the same issues
    and reads far less like offensive security to a content classifier; the sharper framing was only
-   ever stylistic. **Budget: one careful review pass per PR** (self-review directly for small
-   mechanical diffs); a 2–3-angle panel only for the riskiest tickets (capabilities/auth,
-   federation — the §23 renderer ticket names its own panel). Token spend must last the whole
-   backlog. ~~**Audits are paused**~~ — **UNPAUSED, and now STANDING: audit after every piece of
+   ever stylistic.
+
+   **THE SYSTEM CATCHES MISTAKES; THE MODEL DOES NOT AVOID THEM** (Myk, 2026-07-21). This is the
+   governing principle, and it replaces the old budget rule below it. Do not tune this process
+   toward a model that is careful enough — that target does not exist. 2026-07-21 is the proof: the
+   session's own model wrote hazard **H7**, in its own words, and violated it **three hours later**
+   in a function whose entire stated purpose was keeping a promise about completeness. Maximal
+   proximity, freshest possible memory, still shipped. Knowing a trap in the abstract does almost
+   nothing to help you notice you are standing in it.
+
+   **~~Budget: one careful review pass per PR (self-review for small mechanical diffs)~~ — RETIRED.**
+   That rule optimized for spending less on review, and 2026-07-21 priced it honestly:
+
+   | | caught |
+   |---|---|
+   | P5 as budgeted (self-review, one pass) | **nothing** |
+   | independent diff audits (3 runs) | **every finding, incl. 2 probed to certainty** |
+
+   Prosecute-as-practiced passed all three negation-closure sites, a hollow rail in the PR *about*
+   hollow rails, and a keystone file that merged as a **zero-line diff**. The failure is structural,
+   not effortful: **self-review shares the ticket's premise**, and a wrong premise produces perfect
+   rails around a real bug. Independence is the active ingredient — not care, not a sharper prompt.
+
+   **So: P5's default is an INDEPENDENT reviewer that did not write the diff** — a subagent with the
+   diff, the hazards file, and no access to the author's reasoning. Self-review is the **exception**,
+   and it must be justified in the PR body. Note that "small mechanical diff" is not a justification:
+   the worst finding of 2026-07-21 was in a tiny one.
+
+   **Review the RAILS, not just the code.** Every audit that day found rail defects, and the rail
+   defects were what would have let the bug ship. Ask of each new test: *could this pass with the fix
+   reverted?* and *could this pass if the feature were deleted entirely?* Both were live failures.
+
+   **Budget honestly.** Review is the cheapest thing here relative to shipping an erasure leak. Where
+   spend must be bounded, bound the number of ANGLES, never the independence. ~~**Audits are paused**~~ — **UNPAUSED, and now STANDING: audit after every piece of
    major work** (Myk, 2026-07-21). Audit 1's pause was a cost decision; audit 3 justified reversing
    it by finding **13 real issues in one pass**, two of them probed to certainty (a completed
    erasure left the plaintext recoverable from the sqlite file; `migrate` resurrected withdrawn
@@ -241,8 +313,11 @@ busy.
   without asking, on a feature branch (never `main`), with real messages (the poetry rule applies to
   commits too). The point is to churn autonomously and pull Myk in only where ADLC actually needs a
   human: **P1** (he keeps `.adlc/tickets.json` stocked — that is the approval of what to build) and
-  **P6** (accepting the merge). Open PRs; don't merge to `main` or self-approve the design-stage
-  "(Myk)" sign-offs unless he delegates that. Parallelism is per-ticket git worktrees, width bounded
+  **P6** (accepting the merge). ~~Open PRs; don't merge to `main`~~ — **SUPERSEDED 2026-07-21 by the
+  repair-vs-decide test in "merge by risk" above**: the model self-merges a REPAIR that restores
+  stated behavior (green + P5 + clean audit); anything that DECIDES what the system promises, and
+  every design-stage section, is still Myk's. Never self-approve the design-stage "(Myk)" sign-offs
+  unless he delegates that. Parallelism is per-ticket git worktrees, width bounded
   by `adlc merge-forecast`. (This replaced the deleted fleet-level control-pane rules; Loam is
   governed per-repo by this file.)
 - **v1 is fully multi-tenant** (SPEC §7) — tenant isolation is first-class in the genesis schemas

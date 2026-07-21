@@ -22,19 +22,14 @@
 // what the door actually SERVES — the exploit rail demands a 404 for bytes the fixture proves are otherwise
 // reachable, and the admission rail demands a 200 carrying the exact declared bytes.
 
-// FROZEN AHEAD OF THE BUILD, AND THEREFORE SKIPPED (ADLC P3). This rail lands BEFORE the fix it
-// describes, so `rails-guard` has a real freeze baseline on main and any later edit to it is a
-// visible, audited act rather than an invisible one. It is `describe.skip` for exactly one reason:
-// it FAILS against main's current code — which is the point of a rail, written to fail until the
-// build makes it pass — and a red bar may not land on main. Verified: 3 of 5 fail against main.
+// UN-SKIPPED HERE, in the same change that fixes the gate — which is what the frozen version of this
+// file (landed skipped in #156) said must happen. That un-skip is the ONLY edit this PR makes to a
+// frozen rail, and `rails-guard --ticket T42 --base <the freeze commit>` reports exactly that one
+// line rather than the undifferentiated exit 2 the combined branch produced.
 //
-// The build PR un-skips it in the same change that fixes the gate, and that un-skip should be the
-// ONLY rail edit it contains. Its sibling `test/surface/rest-lens-gate.test.ts` lands live rather
-// than skipped, because everything that file asserts already holds on main.
-//
-// This is not dead code. `test/gateway/promote-survival-probe.test.ts` (T39) rides the same
-// convention. If you are reading this and the fix HAS landed while this is still skipped, that is a
-// bug: un-skip it and check it passes.
+// Why it was skipped: a rail written before its build FAILS, which is the point of writing it first,
+// and a red bar may not land on main. Verified against main before freezing: 3 of 5 failed. Verified
+// again here with the fix in place: 5 pass, and 3 fail again the moment the gate is reverted.
 
 import { describe, expect, it } from "vitest";
 import {
@@ -112,7 +107,7 @@ const boot = async (): Promise<Gateway> => {
 const REF_NEW = contentAddress(NEW_BYTES);
 const REF_OLD = contentAddress(OLD_BYTES);
 
-describe.skip("§12 — the anonymous byte-door honours the lens, not the program", () => {
+describe("§12 — the anonymous byte-door honours the lens, not the program", () => {
   it("PRECONDITION: the two readings share a hyperschema name and resolve to DIFFERENT bytes", async () => {
     const gw = await boot();
     // Delta level — the same program, two lenses. That gap is what the old gate could not see.

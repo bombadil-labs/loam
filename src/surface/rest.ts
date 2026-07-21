@@ -343,8 +343,7 @@ export async function handleRest(
   // or the full door). A declared PIN (§23.8) — even one that happens to be the latest — otherwise answers
   // through pinned resolution, which needs no live surface, so a pin-only public store still serves it.
   const liveSurface = gateway.surface(door);
-  const servesLive =
-    liveSurface?.registered.some((r) => r.hyperschema.name === schemaName) ?? false;
+  const servesLive = liveSurface?.registered.some((r) => lensOf(r) === schemaName) ?? false;
   const trueLatest = gateway
     .registrationVersions()
     .filter((v) => lensOf(v) === schemaName)
