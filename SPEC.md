@@ -57,6 +57,7 @@ name begins with that number.
 | §25 | [Hardening — namespacing, entity-IDs, brick-proofing, repair](spec/25-hardening.md) |
 | §26 | [As-of reads — the temporal promise, kept](spec/26-as-of-reads.md) |
 | §27 | [Containers — the primitive under sandboxes, modules, and federation (Loam as git for signed claims)](spec/27-containers.md) *(design-stage draft)* |
+| §28 | [Trust is a property of a container — admission delegates, effectiveness attenuates](spec/28-container-trust.md) *(design-stage draft)* |
 
 _**§21**, **§22**, **§25**, and **§26** are **landed** — design accepted and implemented (see each
 Provenance footer; §21.7's coexistence design is accepted with its implementation queued as ticket T2).
@@ -67,6 +68,8 @@ Provenance footer; §21.7's coexistence design is accepted with its implementati
 **§24** (quarantine) has its full design decided ([#115](https://github.com/bombadil-labs/loam/pull/115))
 with slice 1 and promote-outputs built ([#109](https://github.com/bombadil-labs/loam/pull/109),
 [#111](https://github.com/bombadil-labs/loam/pull/111)); later slices are queued in
-`.adlc/tickets.json`. **§27** (containers) is a **design-stage draft** — the decided layer is recorded,
-implementation queued. A reserved number lands here as its own `spec/NN-*.md` file when its work
-merges._
+`.adlc/tickets.json`. **§27** (containers) and **§28** (container trust) are **design-stage drafts** —
+the decided layer is recorded, implementation queued. §28 collects the residual §7 has carried since
+step 13 and generalizes §8's trust from a store-wide scalar to a property of every container; read it
+before §27's trust knob, which it re-founds. A reserved number lands here as its own `spec/NN-*.md`
+file when its work merges._
