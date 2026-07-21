@@ -16,6 +16,7 @@
 import { describe, expect, it } from "vitest";
 import { parseTerm, signClaims } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
+import { lensOf } from "../../src/gateway/registration.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_READING, garden, governedBootstrap } from "./fixtures.js";
@@ -177,16 +178,33 @@ describe("expand reading refs bind at the door (issue #23)", () => {
     await gateway.close();
   });
 
-  it("an IDENTICAL process-local override is not a failed publish — the law is durable", async () => {
-    // Ticket T28. `register()` is a process-local override; `publishRegistration` is durable law.
-    // Publishing the same law that a manual registration currently holds SUCCEEDS: the definition,
-    // living Schema, snapshot and binding are all on the ground, and on the next boot without the
-    // override they bind. Throwing would have told the operator their write failed when it did not —
-    // about append-only ground they cannot take back.
+  it("a publish shadowed by a process-local override still SAYS SO, with the real reason", async () => {
+    // Ticket T28. Swallowing this was tried and reverted: a manual binding carries no resolvers at
+    // all (`registerImpl` has no such parameter), so "the same law" cannot be established, and a
+    // publish shipping resolvers would have been reported as a benign duplicate while serving none
+    // of them. A true sentence beats a quiet wrong surface — so it throws, and names the cause the
+    // fixpoint actually caught rather than the old fixed guess about hyperschema names.
     const gateway = await keeperGarden(); // binds Plant in-process with PLANT_READING
-    await gateway.publishRegistration(PLANT, PLANT_READING, [FERN], { actor: KEEPER_SEED });
-    // Durable: the published version is on the record even though the override is what serves now.
-    expect(gateway.registrationVersions().some((v) => v.hyperschema.name === "Plant")).toBe(true);
+    const why = await gateway
+      .publishRegistration(PLANT, PLANT_READING, [FERN], { actor: KEEPER_SEED })
+      .then(
+        () => "",
+        (e: Error) => e.message,
+      );
+    expect(why).toMatch(/did not bind/);
+    expect(why).toMatch(/collides with an earlier schema/);
+    expect(why).not.toMatch(/negate the old definition first/);
+    // ...and the message's "persisted" clause is TRUE: the deltas really are on the ground, with the
+    // lens, roots and Schema the publish named — not merely something bearing the right name. (A
+    // manual `register()` contributes nothing here: registrationVersions reads the reactor alone.)
+    const published = gateway
+      .registrationVersions()
+      .find((v) => v.hyperschema.name === "Plant" && lensOf(v) === "Plant");
+    expect(published).toBeDefined();
+    expect(published!.roots).toEqual([FERN]);
+    expect([...published!.schema.props.keys()].sort()).toEqual(
+      [...PLANT_READING.props.keys()].sort(),
+    );
     await gateway.close();
   });
 

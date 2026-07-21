@@ -153,7 +153,12 @@ const dependencyIds = (e: HVEntry, into: string[]): void => {
     if (reading !== undefined) into.push(readingId(reading));
     for (const entries of child.props.values()) {
       for (const childEntry of entries) {
-        dependencyIds(childEntry, into); // every entry the child's Policy sees, negated included
+        // Every entry the child's Policy sees, negated included — for consistency with the top
+        // level, NOT because it fixes anything observable. A retraction under a child `annotate`
+        // gather cannot change the child's resolved view (applyPolicy ignores the flag), and under
+        // `drop` the entry leaves the hview outright so the id set moves on its own. Stated because
+        // it is unrailed by construction: there is no read whose value it can alter.
+        dependencyIds(childEntry, into);
       }
     }
   }
@@ -222,8 +227,8 @@ export async function loadResolvers(
   await Promise.all([...codes].map((code) => loadResolver(code)));
 }
 
-// The memo: `(resolver-content-address, bucket-delta-set)` → value (SPEC §22.5). Keyed on the surviving
-// bucket, so it invalidates EXACTLY when the bucket recomputes — including when a fact is FORGOTTEN
+// The memo: `(resolver-content-address, ROOT, bucket-delta-set)` → value (SPEC §22.5), where the delta set records
+// each entry's RETRACTION state as well as its id (§22.9). It invalidates EXACTLY when the bucket recomputes — including when a fact is FORGOTTEN
 // (§11): an erased delta drops from the bucket, the key changes, the memo misses, the resolver re-runs
 // over the surviving ground, and its old value — distilled from bytes that no longer exist — can never
 // be served again. Erasure invalidation is not bolted on; it falls straight out of the key.

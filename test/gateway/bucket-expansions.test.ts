@@ -222,4 +222,104 @@ describe("a resolver sees its own gather's expansions (T31)", () => {
     expect(await read()).toBe("2 seen, 1 retracted");
     await gw.close();
   });
+
+  it("a parent recomputes when its CHILD's ground changes, under an annotate child gather too", async () => {
+    // The child half of the dependency walk (§22.8): a parent resolver reads its expanded children,
+    // so the parent's memo key must move when the CHILD's ground moves. Covered here with an annotate
+    // child gather, which the §22.8 rail does not exercise.
+    //
+    // Honest about its limit: this does NOT discriminate whether the walk records the child's
+    // retraction FLAG, and no test can — applyPolicy ignores the flag, so a retraction cannot change
+    // a child's resolved view under annotate, and under drop the entry leaves the hview entirely.
+    const gw = await Gateway.open(new MemoryBackend(), { seed: SEED });
+    await gw.append([signClaims(operatorMarkerClaims(OP), SEED)]);
+    const ANNOTATED = {
+      op: "group",
+      key: "byTargetContext",
+      in: { op: "mask", policy: "annotate", in: "input" },
+    };
+    // The CHILD gathers under annotate, so its retracted notes stay visible-but-flagged.
+    await gw.publishRegistration(
+      { name: "NoteH", alg: 1, body: parseTerm(ANNOTATED) },
+      parseSchema({ name: "Note", props: { body: ALL }, default: PICK }),
+      [],
+      undefined,
+      undefined,
+      undefined,
+      ["body"],
+    );
+    // The PARENT expands notes and counts, from the children, how many survive.
+    await gw.publishRegistration(
+      {
+        name: "PageH",
+        alg: 1,
+        body: parseTerm({
+          op: "expand",
+          role: { exact: "note" },
+          schema: "NoteH",
+          reading: "Note",
+          in: GATHER,
+        }),
+      },
+      parseSchema({ name: "Page", props: { note: ALL }, default: PICK }),
+      ["page:1"],
+      undefined,
+      undefined,
+      undefined,
+      [],
+      {
+        note: {
+          code:
+            "export default (b) => String(b.reduce((n, e) => n + " +
+            "((e.value && Array.isArray(e.value.body)) ? e.value.body.length : 0), 0));",
+          rung: "a" as const,
+          type: "string" as const,
+        },
+      },
+    );
+    const body = (n: number, text: string) =>
+      signClaims(
+        {
+          ...at(n),
+          pointers: [
+            {
+              role: "subject",
+              target: { kind: "entity", entity: { id: "note:a", context: "body" } },
+            },
+            { role: "body", target: { kind: "primitive", value: text } },
+          ],
+        },
+        SEED,
+      );
+    const first = body(10, "one");
+    await gw.append([
+      first,
+      body(11, "two"),
+      signClaims(
+        {
+          ...at(12),
+          pointers: [
+            { role: "page", target: { kind: "entity", entity: { id: "page:1", context: "note" } } },
+            { role: "note", target: { kind: "entity", entity: { id: "note:a", context: "in" } } },
+          ],
+        },
+        SEED,
+      ),
+    ]);
+    const count = async () =>
+      ((await gw.query(`{ page(entity: "page:1") { note } }`)).data as { page: { note: string } })
+        .page.note;
+    expect(await count()).toBe("2");
+
+    // A retraction inside the child leaves the child's VIEW unchanged under annotate (the Policy
+    // does not consult the flag), so the parent's answer must not move either. Pinned so the
+    // no-op stays a no-op rather than drifting into a spurious recompute.
+    await gw.append([signClaims(makeNegationClaims(OP, 99, first.id), SEED)]);
+    expect(await count()).toBe("2");
+
+    // The load-bearing half: the child's ground GROWS, and the parent must recompute.
+    await gw.append([body(13, "three")]);
+    expect(await count()).toBe("3");
+    await gw.close();
+  });
 });

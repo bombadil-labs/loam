@@ -109,7 +109,7 @@ export type ClaimTemplates = Readonly<Record<string, ClaimTemplate>>;
 
 // A custom resolver (SPEC §22): the last, optional step of a lens — `resolve(bucket) → value`,
 // downstream of the Policy. The Policy keeps the epistemics (WHICH claims survive, in what order);
-// the resolver overrides only the semantics (what the survivors MEAN as a value in this lens). It
+// the resolver overrides only the semantics (what the gathered claims MEAN as a value in this lens (SPEC §22.9: the bucket is what the Policy is given)). It
 // travels on the BINDING, per field, so changing a resolver mints a new registration version (SPEC
 // §22.4 at the version-delta level; folding it into the `name@hash` VersionedSchema waits for §23's
 // renderer pin, exactly as §21 deferred `VersionedHyperSchema`).
