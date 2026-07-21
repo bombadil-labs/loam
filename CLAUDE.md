@@ -74,12 +74,30 @@ The phases, with Loam's own craft folded into each:
    ever stylistic. **Budget: one careful review pass per PR** (self-review directly for small
    mechanical diffs); a 2–3-angle panel only for the riskiest tickets (capabilities/auth,
    federation — the §23 renderer ticket names its own panel). Token spend must last the whole
-   backlog. **Audits are paused** (Myk, 2026-07-09): audit 1 cost ~5% of the total token budget — no
-   further audit panels until the arc and its landings are done. Retro to apply before any future
-   audit: the per-finding verify stage was ~80% of the cost and refuted only 1 of 24 candidates (the
-   finders were already precise), and three findings were found by multiple overlapping angles — so
-   a future audit is 3–4 tightly-scoped finder angles, **no** verify stage (the fixer verifies while
-   fixing), findings capped per angle.
+   backlog. ~~**Audits are paused**~~ — **UNPAUSED, and now STANDING: audit after every piece of
+   major work** (Myk, 2026-07-21). Audit 1's pause was a cost decision; audit 3 justified reversing
+   it by finding **13 real issues in one pass**, two of them probed to certainty (a completed
+   erasure left the plaintext recoverable from the sqlite file; `migrate` resurrected withdrawn
+   operator law, turning a §17 410 into a 200 and potentially serving it anonymously) and one of
+   them a build rule §24.8 had already written and nobody had built.
+
+   **Run the RETRO SHAPE, which is what makes this affordable:** 3–4 tightly-scoped finder angles,
+   **no verify stage** (the fixer verifies while fixing — the verify stage was ~80% of audit 1's
+   cost and refuted 1 of 24 candidates), findings capped per angle, and every angle told that **a
+   clean result is a valid result** so it does not pad. Scale the angles to the work: 3–4 over the
+   whole tree after an arc lands; **1–2 scoped to the diff** after a single ticket. Tell each angle
+   what is ALREADY KNOWN so it does not re-find it, and require CONFIRMED-vs-PLAUSIBLE on every
+   finding.
+
+   **Pick angles from what has actually bitten**, not from a generic checklist — audit 3's angles
+   were drawn from real bugs found hours earlier and every one landed. `src/gateway/SUBSTRATE-HAZARDS.md`
+   is the running list; a hazard there that keeps recurring is next audit's angle.
+
+   **Why this is worth the tokens, stated plainly:** the gates verify conformance to the ticket, and
+   they cannot verify that the ticket is right. Rails are downstream of the spec, so a wrong premise
+   produces perfect rails around a real bug — which is exactly how all three of the negation-closure
+   sites shipped green. The audit is the only step that reads the code without the ticket's
+   assumptions, and that is a different question from every other gate.
 7. **P6 — Integrate (the human gate).** Myk decides. Surface the evidence (`adlc gate-manifest
    show`, behavior diffs). **The landing PR writes the ticket's design as a new `spec/NN-slug.md`
    file** — the whole section, closed by its `**Provenance.**` footer (the PR link(s) + a short
