@@ -33,6 +33,7 @@ export interface HealReport {
   readonly toPrimary: number; // deltas the primary was missing, now replanted
   readonly purgedPrimary: number; // dead ids the primary actually removed
   readonly purgedMirror: number; // dead ids the mirror actually removed
+  readonly purgeFailures: readonly string[]; // sweeps that refused — reported, never swallowed
 }
 
 export class MirrorBackend implements StoreBackend, RepairableBackend {
@@ -88,7 +89,11 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
     const results = await Promise.allSettled([this.primary.purge(batch), this.mirror.purge(batch)]);
     const failed = results.find((r) => r.status === "rejected");
     if (failed !== undefined) throw failed.reason;
-    return (results[0] as PromiseFulfilledResult<number>).value;
+    // Evidence that ANY tier removed bytes, composed the same way failures are. Returning the
+    // primary's count alone answers "how many the hot tier held", which is not what a caller
+    // weighing completeness is asking — a mirror that removed the last straggler would read as 0.
+    const counts = results.map((r) => (r as PromiseFulfilledResult<number>).value);
+    return Math.max(...counts);
   }
 
   // Two-way union: each side receives what only the other holds. Idempotent — a whole pair
@@ -110,15 +115,30 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
     // `<id>.json.<pid>.tmp`, a misfiled copy, a WAL image, a freelist page. Asking a read whether
     // the work is outstanding conflates readability with byte-presence, which is the one conflation
     // §11 forbids, and it made the straggler sweep unreachable on every tier.
+    // A purge failure here must NOT abort the heal. Heal runs on the boot path with the whole
+    // accumulated tombstone set, so a single file held by a backup agent or a WAL a concurrent
+    // reader will not release would otherwise make the store refuse to start — trading a leak for
+    // an outage. Best-effort-and-loud: the sweep continues, and the report carries what failed so
+    // the operator is told rather than the error being swallowed.
     const ids = [...dead];
-    const purgedPrimary = ids.length > 0 ? await this.primary.purge(ids) : 0;
+    const purgeFailures: string[] = [];
+    const sweep = async (tier: StoreBackend): Promise<number> => {
+      if (ids.length === 0) return 0;
+      try {
+        return await tier.purge(ids);
+      } catch (err) {
+        purgeFailures.push(err instanceof Error ? err.message : String(err));
+        return 0;
+      }
+    };
+    const purgedPrimary = await sweep(this.primary);
     const toMirror = await this.mirror.append(alive);
     const fromMirror = await this.mirror.deltasSince(new Set(alive.map((d) => d.id)));
     const replant = fromMirror.filter((d) => !dead.has(d.id));
-    const purgedMirror = ids.length > 0 ? await this.mirror.purge(ids) : 0;
+    const purgedMirror = await sweep(this.mirror);
     const toPrimary = await this.primary.append(replant);
     if (this.#lagEpoch === epoch) this.#lagging = false;
-    return { toMirror, toPrimary, purgedPrimary, purgedMirror };
+    return { toMirror, toPrimary, purgedPrimary, purgedMirror, purgeFailures };
   }
 
   async close(): Promise<void> {

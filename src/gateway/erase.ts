@@ -238,23 +238,31 @@ export async function eraseImpl(
       d.claims.pointers.some((p) => p.target.kind === "delta" && p.target.deltaRef.delta === id),
     )
     .map((d) => d.id);
-  const tombstone = signClaims(
-    eraseClaims(id, target.claims.author, gw.operatorAuthor, gw.nextTimestamp(), opts.reason),
-    seed,
+  // RETRY IS SAFE: a first attempt can record the tombstone and still leave bytes at rest (a purge
+  // that deleted rows then failed to truncate the WAL, a tier that refused). The operator's re-run
+  // must finish the sweep WITHOUT growing the erasure log — a fresh timestamp would mint a new
+  // content address and append a second tombstone for the same target on every attempt.
+  const already = [...gw.reactor.snapshot()].find(
+    (d) =>
+      isTombstone(d.claims) &&
+      d.claims.author === gw.operatorAuthor &&
+      d.claims.pointers.some((p) => p.target.kind === "delta" && p.target.deltaRef.delta === id),
   );
-  await gw.append([tombstone]);
-  await gw.flush(); // the tombstone must be ground before the target stops being ground
-  // The purge COUNT is the only evidence the bytes went. A backend that removed nothing returns 0
-  // and, unchecked, produces a byte-identical successful return — an erasure reporting completion on
-  // no evidence of completion. The target was in the ground a moment ago, so 0 means the store
-  // failed, and §11 is the wrong promise to keep quietly.
-  const removed = await gw.backend.purge([id]);
-  if (removed === 0) {
-    throw new Error(
-      `erase ${id}: the store removed no bytes — the tombstone is recorded, but the content may ` +
-        `still be at rest. Resolve the store fault and re-run; erasure is not complete.`,
+  const tombstone =
+    already ??
+    signClaims(
+      eraseClaims(id, target.claims.author, gw.operatorAuthor, gw.nextTimestamp(), opts.reason),
+      seed,
     );
+  if (already === undefined) {
+    await gw.append([tombstone]);
+    await gw.flush(); // the tombstone must be ground before the target stops being ground
   }
+  // A purge count of 0 is AMBIGUOUS — it means "this tier never held it" exactly as often as it
+  // means "this tier failed to remove it" — so the count cannot carry the completeness verdict.
+  // Byte-presence can. The verdict is therefore deferred to the end of this function, after
+  // re-seating and after the pool fan-out, so that neither is skipped by a local miss.
+  const removed = await gw.backend.purge([id]);
   await gw.reseat();
   // §24.8 — the erasure reaches every attached QUARANTINE POOL (the operator's own replicas of this
   // ground): the same tombstone lands there and the byte is purged there too, so a forgotten record can
@@ -262,6 +270,18 @@ export async function eraseImpl(
   // glass unconditionally; a quarantine that could hide a purged byte would be an erasure-evasion channel.
   const seen = new Set<Gateway>([gw]);
   for (const pool of gw.quarantinePools) await pool.eraseReplica(tombstone, id, seen);
+  // NOW the verdict, once every tier has been swept. Only a 0 count is in doubt, so only a 0 pays
+  // for the scan: a store that removed rows plainly removed them, while 0 could be a completed
+  // earlier attempt (`purge` deletes rows and may still throw on a WAL it could not truncate — the
+  // caller retries, and on that retry the rows are already gone) or a store that silently refused.
+  // Byte-presence separates them, and it is the only thing §11 actually promises about.
+  if (removed === 0 && (await gw.backend.deltasSince(new Set())).some((d) => d.id === id)) {
+    throw new Error(
+      `erase ${id}: the tombstone is recorded and every tier was swept, but the content is STILL ` +
+        `HELD by the store — erasure is not complete. Resolve the store fault and re-run; the ` +
+        `re-run is safe and will not mint a second tombstone.`,
+    );
+  }
   return { erased: id, citations };
 }
 
