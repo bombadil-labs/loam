@@ -107,6 +107,21 @@ commingled. There are exactly three routes, and two of them are dishonest:
 
 Only (3) is honest, and it is an **operational migration, not an operation**.
 
+**And route (3) is sharper than "expensive" — it is a step where suppressed claims can silently
+reappear.** Extraction is `fork(A, p) = { d ∈ A : p(d) }` (SPEC-1 §8) into a fresh store, and rhizomatic's
+`negated(d, D)` ranges over the **operand set** (SPEC-2 §4.3): suppression is a property of the set being
+evaluated, not of the delta. So a negation left behind by the fork predicate stops suppressing its target,
+and a claim that was masked in the commingled store comes back **live** in the extracted one. The substrate
+pins this as a conformance vector (`select-then-mask-scopes-to-operand`). Any property→wall migration must
+therefore carry the **negation closure** along with its targets, or the extraction silently resurrects
+retracted claims — a data-integrity failure, not a performance one. This is an argument for walls-by-default
+that is independent of cost, and it is the stronger of the two.
+
+The same operand-set rule bites any filter of a delta-set, not only a migration — Loam shipped one such
+filter in its membership-scoped seeding edge and had exactly this hole (ticket **T38**, found by running
+it). Read this paragraph as a general rule with a general remedy: **a filter that narrows a delta-set must
+carry the negation closure of what it admits, or it does not preserve what survives.**
+
 The general statement, because it reaches past tenancy:
 
 > **You cannot retroactively achieve isolation over grow-only shared ground.** A wall's value comes from
@@ -259,13 +274,25 @@ design**, with both recursive routes sanctioned and their tradeoff named — hos
 derive-and-`inView` for provenance. Loam takes both, keyed on the question being asked (§28.6). The
 substrate side also flagged that `expand.reading` lives in the gather body (SPEC-2 §4.5), so sibling
 lenses over one HyperSchema necessarily share a child's reading — which would make "tenant A and tenant B
-read embedded posts differently" inexpressible by lens choice alone. **§28.4's walls-by-default ruling
-defuses this for the default posture** (a wall tenant has its own store, its own registrations, and
-therefore its own gather bodies — it was never sharing one); the constraint bites the PROPERTY posture
-only, where it becomes a stated limit and one more reason to choose a wall. Confirmation of that reading
-is outstanding with the substrate side; if wall-tenants can still share a body, this paragraph is wrong
-and the unbuilt `reading: {hole: …}` escape becomes a prerequisite for property-posture tenancy rather
-than a possibility.
+read embedded posts differently" inexpressible by lens choice alone. A first draft of this paragraph
+claimed walls-by-default defused it, reasoning that a wall tenant has its own store and therefore its own
+bodies. **That middle step is wrong, and the correction matters more than the conclusion: the §4.5
+constraint is PER-BODY, not per-store.** A HyperSchema body is content-addressed data and publishable as
+deltas (SPEC-3 §5) — portable by design — so two tenants in two *different* stores that both adopt the
+same published body share that body's child readings, walls or not. Separate stores do not separate
+readings; separate **bodies** do. And the case is not hypothetical for a platform: a canonical `Post`
+gather body, published once for interop and adopted by every tenant, is the shape the substrate
+encourages — and it puts wall-tenants squarely back under the constraint.
+
+**The real trigger is an ADOPTED body plus divergent reading needs, and it can occur in either posture.**
+A tenant that authors its own body is unconstrained on whichever side of the wall it sits; a tenant that
+adopts the platform's body inherits its readings. (Two bodies differing only in `reading` are different
+programs with different `termHash`es — the reference is part of the program's identity — so a store may
+hold both without collision.) The conclusion survives the restatement: **a full tenant model is not yet
+the consumer for the unbuilt `reading: {hole: …}` escape**, because on both default paths — own store, own
+body — the need dissolves, and the escape stays available if adopted-body tenants later want divergent
+readings. But *"we are walls, so §4.5 cannot bite us"* would have been a load-bearing assumption that is
+not true, and it is recorded here as false so that nobody rebuilds it.
 
 Rides §6 (authority never rides in on data), §7 (the residual this section collects), §8 (trust is data,
 generalized here from a scalar to a tree), §11/§24.8 (the erasure reach the operator cannot delegate),
