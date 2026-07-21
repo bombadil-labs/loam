@@ -93,11 +93,21 @@ describe("MirrorBackend", () => {
     expect(store.lagging).toBe(true);
     expect(ids(await inner.deltasSince(new Set()))).toEqual([]);
     cold.repair();
-    expect(await store.heal()).toEqual({ toMirror: 2, toPrimary: 0 });
+    expect(await store.heal()).toEqual({
+      toMirror: 2,
+      toPrimary: 0,
+      purgedPrimary: 0,
+      purgedMirror: 0,
+    });
     expect(store.lagging).toBe(false);
     expect(ids(await inner.deltasSince(new Set()))).toEqual(ids([d1, d2]));
     // healing an already-whole pair moves nothing
-    expect(await store.heal()).toEqual({ toMirror: 0, toPrimary: 0 });
+    expect(await store.heal()).toEqual({
+      toMirror: 0,
+      toPrimary: 0,
+      purgedPrimary: 0,
+      purgedMirror: 0,
+    });
   });
 
   it("heal() is also the restore: a mirror's memory replants an empty primary", async () => {
@@ -107,7 +117,12 @@ describe("MirrorBackend", () => {
     const store = new MirrorBackend(fresh, vault);
     // before healing, reads answer from the primary alone — the mirror is a shadow, not a read path
     expect(await store.deltasSince(new Set())).toEqual([]);
-    expect(await store.heal()).toEqual({ toMirror: 0, toPrimary: 3 });
+    expect(await store.heal()).toEqual({
+      toMirror: 0,
+      toPrimary: 3,
+      purgedPrimary: 0,
+      purgedMirror: 0,
+    });
     expect(ids(await store.deltasSince(new Set()))).toEqual(ids([d1, d2, d3]));
   });
 

@@ -306,3 +306,27 @@ describe("the erasure log stays append-only", () => {
     await gateway.close();
   });
 });
+
+// §11's promise is about BYTES, and the purge count is the only evidence they went (ticket T55).
+describe("erase refuses to report a completion it cannot evidence", () => {
+  it("a backend whose purge removes nothing makes erase throw rather than return erased", async () => {
+    const { gateway, backend, fact } = await grove();
+    // A store that accepts writes and silently removes nothing — the shape a failing disk, a
+    // read-only mount, or a stale index produces. The tombstone still lands; the bytes do not.
+    backend.purge = () => Promise.resolve(0);
+    await expect(gateway.erase(fact.id, { reason: "the subject asked" })).rejects.toThrow(
+      /removed no bytes/,
+    );
+    await gateway.close();
+  });
+
+  it("the ordinary path still reports the erasure, and the bytes are actually gone", async () => {
+    const { gateway, fact } = await grove();
+    // The positive leg: without it, an erase that always threw would satisfy the rail above.
+    await expect(gateway.erase(fact.id, { reason: "the subject asked" })).resolves.toMatchObject({
+      erased: fact.id,
+    });
+    expect(gateway.reactor.get(fact.id)).toBeUndefined();
+    await gateway.close();
+  });
+});

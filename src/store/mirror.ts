@@ -31,6 +31,8 @@ export interface MirrorOptions {
 export interface HealReport {
   readonly toMirror: number; // deltas the mirror was missing, now archived
   readonly toPrimary: number; // deltas the primary was missing, now replanted
+  readonly purgedPrimary: number; // dead ids the primary actually removed
+  readonly purgedMirror: number; // dead ids the mirror actually removed
 }
 
 export class MirrorBackend implements StoreBackend, RepairableBackend {
@@ -103,14 +105,20 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
     const dead = exclude ?? new Set<string>();
     const all = await this.primary.deltasSince(new Set());
     const alive = all.filter((d) => !dead.has(d.id));
-    if (alive.length < all.length) await this.primary.purge([...dead]);
+    // Purge runs whenever there is anything dead — it is NOT gated on a read having seen the
+    // corpse. `deltasSince` is defined to skip what `purge` exists to find: a crash-left
+    // `<id>.json.<pid>.tmp`, a misfiled copy, a WAL image, a freelist page. Asking a read whether
+    // the work is outstanding conflates readability with byte-presence, which is the one conflation
+    // §11 forbids, and it made the straggler sweep unreachable on every tier.
+    const ids = [...dead];
+    const purgedPrimary = ids.length > 0 ? await this.primary.purge(ids) : 0;
     const toMirror = await this.mirror.append(alive);
     const fromMirror = await this.mirror.deltasSince(new Set(alive.map((d) => d.id)));
     const replant = fromMirror.filter((d) => !dead.has(d.id));
-    if (replant.length < fromMirror.length) await this.mirror.purge([...dead]);
+    const purgedMirror = ids.length > 0 ? await this.mirror.purge(ids) : 0;
     const toPrimary = await this.primary.append(replant);
     if (this.#lagEpoch === epoch) this.#lagging = false;
-    return { toMirror, toPrimary };
+    return { toMirror, toPrimary, purgedPrimary, purgedMirror };
   }
 
   async close(): Promise<void> {

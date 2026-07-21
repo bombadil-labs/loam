@@ -244,7 +244,17 @@ export async function eraseImpl(
   );
   await gw.append([tombstone]);
   await gw.flush(); // the tombstone must be ground before the target stops being ground
-  await gw.backend.purge([id]);
+  // The purge COUNT is the only evidence the bytes went. A backend that removed nothing returns 0
+  // and, unchecked, produces a byte-identical successful return — an erasure reporting completion on
+  // no evidence of completion. The target was in the ground a moment ago, so 0 means the store
+  // failed, and §11 is the wrong promise to keep quietly.
+  const removed = await gw.backend.purge([id]);
+  if (removed === 0) {
+    throw new Error(
+      `erase ${id}: the store removed no bytes — the tombstone is recorded, but the content may ` +
+        `still be at rest. Resolve the store fault and re-run; erasure is not complete.`,
+    );
+  }
   await gw.reseat();
   // §24.8 — the erasure reaches every attached QUARANTINE POOL (the operator's own replicas of this
   // ground): the same tombstone lands there and the byte is purged there too, so a forgotten record can

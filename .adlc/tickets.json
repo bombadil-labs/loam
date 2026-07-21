@@ -400,16 +400,18 @@
       "body": "RAILS FROZEN at commit d965b26 (the rails-guard --base for this ticket). Both fail as written; the build makes them pass.\n\nHISTORICAL AUDIT 2026-07-21, angle H7 completeness. CONFIRMED. The most serious finding of the pass, and a direct continuation of T40.\n\n(1) heal() INFERS THE WORK IS DONE FROM A READ. src/store/mirror.ts:104-110 documents itself as the operation that finishes the forgetting on whatever tier the purge originally missed. But it only calls purge on a tier when that tier deltasSince still hands back a dead delta: primary guarded by alive.length < all.length, mirror by replant.length < fromMirror.length. That is hazard H7 shape (a) verbatim - the presence of a READABLE row taken as proof the work is outstanding, its absence as proof the work is done. Readability and byte-presence are precisely the two things SPEC 11 says must not be conflated.\n\nWHY IT IS NOT HYPOTHETICAL: ArchiveBackend.append writes a temp name, fsyncs, renames. A crash in that window leaves a COMPLETE delta on disk under a name deltasSince deliberately skips. T40 taught purge to sweep those stragglers by prefix - purge is the one operation that must see them. But once the target canonical file is gone, the straggler is invisible to deltasSince, so the guard is false, mirror.purge is never called, and the T40 sweep is UNREACHABLE from the heal path - permanently, on every subsequent serve. The plaintext of an erased delta lives in the vault in a plain file any rsync or tar copies. Same shape on the sqlite side: once a row is deleted, deltasSince cannot see it, so the WAL-truncate and freelist scrub are never re-driven.\n\nFIX: drop both guards. Call purge([...dead]) unconditionally on each tier whenever dead is non-empty - purge is already idempotent, returns a count, and is the only layer that can see stragglers, misfiled copies, WAL images and freelist pages. Then USE the counts: fold them into HealReport so it states what forgetting it performed rather than implying it by omission.\n\n(2) eraseImpl DISCARDS THE PURGE COUNT (src/gateway/erase.ts:245-255). The two halves of the fan-out hold opposite standards and the primary path - the one that answers a data subject - is the lax one. eraseReplicaImpl states the doctrine (best-effort-and-loud, never a silent success) and proves the tombstone landed. eraseImpl performs the same three steps, checks none, drops purge return value, and returns a completeness claim about bytes derived from no evidence about bytes. A backend that removed zero rows produces a byte-identical successful return. Note MirrorBackend.purge returns only the PRIMARY count, so even an inspecting caller learns nothing about the cold tier.\n\nRAILS - BOTH LEVELS, and the object level here is the FILESYSTEM. Erase, simulate a crash-left straggler in the archive fan, heal, then GREP THE VAULT DIRECTORY for the plaintext. Every API-level assertion stays green across this leak - that is exactly how T40 shipped. Second rail: a backend whose purge removes zero rows must make erase refuse loudly rather than return erased.\n\nCARE: erasure is the strongest promise the system makes. This is a REPAIR of stated SPEC 11 behavior, not a widened promise.",
       "edges": [],
       "id": "T55",
-      "phase": "P3",
+      "phase": "P5",
       "rails": [
-        "test/store/erasure-at-rest.test.ts"
+        "test/store/erasure-at-rest.test.ts",
+        "test/gateway/erase.test.ts"
       ],
       "scope": [
         "src/store/mirror.ts",
         "src/gateway/erase.ts",
-        "test/store/"
+        "test/store/",
+        "test/gateway/"
       ],
-      "status": "todo",
+      "status": "in_review",
       "title": "heal() never purges — the T40 sweep is unreachable, so erased plaintext survives in the vault forever"
     },
     {
