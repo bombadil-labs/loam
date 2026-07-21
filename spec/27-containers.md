@@ -31,7 +31,9 @@ vector:
 - **Membership** — which deltas are inside. **This is a delta-query** (DECIDED, §27.6): a `Term → dset`, the
   shape `offeredLens` already is — static (freeze to a version) or live (a subscription), over a local or
   remote store. A shippable module adds a MANIFEST atop the query: which schemas / renderers / entities are
-  its PUBLIC SURFACE versus internal deltas it needs but does not export (still open, §27.6).
+  its PUBLIC SURFACE — the exports it promises to keep stable across versions (§27.8). Note the correction
+  §27.8 makes to the phrasing this bullet used to carry: an unexported member is NOT-ADVERTISED, never
+  NOT-READABLE. The manifest is an interface promise, not an access control.
 - **Seeding** — how it is populated: one-way inbound federation from a primary (the quarantine), an
   explicit import of a shipped module, or hand-authored deltas.
 - **Trust posture** — foreign law inside binds nothing until blessed (inert-by-default, §8/§12). The
@@ -226,10 +228,9 @@ a query, exclusion a property, composition the boolean operators.)
 
 The questions that DO remain open:
 
-1. **The manifest.** A membership query says what is *in* a container; a module still needs to say what it
-   *exports* — which schemas / renderers / entities are its public surface versus internal deltas it needs
-   but does not expose. This is where a module stops being "a query's output" and becomes a package with an
-   interface. (Membership: decided. Manifest: open.)
+1. ~~**The manifest.**~~ **CLOSED — see §27.8.** A membership query says what is *in* a container; a module
+   still needs to say what it *exports*. That is where a module stops being "a query's output" and becomes a
+   package with an interface, and §27.8 now names the interface. (Membership: decided. Manifest: decided.)
 2. ~~**Identity as a Merkle-set.**~~ **CLOSED** — see the identity provenance below. The order-free content
    address is BUILT at rung 2 of the §22.3/§23.10 ladder (a hash over the sorted member ids), which is what
    turns "a container" into a nameable, verifiable, pinnable module version. The Merkle rung remains the
@@ -247,6 +248,101 @@ provenance, and worth building regardless of how far this framing goes; then, wh
 same object (a trusted module import, a shipped app), generalize the pool into a named `Container` with the
 `{membership, seeding, trust, boundary, identity}` vector and let **quarantine be one preset**. The Container
 primitive is the north star; promotion is the next commit; the two are the same direction.
+
+### 27.8 The manifest — a container's interface, and the honesty about what "internal" means
+
+Membership (§27.6) says what is IN a container. Identity (§27.2) names the frozen result. Neither says what
+a consumer may *rely on*, and that is the whole difference between a delta-set and a package. The manifest
+is the interface: **the exports a module promises, named so a consumer can ask for one without knowing how
+the module is built inside.**
+
+**The manifest is itself member deltas.** Everything else in Loam is data — trust (§8), budgets (§25), a
+Schema as a publishable entity (§21), a container's own knobs as claims about it (§27.1) — and a manifest
+that were a separate artifact would be the one piece of a module living outside the model the module is made
+of. As member deltas it is negatable, forkable, and readable through the ordinary doors; and because §27.2's
+address is computed over the members, **a module version pins its own interface for free** — you cannot
+swap what a version exports without minting a different version, which is exactly the property a consumer
+pinning that version wants.
+
+One consequence has to be stated or it becomes a bug: **a manifest may never cite the version address it is
+part of.** It is a member, so it is inside the hash; a manifest naming its own version id would be a
+fixpoint with no solution. Exports name their targets directly (below), the address closes over the whole
+member set including the manifest, and nothing is circular.
+
+**What a module may export, split by what it costs to accept.** The list is closed, and it is ordered by
+the distinction that matters downstream — whether accepting the export is accepting LAW:
+
+| Export | Kind | Accepting it means |
+|---|---|---|
+| HyperSchema (§21) | law | a shape your reads may resolve against |
+| Schema (§21) | law | a resolution program that decides which claims win |
+| resolver binding (§22) | law | code that computes a value your doors then advertise |
+| renderer binding (§23) | law | code that renders, and may hold a pen (§23.3) |
+| entity | fact | a name to read; binds nothing |
+| byte-blob (§23.7) | fact | bytes to serve; binds nothing |
+
+The law/fact split is not decoration. Inert-by-default (§8/§12) says foreign law binds nothing until blessed,
+so the manifest's law rows are precisely the list a "smallest safe blessing" has to range over — §27.6's
+question 3 inherits this table as its domain, and a module exporting no law is a module that needs no
+blessing at all.
+
+**An export names its target by that kind's most stable identifier, and carries a module-local ALIAS.**
+A raw delta id is wrong: it is content-addressed, so an adoption-merge (§27.3) that re-signs the content
+mints a new id and silently breaks the export. So each kind names itself the way that kind is already
+named — a Schema by its §21 schema identity (the living→frozen ladder §21 already built), a renderer by its
+content-addressed ESM address, an entity by its entity id — and the export wraps that target in an **alias**:
+a short module-local name the consumer writes.
+
+The alias is the point. It is the seam between the interface and the contents, and it is what lets a module
+publish `Feed` at version 1 and a completely rebuilt `Feed` at version 7 while every consumer still asks the
+same question. A consumer says `(module version, "Feed")`; aliases are module-local, so two modules may both
+export `Feed` with no collision and no registry to arbitrate. This is the shape §27.6 asked for when it asked
+what a consumer writes to say "give me this module's Feed schema."
+
+**And now the honesty, which matters more than the mechanism.** §27.6 framed the manifest as public surface
+"versus internal deltas it needs but does not expose," and that phrasing promises something this design does
+not deliver. It has to be corrected rather than inherited:
+
+> **"Internal" means NOT-ADVERTISED. It does not mean NOT-READABLE.**
+
+A reference-loaded module (§27.3) is a container in your own store. You can query it — `select` is a
+first-class door (§27.6), and §23.9/§24.2's opt-in interop read is deliberate transparency through the
+glass. There is no read-side capability slice; §24.2 named that gap as an open honesty note and deferred it,
+and nothing since has closed it. So a non-exported member is a member you can plainly read.
+
+This is not a hole to be patched later, and it should not be described as one. **A module's internals are as
+private as a JavaScript bundle's — which is to say, not at all.** The reason is structural, not an
+implementation shortfall: a module you loaded is a module whose deltas are in a container you hold, and
+confidentiality of contents you hold is not something any manifest can grant. Genuine confidentiality would
+mean the deltas never arriving — a remote module you query rather than load, which is a different
+architecture (and one containers can express: §27.6's membership query is already local-or-remote).
+
+So the manifest is an **interface promise, not an access control**. What it actually buys, stated without
+inflation: a consumer knows which names are stable across versions, which surface is meant to be depended
+on, and which law they are being asked to bless. What it does not buy: secrecy. In the §13 register, the
+manifest widens nothing a door may lawfully answer — it narrows what a *maintainer* has promised to keep
+working, and that is a social contract enforced by version identity, not a boundary enforced by the store.
+
+**A minimum substrate version, and nothing more.** A manifest states the lowest rhizomatic version the
+module requires. This is not speculative future-proofing; the case has already happened. Composable set
+difference and intersection arrived in rhizomatic 0.6.0 (#16), so a module whose membership query nests a
+`difference` simply cannot evaluate on 0.5.x — and without a stated floor the consumer meets that as a
+confusing evaluation failure deep in a Term instead of a clean refusal at load. One version floor turns a
+runtime mystery into a door-level "this module needs 0.6.0, you have 0.5.2." Everything else a fuller
+dependency story might carry — version ranges, a solver, transitive resolution across the §27.4 frozen DAG —
+is deferred until a module actually pins another module, and is noted here only so the deferral is on the
+record rather than an oversight.
+
+**Storage follows §27.2's rule, restated because the manifest is the first thing that will be tempted to
+break it: a persisted export names its target by content address and never holds its bytes.** Content
+addressing is hash consing — a delta's id *is* its structural hash — so naming costs an address where
+embedding would cost a copy. That single choice is three properties at once: the shared representation (a
+version over ten thousand members is ten thousand addresses); erasure correctness by construction (§11/§24.8
+— a manifest that NAMES its exports cannot become a place where an erased delta survives, because it never
+held the bytes, and an erased export reads as honestly missing rather than secretly present); and §27.4's
+composition rule, since a version pinning another version is one more address. The same sentence answers the
+memory question, the erasure question, and the federation question, which is usually the sign it is the
+right sentence.
 
 **Provenance.** **Design-stage DRAFT (Claude, 2026-07-15)** — this section names a primitive the arc
 converged on and fixes its two decided questions; it BUILDS nothing and awaits **Myk's sign-off in chat
@@ -322,3 +418,30 @@ address is over members and not over WHEN; an empty membership is a lawful and s
 `freeze` neither widens nor narrows what `select` accepts, asserted as an equivalence between the
 two doors rather than against a pinned error string. Village: `demos/village/phase-membership.mjs`
 freezes a living container and watches the ground move past it.
+
+**§27.8 MANIFEST DESIGNED** (design-stage, ticket T30, Claude 2026-07-20) — closing §27.6's question 1.
+The manifest is member DELTAS (so a version pins its own interface, and nothing about a module lives
+outside the model a module is made of), with the one stated constraint that it may never cite the version
+address it is part of. Exports are a CLOSED list split by whether accepting one is accepting LAW —
+hyperschema / schema / resolver binding / renderer binding are law; entity and byte-blob are facts — which
+hands §27.6's question 3 its exact domain. Each export names its target by that kind's most stable
+identifier (never a raw delta id, which an adoption-merge would silently break by re-signing) and carries a
+module-local ALIAS, the seam that lets a rebuilt `Feed` stay `Feed` across versions and lets two modules
+export the same name without a registry. A minimum rhizomatic version is stated, motivated by a case that
+already happened (a nested `difference` cannot evaluate below 0.6.0); richer dependency resolution is
+deferred and the deferral recorded. Storage follows §27.2: exports NAME their targets by content address
+and never hold bytes — hash consing, which is what content addressing already was (Myk, 2026-07-20) — so
+the shared representation, §11/§24.8 erasure correctness, and §27.4's composition all fall out of one
+choice.
+
+**The correction this section makes, flagged because it changes a promise:** §27.6 described a manifest as
+separating public surface from "internal deltas it needs but does not expose," which implies a
+confidentiality nothing here delivers. §27.8 states plainly that INTERNAL MEANS NOT-ADVERTISED, NOT
+NOT-READABLE — a reference-loaded module is a container in your own store, `select` is a first-class door,
+and there is no read-side capability slice (§24.2 deferred it and nothing since has closed it). A module's
+internals are as private as a JavaScript bundle's. That is structural rather than a shortfall: real
+confidentiality means the deltas never arriving, which is a remote-membership architecture, not a manifest
+field. Recorded here so no later section inherits the stronger reading.
+
+**Design-stage: awaits Myk (P6).** Question 3 (trust on load) remains open and now has a concrete domain —
+the four law rows above — as ticket T31.
