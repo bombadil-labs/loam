@@ -186,6 +186,47 @@ operator withdrew, while reporting success. Two occurrences is why this is a haz
 
 ---
 
+## H8. A delta store invites the full scan — notice it, and pick the affordance carefully
+
+**The property.** rhizomatic's model is a delta SET you evaluate over. That is correct, and it is
+seductive: almost every question ("what is lawful?", "what is struck?", "what is on disk?") has an
+obvious answer that walks everything. The obvious answer is usually right the first time and wrong at
+the tenth thousand delta.
+
+**The hazard.** These scans land on paths that run per-request, per-append, or per-boot, and their
+bound grows MONOTONICALLY — deltas are append-only, tombstones are append-only, so nothing ever
+shrinks the walk. It never fails; it just gets slower forever, and it is invisible in a test suite
+whose fixtures hold ten deltas.
+
+**Ask, every time you write a loop over the whole set:** *what runs this, how often, and what bounds
+it?* Then, before reaching for infrastructure, check the cheap fixes first — they are usually enough:
+
+- **Invert the loop.** Walking `items × candidates` when `candidates × items` answers identically is
+  the most common form, and it costs nothing to fix. `ArchiveBackend.purge` was `ids × fans × files`
+  and is now one pass over files with a Set lookup: ~10M string comparisons per boot became ~10k.
+- **Then, and only then, an affordance** — and choose by FAILURE DIRECTION, which matters more than
+  speed:
+  - An index of **work completed** (a swept high-water mark) fails SAFE: lose it and you redo the
+    work, which is idempotent and merely costs time.
+  - An index of **data location** (`id → path`, a materialized set) fails OPEN: it knows only what
+    was successfully recorded, so it is blind to exactly the cases a completeness sweep exists for —
+    a crash between fsync and rename, a misfiled copy. See H7; this is the same trap wearing a
+    performance costume.
+
+  **Index the work you have COMPLETED, never the data you expect to FIND.** `ArchiveBackend` already
+  embodies this: it keeps an `onDisk` set that `append` consults to skip rewrites, and `purge`
+  deliberately never asks it what to remove.
+
+**Be judicious.** Durable state you did not need is another thing that goes stale and lies. Measure
+after the cheap fix before adding any.
+
+**Cost so far.** Three sites, none of them a wrong ANSWER — which is why review keeps waving them
+through: constitutional reads scan the whole store per request (T37); `withNegationClosure`
+materializes the whole store per call on three hot paths (T51); and `ArchiveBackend.purge` was moved
+onto the boot path by T55's own fix, at `erasures × archived deltas`, before the inversion landed.
+
+---
+
 ## Adding to this file
 
 An entry earns its place by having **cost something** — a bug, a near-miss caught in review, or a

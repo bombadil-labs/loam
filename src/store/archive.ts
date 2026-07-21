@@ -190,32 +190,39 @@ export class ArchiveBackend implements StoreBackend {
         namesByFan.set(fan, []);
       }
     }
-    let removed = 0;
-    for (const id of ids) {
-      let found = false;
-      for (const fan of fans) {
-        const target = join(this.root, fan, `${id}.json`);
-        if (existsSync(target)) {
-          rmSync(target, { force: true, maxRetries: 5, retryDelay: 100 });
-          found = true;
-        }
-        // ...and every `.tmp` STRAGGLER for the same id (ticket T40). `append` writes
-        // `<id>.json.<pid>.tmp`, fsyncs, then renames; a crash in that window leaves the complete
-        // delta on disk under a name reads ignore. "Reads ignore it" is the right bound for
-        // correctness and the WRONG one for §11, where the promise is that the byte is REMOVED, not
-        // that it is unread — a `.tmp` is a plain file any backup, rsync, or tar sweeps up. Purge is
-        // the one operation that must see them, so it matches by prefix rather than exact name.
-        const prefix = `${id}.json.`;
-        for (const name of namesByFan.get(fan) ?? []) {
-          if (!name.startsWith(prefix) || !name.endsWith(".tmp")) continue;
-          rmSync(join(this.root, fan, name), { force: true, maxRetries: 5, retryDelay: 100 });
-          found = true;
-        }
+    // Walk the FILES once and ask each whether its id is dead — not the ids once and search every
+    // fan for each. The two answer identically (both visit every file in every fan), but the
+    // id-outer form costs ids × fans stat calls plus ids × files string comparisons, and `heal`
+    // hands this the whole accumulated tombstone set on every boot. At 1,000 erasures over 10,000
+    // archived deltas that is ~256,000 `existsSync` and ~10M `startsWith` per start, growing
+    // forever because tombstones are append-only. File-outer is one Set lookup per file.
+    //
+    // Note what is NOT used: `onDisk`. It is an index of what this handle believes it wrote, and a
+    // purge that consulted it would see only what the bookkeeping knows — while the whole point of
+    // the sweep is the bytes it does NOT know about (a crash between fsync and rename, a misfiled
+    // copy). Index the work you have COMPLETED, never the data you expect to FIND.
+    const dead = new Set(ids);
+    const found = new Set<string>();
+    for (const fan of fans) {
+      for (const name of namesByFan.get(fan) ?? []) {
+        // `<id>.json` — the canonical file. `<id>.json.<pid>.tmp` — a straggler `append` left when
+        // it fsynced and then died before the rename (ticket T40). Reads ignore the latter, which
+        // is the right bound for correctness and the WRONG one for §11: the promise is that the
+        // byte is REMOVED, not that it is unread, and a `.tmp` is a plain file any backup sweeps up.
+        const cut = name.endsWith(".json")
+          ? name.length - ".json".length
+          : name.endsWith(".tmp")
+            ? name.indexOf(".json.")
+            : -1;
+        if (cut <= 0) continue;
+        const id = name.slice(0, cut);
+        if (!dead.has(id)) continue;
+        rmSync(join(this.root, fan, name), { force: true, maxRetries: 5, retryDelay: 100 });
+        found.add(id);
       }
-      if (found) removed += 1;
-      this.onDisk.delete(id);
     }
-    return removed;
+    for (const id of dead) this.onDisk.delete(id);
+    return found.size;
   }
 
   async close(): Promise<void> {

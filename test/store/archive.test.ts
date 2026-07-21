@@ -10,6 +10,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -117,5 +118,39 @@ describe("ArchiveBackend replication by copy", () => {
     const merged = new ArchiveBackend(rootB);
     expect(ids(await merged.deltasSince(new Set()))).toEqual(ids([signed, other, unsigned]));
     await merged.close();
+  });
+});
+
+describe("ArchiveBackend purge sweeps files, not id-by-fan", () => {
+  it("removes canonical files and stragglers across many ids in one pass, counting distinct ids", async () => {
+    const root = freshRoot();
+    const store = new ArchiveBackend(root);
+    const many = Array.from({ length: 200 }, (_, i) =>
+      observed(FERN, "height", i, 5000 + i, GARDENER_SEED),
+    );
+    await store.append(many);
+
+    // Half get a crash-left straggler beside them; a quarter are purged with no file at all (the
+    // already-swept case a retry produces), so the count must be DISTINCT IDS ACTUALLY FOUND.
+    const doomed = many.slice(0, 100);
+    for (const d of doomed.slice(0, 50)) {
+      writeFileSync(`${fileFor(root, d.id)}.31337.tmp`, readFileSync(fileFor(root, d.id)));
+    }
+    const neverHere = Array.from({ length: 50 }, (_, i) =>
+      observed(FERN, "absent", i, 9000 + i, SURVEYOR_SEED),
+    );
+
+    const removed = await store.purge([...doomed.map((d) => d.id), ...neverHere.map((d) => d.id)]);
+    expect(removed).toBe(100);
+
+    const left = await store.deltasSince(new Set());
+    expect(left.length).toBe(100);
+    // No straggler survives — the assertion that reads the directory rather than the API.
+    const stragglers = readdirSync(root, { withFileTypes: true })
+      .filter((f) => f.isDirectory())
+      .flatMap((f) => readdirSync(join(root, f.name)))
+      .filter((name) => name.endsWith(".tmp"));
+    expect(stragglers).toEqual([]);
+    await store.close();
   });
 });
