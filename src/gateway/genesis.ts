@@ -56,7 +56,26 @@ export function assembleGenesis(spec: GenesisSpec): Genesis {
   const operator = authorForSeed(seed);
   const deltas: Delta[] = [signClaims(operatorMarkerClaims(operator), seed)];
   let clock = 1;
+  // Two registrations over one hyperschema ENTITY that resolve to the same lens name can never both
+  // bind — replay keys latest-per-lens, so one silently wins by array order (H6 at the mint site).
+  // Refuse the spec rather than serve a policy the operator's ordering, not their intent, selected.
+  const seenLens = new Set<string>();
   for (const reg of spec.registrations ?? []) {
+    // The LENS name, exactly as the live mint paths derive it (`schema.name ?? hyperschema.name`,
+    // honouring an explicit `lensName`). Passing the PROGRAM name here is what collapsed siblings.
+    const lensName = reg.lensName ?? reg.schema.name ?? reg.hyperschema.name;
+    // Key on NUL, the separator the reader's latest-per-lens dedup uses — NUL is the one character
+    // both mint paths forbid in a name, so (entity, lens) joins unambiguously. A space could let two
+    // distinct pairs collide into a false refusal.
+    const key = [schemaEntityFor(reg.hyperschema, reg.entity), lensName].join("\u0000");
+    if (seenLens.has(key)) {
+      throw new Error(
+        `genesis: two registrations over the same hyperschema resolve to lens "${lensName}" — ` +
+          `they cannot both bind, so one would be silently dropped. Give each reading a distinct ` +
+          `schema name.`,
+      );
+    }
+    seenLens.add(key);
     // Four deltas per registration (SPEC §21): the hyperschema DEFINITION, the LIVING resolution
     // Schema entity, its frozen VersionedSchema SNAPSHOT, and the BINDING that references all three.
     // Deterministic timestamps keep boot idempotent. The binding carries its `writable` list through
@@ -68,7 +87,7 @@ export function assembleGenesis(spec: GenesisSpec): Genesis {
     );
     const { living, snapshot, binding } = registrationDeltaClaims(
       entity,
-      reg.hyperschema.name,
+      lensName,
       reg.schema,
       reg.roots,
       operator,
