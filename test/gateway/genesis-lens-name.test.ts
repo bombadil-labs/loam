@@ -85,7 +85,7 @@ describe("§21.7 — a genesis mints each reading under its own lens name", () =
     await gw.close();
   });
 
-  it("REFUSAL: a genesis whose two registrations resolve to the SAME lens name is refused, not reduced", async () => {
+  it("REFUSAL: a genesis whose two registrations resolve to the SAME lens name is refused, not reduced", () => {
     // Two readings that collide on lens name (both "Plant") over one hyperschema can never both
     // bind — silently dropping one is how array order used to pick the served policy. Refuse loudly.
     expect(() =>
