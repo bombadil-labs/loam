@@ -29,7 +29,7 @@ import {
   type QueryResult,
   type RequestContext,
 } from "../gateway/gateway.js";
-import { parseRegistrationInput, schemaEntityFor } from "../gateway/registration.js";
+import { parseRegistrationInput, schemaEntityFor, type LensName } from "../gateway/registration.js";
 
 export interface TokenIdentity {
   readonly actor?: string; // a signing seed: requests act as this identity
@@ -177,7 +177,7 @@ const sendBytes = (
 const byteDoorOf = (
   pathname: string,
   params: URLSearchParams,
-): { ref: string; lens: string; entity: string } | undefined => {
+): { ref: string; lens: LensName; entity: string } | undefined => {
   const segs = pathname.split("/").slice(3);
   if (segs.length !== 1 || segs[0] === "") return undefined;
   const fromRaw = params.get("from");
@@ -186,7 +186,13 @@ const byteDoorOf = (
     const from = decodeURIComponent(fromRaw);
     const i = from.indexOf("/");
     if (i <= 0 || i >= from.length - 1) return undefined;
-    return { ref: decodeURIComponent(segs[0]!), lens: from.slice(0, i), entity: from.slice(i + 1) };
+    // The trust boundary: `lens` is a stranger's URL segment, blessed as a LensName here so the door
+    // gates on it with the brand intact. serveBytesImpl re-resolves under the door's discipline.
+    return {
+      ref: decodeURIComponent(segs[0]!),
+      lens: from.slice(0, i) as LensName,
+      entity: from.slice(i + 1),
+    };
   } catch {
     return undefined;
   }

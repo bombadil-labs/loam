@@ -23,9 +23,14 @@ import { MemoryBackend } from "../../src/store/memory.js";
 import { publicClaims } from "../../src/gateway/public.js";
 import { buildOpenApi } from "../../src/surface/rest.js";
 import { bytesEnvelope, INLINE_MAX, findBytesByRef } from "../../src/gateway/bytes.js";
-import { parseResolvers, type ResolverSpecs } from "../../src/gateway/registration.js";
+import {
+  parseResolvers,
+  type ResolverSpecs,
+  type LensName,
+} from "../../src/gateway/registration.js";
 import { PLANT } from "./fixtures.js";
 import { FERN } from "../spike/garden.js";
+const L = (n: string): LensName => n as LensName;
 
 const OP_SEED = "0e".repeat(32);
 const OP = authorForSeed(OP_SEED);
@@ -137,7 +142,7 @@ describe("§23.7 the byte-door: proof of read, uniform 404, erasure by construct
   it("serves the raw bytes (200 + the BytesView's mime) for a ref the resolved view contains (rail b)", async () => {
     const gw = await boot();
     await gw.append([bytesFact(FERN, "avatar", "image/png", SMALL, 1000)]);
-    const out = gw.serveBytes(contentAddress(SMALL), "Plant", FERN, "full");
+    const out = gw.serveBytes(contentAddress(SMALL), L("Plant"), FERN, "full");
     expect(out.status).toBe(200);
     expect(out.contentType).toBe("image/png");
     expect([...out.body]).toEqual([...SMALL]);
@@ -148,9 +153,9 @@ describe("§23.7 the byte-door: proof of read, uniform 404, erasure by construct
     const gw = await boot();
     await gw.append([bytesFact(FERN, "avatar", "image/png", SMALL, 1000)]);
     const ref = contentAddress(SMALL);
-    expect(gw.serveBytes(ref, "Plant", "entity:absent", "full").status).toBe(404);
-    expect(gw.serveBytes(contentAddress(BIG), "Plant", FERN, "full").status).toBe(404);
-    expect(gw.serveBytes(ref, "NoSuchLens", FERN, "full").status).toBe(404);
+    expect(gw.serveBytes(ref, L("Plant"), "entity:absent", "full").status).toBe(404);
+    expect(gw.serveBytes(contentAddress(BIG), L("Plant"), FERN, "full").status).toBe(404);
+    expect(gw.serveBytes(ref, L("NoSuchLens"), FERN, "full").status).toBe(404);
     await gw.close();
   });
 
@@ -159,9 +164,9 @@ describe("§23.7 the byte-door: proof of read, uniform 404, erasure by construct
     const fact = bytesFact(FERN, "avatar", "image/png", SMALL, 1000);
     await gw.append([fact]);
     const ref = contentAddress(SMALL);
-    expect(gw.serveBytes(ref, "Plant", FERN, "full").status).toBe(200);
+    expect(gw.serveBytes(ref, L("Plant"), FERN, "full").status).toBe(200);
     await gw.erase(fact.id, { reason: "the subject asked to be forgotten" });
-    expect(gw.serveBytes(ref, "Plant", FERN, "full").status).toBe(404);
+    expect(gw.serveBytes(ref, L("Plant"), FERN, "full").status).toBe(404);
     await gw.close();
   });
 
@@ -170,12 +175,12 @@ describe("§23.7 the byte-door: proof of read, uniform 404, erasure by construct
     await gw.append([bytesFact(FERN, "avatar", "image/png", SMALL, 1000)]);
     const ref = contentAddress(SMALL);
     // Before declaration: the stranger's door sees no lens at all → 404.
-    expect(gw.serveBytes(ref, "Plant", FERN, "public").status).toBe(404);
+    expect(gw.serveBytes(ref, L("Plant"), FERN, "public").status).toBe(404);
     // The full door serves it regardless (a token may read a registered lens).
-    expect(gw.serveBytes(ref, "Plant", FERN, "full").status).toBe(200);
+    expect(gw.serveBytes(ref, L("Plant"), FERN, "full").status).toBe(200);
     // After the operator declares Plant public: the anonymous door serves it too.
     await gw.append([signClaims(publicClaims(["Plant"], OP, 2000), OP_SEED)]);
-    expect(gw.serveBytes(ref, "Plant", FERN, "public").status).toBe(200);
+    expect(gw.serveBytes(ref, L("Plant"), FERN, "public").status).toBe(200);
     await gw.close();
   });
 });
