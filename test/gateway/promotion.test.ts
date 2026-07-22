@@ -319,4 +319,38 @@ describe("§24.3/§27 — a STRUCK adoption record leaves the trail and lets pro
     await q.drop();
     await primary.close();
   });
+  it("BRIDGE (regression): a citation still rewrites after the cited value's provenance record is struck", async () => {
+    const primary = await bootPrimary();
+    const q = await primary.openQuarantine();
+    const factA = foreignFact("cited value, provenance later withdrawn", 3900);
+    const factB = signClaims(
+      {
+        timestamp: 3910,
+        author: GUEST,
+        pointers: [
+          { role: "subject", target: { kind: "entity", entity: { id: FERN, context: "message" } } },
+          {
+            role: "value",
+            target: { kind: "primitive", value: "cites A after A's record is struck" },
+          },
+          { role: "cites", target: { kind: "delta", deltaRef: { delta: factA.id } } },
+        ],
+      },
+      GUEST_SEED,
+    );
+    await q.gateway.federate([factA, factB]);
+    const { promoted: adoptedA } = await primary.promote(q.gateway, factA.id);
+    const recordA = recordFor(primary, adoptedA)!;
+    // Withdraw A's PROVENANCE record (keeping the value) — the §27 review action T46's audit rail
+    // blesses. The reference bridge must NOT be severed: A's counterpart still stands and is citable.
+    await primary.append([
+      signClaims(makeNegationClaims(OP, 9_000_001, recordA.id, "withdraw A's provenance"), OP_SEED),
+    ]);
+    // Before the bridge decoupling this threw "would dangle" — the struck record removed the bridge.
+    const { promoted: adoptedB } = await primary.promote(q.gateway, factB.id);
+    const cited = primary.reactor.get(adoptedB)!.claims.pointers.find((p) => p.role === "cites")!;
+    expect(cited.target.kind === "delta" && cited.target.deltaRef.delta).toBe(adoptedA); // rewritten
+    await q.drop();
+    await primary.close();
+  });
 });

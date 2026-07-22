@@ -8,7 +8,7 @@
 // dropped wholesale, so there is nothing to negate delta-by-delta).
 
 import { signClaims } from "@bombadil/rhizomatic";
-import type { Claims, Reactor } from "@bombadil/rhizomatic";
+import type { Claims, Delta, Reactor } from "@bombadil/rhizomatic";
 import type { Gateway } from "./gateway.js";
 import { lawfulNegated } from "./registration.js";
 
@@ -99,17 +99,37 @@ export function isAdoption(claims: Claims): boolean {
 // canonical value back to the quarantine that produced it (the raw material of a "review what's in here"
 // interface, §27). `operator` filters the trail to one author's adoptions; absent, every adoption record
 // in the ground is read (an optional filter filters — it never empties).
-export function readAdoptions(reactor: Reactor, operator?: string): Adoption[] {
+export function readAdoptions(
+  reactor: Reactor,
+  operator?: string,
+  opts?: { includeStruck?: boolean },
+): Adoption[] {
   const out: Adoption[] = [];
   // A struck record is not a record: every sibling constitutional reader gates on the negation
   // algebra, and `adopt.ts` was the one that did not (H1 at the audit surface). Without this, a
   // withdrawn provenance keeps appearing in the trail, and `promoteImpl`'s presence short-circuit
   // rides that stale trail — re-promoting a value whose record was struck reports success and lands
   // nothing. Forgiveness (striking the record) must let promotion re-establish it.
-  const negated = lawfulNegated(reactor, operator);
+  //
+  // Scoped to each record's OWN author: an adoption record is operator-authored, and only its
+  // author's lawful strike forgives it — a federated stranger's negation retires nothing the
+  // operator planted (the same doctrine `lawfulNegated` itself keeps). Memoized so the common
+  // single-operator case is one build. `includeStruck` is the internal escape for the citation
+  // BRIDGE (promoteImpl): a withdrawn provenance record does not un-adopt the value, so a delta
+  // still citable through its present counterpart must stay findable even after the record is struck.
+  const negatedByAuthor = new Map<string, (id: string) => boolean>();
+  const struck = (d: Delta): boolean => {
+    if (opts?.includeStruck === true) return false;
+    let f = negatedByAuthor.get(d.claims.author);
+    if (f === undefined) {
+      f = lawfulNegated(reactor, d.claims.author);
+      negatedByAuthor.set(d.claims.author, f);
+    }
+    return f(d.id);
+  };
   for (const d of reactor.snapshot()) {
     if ((operator !== undefined && d.claims.author !== operator) || !isAdoption(d.claims)) continue;
-    if (negated(d.id)) continue; // the operator withdrew this provenance record
+    if (struck(d)) continue; // the operator withdrew this provenance record
     const prim = (role: string): string | undefined => {
       const p = d.claims.pointers.find((x) => x.role === role);
       return p?.target.kind === "primitive" ? String(p.target.value) : undefined;
@@ -173,12 +193,22 @@ export async function promoteImpl(
   // primary holds passes as-is; one the primary knows only THROUGH AN ADOPTION is REWRITTEN to cite its
   // adopted counterpart (promotion re-signs, so a pool id can never appear in the primary — the trail is
   // the bridge). A citation satisfying neither is refused: adopt the cited delta first, then this one.
-  const trail = new Map(gw.adoptions().map((a) => [a.sourceDelta, a.adoptedDelta]));
+  //
+  // The BRIDGE reads struck records TOO: withdrawing a provenance record (§27 review) does not
+  // un-adopt the value — the counterpart still stands in the primary and remains legitimately
+  // citable, so a strike on the record must not sever the reference bridge (guarded per-counterpart
+  // by the presence check below). The idempotence short-circuit, in contrast, reads the LIVE trail.
+  const bridge = new Map(
+    readAdoptions(gw.reactor, gw.operatorAuthor, { includeStruck: true }).map((a) => [
+      a.sourceDelta,
+      a.adoptedDelta,
+    ]),
+  );
   const pointers = src.claims.pointers.map((p) => {
     if (p.target.kind !== "delta") return p;
     const cited = p.target.deltaRef.delta;
     if (gw.reactor.get(cited) !== undefined) return p;
-    const counterpart = trail.get(cited);
+    const counterpart = bridge.get(cited);
     if (counterpart !== undefined && gw.reactor.get(counterpart) !== undefined) {
       return {
         ...p,
@@ -202,8 +232,12 @@ export async function promoteImpl(
     gw.options.seed,
   );
   // Idempotence: an adoption that already stands is returned, never re-landed — one output, one
-  // adopted delta, one trail record, however many times the operator says yes.
-  if (trail.get(deltaId) === adopted.id && gw.reactor.get(adopted.id) !== undefined) {
+  // adopted delta, one trail record, however many times the operator says yes. This reads the LIVE
+  // trail (struck records filtered), so once the operator withdraws a record, re-promotion re-lands
+  // it. (The adopted VALUE's own survival — a §14 negation on it, distinct from erase — is checked
+  // by presence here, not survival; closing that is T39, a deliberate refuse-vs-revive decision.)
+  const live = new Map(gw.adoptions().map((a) => [a.sourceDelta, a.adoptedDelta]));
+  if (live.get(deltaId) === adopted.id && gw.reactor.get(adopted.id) !== undefined) {
     return { promoted: adopted.id };
   }
   const record = signClaims(
