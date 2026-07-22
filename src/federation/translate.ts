@@ -27,6 +27,7 @@ import {
 } from "@bombadil/rhizomatic";
 import type { AppendReceipt, Gateway } from "../gateway/gateway.js";
 import { lawfulNegated, lawfulSnapshot } from "../gateway/registration.js";
+import { promotionRefusal } from "../gateway/adopt.js";
 
 export const CTX_TRANSLATION = "loam.translation";
 
@@ -278,15 +279,26 @@ export async function translate(
           unbound += 1;
           continue;
         }
+        const emitted: Pointer[] = [
+          ...pointers,
+          { role: "translates", target: { kind: "delta", deltaRef: { delta: source.id } } },
+        ];
+        // `translate` re-speaks foreign content in the OPERATOR's voice (the pass runs under the
+        // operator seed), so it must refuse the reserved vocabulary the promote door already refuses
+        // for the SAME crossing — `loam.*`/`rhizomatic.*` contexts, `loam:` ids, negations. Otherwise
+        // an operator-blessed spec whose template names a reserved context lets a stranger's delta —
+        // which picks the entity id — mint operator-authored LAW (a grant, a trust edge, a
+        // registration). The guard is `promotionRefusal`, the one that guards adoption (§24.4/T54).
+        if (promotionRefusal({ timestamp: source.claims.timestamp, author, pointers: emitted })) {
+          unbound += 1;
+          continue;
+        }
         emissions.push(
           signClaims(
             {
               timestamp: source.claims.timestamp, // deterministic → same id → idempotent
               author,
-              pointers: [
-                ...pointers,
-                { role: "translates", target: { kind: "delta", deltaRef: { delta: source.id } } },
-              ],
+              pointers: emitted,
             },
             opts.seed,
           ),
