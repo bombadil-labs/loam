@@ -270,11 +270,20 @@ export async function eraseImpl(
   // glass unconditionally; a quarantine that could hide a purged byte would be an erasure-evasion channel.
   const seen = new Set<Gateway>([gw]);
   for (const pool of gw.quarantinePools) await pool.eraseReplica(tombstone, id, seen);
-  // NOW the verdict, once every tier has been swept. Only a 0 count is in doubt, so only a 0 pays
-  // for the scan: a store that removed rows plainly removed them, while 0 could be a completed
-  // earlier attempt (`purge` deletes rows and may still throw on a WAL it could not truncate — the
-  // caller retries, and on that retry the rows are already gone) or a store that silently refused.
-  // Byte-presence separates them, and it is the only thing §11 actually promises about.
+  // NOW the verdict, once every tier has been swept — the SAME rule the replica fan-out uses.
+  await assertBytesGone(gw, id, removed);
+  return { erased: id, citations };
+}
+
+// §11's completeness verdict, shared by the primary erase and the replica fan-out so they cannot
+// decide by two different rules (T62). A purge count of 0 is AMBIGUOUS — it means "this tier never
+// held it" exactly as often as "this tier failed to remove it" — so the count cannot carry the
+// verdict; byte-presence can, and it is the only thing §11 actually promises about. Only a 0 pays
+// for the scan: a positive count plainly removed rows, while 0 could be a completed earlier attempt
+// (`purge` deletes rows and may still throw on a WAL it could not truncate — the retry finds them
+// already gone), a tier that never held the id, or a store that silently refused. A store still
+// holding the id after a swept, re-seated erase has not kept the promise.
+async function assertBytesGone(gw: Gateway, id: string, removed: number): Promise<void> {
   if (removed === 0 && (await gw.backend.deltasSince(new Set())).some((d) => d.id === id)) {
     throw new Error(
       `erase ${id}: the tombstone is recorded and every tier was swept, but the content is STILL ` +
@@ -282,7 +291,6 @@ export async function eraseImpl(
         `re-run is safe and will not mint a second tombstone.`,
     );
   }
-  return { erased: id, citations };
 }
 
 // Honor an erasure DECIDED by the primary operator (the body of `Gateway.eraseReplica`, SPEC §24.8),
@@ -320,7 +328,7 @@ export async function eraseReplicaImpl(
       `the erasure did not complete: the operator's tombstone for ${id} could not land in an attached pool`,
     );
   }
-  await gw.backend.purge([id]);
+  const removed = await gw.backend.purge([id]);
   await gw.reseat();
   // Transitive: a pool of a pool holds the operator's bytes too. `seen` guards the walk — a cycle
   // among pools cannot arise from openQuarantine (each pool is a fresh gateway), but a fan-out
@@ -329,4 +337,8 @@ export async function eraseReplicaImpl(
   for (const pool of gw.quarantinePools) {
     if (!seen.has(pool)) await pool.eraseReplica(tombstone, id, seen);
   }
+  // The SAME byte-presence verdict the primary uses (T62): a pool that held the byte and removed
+  // nothing would otherwise report a silent success for content still at rest — the §24.8 evasion
+  // channel this fan-out exists to close. A purge that discards its count decides nothing.
+  await assertBytesGone(gw, id, removed);
 }

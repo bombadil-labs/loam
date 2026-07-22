@@ -8,7 +8,7 @@
 // read-only mount (present → incomplete).
 
 import { describe, expect, it } from "vitest";
-import { authorForSeed, type Delta, type Policy, type Schema } from "@bombadil/rhizomatic";
+import { type Policy, type Schema } from "@bombadil/rhizomatic";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
