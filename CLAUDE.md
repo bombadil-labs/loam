@@ -68,14 +68,56 @@ All updated. **`adlc:prosecutor-{correctness,security,tests,contract,diff}` and
 is what the "spawn a subagent" rule above means in practice. Use them; do not hand-roll review
 prompts beside a shipped panel (that mistake cost a day).
 
-**`adlc review` works on Windows via a LOCAL PATCH — re-apply it after any adlc upgrade:**
-`npm run adlc:patch` (`scripts/patch-adlc-npx.mjs`). Upstream's `runExternal` spawns bare `npx`,
-which on Windows needs BOTH `npx.cmd` AND `shell: true` — naming the `.cmd` alone turns `ENOENT`
-into `EINVAL`, because Node ≥18.20.2 refuses to spawn `.bat`/`.cmd` without a shell
-(CVE-2024-27980). The script is idempotent, completes a half-applied patch, and REFUSES rather than
-guessing if upstream restructures the call. It patches a GLOBAL package, so `npm i -g @adlc/cli`
-wipes it — that is the whole reason it is a script and not a hand-edit. Delete it once a released
-`@adlc/cli` spawns correctly on Windows.
+**TWO adlc CLIs are broken on Windows and both run via LOCAL PATCHES — re-apply after any adlc
+upgrade with `npm run adlc:patch`.** They patch a GLOBAL package, so `npm i -g @adlc/cli` wipes
+them; that is why they are scripts and not hand-edits. Both are idempotent, both count call sites
+rather than testing presence, both read the file back, and both REFUSE rather than guess if upstream
+restructures the call. Delete each once a released `@adlc/cli` works on Windows.
+
+- **`adlc review`** (`scripts/patch-adlc-npx.mjs`) — `runExternal` spawns bare `npx`, which Node
+  will not resolve without PATHEXT, so the reviewer died `ENOENT`. Naming `npx.cmd` turns that into
+  `EINVAL` (Node ≥18.20.2 refuses `.cmd` without a shell, per CVE-2024-27980), and `shell: true`
+  fixes the spawn by opening an argument-injection hole in a command that forwards diff paths and
+  free text. The patch takes the third road: spawn **node against npm's own `npx-cli.js`** — no
+  `.cmd`, no shell, argv stays an array, mitigation satisfied rather than disabled.
+- **`adlc init`** (`scripts/patch-adlc-init.mjs`) — `writeFileNoFollow` opens an existing file
+  `O_WRONLY|O_TRUNC`, and Windows rejects `O_TRUNC` without `O_CREAT` (`EINVAL`). The exclusive
+  `O_CREAT|O_EXCL` branch works, so init cheerfully CREATES what is missing and dies on the first
+  file that already exists — which is why this repo had a hand-written `.gitignore` and no
+  `config.json`. The patch adds `O_CREAT` **on win32 only**, leaving POSIX flags byte-identical.
+
+**`.adlc/` is an ALLOWLIST and `adlc init` owns it.** Committed: `config.json`, `tickets.json`,
+`tickets/`, `specs/` — the CONTRACT. Local, per-worktree, never committed: `findings.jsonl`,
+`manifest.jsonl`, `ticket-transactions/` — evidence that gates assert against *here*, which would
+collide across branches if shared. Do not hand-add a negation; if an upgrade adds a contract file,
+re-run `adlc init`. (A committed ledger looks like durability and is really a merge conflict; the
+durable home for a finding is P7 distillation into `SUBSTRATE-HAZARDS.md` and the journal.)
+
+**`adlc run <phase>` asserts the phase's evidence exists, and the names are EXACT.** You record with
+`adlc gate-manifest record <gate-name> --ticket <id>` and assert with `adlc run <phase> --ticket
+<id>`; a gate recorded under an invented name satisfies nothing — the run still fails closed, and
+the evidence you did produce is invisible to it. The required set per phase:
+
+| phase | required evidence |
+|---|---|
+| `p1` | `spec-lint`, `premortem` |
+| `p2` | `coldstart`, `merge-forecast` |
+| `p3` | `rails-red`, `hollow-test`, `rails-frozen` |
+| `p4` | `rails-green`, `rails-check`, `flail-check` |
+| `p5` | `p5-complete` |
+| `p6` | `p5-complete`, `p6-acceptance-packet` |
+| `p7` | `lesson-foundry`, `rejection-mining`, `skill-rot` |
+
+`p3`–`p6` also require a **ticket**, and `p5`/`p6` a **revision**: the P5 record binds the ticket
+definition, the transcript, and a clean-worktree revision by hash, so it goes STALE the moment the
+tree moves. Prosecute last, and re-prosecute after any fixup — an amended commit invalidates the
+evidence by design.
+
+**`adlc hollow-test` is the shipped detector for our worst recurring bug** — it mutates changed code
+and reports the mutants your tests do not kill. Run it in P3 rather than hand-rolling revert-probes.
+Scope it: it mutates **whatever is in the diff**, so a commit that bundles `.adlc/` evidence with
+code will have its JSON log lines mutated and reported as survivors. Point it at source with
+`--target <file>` (repeatable) or `--rails <ticket.json>`, which expands the ticket's rails globs.
 
 **And `adlc prosecute` is an evidence RECORDER**
 (`--input passes.json`): it writes down what it is handed and never verifies a review occurred, so
@@ -120,6 +162,13 @@ The phases, with Loam's own craft folded into each:
    Freeze them as `rails` on the ticket; `adlc rails-guard` (and the plugin's PreToolUse rail hook)
    then protect them. Once any ticket declares `rails`, `.adlc/tickets.json` itself becomes a frozen
    trust root — edits need `ADLC_RAILS_BYPASS=1` (an audited, deliberate act).
+
+   The phase's three evidence names say what the order must be: **`rails-red`** (watch them FAIL
+   first — a rail never seen red has proven nothing), **`hollow-test`** (mutate the code and confirm
+   they kill the mutants), then **`rails-frozen`**. Run `adlc hollow-test --rails .adlc/tickets.json`
+   or `--target <file>` rather than hand-rolling a revert-probe; it asks *could this pass with the
+   behavior broken?* mechanically, on every changed line, which is the question we kept answering by
+   hand and kept getting wrong.
 
    **ASSERT AT BOTH LEVELS — DELTA AND OBJECT. It is not either/or** (Myk, 2026-07-21). A rail that
    only checks one leaves the other open to nuanced bugs, and 2026-07-21 produced the failure in
@@ -206,8 +255,11 @@ The phases, with Loam's own craft folded into each:
    produces perfect rails around a real bug — which is exactly how all three of the negation-closure
    sites shipped green. The audit is the only step that reads the code without the ticket's
    assumptions, and that is a different question from every other gate.
-7. **P6 — Integrate (the human gate).** Myk decides. Surface the evidence (`adlc gate-manifest
-   show`, behavior diffs). **The landing PR writes the ticket's design as a new `spec/NN-slug.md`
+7. **P6 — Integrate (the human gate).** Myk decides. Surface the evidence: `adlc accept --ticket
+   <id> --packet <packet.json>` builds the **acceptance packet** (`p6-acceptance-packet`, the second
+   thing `adlc run p6` demands, alongside a still-fresh `p5-complete`), and it takes optional
+   `--before`/`--after` snapshots so the behavior diff rides in the packet rather than in prose.
+   `adlc gate-manifest show --ticket <id>` prints the trail. **The landing PR writes the ticket's design as a new `spec/NN-slug.md`
    file — the LAST step, and the only step that touches `spec/`** — the whole section, closed by its
    `**Provenance.**` footer (the PR link(s) + a short implementation note) — adds its row to the
    `SPEC.md` index, and removes the realized ticket from `.adlc/tickets.json`. It is written FROM the
@@ -225,7 +277,12 @@ The phases, with Loam's own craft folded into each:
    `demos/village/README.md` (Myk, 2026-07-09: with each new PR, document how you've updated the
    village). `demos/village/homes/` stays untracked (stores and seeds are disposable); the village's
    code and docs ride the ticket's PR.
-9. **P7 — Distill.** Repeated review findings become defenses (`/adlc:adlc-distill`).
+9. **P7 — Distill.** Repeated review findings become defenses (`/adlc:adlc-distill`). The phase has
+   three shipped gates and `adlc run p7` wants all of them: **`lesson-foundry`** (turns the findings
+   ledger into durable rules), **`rejection-mining`** (reads what review REJECTED, not just what it
+   accepted), **`skill-rot`** (finds defenses that have gone stale). This is also where a local
+   `findings.jsonl` earns its keep — it is per-worktree and uncommitted, so a lesson only becomes
+   durable by landing in `SUBSTRATE-HAZARDS.md`, `CLAUDE.md`, or the journal.
 
 After a ticket lands, re-evaluate the **remaining** tickets against what you just learned. A learning
 that changes the plan edits the relevant ticket body (not SPEC.md — SPEC.md is history, changed only
