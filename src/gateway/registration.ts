@@ -717,10 +717,10 @@ const NUL_SEP = String.fromCharCode(0);
 // The lens name a binding carries in its own bytes: the living `schema:<name>` pointer's target,
 // minus the prefix (slice 2prime put it there). A binding predating the prefix convention falls
 // back to the whole id — one name per entity, the conservative pre-coexistence regrouping.
-const lensNameOf = (cand: Candidate): string =>
-  cand.livingEntity.startsWith("schema:")
+const lensNameOf = (cand: Candidate): LensName =>
+  (cand.livingEntity.startsWith("schema:")
     ? cand.livingEntity.slice("schema:".length)
-    : cand.livingEntity;
+    : cand.livingEntity) as LensName;
 
 export function readRegistrations(reactor: Reactor, operator?: string): Registration[] {
   const lawful = lawfulSnapshot(reactor, operator);
@@ -839,7 +839,10 @@ export function readRegistrationVersions(
 // lawful registration here is a plain 404, whatever bytes it names.
 export interface WithdrawnRegistration {
   readonly deltaId: string;
-  readonly schemaName: string;
+  // The LENS name of the struck registration — the same key the §17 door compares against a URL
+  // segment. Named `lensName`, not `schemaName`, so the next reader cannot take it from the
+  // hyperschema (the PROGRAM), which sibling lenses share (hazard H6).
+  readonly lensName: LensName;
 }
 
 export function readWithdrawnRegistrations(
@@ -852,8 +855,12 @@ export function readWithdrawnRegistrations(
   const out: WithdrawnRegistration[] = [];
   for (const cand of withdrawn) {
     try {
-      const schema = loadHyperSchema(lawful, cand.schemaEntity);
-      out.push({ deltaId: cand.id, schemaName: schema.name });
+      // The `loadHyperSchema` call is the loadability guard only — "nothing nameable remains" if the
+      // definition is gone. The NAME comes from `lensNameOf`, the lens the door will compare, never
+      // from the hyperschema (the program). This is the same reader the sibling latest-per-lens and
+      // version readers use above.
+      loadHyperSchema(lawful, cand.schemaEntity);
+      out.push({ deltaId: cand.id, lensName: lensNameOf(cand) });
     } catch {
       // its definition is gone too: nothing nameable remains to say "withdrawn" about
     }
