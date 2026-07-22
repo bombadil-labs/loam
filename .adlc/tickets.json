@@ -260,13 +260,15 @@
       "body": "AUDIT 2026-07-21, angle 'presence vs survival'. CONFIRMED. `adopt.ts` is the ONLY file in src/ that reads a constitutional vocabulary and does not appear in a grep for `negated|struck|lawfulNegated|surviving` - structurally conspicuous beside eight disciplined siblings.\n\n`readAdoptions` (`src/gateway/adopt.ts:101-130`, loop head :103) iterates `reactor.snapshot()` filtering on operator authorship and `isAdoption(...)`, and never applies `lawfulNegated`. Three consequences:\n\n(1) **THE AUDIT TRAIL LIES.** `Gateway.adoptions()` is documented as the visible trail from a canonical value back to the quarantine that produced it, 'for audit and review (§27)'. A provenance record the operator explicitly struck keeps appearing in it. §24.3's premise is that this trail is authoritative.\n\n(2) **PROMOTION SILENTLY NO-OPS.** `promoteImpl` builds `trail` from `gw.adoptions()` (:168), then at :198 short-circuits when `trail.get(deltaId) === adopted.id && gw.reactor.get(adopted.id) !== undefined` - both halves presence checks over a stale trail. Operator promotes P->A with record R, then negates R (withdrawing the provenance, keeping the value). Re-promoting P hits this branch, RETURNS `{ promoted: A }`, and lands NOTHING - no new record. The canonical value lives in history with no surviving provenance and promotion refuses to re-establish it, permanently, while telling the caller it succeeded. **This is the same honesty defect PR #151 fixed for `publish` ('publish answers its outcome'), reappearing in `promote`** - which by CLAUDE.md's own P7 rule makes it a defense rather than a third fix (see the hazard file).\n\n(3) Citation rewrite (:172-179) rides the same stale trail - lower severity, since a citation is about resolvability, but a withdrawn adoption still steers what new canonical deltas point at.\n\nFIX: `const negated = lawfulNegated(reactor, operator)` at the top of `readAdoptions` and `continue` on `negated(d.id)`. That one change also fixes the promote no-op, since the trail then correctly forgets and promotion re-lands a fresh record.\n\nRAILS: a struck adoption record does not appear in `adoptions()`; re-promoting after striking the record LANDS A NEW RECORD and says so; `test/gateway/promotion.test.ts` currently has no negated-adoption case, so nothing pins any of this.\n\nCARE: promotion surface -> Myk's merge (P6).",
       "edges": [],
       "id": "T46",
-      "phase": "P1",
-      "rails": [],
+      "phase": "P5",
+      "rails": [
+        "test/gateway/promotion.test.ts"
+      ],
       "scope": [
         "src/gateway/adopt.ts",
         "test/gateway/promotion.test.ts"
       ],
-      "status": "todo",
+      "status": "in_review",
       "title": "readAdoptions never checks survival - the audit trail lies and promote silently no-ops"
     },
     {
