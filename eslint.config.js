@@ -62,13 +62,16 @@ export default tseslint.config(
       },
     },
   },
-  // Hazard H6, closed at the layer types cannot reach. `lensOf`/`programOf` brand the two names so
-  // `LensName === ProgramName` is a compile error — but rhizomatic types `hyperschema.name` as bare
-  // `string`, so a raw `r.hyperschema.name === <aLensName>` slips past the checker (string vs a brand
-  // is allowed). This forbids `.hyperschema.name` as an operand of a comparison in the door files:
-  // route a program name through `programOf(r)` and the brand is restored, so the comparison is
-  // checked. Reading `.hyperschema.name` for any OTHER purpose (building a materialization key, a
-  // message) is untouched — only the comparison, which is the one that decides authorization.
+  // Hazard H6 backstop. `lensOf`/`programOf` brand the two names so `LensName === ProgramName` is a
+  // compile error — but rhizomatic types `hyperschema.name` as bare `string`, so a raw
+  // `r.hyperschema.name === <aLensName>` slips past the checker (string vs a brand is allowed). This
+  // forbids `.hyperschema.name` as a DIRECT operand of a comparison in the door files: route a
+  // program name through `programOf(r)` and the brand is restored, so the comparison is checked.
+  // SCOPE, stated honestly: it catches the direct form only — the shape every H6 bug has actually
+  // taken. A program name first bound to a variable and then compared (`const p = r.hyperschema.name;
+  // p === lens`) still slips both the checker and this rule; the guard against that is that
+  // `programOf`/`lensOf` are the ergonomic path, not a lint. Reading `.hyperschema.name` for any
+  // non-comparison purpose (a materialization key, a message) is untouched by design.
   {
     files: ["src/gateway/**/*.ts", "src/surface/**/*.ts", "src/server/**/*.ts"],
     ignores: ["src/gateway/registration.ts"], // where lensOf/programOf are defined
