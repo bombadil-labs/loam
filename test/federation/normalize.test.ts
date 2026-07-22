@@ -93,7 +93,7 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
     ).toEqual([]); // the foreign shape is invisible to the local lens
 
     const report = await translate(gateway, { seed: TRANSLATOR_SEED });
-    expect(report).toEqual({ emitted: 1, matched: 1, unbound: 0 });
+    expect(report).toEqual({ emitted: 1, matched: 1, unbound: 0, refused: 0 });
 
     const emission = [...gateway.reactor.snapshot()].find(
       (d) =>
@@ -269,7 +269,7 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
       signClaims(makeNegationClaims(OPERATOR, 6000, foreign.id), OPERATOR_SEED),
     ]);
     const report = await translate(gateway, { seed: TRANSLATOR_SEED });
-    expect(report).toEqual({ emitted: 0, matched: 0, unbound: 0 }); // retired facts stay retired
+    expect(report).toEqual({ emitted: 0, matched: 0, unbound: 0, refused: 0 }); // retired facts stay retired
     await gateway.close();
   });
 
@@ -299,7 +299,7 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
     );
     await gateway.federate([shared]);
     const report = await translate(gateway, { seed: TRANSLATOR_SEED });
-    expect(report).toEqual({ emitted: 0, matched: 1, unbound: 1 }); // recognized, refused whole
+    expect(report).toEqual({ emitted: 0, matched: 1, unbound: 1, refused: 0 }); // recognized, refused whole
     await gateway.close();
   });
 
@@ -352,7 +352,7 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
     await gateway.federate([evasive]);
     const report = await translate(gateway, { seed: TRANSLATOR_SEED });
     // terminal means terminal: shape, not authorship — the reserved role opts the source out
-    expect(report).toEqual({ emitted: 0, matched: 0, unbound: 0 });
+    expect(report).toEqual({ emitted: 0, matched: 0, unbound: 0, refused: 0 });
     await gateway.close();
   });
 
