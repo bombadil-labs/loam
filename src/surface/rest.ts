@@ -325,7 +325,7 @@ export async function handleRest(
       // what this ground holds beyond the declared world (§12's discipline, kept here).
       if (door === "full") {
         const withdrawn = gateway.withdrawnRegistrations();
-        if (withdrawn.some((w) => w.deltaId === hash && w.schemaName === schemaName)) {
+        if (withdrawn.some((w) => w.deltaId === hash && w.lensName === schemaName)) {
           return refuse(
             410,
             "that version was withdrawn by the operator — it is remembered, not served",
