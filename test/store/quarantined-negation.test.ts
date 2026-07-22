@@ -79,7 +79,7 @@ describe("§25/H1 — a quarantined negation names the strike it stranded", () =
       parseClaims: (r) => r as (typeof negation)["claims"],
       computeId: () => negation.id,
       makeDelta: (c, s) => ({ id: negation.id, claims: c, sig: s! }),
-      verifyDelta: () => "valid",
+      verifyDelta: () => "verified",
     });
     expect(verdict.ok).toBe(false);
     if (!verdict.ok) expect(verdict.negates).toBe(TARGET);

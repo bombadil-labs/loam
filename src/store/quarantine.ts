@@ -44,6 +44,46 @@ export interface QuarantinedRow {
   // A short, safe, single-line preview of the raw bytes — enough to recognize the row, never
   // enough to launder bytes back into a delta.
   readonly preview: string;
+  // If this row's claims PARSED (id-mismatch / invalid-signature) and carry a `negates` ref: the id
+  // it strikes. A quarantined negation silently REVIVES its target (a retracted value, a revoked
+  // grant, a tombstone), so naming it turns that silent revival into one the operator can act on
+  // (§25/H1). Absent when the row is unparseable (no claims to read) or is not a negation.
+  readonly negates?: string;
+}
+
+// The target a delta's claims strike, if any — a single `negates` delta-ref (mutate.ts/accounts.ts).
+export function negatesOf(claims: Delta["claims"]): string | undefined {
+  for (const p of claims.pointers) {
+    if (p.role === "negates" && p.target.kind === "delta") return p.target.deltaRef.delta;
+  }
+  return undefined;
+}
+
+// Operator-facing warnings for strikes a quarantine has stranded (§25/H1). A quarantined negation
+// no longer suppresses its target, so the claim it struck reads live until the row is settled — the
+// operator must be TOLD, not left to discover a retracted value serving again. `repair list` prints
+// these. The unparseable case cannot name a target but still cautions that a strike MAY be missing.
+export function strandedStrikeWarnings(rows: readonly QuarantinedRow[]): string[] {
+  const out: string[] = [];
+  let opaque = 0;
+  for (const r of rows) {
+    if (r.negates !== undefined) {
+      out.push(
+        `quarantined row ${r.key} STRUCK delta ${r.negates}; that claim (a retraction, revoked ` +
+          `grant, or tombstone) reads LIVE again until this row is settled — repair discard + ` +
+          `re-federate the healthy copy.`,
+      );
+    } else if (r.reason === "unparseable") {
+      opaque += 1;
+    }
+  }
+  if (opaque > 0) {
+    out.push(
+      `${opaque} quarantined row(s) could not be parsed — a retraction, revoked grant, or ` +
+        `tombstone MAY be missing from the ground. Verify strikes after settling.`,
+    );
+  }
+  return out;
 }
 
 // A short, safe preview: collapse whitespace, replace control characters, truncate. Repair shows
@@ -92,7 +132,12 @@ export interface AdmissionDeps {
 
 export type Admission =
   | { readonly ok: true; readonly delta: Delta }
-  | { readonly ok: false; readonly reason: Exclude<QuarantineReason, "foreign-key"> };
+  | {
+      readonly ok: false;
+      readonly reason: Exclude<QuarantineReason, "foreign-key">;
+      // The strike this row stranded, when its claims parsed far enough to read a `negates` ref.
+      readonly negates?: string;
+    };
 
 // Run the same admission a healthy read runs — parse, recompute the id against the id the row is
 // filed under, verify the signature — and report the FIRST failure as a quarantine reason instead
@@ -110,14 +155,17 @@ export function admit(
   try {
     claims = deps.parseClaims(rawClaims);
   } catch {
-    return { ok: false, reason: "unparseable" };
+    return { ok: false, reason: "unparseable" }; // no claims to read — cannot name a strike
   }
+  // The claims parsed, so a stranded strike is nameable from here on (id-mismatch, invalid-signature).
+  const struck = negatesOf(claims);
+  const negates = struck !== undefined ? { negates: struck } : {};
   if (deps.computeId(claims) !== filedId || claimedId !== filedId) {
-    return { ok: false, reason: "id-mismatch" };
+    return { ok: false, reason: "id-mismatch", ...negates };
   }
   const delta = deps.makeDelta(claims, sig);
   if (deps.verifyDelta(delta) === "invalid") {
-    return { ok: false, reason: "invalid-signature" };
+    return { ok: false, reason: "invalid-signature", ...negates };
   }
   return { ok: true, delta };
 }
