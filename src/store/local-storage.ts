@@ -176,7 +176,12 @@ export class LocalStorageBackend implements StoreBackend, RepairableBackend {
         verifyDelta,
       });
       if (!verdict.ok) {
-        quarantine.push({ key, reason: verdict.reason, preview: previewOf(raw) });
+        quarantine.push({
+          key,
+          reason: verdict.reason,
+          preview: previewOf(raw),
+          ...(verdict.negates !== undefined ? { negates: verdict.negates } : {}),
+        });
         continue;
       }
       if (knownIds.has(verdict.delta.id)) continue;
