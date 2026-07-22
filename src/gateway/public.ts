@@ -13,7 +13,7 @@
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import type { Claims, Reactor } from "@bombadil/rhizomatic";
 import type { Gateway, RequestContext } from "./gateway.js";
-import { lawfulNegated, lawfulSnapshot, programOf } from "./registration.js";
+import { lawfulNegated, lawfulSnapshot, lensOf, type LensName } from "./registration.js";
 
 export const PUBLIC_ENTITY = "loam:public";
 export const CTX_PUBLIC = "loam.public";
@@ -134,15 +134,17 @@ export async function declarePublicImpl(
 function freezePublicEntry(gw: Gateway, entry: string): string {
   const at = entry.indexOf("@");
   if (at < 0) return entry;
-  const name = entry.slice(0, at);
+  // The operator pinned a LENS (the name before `@`). Branding it makes `programOf(v) === name` — the
+  // bug this ticket fixes — a compile error, so the pin can never silently regress to a program key.
+  const name = entry.slice(0, at) as LensName;
   const ver = entry.slice(at + 1);
   const m = /^v([1-9]\d*)$/.exec(ver);
   if (m === null) return entry; // already an @<deltaId> (or opaque): freeze it as given
-  // KNOWN BUG (T47): this compares the PROGRAM name, but `name` is the lens the operator pinned, so
-  // under coexistence the Nth entry is not the Nth version of that lens. Routed through `programOf`
-  // to preserve today's behaviour and satisfy the H6 lint; T47 fixes it to `lensOf` with a rail, and
-  // typing `name` as LensName there turns this line into the compile error that proves the fix.
-  const versions = gw.registrationVersions().filter((v) => programOf(v) === name);
+  // The pin freezes the Nth version OF THE LENS the operator named — `publishRendererImpl` freezes
+  // its own pin the same way. Filtering by the program name would interleave every reading over the
+  // hyperschema (§21.7), so `Plant@v2` could freeze a sibling reading's version and open a door the
+  // operator never declared.
+  const versions = gw.registrationVersions().filter((v) => lensOf(v) === name);
   const pinned = versions[Number(m[1]) - 1];
   if (pinned === undefined) {
     throw new Error(`public: schema "${name}" has no version v${m[1]} (it has ${versions.length})`);
