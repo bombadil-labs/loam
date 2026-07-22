@@ -59,7 +59,8 @@ describe("§9/§24 — translate refuses to re-speak reserved constitutional voc
     await gw.federate([strangerPoke()], { admit: () => true }); // the stranger's source arrives
 
     expect(readTrustPolicy(gw.reactor, OP).mode).toBe("open"); // default, before the pass
-    await translate(gw, { seed: OP_SEED });
+    const report = await translate(gw, { seed: OP_SEED });
+    expect(report.refused).toBe(1); // the operator sees the door was probed, distinct from a benign miss
 
     // OBJECT LEVEL: the store's federation posture must NOT have flipped — the injection was refused.
     expect(readTrustPolicy(gw.reactor, OP).mode).toBe("open");

@@ -240,6 +240,11 @@ export interface TranslateReport {
   readonly emitted: number; // newly landed this pass (union swallowed the rest)
   readonly matched: number; // (spec, source) pairs the recognizers claimed
   readonly unbound: number; // recognized but untranslatable (a hole missing or ambiguous)
+  // A (spec, source) pair whose emission would have crossed into RESERVED constitutional vocabulary
+  // and was refused (§24.4/T54). Kept distinct from `unbound` because it is a security event — a
+  // spec probed with a source aiming at reserved law — not a benign template miss, and an operator
+  // reading the report should see when their door was tested.
+  readonly refused: number;
 }
 
 // One pass of the generic translator: apply every lawful spec to every surviving,
@@ -265,6 +270,7 @@ export async function translate(
   const emissions: Delta[] = [];
   let matched = 0;
   let unbound = 0;
+  let refused = 0;
   if (specs.length > 0) {
     for (const source of gateway.reactor.snapshot()) {
       const isTranslation = source.claims.pointers.some(
@@ -290,7 +296,7 @@ export async function translate(
         // which picks the entity id — mint operator-authored LAW (a grant, a trust edge, a
         // registration). The guard is `promotionRefusal`, the one that guards adoption (§24.4/T54).
         if (promotionRefusal({ timestamp: source.claims.timestamp, author, pointers: emitted })) {
-          unbound += 1;
+          refused += 1;
           continue;
         }
         emissions.push(
@@ -308,5 +314,5 @@ export async function translate(
   }
   const receipt: AppendReceipt =
     emissions.length > 0 ? await gateway.append(emissions) : { accepted: 0, duplicates: 0 };
-  return { emitted: receipt.accepted, matched, unbound };
+  return { emitted: receipt.accepted, matched, unbound, refused };
 }
