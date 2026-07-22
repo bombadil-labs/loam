@@ -89,17 +89,34 @@ The phases, with Loam's own craft folded into each:
    `.adlc/tickets.json` — the body must stand alone (an agent can't see the conversation), the
    `scope`/`rails`/`edges` honest. `coldstart` will check it is executable without guesswork; a
    vague ticket fails it, and that failure is the signal to split it into finer tickets.
-2. **P1 — Interrogate / design-stage.** `adlc spec-lint`, `premortem`, `parallax`, and
-   `adversarial-review --prompt-only` on the ticket/design. **Many Loam tickets are "design-stage":
-   the first deliverable is the drafted SPEC-section prose (staged as its future `spec/NN-*.md`
-   file, to land when the work merges) plus answers to the ticket's listed design questions — and then you STOP and wait for Myk's word in
-   chat before writing implementation code.** "He'd probably approve" is not his word. That stop is
-   the P6 human gate arriving early, at design time.
+2. **P1 — Interrogate / design-stage.** The deliverable is a **WORKING SPEC at
+   `.adlc/specs/NN-slug.md`** — *not* prose staged into `spec/`. `spec/` is the HISTORICAL record
+   and is written only at landing (P6); treating it as the design surface is what let P1's gates be
+   skipped entirely, because a narrative "what IS" section carries no acceptance criteria and
+   `spec-lint` passes it vacuously (`WARNING: no criteria found`, exit 0 — a gate that gates nothing).
+
+   A working spec carries an **`## Acceptance criteria`** heading, and every criterion NAMES ITS
+   VERIFICATION — a test path or a backtick command. That is the whole point: **spec-lint's
+   "verification method" is our rail**, so `adlc spec-lint <path>` mechanically enforces *every
+   promise names the test that will prove it*, at design time, before any code. A criterion with no
+   method is a WISH and gate-FAILS (exit 2). This is the hollow-rail defense moved upstream — from
+   something the model must remember into something the gate refuses.
+
+   Run: `adlc spec-lint .adlc/specs/NN-slug.md` (exit 2 on a wish), then `adlc premortem <path>`
+   (failure-first stress) and `adlc parallax --file <path>` (ambiguity fan-out), plus
+   `adversarial-review --prompt-only` on the design.
+
+   **Then STOP and wait for Myk's word in chat before writing implementation code** — plus answers to
+   the ticket's listed design questions. "He'd probably approve" is not his word. That stop is the P6
+   human gate arriving early, at design time.
 3. **P2 — Decompose.** `adlc coldstart <id> --prompt-only` (executability), `adlc model-router`
    (which model strategy), `adlc merge-forecast` (fan-out width + `mergeOrder`).
 4. **P3 — Rail (tests first).** Write clean, honest tests that capture everything in the ticket —
    the behavior it must exhibit, asserted against real outcomes, not against the shape of the
    implementation. **No reward-hacking: a test that can pass without the desired behavior is a bug.**
+   **Where a working spec exists, its acceptance criteria ARE the rail list** — each criterion already
+   names its verification path, so P3 is writing the tests P1 already committed to, not inventing a
+   set. Freezing them should be transcription; if a criterion has no test yet, P1 under-specified.
    Freeze them as `rails` on the ticket; `adlc rails-guard` (and the plugin's PreToolUse rail hook)
    then protect them. Once any ticket declares `rails`, `.adlc/tickets.json` itself becomes a frozen
    trust root — edits need `ADLC_RAILS_BYPASS=1` (an audited, deliberate act).
@@ -191,10 +208,14 @@ The phases, with Loam's own craft folded into each:
    assumptions, and that is a different question from every other gate.
 7. **P6 — Integrate (the human gate).** Myk decides. Surface the evidence (`adlc gate-manifest
    show`, behavior diffs). **The landing PR writes the ticket's design as a new `spec/NN-slug.md`
-   file** — the whole section, closed by its `**Provenance.**` footer (the PR link(s) + a short
-   implementation note) — adds its row to the `SPEC.md` index, and removes the realized ticket from
-   `.adlc/tickets.json`. The spec grows only here, never speculatively; a new file is the default,
-   editing an existing section the rare exception. Append a record to the journal — a **new
+   file — the LAST step, and the only step that touches `spec/`** — the whole section, closed by its
+   `**Provenance.**` footer (the PR link(s) + a short implementation note) — adds its row to the
+   `SPEC.md` index, and removes the realized ticket from `.adlc/tickets.json`. It is written FROM the
+   settled working spec (`.adlc/specs/NN-slug.md`), re-cast as narrative: `spec/` records what IS, in
+   prose, for a reader; the working spec was a gateable instrument for a builder. Different genres,
+   different lifetimes — do not paste one into the other. The working spec has served its purpose at
+   this point and may be left as the design's audit trail. The spec grows only here, never
+   speculatively; a new file is the default, editing an existing section the rare exception. Append a record to the journal — a **new
    `journal/<date>-<slug>.md` file** (what was done + any novel learning) plus its row in the
    `JOURNAL.md` index, the same new-file-per-landing discipline the spec runs on.
 8. **The village.** Extend `demos/village/` — the living demonstration, see
@@ -277,7 +298,10 @@ busy.
   section is a new file in `spec/`; a new entry is a new file in `journal/` plus its index row —
   never a new root doc. The backlog is not a doc anymore: it is `.adlc/tickets.json` (a committed
   contract — don't reformat it; it's machine-written, and becomes a frozen rail once any ticket
-  declares `rails`). Do not accumulate more root markdown; fold, don't add.
+  declares `rails`). Neither is the DESIGN surface: a work-in-progress spec is a **working spec** at
+  `.adlc/specs/NN-slug.md` (gateable, criteria-bearing, P1's instrument), which becomes a `spec/`
+  section only at landing. `spec/` is the archive, never the drafting table. Do not accumulate more
+  root markdown; fold, don't add.
 - **Strict in PRs, creative and aggressive in execution.** Ship real vertical slices; don't
   gold-plate; don't reward-hack a green bar.
 - **Match rhizomatic's vocabulary** — the concepts are HyperSchema / HyperView / View / Schema /
