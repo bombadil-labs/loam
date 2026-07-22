@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "securityMode": "unsigned-fallback",
+  "harnesses": {
+    "codex": {
+      "railEnforcement": "auto"
+    }
+  }
+}

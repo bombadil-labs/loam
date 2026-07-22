@@ -68,7 +68,7 @@
     "release": "node scripts/release.mjs",
     "version": "node scripts/sync-version.mjs",
     "prepublishOnly": "npm run check",
-    "adlc:patch": "node scripts/patch-adlc-npx.mjs"
+    "adlc:patch": "node scripts/patch-adlc-npx.mjs && node scripts/patch-adlc-init.mjs"
   },
   "dependencies": {
     "@bombadil/rhizomatic": "^0.8.0",

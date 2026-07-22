@@ -7,14 +7,15 @@ dist/
 demos/village/homes/
 .claude/
 site-dist/
-# .adlc/ evidence is the durable record and is TRACKED BY DEFAULT — only known-scratch paths are
-# ignored. tickets.json is the contract every gate reads, manifest.jsonl the hash-chained gate
-# evidence P6 surfaces, findings.jsonl P7's only input. This was an allowlist (`.adlc/*` plus
-# negations) until a prosecutor pass pointed out the obvious: under an allowlist, any NEW evidence
-# file a future adlc version writes — an acceptance record, a rails lockfile — is silently untracked
-# on creation, with no error and nothing in the diff to notice. That is the same
-# machinery-switched-off shape that hid the stale plugin and the untracked ledger. Deny the scratch,
-# keep the evidence.
-.adlc/tmp/
-.adlc/cache/
 .claude/settings.local.json
+
+# ADLC runtime — an ALLOWLIST, and `adlc init` owns these lines. What is committed is the CONTRACT
+# (config, tickets, specs); everything else under .adlc/ — findings.jsonl, manifest.jsonl,
+# ticket-transactions/ — is per-worktree evidence that gates assert against locally, and committing
+# it would collide across branches. If an adlc upgrade adds a new contract file, re-run `adlc init`
+# to pick up its negation rather than hand-adding one here.
+.adlc/*
+!.adlc/config.json
+!.adlc/tickets.json
+!.adlc/tickets/
+!.adlc/specs/
