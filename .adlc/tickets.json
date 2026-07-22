@@ -368,13 +368,15 @@
       "body": "HISTORICAL AUDIT 2026-07-21, angle H6. CONFIRMED mechanism. Hazard H6 at the MINT site rather than at a door.\n\nregistrationDeltaClaims treats its second argument as the LENS name - it stamps the Schema and derives the LIVING entity schema:<name>, which is exactly what lensNameOf slices back out on replay to become Registration.lensName, the key every door uses through lensOf. Both other mint paths pass the lens: publishRegistrationImpl computes schema.name ?? hyperschema.name, registerImpl the same. assembleGenesis ALONE passes reg.hyperschema.name - the PROGRAM - and it silently discards Registration.lensName, a field the very input type it accepts declares for this purpose.\n\nCONSEQUENCE, live under 21.7 coexistence: a genesis declaring two readings over one hyperschema mints BOTH at living entity schema:<program>, both re-stamped with the program name. On replay readRegistrations keys latest-per-lens by [registrationEntity, lensName]; both share BOTH components, so the LAST entry in the array wins and the other vanishes with no error. Whichever survives serves under the program name - and if the operator public declaration names that program name (the natural name, and the only one genesis can produce), the anonymous surface admits it. ARRAY ORDER, not the operator declared reading, decides whether the redacted or the full policy sits behind the anonymous door.\n\nNOTE ON HOW THIS WAS MISSED: test/surface/rest-lens-gate.test.ts documented this as an unavoidable fixture constraint (genesis derives that from the hyperschema, so a genesis lens can never differ) and routed its readings through publishRegistration to work around it. A constraint accepted rather than questioned. Worth remembering as its own lesson.\n\nFIX: pass the lens - reg.lensName ?? reg.schema.name ?? reg.hyperschema.name. AND make the collapse loud: assembleGenesis should REFUSE a spec in which two registrations over the same hyperschema entity resolve to the same lens name, since that pair can never both bind.\n\nRAILS - BOTH LEVELS. Delta level: a genesis naming two readings mints two DISTINCT living entities, and both survive readRegistrations. Object level: each lens answers under its own policy at a door, and a public declaration opens exactly the declared one. Plus the refusal rail: a genesis whose two registrations collapse to one lens name is refused, not silently reduced.",
       "edges": [],
       "id": "T56",
-      "phase": "P1",
-      "rails": [],
+      "phase": "P5",
+      "rails": [
+        "test/gateway/genesis-lens-name.test.ts"
+      ],
       "scope": [
         "src/gateway/genesis.ts",
         "test/gateway/"
       ],
-      "status": "todo",
+      "status": "in_review",
       "title": "assembleGenesis mints every lens under the PROGRAM name — sibling readings collapse silently, and array order picks what the anonymous door serves"
     },
     {
