@@ -384,15 +384,17 @@
       "body": "PROSECUTOR FINDINGS on the T55 diff, deferred rather than folded in so the fix stayed reviewable. Both CONFIRMED.\n\n(1) THE REPLICA PATH DECIDES NOTHING. eraseImpl now decides completeness from BYTE PRESENCE after sweeping every tier - a purge count of 0 is ambiguous, since it means never held it exactly as often as failed to remove it. eraseReplicaImpl still discards its purge count entirely, so a pool holding the byte and removing nothing yields a top level erase that reports completion for content still at rest inside the operator own walls. That is precisely the 24.8 evasion channel the comment above that function says must not exist. Fix: give both sites ONE rule - after purge and reseat, assert the id is absent from the backend own listing. That answer is correct for a pool that never held the id (absent, complete) and for a tier a previous attempt already cleared (absent, complete), and still fails loudly for the read only mount.\n\n(2) THE ARCHIVE SWEEP IS NOW ON THE BOOT PATH AND UNBOUNDED. heal purges unconditionally with the whole accumulated tombstone set, and it runs on boot. ArchiveBackend.purge loops ids crossed with fan directories: an existence check per pair, plus a prefix scan of that fan whole file list per pair. Its own comment budgets roughly 256000 directory reads per heal as the thing to avoid; the readdir was hoisted but the per pair work was not. With a thousand historical erasures and ten thousand archived deltas that is a quarter million stat calls and millions of string comparisons added to every boot, growing monotonically and never reclaimable because tombstones are append only. Fix: invert to a SINGLE pass over the fan listings testing membership in a Set of dead ids, and consider a persisted swept high water mark so a steady state boot sweeps only the newly dead.\n\nRAILS: for (1) a pool that holds the byte and refuses to remove it must make the top level erase refuse, and a pool that never held it must not. For (2) a store with N tombstones and M archived deltas must not do work proportional to N times M on boot - assert the call counts, not the wall clock.\n\nCARE: both are REPAIRS. (2) is a performance regression introduced by T55 itself, so it should not sit long.",
       "edges": [],
       "id": "T62",
-      "phase": "P1",
-      "rails": [],
+      "phase": "P5",
+      "rails": [
+        "test/gateway/erase-completeness.test.ts"
+      ],
       "scope": [
         "src/gateway/erase.ts",
         "src/store/archive.ts",
         "test/gateway/",
         "test/store/"
       ],
-      "status": "todo",
+      "status": "in_review",
       "title": "Erasure completeness is decided in two places by two different rules — unify on byte-presence, and bound the archive sweep"
     },
     {
