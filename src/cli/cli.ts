@@ -26,6 +26,7 @@ import { ArchiveBackend } from "../store/archive.js";
 import { MirrorBackend } from "../store/mirror.js";
 import { SqliteBackend } from "../store/sqlite.js";
 import { legibilityWarnings, reAdmit } from "../gateway/repair.js";
+import { strandedStrikeWarnings } from "../store/quarantine.js";
 import { parseArgs, rejectUnknown } from "./args.js";
 import { archivePath, initHome, readSeed, storePath } from "./config.js";
 
@@ -442,7 +443,19 @@ async function cmdRepair(args: readonly string[], io: IO): Promise<number> {
             io.out(`    ${r.key}`);
             io.out(`      reason:  ${r.reason}`);
             io.out(`      preview: ${r.preview}`);
+            for (const target of r.negates ?? []) {
+              io.out(`      claims to strike: ${target} (unverified; LIVE until settled)`);
+            }
           }
+        }
+        // §25/H1: a quarantined negation no longer suppresses its target, so a retracted value,
+        // revoked grant, or tombstone reads live again — the operator must be told, loudly.
+        const stranded = strandedStrikeWarnings(pen);
+        if (stranded.length > 0) {
+          io.out(
+            `  ${stranded.length} STRANDED STRIKE warning${stranded.length === 1 ? "" : "s"}:`,
+          );
+          for (const w of stranded) io.out(`    ${w}`);
         }
         if (warnings.length > 0) {
           io.out(

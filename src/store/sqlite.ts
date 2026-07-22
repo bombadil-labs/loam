@@ -152,7 +152,12 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
         verifyDelta,
       });
       if (!verdict.ok) {
-        quarantine.push({ key: row.id, reason: verdict.reason, preview: previewOf(row.claims) });
+        quarantine.push({
+          key: row.id,
+          reason: verdict.reason,
+          preview: previewOf(row.claims),
+          ...(verdict.negates !== undefined ? { negates: verdict.negates } : {}),
+        });
         continue;
       }
       this.onDisk.add(row.id);

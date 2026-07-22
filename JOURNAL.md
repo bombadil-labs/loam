@@ -91,3 +91,7 @@ entry is a NEW FILE and two concurrent landings never touch the same one (the sa
 | 2026-07-21 | [Audit 3, and what it cost to believe a green bar](journal/2026-07-21-audit-3-and-what-it-cost-to-believe-green.md) |
 | 2026-07-21 | [T47: the public-pin chain](journal/2026-07-21-t47-the-public-pin-chain.md) |
 | 2026-07-22 | [T59: the 410 door names the lens](journal/2026-07-22-t59-the-410-door-names-the-lens.md) |
+| 2026-07-22 | [T57: a quarantined negation names its strike](journal/2026-07-22-t57-a-quarantined-negation-names-its-strike.md) |
+| 2026-07-22 | [T46: a struck adoption leaves the trail](journal/2026-07-22-t46-a-struck-adoption-leaves-the-trail.md) |
+| 2026-07-22 | [T54: the translator door gets the promote guard](journal/2026-07-22-t54-the-translator-door-gets-the-promote-guard.md) |
+| 2026-07-22 | [T56: genesis mints per-lens](journal/2026-07-22-t56-genesis-mints-per-lens.md) |

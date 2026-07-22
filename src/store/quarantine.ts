@@ -44,6 +44,53 @@ export interface QuarantinedRow {
   // A short, safe, single-line preview of the raw bytes — enough to recognize the row, never
   // enough to launder bytes back into a delta.
   readonly preview: string;
+  // If this row's claims PARSED (id-mismatch / invalid-signature) and carry `negates` refs: the ids
+  // it strikes. A quarantined negation silently REVIVES its target(s) (a retracted value, a revoked
+  // grant, a tombstone), so naming them turns that silent revival into one the operator can act on
+  // (§25/H1). ALL targets, not the first — the substrate honors every `negates` pointer, so a
+  // foreign delta may strike several at once. Absent when unparseable or not a negation.
+  readonly negates?: readonly string[];
+}
+
+// Every target a delta's claims strike — one entry per `negates` delta-ref. The substrate registers
+// a negator for EACH such pointer (a single delta can lawfully strike several targets), and this
+// store ingests foreign deltas, so returning only the first would let the rest revive silently.
+export function negatesOf(claims: Delta["claims"]): readonly string[] {
+  const out: string[] = [];
+  for (const p of claims.pointers) {
+    if (p.role === "negates" && p.target.kind === "delta") out.push(p.target.deltaRef.delta);
+  }
+  return out;
+}
+
+// Operator-facing warnings for strikes a quarantine has stranded (§25/H1). A quarantined negation
+// no longer suppresses its target, so the claim it struck reads live until the row is settled — the
+// operator must be TOLD, not left to discover a retracted value serving again. `repair list` prints
+// these. The unparseable case cannot name a target but still cautions that a strike MAY be missing.
+export function strandedStrikeWarnings(rows: readonly QuarantinedRow[]): string[] {
+  const out: string[] = [];
+  let opaque = 0;
+  for (const r of rows) {
+    // "CLAIMS TO strike", not "struck": these rows failed admission (bad signature or id), so the
+    // claim is UNVERIFIED — a row planted at the origin could name any id. The operator still must
+    // know, because IF the strike was real it now reads live; but the wording must not let a planted
+    // row masquerade as an authenticated retraction.
+    for (const target of r.negates ?? []) {
+      out.push(
+        `quarantined row ${r.key} CLAIMS TO STRIKE delta ${target} (unverified); if that strike ` +
+          `was real — a retraction, revoked grant, or tombstone — ${target} reads LIVE again until ` +
+          `this row is settled (repair discard + re-federate the healthy copy).`,
+      );
+    }
+    if ((r.negates ?? []).length === 0 && r.reason === "unparseable") opaque += 1;
+  }
+  if (opaque > 0) {
+    out.push(
+      `${opaque} quarantined row(s) could not be parsed — a retraction, revoked grant, or ` +
+        `tombstone MAY be missing from the ground. Verify strikes after settling.`,
+    );
+  }
+  return out;
 }
 
 // A short, safe preview: collapse whitespace, replace control characters, truncate. Repair shows
@@ -92,7 +139,12 @@ export interface AdmissionDeps {
 
 export type Admission =
   | { readonly ok: true; readonly delta: Delta }
-  | { readonly ok: false; readonly reason: Exclude<QuarantineReason, "foreign-key"> };
+  | {
+      readonly ok: false;
+      readonly reason: Exclude<QuarantineReason, "foreign-key">;
+      // The strikes this row stranded, when its claims parsed far enough to read `negates` refs.
+      readonly negates?: readonly string[];
+    };
 
 // Run the same admission a healthy read runs — parse, recompute the id against the id the row is
 // filed under, verify the signature — and report the FIRST failure as a quarantine reason instead
@@ -110,14 +162,17 @@ export function admit(
   try {
     claims = deps.parseClaims(rawClaims);
   } catch {
-    return { ok: false, reason: "unparseable" };
+    return { ok: false, reason: "unparseable" }; // no claims to read — cannot name a strike
   }
+  // The claims parsed, so a stranded strike is nameable from here on (id-mismatch, invalid-signature).
+  const struck = negatesOf(claims);
+  const negates = struck.length > 0 ? { negates: struck } : {};
   if (deps.computeId(claims) !== filedId || claimedId !== filedId) {
-    return { ok: false, reason: "id-mismatch" };
+    return { ok: false, reason: "id-mismatch", ...negates };
   }
   const delta = deps.makeDelta(claims, sig);
   if (deps.verifyDelta(delta) === "invalid") {
-    return { ok: false, reason: "invalid-signature" };
+    return { ok: false, reason: "invalid-signature", ...negates };
   }
   return { ok: true, delta };
 }

@@ -9,11 +9,18 @@
 // idempotence, erasure-holds, and chain-closure suites below all stand on that one property.
 
 import { describe, expect, it } from "vitest";
-import { authorForSeed, signClaims, type Policy, type Schema } from "@bombadil/rhizomatic";
+import {
+  authorForSeed,
+  makeNegationClaims,
+  Reactor,
+  signClaims,
+  type Policy,
+  type Schema,
+} from "@bombadil/rhizomatic";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
-import { isAdoption, readAdoptions } from "../../src/gateway/adopt.js";
+import { adoptionRecordClaims, isAdoption, readAdoptions } from "../../src/gateway/adopt.js";
 import { PLANT } from "./fixtures.js";
 import { FERN } from "../spike/garden.js";
 
@@ -251,5 +258,116 @@ describe("§24.3 promote-outputs adopts FACTS, never LAW — operator authorship
     expect(readAdoptions(primary.reactor, GUEST)).toHaveLength(0); // the filter still filters
     await q.drop();
     await primary.close();
+  });
+});
+
+// A struck adoption record must leave the trail AND let promotion re-establish it (ticket T46). The
+// adoption reader ignored `lawfulNegated`, so a withdrawn provenance record kept appearing in
+// `adoptions()` (the audit trail lied) and `promoteImpl`'s presence short-circuit rode that stale
+// trail — re-promoting a value whose record was struck returned success and landed nothing.
+describe("§24.3/§27 — a STRUCK adoption record leaves the trail and lets promotion re-land", () => {
+  const recordFor = (gw: Gateway, promoted: string) =>
+    [...gw.reactor.snapshot()].find(
+      (d) =>
+        isAdoption(d.claims) &&
+        d.claims.pointers.some(
+          (p) =>
+            p.role === "adopted" &&
+            p.target.kind === "delta" &&
+            p.target.deltaRef.delta === promoted,
+        ),
+    );
+  const recordCount = (gw: Gateway) =>
+    [...gw.reactor.snapshot()].filter((d) => isAdoption(d.claims)).length;
+
+  it("AUDIT (object): striking an adoption record removes it from adoptions(), while the value lives", async () => {
+    const primary = await bootPrimary();
+    const q = await primary.openQuarantine();
+    const fact = foreignFact("adopted, then provenance withdrawn", 3700);
+    await q.gateway.federate([fact]);
+    const { promoted } = await primary.promote(q.gateway, fact.id, { from: "trial-pool" });
+    const record = recordFor(primary, promoted)!;
+    expect(primary.adoptions().some((a) => a.adoptedDelta === promoted)).toBe(true); // present first
+
+    // The operator withdraws the PROVENANCE record (a plain negation), keeping the value.
+    await primary.append([
+      signClaims(makeNegationClaims(OP, 9_000_000, record.id, "withdraw provenance"), OP_SEED),
+    ]);
+
+    expect(primary.adoptions().some((a) => a.adoptedDelta === promoted)).toBe(false); // gone from trail
+    expect(await messageOf(primary)).toBe("adopted, then provenance withdrawn"); // value still stands
+    await q.drop();
+    await primary.close();
+  });
+
+  it("PROMOTE (delta): re-promoting after striking the record LANDS A NEW record, not a silent no-op", async () => {
+    const primary = await bootPrimary();
+    const q = await primary.openQuarantine();
+    const fact = foreignFact("re-blessed after withdrawal", 3800);
+    await q.gateway.federate([fact]);
+    const { promoted } = await primary.promote(q.gateway, fact.id, { from: "trial-pool" });
+    const record = recordFor(primary, promoted)!;
+    await primary.append([
+      signClaims(makeNegationClaims(OP, 9_000_000, record.id, "withdraw"), OP_SEED),
+    ]);
+    const before = recordCount(primary); // 1 — the struck record still sits in the ground
+
+    const re = await primary.promote(q.gateway, fact.id, { from: "trial-pool" });
+    // A fresh record must land — before the fix, promote short-circuits on the stale trail and lands
+    // nothing while reporting success.
+    expect(recordCount(primary)).toBe(before + 1);
+    expect(primary.adoptions().some((a) => a.adoptedDelta === re.promoted)).toBe(true); // live in trail
+    await q.drop();
+    await primary.close();
+  });
+  it("BRIDGE (regression): a citation still rewrites after the cited value's provenance record is struck", async () => {
+    const primary = await bootPrimary();
+    const q = await primary.openQuarantine();
+    const factA = foreignFact("cited value, provenance later withdrawn", 3900);
+    const factB = signClaims(
+      {
+        timestamp: 3910,
+        author: GUEST,
+        pointers: [
+          { role: "subject", target: { kind: "entity", entity: { id: FERN, context: "message" } } },
+          {
+            role: "value",
+            target: { kind: "primitive", value: "cites A after A's record is struck" },
+          },
+          { role: "cites", target: { kind: "delta", deltaRef: { delta: factA.id } } },
+        ],
+      },
+      GUEST_SEED,
+    );
+    await q.gateway.federate([factA, factB]);
+    const { promoted: adoptedA } = await primary.promote(q.gateway, factA.id);
+    const recordA = recordFor(primary, adoptedA)!;
+    // Withdraw A's PROVENANCE record (keeping the value) — the §27 review action T46's audit rail
+    // blesses. The reference bridge must NOT be severed: A's counterpart still stands and is citable.
+    await primary.append([
+      signClaims(makeNegationClaims(OP, 9_000_001, recordA.id, "withdraw A's provenance"), OP_SEED),
+    ]);
+    // Before the bridge decoupling this threw "would dangle" — the struck record removed the bridge.
+    const { promoted: adoptedB } = await primary.promote(q.gateway, factB.id);
+    const cited = primary.reactor.get(adoptedB)!.claims.pointers.find((p) => p.role === "cites")!;
+    expect(cited.target.kind === "delta" && cited.target.deltaRef.delta).toBe(adoptedA); // rewritten
+    await q.drop();
+    await primary.close();
+  });
+  it("STRANGER cannot censor (unit): readAdoptions honors only the record author's own strike", () => {
+    // A governed store's write-standing door refuses a stranger's negation outright, so this scoping
+    // is exercised where it is reachable: readAdoptions as a pure function on a hand-built reactor
+    // holding both the operator's record and a stranger's strike of it.
+    const record = signClaims(
+      adoptionRecordClaims("adopted-id", "pool", "src-id", GUEST, OP, 1000),
+      OP_SEED,
+    );
+    const reactor = new Reactor();
+    reactor.ingest(record);
+    reactor.ingest(signClaims(makeNegationClaims(GUEST, 2000, record.id, "not yours"), GUEST_SEED));
+    // The stranger's negation is inert — only the record author's own strike forgives (H1 doctrine).
+    expect(readAdoptions(reactor).some((a) => a.adoptedDelta === "adopted-id")).toBe(true);
+    reactor.ingest(signClaims(makeNegationClaims(OP, 3000, record.id, "mine"), OP_SEED));
+    expect(readAdoptions(reactor).some((a) => a.adoptedDelta === "adopted-id")).toBe(false);
   });
 });
