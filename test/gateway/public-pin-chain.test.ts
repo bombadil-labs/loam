@@ -13,15 +13,17 @@
 // the newest height, NARROW the oldest, so a served body tells them apart.
 
 import { describe, expect, it } from "vitest";
-import { parseSchema, type Schema } from "@bombadil/rhizomatic";
+import { authorForSeed, parseSchema, signClaims, type Schema } from "@bombadil/rhizomatic";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
-import { lensOf } from "../../src/gateway/registration.js";
+import { lensOf, type LensName } from "../../src/gateway/registration.js";
 import { PLANT } from "./fixtures.js";
 import { FERN, observed } from "../spike/garden.js";
 
 const OP_SEED = "0e".repeat(32);
+const OP = authorForSeed(OP_SEED);
+const L = (n: string): LensName => n as LensName;
 const CARD = "export default (n) => `<p>height: ${n.view.height}</p>`;";
 
 const BROAD: Schema = parseSchema({
@@ -98,6 +100,34 @@ describe("§23.8 — a public pin freezes the Nth version of the LENS, not the p
     expect(out.status).toBe(200);
     expect(out.body).toContain("height: 99");
     expect(out.body).not.toContain("height: 10");
+    await gw.close();
+  });
+
+  it("OBJECT LEVEL: the route door resolves the PAIR — a binding whose lens and version disagree 404s", async () => {
+    const gw = await staged();
+    // The renderers.ts half of the fix (defense-in-depth against a raw /append the module header
+    // contemplates): a binding may name lens "Plant" while its versionId addresses a PlantPublic
+    // version. The gate `isPublicPin("Plant", <that id>)` can be satisfied by a raw `Plant@<hash>`
+    // declaration (freezePublicEntry passes an @<deltaId> through verbatim), so the door must resolve
+    // BOTH halves or it serves the undeclared sibling. Reverting `&& lensOf(v) === binding.schemaName`
+    // turns this red — the door would serve PlantPublic (oldest, height 10).
+    const publicId = gw.registrationVersions().find((v) => lensOf(v) === "PlantPublic")!.deltaId;
+    const { rendererBindingClaims } = await import("../../src/gateway/renderers.js");
+    await gw.append([
+      signClaims(
+        rendererBindingClaims(
+          { route: "crafted", schemaName: L("Plant"), consumes: ["height"], bundle: CARD },
+          publicId, // versionId of a DIFFERENT lens than schemaName
+          OP,
+          9_000_000,
+        ),
+        OP_SEED,
+      ),
+    ]);
+    await gw.declarePublic([`Plant@${publicId}`]); // raw @<hash> passthrough satisfies the gate
+    const out = await gw.serveRoute("crafted", FERN, "public");
+    expect(out.status).toBe(404);
+    expect(out.body).not.toContain("height: 10"); // the sibling reading must not leak
     await gw.close();
   });
 });
