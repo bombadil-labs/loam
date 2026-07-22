@@ -5,6 +5,7 @@
 // lens's latest), the §23.6 "an app never outlives its source" law (withdraw stops serving), and that a
 // faulting bundle refuses cleanly without leaking.
 
+import { type LensName } from "../../src/gateway/registration.js";
 import { describe, expect, it } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
@@ -13,6 +14,7 @@ import { MemoryBackend } from "../../src/store/memory.js";
 import { publicClaims } from "../../src/gateway/public.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
 import { FERN, observed } from "../spike/garden.js";
+const L = (n: string): LensName => n as LensName;
 
 const OP_SEED = "0e".repeat(32);
 const OP = authorForSeed(OP_SEED);
@@ -220,7 +222,7 @@ describe("§23.6: an app never outlives its source", () => {
     await gw.append([
       signClaims(
         rendererBindingClaims(
-          { route: "ghost", schemaName: "Ghost", consumes: [], bundle: HEIGHT_CARD },
+          { route: "ghost", schemaName: L("Ghost"), consumes: [], bundle: HEIGHT_CARD },
           undefined,
           OP,
           9_000_000,
@@ -322,7 +324,7 @@ describe("§23: an unloaded bundle is UNMOUNTED (404), and prepareRoute loads it
     await gw.append([
       signClaims(
         rendererBindingClaims(
-          { route: "raw", schemaName: "Plant", consumes: ["height"], bundle: uniqueBundle },
+          { route: "raw", schemaName: L("Plant"), consumes: ["height"], bundle: uniqueBundle },
           undefined,
           OP,
           9_000_000,

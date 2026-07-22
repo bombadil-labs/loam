@@ -177,8 +177,26 @@ export function parseResolvers(raw: unknown): ResolverSpecs {
 // The serving key (§21.7): the LENS name when the binding carries one, the hyperschema name in
 // the degenerate case. Every door keys on this — never on the hyperschema name, which sibling
 // lenses share.
-export const lensOf = (r: { lensName?: string; hyperschema: { name: string } }): string =>
-  r.lensName ?? r.hyperschema.name;
+//
+// LensName and ProgramName are BRANDS, not runtime values — `string & {unique symbol}` erases to
+// `string` at compile time, so this costs nothing and changes no bytes. Their whole job is to make
+// the confusion behind hazard H6 a TYPE ERROR: `LensName === ProgramName` has no overlap, so the
+// compiler refuses it. Read a program name through `programOf`, a lens name through `lensOf`, and
+// type every door parameter that keys on a lens as `LensName` — then a door that gates on the
+// program cannot type-check. The one residual hole is raw `r.hyperschema.name` (rhizomatic types it
+// as bare `string`), which is why `programOf` exists: route through it and the brand is restored.
+export type LensName = string & { readonly __lens: unique symbol };
+export type ProgramName = string & { readonly __program: unique symbol };
+
+export const lensOf = (r: { lensName?: string; hyperschema: { name: string } }): LensName =>
+  (r.lensName ?? r.hyperschema.name) as LensName;
+
+// The PROGRAM name (the hyperschema's own name) — the thing sibling lenses SHARE and doors must
+// never gate on. Reading it through here rather than raw `r.hyperschema.name` restores the brand, so
+// comparing it to a lens name is caught. Materializations are per-program, so this is the right key
+// there and the wrong key at every door.
+export const programOf = (r: { hyperschema: { name: string } }): ProgramName =>
+  r.hyperschema.name as ProgramName;
 
 export interface Registration {
   readonly hyperschema: HyperSchema;

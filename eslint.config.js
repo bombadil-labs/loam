@@ -62,5 +62,27 @@ export default tseslint.config(
       },
     },
   },
+  // Hazard H6, closed at the layer types cannot reach. `lensOf`/`programOf` brand the two names so
+  // `LensName === ProgramName` is a compile error — but rhizomatic types `hyperschema.name` as bare
+  // `string`, so a raw `r.hyperschema.name === <aLensName>` slips past the checker (string vs a brand
+  // is allowed). This forbids `.hyperschema.name` as an operand of a comparison in the door files:
+  // route a program name through `programOf(r)` and the brand is restored, so the comparison is
+  // checked. Reading `.hyperschema.name` for any OTHER purpose (building a materialization key, a
+  // message) is untouched — only the comparison, which is the one that decides authorization.
+  {
+    files: ["src/gateway/**/*.ts", "src/surface/**/*.ts", "src/server/**/*.ts"],
+    ignores: ["src/gateway/registration.ts"], // where lensOf/programOf are defined
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "BinaryExpression[operator=/^[=!]==?$/] > MemberExpression[property.name='name'][object.property.name='hyperschema']",
+          message:
+            "Do not compare `.hyperschema.name` directly — it is a bare string and bypasses the LensName/ProgramName brand (hazard H6). Route it through `programOf(r)`, which restores the brand so the comparison is type-checked.",
+        },
+      ],
+    },
+  },
   eslintConfigPrettier,
 );

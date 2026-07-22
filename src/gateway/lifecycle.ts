@@ -34,6 +34,7 @@ import { NUL, type Bound, type Gateway, type RequestContext } from "./gateway.js
 import { buildGqlSchema } from "./gql.js";
 import {
   lensOf,
+  programOf,
   lawfulSnapshot,
   readinglessExpandRole,
   parseClaimTemplates,
@@ -607,7 +608,7 @@ export async function publishRegistrationImpl(
   }
   const lensName = schema.name ?? hyperschema.name;
   const survivors = gw.registered.filter(
-    (r) => !(r.hyperschema.name === hyperschema.name && lensOf(r) === lensName),
+    (r) => !(programOf(r) === hyperschema.name && lensOf(r) === lensName),
   );
   const trialLenses: Bound[] = [
     ...survivors,

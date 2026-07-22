@@ -13,7 +13,7 @@
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import type { Claims, Reactor } from "@bombadil/rhizomatic";
 import type { Gateway, RequestContext } from "./gateway.js";
-import { lawfulNegated, lawfulSnapshot } from "./registration.js";
+import { lawfulNegated, lawfulSnapshot, programOf } from "./registration.js";
 
 export const PUBLIC_ENTITY = "loam:public";
 export const CTX_PUBLIC = "loam.public";
@@ -138,7 +138,11 @@ function freezePublicEntry(gw: Gateway, entry: string): string {
   const ver = entry.slice(at + 1);
   const m = /^v([1-9]\d*)$/.exec(ver);
   if (m === null) return entry; // already an @<deltaId> (or opaque): freeze it as given
-  const versions = gw.registrationVersions().filter((v) => v.hyperschema.name === name);
+  // KNOWN BUG (T47): this compares the PROGRAM name, but `name` is the lens the operator pinned, so
+  // under coexistence the Nth entry is not the Nth version of that lens. Routed through `programOf`
+  // to preserve today's behaviour and satisfy the H6 lint; T47 fixes it to `lensOf` with a rail, and
+  // typing `name` as LensName there turns this line into the compile error that proves the fix.
+  const versions = gw.registrationVersions().filter((v) => programOf(v) === name);
   const pinned = versions[Number(m[1]) - 1];
   if (pinned === undefined) {
     throw new Error(`public: schema "${name}" has no version v${m[1]} (it has ${versions.length})`);

@@ -65,6 +65,7 @@ import {
 import { declarePublicImpl, readPublicSchemas } from "./public.js";
 import {
   lensOf,
+  programOf,
   readRegistrationVersions,
   readWithdrawnRegistrations,
   type ResolverSpecs,
@@ -72,6 +73,7 @@ import {
   type Registration,
   type RegistrationVersion,
   type WithdrawnRegistration,
+  type LensName,
 } from "./registration.js";
 import { newResolverMemo, type ResolverMemo } from "./resolvers.js";
 import {
@@ -553,7 +555,7 @@ export class Gateway {
   // The byte-door (SPEC §23.7): the body lives in renderers.ts.
   serveBytes(
     ref: string,
-    fromLens: string,
+    fromLens: LensName,
     fromEntity: string,
     door: "full" | "public",
   ): { status: number; contentType: string; body: Uint8Array } {
@@ -715,7 +717,7 @@ export class Gateway {
   // NOTE: the resolution is AS OF NOW — after an evolution, work bound to the superseded
   // generation keeps watching the old shape until it re-attaches.
   materializationFor(name: string): string {
-    const hit = this.registered.find((r) => lensOf(r) === name || r.hyperschema.name === name);
+    const hit = this.registered.find((r) => lensOf(r) === name || programOf(r) === name);
     return hit !== undefined ? this.matName(hit.hyperschema.name) : name;
   }
 

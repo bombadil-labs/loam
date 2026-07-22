@@ -23,14 +23,14 @@ import { importEsm, loadedEsm } from "./esm.js";
 import type { Gateway, RequestContext } from "./gateway.js";
 import type { ResolvedNode } from "./gql.js";
 import { renderInWorker } from "./render-worker.js";
-import { lawfulNegated, lawfulSnapshot, lensOf } from "./registration.js";
+import { lawfulNegated, lawfulSnapshot, lensOf, type LensName } from "./registration.js";
 
 export const CTX_RENDERER = "loam.renderer";
 
 // What a route + schema + UI share, at input and at rest.
 interface RendererCore {
   readonly route: string;
-  readonly schemaName: string;
+  readonly schemaName: LensName;
   readonly consumes: readonly string[];
   readonly bundle: string;
   // Write-enabled renderers (SPEC §23.3). `writable` is the fields this renderer's forms may write — a
@@ -145,7 +145,9 @@ export function parseRendererInput(raw: unknown): RendererSpec {
   }
   return {
     route: o.route,
-    schemaName,
+    // Parse boundary: validated a non-empty string above, now blessed as a lens name (§21.7 keys
+    // renderers on the lens). The one legitimate crossing — untrusted input entering the typed zone.
+    schemaName: schemaName as LensName,
     ...(o.version === undefined ? {} : { version: o.version }),
     consumes: o.consumes as string[],
     bundle: o.bundle,
@@ -251,7 +253,8 @@ export function readRenderers(reactor: Reactor, operator?: string): RendererBind
     const writeReady = writable !== undefined && writable.length > 0 && pen !== undefined;
     const binding: RendererBinding = {
       route,
-      schemaName,
+      // Parse boundary: reconstructed from a lawful delta, validated string above (see the guard).
+      schemaName: schemaName as LensName,
       ...(versionId === undefined ? {} : { versionId }),
       consumes,
       bundle,
@@ -566,7 +569,7 @@ export async function writeRouteImpl(
 export function serveBytesImpl(
   gw: Gateway,
   ref: string,
-  fromLens: string,
+  fromLens: LensName,
   fromEntity: string,
   door: "full" | "public",
 ): { status: number; contentType: string; body: Uint8Array } {

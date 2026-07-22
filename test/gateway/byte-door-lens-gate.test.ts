@@ -25,9 +25,10 @@ import { authorForSeed } from "@bombadil/rhizomatic";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
-import { lensOf } from "../../src/gateway/registration.js";
+import { lensOf, type LensName } from "../../src/gateway/registration.js";
 import { PLANT } from "./fixtures.js";
 import { FERN } from "../spike/garden.js";
+const L = (n: string): LensName => n as LensName;
 
 const OP_SEED = "0e".repeat(32);
 const OP = authorForSeed(OP_SEED);
@@ -103,8 +104,8 @@ describe("§12 — the anonymous byte-door honours the lens, not the program", (
     expect(gw.surface("public")?.registered.map(lensOf)).toEqual(["PlantPublic"]);
 
     // The readings must genuinely diverge, or nothing below can tell lens from program.
-    expect(gw.serveBytes(REF_NEW, "Plant", FERN, "full").status).toBe(200);
-    expect(gw.serveBytes(REF_NEW, "PlantPublic", FERN, "full").status).toBe(404);
+    expect(gw.serveBytes(REF_NEW, L("Plant"), FERN, "full").status).toBe(200);
+    expect(gw.serveBytes(REF_NEW, L("PlantPublic"), FERN, "full").status).toBe(404);
     await gw.close();
   });
 
@@ -112,7 +113,7 @@ describe("§12 — the anonymous byte-door honours the lens, not the program", (
     const gw = await boot();
     // The bytes the precondition proved reachable through the private reading. This 404 is a
     // refusal, not a fixture accident.
-    const refused = gw.serveBytes(REF_NEW, "Plant", FERN, "public");
+    const refused = gw.serveBytes(REF_NEW, L("Plant"), FERN, "public");
     expect(refused.status).toBe(404);
     expect(out(refused)).toBe(UNIFORM_REFUSAL);
     await gw.close();
@@ -121,7 +122,7 @@ describe("§12 — the anonymous byte-door honours the lens, not the program", (
   it("ADMISSION: the DECLARED reading still serves its bytes — a door that refuses everything fails here", async () => {
     const gw = await boot();
     // The positive leg: without it a door that refused everything would pass this file.
-    const served = gw.serveBytes(REF_OLD, "PlantPublic", FERN, "public");
+    const served = gw.serveBytes(REF_OLD, L("PlantPublic"), FERN, "public");
     expect(served.status).toBe(200);
     expect(served.contentType).toBe("image/png");
     expect([...served.body]).toEqual([...OLD_BYTES]);
@@ -130,8 +131,8 @@ describe("§12 — the anonymous byte-door honours the lens, not the program", (
 
   it("the refusal is uniform — undeclared and never-existed are indistinguishable in every field", async () => {
     const gw = await boot();
-    const undeclared = gw.serveBytes(REF_NEW, "Plant", FERN, "public");
-    const nonsense = gw.serveBytes(REF_NEW, "NoSuchLensAtAll", FERN, "public");
+    const undeclared = gw.serveBytes(REF_NEW, L("Plant"), FERN, "public");
+    const nonsense = gw.serveBytes(REF_NEW, L("NoSuchLensAtAll"), FERN, "public");
     // §12/§13: a refusal must not tell a stranger which guess was closer. Whole tuple, not just the
     // body — a differentiated status is an oracle too.
     expect({ ...undeclared, body: [...undeclared.body] }).toEqual({
@@ -145,7 +146,7 @@ describe("§12 — the anonymous byte-door honours the lens, not the program", (
 
   it("the operator's own door still reaches the private reading, as it always could", async () => {
     const gw = await boot();
-    const operatorSide = gw.serveBytes(REF_NEW, "Plant", FERN, "full");
+    const operatorSide = gw.serveBytes(REF_NEW, L("Plant"), FERN, "full");
     expect(operatorSide.status).toBe(200);
     expect([...operatorSide.body]).toEqual([...NEW_BYTES]);
     await gw.close();
