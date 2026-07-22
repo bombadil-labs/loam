@@ -16,7 +16,7 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { authorForSeed, makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
 import { SqliteBackend } from "../../src/store/sqlite.js";
-import { admit, strandedStrikeWarnings } from "../../src/store/quarantine.js";
+import { admit, negatesOf, strandedStrikeWarnings } from "../../src/store/quarantine.js";
 
 const SEED = "0e".repeat(32);
 const OP = authorForSeed(SEED);
@@ -70,6 +70,23 @@ describe("§25/H1 — a quarantined negation names the strike it stranded", () =
       { key: "k3", reason: "invalid-signature", preview: "…" },
     ]);
     expect(benign).toEqual([]);
+  });
+
+  it("negatesOf extracts EVERY negates pointer, not just the first (the substrate honors all)", () => {
+    const T2 = "2e".repeat(32);
+    // A hand-authored claims striking two ids at once — the foreign-delta shape the store ingests.
+    const claims = {
+      timestamp: 1,
+      author: OP,
+      pointers: [
+        {
+          role: "negates" as const,
+          target: { kind: "delta" as const, deltaRef: { delta: TARGET } },
+        },
+        { role: "negates" as const, target: { kind: "delta" as const, deltaRef: { delta: T2 } } },
+      ],
+    };
+    expect(negatesOf(claims)).toEqual([TARGET, T2]); // first-only extraction fails this
   });
 
   it("a MULTI-TARGET negation (a foreign delta striking several ids) discloses EVERY stranded strike", () => {
