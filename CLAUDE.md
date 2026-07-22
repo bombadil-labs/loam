@@ -165,10 +165,11 @@ The phases, with Loam's own craft folded into each:
 
    The phase's three evidence names say what the order must be: **`rails-red`** (watch them FAIL
    first — a rail never seen red has proven nothing), **`hollow-test`** (mutate the code and confirm
-   they kill the mutants), then **`rails-frozen`**. Run `adlc hollow-test --rails .adlc/tickets.json`
-   or `--target <file>` rather than hand-rolling a revert-probe; it asks *could this pass with the
-   behavior broken?* mechanically, on every changed line, which is the question we kept answering by
-   hand and kept getting wrong.
+   they kill the mutants), then **`rails-frozen`**. Run `adlc hollow-test` rather than hand-rolling a
+   revert-probe: it asks *could this pass with the behavior broken?* mechanically, on every changed
+   line, which is the question we kept answering by hand and kept getting wrong. Use
+   **`--target <file>`** (repeatable) — `--rails` wants a SINGLE-ticket JSON with a top-level `rails`
+   array, which our multi-ticket `.adlc/tickets.json` is not, so it errors rather than expanding.
 
    **ASSERT AT BOTH LEVELS — DELTA AND OBJECT. It is not either/or** (Myk, 2026-07-21). A rail that
    only checks one leaves the other open to nuanced bugs, and 2026-07-21 produced the failure in
