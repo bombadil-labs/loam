@@ -443,7 +443,9 @@ async function cmdRepair(args: readonly string[], io: IO): Promise<number> {
             io.out(`    ${r.key}`);
             io.out(`      reason:  ${r.reason}`);
             io.out(`      preview: ${r.preview}`);
-            if (r.negates !== undefined) io.out(`      strikes: ${r.negates} (LIVE until settled)`);
+            for (const target of r.negates ?? []) {
+              io.out(`      claims to strike: ${target} (unverified; LIVE until settled)`);
+            }
           }
         }
         // §25/H1: a quarantined negation no longer suppresses its target, so a retracted value,

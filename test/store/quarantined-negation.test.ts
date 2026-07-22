@@ -46,7 +46,7 @@ describe("§25/H1 — a quarantined negation names the strike it stranded", () =
     expect(row).toBeDefined();
     expect(row!.reason).toBe("invalid-signature");
     // The stranded strike must be named, or the revival is silent.
-    expect(row!.negates).toBe(TARGET);
+    expect(row!.negates).toEqual([TARGET]);
     await store2.close();
     rmSync(path, { force: true });
   });
@@ -54,7 +54,7 @@ describe("§25/H1 — a quarantined negation names the strike it stranded", () =
   it("OBJECT LEVEL: the operator warning names the stranded target, and cautions on the opaque case", () => {
     // A parsed-claims quarantine (invalid-signature / id-mismatch) names its target.
     const named = strandedStrikeWarnings([
-      { key: "k1", reason: "invalid-signature", preview: "…", negates: TARGET },
+      { key: "k1", reason: "invalid-signature", preview: "…", negates: [TARGET] },
     ]);
     expect(named.join(" ")).toContain(TARGET);
     expect(named.join(" ")).toMatch(/live|strike|retract|until settled/i);
@@ -72,6 +72,19 @@ describe("§25/H1 — a quarantined negation names the strike it stranded", () =
     expect(benign).toEqual([]);
   });
 
+  it("a MULTI-TARGET negation (a foreign delta striking several ids) discloses EVERY stranded strike", () => {
+    // The substrate honors every `negates` pointer, so one delta can strike several targets — a
+    // peer can revoke several grants at once. If only the first were disclosed, the rest revive
+    // silently, which is the exact H1 escape the disclosure exists to close.
+    const T2 = "2e".repeat(32);
+    const warnings = strandedStrikeWarnings([
+      { key: "k", reason: "invalid-signature", preview: "…", negates: [TARGET, T2] },
+    ]);
+    expect(warnings.join(" ")).toContain(TARGET);
+    expect(warnings.join(" ")).toContain(T2);
+    expect(warnings.length).toBe(2); // one line per struck id
+  });
+
   it("admit surfaces the negation target on a parsed-claims failure", () => {
     const negation = signClaims(makeNegationClaims(OP, 1000, TARGET, "retracted"), SEED);
     // A negation filed under the WRONG id (id-mismatch): claims parse, so `negates` is available.
@@ -82,6 +95,6 @@ describe("§25/H1 — a quarantined negation names the strike it stranded", () =
       verifyDelta: () => "verified",
     });
     expect(verdict.ok).toBe(false);
-    if (!verdict.ok) expect(verdict.negates).toBe(TARGET);
+    if (!verdict.ok) expect(verdict.negates).toEqual([TARGET]);
   });
 });
