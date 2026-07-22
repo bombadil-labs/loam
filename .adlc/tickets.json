@@ -341,14 +341,16 @@
       "body": "SPLIT OUT OF T47 on 2026-07-21. It shared nothing with T47 but the audit that found it; T47 became the public-pin chain and this is the translator guard. STILL PLAUSIBLE - probe first, and note the recommendation at the end is to REUSE promotionRefusal rather than write a second guard.\n\n`translate` RE-SPEAKS STRANGER CONTENT IN THE OPERATOR'S VOICE WITH NO RESERVED-VOCABULARY GUARD.** `applyTemplate` (`src/federation/translate.ts:210-236`) builds each emitted pointer as `{kind: 'entity', entity: {id: src.target.entity.id, context: p.context!}}` - **the entity id comes from the recognized, possibly hostile delta**; primitive holes copy `src.target.value` verbatim. `parseEmitTemplate` (:55-97) accepts any non-empty string as a context and any primitive as a value, with no reserved-namespace check. Compare `promotionRefusal` (`adopt.ts:66-85`), which guards THE SAME CROSSING - foreign content becoming the operator's own claim - by refusing `loam.*`/`rhizomatic.*` contexts, `loam:` ids, and negations, with the comment 'operator authorship is exactly what gives a delta force here'. The translator performs that identical crossing ungated. And the crossing really is into the operator's voice in the reference deployment: `demos/village/village.mjs:297`, `phase9.mjs:87,114`, `demos/tutorial/lessons.mjs:945` all call `translate(gw, { seed: almanac.seed })` with the OPERATOR seed, so emissions land inside `lawfulSnapshot` where `readRegistrations`/`readTrustPolicy`/`readPublicSchemas`/`readBudgetPolicy`/`readBindingDefinitions`/`survivingTombstones` read them as LAW. Weaponizing needs the operator to have blessed a spec whose template names a reserved context, at which point the stranger picks the entity id (`loam:store`, `loam:public`, `loam:trust`) and the primitive values (a grant's `subject`) - an operator FOOTGUN rather than a stranger-only path, which is why it is PLAUSIBLE. But it is exactly the footgun `promotionRefusal` exists to remove, and the asymmetry between the two doors looks unintended rather than reasoned. PROBE: a template naming a reserved context, emitted under the operator seed - does it bind as law? RECOMMENDATION if confirmed: reuse `promotionRefusal` rather than writing a second guard.\n\n\nCARE: this crossing is foreign content becoming the operator own claim, the same crossing promotionRefusal guards. If the probe confirms, the fix is a repair of an unintended asymmetry; if it turns out the asymmetry was reasoned, that is a design question and Myk decides.",
       "edges": [],
       "id": "T54",
-      "phase": "P1",
-      "rails": [],
+      "phase": "P5",
+      "rails": [
+        "test/federation/translate-reserved-guard.test.ts"
+      ],
       "scope": [
         "src/federation/translate.ts",
         "src/gateway/adopt.ts",
         "test/federation/"
       ],
-      "status": "todo",
+      "status": "in_review",
       "title": "translate re-speaks stranger content in the operator voice with no reserved-vocabulary guard"
     },
     {
