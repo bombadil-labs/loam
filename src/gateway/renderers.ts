@@ -414,9 +414,13 @@ export async function serveRouteImpl(
       // (§23.8 — a declaration is publication, not a probe); every undeclared pin stays a uniform 404,
       // so history is not anonymously probable. The full door serves any surviving registered version.
       if (door === "public" && !gw.isPublicPin(binding.schemaName, binding.versionId)) return gone;
-      // Pinned by the version's CONTENT ADDRESS: resolve the exact surviving version, or — if it was
-      // withdrawn or erased — go dark (§23.6, an app never outlives its source).
-      const pinned = gw.registrationVersions().find((v) => v.deltaId === binding.versionId);
+      // Pinned by the version's CONTENT ADDRESS, but resolve the WHOLE key it authorized: the pair
+      // (lens, versionId). The gate checked `isPublicPin(schemaName, versionId)`; matching versionId
+      // alone would serve a sibling reading sharing the hyperschema if one carried that address
+      // (§21.7). Or — if the version was withdrawn or erased — go dark (§23.6).
+      const pinned = gw
+        .registrationVersions()
+        .find((v) => v.deltaId === binding.versionId && lensOf(v) === binding.schemaName);
       if (pinned === undefined) return gone;
       node = gw.resolvePinned(pinned, entity);
     }
@@ -482,7 +486,9 @@ function routeServableOn(gw: Gateway, binding: RendererBinding, door: "full" | "
     );
   }
   if (door === "public") return gw.isPublicPin(binding.schemaName, binding.versionId);
-  return gw.registrationVersions().some((v) => v.deltaId === binding.versionId);
+  return gw
+    .registrationVersions()
+    .some((v) => v.deltaId === binding.versionId && lensOf(v) === binding.schemaName);
 }
 
 // Write through a rendered route (the body of `Gateway.writeRoute`, SPEC §23.3): a form on a mounted
