@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import {
   authorForSeed,
   makeNegationClaims,
+  Reactor,
   signClaims,
   type Policy,
   type Schema,
@@ -19,7 +20,7 @@ import {
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
-import { isAdoption, readAdoptions } from "../../src/gateway/adopt.js";
+import { adoptionRecordClaims, isAdoption, readAdoptions } from "../../src/gateway/adopt.js";
 import { PLANT } from "./fixtures.js";
 import { FERN } from "../spike/garden.js";
 
@@ -352,5 +353,21 @@ describe("§24.3/§27 — a STRUCK adoption record leaves the trail and lets pro
     expect(cited.target.kind === "delta" && cited.target.deltaRef.delta).toBe(adoptedA); // rewritten
     await q.drop();
     await primary.close();
+  });
+  it("STRANGER cannot censor (unit): readAdoptions honors only the record author's own strike", () => {
+    // A governed store's write-standing door refuses a stranger's negation outright, so this scoping
+    // is exercised where it is reachable: readAdoptions as a pure function on a hand-built reactor
+    // holding both the operator's record and a stranger's strike of it.
+    const record = signClaims(
+      adoptionRecordClaims("adopted-id", "pool", "src-id", GUEST, OP, 1000),
+      OP_SEED,
+    );
+    const reactor = new Reactor();
+    reactor.ingest(record);
+    reactor.ingest(signClaims(makeNegationClaims(GUEST, 2000, record.id, "not yours"), GUEST_SEED));
+    // The stranger's negation is inert — only the record author's own strike forgives (H1 doctrine).
+    expect(readAdoptions(reactor).some((a) => a.adoptedDelta === "adopted-id")).toBe(true);
+    reactor.ingest(signClaims(makeNegationClaims(OP, 3000, record.id, "mine"), OP_SEED));
+    expect(readAdoptions(reactor).some((a) => a.adoptedDelta === "adopted-id")).toBe(false);
   });
 });
