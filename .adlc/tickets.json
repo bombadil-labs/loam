@@ -381,8 +381,10 @@
       "body": "HISTORICAL AUDIT 2026-07-21, angle H1. CONFIRMED. Hazard H1 meeting SPEC 25 row quarantine - a combination neither ticket anticipated.\n\ndeltasSince sets aside any row failing admit (unparseable, id-mismatch, invalid-signature) and reads on. That is a NARROWING of the delta-set, and it is the one narrowing in the tree that CANNOT carry a negation closure, because the dropped row is precisely the thing that is illegible. The driver own justification is the H1 blind spot verbatim: the bad row contributes to no view, exactly as a not-yet-synced delta contributes to none. A missing CLAIM contributes nothing. A missing NEGATION REVIVES ITS TARGET.\n\nSCENARIO: a tenant author retracts a claim through clearEntity/retract - the negation lands as its own row. Later that row bytes are torn by a half-written batch (the exact case the quarantine module names). On the next boot the reactor replays only admissible deltas, negated ranges over a ground that no longer holds the strike, and EVERY reader resolves the retracted value as live: GraphQL, the anonymous door, and every federation peer pulling offeredDeltas. The same shape restores write standing to a REVOKED GRANT (revocation is a plain negation) and drops a TOMBSTONE out of readTombstones, letting a forgotten id back through the federation door.\n\nAGGRAVATOR - IT IS NOT SELF-HEALING. The deltas table declares id UNIQUE and appends with INSERT OR IGNORE. A corrupt row squats on the id, so heal replanting the archive healthy copy of the same negation is SILENTLY IGNORED (changes is 0, so the report honestly says 0 and the operator sees nothing). MirrorBackend.deltasSince delegates to the primary only, so the archive good copy is never read either. repair re-admit re-runs admission on the same bad bytes and fails again. The revival is DURABLE until a human runs repair discard and re-federates.\n\nAND THE OPERATOR IS NOT TOLD. loam repair list prints key, reason, preview - nothing says a retraction fell out. Two of the three reasons (id-mismatch, invalid-signature) have ALREADY parsed their claims, so the driver can see the row carries a negates ref and can name the target. Only unparseable is genuinely opaque, and even there the operator can be warned that strikes may be missing.\n\nFIX: give QuarantinedRow an optional negates field, set wherever admit reached parsed-claims, and have repair list say plainly that this row struck an id and that claim is live again until settled. For unparseable, emit a standing warning that the ground may be missing strikes. Separately make repair able to REPLACE a quarantined row bytes with a healthy copy of the same id - an INSERT OR REPLACE reserved to repair re-admit --from-mirror, or a discard-then-heal step in heal - so a corrupt negation is not permanently unrecoverable behind INSERT OR IGNORE.\n\nRAILS - BOTH LEVELS, and USE test/gateway/narrowing.ts assertPreservesSuppression (which currently has ZERO callers - see the hollow-rail finding). Strike a claim, corrupt the negation row, boot, assert the claim does NOT read live through a Schema, and assert the operator is told which target lost its strike.\n\nCARE: this is a REPAIR of stated behavior. local-storage.ts:159-179 has the identical shape.",
       "edges": [],
       "id": "T57",
-      "phase": "P1",
-      "rails": [],
+      "phase": "P5",
+      "rails": [
+        "test/store/quarantined-negation.test.ts"
+      ],
       "scope": [
         "src/store/sqlite.ts",
         "src/store/local-storage.ts",
@@ -390,7 +392,7 @@
         "src/cli/cli.ts",
         "test/store/"
       ],
-      "status": "todo",
+      "status": "in_review",
       "title": "A quarantined row that is a NEGATION revives its target — durably, because INSERT OR IGNORE blocks the heal"
     },
     {
