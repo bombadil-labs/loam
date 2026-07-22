@@ -10,6 +10,7 @@
 import { signClaims } from "@bombadil/rhizomatic";
 import type { Claims, Reactor } from "@bombadil/rhizomatic";
 import type { Gateway } from "./gateway.js";
+import { lawfulNegated } from "./registration.js";
 
 export const ADOPTION_ENTITY = "loam:adoption";
 export const CTX_ADOPTION = "loam.adoption";
@@ -100,8 +101,15 @@ export function isAdoption(claims: Claims): boolean {
 // in the ground is read (an optional filter filters — it never empties).
 export function readAdoptions(reactor: Reactor, operator?: string): Adoption[] {
   const out: Adoption[] = [];
+  // A struck record is not a record: every sibling constitutional reader gates on the negation
+  // algebra, and `adopt.ts` was the one that did not (H1 at the audit surface). Without this, a
+  // withdrawn provenance keeps appearing in the trail, and `promoteImpl`'s presence short-circuit
+  // rides that stale trail — re-promoting a value whose record was struck reports success and lands
+  // nothing. Forgiveness (striking the record) must let promotion re-establish it.
+  const negated = lawfulNegated(reactor, operator);
   for (const d of reactor.snapshot()) {
     if ((operator !== undefined && d.claims.author !== operator) || !isAdoption(d.claims)) continue;
+    if (negated(d.id)) continue; // the operator withdrew this provenance record
     const prim = (role: string): string | undefined => {
       const p = d.claims.pointers.find((x) => x.role === role);
       return p?.target.kind === "primitive" ? String(p.target.value) : undefined;
