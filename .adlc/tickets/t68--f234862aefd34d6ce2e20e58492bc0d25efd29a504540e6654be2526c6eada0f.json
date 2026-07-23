@@ -1,0 +1,15 @@
+{
+  "body": "FOUND by a prosecutor pass and rescued from the local findings ledger before the Windows worktree was retired (2026-07-22). Severity HIGH. It is filed as a ticket precisely because a finding whose only home is .adlc/findings.jsonl does not survive a reclone — the ledger is per-worktree by ADLC's design.\n\nTHE HOLE. `test/gateway/narrowing.ts` exports `assertPreservesSuppression`. Its own header says any new narrowing operation should be routed through it. `src/gateway/SUBSTRATE-HAZARDS.md` H1 names it as THE structural defense for the operand-set suppression hazard — the hazard that has produced more real bugs here than any other. It has ZERO callers. Grep finds exactly two references: its own definition and its own comment.\n\nSo the defense exists, is advertised in the doc a reviewer is told to read first, and has never once run. That is the same machinery-switched-off shape as a spec-lint pointed at a narrative section, a rail glob matching no file, and a gate recorded under an invented name — a thing that looks like protection and asserts nothing. It is worse than the others in one respect: the hazards file CITES it, so a reader reasonably concludes the class is covered.\n\nWHAT TO DO — decide between two, do not split the difference:\n  (a) ROUTE THE REAL SITES THROUGH IT. Every operation that FILTERS, NARROWS, SUBSETS or COPIES a delta-set is a candidate: quarantine-pool, trust resolution, adopt/promote, federation translate, migrate, container membership, the seeding edge, the door's served view. Each gets a narrowing case asserting a struck claim stays struck across the edge — at BOTH levels, per the P3 rule. This is the option that makes H1's citation true.\n  (b) DELETE IT and remove the citation from SUBSTRATE-HAZARDS.md. A helper nobody calls is a false assurance, and the hazards file says an entry retires when the hazard becomes impossible by construction — not when a helper is written.\n\n(a) is almost certainly right, since H1 is live and recurring; (b) is listed so the choice is explicit rather than assumed.\n\nCARE. Do not backfill narrowing cases over already-merged code without reading the code fresh — a rail written by the author of merged code shares its premise, which is how three hollow rails shipped on 2026-07-21. Write each case from what H1 says must be true, then check the site against it.\n\nRAILS — at P3, when the cases exist. The meta-rail worth having: a check that `assertPreservesSuppression` has at least N callers, so this cannot silently return to zero.\n",
+  "edges": [],
+  "id": "T68",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "test/gateway/narrowing.ts",
+    "src/gateway/SUBSTRATE-HAZARDS.md",
+    "test/gateway/",
+    "test/federation/"
+  ],
+  "status": "todo",
+  "title": "The advertised H1 defense has zero callers — assertPreservesSuppression is a helper nobody routes through"
+}
