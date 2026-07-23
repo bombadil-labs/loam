@@ -240,8 +240,23 @@ descending order of independence:
    this test pass with the fix reverted?), `loam-lens-name` (H6), `loam-scan-scale` (H8 and the
    stale-index trap), plus `loam-verifier`, which takes ONE finding and tries to refute it. Project
    agents are not plugin-provided, so unlike the `adlc:prosecutor-*` panel they survive a WSL
-   session. **Pick 2–4 lenses by what the diff touches** — running all six on a small change is how
-   a panel starts padding.
+   session. **Do not pick them by hand and do not run all six** — `npm run p5 -- --base <ref>`
+   (`scripts/p5-triage.mjs`) reads the diff and names only the lenses the change earns, with the
+   evidence that earned each and the dropped ones listed so the cap is never silent.
+
+   **Climb the ladder in order; each rung is cheaper than the one above it.** Most of P5 does not
+   need a model at all:
+
+   | rung | cost | covers |
+   |---|---|---|
+   | `npm run lint` | free, already in `npm run check` | H6's common case — the `.hyperschema.name` comparison is an ESLint error |
+   | `adlc hollow-test --target <file>` | no tokens | *could this pass with the fix reverted?* — mechanically, on every changed line |
+   | 1–3 routed lenses | a spin-up each | what mutation cannot reach: a vacuous fixture, a header that overclaims, a feature that could be deleted whole |
+   | `loam-verifier` | one per FINDING | refuting what a lens claimed — not one per lens |
+
+   A survivor from `hollow-test` is a finding with no model involved, and a clean run *narrows* the
+   lens rather than replacing it. Measured: a docs-only diff routes to **zero** lenses; the T62
+   erasure diff routes to three and names why.
 3. **`adlc:prosecutor-*`** — the shipped generic panel. Fine, and gone without the plugin.
 
 The local lenses exist because CLAUDE.md's own audit doctrine says angles drawn from what has
