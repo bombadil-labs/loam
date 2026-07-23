@@ -114,7 +114,10 @@ describe("ArchiveBackend.holds sees the bytes, not the bookkeeping (ticket T67)"
     await store.append([signed]);
     const wrongFan = join(root, "zz");
     mkdirSync(wrongFan, { recursive: true });
-    cpSync(join(root, signed.id.slice(0, 2), `${signed.id}.json`), join(wrongFan, `${signed.id}.json`));
+    cpSync(
+      join(root, signed.id.slice(0, 2), `${signed.id}.json`),
+      join(wrongFan, `${signed.id}.json`),
+    );
     rmSync(join(root, signed.id.slice(0, 2), `${signed.id}.json`), { force: true });
     // The canonical name is gone; the delta is still on disk under a name a `fileFor` lookup
     // would miss. A targeted probe that only stats the canonical path would report it forgotten.

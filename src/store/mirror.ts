@@ -70,6 +70,22 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
     return this.primary.deltasSince(knownIds);
   }
 
+  // BOTH tiers, because §11's promise covers both. Reads answer from the primary — a mirror is a
+  // shadow, not a second voice — but byte-presence is not a read: a delta the primary forgot and
+  // the mirror kept is a delta this store still HOLDS, and answering from the primary alone is how
+  // an erasure came to report completeness over a legible copy on the cold side (ticket T67).
+  //
+  // Failures compose exactly as `purge`'s do: both sides are attempted, then the first refusal is
+  // reported. A tier that cannot answer has not proven it forgot anything, so this REJECTS rather
+  // than resolving false — treating "I could not check" as "it is gone" is the precise false
+  // completion this method exists to prevent.
+  async holds(id: string): Promise<boolean> {
+    const results = await Promise.allSettled([this.primary.holds(id), this.mirror.holds(id)]);
+    const failed = results.find((r) => r.status === "rejected");
+    if (failed !== undefined) throw failed.reason;
+    return results.some((r) => (r as PromiseFulfilledResult<boolean>).value);
+  }
+
   // Reads answer from the primary, so its quarantine (SPEC §25) is the store's quarantine — a
   // corrupt row set aside on the hot side. A primary that cannot quarantine (a bare memory tier)
   // holds nothing to repair, so the pen is empty.

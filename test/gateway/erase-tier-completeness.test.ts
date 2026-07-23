@@ -35,7 +35,8 @@ const OPERATOR = authorForSeed(OP_SEED);
 const scratch = (): string => mkdtempSync(join(tmpdir(), "loam-t67-"));
 const roots: string[] = [];
 afterAll(() => {
-  for (const r of roots) rmSync(r, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  for (const r of roots)
+    rmSync(r, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 // A governed grove whose store is the supplied backend — the same shape as erase.test.ts's
@@ -134,7 +135,7 @@ describe("erase is complete only when every TIER is clean", () => {
       holds: (id) => vault.holds(id),
       close: () => vault.close(),
       // The regression: sweep `<id>.json` and leave `<id>.json.*.tmp` behind.
-      purge: async (ids) => {
+      purge: (ids) => {
         let removed = 0;
         for (const fan of readdirSync(root, { withFileTypes: true }).filter((f) =>
           f.isDirectory(),
@@ -148,7 +149,7 @@ describe("erase is complete only when every TIER is clean", () => {
             }
           }
         }
-        return removed;
+        return Promise.resolve(removed);
       },
     };
     const backend = new MirrorBackend(primary, shallow);

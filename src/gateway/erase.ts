@@ -222,11 +222,30 @@ export async function eraseImpl(
   if (seed === undefined || gw.operatorAuthor === undefined) {
     throw new Error("erasure is the instance operator's alone, and this store has no operator");
   }
+  // RETRY IS SAFE, and it is driven by the TOMBSTONE rather than by the target. A first attempt can
+  // record the tombstone and still leave bytes at rest (a tier that refused, a WAL that would not
+  // truncate); the operator's re-run must finish the sweep WITHOUT growing the erasure log — a
+  // fresh timestamp would mint a new content address and a second tombstone on every attempt.
+  //
+  // Read BEFORE the `nothing to erase` guard, because after a partial attempt the target is
+  // routinely no longer in the reactor and the guard would strand the erasure permanently. The
+  // sequence that does it: `purge` succeeds on the primary, `reseat` rebuilds the reactor from
+  // `deltasSince` — which on a mirror is the PRIMARY only — and the target vanishes from the
+  // reactor while the mirror still holds the bytes. Gating the re-run on the target's presence
+  // would mean no call to `erase` could ever finish that sweep; only a boot-time `heal(exclude)`
+  // could, which is exactly the delay a synchronous verdict exists to remove. The tombstone is
+  // append-only and durable, so it is the honest anchor for "this erasure is outstanding."
+  const already = [...gw.reactor.snapshot()].find(
+    (d) =>
+      isTombstone(d.claims) &&
+      d.claims.author === gw.operatorAuthor &&
+      d.claims.pointers.some((p) => p.target.kind === "delta" && p.target.deltaRef.delta === id),
+  );
   const target = gw.reactor.get(id);
-  if (target === undefined) {
+  if (target === undefined && already === undefined) {
     throw new Error(`nothing to erase: ${id} is not held here`);
   }
-  if (isTombstone(target.claims)) {
+  if (target !== undefined && isTombstone(target.claims)) {
     // The erasure log is the record of what was forgotten; it stays append-only. Un-erasure
     // is striking the tombstone (forgiveness), never erasing it.
     throw new Error("the erasure log is append-only: a tombstone cannot itself be erased");
@@ -238,31 +257,23 @@ export async function eraseImpl(
       d.claims.pointers.some((p) => p.target.kind === "delta" && p.target.deltaRef.delta === id),
     )
     .map((d) => d.id);
-  // RETRY IS SAFE: a first attempt can record the tombstone and still leave bytes at rest (a purge
-  // that deleted rows then failed to truncate the WAL, a tier that refused). The operator's re-run
-  // must finish the sweep WITHOUT growing the erasure log — a fresh timestamp would mint a new
-  // content address and append a second tombstone for the same target on every attempt.
-  const already = [...gw.reactor.snapshot()].find(
-    (d) =>
-      isTombstone(d.claims) &&
-      d.claims.author === gw.operatorAuthor &&
-      d.claims.pointers.some((p) => p.target.kind === "delta" && p.target.deltaRef.delta === id),
-  );
   const tombstone =
     already ??
     signClaims(
-      eraseClaims(id, target.claims.author, gw.operatorAuthor, gw.nextTimestamp(), opts.reason),
+      eraseClaims(id, target!.claims.author, gw.operatorAuthor, gw.nextTimestamp(), opts.reason),
       seed,
     );
   if (already === undefined) {
     await gw.append([tombstone]);
     await gw.flush(); // the tombstone must be ground before the target stops being ground
   }
-  // A purge count of 0 is AMBIGUOUS — it means "this tier never held it" exactly as often as it
-  // means "this tier failed to remove it" — so the count cannot carry the completeness verdict.
-  // Byte-presence can. The verdict is therefore deferred to the end of this function, after
-  // re-seating and after the pool fan-out, so that neither is skipped by a local miss.
-  const removed = await gw.backend.purge([id]);
+  // The count is EVIDENCE OF WORK, never the verdict. A 0 means "this tier never held it" exactly
+  // as often as "this tier refused to remove it", and an aggregate across tiers is worse still: a
+  // mirror returns the MAX of its two sides, so one tier's honest removal reads identically to a
+  // clean pair while the other tier quietly keeps the bytes. Only byte-presence answers §11, and it
+  // is asked at the end of this function — after re-seating and after the pool fan-out, so no tier
+  // is skipped by a local miss.
+  await gw.backend.purge([id]);
   await gw.reseat();
   // §24.8 — the erasure reaches every attached QUARANTINE POOL (the operator's own replicas of this
   // ground): the same tombstone lands there and the byte is purged there too, so a forgotten record can
@@ -270,12 +281,11 @@ export async function eraseImpl(
   // glass unconditionally; a quarantine that could hide a purged byte would be an erasure-evasion channel.
   const seen = new Set<Gateway>([gw]);
   for (const pool of gw.quarantinePools) await pool.eraseReplica(tombstone, id, seen);
-  // NOW the verdict, once every tier has been swept. Only a 0 count is in doubt, so only a 0 pays
-  // for the scan: a store that removed rows plainly removed them, while 0 could be a completed
-  // earlier attempt (`purge` deletes rows and may still throw on a WAL it could not truncate — the
-  // caller retries, and on that retry the rows are already gone) or a store that silently refused.
-  // Byte-presence separates them, and it is the only thing §11 actually promises about.
-  if (removed === 0 && (await gw.backend.deltasSince(new Set())).some((d) => d.id === id)) {
+  // NOW the verdict, once every tier has been swept — asked of the BYTES, unconditionally. The
+  // count no longer gates it: a positive count proves some tier removed something, never that every
+  // tier did, and under a mirror those are routinely different tiers. `holds` is the same question
+  // §11 promises about, put to each tier that could be holding an answer.
+  if (await gw.backend.holds(id)) {
     throw new Error(
       `erase ${id}: the tombstone is recorded and every tier was swept, but the content is STILL ` +
         `HELD by the store — erasure is not complete. Resolve the store fault and re-run; the ` +
@@ -322,6 +332,18 @@ export async function eraseReplicaImpl(
   }
   await gw.backend.purge([id]);
   await gw.reseat();
+  // The same byte-presence verdict the primary applies to itself. A pool is where §11 is EASIEST to
+  // evade — the fan-out used to discard this purge's count entirely, so a replica that silently
+  // retained reported a clean completion outward and the primary's `erase` resolved over it. §11
+  // reaches through the one-way glass unconditionally, and a promise kept only on the hot side is
+  // not kept.
+  if (await gw.backend.holds(id)) {
+    throw new Error(
+      `the erasure did not complete: an attached quarantine pool was swept but STILL HOLDS ${id}. ` +
+        `A forgotten record must not survive inside the operator's own replica. Resolve the pool's ` +
+        `store fault and re-run the erasure; the re-run is safe and mints no second tombstone.`,
+    );
+  }
   // Transitive: a pool of a pool holds the operator's bytes too. `seen` guards the walk — a cycle
   // among pools cannot arise from openQuarantine (each pool is a fresh gateway), but a fan-out
   // that could infinite-loop would be a worse bug than the one this fixed.

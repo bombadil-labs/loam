@@ -225,6 +225,35 @@ export class ArchiveBackend implements StoreBackend {
     return found.size;
   }
 
+  async holds(id: string): Promise<boolean> {
+    this.assertOpen();
+    // The same reach as `purge`, deliberately: every fan (a misfiled copy is still the bytes) and
+    // both name shapes (`<id>.json` and the `<id>.json.<pid>.tmp` a crash leaves between fsync and
+    // rename). NOT `deltasSince`, which skips the straggler by design, and NOT `onDisk`, which
+    // knows only what this handle wrote — the bytes worth finding are the ones no bookkeeping
+    // recorded. Purges and probes are rare; the walk is cheap enough to be thorough.
+    const fans = readdirSync(this.root, { withFileTypes: true })
+      .filter((f) => f.isDirectory())
+      .map((f) => f.name);
+    for (const fan of fans) {
+      let names: readonly string[];
+      try {
+        names = readdirSync(join(this.root, fan));
+      } catch {
+        continue; // a fan that vanished between listing and reading holds nothing
+      }
+      for (const name of names) {
+        const cut = name.endsWith(".json")
+          ? name.length - ".json".length
+          : name.endsWith(".tmp")
+            ? name.indexOf(".json.")
+            : -1;
+        if (cut > 0 && name.slice(0, cut) === id) return true;
+      }
+    }
+    return false;
+  }
+
   async close(): Promise<void> {
     this.closed = true;
   }

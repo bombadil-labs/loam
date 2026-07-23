@@ -212,15 +212,20 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
       // §11 does not permit reporting a completeness we did not deliver, so this refuses loudly.
       // The rows ARE already deleted by then, so the message says exactly that — the caller holds
       // a partial erasure to retry, not a failed one to redo.
-      if (removed > 0) {
-        const [status] = this.db.pragma("wal_checkpoint(TRUNCATE)") as Array<{ busy: number }>;
-        if (status !== undefined && status.busy !== 0) {
-          throw new Error(
-            "purge: the rows were deleted but the write-ahead log could not be truncated (a " +
-              "concurrent reader held it past busy_timeout). Their plaintext may remain in the " +
-              "-wal sidecar, so this erasure is INCOMPLETE (§11). Retry once the other handle is idle.",
-          );
-        }
+      //
+      // UNCONDITIONAL, not gated on `removed > 0`. The gate was self-defeating on the exact path
+      // this error creates: the first attempt deletes the rows and fails to truncate, so the retry
+      // finds nothing to delete, `removed` is 0, and the checkpoint the retry exists to perform is
+      // skipped in silence — leaving the plaintext in the sidecar while every caller reports
+      // success. A retry must be able to finish the work the first attempt started, and the work
+      // outstanding here is the truncation, not the DELETE.
+      const [status] = this.db.pragma("wal_checkpoint(TRUNCATE)") as Array<{ busy: number }>;
+      if (status !== undefined && status.busy !== 0) {
+        throw new Error(
+          "purge: the write-ahead log could not be truncated (a concurrent reader held it past " +
+            "busy_timeout). The rows are deleted, but their plaintext may remain in the -wal " +
+            "sidecar, so this erasure is INCOMPLETE (§11). Retry once the other handle is idle.",
+        );
       }
     } catch (err) {
       try {
@@ -231,6 +236,14 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
       throw err;
     }
     return removed;
+  }
+
+  async holds(id: string): Promise<boolean> {
+    this.assertOpen();
+    // A targeted lookup, not a scan: erasures are rare and the id is the primary key. This asks the
+    // TABLE rather than `onDisk`, which is an index of what this handle wrote — a second handle's
+    // row is still a row this store holds.
+    return this.db.prepare("SELECT 1 FROM deltas WHERE id = ?").get(id) !== undefined;
   }
 
   async close(): Promise<void> {
