@@ -17,10 +17,17 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { claimsToJson, makeDelta, type Delta } from "@bombadil/rhizomatic";
 import { ArchiveBackend } from "../../src/store/archive.js";
 import { FERN, GARDENER_SEED, SURVEYOR_SEED, observed } from "../spike/garden.js";
+
+// The archive does real filesystem work — one file per delta, write+fsync+rename each — and the
+// many-ids purge sweep writes ~100 of them. Under a loaded CI runner (Windows especially, where
+// fsync is dearer) that blows vitest's 5s default. The same generous hang-guard the other heavy
+// suites carry (contract.test.ts, pack.test.ts — which learned this first): it only ever matters
+// when something is genuinely stuck.
+vi.setConfig({ testTimeout: 15000 });
 
 const signed = observed(FERN, "height", 30, 1000, GARDENER_SEED);
 const other = observed(FERN, "height", 34, 2000, SURVEYOR_SEED);
