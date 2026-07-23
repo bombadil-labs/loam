@@ -6,7 +6,7 @@
 #
 #   docker run -e LOAM_TOKEN=<secret> -v loam-data:/data -p 4321:4321 loam
 
-FROM node:22 AS build
+FROM node:24 AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -14,7 +14,7 @@ COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
 RUN npm run build && npm prune --omit=dev
 
-FROM node:22-slim AS runtime
+FROM node:24-slim AS runtime
 # The data volume, owned by the runtime user — created and chowned BEFORE the VOLUME line, so the
 # ownership survives into the image (a VOLUME declared first would discard later changes to it).
 RUN useradd --system --uid 10001 --create-home loam && mkdir -p /data && chown loam /data

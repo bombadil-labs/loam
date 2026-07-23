@@ -48,16 +48,16 @@ was missing for a duller reason than a loading failure: **only the `elixir` and 
 were ever added, neither has a version installed, and `~/.asdf/shims` is empty.** There was nothing
 for asdf to provide. Nothing is broken; node was simply never installed.
 
-Loam needs **Node 22** (`engines: >=22.13`, and CI pins 22).
+Loam needs **Node 24** (`engines: >=24`, and CI pins 24).
 
 ```bash
 asdf plugin add nodejs
-asdf install nodejs latest:22
-asdf global nodejs "$(asdf latest nodejs 22)"
+asdf install nodejs latest:24
+asdf global nodejs "$(asdf latest nodejs 24)"
 
 # a new shell, or re-source, so the shim lands on PATH
 exec bash -l
-node -v   # expect v22.x
+node -v   # expect v24.x
 npm -v
 ```
 
