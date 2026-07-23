@@ -2,13 +2,15 @@
   "body": "HIGH, trust-root. Found by adversarial-review during T67 (2026-07-23), then verified directly.\n\nTHE BUG. `scripts/rails-guard-ci.mjs` reads rail DECLARATIONS from the ticket store and guards the rails it finds. CLAUDE.md's P6 convention says the landing PR 'removes the realized ticket from the store'. So a rail is frozen ONLY in the window between the P3 commit that declares it and the P6 landing that deletes the ticket. After landing — exactly when the rail is guarding a bug the repo has already PAID for — the declaration is gone, `declared.length === 0` takes the early exit, and the gate prints 'nothing is frozen yet' and exits 0. Forever.\n\nVERIFIED, not inferred: `.adlc/ticket-archive/` contains only its `.store.json` header; t40/t41/t42/t55/t57 (all landed) are absent from `.adlc/tickets/`; and NO ticket on main declares a single rail. The gate has been a structural no-op for its entire life, and would remain one after every future landing.\n\nNOTE ON ATTRIBUTION. The reviewer believed T67's rewrite introduced this and that the previous file-existence rule 'froze forever once merged'. That is wrong, and the correction matters for the fix: main's version ALSO sources declarations from the ticket store (`adlc ticket store export`), so it loses the ticket at landing identically. The disease predates the rewrite and survives its revert. T67 reverted the rewrite for an unrelated reason (trust-root tiering), so main's behavior is what needs fixing.\n\nTHE FIX (two halves, both needed):\n  (i) LANDING MUST ARCHIVE, NOT DELETE. `adlc ticket archive` exists and `.adlc/ticket-archive/` is on the committed allowlist. Change the P6 convention in CLAUDE.md, and archive the already-landed tickets that were deleted (recoverable from git history).\n  (ii) THE GATE MUST READ BOTH. Guard the union of rails declared in the base tree's `.adlc/tickets/` AND `.adlc/ticket-archive/`. Exempt only the rails the branch is FIRST declaring (present on the branch's ticket, absent from the base's) — that is the narrow exemption the authoring-PR problem actually needs, rather than falling back to guarding nothing.\n\nCARE: `scripts/rails-guard-ci.mjs` is on ADLC's EXACT trust-root file list (`@adlc/prosecute/lib/tier.mjs`), so a clean P5 here REQUIRES a cross-model adversarial approve from a provider distinct from the author. This box has only the `claude` CLI and no provider keys, so this ticket is BLOCKED on Myk providing a key (GEMINI_API_KEY or OPENAI_API_KEY) or accepting a documented exception. Do not self-approve it — the gate refusing same-model review of a change to the enforcement layer is the whole point.\n\nRAILS: the gate must go RED for a branch that edits a rail declared by an ARCHIVED (landed) ticket — the case that is silently green today. Plus: a branch first-declaring a rail inside a pre-existing suite must stay GREEN, or T67's exact problem returns.\n",
   "edges": [],
   "id": "T69",
-  "phase": "P1",
-  "rails": [],
+  "phase": "P3",
+  "rails": [
+    "test/scripts/rails-guard-ci.test.ts"
+  ],
   "scope": [
     "scripts/rails-guard-ci.mjs",
     "CLAUDE.md",
     ".adlc/ticket-archive/"
   ],
-  "status": "todo",
+  "status": "in_review",
   "title": "A rail's freeze evaporates the moment its ticket lands — the backstop guards only unfinished work"
 }
