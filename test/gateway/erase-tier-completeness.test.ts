@@ -291,3 +291,65 @@ describe("the retry anchor honors forgiveness", () => {
     await gateway.close();
   });
 });
+
+// Moving the retry anchor ahead of the existence guard removed the only check that `erase` did any
+// work. Left unbounded, a surviving tombstone from a completed erasure months ago would suppress
+// the guard forever: append nothing, purge nothing, and return `{ erased }` — a completion report
+// for work never done, in the function whose whole subject is completion reports for work never
+// done. The bypass is bounded by "is there anything left to sweep", so these two cases must differ.
+describe("the retry bypass is for an OUTSTANDING erasure, not for any tombstone", () => {
+  it("a second erase of a CLEANLY erased id still refuses", async () => {
+    const { gateway, fact } = await groveOn(
+      new MirrorBackend(new MemoryBackend(), new MemoryBackend()),
+    );
+    await expect(gateway.erase(fact.id, { reason: "the subject asked" })).resolves.toMatchObject({
+      erased: fact.id,
+    });
+    // Nothing is left anywhere: the tombstone survives, but the erasure does not.
+    await expect(gateway.erase(fact.id)).rejects.toThrow(/nothing to erase/);
+    await gateway.close();
+  });
+
+  it("...while a retry with bytes still on a tier is let through", async () => {
+    // The case the bypass exists for, pinned beside the case it must not cover — otherwise a
+    // "fix" that simply restored the old guard would look correct against the rail above.
+    const primary = new MemoryBackend();
+    const mirrorInner = new MemoryBackend();
+    let retain = true;
+    const flaky: StoreBackend = {
+      append: (d) => mirrorInner.append(d),
+      deltasSince: (k) => mirrorInner.deltasSince(k),
+      holds: (id) => mirrorInner.holds(id),
+      close: () => mirrorInner.close(),
+      purge: (ids) => (retain ? Promise.resolve(0) : mirrorInner.purge(ids)),
+    };
+    const { gateway, fact, tombstones } = await groveOn(new MirrorBackend(primary, flaky));
+
+    await expect(gateway.erase(fact.id)).rejects.toThrow(/STILL HELD/);
+    expect(await primary.holds(fact.id)).toBe(false); // the reactor has lost the target...
+    expect(await mirrorInner.holds(fact.id)).toBe(true); // ...but the bytes are still out there
+
+    retain = false;
+    await expect(gateway.erase(fact.id)).resolves.toMatchObject({ erased: fact.id });
+    expect(tombstones()).toBe(1);
+    await gateway.close();
+  });
+
+  it("the manifest never cites the erasure's own tombstone, on the first call or a retry", async () => {
+    const { gateway, fact } = await groveOn(
+      new MirrorBackend(new MemoryBackend(), new MemoryBackend()),
+    );
+    const first = await gateway.erase(fact.id, { reason: "the subject asked" });
+    // The tombstone names the id in an `erases` pointer, so a naive citation filter picks it up on
+    // any call where it is already in the ground — and a caller cascading on citations would then
+    // try to erase the cut itself and be refused by the append-only guard.
+    for (const cited of first.citations) {
+      expect(
+        isTombstone(
+          gateway.reactor.get(cited)?.claims ?? { timestamp: 0, author: "", pointers: [] },
+        ),
+      ).toBe(false);
+    }
+    await gateway.close();
+  });
+});

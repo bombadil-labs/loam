@@ -251,11 +251,20 @@ export async function eraseImpl(
     (d) => tombstoneParts(d.claims).targetId === id,
   );
   const target = gw.reactor.get(id);
-  if (target === undefined && already === undefined) {
-    // No live target and no surviving tombstone: there is nothing here to forget, and saying
-    // otherwise would report a completion for work never done — H7, in the function whose whole
-    // subject is H7. A struck tombstone lands here too, and correctly: forgiveness means the
-    // erasure is withdrawn, so a fresh one must be spoken rather than the old one silently reused.
+  // The bypass is for an OUTSTANDING erasure, not for any tombstone that ever named this id. A
+  // surviving tombstone alone is not enough: an id erased cleanly months ago has one, and letting
+  // that suppress the guard makes `erase` resolve `{ erased }` having appended nothing, purged
+  // nothing, and touched nothing — a completion report for work never done, which is the shape
+  // this whole ticket exists to delete. So ask whether there is anything left to sweep. `holds` is
+  // exactly that question, and it is true in the case the bypass exists for: a partial attempt
+  // whose mirror still has the bytes, where `reseat` has already taken the target out of the
+  // reactor. (A struck tombstone reaches here too, and correctly — forgiveness withdraws the
+  // erasure, so a fresh one must be spoken rather than the old one silently reused.)
+  // "Anywhere in reach" includes the POOLS. Asking only this gateway's backend would strand the
+  // pool-retention case exactly as asking only the reactor stranded the mirror one: the primary
+  // purges cleanly, the pool keeps the bytes, `erase` refuses — and the re-run the operator is told
+  // to make finds a clean local store and reports nothing to erase. Same bug, one level out.
+  if (target === undefined && (already === undefined || !(await heldAnywhere(gw, id)))) {
     throw new Error(`nothing to erase: ${id} is not held here`);
   }
   if (target !== undefined && isTombstone(target.claims)) {
@@ -265,7 +274,14 @@ export async function eraseImpl(
   }
   // The manifest: every delta citing the id (negations, provenance links) — the holes the
   // cut will leave, enumerated before it is made. Cascade is the caller's choice.
+  //
+  // The erasure's OWN tombstone is not a citation. It names the id in an `erases` pointer, so a
+  // naive filter picks it up on any call where it is already in the ground — meaning a retry
+  // returns a manifest the first attempt did not, and a caller cascading on citations would try to
+  // erase the tombstone and be refused by the append-only guard above. The manifest describes what
+  // the cut LEAVES BEHIND, and the tombstone is the cut itself.
   const citations = [...gw.reactor.snapshot()]
+    .filter((d) => !(isTombstone(d.claims) && tombstoneParts(d.claims).targetId === id))
     .filter((d) =>
       d.claims.pointers.some((p) => p.target.kind === "delta" && p.target.deltaRef.delta === id),
     )
@@ -302,22 +318,79 @@ export async function eraseImpl(
   const fanned = await Promise.allSettled(
     [...gw.quarantinePools].map((pool) => pool.eraseReplica(tombstone, id, seen)),
   );
-  const poolRefused = fanned.find((r) => r.status === "rejected");
   // NOW the verdict, once every tier has been swept — asked of the BYTES, unconditionally. The
   // count no longer gates it: a positive count proves some tier removed something, never that every
   // tier did, and under a mirror those are routinely different tiers. `holds` is the same question
   // §11 promises about, put to each tier that could be holding an answer.
-  if (await gw.backend.holds(id)) {
+  //
+  // EVERY fault, in ONE report. The remedy this error prescribes is "resolve the store fault and
+  // re-run", so handing the operator one fault at a time out of a set already in hand costs a round
+  // trip per replica. And the local verdict must not be thrown ahead of the remote ones: whenever
+  // this ground also retains — or its own `holds` rejects, which is the unreachable-tier case — an
+  // early throw would discard every replica refusal already collected.
+  const faults = await incompleteErasureFaults(gw, id, fanned);
+  if (faults.length > 0) {
     throw new Error(
       `erase ${id}: the tombstone is recorded and every tier was swept, but the content is STILL ` +
-        `HELD by the store — erasure is not complete. Resolve the store fault and re-run; the ` +
-        `re-run is safe and will not mint a second tombstone.`,
+        `HELD by the store — erasure is not complete. ${faults.length} fault(s):\n  ` +
+        `${faults.map((f) => f.what).join("\n  ")}\n` +
+        `Resolve them and re-run; the re-run is safe and will not mint a second tombstone.`,
+      { cause: faults[0]?.cause },
     );
   }
-  // This ground is clean, but a replica refused — still an incomplete erasure, reported last so the
-  // local verdict is never masked by a remote one, nor the remote by the local.
-  if (poolRefused !== undefined) throw poolRefused.reason;
   return { erased: id, citations };
+}
+
+// Does this ground, or any replica of it, still hold bytes filed under `id`? The question the retry
+// guard asks — "is there anything left to sweep" — and it has to reach as far as the sweep does, or
+// it strands whatever it cannot see. A tier that REFUSES counts as holding: an unprovable store has
+// not shown the erasure is finished, so the retry must be allowed through to try again (H9).
+async function heldAnywhere(gw: Gateway, id: string, seen = new Set<Gateway>()): Promise<boolean> {
+  if (seen.has(gw)) return false;
+  seen.add(gw);
+  try {
+    if (await gw.backend.holds(id)) return true;
+  } catch {
+    return true; // could not be proven clean — treat as outstanding, never as done
+  }
+  for (const pool of gw.quarantinePools) {
+    if (await heldAnywhere(pool, id, seen)) return true;
+  }
+  return false;
+}
+
+// Everything standing between this call and a completed erasure, collected rather than raced: this
+// ground's own retained bytes (or a tier that could not be asked), plus every replica that refused.
+// Returning them as a list is what lets one message name them all.
+async function incompleteErasureFaults(
+  gw: Gateway,
+  id: string,
+  fanned: readonly PromiseSettledResult<void>[],
+): Promise<{ what: string; cause?: unknown }[]> {
+  const faults: { what: string; cause?: unknown }[] = [];
+  try {
+    if (await gw.backend.holds(id)) {
+      faults.push({ what: `this store STILL HOLDS the content at rest` });
+    }
+  } catch (err) {
+    // Could not be asked is not the same as clean — H9. A tier that cannot answer has proven
+    // nothing, so it is a fault, not a pass.
+    faults.push({
+      what: `this store could not be proven clean: ${err instanceof Error ? err.message : String(err)}`,
+      cause: err,
+    });
+  }
+  for (const r of fanned) {
+    if (r.status === "rejected") {
+      faults.push({
+        what: `an attached quarantine pool refused: ${
+          r.reason instanceof Error ? r.reason.message : String(r.reason)
+        }`,
+        cause: r.reason,
+      });
+    }
+  }
+  return faults;
 }
 
 // Honor an erasure DECIDED by the primary operator (the body of `Gateway.eraseReplica`, SPEC §24.8),

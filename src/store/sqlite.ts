@@ -43,6 +43,11 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
   // Rows the most recent read set aside (SPEC §25): recomputed on every deltasSince from the
   // table's own bytes, never a stored countdown. `loam repair` reads this back.
   private lastQuarantine: QuarantinedRow[] = [];
+  // Set when a purge deleted rows and then could not truncate the WAL, so their pre-delete page
+  // images may still be legible in the `-wal` sidecar. It is the difference between "this call
+  // removed nothing, and nothing is owed" and "an earlier call left truncation outstanding" —
+  // which is exactly what `removed` alone cannot tell a retry.
+  private truncationOutstanding = false;
 
   private readonly insertDelta: Database.Statement;
   private readonly selectAll: Database.Statement;
@@ -213,25 +218,29 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
       // The rows ARE already deleted by then, so the message says exactly that — the caller holds
       // a partial erasure to retry, not a failed one to redo.
       //
-      // UNCONDITIONAL, not gated on `removed > 0`. The gate was self-defeating on the exact path
-      // this error creates: the first attempt deletes the rows and fails to truncate, so the retry
-      // finds nothing to delete, `removed` is 0, and the checkpoint the retry exists to perform is
-      // skipped in silence — leaving the plaintext in the sidecar while every caller reports
-      // success. A retry must be able to finish the work the first attempt started, and the work
-      // outstanding here is the truncation, not the DELETE.
+      // ATTEMPTED unconditionally, but only FAILING when truncation is actually owed. Gating the
+      // attempt on `removed > 0` was self-defeating — the first try deletes the rows and cannot
+      // truncate, so the retry finds nothing to delete and skips the very checkpoint it exists to
+      // perform, leaving the plaintext in the sidecar while every caller reports success. But
+      // making the FAILURE unconditional was worse in the other direction: `purge` is called on
+      // every attached quarantine pool and on every boot `heal` sweep with the whole accumulated
+      // tombstone set, and those overwhelmingly match nothing. A busy checkpoint there would fail
+      // an erasure that had already completed on every tier that held it, and point the operator at
+      // a replica that never had the record. So: always try, and refuse only when this call deleted
+      // rows or an earlier one left truncation outstanding.
       const [status] = this.db.pragma("wal_checkpoint(TRUNCATE)") as Array<{ busy: number }>;
-      if (status !== undefined && status.busy !== 0) {
-        // The message has to match what actually happened. Ungated, this fires on a sweep that
-        // deleted nothing — a `heal` boot carrying the whole accumulated tombstone set, or the
-        // retry whose DELETE already ran — and asserting "the rows are deleted" there would tell
-        // an operator a partial erasure occurred on records purged months ago.
+      const busy = status !== undefined && status.busy !== 0;
+      if (!busy)
+        this.truncationOutstanding = false; // the sidecar is empty; nothing is owed
+      else if (removed > 0 || this.truncationOutstanding) {
+        this.truncationOutstanding = true; // survives the throw, so the retry still knows
         throw new Error(
           `purge: the write-ahead log could not be truncated (a concurrent reader held it past ` +
             `busy_timeout). ${
               removed > 0
                 ? "The rows are deleted, but their plaintext may remain in the -wal sidecar"
-                : "No rows matched — the outstanding work was the truncation itself, and earlier " +
-                  "deletions' plaintext may remain in the -wal sidecar"
+                : "No rows matched here — the outstanding work is an EARLIER purge's truncation, " +
+                  "whose plaintext may remain in the -wal sidecar"
             }, so this erasure is INCOMPLETE (§11). Retry once the other handle is idle.`,
         );
       }

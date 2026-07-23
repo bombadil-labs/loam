@@ -128,6 +128,29 @@ describe("§11 at rest — sqlite", () => {
     await store.close();
   });
 
+  it("a purge that matched NOTHING does not fail on a busy checkpoint (ticket T67)", async () => {
+    // The other side of ungating the checkpoint. `purge` is called on every attached quarantine
+    // pool and on every boot `heal` sweep carrying the whole accumulated tombstone set, and those
+    // overwhelmingly match nothing. If a busy checkpoint failed those calls, a concurrent reader on
+    // an unrelated replica would fail an erasure that had already completed on every tier that held
+    // the record — and point the operator at a store that never had it. Attempt always; refuse only
+    // when truncation is actually owed.
+    const dir = scratch();
+    const store = new SqliteBackend(join(dir, "store.db"));
+    await store.append([canary(SURVIVOR, 1000)]);
+
+    const db = (store as unknown as { db: { pragma: (s: string, o?: unknown) => unknown } }).db;
+    const realPragma = db.pragma.bind(db);
+    db.pragma = (sql: string, opts?: unknown) =>
+      sql.startsWith("wal_checkpoint") ? [{ busy: 1 }] : realPragma(sql, opts);
+
+    // An id this store never held, with the checkpoint refusing: nothing was owed, so nothing fails.
+    await expect(store.purge([canary(MARKER, 9999).id])).resolves.toBe(0);
+
+    db.pragma = realPragma;
+    await store.close();
+  });
+
   it("purging EVERY delta leaves no plaintext anywhere in the database directory", async () => {
     const dir = scratch();
     const file = join(dir, "store.db");
