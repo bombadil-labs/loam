@@ -63,7 +63,11 @@ parentPort.on('message', async ({ bundle, node }) => {
 
 // Run one render in a bounded worker. Resolves to a RenderResult, NEVER rejects — every failure folds into
 // a clean refusal, and the worker is always terminated (no leak of the thread on the timeout path).
-export function renderInWorker(bundle: string, node: unknown): Promise<RenderResult> {
+export function renderInWorker(
+  bundle: string,
+  node: unknown,
+  timeoutMs: number | undefined = RENDER_TIMEOUT_MS,
+): Promise<RenderResult> {
   return new Promise((resolve) => {
     const worker = new Worker(WORKER_SRC, {
       eval: true,
@@ -87,11 +91,12 @@ export function renderInWorker(bundle: string, node: unknown): Promise<RenderRes
     // right and the clock was wrong). So construction arms a SPAWN bound, and `online` — the
     // moment the bundle can actually run — re-arms a fresh RENDER bound. Both windows stay hard;
     // no path is unbounded.
-    let timer = setTimeout(() => finish(timedOut), RENDER_TIMEOUT_MS);
+    const budget = timeoutMs ?? RENDER_TIMEOUT_MS;
+    let timer = setTimeout(() => finish(timedOut), budget);
     worker.once("online", () => {
       if (settled) return;
       clearTimeout(timer);
-      timer = setTimeout(() => finish(timedOut), RENDER_TIMEOUT_MS);
+      timer = setTimeout(() => finish(timedOut), budget);
     });
     worker.on("message", (msg: { kind?: string; html?: string }) => {
       if (msg.kind === "ok" && typeof msg.html === "string") {
