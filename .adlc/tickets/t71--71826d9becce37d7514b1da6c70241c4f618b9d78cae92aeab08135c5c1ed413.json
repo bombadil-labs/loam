@@ -1,0 +1,13 @@
+{
+  "body": "MEDIUM-HIGH, erasure-integrity. Found MECHANICALLY by `adlc hollow-test` during T67's P5 (2026-07-23) — no model involved.\n\nTHE BUG. Two surviving mutants on the same two lines of `SqliteBackend`'s constructor:\n  - `freelist_count, { simple: true }` -> `{ simple: false }` (SURVIVED)\n  - `if (freelist > 0) this.db.exec(\"VACUUM\")` -> `if (freelist <= 0)` (SURVIVED)\n\nEither mutation disables the one-time VACUUM that scrubs inherited freelist pages — and the entire test suite stays green. That VACUUM is T40's own §11 byte-level fix: `secure_delete` is CONNECTION-level and governs only pages freed from now on, so a store that erased anything before T40 shipped keeps that plaintext in its freelist forever, and only VACUUM clears it. The comment in sqlite.ts says this was PROBED — reopening such a store and running fresh appends/purges/checkpoints still yielded the old content.\n\nSo the repo has a §11 guarantee, a paragraph of hard-won prose explaining why it is load-bearing, and no rail. It can be deleted or inverted by any future edit and CI will applaud.\n\nTHE RAIL (this is the whole ticket). Build a store the OLD way — plaintext deltas, purge them with `secure_delete` OFF so the pages land in the freelist legibly — close it, then open it with the current SqliteBackend and assert the marker bytes are gone from the file. Byte level, reading the file, exactly as test/store/erasure-at-rest.test.ts already does for the other §11 promises. Probe it: reverting the `freelist > 0` VACUUM must turn it red.\n\nNOTE: two other survivors from the same run are lower value and can ride along or be dropped — `mirror.ts` `#lagEpoch += 1 -> += 2` (nothing asserts the lag-epoch counting semantics) and `erase.ts` tombstoneParts `&& -> ||` in the erases-pointer test. The freelist pair is the one that matters.\n",
+  "edges": [],
+  "id": "T71",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "src/store/sqlite.ts",
+    "test/store/erasure-at-rest.test.ts"
+  ],
+  "status": "todo",
+  "title": "The inherited-freelist VACUUM can be inverted with the whole suite green — T40's §11 fix has no rail"
+}
