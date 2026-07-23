@@ -12,7 +12,9 @@
   button); replaces a tailscale-exposed box with a plain authed HTTPS endpoint. Implemented
   (step 8): a `Dockerfile` (node 24-slim, non-root, `loam serve --http`, store on a `/data`
   volume) and the `loam` CLI. **Hosted persistence is a driver, not an image change**: the
-  `StoreBackend` seam (step 2) is satisfied by any async append/`deltasSince`/close, so a libSQL
+  `StoreBackend` seam (step 2) is satisfied by any async append/`deltasSince`/`purge`/`holds`/close
+  (`holds` is §11's byte-presence verdict: does any tier still hold the id, seen at least as far
+  as that driver's own `purge` reaches — landed by [#183](https://github.com/bombadil-labs/loam/pull/183)), so a libSQL
   driver (`@libsql/client` against a Turso URL) drops in beside `SqliteBackend` with no gateway,
   server, or CLI change — the same file format, hosted and replicated. (Not vendored here: it
   adds a dependency for a path that needs a live Turso account to exercise; the seam is the

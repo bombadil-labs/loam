@@ -106,7 +106,16 @@ export class ArchiveBackend implements StoreBackend {
       } finally {
         closeSync(fd);
       }
-      renameSync(tmp, target);
+      try {
+        renameSync(tmp, target);
+      } catch (err) {
+        // A failed rename must not leave the temp file behind: it holds a FULL delta under a
+        // name no read returns — the byte-at-rest shape `holds` and §11 exist to hunt — and a
+        // bad target lands it in the process CWD, where the next `git add -A` offers it to
+        // history, beyond any purge's reach.
+        rmSync(tmp, { force: true });
+        throw err;
+      }
       this.onDisk.add(d.id);
       stored += 1;
     }
@@ -223,6 +232,43 @@ export class ArchiveBackend implements StoreBackend {
     }
     for (const id of dead) this.onDisk.delete(id);
     return found.size;
+  }
+
+  async holds(id: string): Promise<boolean> {
+    this.assertOpen();
+    // Fast path: a delta at its canonical name is held — one stat, no walk. Only the POSITIVE
+    // answer may short-circuit: the bytes worth finding are exactly the ones NOT at their
+    // canonical name (a crash-left `.tmp`, a misfiled copy), so absence pays the full sweep.
+    if (existsSync(this.fileFor(id))) return true;
+    // The same reach as `purge`: every fan (a misfiled copy is still the bytes) and both name
+    // shapes (`<id>.json`, and the `<id>.json.<pid>.tmp` a crash leaves between fsync and
+    // rename). NOT `deltasSince` (skips the straggler by design) and NOT `onDisk` (knows only
+    // what this handle wrote).
+    const fans = readdirSync(this.root, { withFileTypes: true })
+      .filter((f) => f.isDirectory())
+      .map((f) => f.name);
+    for (const fan of fans) {
+      let names: readonly string[];
+      try {
+        names = readdirSync(join(this.root, fan));
+      } catch (err) {
+        // ENOENT only: a fan that vanished between listing and reading holds nothing. Any other
+        // error (EACCES, EIO, EMFILE) means this fan was NOT examined and may still hold the
+        // bytes — `purge` may swallow that because its count is evidence of work, but this IS
+        // the verdict, so it refuses rather than answer clean over an unread directory (H9).
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+        continue;
+      }
+      for (const name of names) {
+        const cut = name.endsWith(".json")
+          ? name.length - ".json".length
+          : name.endsWith(".tmp")
+            ? name.indexOf(".json.")
+            : -1;
+        if (cut > 0 && name.slice(0, cut) === id) return true;
+      }
+    }
+    return false;
   }
 
   async close(): Promise<void> {

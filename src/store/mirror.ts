@@ -70,6 +70,27 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
     return this.primary.deltasSince(knownIds);
   }
 
+  // BOTH tiers, because §11's promise covers both. Reads answer from the primary — a mirror is a
+  // shadow, not a second voice — but byte-presence is not a read: a delta the primary forgot and
+  // the mirror kept is a delta this store still HOLDS.
+  // Failures compose as `purge`'s do: both sides attempted, then the first refusal reported. A
+  // tier that cannot answer has proven nothing, so this REJECTS rather than resolving false (H9).
+  // The refusal names its tier, and the driver's own error survives as `cause`.
+  async holds(id: string): Promise<boolean> {
+    const results = await Promise.allSettled([this.primary.holds(id), this.mirror.holds(id)]);
+    const tiers = ["primary", "mirror"] as const;
+    for (const [i, r] of results.entries()) {
+      if (r.status === "rejected") {
+        throw new Error(
+          `the ${tiers[i]} tier could not be proven clean of ${id}: ` +
+            `${r.reason instanceof Error ? r.reason.message : String(r.reason)}`,
+          { cause: r.reason },
+        );
+      }
+    }
+    return results.some((r) => (r as PromiseFulfilledResult<boolean>).value);
+  }
+
   // Reads answer from the primary, so its quarantine (SPEC §25) is the store's quarantine — a
   // corrupt row set aside on the hot side. A primary that cannot quarantine (a bare memory tier)
   // holds nothing to repair, so the pen is empty.

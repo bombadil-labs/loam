@@ -25,11 +25,13 @@ const ids = (deltas: readonly Delta[]) => deltas.map((d) => d.id).sort();
 const tmp = mkdtempSync(join(tmpdir(), "loam-mirror-"));
 afterAll(() => rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
 
-// A side that refuses every call — the unreachable cold store.
+// A side that refuses every call — the unreachable cold store. `holds` REJECTS rather than
+// resolving false: a tier nobody can reach has not proven it forgot anything (H9).
 const unreachable = (): StoreBackend => ({
   append: () => Promise.reject(new Error("cold store unreachable")),
   deltasSince: () => Promise.reject(new Error("cold store unreachable")),
   purge: () => Promise.reject(new Error("cold store unreachable")),
+  holds: () => Promise.reject(new Error("cold store unreachable")),
   close: () => Promise.reject(new Error("cold store unreachable")),
 });
 
@@ -42,6 +44,7 @@ function flaky(inner: StoreBackend): { backend: StoreBackend; repair(): void } {
       append: (d) => (broken ? refuse() : inner.append(d)),
       deltasSince: (k) => (broken ? refuse() : inner.deltasSince(k)),
       purge: (ids) => (broken ? refuse() : inner.purge(ids)),
+      holds: (id) => (broken ? refuse() : inner.holds(id)), // delegate; never a convenient `false`
       close: () => inner.close(),
     },
     repair: () => {
@@ -190,12 +193,45 @@ describe("MirrorBackend", () => {
     expect(ids(await primary.deltasSince(new Set()))).toEqual(ids([d2])); // purged here too
   });
 
+  it("holds asks BOTH tiers: a byte only the mirror kept is still a byte this store holds", async () => {
+    // `deltasSince` answers from the primary, so a mirror that silently retained is invisible
+    // to every read — byte-presence must ask both tiers.
+    const primary = new MemoryBackend();
+    const mirror = new MemoryBackend();
+    const store = new MirrorBackend(primary, mirror);
+    await mirror.append([d1]); // only the cold side holds it
+    expect(await store.deltasSince(new Set())).toEqual([]); // the read sees nothing...
+    expect(await store.holds(d1.id)).toBe(true); // ...and the store holds it anyway
+  });
+
+  it("holds is true when only the PRIMARY holds it", async () => {
+    const primary = new MemoryBackend();
+    const mirror = new MemoryBackend();
+    const store = new MirrorBackend(primary, mirror);
+    await primary.append([d1]);
+    expect(await store.holds(d1.id)).toBe(true);
+    expect(await store.holds(d2.id)).toBe(false); // and false is still reachable
+  });
+
+  it("a tier that cannot answer makes holds REJECT, never resolve false — and NAMES the tier", async () => {
+    // Swallowing a tier's error turns "I could not check" into "it is gone" (H9). Purge composes
+    // its failures this way; so does this. The tier is named because the operator's next move
+    // depends on WHICH store to look at, and the driver's own error is kept as `cause`.
+    const store = new MirrorBackend(new MemoryBackend(), unreachable());
+    await expect(store.holds(d1.id)).rejects.toThrow(/mirror tier could not be proven clean/);
+    await expect(store.holds(d1.id)).rejects.toThrow(/unreachable/); // the cause survives
+    // ...and the other direction, so the label is read from the failing side rather than hardcoded.
+    const flipped = new MirrorBackend(unreachable(), new MemoryBackend());
+    await expect(flipped.holds(d1.id)).rejects.toThrow(/primary tier could not be proven clean/);
+  });
+
   it("close() closes both sides even when one refuses, then reports the refusal", async () => {
     const closed: string[] = [];
     const side = (name: string, fail: boolean): StoreBackend => ({
       append: () => Promise.resolve(0),
       deltasSince: () => Promise.resolve([]),
       purge: () => Promise.resolve(0),
+      holds: () => Promise.resolve(false), // truthful: this side stores nothing at all
       close: () => {
         closed.push(name);
         return fail ? Promise.reject(new Error(`${name} refused to close`)) : Promise.resolve();

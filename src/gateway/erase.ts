@@ -222,67 +222,160 @@ export async function eraseImpl(
   if (seed === undefined || gw.operatorAuthor === undefined) {
     throw new Error("erasure is the instance operator's alone, and this store has no operator");
   }
+  // Retry anchors on the TOMBSTONE, read before the `nothing to erase` guard: a partial attempt
+  // can leave the target gone from the reactor while a tier still holds the bytes, and a re-run
+  // must not mint a second tombstone (a fresh timestamp is a new content address).
+  // Anchor only on a tombstone that is SURVIVING (a struck one is forgiveness — the id may
+  // return) and that ERASES this id (a pointer merely mentioning it is not an erasure of it).
+  // `survivingTombstones` owns both rules, so the anchor and the dead set cannot drift.
+  const already = survivingTombstones(gw.reactor, gw.operatorAuthor).find(
+    (d) => tombstoneParts(d.claims).targetId === id,
+  );
   const target = gw.reactor.get(id);
-  if (target === undefined) {
+  // Bypass the guard only for an OUTSTANDING erasure — an id erased cleanly long ago also has a
+  // surviving tombstone, and resolving `{ erased }` for it would report work never done.
+  // Outstanding is asked of this ground AND its pools; the local backend alone would strand the
+  // pool-retention retry. (A struck tombstone lands here too, correctly: forgiveness withdraws
+  // the erasure, so a fresh one must be spoken rather than the old one silently reused.)
+  if (target === undefined && (already === undefined || !(await erasureOutstanding(gw, id)))) {
     throw new Error(`nothing to erase: ${id} is not held here`);
   }
-  if (isTombstone(target.claims)) {
+  if (target !== undefined && isTombstone(target.claims)) {
     // The erasure log is the record of what was forgotten; it stays append-only. Un-erasure
     // is striking the tombstone (forgiveness), never erasing it.
     throw new Error("the erasure log is append-only: a tombstone cannot itself be erased");
   }
+  const tombstone =
+    already ??
+    signClaims(
+      eraseClaims(id, target!.claims.author, gw.operatorAuthor, gw.nextTimestamp(), opts.reason),
+      seed,
+    );
   // The manifest: every delta citing the id (negations, provenance links) — the holes the
   // cut will leave, enumerated before it is made. Cascade is the caller's choice.
+  // Excluded BY IDENTITY: only the tombstone this erasure mints or reuses. A shape filter would
+  // both catch it on retry (a manifest that varies between attempts, a cascading caller sent to
+  // erase the cut itself) and wrongly drop a struck tombstone from a forgiven earlier erasure —
+  // a surviving delta dangling at the hole, which the manifest exists to enumerate.
   const citations = [...gw.reactor.snapshot()]
+    .filter((d) => d.id !== tombstone.id)
     .filter((d) =>
       d.claims.pointers.some((p) => p.target.kind === "delta" && p.target.deltaRef.delta === id),
     )
     .map((d) => d.id);
-  // RETRY IS SAFE: a first attempt can record the tombstone and still leave bytes at rest (a purge
-  // that deleted rows then failed to truncate the WAL, a tier that refused). The operator's re-run
-  // must finish the sweep WITHOUT growing the erasure log — a fresh timestamp would mint a new
-  // content address and append a second tombstone for the same target on every attempt.
-  const already = [...gw.reactor.snapshot()].find(
-    (d) =>
-      isTombstone(d.claims) &&
-      d.claims.author === gw.operatorAuthor &&
-      d.claims.pointers.some((p) => p.target.kind === "delta" && p.target.deltaRef.delta === id),
-  );
-  const tombstone =
-    already ??
-    signClaims(
-      eraseClaims(id, target.claims.author, gw.operatorAuthor, gw.nextTimestamp(), opts.reason),
-      seed,
-    );
   if (already === undefined) {
     await gw.append([tombstone]);
     await gw.flush(); // the tombstone must be ground before the target stops being ground
   }
-  // A purge count of 0 is AMBIGUOUS — it means "this tier never held it" exactly as often as it
-  // means "this tier failed to remove it" — so the count cannot carry the completeness verdict.
-  // Byte-presence can. The verdict is therefore deferred to the end of this function, after
-  // re-seating and after the pool fan-out, so that neither is skipped by a local miss.
-  const removed = await gw.backend.purge([id]);
-  await gw.reseat();
+  // The purge count is evidence of work, never the verdict: 0 means "never held" as often as
+  // "refused to remove", and a mirror returns the max of its two sides, hiding a retaining tier.
+  // Only byte-presence (`holds`) answers §11, asked at the end after re-seat and pool fan-out.
+  // A local refusal is a fault to COLLECT, never an abort: thrown here it would deny the
+  // tombstone and the sweep to every attached pool — one tier's fault becoming every replica's leak.
+  let localPurge: unknown;
+  try {
+    await gw.backend.purge([id]);
+  } catch (err) {
+    localPurge = err;
+  }
+  try {
+    await gw.reseat();
+  } catch (err) {
+    // Same backend the purge just used — same fault class, same collection; aborting here
+    // would deny the pools their sweep.
+    localPurge = localPurge ?? err;
+  }
   // §24.8 — the erasure reaches every attached QUARANTINE POOL (the operator's own replicas of this
   // ground): the same tombstone lands there and the byte is purged there too, so a forgotten record can
   // never live on in a staging area inside the operator's own walls. §11 reaches through the one-way
   // glass unconditionally; a quarantine that could hide a purged byte would be an erasure-evasion channel.
+  // SETTLE the whole fan-out, then report: a sequential walk aborts at the first refusing pool
+  // and starves every replica behind it of both tombstone and purge — one replica's fault must
+  // not become every other replica's leak (`MirrorBackend.purge`/`close` compose the same way).
+  // `seen` membership is claimed synchronously at dispatch: a pool attached beneath two parents
+  // is reachable, and a claim recorded only after the child's awaits could dispatch it twice.
   const seen = new Set<Gateway>([gw]);
-  for (const pool of gw.quarantinePools) await pool.eraseReplica(tombstone, id, seen);
-  // NOW the verdict, once every tier has been swept. Only a 0 count is in doubt, so only a 0 pays
-  // for the scan: a store that removed rows plainly removed them, while 0 could be a completed
-  // earlier attempt (`purge` deletes rows and may still throw on a WAL it could not truncate — the
-  // caller retries, and on that retry the rows are already gone) or a store that silently refused.
-  // Byte-presence separates them, and it is the only thing §11 actually promises about.
-  if (removed === 0 && (await gw.backend.deltasSince(new Set())).some((d) => d.id === id)) {
+  const targets = [...gw.quarantinePools].filter((pool) => !seen.has(pool));
+  for (const pool of targets) seen.add(pool);
+  const fanned = await Promise.allSettled(
+    targets.map((pool) => pool.eraseReplica(tombstone, id, seen)),
+  );
+  // The verdict is asked of the BYTES, unconditionally — a purge count proves some tier removed
+  // something, never that every tier did. Every fault lands in ONE report: the remedy is
+  // "resolve and re-run", and one fault per round trip would cost a re-run per replica.
+  const faults = await incompleteErasureFaults(gw, id, fanned);
+  if (localPurge !== undefined) {
+    faults.unshift({
+      what: `this store's purge refused: ${localPurge instanceof Error ? localPurge.message : JSON.stringify(localPurge)}`,
+      cause: localPurge,
+    });
+  }
+  if (faults.length > 0) {
     throw new Error(
       `erase ${id}: the tombstone is recorded and every tier was swept, but the content is STILL ` +
-        `HELD by the store — erasure is not complete. Resolve the store fault and re-run; the ` +
-        `re-run is safe and will not mint a second tombstone.`,
+        `HELD by the store — erasure is not complete. ${faults.length} fault(s):\n  ` +
+        `${faults.map((f) => f.what).join("\n  ")}\n` +
+        `Resolve them and re-run; the re-run is safe and will not mint a second tombstone.`,
+      { cause: faults[0]?.cause },
     );
   }
   return { erased: id, citations };
+}
+
+// Is this erasure still OUTSTANDING anywhere in reach — this ground or any replica of it? Its
+// fault model must be the verdict's, or the two drift: outstanding means bytes held (or
+// unprovable — a tier that cannot answer has proven nothing; H9), OR a reachable replica that
+// does not yet carry the operator's tombstone for the id.
+async function erasureOutstanding(
+  gw: Gateway,
+  id: string,
+  seen = new Set<Gateway>(),
+): Promise<boolean> {
+  if (seen.has(gw)) return false;
+  seen.add(gw);
+  try {
+    if (await gw.backend.holds(id)) return true;
+  } catch {
+    return true; // could not be proven clean — treat as outstanding, never as done
+  }
+  if (!readTombstones(gw.reactor, gw.operatorAuthor).has(id)) return true; // delivery still owed
+  for (const pool of gw.quarantinePools) {
+    if (await erasureOutstanding(pool, id, seen)) return true;
+  }
+  return false;
+}
+
+// Everything standing between this call and a completed erasure, collected rather than raced:
+// this ground's retained bytes (or a tier that could not be asked), plus every replica refusal.
+// Shared by both fan-out layers so the two halves cannot drift on how faults compose.
+async function incompleteErasureFaults(
+  gw: Gateway,
+  id: string,
+  fanned: readonly PromiseSettledResult<void>[],
+): Promise<{ what: string; cause?: unknown }[]> {
+  const faults: { what: string; cause?: unknown }[] = [];
+  try {
+    if (await gw.backend.holds(id)) {
+      faults.push({ what: `this store STILL HOLDS the content at rest` });
+    }
+  } catch (err) {
+    // Could not be asked is not clean — a tier that cannot answer has proven nothing (H9).
+    faults.push({
+      what: `this store could not be proven clean: ${err instanceof Error ? err.message : String(err)}`,
+      cause: err,
+    });
+  }
+  for (const r of fanned) {
+    if (r.status === "rejected") {
+      faults.push({
+        what: `an attached quarantine pool refused: ${
+          r.reason instanceof Error ? r.reason.message : String(r.reason)
+        }`,
+        cause: r.reason,
+      });
+    }
+  }
+  return faults;
 }
 
 // Honor an erasure DECIDED by the primary operator (the body of `Gateway.eraseReplica`, SPEC §24.8),
@@ -320,13 +413,46 @@ export async function eraseReplicaImpl(
       `the erasure did not complete: the operator's tombstone for ${id} could not land in an attached pool`,
     );
   }
-  await gw.backend.purge([id]);
-  await gw.reseat();
-  // Transitive: a pool of a pool holds the operator's bytes too. `seen` guards the walk — a cycle
-  // among pools cannot arise from openQuarantine (each pool is a fresh gateway), but a fan-out
-  // that could infinite-loop would be a worse bug than the one this fixed.
+  let localPurge: unknown;
+  try {
+    await gw.backend.purge([id]);
+  } catch (err) {
+    localPurge = err; // collected below — a pool tier's fault must not starve its own children
+  }
+  try {
+    await gw.reseat();
+  } catch (err) {
+    localPurge = localPurge ?? err; // same fault class, same collection — see eraseImpl
+  }
+  // Transitive FIRST, verdict LAST (the order `eraseImpl` keeps): a verdict thrown before the
+  // walk would starve every pool behind and beneath this one of both tombstone and purge —
+  // trading one silent leak for a blocking leak across all the others. `seen` guards the walk
+  // against a cycle; the whole walk is settled, then reported, so one unprovable replica cannot
+  // hide another.
   seen.add(gw);
-  for (const pool of gw.quarantinePools) {
-    if (!seen.has(pool)) await pool.eraseReplica(tombstone, id, seen);
+  const nested = [...gw.quarantinePools].filter((pool) => !seen.has(pool));
+  for (const pool of nested) seen.add(pool); // claimed at dispatch — see the eraseImpl note
+  const walked = await Promise.allSettled(
+    nested.map((pool) => pool.eraseReplica(tombstone, id, seen)),
+  );
+  // This tier's own bytes AND every nested refusal, in ONE report, via the collector shared with
+  // `eraseImpl`. A pool is where §11 is easiest to evade — a silently-retaining replica must not
+  // read as clean outward, and a store that cannot be ASKED is a fault beside the others, never
+  // an escape hatch that drops the nested refusals already in hand.
+  const faults = await incompleteErasureFaults(gw, id, walked);
+  if (localPurge !== undefined) {
+    faults.unshift({
+      what: `this pool's purge refused: ${localPurge instanceof Error ? localPurge.message : JSON.stringify(localPurge)}`,
+      cause: localPurge,
+    });
+  }
+  if (faults.length > 0) {
+    throw new Error(
+      `the erasure did not complete in an attached quarantine pool: a forgotten record must not ` +
+        `survive inside the operator's own replica. ${faults.length} fault(s):\n  ` +
+        `${faults.map((f) => f.what).join("\n  ")}\n` +
+        `Resolve them and re-run the erasure; the re-run is safe and mints no second tombstone.`,
+      { cause: faults[0]?.cause },
+    );
   }
 }

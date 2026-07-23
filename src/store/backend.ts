@@ -43,6 +43,15 @@ export interface StoreBackend {
   // no-ops. Resolves to the count actually removed.
   purge(ids: Iterable<string>): Promise<number>;
 
+  // Does this backend still hold bytes filed under `id`, on ANY tier it owns? The question §11
+  // actually asks. `deltasSince` cannot stand in for it: that read is DEFINED to skip what
+  // `purge` exists to find (a crash-left tmp file, a misfiled copy), so a read seeing nothing
+  // proves only that nothing is READABLE, while §11 promises the bytes are GONE.
+  // The invariant every driver keeps: `holds` sees at least everything `purge` reaches —
+  // implemented against the bytes that driver's purge sweeps, never a bookkeeping index of what
+  // this handle believes it wrote.
+  holds(id: string): Promise<boolean>;
+
   // Release held resources.
   close(): Promise<void>;
 }

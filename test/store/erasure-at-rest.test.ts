@@ -9,6 +9,7 @@
 // So these rails read the FILE. That is the whole point: an API-level assertion cannot see this
 // class of failure, and writing one would have produced a green bar over a leak (again).
 
+import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -94,6 +95,170 @@ describe("§11 at rest — sqlite", () => {
 
     await store.close();
     expect(anyFileContains(dir, MARKER)).toBeUndefined();
+  });
+
+  it("a RETRY whose DELETE finds nothing still truncates the WAL (ticket T67)", async () => {
+    // The documented partial-erasure path: the first attempt deletes the rows and then fails to
+    // truncate the WAL. On the retry the rows are already gone (`removed` is 0), yet the work
+    // outstanding is the truncation — a checkpoint gated on `removed > 0` would skip it forever.
+    const dir = scratch();
+    const file = join(dir, "store.db");
+    const store = new SqliteBackend(file);
+    const target = canary(MARKER, 1000);
+    await store.append([target]);
+
+    // Attempt 1, with the truncation sabotaged mid-purge: rows deleted, WAL left holding their
+    // pre-delete page images. A second live handle is what does this in the wild; here the pragma
+    // is intercepted so the rail is deterministic rather than a race.
+    const db = (store as unknown as { db: { pragma: (s: string, o?: unknown) => unknown } }).db;
+    const realPragma = db.pragma.bind(db);
+    db.pragma = (sql: string, opts?: unknown) =>
+      sql.startsWith("wal_checkpoint") ? [{ busy: 1 }] : realPragma(sql, opts);
+    await expect(store.purge([target.id])).rejects.toThrow(/write-ahead log|INCOMPLETE/i);
+    expect(anyFileContains(dir, MARKER)).toBeDefined(); // still at rest, as the error says
+
+    // The operator idles the other handle and re-runs, exactly as the error instructs. The DELETE
+    // now finds nothing — and the checkpoint must still happen.
+    db.pragma = realPragma;
+    expect(await store.purge([target.id])).toBe(0); // no rows left to remove...
+    expect(anyFileContains(dir, MARKER)).toBeUndefined(); // ...and the bytes are finally gone
+
+    await store.close();
+  });
+
+  it("the truncation debt SURVIVES A CRASH: a reopened handle still knows, and still refuses to lie (ticket T67)", async () => {
+    // The same partial erasure, ended by a process death instead of a retry. A debt held only in
+    // handle memory leaves the reopened store looking clean — rows gone, holds false — while the
+    // sidecar still carries the plaintext and the retry is refused as `nothing to erase`. The
+    // debt must be durable; this rail spans the process boundary to prove it.
+    const dir = scratch();
+    const file = join(dir, "store.db");
+    const first = new SqliteBackend(file);
+    const target = canary(MARKER, 1000);
+    await first.append([target]);
+
+    const db1 = (first as unknown as { db: { pragma: (s: string, o?: unknown) => unknown } }).db;
+    const real1 = db1.pragma.bind(db1);
+    db1.pragma = (sql: string, opts?: unknown) =>
+      sql.startsWith("wal_checkpoint") ? [{ busy: 1 }] : real1(sql, opts);
+    await expect(first.purge([target.id])).rejects.toThrow(/INCOMPLETE/);
+    // NO close() — close would checkpoint and settle the debt gracefully, which is exactly the
+    // path a crash does not take. The handle is simply abandoned.
+
+    const reopened = new SqliteBackend(file);
+    // The reopened store owes a truncation it cannot prove is done, so byte-presence for the
+    // purged id is UNPROVABLE — and unprovable answers true, never false (H9). This is what lets
+    // the gateway's retry through instead of refusing it as `nothing to erase`.
+    expect(await reopened.holds(target.id)).toBe(true);
+    // The retry's own purge drives the checkpoint, clears the debt, and only THEN does the store
+    // report the bytes gone.
+    expect(await reopened.purge([target.id])).toBe(0);
+    expect(await reopened.holds(target.id)).toBe(false);
+    expect(anyFileContains(dir, MARKER)).toBeUndefined();
+    await reopened.close();
+  });
+
+  it("a latched debt belongs to ITS ids: an unrelated purge under the same busy WAL is untouched", async () => {
+    // The debt is a set of ids, never a handle-wide latch: A's owed truncation must not refuse
+    // B's erasure while any reader holds the WAL.
+    const dir = scratch();
+    const store = new SqliteBackend(join(dir, "store.db"));
+    const owed = canary(MARKER, 1000);
+    await store.append([owed]);
+    const db = (store as unknown as { db: { pragma: (s: string, o?: unknown) => unknown } }).db;
+    const realPragma = db.pragma.bind(db);
+    db.pragma = (sql: string, opts?: unknown) =>
+      sql.startsWith("wal_checkpoint") ? [{ busy: 1 }] : realPragma(sql, opts);
+    await expect(store.purge([owed.id])).rejects.toThrow(/INCOMPLETE/); // A owes a truncation
+
+    // B was never here; the checkpoint is STILL busy. B's purge must not inherit A's debt...
+    await expect(store.purge([canary(SURVIVOR, 2000).id])).resolves.toBe(0);
+    // ...and byte-presence stays scoped the same way: A unprovable, B provably absent.
+    expect(await store.holds(owed.id)).toBe(true);
+    expect(await store.holds(canary(SURVIVOR, 2000).id)).toBe(false);
+
+    db.pragma = realPragma;
+    await store.close();
+  });
+
+  it("a GRACEFUL close settles the debt it discharges: no phantom on reopen", async () => {
+    // The complement of the crash rail above. close() checkpoints and unlinks the sidecar — the
+    // debt is genuinely satisfied — so it must also clear the persisted record, or the reopened
+    // handle reports retention over provably-absent bytes and a second erase of a cleanly-erased
+    // id rides the phantom through the retry bypass to a completion report for no work.
+    const dir = scratch();
+    const file = join(dir, "store.db");
+    const first = new SqliteBackend(file);
+    const target = canary(MARKER, 1000);
+    await first.append([target]);
+    const db1 = (first as unknown as { db: { pragma: (s: string, o?: unknown) => unknown } }).db;
+    const real1 = db1.pragma.bind(db1);
+    db1.pragma = (sql: string, opts?: unknown) =>
+      sql.startsWith("wal_checkpoint") ? [{ busy: 1 }] : real1(sql, opts);
+    await expect(first.purge([target.id])).rejects.toThrow(/INCOMPLETE/);
+    db1.pragma = real1; // the reader is gone by shutdown — close's own checkpoint will land
+    await first.close();
+
+    const reopened = new SqliteBackend(file);
+    expect(await reopened.holds(target.id)).toBe(false); // no phantom debt
+    expect(anyFileContains(dir, MARKER)).toBeUndefined(); // and the bytes really are gone
+    await reopened.close();
+  });
+
+  it("an UNREADABLE debt row owes for everyone, and a landed checkpoint forgives it", async () => {
+    // The debt row exists but cannot name its ids: every id is unprovable, not none of them (H9).
+    const dir = scratch();
+    const file = join(dir, "store.db");
+    const setup = new SqliteBackend(file);
+    await setup.append([canary(SURVIVOR, 1000)]);
+    await setup.close();
+    // Corrupt the debt row behind the seam, as a crash mid-write or a foreign writer would.
+    const raw = new Database(file);
+    raw
+      .prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('truncation-outstanding', ?)")
+      .run("{corrupt");
+    raw.close();
+
+    const reopened = new SqliteBackend(file);
+    expect(await reopened.holds(canary(MARKER, 9999).id)).toBe(true); // unknown debt: all unprovable
+    // The next successful checkpoint forgives it — any purge drives one.
+    await reopened.purge([canary(MARKER, 9999).id]);
+    expect(await reopened.holds(canary(MARKER, 9999).id)).toBe(false);
+    await reopened.close();
+
+    // VALID JSON that is not an array owes exactly the same way — the dangling-else shape:
+    // "{corrupt" throws in JSON.parse while "5" parses cleanly, so both paths must owe.
+    const raw2 = new Database(file);
+    raw2
+      .prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('truncation-outstanding', ?)")
+      .run("5");
+    raw2.close();
+    const again = new SqliteBackend(file);
+    expect(await again.holds(canary(MARKER, 9999).id)).toBe(true);
+    await again.purge([canary(MARKER, 9999).id]);
+    expect(await again.holds(canary(MARKER, 9999).id)).toBe(false);
+    await again.close();
+  });
+
+  it("a purge that matched NOTHING does not fail on a busy checkpoint (ticket T67)", async () => {
+    // `purge` runs on every attached quarantine pool and every boot `heal` sweep, and those
+    // overwhelmingly match nothing. A busy checkpoint there would fail an erasure that had
+    // already completed on every tier that held the record. Attempt always; refuse only when
+    // truncation is actually owed.
+    const dir = scratch();
+    const store = new SqliteBackend(join(dir, "store.db"));
+    await store.append([canary(SURVIVOR, 1000)]);
+
+    const db = (store as unknown as { db: { pragma: (s: string, o?: unknown) => unknown } }).db;
+    const realPragma = db.pragma.bind(db);
+    db.pragma = (sql: string, opts?: unknown) =>
+      sql.startsWith("wal_checkpoint") ? [{ busy: 1 }] : realPragma(sql, opts);
+
+    // An id this store never held, with the checkpoint refusing: nothing was owed, so nothing fails.
+    await expect(store.purge([canary(MARKER, 9999).id])).resolves.toBe(0);
+
+    db.pragma = realPragma;
+    await store.close();
   });
 
   it("purging EVERY delta leaves no plaintext anywhere in the database directory", async () => {

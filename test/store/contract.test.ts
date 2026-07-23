@@ -275,6 +275,53 @@ for (const makeHarness of harnesses) {
       await store.close();
     });
 
+    it("holds answers byte-presence: absent, then held, then absent again (ticket T67)", async () => {
+      // The question §11 actually asks, asked of every driver rather than inferred from a read.
+      // `deltasSince` cannot stand in for this — it is DEFINED to skip what `purge` exists to find
+      // (an archive `.tmp` straggler), so a read that sees nothing proves nothing about the bytes.
+      const h = makeHarness();
+      const store = h.open();
+      expect(await store.holds(signed1.id)).toBe(false); // never appended here
+      await store.append(all);
+      expect(await store.holds(signed1.id)).toBe(true);
+      await store.purge([signed1.id]);
+      expect(await store.holds(signed1.id)).toBe(false);
+      expect(await store.holds(signed2.id)).toBe(true); // ...and only the named id went
+      await store.close();
+    });
+
+    if (sample.reopen !== undefined) {
+      it("holds asks the STORE, not this handle's bookkeeping", async () => {
+        // Append through one handle, probe through another. Without this, a `holds` implemented as
+        // `this.onDisk.has(id)` passes every other test in this file — `append` adds to that index
+        // and `purge` deletes from it, so the symmetry holds while the answer comes from a cache of
+        // what this handle DID rather than from the bytes. A second handle's row is still a row
+        // this store holds, and the byte a crash left behind was never in anyone's index (H8).
+        const h = makeHarness();
+        const writer = h.open();
+        await writer.append([signed1]);
+        await writer.close();
+
+        const reader = h.reopen!();
+        expect(await reader.holds(signed1.id)).toBe(true); // never written by THIS handle
+        expect(await reader.purge([signed1.id])).toBe(1);
+        expect(await reader.holds(signed1.id)).toBe(false);
+        await reader.close();
+      });
+    }
+
+    it("holds sees at least what purge reaches: a positive count is never a surprise", async () => {
+      // The governing invariant. A driver whose `purge` can remove bytes its `holds` cannot see
+      // would report a completion the store never delivered — H7 with the evidence inverted.
+      const h = makeHarness();
+      const store = h.open();
+      await store.append(all);
+      for (const d of all) expect(await store.holds(d.id)).toBe(true);
+      expect(await store.purge(ids(all))).toBe(all.length);
+      for (const d of all) expect(await store.holds(d.id)).toBe(false);
+      await store.close();
+    });
+
     it("purge is mechanical, not law: the purged delta may be appended again", async () => {
       // Refusal-of-return is the GATEWAY's job (tombstones at admission); a backend keeps
       // "a set of deltas" and no memory of grudges.
@@ -295,6 +342,7 @@ for (const makeHarness of harnesses) {
       await expect(store.append([signed2])).rejects.toThrow(/closed/);
       await expect(store.deltasSince(new Set())).rejects.toThrow(/closed/);
       await expect(store.purge([signed1.id])).rejects.toThrow(/closed/);
+      await expect(store.holds(signed1.id)).rejects.toThrow(/closed/);
     });
 
     if (sample.reopen !== undefined) {

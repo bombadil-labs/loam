@@ -89,6 +89,11 @@ describe("LocalStorageBackend: the seed key is structurally outside the delta se
     // and no purge can be talked into removing it:
     expect(await store.purge(["seed"])).toBe(0);
     expect(origin.getItem("loam:garden:seed")).toBe("a1".repeat(32));
+    // ...and `holds` does not see it either: the key EXISTS in storage, so a probe that fell
+    // through to `getItem(keyFor("seed"))` would answer true — reporting key material as
+    // retained subject content. The seed is not a delta; a byte-presence question about deltas
+    // must not be answerable by it.
+    expect(await store.holds("seed")).toBe(false);
     await store.close();
   });
 });

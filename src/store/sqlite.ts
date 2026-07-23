@@ -14,7 +14,7 @@
 /* eslint-disable @typescript-eslint/require-await -- the async keyword is load-bearing: it
    turns every synchronous throw (SQLITE_BUSY, a closed handle, a refused delta) into the
    rejected promise the seam promises. */
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import Database from "better-sqlite3";
 import {
@@ -43,6 +43,17 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
   // Rows the most recent read set aside (SPEC §25): recomputed on every deltasSince from the
   // table's own bytes, never a stored countdown. `loam repair` reads this back.
   private lastQuarantine: QuarantinedRow[] = [];
+  // Ids whose rows were deleted under a WAL that could not be truncated — their pre-delete page
+  // images may still be legible in the `-wal` sidecar. A SET, not a handle-wide flag: the debt
+  // belongs to those ids alone, so unrelated purges and erasures stay completable.
+  // As durable as the erasure it belongs to — mirrored into the `meta` table and read back at
+  // open, or a crash before the retry would leave a clean-looking store whose sidecar still
+  // carries the plaintext and a retry refused as `nothing to erase`.
+  private truncationOwed = new Set<string>();
+  // Set when the persisted debt row exists but cannot be read: the debt is real and its ids are
+  // unknown, so EVERY id is unprovable until a checkpoint lands (H9 — an unreadable debt must
+  // never read as "nothing owed"). Cleared exactly where the owed set is.
+  private truncationUnknown = false;
 
   private readonly insertDelta: Database.Statement;
   private readonly selectAll: Database.Statement;
@@ -79,11 +90,45 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
         claims TEXT NOT NULL,
         sig    TEXT
       );
+      CREATE TABLE IF NOT EXISTS meta (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
     `);
     this.insertDelta = this.db.prepare(
       "INSERT OR IGNORE INTO deltas (id, claims, sig) VALUES (?, ?, ?)",
     );
     this.selectAll = this.db.prepare("SELECT id, claims, sig FROM deltas ORDER BY seq");
+    // A previous handle's unfinished truncation is this handle's debt from the first moment.
+    let owed = this.db
+      .prepare("SELECT value FROM meta WHERE key = 'truncation-outstanding'")
+      .get() as { value: string } | undefined;
+    // A debt row whose sidecar no longer exists is provably moot — a later checkpoint truncated
+    // and unlinked the -wal after the row was written. Trusting the stale row would make holds()
+    // a permanent false positive for its ids and hand erase() a phantom to "complete".
+    if (owed !== undefined && !existsSync(`${filePath}-wal`)) {
+      this.db.prepare("DELETE FROM meta WHERE key = 'truncation-outstanding'").run();
+      owed = undefined;
+    }
+    if (owed !== undefined) {
+      try {
+        const ids = JSON.parse(owed.value) as unknown;
+        // Braces are load-bearing: a dangling else here bound to the inner if, letting valid
+        // non-array JSON owe nothing.
+        if (Array.isArray(ids)) {
+          for (const i of ids) {
+            if (typeof i === "string") this.truncationOwed.add(i);
+            else this.truncationUnknown = true; // a non-string entry is a debt it cannot name
+          }
+        } else {
+          this.truncationUnknown = true; // a debt row that is not an id list still owes
+        }
+      } catch {
+        // An unreadable debt row cannot name its ids — which makes every id unprovable, not
+        // none of them (H9).
+        this.truncationUnknown = true;
+      }
+    }
   }
 
   private assertOpen(): void {
@@ -190,12 +235,26 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
   async purge(ids: Iterable<string>): Promise<number> {
     this.assertOpen();
     const remove = this.db.prepare("DELETE FROM deltas WHERE id = ?");
+    const batch = [...ids];
+    const deletedNow: string[] = []; // the ids whose images the WAL may hold if truncation fails
     let removed = 0;
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      for (const id of ids) {
-        if (remove.run(id).changes > 0) removed += 1;
+      for (const id of batch) {
+        if (remove.run(id).changes > 0) {
+          removed += 1;
+          deletedNow.push(id);
+        }
         this.onDisk.delete(id); // and never mark a purged id durable
+      }
+      // The debt rides the SAME transaction as the deletions it describes: written after COMMIT,
+      // a crash in the gap would leave deleted rows whose WAL images no reopened handle knew to
+      // distrust. Both land or neither does; the checkpoint below clears it on the happy path.
+      if (deletedNow.length > 0) {
+        for (const id of deletedNow) this.truncationOwed.add(id);
+        this.db
+          .prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('truncation-outstanding', ?)")
+          .run(JSON.stringify([...this.truncationOwed]));
       }
       this.db.exec("COMMIT");
       // `secure_delete` zeroes the freed pages in the DATABASE; in WAL mode the delete is first
@@ -212,13 +271,35 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
       // §11 does not permit reporting a completeness we did not deliver, so this refuses loudly.
       // The rows ARE already deleted by then, so the message says exactly that — the caller holds
       // a partial erasure to retry, not a failed one to redo.
-      if (removed > 0) {
-        const [status] = this.db.pragma("wal_checkpoint(TRUNCATE)") as Array<{ busy: number }>;
-        if (status !== undefined && status.busy !== 0) {
+      //
+      // Attempted unconditionally, but FAILING only for the ids that actually owe a truncation:
+      // gating the attempt on `removed > 0` skips the very checkpoint a retry exists to perform,
+      // while failing unconditionally fails erasures for ids this store never held (pools and
+      // boot sweeps purge those routinely). The debt is this call's deletions plus any prior
+      // owed id this call was asked about.
+      const [status] = this.db.pragma("wal_checkpoint(TRUNCATE)") as Array<{ busy: number }>;
+      // A result this code cannot read is NOT a success — treating an absent row as "truncated"
+      // would clear a real debt on evidence of nothing (H9).
+      const busy = status === undefined || status.busy !== 0;
+      if (!busy) {
+        // The sidecar is empty; nothing is owed by anyone — in memory and on disk.
+        this.truncationOwed.clear();
+        this.truncationUnknown = false;
+        this.db.prepare("DELETE FROM meta WHERE key = 'truncation-outstanding'").run();
+      } else {
+        const owedHere =
+          deletedNow.length > 0 ||
+          this.truncationUnknown ||
+          batch.some((id) => this.truncationOwed.has(id));
+        if (owedHere) {
           throw new Error(
-            "purge: the rows were deleted but the write-ahead log could not be truncated (a " +
-              "concurrent reader held it past busy_timeout). Their plaintext may remain in the " +
-              "-wal sidecar, so this erasure is INCOMPLETE (§11). Retry once the other handle is idle.",
+            `purge: the write-ahead log could not be truncated (a concurrent reader held it past ` +
+              `busy_timeout). ${
+                removed > 0
+                  ? "The rows are deleted, but their plaintext may remain in the -wal sidecar"
+                  : "No rows matched here — the outstanding work is an EARLIER purge's truncation, " +
+                    "whose plaintext may remain in the -wal sidecar"
+              }, so this erasure is INCOMPLETE (§11). Retry once the other handle is idle.`,
           );
         }
       }
@@ -233,7 +314,35 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
     return removed;
   }
 
+  async holds(id: string): Promise<boolean> {
+    this.assertOpen();
+    // An id whose truncation is owed may still have pre-delete page images in the `-wal`
+    // sidecar: byte-presence is unprovable for THAT id, and unprovable answers TRUE, never
+    // false (H9). Scoped to the owing ids — one erasure's debt must not make every record
+    // unprovable.
+    if (this.truncationUnknown || this.truncationOwed.has(id)) return true;
+    // Asks the TABLE, not `onDisk` — that index records only what this handle wrote, and a
+    // second handle's row is still a row this store holds.
+    return this.db.prepare("SELECT 1 FROM deltas WHERE id = ?").get(id) !== undefined;
+  }
+
   async close(): Promise<void> {
+    // Closing the last connection checkpoints and unlinks the sidecar anyway, but done
+    // implicitly it leaves the persisted debt row behind — a phantom `holds` true over
+    // provably-absent bytes. So checkpoint explicitly, and only a SUCCESS clears the record:
+    // a busy checkpoint at close leaves the debt standing, the honest state of an unfolded sidecar.
+    if ((this.truncationOwed.size > 0 || this.truncationUnknown) && this.db.open) {
+      try {
+        const [status] = this.db.pragma("wal_checkpoint(TRUNCATE)") as Array<{ busy: number }>;
+        if (status !== undefined && status.busy === 0) {
+          this.truncationOwed.clear();
+          this.truncationUnknown = false;
+          this.db.prepare("DELETE FROM meta WHERE key = 'truncation-outstanding'").run();
+        }
+      } catch {
+        /* close() must still close; the debt row stays, which is the fail-closed direction */
+      }
+    }
     this.db.close();
   }
 }

@@ -1,9 +1,22 @@
 {
+  "_adlcArchive": {
+    "archivedAt": "2026-07-23T16:59:36.088Z",
+    "reason": "completed",
+    "sourceRevision": null,
+    "sourceStoreHash": "5090eb5c206264b82ba909ddc15ed33e06ff4f25f7f9dd8450637522d976f6d6",
+    "ticketHash": "da01e0c322315ba35f17b0c01be1174eba54a44672bd7b78b7cab56c05f82e44",
+    "version": 1
+  },
   "body": "HIGH, erasure-integrity. Found by the T62 prosecutor (2026-07-22 overnight). Affects LANDED code (eraseImpl, from T55) as well as T62's eraseReplicaImpl, so main currently has this leak under a mirror.\n\nTHE BUG. `assertBytesGone` (src/gateway/erase.ts) decides §11 completeness with `gw.backend.deltasSince(new Set())` gated on `removed === 0`. Under `MirrorBackend` this is TIER-BLIND:\n\n1. `MirrorBackend.deltasSince` (mirror.ts:69-71) returns ONLY the primary tier. A byte still at rest on the MIRROR tier is never in the set the verdict inspects — erase reports complete while the mirror keeps the byte.\n\n2. `MirrorBackend.purge` (mirror.ts:87-97) returns `Math.max(primary, mirror)`. If the primary silently retains (returns 0, keeps the row) while the mirror legitimately removes a straggler (returns 1), `removed = max(0,1) = 1`, so the `removed === 0` guard SKIPS the scan entirely — even though a scan of the primary would have seen the retained byte.\n\nBoth are H7 (report success without proving the bytes went), both violate §11's \"every tier\" promise. Next-boot `heal(exclude)` eventually sweeps the mirror, but the synchronous erase has already returned a false completion to the data subject / compliance record.\n\nTHE FIX. The verdict must inspect the SAME set of tiers §11 requires the bytes gone from, independent of the aggregate purge count. Two shapes:\n  (i) Add an all-tiers byte-presence probe to StoreBackend — e.g. `holds(id: string): Promise<boolean>`, implemented per driver with a TARGETED lookup (sqlite: SELECT WHERE id; memory: map.has; archive: file-exists across fans incl. .tmp stragglers; local-storage: key + quarantine scan; mirror: `primary.holds(id) || mirror.holds(id)`; quarantine-pool backend as appropriate). Then `assertBytesGone` becomes `if (await gw.backend.holds(id)) throw`, dropping the `removed === 0` gate entirely (erasures are rare; a targeted probe is cheap).\n  (ii) Or expose per-tier retention from MirrorBackend so assertBytesGone asserts each tier clean.\n\n(i) is preferred — it makes byte-presence a first-class backend question and reuses the archive's straggler-aware sweep semantics (the .tmp stragglers T40/T55 taught purge to see; `holds` must see them too, or a stranded .tmp reports absent while the bytes remain — mirror the archive purge's prefix logic, do NOT use deltasSince which skips .tmp by design).\n\nRAILS — BOTH LEVELS, and the object level is the FILESYSTEM/tier. Build a MirrorBackend(primary, mirror) where the MIRROR retains on purge (returns 0, keeps the row) and the primary is clean: erase must REFUSE (not report complete). And the inverse: primary retains, mirror removes a straggler (returns 1): erase must still REFUSE despite the positive aggregate count. Plus the archive-straggler case: a `.tmp` straggler on a tier must make `holds` true so erase refuses. Probe each: reverting the tier-complete probe to primary-only deltasSince must turn each red.\n\nCARE: erasure-critical, and it touches the StoreBackend CONTRACT (6 drivers). Prosecute hard. A wrong `holds` reports the exact false completion it exists to prevent, so the rails must be byte/tier level, never API-level. This is a REPAIR of stated §11 behavior (no on-wire change), but given the blast radius consider Myk's eye on the `holds` semantics before merge. It should not sit long — it is a live erasure leak on main under a mirror.\n",
   "edges": [],
   "id": "T67",
-  "phase": "P1",
-  "rails": [],
+  "phase": "P3",
+  "rails": [
+    "test/gateway/erase-tier-completeness.test.ts",
+    "test/store/contract.test.ts",
+    "test/store/mirror.test.ts",
+    "test/store/archive.test.ts"
+  ],
   "scope": [
     "src/store/backend.ts",
     "src/store/mirror.ts",
@@ -15,6 +28,6 @@
     "test/gateway/",
     "test/store/"
   ],
-  "status": "todo",
+  "status": "in_review",
   "title": "Erasure completeness is TIER-BLIND under MirrorBackend — the byte-presence verdict reads only the primary (live leak on main)"
 }

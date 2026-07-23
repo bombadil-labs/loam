@@ -139,6 +139,17 @@ async function cmdServe(
         `loam: healed — ${healed.toPrimary} deltas replanted from the archive, ${healed.toMirror} newly archived`,
       );
     }
+    // The sweep's refusals are load-bearing: a report nobody reads is a swallowed error with
+    // extra steps (H9). A refused sweep means a tombstoned id's bytes may still be at rest on
+    // some tier — serve continues (refusing to boot trades a leak for an outage), but the
+    // operator is told.
+    for (const failure of healed.purgeFailures) {
+      io.err(
+        `loam: the boot sweep could not finish an erasure — bytes the operator ordered forgotten ` +
+          `may still be at rest: ${failure}. Serving anyway; resolve the store fault and re-run ` +
+          `the erasure (or restart) to finish the sweep.`,
+      );
+    }
     backend = mirror;
   }
 

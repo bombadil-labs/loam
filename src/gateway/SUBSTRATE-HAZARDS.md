@@ -227,6 +227,36 @@ onto the boot path by T55's own fix, at `erasures × archived deltas`, before th
 
 ---
 
+## H9. A swallowed failure answers NO — and a caller weighing safety hears "it is gone"
+
+**The property.** Loam has probes whose FALSE is a licence: `holds(id) === false` lets an erasure
+report §11 completeness, an empty `quarantine()` lets a boot proceed, a zero purge count reads as
+nothing-to-do. These are not neutral reads. A negative answer authorizes an action.
+
+**The hazard.** Every `catch { continue }`, every discarded return value, every `?? false` inside
+such a probe converts *"I could not determine this"* into *"the answer is no."* The conversion is
+silent by construction — that is what the catch is for — and it happens at the exact moment the
+system is least healthy, which is when the probe matters most. It is H7's mirror image: H7 reports a
+success it never proved; H9 reports an ABSENCE it never proved.
+
+**Ask.** *Does a FALSE from this function permit something?* Then walk every path that can produce
+false and ask which of them mean "checked, and no" versus "did not check." Name the narrow error you
+can genuinely interpret — `ENOENT` means a directory really is not there — and rethrow the rest. If
+the answer is composed from several sources, ask what happens when one refuses: `Promise.allSettled`
+plus "attempt all, then report the first refusal" is the shape that keeps a partial answer from
+posing as a whole one. And if a report carries a failure field, **find its reader** — a field nobody
+reads is a swallowed error with extra steps.
+
+**Cost so far.** Three sites in one night (2026-07-23, T67's P5). `ArchiveBackend.holds` caught every
+`readdirSync` error, not just `ENOENT`, so an unreadable fan answered "no bytes here" and `erase`
+reported a completion over legible plaintext — the very bug the ticket existed to fix, on the tier
+the fix was written for. `MirrorBackend.heal` records refused sweeps into `purgeFailures`, promising
+in its own comment that the operator is told; nothing in `src/` reads that field, so a boot sweep can
+fail in total silence (T70). And the pool fan-out aborted on its first refusal, so replicas ordered
+behind a broken one were never swept — an unexamined replica reported as a clean one.
+
+---
+
 ## Adding to this file
 
 An entry earns its place by having **cost something** — a bug, a near-miss caught in review, or a

@@ -1,0 +1,54 @@
+ℹ Target: branch t67-tier-blind-erasure vs main (merge-base 060d7a2ec780b58fbd23a24b4d97e88ed86b7283)
+  ▪ 37 file(s), 274838 diff bytes, mode: inline-diff
+ℹ Using LLM provider: gemini (model: gemini-3.5-flash)
+  ▪ Verification pass: trying to refute 3 finding(s)...
+⚠ Finding "Concurrent appends during the reordered `reseat` sequence are permanently dropped from the live reactor": quoted evidence was not found in the provided context — confidence halved for gating.
+⚠ Finding "SQLite WAL truncation debt is written outside the deletion transaction, risking silent retention across crashes": quoted evidence was not found in the provided context — confidence halved for gating.
+⚠ Finding "Synchronous directory traversal in `ArchiveBackend.holds` blocks the event loop and degrades performance": quoted evidence was not found in the provided context — confidence halved for gating.
+⚠ Model verdict was "needs-attention"; the gate derived "approve" from the findings (--fail-on medium, --min-confidence 0.5).
+
+ APPROVE   branch t67-tier-blind-erasure vs main (merge-base 060d7a2ec780b58fbd23a24b4d97e88ed86b7283)
+
+Summary
+  The proposed changes resolve the immediate tier-blindness issue but introduce significant concurrency, correctness, and performance risks. Specifically, concurrent appends during the reordered `reseat` sequence can be silently dropped from the gateway's active reactor while remaining in the database. Furthermore, the SQLite WAL truncation debt is written outside the transaction boundary with swallowed exceptions, risking silent data retention across restarts. Lastly, synchronous directory listings in `ArchiveBackend.holds` block the event loop and create potential resource exhaustion under load.
+
+Coverage
+  4 file(s) examined
+
+Findings (3)
+
+  HIGH     [concurrency] Concurrent appends during the reordered `reseat` sequence are permanently dropped from the live reactor  conf 0.90
+    src/gateway/gateway.ts:625-643
+    In `Gateway.reseat()`, the read-before-teardown reordering introduces an asynchronous window. When `await channel.return()` is awaited, the event loop yields. If a concurrent `Gateway.append()` is called during this window, the new delta is ingested into the old reactor and written asynchronously to the backend. However, because the backend write may not yet be completed when `this.backend.deltasSince(known)` runs, the newly appended delta is missed by the differential read and is omitted from the new reactor swapped in at the end of `reseat`. This leads to a permanent divergence where the delta exists in the database but is missing from the active gateway reactor, causing subsequent operations (like views or erasures of that delta) to behave incorrectly.
+    ✗ failure: 1. Client A initiates an erasure, triggering `gw.reseat()`.
+2. `reseat()` reads the backend and yields on `await channel.return()`.
+3. Client B calls `Gateway.append([Y])` concurrently, which ingests `Y` into the old reactor and initiates an asynchronous database write.
+4. `reseat()` resumes and queries `this.backend.deltasSince(known)` before B's database write completes; hence `Y` is not returned.
+5. `reseat()` swaps the new reactor in, which does not contain `Y`.
+6. B's append finishes writing to the DB. `Y` is now in the DB but missing from the live gateway reactor until the next process restart.
+    → fix: To prevent the teardown window from dropping concurrent writes, acquire the fresh delta set (or buffer incoming ingests) synchronously or immediately before `this._reactor = reactor` without any intervening `await` points.
+    ⚠ ungrounded: quoted evidence was not found in the provided context — confidence halved for gating
+
+  HIGH     [correctness] SQLite WAL truncation debt is written outside the deletion transaction, risking silent retention across crashes  conf 0.95
+    src/store/sqlite.ts:218-232
+    In `SqliteBackend.purge()`, the deletion transaction commits (`COMMIT`) before the outstanding WAL truncation debt is recorded in the `meta` table. If the database write to the `meta` table fails or if the process crashes/terminates between the `COMMIT` and the `meta` write, the rows are deleted but no durable record of the outstanding WAL truncation is saved. On a subsequent restart, `holds()` will return `false` for the deleted ID even though its plaintext may still sit in the un-checkpointed `-wal` sidecar. The operator's retry will then be refused with 'nothing to erase', violating the compliance guarantee of complete erasure.
+    ✗ failure: 1. `purge([id])` runs, successfully deletes the rows, and commits the transaction.
+2. Before the metadata write to the `meta` table can execute, the process crashes or is terminated.
+3. On restart, the store reads no outstanding truncation debt.
+4. Plaintext of the deleted row remains legible in `store.db-wal`.
+5. The operator attempts a retry, but the gateway rejects with 'nothing to erase', leaving the WAL forever un-checkpointed for that erasure.
+    → fix: Persist the outstanding WAL truncation debt row inside the SAME transaction as the row deletion (i.e., before the `COMMIT`), and clear it only after a successful checkpoint.
+    ⚠ ungrounded: quoted evidence was not found in the provided context — confidence halved for gating
+
+  MEDIUM   [performance] Synchronous directory traversal in `ArchiveBackend.holds` blocks the event loop and degrades performance  conf 0.90
+    src/store/archive.ts:228-260
+    In `ArchiveBackend.holds()`, the implementation uses synchronous filesystem APIs (`readdirSync`) to perform an exhaustive search of all files and folders under the vault root when a record is absent. Because `holds` is called multiple times per erasure (unconditionally at the end of `eraseImpl`, in `erasureOutstanding`, and recursively for all quarantine pools), this blocks the single-threaded Node.js event loop for the duration of the entire vault directory scan, leading to high latency and potential resource exhaustion under load or with large archives.
+    ✗ failure: An operator processes a bulk subject request or executes repeated erasures against a large archive store. Each negative answer triggers synchronous recursion over all fan folders and filenames, completely freezing the Node.js event loop and blocking concurrent client requests.
+    → fix: Refactor `holds` and other directory traversal code to use asynchronous filesystem operations (`fs.promises.readdir`) rather than synchronous APIs, or optimize the lookup to avoid scanning unrelated directories when the canonical path is absent.
+    ⚠ ungrounded: quoted evidence was not found in the provided context — confidence halved for gating
+
+Next steps
+  • Address the concurrency window in `reseat` to guarantee all concurrent writes are preserved.
+  • Move the SQLite WAL truncation debt persistence inside the purge database transaction.
+  • Migrate `ArchiveBackend` filesystem traversal logic to asynchronous alternatives.
+

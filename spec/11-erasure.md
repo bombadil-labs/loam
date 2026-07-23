@@ -23,6 +23,15 @@ its content.
   reach every tier: the sqlite row, the mirror, the archive's fan file. **`heal()` must consult
   tombstones and never resurrect a purged id** (the crash in reverse — this interaction is where
   the bugs will hide; test it first).
+- **Completeness is decided by BYTE-PRESENCE, never by a purge count.** A count is evidence of
+  work — a 0 means "never held" as often as "refused to remove", and a mirror's aggregate hides
+  one tier behind another — so the verdict is `StoreBackend.holds(id)`: does any tier still hold
+  bytes filed under the id, including bytes a read is defined to skip (a crash-left `.tmp`, a
+  misfiled copy, a WAL page image owed a truncation)? `holds` sees at least everything `purge`
+  reaches, per driver, and a tier that cannot be ASKED answers held — unprovable never reads as
+  gone. The same verdict runs in every attached quarantine pool (§24.8), transitively; a retry is
+  anchored on the surviving tombstone and bounded by outstanding work, so a partial erasure can
+  always be finished and a completed one is never re-reported.
 - **The door remembers the hole.** Admission (federate AND append) composes the tombstone set:
   a tombstoned id is refused re-entry forever — a hash-set check, cheap. Union normally lets
   anything return; the tombstone is how forgetting sticks against the store's own gossip.
@@ -64,4 +73,4 @@ its content.
   property of the content itself (timestamps correlate, style fingerprints). Rung 4 is the
   tool for content-side scrubbing; no substrate can do it for you.
 
-**Provenance.** Landed — [#34](https://github.com/bombadil-labs/loam/pull/34) (the erase seam), [#36](https://github.com/bombadil-labs/loam/pull/36) (the law slice: authority → manifest → tombstone → purge), [#38](https://github.com/bombadil-labs/loam/pull/38) (operator-only gating + hardening). Lives in `src/gateway/erase.ts` (`Gateway.erase`, `eraseDefect`) and the tombstone readers (`readTombstones`, honored at both the append and federation doors). Key decision (Myk, 2026-07-10): erasure is the instance operator's alone — a data subject asks, the operator executes — and the signed tombstone refuses the exact bytes' return by id, so the store remembers THAT it forgot without keeping what.
+**Provenance.** Landed — [#34](https://github.com/bombadil-labs/loam/pull/34) (the erase seam), [#36](https://github.com/bombadil-labs/loam/pull/36) (the law slice: authority → manifest → tombstone → purge), [#38](https://github.com/bombadil-labs/loam/pull/38) (operator-only gating + hardening). Lives in `src/gateway/erase.ts` (`Gateway.erase`, `eraseDefect`) and the tombstone readers (`readTombstones`, honored at both the append and federation doors). Amended by [#183](https://github.com/bombadil-labs/loam/pull/183) (T67): the completeness verdict is `StoreBackend.holds` — byte-presence on every tier and every pool, with the id-scoped durable WAL-truncation debt in the sqlite driver. Key decision (Myk, 2026-07-10): erasure is the instance operator's alone — a data subject asks, the operator executes — and the signed tombstone refuses the exact bytes' return by id, so the store remembers THAT it forgot without keeping what.
