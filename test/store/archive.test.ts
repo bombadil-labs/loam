@@ -86,6 +86,43 @@ describe("ArchiveBackend layout", () => {
   });
 });
 
+describe("ArchiveBackend.holds sees the bytes, not the bookkeeping (ticket T67)", () => {
+  it("a `.tmp` straggler planted BEHIND the seam still reads as held", async () => {
+    // Planting it with a raw write rather than an append is the whole point: `onDisk` is an index
+    // of what THIS handle completed, so a `holds` built on it cannot see a crash-left copy — and a
+    // crash-left copy is exactly the byte §11 promises went. Index the work you COMPLETED, never
+    // the data you expect to FIND (H8).
+    const root = freshRoot();
+    const store = new ArchiveBackend(root);
+    const fan = join(root, signed.id.slice(0, 2));
+    mkdirSync(fan, { recursive: true });
+    writeFileSync(join(fan, `${signed.id}.json.9999.tmp`), '{"claims');
+
+    // No read can see it — that is correct for reads, and why a read cannot answer §11.
+    expect(await store.deltasSince(new Set())).toEqual([]);
+    expect(await store.holds(signed.id)).toBe(true);
+
+    // ...and the sweep that reaches it is the same one `holds` mirrors.
+    expect(await store.purge([signed.id])).toBe(1);
+    expect(await store.holds(signed.id)).toBe(false);
+    await store.close();
+  });
+
+  it("a misfiled copy in the wrong fan reads as held: holds hunts every fan, as purge does", async () => {
+    const root = freshRoot();
+    const store = new ArchiveBackend(root);
+    await store.append([signed]);
+    const wrongFan = join(root, "zz");
+    mkdirSync(wrongFan, { recursive: true });
+    cpSync(join(root, signed.id.slice(0, 2), `${signed.id}.json`), join(wrongFan, `${signed.id}.json`));
+    rmSync(join(root, signed.id.slice(0, 2), `${signed.id}.json`), { force: true });
+    // The canonical name is gone; the delta is still on disk under a name a `fileFor` lookup
+    // would miss. A targeted probe that only stats the canonical path would report it forgotten.
+    expect(await store.holds(signed.id)).toBe(true);
+    await store.close();
+  });
+});
+
 describe("ArchiveBackend stays a set", () => {
   it("a misfiled copy (wrong fan) is still one delta: reads dedupe by id", async () => {
     const root = freshRoot();

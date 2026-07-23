@@ -46,8 +46,24 @@ holds(id: string): Promise<boolean>;
 ```
 
 and the verdict in `eraseImpl` collapses to `if (await gw.backend.holds(id)) throw ...`, with the
-`removed === 0` gate **deleted**. Retry-safety survives unchanged: a completed earlier attempt makes
-`holds` false, so the re-run succeeds without minting a second tombstone.
+`removed === 0` gate **deleted**.
+
+**And the retry path has to be rebuilt, or the fix strands the erasure it refuses.** This is
+adversarial-review finding 1, confirmed against the code, and it is the reason a fix cannot be one
+line. `eraseImpl` opens with `if (gw.reactor.get(id) === undefined) throw "nothing to erase"`
+(erase.ts:227) — *before* the `already`-tombstone lookup (erase.ts:245). On attempt 1 against a
+retaining mirror, the primary purge succeeds, `gw.reseat()` (erase.ts:266) rebuilds the reactor from
+`deltasSince`, which on a mirror is the PRIMARY only — so the target leaves the reactor. The new
+verdict then rejects, correctly. But the operator doing exactly what the error instructs — fix the
+tier, re-run — now hits `nothing to erase`, and **no invocation of `erase` can ever finish that
+sweep**. Only a later boot-time `heal(exclude)` reaches it, which is the delay this whole ticket
+exists to eliminate.
+
+Today the trap is masked, because the mirror-only retention never rejects — that IS the leak. The
+fix creates the trap. So: when a surviving lawful operator tombstone for `id` already exists, the
+`nothing to erase` guard is **skipped** and erasure proceeds straight to purge + verify, reusing
+that tombstone. Erasure is then driven by the TOMBSTONE, which is append-only and durable, rather
+than by the target's presence in a reactor the previous attempt just re-seated away.
 
 **The governing invariant, and the reason it is testable:** *`holds` sees at least everything
 `purge` reaches.* Per driver, `holds` mirrors that driver's own purge reach — never `deltasSince`,
@@ -65,9 +81,17 @@ never a bookkeeping index:
 
 Naming the bound is the point — an overclaiming probe is the same H7 wearing a fix's clothes.
 
-- **sqlite freelist / WAL residue** is not `holds`'s question. It is `purge`'s, and `purge` already
-  refuses loudly when it cannot truncate the WAL, with `secure_delete = ON` plus the inherited-
-  freelist VACUUM covering the pages. `holds` answers about ROWS the driver owns.
+- **sqlite freelist residue** is not `holds`'s question — `secure_delete = ON` plus the
+  inherited-freelist VACUUM cover the pages. `holds` answers about ROWS the driver owns.
+- **sqlite WAL residue IS in scope, and the carve-out this spec first claimed was false**
+  (adversarial-review finding 2, confirmed at sqlite.ts:215). `purge` gates its
+  `wal_checkpoint(TRUNCATE)` on `if (removed > 0)`. On the documented retry — first attempt deleted
+  the rows and then failed to truncate — the rows are already gone, so `removed === 0`, so **no
+  checkpoint is attempted and no error is raised**, and `holds` (a row lookup) reports false over
+  plaintext still sitting in `store.db-wal`. Promoting `holds` to THE §11 verdict would ratify that
+  false completion in a document whose entire subject is false completions. Fixed by dropping the
+  `removed > 0` gate so the checkpoint is attempted whenever the driver is in WAL mode, with its
+  `busy` result checked as it already is.
 - **A misfiled or quarantined row whose CLAIMS compute to an erased id** (a sqlite row filed under
   key X carrying B's claims; the localStorage equivalent) is retained content that neither `purge`
   nor `holds` reaches today. It is a real, separate §11 gap, out of T67's scope, and gets its own
@@ -125,6 +149,18 @@ Naming the bound is the point — an overclaiming probe is the same H7 wearing a
 - A refused erase leaves the tombstone RECORDED (the erasure log is append-only, the retry is
   safe), and the immediate re-run after the retention is cleared succeeds without minting a second
   tombstone. Verified by `test/gateway/erase-tier-completeness.test.ts`.
+- The retry works in BOTH configurations, which differ in a way the first draft of this spec missed:
+  (a) the primary still holds the target, and (b) ONLY a non-primary tier does — where `reseat` has
+  already dropped the target from the reactor, so a retry gated on `reactor.get(id)` is impossible.
+  Case (b) is the ticket's headline scenario. Verified by `test/gateway/erase-tier-completeness.test.ts`.
+- A second `erase` attempt after a failed WAL truncation still REFUSES until the WAL is actually
+  truncated — the rail the `removed > 0` gate currently removes.
+  Verified by `test/store/erasure-at-rest.test.ts`.
+- A quarantine pool (§24.8) whose backend retains the target makes `gateway.erase(id)` reject, and
+  the message names the pool; a NESTED pool that retains does the same; and a positive control with
+  no pool retaining resolves normally. `eraseReplicaImpl` discards its purge count entirely today —
+  it does not even have the ambiguous gate the mirror path has.
+  Verified by `test/gateway/erasure-fanout.test.ts`.
 - The healthy path is unregressed at both levels: after `erase(id)` on a clean mirror pair, the
   reader resolves nothing for the id AND the marker bytes are absent from every file under both
   tier roots. Verified by `test/store/erasure-at-rest.test.ts`.
