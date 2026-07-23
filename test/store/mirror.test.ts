@@ -26,8 +26,7 @@ const tmp = mkdtempSync(join(tmpdir(), "loam-mirror-"));
 afterAll(() => rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
 
 // A side that refuses every call — the unreachable cold store. `holds` REJECTS rather than
-// resolving false: a tier nobody can reach has not proven it forgot anything, and a double that
-// answered `false` here would assert the exact false completion T67 exists to delete.
+// resolving false: a tier nobody can reach has not proven it forgot anything (H9).
 const unreachable = (): StoreBackend => ({
   append: () => Promise.reject(new Error("cold store unreachable")),
   deltasSince: () => Promise.reject(new Error("cold store unreachable")),
@@ -195,8 +194,8 @@ describe("MirrorBackend", () => {
   });
 
   it("holds asks BOTH tiers: a byte only the mirror kept is still a byte this store holds", async () => {
-    // The tier-blindness at the root of T67. `deltasSince` answers from the primary, so a mirror
-    // that silently retained is invisible to every read — and the erasure verdict used to be a read.
+    // `deltasSince` answers from the primary, so a mirror that silently retained is invisible
+    // to every read — byte-presence must ask both tiers.
     const primary = new MemoryBackend();
     const mirror = new MemoryBackend();
     const store = new MirrorBackend(primary, mirror);
@@ -215,10 +214,9 @@ describe("MirrorBackend", () => {
   });
 
   it("a tier that cannot answer makes holds REJECT, never resolve false — and NAMES the tier", async () => {
-    // The one failure mode that would reinstate the bug: swallowing a tier's error turns "I could
-    // not check" into "it is gone." Purge composes its failures this way; so does this. The tier is
-    // named because the operator's next move depends on WHICH store to go look at, and the driver's
-    // own error is kept as `cause` rather than flattened away.
+    // Swallowing a tier's error turns "I could not check" into "it is gone" (H9). Purge composes
+    // its failures this way; so does this. The tier is named because the operator's next move
+    // depends on WHICH store to look at, and the driver's own error is kept as `cause`.
     const store = new MirrorBackend(new MemoryBackend(), unreachable());
     await expect(store.holds(d1.id)).rejects.toThrow(/mirror tier could not be proven clean/);
     await expect(store.holds(d1.id)).rejects.toThrow(/unreachable/); // the cause survives

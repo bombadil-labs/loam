@@ -72,17 +72,10 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
 
   // BOTH tiers, because §11's promise covers both. Reads answer from the primary — a mirror is a
   // shadow, not a second voice — but byte-presence is not a read: a delta the primary forgot and
-  // the mirror kept is a delta this store still HOLDS, and answering from the primary alone is how
-  // an erasure came to report completeness over a legible copy on the cold side (ticket T67).
-  //
-  // Failures compose exactly as `purge`'s do: both sides are attempted, then the first refusal is
-  // reported. A tier that cannot answer has not proven it forgot anything, so this REJECTS rather
-  // than resolving false — treating "I could not check" as "it is gone" is the precise false
-  // completion this method exists to prevent.
-  // The refusal NAMES ITS TIER. "Something could not be checked" sends an operator to read both
-  // stores; "the mirror tier could not be checked" sends them to one. The cause is carried as
-  // `cause` rather than flattened into the message, so the driver's own error — the ENOENT, the
-  // EACCES, the SQLITE_BUSY — survives for whoever is debugging underneath.
+  // the mirror kept is a delta this store still HOLDS.
+  // Failures compose as `purge`'s do: both sides attempted, then the first refusal reported. A
+  // tier that cannot answer has proven nothing, so this REJECTS rather than resolving false (H9).
+  // The refusal names its tier, and the driver's own error survives as `cause`.
   async holds(id: string): Promise<boolean> {
     const results = await Promise.allSettled([this.primary.holds(id), this.mirror.holds(id)]);
     const tiers = ["primary", "mirror"] as const;

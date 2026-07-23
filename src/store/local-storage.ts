@@ -211,10 +211,9 @@ export class LocalStorageBackend implements StoreBackend, RepairableBackend {
 
   async holds(id: string): Promise<boolean> {
     this.assertOpen();
-    // The key IS the reach: `purge` removes exactly `keyFor(id)`, so that is exactly what a byte
-    // probe must inspect. A row misfiled under some OTHER key whose claims happen to compute to
-    // `id` is retained content neither operation sees — a real, separate §11 gap, named in T67's
-    // working spec and left to its own ticket rather than half-answered here.
+    // The key IS the reach: `purge` removes exactly `keyFor(id)`, so that is what a byte probe
+    // inspects. A row misfiled under some OTHER key whose claims compute to `id` is retained
+    // content neither operation sees — a separate §11 gap, out of scope here.
     if (id === SEED_SUFFIX) return false; // the seed is not a delta and is not erasable as one
     return this.storage.getItem(this.keyFor(id)) !== null;
   }

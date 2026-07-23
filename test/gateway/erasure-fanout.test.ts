@@ -124,10 +124,8 @@ class RetainingBackend extends MemoryBackend {
 
 describe("§24.8 rail (g) — a pool that retains makes the primary's erase REFUSE (ticket T67)", () => {
   it("a retaining pool cannot report a completion it did not deliver", async () => {
-    // Before T67 the fan-out called `purge` and discarded the count entirely — it did not even have
-    // the ambiguous `removed === 0` gate the mirror path had. A pool whose store silently kept the
-    // bytes reported success outward, and the primary's `erase` resolved over it: a forgotten
-    // record living on inside the operator's own walls, which is the one thing §24.8 exists to stop.
+    // A pool whose store silently keeps the bytes must not report success outward — a forgotten
+    // record living on inside the operator's own walls is the one thing §24.8 exists to stop.
     const FORGOTTEN = "a-pool-is-not-a-hiding-place";
     const primary = await bootPrimary();
     const secret = observed(FERN, "message", FORGOTTEN, 2000, OP_SEED);
@@ -195,11 +193,9 @@ describe("§24.8 rail (g) — a pool that retains makes the primary's erase REFU
   });
 
   it("a retaining pool does not starve the pools ORDERED BEHIND it", async () => {
-    // The verdict is thrown AFTER the transitive walk, and the walk is settled before reporting.
-    // Placed before, the first retaining pool aborts the sequential fan-out: every sibling and
-    // every nested pool behind it receives neither the tombstone nor the purge, so they keep the
-    // bytes AND stay able to re-admit the id — and the retry fails identically for as long as the
-    // one faulty replica is broken. That trades a silent leak in one replica for a blocking leak
+    // The verdict is thrown AFTER the transitive walk, and the walk is settled before reporting:
+    // thrown before, the first retaining pool would starve every sibling and nested pool behind
+    // it of both tombstone and purge — a silent leak in one replica traded for a blocking leak
     // across all the others.
     const FORGOTTEN = "a-broken-replica-must-not-shield-the-others";
     const primary = await bootPrimary();
@@ -256,10 +252,9 @@ describe("§24.8 rail (g) — a pool that retains makes the primary's erase REFU
   });
 
   it("a pool that never HELD the id but never RECEIVED the tombstone is outstanding work: the retry completes it", async () => {
-    // The guard's fault model is the verdict's fault model. The verdict rejects on failed
-    // tombstone delivery; a guard that asked only about BYTES then stranded exactly that erasure —
-    // the pool held nothing, so the retry read "nothing to erase" while the pool still lacked the
-    // one delta that keeps it from re-admitting the id forever.
+    // The guard's fault model is the verdict's: the verdict rejects on failed tombstone
+    // delivery, so a guard asking only about BYTES would strand this erasure — the pool holds
+    // nothing, yet still lacks the one delta that keeps it from re-admitting the id forever.
     const primary = await bootPrimary();
     const secret = observed(FERN, "message", "delivery-is-work-too", 2000, OP_SEED);
     await primary.append([secret]);

@@ -99,11 +99,8 @@ describe("§11 at rest — sqlite", () => {
 
   it("a RETRY whose DELETE finds nothing still truncates the WAL (ticket T67)", async () => {
     // The documented partial-erasure path: the first attempt deletes the rows and then fails to
-    // truncate the WAL, so the caller holds "a partial erasure to retry, not a failed one to redo."
-    // `purge` used to gate its `wal_checkpoint(TRUNCATE)` on `removed > 0` — and on that very retry
-    // the rows are already gone, so `removed` is 0, so the checkpoint the retry EXISTS to perform
-    // was skipped in silence. The plaintext stayed in the sidecar and every caller reported
-    // success. The work outstanding on a retry is the truncation, not the DELETE.
+    // truncate the WAL. On the retry the rows are already gone (`removed` is 0), yet the work
+    // outstanding is the truncation — a checkpoint gated on `removed > 0` would skip it forever.
     const dir = scratch();
     const file = join(dir, "store.db");
     const store = new SqliteBackend(file);
@@ -130,11 +127,10 @@ describe("§11 at rest — sqlite", () => {
   });
 
   it("the truncation debt SURVIVES A CRASH: a reopened handle still knows, and still refuses to lie (ticket T67)", async () => {
-    // The same partial erasure, ended by a process death instead of a retry. A latch that lived
-    // only in handle memory made the reopened store look clean — rows gone, holds false — while
-    // the sidecar still carried the plaintext, and the operator's retry was refused as `nothing
-    // to erase`: the stranding class this ticket exists to delete, moved across a process
-    // boundary. The debt is durable now, and this rail spans the boundary to prove it.
+    // The same partial erasure, ended by a process death instead of a retry. A debt held only in
+    // handle memory leaves the reopened store looking clean — rows gone, holds false — while the
+    // sidecar still carries the plaintext and the retry is refused as `nothing to erase`. The
+    // debt must be durable; this rail spans the process boundary to prove it.
     const dir = scratch();
     const file = join(dir, "store.db");
     const first = new SqliteBackend(file);
@@ -163,9 +159,8 @@ describe("§11 at rest — sqlite", () => {
   });
 
   it("a latched debt belongs to ITS ids: an unrelated purge under the same busy WAL is untouched", async () => {
-    // The handle-wide version of the latch failed every later purge while any reader held the
-    // WAL — including for ids this store never held — persisted forever, across restarts. The
-    // debt is a set of ids now: A's owed truncation cannot refuse B's erasure.
+    // The debt is a set of ids, never a handle-wide latch: A's owed truncation must not refuse
+    // B's erasure while any reader holds the WAL.
     const dir = scratch();
     const store = new SqliteBackend(join(dir, "store.db"));
     const owed = canary(MARKER, 1000);
@@ -211,9 +206,7 @@ describe("§11 at rest — sqlite", () => {
   });
 
   it("an UNREADABLE debt row owes for everyone, and a landed checkpoint forgives it", async () => {
-    // The debt row exists but cannot name its ids: every id is unprovable, not none of them.
-    // Failing open here silently reproduced the stranding for whichever ids the corrupted row
-    // carried — H9 in the recovery path of the H9 fix.
+    // The debt row exists but cannot name its ids: every id is unprovable, not none of them (H9).
     const dir = scratch();
     const file = join(dir, "store.db");
     const setup = new SqliteBackend(file);
@@ -233,9 +226,8 @@ describe("§11 at rest — sqlite", () => {
     expect(await reopened.holds(canary(MARKER, 9999).id)).toBe(false);
     await reopened.close();
 
-    // And the dangling-else shape: VALID JSON that is not an array owes exactly the same way. An
-    // earlier fix let this case fall through both branches (the else bound to the inner if) —
-    // "{corrupt" was caught while "5" walked free.
+    // VALID JSON that is not an array owes exactly the same way — the dangling-else shape:
+    // "{corrupt" throws in JSON.parse while "5" parses cleanly, so both paths must owe.
     const raw2 = new Database(file);
     raw2
       .prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('truncation-outstanding', ?)")
@@ -249,12 +241,10 @@ describe("§11 at rest — sqlite", () => {
   });
 
   it("a purge that matched NOTHING does not fail on a busy checkpoint (ticket T67)", async () => {
-    // The other side of ungating the checkpoint. `purge` is called on every attached quarantine
-    // pool and on every boot `heal` sweep carrying the whole accumulated tombstone set, and those
-    // overwhelmingly match nothing. If a busy checkpoint failed those calls, a concurrent reader on
-    // an unrelated replica would fail an erasure that had already completed on every tier that held
-    // the record — and point the operator at a store that never had it. Attempt always; refuse only
-    // when truncation is actually owed.
+    // `purge` runs on every attached quarantine pool and every boot `heal` sweep, and those
+    // overwhelmingly match nothing. A busy checkpoint there would fail an erasure that had
+    // already completed on every tier that held the record. Attempt always; refuse only when
+    // truncation is actually owed.
     const dir = scratch();
     const store = new SqliteBackend(join(dir, "store.db"));
     await store.append([canary(SURVIVOR, 1000)]);

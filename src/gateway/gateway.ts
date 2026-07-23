@@ -617,11 +617,9 @@ export class Gateway {
   // re-attaches its runner, as the village does after the crash).
   /** @internal — T19 seam (erase.ts) */
   async reseat(): Promise<void> {
-    // READ FIRST, TEAR DOWN AFTER, CATCH UP LAST. The first read is the one step here that can
-    // fail (the same faulting backend whose purge may just have refused), and everything after it
-    // is destructive: channels ended, caches cleared, persistence detached. Ordered the other way,
-    // a failed read left the gateway half-torn-down — every subscription killed, the reactor still
-    // seated on pre-purge ground, nothing re-attached — with the erase call already gone.
+    // READ FIRST, TEAR DOWN AFTER, CATCH UP LAST: the read is the one step here that can fail,
+    // and everything after it is destructive. Ordered the other way, a failed read leaves the
+    // gateway half-torn-down — subscriptions killed, reactor still on pre-purge ground.
     const reactor = new Reactor();
     for (const d of await this.backend.deltasSince(new Set())) {
       if (reactor.ingest(d).status === "rejected") {
@@ -640,15 +638,12 @@ export class Gateway {
     // Drop the resolver memo (SPEC §22.5/§11): keying already forbids serving a value over erased
     // bytes, but a re-seat is exactly the moment the ground forgot — clear it so nothing lingers.
     this.resolverMemo.clear();
-    // CATCH UP on the teardown window, UNTIL QUIESCENT. Every await above is a seam another task
-    // can append through: the delta lands in the backend and the OLD reactor, and a swap to the
-    // snapshot alone would drop it from the live ground until a restart — after which a later
-    // `erase` of that id would answer `nothing to erase` over bytes still at rest, the exact
-    // hazard family this seam exists to close. One differential read narrows the window to its
-    // own await; LOOPING until a read returns nothing closes it, because the ingest loop and the
-    // swap below are synchronous — nothing can interleave after the read that came back empty.
-    // The cap is a livelock bound, not a correctness bound; ten raced appends in a row means
-    // something is writing in a hot loop and deserves the loud refusal.
+    // CATCH UP on the teardown window, until quiescent: every await above is a seam another
+    // task can append through — the delta lands in the backend and the OLD reactor, and swapping
+    // to the snapshot alone would drop it from the live ground until a restart. Looping until a
+    // read returns nothing closes the window, because the ingest loop and the swap below are
+    // synchronous. The cap is a livelock bound, not a correctness bound: ten raced appends in a
+    // row is a hot loop that deserves the loud refusal.
     for (let round = 0; ; round += 1) {
       const known = new Set(reactor.snapshot().ids());
       const stragglers = await this.backend.deltasSince(known);

@@ -44,15 +44,12 @@ export interface StoreBackend {
   purge(ids: Iterable<string>): Promise<number>;
 
   // Does this backend still hold bytes filed under `id`, on ANY tier it owns? The question §11
-  // actually asks, asked directly instead of inferred from a read. `deltasSince` cannot stand in
-  // for it: that read is DEFINED to skip what `purge` exists to find — a crash-left
-  // `<id>.json.<pid>.tmp`, a misfiled copy — so a read seeing nothing proves only that nothing is
-  // READABLE, and §11 promises the bytes are GONE. Conflating the two is what let an erasure report
-  // completeness while the plaintext sat on a mirror tier (ticket T67).
-  //
-  // The invariant every driver keeps: `holds` sees at least everything `purge` reaches. Implement it
-  // against the same bytes that driver's own purge sweeps, never against a bookkeeping index of what
-  // this handle believes it wrote — index the work you COMPLETED, never the data you expect to FIND.
+  // actually asks. `deltasSince` cannot stand in for it: that read is DEFINED to skip what
+  // `purge` exists to find (a crash-left tmp file, a misfiled copy), so a read seeing nothing
+  // proves only that nothing is READABLE, while §11 promises the bytes are GONE.
+  // The invariant every driver keeps: `holds` sees at least everything `purge` reaches —
+  // implemented against the bytes that driver's purge sweeps, never a bookkeeping index of what
+  // this handle believes it wrote.
   holds(id: string): Promise<boolean>;
 
   // Release held resources.

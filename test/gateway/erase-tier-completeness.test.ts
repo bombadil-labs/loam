@@ -1,12 +1,8 @@
-// §11 completeness under a MIRROR — the verdict must inspect the same tiers the promise covers
-// (ticket T67). The leak these rails close is that `erase` decided completeness from
-// `deltasSince` behind a `removed === 0` gate, and under `MirrorBackend` both halves are
-// tier-blind: `deltasSince` returns the PRIMARY only, and `purge` returns the MAX of the two
-// counts, so one tier's honest removal hides the other tier's silent retention.
-//
-// So these rails assert at the TIER. Every one of them plants retention on a specific side and
-// asks what `erase` reports — never `get(id) === undefined`, which stayed true through every
-// erasure leak this repo has paid for (T40, T55) and would stay true through this one too.
+// §11 completeness under a MIRROR — the verdict must inspect the same tiers the promise covers.
+// Under `MirrorBackend`, `deltasSince` returns the PRIMARY only and `purge` returns the MAX of
+// the two counts, so neither can carry the verdict: one tier's honest removal hides the other's
+// silent retention. Every rail here plants retention on a specific tier and asks what `erase`
+// reports — never `get(id) === undefined`, which stays true through a byte-at-rest leak.
 //
 // The two silent-retention rails necessarily drive a FAKE tier: no shipped driver returns 0 while
 // keeping the row (sqlite throws, the archive throws, memory cannot). They prove the VERDICT.
@@ -59,9 +55,8 @@ async function groveOn(
 }
 
 // A tier that ACCEPTS the removal order and quietly keeps the bytes: `purge` reports 0 and the
-// delta stays in the set. The read-only-mount / silently-refusing-driver shape. It is honest about
-// what it holds — `holds` tells the truth — because a double that lied there would defeat the very
-// rail it is standing in (premortem C1).
+// delta stays in the set — the read-only-mount / silently-refusing-driver shape. `holds` tells
+// the truth, because a double that lied there would defeat the very rail it stands in.
 function retaining(inner: MemoryBackend): StoreBackend {
   return {
     append: (d) => inner.append(d),
@@ -83,9 +78,8 @@ const unreachable = (): StoreBackend => ({
 
 describe("erase is complete only when every TIER is clean", () => {
   it("the MIRROR keeps the byte while the primary is clean: erase refuses", async () => {
-    // The first leak in T67. `deltasSince` on a mirror returns the primary's deltas, and the
-    // primary really did forget — so the old scan saw a clean store and reported success while the
-    // plaintext sat on the other tier.
+    // `deltasSince` on a mirror returns the primary's deltas, and the primary really did forget
+    // — a read-based verdict sees a clean store while the plaintext sits on the other tier.
     const primary = new MemoryBackend();
     const mirrorInner = new MemoryBackend();
     const backend = new MirrorBackend(primary, retaining(mirrorInner));
@@ -101,25 +95,18 @@ describe("erase is complete only when every TIER is clean", () => {
   });
 
   it("the PRIMARY keeps the byte while the mirror removes a straggler: the aggregate count says 1, and erase still refuses", async () => {
-    // The second leak, and the subtler one. `MirrorBackend.purge` returns Math.max(primary, mirror),
-    // so a mirror that legitimately removed something reports 1 for the pair — which satisfied the
-    // old `removed === 0` gate and SKIPPED the scan entirely, even though scanning the primary
-    // would have found the retained byte immediately.
+    // `MirrorBackend.purge` returns Math.max(primary, mirror), so a mirror that legitimately
+    // removed something reports 1 for the pair — a count-gated verdict would skip the scan and
+    // miss the retaining primary.
     const primaryInner = new MemoryBackend();
     const mirror = new MemoryBackend();
     const backend = new MirrorBackend(retaining(primaryInner), mirror);
     const { gateway, fact } = await groveOn(backend);
 
-    // NOTHING is purged before the erase. An earlier draft asserted `backend.purge([fact.id])`
-    // here to "set up" the mirror's positive count — which CONSUMED the mirror's copy, so
-    // `eraseImpl`'s own purge then saw max(0, 0) = 0, the old gate ran its scan, the scan read the
-    // retaining PRIMARY, and the pre-fix code threw. The rail was green with the fix reverted: a
-    // fixture that spends the very condition it exists to create. Probed, not reasoned about —
-    // reverting the verdict turned the other three rails red and left this one passing.
-    //
-    // Left alone, the mirror still holds the target when `erase` runs, so its purge legitimately
-    // removes one, the retaining primary removes none, and `MirrorBackend.purge` reports
-    // max(0, 1) = 1 — the aggregate that made the old `removed === 0` gate skip the scan entirely.
+    // NOTHING is purged before the erase: a setup purge would consume the mirror's copy — the
+    // very condition this fixture exists to create. Left alone, the mirror still holds the
+    // target when `erase` runs, so its purge removes one, the retaining primary removes none,
+    // and `MirrorBackend.purge` reports max(0, 1) = 1 — the positive aggregate under test.
     expect(await primaryInner.holds(fact.id)).toBe(true);
     expect(await mirror.holds(fact.id)).toBe(true);
 
@@ -133,10 +120,10 @@ describe("erase is complete only when every TIER is clean", () => {
   });
 
   it("a `.tmp` straggler the sweep missed makes erase refuse, though no read on any tier can see it", async () => {
-    // `deltasSince` is DEFINED to skip `<id>.json.<pid>.tmp` — correct for reads, and the reason a
-    // read can never answer §11. Here the archive's sweep is rolled back to its pre-T40 behavior
-    // (canonical name only), so the straggler survives the purge; the verdict has to catch what the
-    // sweep missed, or the operator is told a crash-left copy is gone.
+    // `deltasSince` is DEFINED to skip `<id>.json.<pid>.tmp` — correct for reads, and the reason
+    // a read can never answer §11. The `shallow` double sweeps only the canonical name, so the
+    // straggler survives its purge; the verdict has to catch what the sweep missed, or the
+    // operator is told a crash-left copy is gone.
     const root = scratch();
     roots.push(root);
     const primary = new MemoryBackend();
@@ -146,7 +133,7 @@ describe("erase is complete only when every TIER is clean", () => {
       deltasSince: (k) => vault.deltasSince(k),
       holds: (id) => vault.holds(id),
       close: () => vault.close(),
-      // The regression: sweep `<id>.json` and leave `<id>.json.*.tmp` behind.
+      // Sweeps only the canonical `<id>.json`; leaves `<id>.json.*.tmp` behind.
       purge: (ids) => {
         let removed = 0;
         for (const fan of readdirSync(root, { withFileTypes: true }).filter((f) =>
@@ -180,13 +167,9 @@ describe("erase is complete only when every TIER is clean", () => {
 
   it("an UNREACHABLE tier makes erase refuse rather than report a completion it cannot prove", async () => {
     // An intended availability consequence, pinned so it is never "fixed" by swallowing the tier
-    // error: a store whose cold half is offline cannot PROVE the bytes went, so it must not say so.
-    //
-    // HONEST NOTE: this rail is GREEN before the fix — `MirrorBackend.purge` already rejects when a
-    // side rejects, so `erase` already throws here. It is a characterization pin, not evidence that
-    // T67's fix works, and it must not be counted as one. What it protects is the future: adding a
-    // per-tier probe is exactly the change that tempts someone to catch a tier's error and treat an
-    // unprovable tier as a clean one.
+    // error: a store whose cold half is offline cannot PROVE the bytes went, so it must not say
+    // so. A characterization pin, not evidence of the verdict (`MirrorBackend.purge` already
+    // rejects here) — it guards against a per-tier probe that treats unprovable as clean (H9).
     const backend = new MirrorBackend(new MemoryBackend(), unreachable());
     const { gateway, fact } = await groveOn(backend);
     await expect(gateway.erase(fact.id, { reason: "the subject asked" })).rejects.toThrow(
@@ -212,9 +195,8 @@ describe("erase is complete only when every TIER is clean", () => {
   });
 
   it("a refused erase still records the tombstone, and the re-run after repair mints no second one", async () => {
-    // Retry safety survives the verdict change: the erasure log is append-only, so a failed sweep
-    // must leave exactly one tombstone behind and the operator's re-run must finish the job
-    // without growing the log. Deleting the `removed === 0` gate must not cost this.
+    // The erasure log is append-only: a failed sweep leaves exactly one tombstone behind, and
+    // the operator's re-run finishes the job without growing the log.
     const primary = new MemoryBackend();
     const mirrorInner = new MemoryBackend();
     let retain = true;
@@ -285,18 +267,15 @@ describe("the retry anchor honors forgiveness", () => {
     await gateway.erase(fact.id, { reason: "the subject asked" });
     await strike(gateway, fact.id); // forgiven, and NOT re-admitted — the store holds nothing
 
-    // Without the surviving-tombstone rule this returns `{ erased }` for work never done — H7, in
-    // the function whose whole subject is H7.
+    // Without the surviving-tombstone rule this returns `{ erased }` for work never done (H7).
     await expect(gateway.erase(fact.id)).rejects.toThrow(/nothing to erase/);
     await gateway.close();
   });
 });
 
-// Moving the retry anchor ahead of the existence guard removed the only check that `erase` did any
-// work. Left unbounded, a surviving tombstone from a completed erasure months ago would suppress
-// the guard forever: append nothing, purge nothing, and return `{ erased }` — a completion report
-// for work never done, in the function whose whole subject is completion reports for work never
-// done. The bypass is bounded by "is there anything left to sweep", so these two cases must differ.
+// The retry bypass is bounded by "is there anything left to sweep": a surviving tombstone from a
+// completed erasure months ago must not suppress the existence guard forever — that would return
+// `{ erased }` for work never done (H7). So these two cases must differ.
 describe("the retry bypass is for an OUTSTANDING erasure, not for any tombstone", () => {
   it("a second erase of a CLEANLY erased id still refuses", async () => {
     const { gateway, fact } = await groveOn(
@@ -311,8 +290,8 @@ describe("the retry bypass is for an OUTSTANDING erasure, not for any tombstone"
   });
 
   it("...while a retry with bytes still on a tier is let through", async () => {
-    // The case the bypass exists for, pinned beside the case it must not cover — otherwise a
-    // "fix" that simply restored the old guard would look correct against the rail above.
+    // The case the bypass exists for, pinned beside the case it must not cover — a plain
+    // presence guard would look correct against the rail above alone.
     const primary = new MemoryBackend();
     const mirrorInner = new MemoryBackend();
     let retain = true;

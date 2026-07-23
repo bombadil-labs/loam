@@ -109,11 +109,10 @@ export class ArchiveBackend implements StoreBackend {
       try {
         renameSync(tmp, target);
       } catch (err) {
-        // A failed rename must not leave the temp file behind: it holds a FULL delta under a name
-        // no read returns, which is exactly the byte-at-rest shape `holds` and §11 exist to hunt —
-        // and wherever the write landed (a bad target puts it in the process CWD), the next
-        // `git add -A` offers it to history, where no purge can ever reach it. That is not a
-        // hypothetical: a mutation run once committed this repo's own erasure canary that way.
+        // A failed rename must not leave the temp file behind: it holds a FULL delta under a
+        // name no read returns — the byte-at-rest shape `holds` and §11 exist to hunt — and a
+        // bad target lands it in the process CWD, where the next `git add -A` offers it to
+        // history, beyond any purge's reach.
         rmSync(tmp, { force: true });
         throw err;
       }
@@ -237,17 +236,14 @@ export class ArchiveBackend implements StoreBackend {
 
   async holds(id: string): Promise<boolean> {
     this.assertOpen();
-    // Fast path: a delta at its canonical name is held, one stat, no walk. Only the POSITIVE
-    // answer may short-circuit — absence still pays the exhaustive sweep below, because the bytes
-    // worth finding are exactly the ones not at their canonical name (a crash-left `.tmp`, a
-    // misfiled copy), and a fast path that answered "absent" from one stat would hollow the
-    // straggler rails outright.
+    // Fast path: a delta at its canonical name is held — one stat, no walk. Only the POSITIVE
+    // answer may short-circuit: the bytes worth finding are exactly the ones NOT at their
+    // canonical name (a crash-left `.tmp`, a misfiled copy), so absence pays the full sweep.
     if (existsSync(this.fileFor(id))) return true;
-    // The same reach as `purge`, deliberately: every fan (a misfiled copy is still the bytes) and
-    // both name shapes (`<id>.json` and the `<id>.json.<pid>.tmp` a crash leaves between fsync and
-    // rename). NOT `deltasSince`, which skips the straggler by design, and NOT `onDisk`, which
-    // knows only what this handle wrote — the bytes worth finding are the ones no bookkeeping
-    // recorded. Purges and probes are rare; the walk is cheap enough to be thorough.
+    // The same reach as `purge`: every fan (a misfiled copy is still the bytes) and both name
+    // shapes (`<id>.json`, and the `<id>.json.<pid>.tmp` a crash leaves between fsync and
+    // rename). NOT `deltasSince` (skips the straggler by design) and NOT `onDisk` (knows only
+    // what this handle wrote).
     const fans = readdirSync(this.root, { withFileTypes: true })
       .filter((f) => f.isDirectory())
       .map((f) => f.name);
@@ -256,13 +252,10 @@ export class ArchiveBackend implements StoreBackend {
       try {
         names = readdirSync(join(this.root, fan));
       } catch (err) {
-        // ENOENT only: a fan that vanished between listing and reading genuinely holds nothing.
-        // Anything else — EACCES on a vault whose mode changed or that a container opened under a
-        // different uid, EIO on a failing disk, EMFILE under load — means this fan was NOT
-        // examined, and a fan that could not be read may still hold the bytes. Answering `false`
-        // there would hand `erase` a clean verdict over an unread directory, which is this
-        // ticket's own bug wearing a different tier. `purge` may swallow the same error because
-        // its output is evidence of work; this one IS the verdict, so it refuses.
+        // ENOENT only: a fan that vanished between listing and reading holds nothing. Any other
+        // error (EACCES, EIO, EMFILE) means this fan was NOT examined and may still hold the
+        // bytes — `purge` may swallow that because its count is evidence of work, but this IS
+        // the verdict, so it refuses rather than answer clean over an unread directory (H9).
         if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
         continue;
       }

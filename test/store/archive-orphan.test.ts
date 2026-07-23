@@ -1,8 +1,7 @@
 // One rail, in its own file because it mocks the filesystem seam and the mock is file-wide: a
-// failed rename in `ArchiveBackend.append` must unlink its temp file. Left behind, the orphan is a
-// FULL delta at a name no read returns — the byte-at-rest shape §11 hunts — and wherever the write
-// landed, the next `git add -A` offers it to history, where no purge reaches. A mutation run once
-// committed this repo's own erasure canary exactly that way (T67, prosecution round 7).
+// failed rename in `ArchiveBackend.append` must unlink its temp file. Left behind, the orphan is
+// a FULL delta at a name no read returns — the byte-at-rest shape §11 hunts — and wherever the
+// write landed, the next `git add -A` offers it to history, where no purge reaches.
 
 import { describe, expect, it, vi } from "vitest";
 import { mkdtempSync, readdirSync } from "node:fs";
