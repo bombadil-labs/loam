@@ -1,0 +1,15 @@
+{
+  "body": "AUDIT 2026-07-21, angle 'narrowing'. Two CONFIRMED holes the T38 fix did not close. T38 shipped an incomplete fix; this finishes it.\n\n(1) **THE `admit` BRANCH IS UNFIXED.** `src/gateway/quarantine-pool.ts:86` - `if (opts.membership === undefined) return base === undefined ? undefined : base;` returns the caller's raw predicate. T38 wrapped only the `membership` Term branch (:92). Only tombstones get the unconditional pass (:101); ordinary negations do not. So `openQuarantine({ admit: d => d.claims.author === stranger })` admits a claim the operator had STRUCK on the primary, without its retraction, and it binds live in the pool. Compounded by T39 (promote checks presence not survival), that revived claim is adoptable into canonical history in the operator's voice. The comment block at :70-74 asserts the property for BOTH knobs while one implements it - fix the comment too, it is currently false.\n\n(2) **THE FEDERATION INBOUND DOOR DROPS NEGATIONS, DEFEATING THE OUTBOUND FIX END-TO-END.** `offeredDeltasImpl` now ships the closure outbound. The receiver applies a per-delta `admit` with no closure at all (`ingest.ts:243` via `admitForImpl` :109 roster mode, and `federation/pull.ts:73`). Roster mode is `author === operator || roster.has(author)` - purely authorship-scoped - so a negation authored by anyone off the roster is rejected while its target is admitted.\n\nCONCRETE FAILURE: you roster `alice` to pull her posts from peer P. On P, the moderator (P's operator, or a write-granted author - neither on YOUR roster) retracted one of Alice's posts. P correctly offers both. Your door admits the post, rejects the retraction, and your GraphQL surface serves a retracted post as live - publicly, if that lens is open. The peer cannot tell.\n\nTHE REMEDY DIFFERS FROM `withNegationClosure` and this is the design point: the closure must run over the OFFERED BATCH, not the local snapshot, because those negations are not local yet. Decide whether admitting a negation whose author the roster excludes is correct - recommendation YES for negations specifically, since refusing them cannot protect you (it only makes you wrong about what survives), but state the reasoning; it is a genuine widening of what a roster admits.\n\nAlso: `select`/`watch` return the raw dset by design, making the closure a CALLER obligation on a public API - and `freeze` is exactly the caller that forgot. Add a doc-comment on both pointing at hazard H1.\n\nRAILS: extend `test/gateway/negation-closure.test.ts` - the admit-predicate branch preserves suppression; a rostered pull carries an off-roster retraction; the batch-scoped closure does not leak.\n\nCARE: federation surface -> Myk's merge (P6).",
+  "edges": [],
+  "id": "T43",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "src/gateway/quarantine-pool.ts",
+    "src/gateway/ingest.ts",
+    "src/federation/pull.ts",
+    "test/gateway/negation-closure.test.ts"
+  ],
+  "status": "todo",
+  "title": "Finish the negation closure - the admit branch and the federation INBOUND door were both missed"
+}

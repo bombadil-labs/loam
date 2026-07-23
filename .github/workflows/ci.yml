@@ -23,3 +23,24 @@ jobs:
       - run: npm ci
       - name: format + lint + typecheck + tests
         run: npm run check
+
+  # The rail backstop. ADLC's in-session PreToolUse hook cannot gate Bash — a shell can't be reliably
+  # parsed — so a rail edited through a shell command is caught here or nowhere. Linux only: the two
+  # Windows patches this repo carries are for `adlc review` and `adlc init`, neither of which runs
+  # in this job.
+  rails:
+    name: rails-guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the gate diffs against the base ref; a shallow clone has no base
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm i -g @adlc/cli
+      - name: no frozen rail was edited
+        run: |
+          BASE="origin/${{ github.base_ref || github.event.repository.default_branch }}"
+          git fetch --quiet origin "${{ github.base_ref || github.event.repository.default_branch }}"
+          node scripts/rails-guard-ci.mjs "$BASE"

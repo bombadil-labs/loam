@@ -1,0 +1,16 @@
+{
+  "body": "AUDIT 2026-07-21, angle 'erasure reach'. Three retention sites; the first also carries a plain non-erasure bug.\n\n(1) **`watch()` CHANNELS ARE NEVER RE-SEATED - CONFIRMED, and this is two bugs.** `reads.ts:266` registers its entity-stream channel with `gw.channels.add(channel)`, so `reseat()` closes it and parked readers are deliberately woken. `watchImpl` creates its Channel at `ingest.ts:189` and NEVER adds it to `gw.channels`. So: (a) the channel's coalescing buffer may hold a pending `Delta[]` including the erased delta - full content and signature - and `reseat()` does not close it, so a slow reader consuming after the purge receives erased bytes from a live Loam API; and (b) its `subscribeRaw` was registered on the OLD reactor, which `reseat()` replaces (`gateway.ts:635`), so the watcher SILENTLY FREEZES on its pre-erase membership forever - no `done`, no update, no way to notice. (b) is a plain correctness bug independent of erasure, and it contradicts `erase.ts:210`'s promise that 'live subscriptions re-attach exactly as they do after a schema evolution'. Fix is likely one line - register the channel - but rail both halves.\n\n(2) **THE ESM CACHE RETAINS ERASED SOURCE - CONFIRMED.** `esm.ts:22` caches module namespaces in a MODULE-LEVEL Map keyed by content address, loading via `data:text/javascript;base64,...` which Node's ESM registry retains for the process lifetime with no eviction. The cache is process-global, shared across the primary AND every quarantine pool. Erase a §22 resolver or §23 renderer delta: the backend purges, `reseat()` explicitly clears `resolverMemo` (`gateway.ts:628`) - and nothing clears the ESM cache or Node's registry. The erased source stays resident and executable, on the normal path (`preloadResolvers` runs on every rebind). Severity is capped because the byte is code rather than a subject's record, but §11's rule is about the byte.\n\n(3) **A HELD `ModuleVersion` RETAINS DELTAS - PLAUSIBLE.** `Gateway.freeze` returns `readonly members: readonly Delta[]` - real Delta objects, explicitly 'captured at freeze time and never re-evaluated' (`container-identity.ts`). No erasure invalidates one and the fan-out does not enumerate them. Caller-held rather than gateway-held, so weaker - but it is a byte-retaining structure the erasure story has not accounted for, and T38 already flags freeze for a closure fix. Decide whether a ModuleVersion should hold ids rather than deltas (SPEC §27.8 already says a PERSISTED version must name rather than hold; this is the in-memory dual).\n\nRAILS: erase, then assert a parked `watch` reader cannot receive the erased bytes and that the watcher is closed or updated rather than frozen; erase a resolver and assert its source is not still loadable from cache.\n\nCARE: erasure surface -> Myk's merge (P6).",
+  "edges": [],
+  "id": "T45",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "src/gateway/ingest.ts",
+    "src/gateway/esm.ts",
+    "src/gateway/gateway.ts",
+    "src/gateway/container-identity.ts",
+    "test/gateway/"
+  ],
+  "status": "todo",
+  "title": "In-memory structures retain erased bytes - watch channels, the ESM cache, and held ModuleVersions"
+}

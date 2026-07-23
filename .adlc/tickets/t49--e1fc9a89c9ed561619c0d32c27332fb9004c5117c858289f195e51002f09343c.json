@@ -1,0 +1,14 @@
+{
+  "body": "AUDIT of #152/#153/#154 (2026-07-21), findings F2 + F3. My own T40 fix, reviewed. F2 CONFIRMED, F3 PLAUSIBLE.\n\n**F2 — the VACUUM can make a store UN-OPENABLE.** `src/store/sqlite.ts:71-72` runs `VACUUM` in the CONSTRUCTOR when `freelist_count > 0`. VACUUM needs an exclusive write lock over the whole file. With a second handle holding a read transaction — the exact scenario the purge path 120 lines below probes and handles — it waits out `busy_timeout` and throws SYNCHRONOUSLY out of `new SqliteBackend(path)`. `src/cli/cli.ts:113, 217, 294, 385, 423` all construct it bare. **Before this change, opening a store took no exclusive lock at all.** The file's own header pins the contract this broke: WAL + busy_timeout is 'the multi-handle provision', and 'the methods are async so every failure arrives as a rejected promise'. The constructor is not async and has no guard. Secondary: VACUUM rewrites the entire file and needs ~2x its size free, so first open of a large store blocks for its full size on a path nothing treats as expensive.\n\nFIX: wrap in try/catch. **The store must OPEN; the scrub is best-effort-and-REPORTED, not open-blocking.** Report the deferral rather than swallowing it (do not repeat H7 while fixing H7).\n\n**F3 — the constructor VACUUM has no checkpoint.** In WAL mode VACUUM's rebuilt pages land in `store.db-wal`; the main file keeps the inherited plaintext freelist until a checkpoint folds it in. The purge path deliberately runs `wal_checkpoint(TRUNCATE)` AND checks `busy` for exactly this reason. The constructor does neither, so a process killed before `close()` leaves the store in §11 violation while the code believes it healed. FIX: follow the VACUUM with the same CHECKED checkpoint. PROBE to confirm: construct over a store with inherited freelist, do NOT close, then `strings store.db`.",
+  "edges": [],
+  "id": "T49",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "src/store/sqlite.ts",
+    "src/cli/cli.ts",
+    "test/store/"
+  ],
+  "status": "todo",
+  "title": "The sqlite constructor VACUUM can wedge a store closed, and may not reach the main file"
+}

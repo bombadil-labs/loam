@@ -1,0 +1,24 @@
+{
+  "body": "The second strength of promotion, on §24.9's DESCRIBE list, and the last unbuilt half of §24.3/§24.4. Promote-OUTPUTS is built (#111): a quarantine's FACTS cross by re-signing with a `loam.adoption` record, and it explicitly REFUSES law (a delta declaring a reserved vocabulary is rejected). This ticket builds the door that refusal points at.\n\nWHAT §24.4 RECOMMENDED, and it is the whole design: promotion-of-law needs NO special quarantine machinery. It reuses the ORDINARY publish path verbatim — `publishSchemaClaims`/`loadSchema` for a §21 Schema, the §22 binding publish for a resolver, the §23 renderer binding publish for a renderer. The quarantine was the PROBATION; the ordinary publish is the GRADUATION. Blessing is a promotion out of a visible staging area, never a boolean flipped in the dark.\n\nBUILD: `Gateway.promoteLaw(source, deltaId, opts?)` (name it as the codebase wants) which (1) recognizes what KIND of law it is looking at, (2) routes it to that kind's existing publish path under the OPERATOR's authorship — because foreign authorship binds nothing (§8/§12), the operator re-authors to bless, exactly as promote-outputs does for facts — and (3) attaches the quarantine record as PROVENANCE on the blessed thing: a `loam.adoption`-style pointer back to the pool id, the trial, who promoted, when. 'This law was vetted in quarantine before it bound' must be on the record and auditable like any other provenance.\n\n§6'S TWO-AUTHORITY DISCIPLINE IS THE TRAP HERE, and §24.4 flags it: blessing the CODE and granting its PEN are DIFFERENT KEYS (§23.3). Promoting a renderer's law must NOT confer the granted author that lets it write. A rail must prove that: promote a renderer's law out of a pool, then assert it has no pen in the primary until a separate, deliberate grant. If the implementation makes those one act, the ticket has failed even with green tests.\n\nOTHER RAILS:\n- Idempotence, matching promote-outputs: promote the same law twice, converge on one registration and one provenance record.\n- Erasure holds: a promoted law the operator later erased cannot be silently re-promoted past its tombstone (the same re-mints-the-same-id property #111 relies on).\n- The blessed thing actually BINDS: after promotion, a read through the primary's governed door resolves THROUGH the promoted Schema/resolver/renderer. Assert the behavior, not the registration record — a test that only checks the record was written is hollow.\n- Provenance survives: `Gateway.adoptions()` (or its law-side equivalent) shows the trail back to the pool.\n\nCARE: capability + federation surface → Myk's merge (P6). If T31 (trust-on-load) recommended a per-export blessing shape, this is where that shape gets built — reconcile with it rather than inventing a parallel mechanism, and say in the PR which way the reconciliation went.",
+  "edges": [
+    {
+      "contract": "The frame's promotion controls offer BOTH doors — adopt an output (built, #111) and bless the law. The second door has to exist before the frame can put a button on it.",
+      "to": "T35"
+    },
+    {
+      "contract": "Ordering, not logic: the two are independent in design but the forecast scores them a scope-overlap VETO (both amend spec/24-quarantine.md's provenance and both land tests under the same quarantine surface). At width 1 they run sequentially anyway; this edge makes that explicit rather than leaving a known-conflicting pair nominally concurrent. promote-LAW goes first because it completes a §24.3/§24.4 story already half-built, where the envelope opens a new one.",
+      "to": "T34"
+    }
+  ],
+  "id": "T33",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "src/gateway/adopt.ts",
+    "src/gateway/gateway.ts",
+    "spec/24-quarantine.md",
+    "test/gateway/"
+  ],
+  "status": "todo",
+  "title": "§24.4: promote-LAW — the graduation is an ordinary publish that remembers its probation"
+}

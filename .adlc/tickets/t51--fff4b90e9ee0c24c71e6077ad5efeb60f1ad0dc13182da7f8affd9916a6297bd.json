@@ -1,0 +1,13 @@
+{
+  "body": "AUDIT of #152/#153/#154 (2026-07-21), finding F5. CONFIRMED. Performance, not correctness.\n\n`src/gateway/ingest.ts:130` builds `const byId = new Map([...gw.reactor.snapshot()].map((d) => [d.id, d]))` — an O(|store|) spread plus Map allocation on EVERY invocation, across three hot paths: every federation request (`offeredDeltasImpl`), every quarantine pulse and reseed (`memberAdmit`), and every `freeze`. Before this change `offeredDeltasImpl` under a lens cost O(|selected|); it is now O(|store|) regardless of how narrow the lens is.\n\nAnd the Map buys NOTHING: `Reactor.get(id)` is already the O(1) lookup, and `test/gateway/narrowing.ts:44` uses exactly that.\n\nFIX: delete `byId`; call `gw.reactor.get(negationId)`. Same purge semantics (a purged negation still returns `undefined`), one line shorter.\n\nALSO, latent and worth a comment rather than a change: the closure is drawn from the LOCAL SNAPSHOT, so a caller passing a batch not derived from this store would silently under-close. All three current callers are snapshot-derived. T43's inbound-federation fix is exactly the case where that stops being true — its closure must run over the OFFERED BATCH — so note the distinction where a future caller will read it.",
+  "edges": [],
+  "id": "T51",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "src/gateway/ingest.ts",
+    "test/gateway/"
+  ],
+  "status": "todo",
+  "title": "withNegationClosure materializes the whole store per call on three hot paths"
+}
