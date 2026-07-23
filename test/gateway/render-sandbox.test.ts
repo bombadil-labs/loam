@@ -16,9 +16,14 @@ const OP_SEED = "0e".repeat(32);
 const OK = "export default (n) => `<p>height: ${n.view.height}</p>`;";
 const HANG = "export default () => { while (true) {} };";
 const THROW = 'export default () => { throw new Error("secret internal detail"); };';
-const HOG = "export default () => { const a = []; for (;;) a.push(new Array(1e6).fill(7)); };";
+// ~64MB per iteration against the 128MB old-gen ceiling: TWO allocations breach it, so the memory
+// bound needs almost no CPU to fire. At ~8MB per iteration the hog needed ~16 scheduler slices, and
+// under full-suite load the wall-clock timer starved it out and won the race — the T73 flake. The
+// bound under test is CPU-work racing wall-clock; the rail's job is to make the CPU side's win
+// nearly free, not to assume an idle machine.
+const HOG = "export default () => { const a = []; for (;;) a.push(new Array(8e6).fill(7)); };";
 
-const boot = (): Promise<Gateway> =>
+const boot = (options: { renderTimeoutMs?: number } = {}): Promise<Gateway> =>
   Gateway.boot(
     new MemoryBackend(),
     assembleGenesis({
@@ -27,10 +32,11 @@ const boot = (): Promise<Gateway> =>
         { hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN], writable: [...PLANT_WRITABLE] },
       ],
     }),
+    options,
   );
 
-const staged = async (): Promise<Gateway> => {
-  const gw = await boot();
+const staged = async (options: { renderTimeoutMs?: number } = {}): Promise<Gateway> => {
+  const gw = await boot(options);
   await gw.append([observed(FERN, "height", 42, 1000, OP_SEED)]);
   await gw.publishRenderer({ route: "ok", schema: "Plant", consumes: ["height"], bundle: OK });
   await gw.publishRenderer({ route: "hang", schema: "Plant", consumes: ["height"], bundle: HANG });
@@ -83,23 +89,42 @@ describe("§23.9: a bounded worker keeps a bad bundle from wedging the host", ()
     await gw.close();
   });
 
-  it(
-    "a memory-hungry bundle is reclaimed by the MEMORY bound — distinguishably from the timeout (rail d)",
-    async () => {
-      const gw = await staged();
-      const hog = await gw.serveRoute("hog", FERN, "full");
-      expect(hog.status).toBe(500); // bounded, never a crash
-      // The two bounds have DIFFERENT signatures, and this asserts the memory one: a worker the
-      // resourceLimits reclaim dies on the error/exit path and folds to "the renderer faulted";
-      // only the timer produces "the renderer timed out". The hog allocates ~8MB per iteration
-      // against a 128MB old-gen ceiling, so V8 kills it well inside the 500ms timer — if the
-      // timer had won the race instead, this assertion reads "timed out" and fails. That is the
-      // §23.9 claim ("memory bounds so a bundle cannot OOM the host") actually observed, not
-      // inferred from a status code both paths share.
-      expect(hog.body).toBe("the renderer faulted");
-      expect((await gw.serveRoute("ok", FERN, "full")).status).toBe(200); // the host is unharmed
-      await gw.close();
-    },
-    RENDER_TIMEOUT_MS + 4000,
-  );
+  it("the render clock is the OPERATOR'S clock: a 1ms budget times out even the trivial renderer", async () => {
+    // The plumbing rail, born of its own failure: the first version of `renderTimeoutMs` fed one
+    // of the two render call sites and the flake it existed to fix kept firing — a control knob
+    // that silently reaches nothing reads exactly like a fix that didn't work. One millisecond
+    // against a trivial bundle can only time out if the knob genuinely governs the worker.
+    const gw = await staged({ renderTimeoutMs: 1 });
+    const out = await gw.serveRoute("ok", FERN, "full");
+    expect(out.status).toBe(500);
+    expect(out.body).toBe("the renderer timed out");
+    await gw.close();
+  });
+
+  it("a memory-hungry bundle is reclaimed by the MEMORY bound — distinguishably from the timeout (rail d)", async () => {
+    // The CONTROL: a 10s clock, so the only bound in the frame is the memory one. Wall-clock
+    // racing CPU-starved work is nondeterministic under load however cheap the work — the two
+    // earlier de-flake attempts (re-arming the clock at `online`, a hog that breaches in two
+    // allocations) each cut the failure rate and neither killed it. Lengthening this clock is
+    // not weakening the timeout rail (the hang rail above keeps the default); it is removing
+    // the competing bound to observe the one under test — and if the memory bound ever
+    // regresses, the long timer fires, the body reads "timed out", and this rail goes red
+    // exactly as it should.
+    const gw = await staged({ renderTimeoutMs: 10_000 });
+    const hog = await gw.serveRoute("hog", FERN, "full");
+    expect(hog.status).toBe(500); // bounded, never a crash
+    // The two bounds have DIFFERENT signatures, and this asserts the memory one: a worker the
+    // resourceLimits reclaim dies on the error/exit path and folds to "the renderer faulted";
+    // only the timer produces "the renderer timed out". The hog allocates ~8MB per iteration
+    // against a 128MB old-gen ceiling, so V8 kills it well inside the 500ms timer — if the
+    // timer had won the race instead, this assertion reads "timed out" and fails. That is the
+    // §23.9 claim ("memory bounds so a bundle cannot OOM the host") actually observed, not
+    // inferred from a status code both paths share. (Two clocks guard the race: the render's
+    // budget starts at worker `online`, not construction — spawn time under load was eating the
+    // whole window — and the hog breaches the ceiling in two allocations, so the kill needs
+    // almost no CPU. Both halves were needed; each alone still flaked.)
+    expect(hog.body).toBe("the renderer faulted");
+    expect((await gw.serveRoute("ok", FERN, "full")).status).toBe(200); // the host is unharmed
+    await gw.close();
+  }, 14_000);
 });

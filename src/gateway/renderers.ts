@@ -453,11 +453,15 @@ export async function serveRouteImpl(
     }
     gw.publicRendersInFlight += 1;
     try {
-      return await renderInWorker(binding.bundle, {
-        entity,
-        view: bytesEnvelope(node.view) as Record<string, unknown>,
-        hex: node.hex,
-      });
+      return await renderInWorker(
+        binding.bundle,
+        {
+          entity,
+          view: bytesEnvelope(node.view) as Record<string, unknown>,
+          hex: node.hex,
+        },
+        gw.options.renderTimeoutMs,
+      );
     } finally {
       gw.publicRendersInFlight -= 1;
     }
@@ -467,11 +471,15 @@ export async function serveRouteImpl(
   // renderer is a view consumer like gql/REST — hand it the §23.7 envelope (a bytes leaf becomes
   // { mime, ref, base64url? }, primitives pass through), which is also what makes the node JSON/clone-safe
   // to cross the thread boundary. renderInWorker never rejects; every fault folds to a clean refusal.
-  return renderInWorker(binding.bundle, {
-    entity,
-    view: bytesEnvelope(node.view) as Record<string, unknown>,
-    hex: node.hex,
-  });
+  return renderInWorker(
+    binding.bundle,
+    {
+      entity,
+      view: bytesEnvelope(node.view) as Record<string, unknown>,
+      hex: node.hex,
+    },
+    gw.options.renderTimeoutMs,
+  );
 }
 
 // May THIS door serve THIS renderer's route (SPEC §23.5/§23.8)? The same read discipline serveRoute

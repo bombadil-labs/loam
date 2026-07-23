@@ -143,6 +143,12 @@ export interface GatewayOptions {
   // is the anonymous fan; the token door is the operator's own. Over the cap the door refuses a
   // clean 503 that leaks nothing, never queues unboundedly.
   readonly maxPublicRenders?: number;
+  // The per-render wall-clock budget in ms (default RENDER_TIMEOUT_MS, 500). A deploy decision,
+  // like maxPublicRenders — and the control a rail needs when it must observe the MEMORY bound
+  // in isolation: wall-clock racing CPU-starved work is nondeterministic under load, so a test
+  // that lengthens this clock is not weakening the timeout, it is removing the competing bound
+  // from the frame to observe the other one.
+  readonly renderTimeoutMs?: number;
 }
 
 export interface FederationReport {

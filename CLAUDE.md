@@ -404,6 +404,21 @@ busy.
   `.adlc/specs/NN-slug.md` (gateable, criteria-bearing, P1's instrument), which becomes a `spec/`
   section only at landing. `spec/` is the archive, never the drafting table. Do not accumulate more
   root markdown; fold, don't add.
+- **A flaky test is fixed NOW, not managed** (Myk, 2026-07-23). The gates' exit codes are VERDICTS,
+  and the rails drive a state machine on top of them: P5 evidence binds a revision, rails freeze at
+  landing, a self-merge hangs on a green bar, `hollow-test` refuses a non-green baseline outright. A
+  test that is sometimes red makes every one of those a coin flip — and worse, it trains whoever
+  reads a red bar to re-run instead of investigate, which deletes the entire value of red. Measured
+  cost the day this rule landed: one load-flake (T73) forced two clean-`main` probe worktrees just
+  to attribute blame, narrowed a mutation baseline enough to hide survivors, and smeared "is the bar
+  green" across thirteen review rounds. So: the moment a test is OBSERVED flaky, fixing it outranks
+  the ticket in hand. Measure both directions first (fails under load, passes in isolation, on the
+  branch AND on main) so the blame lands on the test rather than the diff. The fix is never widening
+  the assertion — that deletes the rail while appearing to repair it — and never a retry loop;
+  determine whether it is a RAIL bug (fixture not forceful enough to pin the behavior) or a
+  SPEC-ACCURACY bug (the promise is genuinely weaker than stated) and fix that one. If it truly
+  cannot be fixed same-day, it is `it.skip` with the ticket id in the test title — an honest skip is
+  a visible hole; a flake is a hidden one.
 - **Strict in PRs, creative and aggressive in execution.** Ship real vertical slices; don't
   gold-plate; don't reward-hack a green bar.
 - **Match rhizomatic's vocabulary** — the concepts are HyperSchema / HyperView / View / Schema /
