@@ -57,6 +57,7 @@ function fixture(opts: {
   baseFiles?: Record<string, string>;
   branchTickets?: Record<string, object>; // added on the branch (first-declaration)
   branchEdits?: Record<string, string>;
+  noArchiveDir?: boolean; // the never-archived repo shape — the directory absent entirely
 }): string {
   const root = mkdtempSync(join(tmpdir(), "loam-t69-fixture-"));
   roots.push(root);
@@ -70,7 +71,9 @@ function fixture(opts: {
     writeFileSync(join(root, rel), content);
   };
   write(".adlc/tickets/.store.json", '{"format":"adlc-ticket-directory","version":1}\n');
-  write(".adlc/ticket-archive/.store.json", '{"format":"adlc-ticket-directory","version":1}\n');
+  if (opts.noArchiveDir !== true) {
+    write(".adlc/ticket-archive/.store.json", '{"format":"adlc-ticket-directory","version":1}\n');
+  }
   for (const [name, t] of Object.entries(opts.baseTickets ?? {})) {
     write(`.adlc/tickets/${name}`, JSON.stringify(t, null, 2));
   }
@@ -194,6 +197,31 @@ describe.skipIf(!hasAdlc)("rails-guard-ci: the freeze survives the ticket's land
       branchEdits: { "test/deep/nested/foo.test.ts": "expect(true).toBe(true) // edited\n" },
     });
     expect(runGate(root).code).toBe(2);
+  });
+
+  it("a `*` WITHIN a segment is a wildcard, not a literal — `test/store/*.test.ts` freezes the directory", () => {
+    // Pinned because a cross-model review claimed the escape class swallowed `*` (it misquoted the
+    // code — the class deliberately omits `*` so the second replace can translate it). A fixture is
+    // cheaper than an argument, and it keeps the claim decided forever.
+    const root = fixture({
+      baseArchive: { "t9--2222.json": ticket("T9", ["test/store/*.test.ts"]) },
+      baseFiles: { "test/store/mirror.test.ts": "expect(true).toBe(true)\n" },
+      branchEdits: { "test/store/mirror.test.ts": "expect(true).toBe(true) // edited\n" },
+    });
+    expect(runGate(root).code).toBe(2);
+  });
+
+  it("a base tree with NO ticket-archive directory is handled, not fatal", () => {
+    // Also claimed by review: that a missing pathspec makes git ls-tree fatal and bricks CI on any
+    // repo that has never archived. Verified false empirically (a missing pathspec lists nothing,
+    // exit 0) — and pinned here so the empty-archive repo shape stays a first-class case.
+    const root = fixture({
+      baseTickets: { "t10--3333.json": ticket("T10", ["test/foo.test.ts"]) },
+      baseFiles: { "test/foo.test.ts": "expect(true).toBe(true)\n" },
+      branchEdits: { "test/foo.test.ts": "expect(true).toBe(true) // edited\n" },
+      noArchiveDir: true,
+    });
+    expect(runGate(root).code).toBe(2); // still guarded, and no operational failure
   });
 
   it("a mid-path `**` matches ZERO directories too — `test/**/pin.test.ts` freezes `test/pin.test.ts`", () => {
