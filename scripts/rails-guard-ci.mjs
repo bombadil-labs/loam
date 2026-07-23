@@ -92,7 +92,17 @@ try {
   });
   let at = 0;
   for (const path of shards) {
+    // FAIL CLOSED on output this parser cannot account for. A truncated or malformed record here
+    // would otherwise corrupt the offset and leave every LATER shard unread — and unread shards
+    // mean undeclared rails, so the gate would quietly guard less than the base froze. A gate that
+    // cannot read its inputs has no verdict to give; exit 1 says so in the operational lane.
     const nl = raw.indexOf(0x0a, at);
+    if (nl === -1) {
+      console.error(
+        `rails-guard-ci: malformed cat-file output at ${path} — refusing to guess what is frozen`,
+      );
+      process.exit(1);
+    }
     const header = raw.subarray(at, nl).toString("utf8");
     at = nl + 1;
     if (/ (missing|ambiguous)$/.test(header)) {
@@ -100,6 +110,12 @@ try {
       continue;
     }
     const size = Number(header.split(" ")[2]);
+    if (!Number.isInteger(size) || size < 0 || at + size > raw.length) {
+      console.error(
+        `rails-guard-ci: malformed cat-file record for ${path} — refusing to guess what is frozen`,
+      );
+      process.exit(1);
+    }
     const body = raw.subarray(at, at + size).toString("utf8");
     at += size + 1; // the record's trailing newline
     try {
