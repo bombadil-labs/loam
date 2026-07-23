@@ -33,6 +33,16 @@ const hasAdlc = (() => {
   }
 })();
 
+// On CI the skip would FAIL OPEN: a runner that lost its adlc provisioning would report the
+// trust-root gate suite green without running one test of it, which is H9 wearing a test
+// convenience. Locally a loud skip is a kindness; on CI it is a lie, so CI throws instead.
+if (process.env.CI !== undefined && !hasAdlc) {
+  throw new Error(
+    "the adlc CLI is not on PATH and this is a CI run — the rails-guard-ci suite must fail " +
+      "closed rather than skip: provision @adlc/cli in the test job.",
+  );
+}
+
 const roots: string[] = [];
 afterAll(() => {
   for (const r of roots)

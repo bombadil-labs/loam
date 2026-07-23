@@ -80,10 +80,30 @@ try {
   ])
     .split("\n")
     .filter((p) => p.endsWith(".json") && !p.endsWith("/.store.json"));
+  // One `git cat-file --batch` for every shard, not one `git show` each: tombstones accumulate and
+  // (post-T69) so do archived tickets, so the per-shard spawn is the shape that grows forever —
+  // H8's own trap, on the file whose job is enforcement. Batch output is length-prefixed and sliced
+  // as BYTES before decoding: ticket bodies carry multi-byte characters, and a char-indexed slice
+  // would tear the record after them.
   tickets = [];
+  const raw = execFileSync("git", ["cat-file", "--batch"], {
+    input: shards.map((p) => `${base}:${p}`).join("\n"),
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  let at = 0;
   for (const path of shards) {
+    const nl = raw.indexOf(0x0a, at);
+    const header = raw.subarray(at, nl).toString("utf8");
+    at = nl + 1;
+    if (/ (missing|ambiguous)$/.test(header)) {
+      console.log(`rails-guard-ci: skipping unreadable shard on ${base}: ${path}`);
+      continue;
+    }
+    const size = Number(header.split(" ")[2]);
+    const body = raw.subarray(at, at + size).toString("utf8");
+    at += size + 1; // the record's trailing newline
     try {
-      const t = JSON.parse(git(["show", `${base}:${path}`]));
+      const t = JSON.parse(body);
       if (t !== null && typeof t === "object" && typeof t.id === "string") tickets.push(t);
     } catch {
       console.log(`rails-guard-ci: skipping unreadable shard on ${base}: ${path}`);
