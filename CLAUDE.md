@@ -177,12 +177,30 @@ Other things worth knowing: `--verify` re-runs to REFUTE each finding, `--input 
 spec or a rail-set rather than a diff (which is how P1 and P3 get a real review), and
 `--findings-ledger` appends straight into `.adlc/findings.jsonl` for P7.
 
-**It cannot run on Windows**, which is why it has never run here. Two hard stops, both measured: the
-assembled prompt (~18 KB) exceeds Windows' argv limit (~16 KB) and the local agent rejects it on
-stdin, and the `claude` CLI itself refuses to start without a POSIX shell. Linux has neither limit.
-Until the move, P5 falls back to the prosecutor panel — and if that is unavailable too, **say so in
-the PR** rather than letting self-review pass silently, because that is the precise failure the
-independence rule exists to prevent.
+**IT RUNS. First proven 2026-07-23 on T67, on Linux.** The Windows account above it was correct and
+INCOMPLETE, which is the more dangerous shape: clearing the documented blocker revealed two more,
+and each was invisible until the one above it cleared. Recorded in order, because the next tool that
+"has nothing to say" will fail this way too:
+
+1. **Windows argv (documented, real).** The assembled prompt (~18 KB) exceeds the ~16 KB limit.
+   Gone on Linux — a 19,694-byte prompt now assembles and sends.
+2. **The `claude` on PATH was the WINDOWS install, reached through WSL interop** (`/mnt/c/...`,
+   v1.0.51). It starts and answers `--version`, so it looks healthy; it does not support stdin
+   piping, and dies `exit 1` as an argument. `npm i -g @anthropic-ai/claude-code` INSIDE WSL fixes
+   it — asdf's shims then win the PATH. Check `which -a claude` and disbelieve a `/mnt/c` answer.
+3. **The default `--timeout` is 120s**, and a real review of a real diff exceeds it. Pass
+   `--timeout 900`. The failure reads as a tool problem, not a budget one.
+
+**What it bought on its first outing** (the argument for never skipping it): three findings at spec
+stage — one of which would have STRANDED erasures permanently, a design flaw no rail could have
+caught because the rails were downstream of the same wrong premise — then four more on the FIXED
+diff, three of those being defects introduced while fixing the first three. Re-prosecute after every
+fixup is not bookkeeping; that round found the worst bug of the night.
+
+Still true: with no key it is SAME-MODEL in a fresh isolated context, and `--providers` needs a
+credential per family. If no independent reviewer is available at all, **say so in the PR** rather
+than letting self-review pass silently — that is the precise failure the independence rule exists to
+prevent.
 
 **P1 — the deliverable is a WORKING SPEC at `.adlc/specs/NN-slug.md`**, never prose staged into
 `spec/`. `spec/` is the HISTORICAL record, written only at landing; treating it as the design
