@@ -163,6 +163,13 @@ The phases, with Loam's own craft folded into each:
    then protect them. Once any ticket declares `rails`, `.adlc/tickets.json` itself becomes a frozen
    trust root — edits need `ADLC_RAILS_BYPASS=1` (an audited, deliberate act).
 
+   **Declare `rails` when the tests EXIST, never in advance.** A rail glob that matches no file does
+   not fail and does not warn — `rails-guard` prints `all checks passed` and exits **0**. So
+   pre-declaring rail paths on a `todo` ticket protects nothing while manufacturing a green, which is
+   the vacuous-gate shape this whole file exists to defeat. There is no bulk backfill of rails: a
+   ticket earns its `rails` at P3, from the working spec's acceptance criteria, once the files are
+   written. A ticket that lists rails matching nothing is worse than one listing none.
+
    The phase's three evidence names say what the order must be: **`rails-red`** (watch them FAIL
    first — a rail never seen red has proven nothing), **`hollow-test`** (mutate the code and confirm
    they kill the mutants), then **`rails-frozen`**. Run `adlc hollow-test` rather than hand-rolling a
