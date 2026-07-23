@@ -1,0 +1,14 @@
+{
+  "body": "HIGH, erasure-integrity (H7). Found by the loam-erasure lens during T67's P5 (2026-07-23).\n\nTHE BUG. `MirrorBackend.heal` catches every `purge` refusal into `purgeFailures` and returns 0 for that tier. Its own comment promises 'the report carries what failed so the operator is told rather than the error being swallowed'. NOTHING IN src/ EVER READS THAT FIELD. The single production caller is `src/cli/cli.ts` (the boot heal), which reads only `toPrimary`/`toMirror`.\n\nSo: a store whose archive vault is on a read-only mount, or whose sqlite tier loses `wal_checkpoint(TRUNCATE)` to a concurrent reader, refuses the sweep at boot. The error lands in `purgeFailures`. `serve` prints its normal line and runs. The erased plaintext is still in the vault or the -wal sidecar, and NO channel — stdout, onLag, an exception — carries that fact to anyone. 'I could not remove it' became silence, and the process reported a successful boot.\n\nCompounding: heal is the path documented as 'finishes the forgetting on whatever tier the purge originally missed' — the backstop T67 leans on when a synchronous erase refuses. It is also the one completeness path T67 did NOT convert to the byte-presence verdict: heal still reports COUNTS (`purgedPrimary`/`purgedMirror`), which T67's own code comment calls 'EVIDENCE OF WORK, never the verdict', and never asks either tier whether the dead ids are actually gone.\n\nTHE FIX. (a) `serve` must surface a non-empty `purgeFailures` loudly, and should latch a degraded flag rather than serve as if clean. (b) `heal` should apply the same `holds` verdict `erase` now demands: after the sweep, ask each tier whether any dead id is still held, and report that in HealReport.\n\nRAILS: the catch branch at mirror.ts is entered by NO existing test — `purgeFailures` appears in tests only as `purgeFailures: []`. A rail must drive a tier whose purge refuses and assert (1) the report names it and (2) the boot path tells the operator. Object level: assert what `serve` actually writes, not just the returned struct.\n",
+  "edges": [],
+  "id": "T70",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "src/store/mirror.ts",
+    "src/cli/cli.ts",
+    "test/store/mirror.test.ts"
+  ],
+  "status": "todo",
+  "title": "The boot sweep can fail in total silence — heal's purgeFailures has no reader"
+}

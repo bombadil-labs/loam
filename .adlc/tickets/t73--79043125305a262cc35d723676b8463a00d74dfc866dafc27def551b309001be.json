@@ -1,0 +1,13 @@
+{
+  "body": "MEDIUM, rail-integrity. Found during T67's P4 (2026-07-23) while establishing whether a failure was mine.\n\nTHE BUG. `test/gateway/render-sandbox.test.ts` rail (d) asserts a memory-hungry bundle is reclaimed by the MEMORY bound 'distinguishably from the timeout' — `expect(hog.body).toBe(\"the renderer faulted\")`. Under full-suite load it gets 'the renderer timed out' instead and fails. In isolation it passes.\n\nMEASURED, both directions: fails under `npx vitest run` (whole suite) on THIS branch and on a clean `main` worktree; passes under `npx vitest run test/gateway/render-sandbox.test.ts` on both. So it is pre-existing, load-dependent, and unrelated to whatever branch happens to be running when it goes red.\n\nWHY IT MATTERS MORE THAN A FLAKE. The §23.9 claim is that memory bounds and timeouts are DISTINGUISHABLE — that a bundle cannot OOM the host and that the operator can tell which bound fired. Under load the distinction collapses, which means either (a) the implementation genuinely cannot distinguish them when the machine is busy, and the §23.9 claim is weaker than the spec states, or (b) the test's memory pressure is not aggressive enough to beat the timeout deterministically. (a) is a spec-accuracy bug; (b) is a rail bug. Nobody has established which, and the current state — a rail that is red on a loaded CI runner — trains everyone to ignore a red bar, which is the most expensive outcome of the three.\n\nTHE FIX. Determine which of (a)/(b) it is FIRST. If (b): make the hog allocate fast enough that the memory bound fires long before the timeout, or raise the timeout for this case only so the two bounds cannot race. If (a): correct §23.9 to state what is actually guaranteed, and keep a rail for the honest weaker claim.\n\nDo NOT simply widen the assertion to accept either message — that deletes the rail while appearing to fix it, and the distinguishability IS the property under test.\n",
+  "edges": [],
+  "id": "T73",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "test/gateway/render-sandbox.test.ts",
+    "src/gateway/render-sandbox.ts"
+  ],
+  "status": "todo",
+  "title": "A rail that conflates two failure modes: the renderer memory-bound test is green only when the machine is idle"
+}
