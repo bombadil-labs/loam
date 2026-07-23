@@ -23,11 +23,21 @@ Two consequences worth naming before you start:
 1. **CLAUDE.md carries a fallback phase index** for exactly this reason. It is deliberately thin;
    the skill is authoritative whenever it loads.
 2. **P5's independent reviewer gets BETTER, not worse.** The prosecutor panel is the plugin's and
-   goes dark — but `adversarial-review` is a CLI, so it survives, and it is the stronger
-   instrument: `--providers gpt,gemini,claude` merges independent reviews with cross-provider
-   corroboration, which is the cross-model independence ADLC gates P5 on. No API keys needed to
-   start; it drives the local `claude` CLI on your subscription and, when the reviewer is the same
-   model, runs it in a fresh isolated context and says so.
+   goes dark — but `adversarial-review` is a CLI, so it survives. **It has two tiers and only the
+   first is free; do not conflate them.**
+
+   **What you get with no credentials:** the bare command drives the local `claude` CLI on your
+   Claude Code subscription. That is SAME-MODEL, and the tool says so rather than pretending
+   otherwise. What it buys is a fresh, isolated context with no access to the author's reasoning —
+   which is the active ingredient, since self-review fails by sharing the ticket's premise, not by
+   lacking cleverness. Better than self-review; weaker than the next paragraph. Budget: it spends
+   Claude Code tokens, so a review is a real cost even though no key is involved.
+
+   **What needs credentials:** `--providers gpt,gemini,claude` is the true cross-model gate and
+   requires a credential **per family named**. A family you have no key for fails the run rather
+   than quietly degrading to one provider. Only `claude` is on this machine and no provider keys are
+   set, so this form is unavailable until that changes — a Gemini or OpenAI key is the cheapest way
+   to reach it, and a second local agent CLI would also work (`--provider <local-cli-cmd>`).
 
    **This is a reason to move, not a cost of moving.** It cannot run on Windows at all: the
    assembled prompt (~18 KB) exceeds the ~16 KB argv limit and the local agent rejects it on stdin,

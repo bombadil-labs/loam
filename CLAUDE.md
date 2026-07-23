@@ -160,11 +160,19 @@ the skill ever disagree, the skill is right and this is stale.
 | P7 Distill | `lesson-foundry` · `rejection-mining` · `skill-rot` |
 
 **P5's independent reviewer survives the plugin loss — it is `adversarial-review`, a CLI.** The
-prosecutor panel is the plugin's and goes dark in WSL; `adversarial-review` does not, and it is the
-STRONGER instrument: `--providers gpt,gemini,claude` runs the review independently per family and
-merges with cross-provider corroboration, which is the cross-model independence ADLC actually gates
-P5 on. It needs **no API keys** to start — it drives the local `claude` CLI on your subscription,
-and when the reviewer is the same model it says so and runs in a fresh, isolated context window.
+prosecutor panel is the plugin's and goes dark in WSL; `adversarial-review` does not. **It has two
+tiers and only one of them is free — do not conflate them:**
+
+- **With no credentials at all** it drives the local `claude` CLI on the Claude Code subscription.
+  That is SAME-MODEL, and the tool says so rather than pretending otherwise. What it buys is a
+  **fresh, isolated context with no access to the author's reasoning** — which is the active
+  ingredient, since self-review fails by sharing the ticket's premise, not by lacking cleverness.
+  Strictly better than self-review, strictly weaker than the next bullet. This is what Loam has.
+- **`--providers gpt,gemini,claude` is the real cross-model gate and NEEDS a credential per family
+  named.** A family you have no key for fails the run; it does not quietly degrade to one provider.
+  This is the form ADLC gates its trust-root tier on, and we cannot run it today — the only agent CLI
+  on the box is `claude`, and no provider keys are set.
+
 Other things worth knowing: `--verify` re-runs to REFUTE each finding, `--input <file>` reviews a
 spec or a rail-set rather than a diff (which is how P1 and P3 get a real review), and
 `--findings-ledger` appends straight into `.adlc/findings.jsonl` for P7.
@@ -234,7 +242,8 @@ promise about completeness. Maximal proximity, freshest possible memory, still s
 `src/gateway/SUBSTRATE-HAZARDS.md`, and no access to the author's reasoning. Three instruments, in
 descending order of independence:
 
-1. **`adversarial-review --providers gpt,gemini,claude`** — cross-model, the real thing. Linux only.
+1. **`adversarial-review`** — Linux only. Bare (local `claude` CLI, no key): same model, fresh
+   isolated context. `--providers a,b`: true cross-model, but needs a credential per family named.
 2. **`.claude/agents/loam-*`** — the local panel, tracked in this repo: `loam-erasure` (H7 / §11
    completeness), `loam-suppression` (H1 / negation closure, both levels), `loam-hollow-rail` (could
    this test pass with the fix reverted?), `loam-lens-name` (H6), `loam-scan-scale` (H8 and the
