@@ -232,6 +232,17 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
         }
         this.onDisk.delete(id); // and never mark a purged id durable
       }
+      // The debt rides the SAME transaction as the deletions it describes (written pessimistically;
+      // the checkpoint below clears it again on the happy path). Written after COMMIT, a crash in
+      // the gap left deleted rows whose WAL images no reopened handle knew to distrust — the record
+      // existed only when nothing went wrong, which is when it is least needed. In here, deletions
+      // and debt are atomic: both land or neither does.
+      if (deletedNow.length > 0) {
+        for (const id of deletedNow) this.truncationOwed.add(id);
+        this.db
+          .prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('truncation-outstanding', ?)")
+          .run(JSON.stringify([...this.truncationOwed]));
+      }
       this.db.exec("COMMIT");
       // `secure_delete` zeroes the freed pages in the DATABASE; in WAL mode the delete is first
       // recorded in the -wal file, which still holds the pre-delete page images until a checkpoint
@@ -257,25 +268,6 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
       // refused while any unrelated reader held the WAL, forever, across restarts. The debt
       // belongs to the ids whose pre-delete images the sidecar may hold: this call's deletions,
       // plus any prior owed id this call was asked about.
-      // The debt is written PESSIMISTICALLY, before the checkpoint that would make it moot, and a
-      // failed write is LOUD. Written after a busy checkpoint and swallowed, a lost write (or a
-      // crash in that window) silently reproduced the post-restart stranding the durable debt was
-      // added to eliminate — the record existed only when nothing went wrong, which is when it is
-      // least needed. The happy path clears it two lines later; erasures are rare, so the extra
-      // write is nothing.
-      let debtWriteFailed: unknown;
-      if (deletedNow.length > 0) {
-        for (const id of deletedNow) this.truncationOwed.add(id);
-        try {
-          this.db
-            .prepare(
-              "INSERT OR REPLACE INTO meta (key, value) VALUES ('truncation-outstanding', ?)",
-            )
-            .run(JSON.stringify([...this.truncationOwed]));
-        } catch (err) {
-          debtWriteFailed = err;
-        }
-      }
       const [status] = this.db.pragma("wal_checkpoint(TRUNCATE)") as Array<{ busy: number }>;
       const busy = status !== undefined && status.busy !== 0;
       if (!busy) {
@@ -292,15 +284,7 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
                   ? "The rows are deleted, but their plaintext may remain in the -wal sidecar"
                   : "No rows matched here — the outstanding work is an EARLIER purge's truncation, " +
                     "whose plaintext may remain in the -wal sidecar"
-              }, so this erasure is INCOMPLETE (§11). Retry once the other handle is idle.${
-                debtWriteFailed === undefined
-                  ? ""
-                  : ` AND THE DEBT COULD NOT BE MADE DURABLE (${
-                      debtWriteFailed instanceof Error
-                        ? debtWriteFailed.message
-                        : JSON.stringify(debtWriteFailed)
-                    }): if this process dies before the retry succeeds, the reopened store will not know the truncation is owed — treat this erasure as incomplete until re-run to completion.`
-              }`,
+              }, so this erasure is INCOMPLETE (§11). Retry once the other handle is idle.`,
           );
         }
       }

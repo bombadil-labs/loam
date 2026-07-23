@@ -640,15 +640,26 @@ export class Gateway {
     // Drop the resolver memo (SPEC §22.5/§11): keying already forbids serving a value over erased
     // bytes, but a re-seat is exactly the moment the ground forgot — clear it so nothing lingers.
     this.resolverMemo.clear();
-    // CATCH UP on the teardown window. Every await above is a seam another task can append
-    // through: the delta lands in the backend and the OLD reactor, and a swap to the snapshot
-    // alone would drop it from the live ground until a restart — after which a later `erase` of
-    // that id would answer `nothing to erase` over bytes still at rest, the exact hazard family
-    // this seam exists to close. One differential read picks up the stragglers.
-    const known = new Set(reactor.snapshot().ids());
-    for (const d of await this.backend.deltasSince(known)) {
-      if (reactor.ingest(d).status === "rejected") {
-        throw new Error(`reseat: the store handed back an unacceptable delta ${d.id}`);
+    // CATCH UP on the teardown window, UNTIL QUIESCENT. Every await above is a seam another task
+    // can append through: the delta lands in the backend and the OLD reactor, and a swap to the
+    // snapshot alone would drop it from the live ground until a restart — after which a later
+    // `erase` of that id would answer `nothing to erase` over bytes still at rest, the exact
+    // hazard family this seam exists to close. One differential read narrows the window to its
+    // own await; LOOPING until a read returns nothing closes it, because the ingest loop and the
+    // swap below are synchronous — nothing can interleave after the read that came back empty.
+    // The cap is a livelock bound, not a correctness bound; ten raced appends in a row means
+    // something is writing in a hot loop and deserves the loud refusal.
+    for (let round = 0; ; round += 1) {
+      const known = new Set(reactor.snapshot().ids());
+      const stragglers = await this.backend.deltasSince(known);
+      if (stragglers.length === 0) break;
+      if (round >= 10) {
+        throw new Error("reseat: the store will not quiesce — something is appending in a loop");
+      }
+      for (const d of stragglers) {
+        if (reactor.ingest(d).status === "rejected") {
+          throw new Error(`reseat: the store handed back an unacceptable delta ${d.id}`);
+        }
       }
     }
     this._reactor = reactor;
