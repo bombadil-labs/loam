@@ -4,14 +4,14 @@ Loam is a general database built on [rhizomatic](https://github.com/bombadil-lab
 design is in **[SPEC.md](SPEC.md)** and the usage in **[README.md](README.md)** — read them before
 writing code. **Get up to speed on what Loam is and how it works from SPEC.md.** This file is the
 **process**. The backlog of unbuilt/partial design now lives as **ADLC tickets** in
-`.adlc/tickets.json` — the contract every gate reads (it replaced the old `TODO.md` +
+`.adlc/tickets/` — one shard per ticket, the contract every gate reads (it replaced the old `TODO.md` +
 `CURRENT_WORK.md` hand-tracked pair). **[JOURNAL.md](JOURNAL.md)** remains the append-only record —
 an index over **[`journal/`](journal/)**, one file per entry; keep it current as you make decisions.
 
 **SPEC.md is the record of what IS.** It is only ever grown by a **landing PR**, and every section
 carries a `**Provenance.**` footer linking the PR(s) that landed it and naming the implementation —
 one long reliable history with links to the PRs that go deeper. Speculative, unbuilt, or partially
-designed work does **not** live in the spec; it lives as a **ticket** in `.adlc/tickets.json` until it
+designed work does **not** live in the spec; it lives as a **ticket** in the store until it
 lands, and the landing PR **adds its section as a new `spec/NN-slug.md` file** (with its Provenance
 footer) plus a row in the `SPEC.md` index, in the same change — and removes the ticket it realized.
 Each landing writing its *own* file is deliberate: disjoint sections stop colliding, so concurrent
@@ -21,7 +21,7 @@ a bugfix or one-off correction).
 The original v1 plan (build steps 0–9) is **complete** — all merged; the journal is its record. This
 file no longer carries a plan; it carries the lifecycle any future work runs. **To resume:** route
 through the **`adlc` discovery skill** — it maps what you're doing to the right gate. Read
-`.adlc/tickets.json` for the queued work; `adlc merge-forecast` gives the build order (its
+`adlc ticket list` for the queued work; `adlc merge-forecast` gives the build order (its
 `mergeOrder`) and how wide you may safely fan out (`recommendedWidth` — the design-stage arc that
 all edits SPEC.md forecasts width 1, i.e. build it sequentially). If there is no ticket that fits,
 author one first (`/adlc:adlc-ticket`); if the backlog is genuinely empty, ask Myk what to build
@@ -54,19 +54,23 @@ and the difference is whether the gate's value is JUDGMENT or INDEPENDENCE:
   explicitly WITHOUT the author's reasoning. That is not a workaround for a missing tool; it is the
   implementation.
 
-**THE TOOLING WAS NEVER TURNED ON — fixed 2026-07-21, and here is what to use.** For two weeks this
-repo ran ADLC's *advisory* half (`merge-forecast`, `coldstart`, `hollow-test`) and none of its
-*enforcing* half. What was actually wrong, so nobody assumes it again:
+**`adlc:prosecutor-{correctness,security,tests,contract,diff}` and `adlc:prosecutor-verifier` are
+real agent types** — that panel IS P5's independent reviewer, and it is what the "spawn a subagent"
+rule above means in practice. Use them; do not hand-roll review prompts beside a shipped panel.
 
-- The `adlc` **plugin** was pinned at 0.2.0 while upstream was 1.5.1 (35 commits). Its **discovery
-  skill**, its `/adlc:*` commands, its **PreToolUse rails + buildgate hooks**, its **SessionStart
-  preflight hook**, and its **seven prosecutor agents** were all installed and none were loading.
-- `@adlc/cli` was 1.3.0 against 1.5.1; `adversarial-review` was **never installed at all**.
+**KEEP THE TOOLING CURRENT, and check it is actually loaded.** This repo spent two weeks running
+ADLC's advisory half and none of its enforcing half, because a stale pin and a silent Windows spawn
+failure are indistinguishable from a tool that has nothing to say (`journal/` has the account). After
+any upgrade: `npm run adlc:patch`, then `adlc init` (idempotent — it owns `.gitignore`), and confirm
+a gate you expect to FAIL actually fails. A gate you have never seen red has proven nothing, and
+that applies to the toolchain as much as to a rail.
 
-All updated. **`adlc:prosecutor-{correctness,security,tests,contract,diff}` and
-`adlc:prosecutor-verifier` are real agent types** — that panel IS P5's independent reviewer, and it
-is what the "spawn a subagent" rule above means in practice. Use them; do not hand-roll review
-prompts beside a shipped panel (that mistake cost a day).
+**The rail backstop runs in CI** (`scripts/rails-guard-ci.mjs`, wired in `.github/workflows/ci.yml`).
+ADLC's PreToolUse hook is only the in-session layer and explicitly does **not** gate Bash — a shell
+cannot be reliably parsed — so a rail edited through a shell command is caught by the CI diff gate or
+by nothing. The wrapper exists because the bare gate will not scan the store and treats an ADDED file
+as an edit, which would fail the very PR that first writes a ticket's rails; it therefore guards only
+rails that already exist on the base. First-authoring is invisible, everything after it is frozen.
 
 **TWO adlc CLIs are broken on Windows and both run via LOCAL PATCHES — re-apply after any adlc
 upgrade with `npm run adlc:patch`.** They patch a GLOBAL package, so `npm i -g @adlc/cli` wipes
@@ -86,11 +90,13 @@ restructures the call. Delete each once a released `@adlc/cli` works on Windows.
   file that already exists — which is why this repo had a hand-written `.gitignore` and no
   `config.json`. The patch adds `O_CREAT` **on win32 only**, leaving POSIX flags byte-identical.
 
-**`.adlc/` is an ALLOWLIST and `adlc init` owns it.** Committed: `config.json`, `tickets.json`,
-`tickets/`, `specs/` — the CONTRACT. Local, per-worktree, never committed: `findings.jsonl`,
+**`.adlc/` is an ALLOWLIST and `adlc init` owns it.** Committed: `config.json`, `tickets/`,
+`ticket-archive/`, `specs/` — the CONTRACT. Local, per-worktree, never committed: `findings.jsonl`,
 `manifest.jsonl`, `ticket-transactions/` — evidence that gates assert against *here*, which would
 collide across branches if shared. Do not hand-add a negation; if an upgrade adds a contract file,
-re-run `adlc init`. (A committed ledger looks like durability and is really a merge conflict; the
+re-run `adlc init`. **Order is load-bearing** — `.adlc/*` must stay above every negation, and
+`ticket store migrate` has been seen to reorder that block and strand one above it, silently killing
+it (git is last-match-wins). (A committed ledger looks like durability and is really a merge conflict; the
 durable home for a finding is P7 distillation into `SUBSTRATE-HAZARDS.md` and the journal.)
 
 **`adlc run <phase>` asserts the phase's evidence exists, and the names are EXACT.** You record with
@@ -117,7 +123,8 @@ evidence by design.
 and reports the mutants your tests do not kill. Run it in P3 rather than hand-rolling revert-probes.
 Scope it: it mutates **whatever is in the diff**, so a commit that bundles `.adlc/` evidence with
 code will have its JSON log lines mutated and reported as survivors. Point it at source with
-`--target <file>` (repeatable) or `--rails <ticket.json>`, which expands the ticket's rails globs.
+`--target <file>` (repeatable); `--rails` wants a SINGLE-ticket JSON with a top-level `rails` array,
+which our sharded store is not, so it errors rather than expanding.
 
 **And `adlc prosecute` is an evidence RECORDER**
 (`--input passes.json`): it writes down what it is handed and never verifies a review occurred, so
@@ -125,172 +132,129 @@ it may only record what a prosecutor actually returned. Feeding it unearned pass
 operation reporting a success it did not achieve — hazard **H7** at the process layer, which is
 exactly what the old convention produced.
 
-The phases, with Loam's own craft folded into each:
+## What Loam adds to each phase
 
-1. **P0 — Author the ticket** (`/adlc:adlc-ticket`). Turn the work into a self-contained ticket in
-   `.adlc/tickets.json` — the body must stand alone (an agent can't see the conversation), the
-   `scope`/`rails`/`edges` honest. `coldstart` will check it is executable without guesswork; a
-   vague ticket fails it, and that failure is the signal to split it into finer tickets.
-2. **P1 — Interrogate / design-stage.** The deliverable is a **WORKING SPEC at
-   `.adlc/specs/NN-slug.md`** — *not* prose staged into `spec/`. `spec/` is the HISTORICAL record
-   and is written only at landing (P6); treating it as the design surface is what let P1's gates be
-   skipped entirely, because a narrative "what IS" section carries no acceptance criteria and
-   `spec-lint` passes it vacuously (`WARNING: no criteria found`, exit 0 — a gate that gates nothing).
+**The phases are ADLC's and live in the `adlc` skill** — P0 Triage, P1 Interrogate, P2 Decompose,
+P3 Rail, P4 Build, P5 Prosecute, P6 Integrate (the human gate), P7 Distill, each with its tools.
+This file used to restate all of it, and that duplication is exactly how the repo came to believe it
+was running gates it had never run: a phase list written here reads as the authority, so nobody
+opened the skill, and the copy drifted until it described a lifecycle we were not executing. **Route
+with the skill; `adlc <tool> --help` for flags.** What follows is only what Loam adds on top.
 
-   A working spec carries an **`## Acceptance criteria`** heading, and every criterion NAMES ITS
-   VERIFICATION — a test path or a backtick command. That is the whole point: **spec-lint's
-   "verification method" is our rail**, so `adlc spec-lint <path>` mechanically enforces *every
-   promise names the test that will prove it*, at design time, before any code. A criterion with no
-   method is a WISH and gate-FAILS (exit 2). This is the hollow-rail defense moved upstream — from
-   something the model must remember into something the gate refuses.
+**P1 — the deliverable is a WORKING SPEC at `.adlc/specs/NN-slug.md`**, never prose staged into
+`spec/`. `spec/` is the HISTORICAL record, written only at landing; treating it as the design
+surface is what let P1's gates be skipped entirely, because a narrative "what IS" section carries no
+acceptance criteria and `spec-lint` passes it vacuously (`WARNING: no criteria found`, exit 0 — a
+gate that gates nothing). A working spec carries an `## Acceptance criteria` heading and every
+criterion NAMES ITS VERIFICATION — a test path or a backtick command. That is the whole point:
+**spec-lint's "verification method" is our rail**, enforcing *every promise names the test that will
+prove it* at design time, before any code. A criterion with no method is a WISH and gate-FAILS.
+Prefer `--llm`/`--prompt-only`, which also catches a method that is present but VACUOUS; the plain
+run only catches a missing one.
 
-   Run: `adlc spec-lint .adlc/specs/NN-slug.md` (exit 2 on a wish), then `adlc premortem <path>`
-   (failure-first stress) and `adlc parallax --file <path>` (ambiguity fan-out), plus
-   `adversarial-review --prompt-only` on the design.
+**Then STOP and wait for Myk's word in chat before writing implementation code** — plus answers to
+the ticket's listed design questions. "He'd probably approve" is not his word. That stop is the P6
+human gate arriving early, at design time.
 
-   **Then STOP and wait for Myk's word in chat before writing implementation code** — plus answers to
-   the ticket's listed design questions. "He'd probably approve" is not his word. That stop is the P6
-   human gate arriving early, at design time.
-3. **P2 — Decompose.** `adlc coldstart <id> --prompt-only` (executability), `adlc model-router`
-   (which model strategy), `adlc merge-forecast` (fan-out width + `mergeOrder`).
-4. **P3 — Rail (tests first).** Write clean, honest tests that capture everything in the ticket —
-   the behavior it must exhibit, asserted against real outcomes, not against the shape of the
-   implementation. **No reward-hacking: a test that can pass without the desired behavior is a bug.**
-   **Where a working spec exists, its acceptance criteria ARE the rail list** — each criterion already
-   names its verification path, so P3 is writing the tests P1 already committed to, not inventing a
-   set. Freezing them should be transcription; if a criterion has no test yet, P1 under-specified.
-   Freeze them as `rails` on the ticket; `adlc rails-guard` (and the plugin's PreToolUse rail hook)
-   then protect them. Once any ticket declares `rails`, `.adlc/tickets.json` itself becomes a frozen
-   trust root — edits need `ADLC_RAILS_BYPASS=1` (an audited, deliberate act).
+**P3 — ASSERT AT BOTH LEVELS, DELTA AND OBJECT. It is not either/or** (Myk, 2026-07-21). A rail that
+only checks one leaves the other open, and 2026-07-21 produced the failure in *both* directions on
+the same day:
 
-   **Declare `rails` when the tests EXIST, never in advance.** A rail glob that matches no file does
-   not fail and does not warn — `rails-guard` prints `all checks passed` and exits **0**. So
-   pre-declaring rail paths on a `todo` ticket protects nothing while manufacturing a green, which is
-   the vacuous-gate shape this whole file exists to defeat. There is no bulk backfill of rails: a
-   ticket earns its `rails` at P3, from the working spec's acceptance criteria, once the files are
-   written. A ticket that lists rails matching nothing is worse than one listing none.
+- **Object-level only** missed T40: `get(id)` returned undefined — the API said forgotten — while
+  the plaintext sat legible in the sqlite file. The store lied downward.
+- **Delta-level only** missed T15/T38: the right deltas crossed the seeding edge, and a *reader*
+  still saw a retracted claim as live, because suppression is a property of the operand set rather
+  than of the delta. The store lied upward.
 
-   The phase's three evidence names say what the order must be: **`rails-red`** (watch them FAIL
-   first — a rail never seen red has proven nothing), **`hollow-test`** (mutate the code and confirm
-   they kill the mutants), then **`rails-frozen`**. Run `adlc hollow-test` rather than hand-rolling a
-   revert-probe: it asks *could this pass with the behavior broken?* mechanically, on every changed
-   line, which is the question we kept answering by hand and kept getting wrong. Use
-   **`--target <file>`** (repeatable) — `--rails` wants a SINGLE-ticket JSON with a top-level `rails`
-   array, which our multi-ticket `.adlc/tickets.json` is not, so it errors rather than expanding.
+So a rail asks **both**: *what is actually in the store, in bytes or deltas?* **and** *what does a
+reader resolve through a Schema, or a door serve?* The middle is not the top — asserting
+`reactor.negationsOf(...)` is still delta-level structure; the object-level question is what a
+**View** contains and what a **door** answers. When the two disagree, that disagreement is usually
+the bug, and neither assertion alone can see it. Where one level is genuinely out of scope, **name
+the gap in the test file** and say which rail would close it; an honest-looking comment over a
+weaker test is how this class keeps surviving review.
 
-   **ASSERT AT BOTH LEVELS — DELTA AND OBJECT. It is not either/or** (Myk, 2026-07-21). A rail that
-   only checks one leaves the other open to nuanced bugs, and 2026-07-21 produced the failure in
-   *both* directions on the same day:
-   - **Object-level only** missed T40: `get(id)` returned undefined — the API said forgotten — while
-     the plaintext sat legible in the sqlite file. The store lied downward.
-   - **Delta-level only** missed T15/T38: the right deltas crossed the seeding edge, and a *reader*
-     still saw a retracted claim as live, because suppression is a property of the operand set
-     rather than of the delta. The store lied upward.
+Where a working spec exists, **its acceptance criteria ARE the rail list** — each criterion already
+names its verification path, so P3 is transcription, not invention. If a criterion has no test yet,
+P1 under-specified. **No reward-hacking: a test that can pass without the desired behavior is a bug.**
 
-   So a rail asks **both**: *what is actually in the store, in bytes or deltas?* **and** *what does a
-   reader resolve through a Schema, or a door serve?* Note the middle is not the top — asserting
-   `reactor.negationsOf(...)` is still delta-level structure; the object-level question is what a
-   **View** contains and what a **door** answers. When the two levels disagree, that disagreement is
-   usually the bug, and neither assertion alone can see it.
+**Declare `rails` when the tests EXIST, never in advance.** A rail glob matching no file does not
+fail and does not warn — `rails-guard` prints `all checks passed` and exits 0. Pre-declaring paths
+on a `todo` ticket therefore protects nothing while manufacturing a green. There is no bulk
+backfill; a ticket earns its rails at P3. A ticket listing rails that match nothing is worse than
+one listing none. (Retroactive rails have a second problem: written by the author of already-merged
+code, they share that code's premise — which is how three hollow rails shipped on 2026-07-21.)
 
-   Where one level is genuinely out of scope (a unit-level migration step, say), **name the gap in
-   the test file** and say which rail would close it. Do not write a header that claims the stronger
-   assertion — an honest-looking comment over a weaker test is how this class keeps surviving review.
-5. **P4 — Build.** Write the code to make the tests pass. Concise, not cryptic — as small as it can
-   be **without dropping a desired behavior**. The green bar is `npm run check` (format + lint +
-   typecheck + **all** tests; read the counts, never trust a silent grep). If mid-build you loop or
-   drift, `adlc flail-detector`; for a hard failing test, `adlc consensus-fix`.
-6. **P5 — Prosecute.** Before merge, run the adversarial prosecutor on the diff
-   (`/adlc:adlc-prosecute`; `adlc hollow-test` finds tests that pass without testing behavior).
-   **Frame review prompts and finding-summaries in a neutral correctness register** — "review for
-   authorization and correctness gaps; what inputs or states produce a wrong outcome" — rather than
-   role-playing an opponent trying to defeat the system. The neutral framing finds the same issues
-   and reads far less like offensive security to a content classifier; the sharper framing was only
-   ever stylistic.
+**P4 — the green bar is `npm run check`** (format + lint + typecheck + **all** tests; read the
+counts, never trust a silent grep). Write the code as small as it can be **without dropping a
+desired behavior** — concise, not cryptic.
 
-   **THE SYSTEM CATCHES MISTAKES; THE MODEL DOES NOT AVOID THEM** (Myk, 2026-07-21). This is the
-   governing principle, and it replaces the old budget rule below it. Do not tune this process
-   toward a model that is careful enough — that target does not exist. 2026-07-21 is the proof: the
-   session's own model wrote hazard **H7**, in its own words, and violated it **three hours later**
-   in a function whose entire stated purpose was keeping a promise about completeness. Maximal
-   proximity, freshest possible memory, still shipped. Knowing a trap in the abstract does almost
-   nothing to help you notice you are standing in it.
+**P5 — THE SYSTEM CATCHES MISTAKES; THE MODEL DOES NOT AVOID THEM** (Myk, 2026-07-21). This is the
+governing principle. Do not tune this process toward a model that is careful enough — that target
+does not exist. 2026-07-21 is the proof: the session's own model wrote hazard **H7**, in its own
+words, and violated it **three hours later** in a function whose entire stated purpose was keeping a
+promise about completeness. Maximal proximity, freshest possible memory, still shipped.
 
-   **~~Budget: one careful review pass per PR (self-review for small mechanical diffs)~~ — RETIRED.**
-   That rule optimized for spending less on review, and 2026-07-21 priced it honestly:
+**P5's default is an INDEPENDENT reviewer that did not write the diff** — a subagent with the diff,
+`src/gateway/SUBSTRATE-HAZARDS.md`, and no access to the author's reasoning. The
+`adlc:prosecutor-{correctness,security,tests,contract,diff}` panel IS that reviewer; use it rather
+than hand-rolling prompts beside a shipped panel. Self-review is the **exception** and must be
+justified in the PR body — and "small mechanical diff" is not a justification, since the worst
+finding of 2026-07-21 was in a tiny one. The one-careful-pass budget is **retired**; it was priced
+honestly that day:
 
-   | | caught |
-   |---|---|
-   | P5 as budgeted (self-review, one pass) | **nothing** |
-   | independent diff audits (3 runs) | **every finding, incl. 2 probed to certainty** |
+| | caught |
+|---|---|
+| P5 as budgeted (self-review, one pass) | **nothing** |
+| independent diff audits (3 runs) | **every finding, incl. 2 probed to certainty** |
 
-   Prosecute-as-practiced passed all three negation-closure sites, a hollow rail in the PR *about*
-   hollow rails, and a keystone file that merged as a **zero-line diff**. The failure is structural,
-   not effortful: **self-review shares the ticket's premise**, and a wrong premise produces perfect
-   rails around a real bug. Independence is the active ingredient — not care, not a sharper prompt.
+The failure is structural, not effortful: **self-review shares the ticket's premise**, and a wrong
+premise produces perfect rails around a real bug. Independence is the active ingredient — not care,
+not a sharper prompt.
 
-   **So: P5's default is an INDEPENDENT reviewer that did not write the diff** — a subagent with the
-   diff, the hazards file, and no access to the author's reasoning. Self-review is the **exception**,
-   and it must be justified in the PR body. Note that "small mechanical diff" is not a justification:
-   the worst finding of 2026-07-21 was in a tiny one.
+**Review the RAILS, not just the code.** Every audit that day found rail defects, and the rail
+defects were what would have let the bug ship. Ask of each new test: *could this pass with the fix
+reverted?* and *could this pass if the feature were deleted entirely?* Both were live failures.
+`adlc hollow-test` asks that mechanically — use `--target <file>` (repeatable); `--rails` wants a
+single-ticket JSON, which our store is not.
 
-   **Review the RAILS, not just the code.** Every audit that day found rail defects, and the rail
-   defects were what would have let the bug ship. Ask of each new test: *could this pass with the fix
-   reverted?* and *could this pass if the feature were deleted entirely?* Both were live failures.
+**Frame review prompts and finding-summaries in a neutral correctness register** — "review for
+authorization and correctness gaps; what inputs or states produce a wrong outcome" — rather than
+role-playing an opponent. The neutral framing finds the same issues and reads far less like
+offensive security to a classifier; the sharper framing was only ever stylistic.
 
-   **Budget honestly.** Review is the cheapest thing here relative to shipping an erasure leak. Where
-   spend must be bounded, bound the number of ANGLES, never the independence. ~~**Audits are paused**~~ — **UNPAUSED, and now STANDING: audit after every piece of
-   major work** (Myk, 2026-07-21). Audit 1's pause was a cost decision; audit 3 justified reversing
-   it by finding **13 real issues in one pass**, two of them probed to certainty (a completed
-   erasure left the plaintext recoverable from the sqlite file; `migrate` resurrected withdrawn
-   operator law, turning a §17 410 into a 200 and potentially serving it anonymously) and one of
-   them a build rule §24.8 had already written and nobody had built.
+**AUDIT AFTER EVERY PIECE OF MAJOR WORK** (Myk, 2026-07-21) — standing. Bound the number of ANGLES,
+never the independence. **Run the RETRO SHAPE:** 3–4 tightly-scoped finder angles, **no verify
+stage** (the fixer verifies while fixing — verification was ~80% of audit 1's cost and refuted 1 of
+24 candidates), findings capped per angle, every angle told that **a clean result is a valid
+result** so it does not pad. Scale to the work: 3–4 over the tree after an arc lands, **1–2 scoped
+to the diff** after a single ticket. Tell each angle what is ALREADY KNOWN so it does not re-find
+it, and require CONFIRMED-vs-PLAUSIBLE on every finding. **Pick angles from what has actually
+bitten** — audit 3's angles came from real bugs found hours earlier and every one landed;
+`SUBSTRATE-HAZARDS.md` is the running list.
 
-   **Run the RETRO SHAPE, which is what makes this affordable:** 3–4 tightly-scoped finder angles,
-   **no verify stage** (the fixer verifies while fixing — the verify stage was ~80% of audit 1's
-   cost and refuted 1 of 24 candidates), findings capped per angle, and every angle told that **a
-   clean result is a valid result** so it does not pad. Scale the angles to the work: 3–4 over the
-   whole tree after an arc lands; **1–2 scoped to the diff** after a single ticket. Tell each angle
-   what is ALREADY KNOWN so it does not re-find it, and require CONFIRMED-vs-PLAUSIBLE on every
-   finding.
+**Why this is worth the tokens:** the gates verify conformance to the ticket and cannot verify that
+the ticket is right. Rails are downstream of the spec, so a wrong premise produces perfect rails
+around a real bug — which is how all three negation-closure sites shipped green. The audit is the
+only step that reads the code without the ticket's assumptions.
 
-   **Pick angles from what has actually bitten**, not from a generic checklist — audit 3's angles
-   were drawn from real bugs found hours earlier and every one landed. `src/gateway/SUBSTRATE-HAZARDS.md`
-   is the running list; a hazard there that keeps recurring is next audit's angle.
+**P6 — the landing PR writes the ticket's design as a new `spec/NN-slug.md` file, the LAST step and
+the only step that touches `spec/`**: the whole section closed by its `**Provenance.**` footer (the
+PR link(s) + a short implementation note), plus its row in the `SPEC.md` index, and it removes the
+realized ticket from the store. It is written FROM the settled working spec, re-cast as narrative —
+`spec/` records what IS, in prose, for a reader; the working spec was a gateable instrument for a
+builder. Different genres, different lifetimes; do not paste one into the other. The spec grows only
+here, never speculatively; a new file is the default, editing an existing section the rare
+exception. Append a record to the journal — a **new `journal/<date>-<slug>.md` file** (what was done
++ any novel learning) plus its row in the `JOURNAL.md` index.
 
-   **Why this is worth the tokens, stated plainly:** the gates verify conformance to the ticket, and
-   they cannot verify that the ticket is right. Rails are downstream of the spec, so a wrong premise
-   produces perfect rails around a real bug — which is exactly how all three of the negation-closure
-   sites shipped green. The audit is the only step that reads the code without the ticket's
-   assumptions, and that is a different question from every other gate.
-7. **P6 — Integrate (the human gate).** Myk decides. Surface the evidence: `adlc accept --ticket
-   <id> --packet <packet.json>` builds the **acceptance packet** (`p6-acceptance-packet`, the second
-   thing `adlc run p6` demands, alongside a still-fresh `p5-complete`), and it takes optional
-   `--before`/`--after` snapshots so the behavior diff rides in the packet rather than in prose.
-   `adlc gate-manifest show --ticket <id>` prints the trail. **The landing PR writes the ticket's design as a new `spec/NN-slug.md`
-   file — the LAST step, and the only step that touches `spec/`** — the whole section, closed by its
-   `**Provenance.**` footer (the PR link(s) + a short implementation note) — adds its row to the
-   `SPEC.md` index, and removes the realized ticket from `.adlc/tickets.json`. It is written FROM the
-   settled working spec (`.adlc/specs/NN-slug.md`), re-cast as narrative: `spec/` records what IS, in
-   prose, for a reader; the working spec was a gateable instrument for a builder. Different genres,
-   different lifetimes — do not paste one into the other. The working spec has served its purpose at
-   this point and may be left as the design's audit trail. The spec grows only here, never
-   speculatively; a new file is the default, editing an existing section the rare exception. Append a record to the journal — a **new
-   `journal/<date>-<slug>.md` file** (what was done + any novel learning) plus its row in the
-   `JOURNAL.md` index, the same new-file-per-landing discipline the spec runs on.
-8. **The village.** Extend `demos/village/` — the living demonstration, see
-   `demos/village/README.md` — so the village *exercises the behavior this ticket added*,
-   end-to-end and ambitiously: new acts, new stores, new lenses, whatever makes the feature visible
-   in a running federated world. RUN what you added; update the demonstration ledger in
-   `demos/village/README.md` (Myk, 2026-07-09: with each new PR, document how you've updated the
-   village). `demos/village/homes/` stays untracked (stores and seeds are disposable); the village's
-   code and docs ride the ticket's PR.
-9. **P7 — Distill.** Repeated review findings become defenses (`/adlc:adlc-distill`). The phase has
-   three shipped gates and `adlc run p7` wants all of them: **`lesson-foundry`** (turns the findings
-   ledger into durable rules), **`rejection-mining`** (reads what review REJECTED, not just what it
-   accepted), **`skill-rot`** (finds defenses that have gone stale). This is also where a local
-   `findings.jsonl` earns its keep — it is per-worktree and uncommitted, so a lesson only becomes
-   durable by landing in `SUBSTRATE-HAZARDS.md`, `CLAUDE.md`, or the journal.
+**P7 — a local `findings.jsonl` is where lessons START, not where they live.** It is per-worktree and
+uncommitted, so a lesson becomes durable only by landing in `SUBSTRATE-HAZARDS.md`, this file, or
+the journal.
+
+**The village is PARKED** (Myk, 2026-07-22). `demos/village/` was a per-ticket obligation — extend
+the living demonstration so it exercises whatever just landed. It is set aside for now; do not treat
+it as a step. The demo and its ledger stay in the tree, and `demos/village/homes/` stays untracked.
 
 After a ticket lands, re-evaluate the **remaining** tickets against what you just learned. A learning
 that changes the plan edits the relevant ticket body (not SPEC.md — SPEC.md is history, changed only
@@ -317,7 +281,7 @@ motion — author the finer tickets and wire `edges` (prerequisite → dependent
 
 ## Autonomous operation — churn until a human gate
 
-The default posture is autonomous churn (Myk, 2026-07-13): Myk keeps `.adlc/tickets.json` stocked
+The default posture is autonomous churn (Myk, 2026-07-13): Myk keeps the ticket store stocked
 (that is P1 — the approval of *what* to build), and the model works the backlog until it hits a gate
 that genuinely needs him. The loop, per unblocked ticket:
 
@@ -361,9 +325,9 @@ busy.
   `NN-slug.md` file per section (what IS, grown only by landings, each footered with its provenance),
   and **`journal/`** is one `<date>-<slug>.md` file per entry (append-only, newest last). A new
   section is a new file in `spec/`; a new entry is a new file in `journal/` plus its index row —
-  never a new root doc. The backlog is not a doc anymore: it is `.adlc/tickets.json` (a committed
-  contract — don't reformat it; it's machine-written, and becomes a frozen rail once any ticket
-  declares `rails`). Neither is the DESIGN surface: a work-in-progress spec is a **working spec** at
+  never a new root doc. The backlog is not a doc anymore: it is `.adlc/tickets/`, one shard per
+  ticket (a committed contract — don't hand-edit it; go through `adlc ticket update`, which is
+  hash-guarded and refuses to narrow a rail set without `--authorize`). Neither is the DESIGN surface: a work-in-progress spec is a **working spec** at
   `.adlc/specs/NN-slug.md` (gateable, criteria-bearing, P1's instrument), which becomes a `spec/`
   section only at landing. `spec/` is the archive, never the drafting table. Do not accumulate more
   root markdown; fold, don't add.
@@ -411,7 +375,7 @@ busy.
   to a feature branch are safe, reversible checkpoints and part of autonomous progress: make them
   without asking, on a feature branch (never `main`), with real messages (the poetry rule applies to
   commits too). The point is to churn autonomously and pull Myk in only where ADLC actually needs a
-  human: **P1** (he keeps `.adlc/tickets.json` stocked — that is the approval of what to build) and
+  human: **P1** (he keeps the ticket store stocked — that is the approval of what to build) and
   **P6** (accepting the merge). ~~Open PRs; don't merge to `main`~~ — **SUPERSEDED 2026-07-21 by the
   repair-vs-decide test in "merge by risk" above**: the model self-merges a REPAIR that restores
   stated behavior (green + P5 + clean audit); anything that DECIDES what the system promises, and
