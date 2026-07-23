@@ -129,6 +129,27 @@ uname:       MINGW64_NT-10.0-22621
 bwrap here?: ABSENT        # though /usr/bin/bwrap exists in that same Ubuntu
 ```
 
+## 4b. The findings ledger does not come with the clone
+
+`.adlc/findings.jsonl` is per-worktree and untracked, so a fresh clone starts empty. That is ADLC's
+design and it is fine — but this repo's ledger held 41 prosecutor findings, 15 of them high or
+critical, and they are worth reading once rather than rediscovering.
+
+They are not lost: the file was tracked until the allowlist was adopted, so git still has it.
+
+```bash
+git show 20be177^:.adlc/findings.jsonl > .adlc/findings.jsonl
+```
+
+Beware the caret. `20be177` is the commit that REMOVED the file, so the file is empty there; its
+parent is the last revision that still holds it.
+
+Worth knowing about that ledger, because it is the argument for not treating it as storage: the file
+also vanished from the Windows working tree partway through, when a checkout crossed the commit that
+untracked it. Nothing warned. A lesson only becomes durable by landing in `SUBSTRATE-HAZARDS.md`,
+`CLAUDE.md`, the journal, or a ticket — **T68** is the one finding from that ledger that had not yet
+reached any of them, and it is now a ticket for exactly this reason.
+
 ## 5. Afterwards
 
 - Retire the Windows worktree rather than syncing both; two clones of a repo whose gates bind to a
