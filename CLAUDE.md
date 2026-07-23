@@ -141,6 +141,29 @@ was running gates it had never run: a phase list written here reads as the autho
 opened the skill, and the copy drifted until it described a lifecycle we were not executing. **Route
 with the skill; `adlc <tool> --help` for flags.** What follows is only what Loam adds on top.
 
+**Fallback index — the skill is authoritative whenever it loads.** This table is a one-line pointer
+per phase, deliberately too thin to mistake for the definition: no flags, no semantics, nothing that
+can quietly drift into disagreeing with the tool. It exists because **a WSL session has no plugins**
+(see the migration guide) — and therefore no skill, no `/adlc:*` commands, no PreToolUse rail hook,
+and no prosecutor agents. In that session the `adlc` CLI is all of ADLC you have. If this table and
+the skill ever disagree, the skill is right and this is stale.
+
+| phase | gates |
+|---|---|
+| P0 Triage | `adlc ticket create` (`/adlc:adlc-ticket`) |
+| P1 Interrogate | `spec-lint` · `premortem` · `parallax` · `adversarial-review` |
+| P2 Decompose | `coldstart` · `model-router` · `merge-forecast` |
+| P3 Rail | `rails-guard` · `hollow-test` |
+| P4 Build | `flail-detector` · `consensus-fix` |
+| P5 Prosecute | `hollow-test` · `behavior-diff` · `review-calibration` · `adversarial-review` |
+| P6 Integrate | `accept` · `gate-manifest show` — human decision |
+| P7 Distill | `lesson-foundry` · `rejection-mining` · `skill-rot` |
+
+**Without the plugin, P5's independent reviewer is not automatic.** The prosecutor panel is the
+plugin's; `adversarial-review --providers <a,b>` is the CLI equivalent and needs provider keys.
+Falling back to self-review because the agents are missing re-creates the exact failure the
+independence rule exists to prevent — say so in the PR rather than letting it pass silently.
+
 **P1 — the deliverable is a WORKING SPEC at `.adlc/specs/NN-slug.md`**, never prose staged into
 `spec/`. `spec/` is the HISTORICAL record, written only at landing; treating it as the design
 surface is what let P1's gates be skipped entirely, because a narrative "what IS" section carries no
