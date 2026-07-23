@@ -159,10 +159,22 @@ the skill ever disagree, the skill is right and this is stale.
 | P6 Integrate | `accept` · `gate-manifest show` — human decision |
 | P7 Distill | `lesson-foundry` · `rejection-mining` · `skill-rot` |
 
-**Without the plugin, P5's independent reviewer is not automatic.** The prosecutor panel is the
-plugin's; `adversarial-review --providers <a,b>` is the CLI equivalent and needs provider keys.
-Falling back to self-review because the agents are missing re-creates the exact failure the
-independence rule exists to prevent — say so in the PR rather than letting it pass silently.
+**P5's independent reviewer survives the plugin loss — it is `adversarial-review`, a CLI.** The
+prosecutor panel is the plugin's and goes dark in WSL; `adversarial-review` does not, and it is the
+STRONGER instrument: `--providers gpt,gemini,claude` runs the review independently per family and
+merges with cross-provider corroboration, which is the cross-model independence ADLC actually gates
+P5 on. It needs **no API keys** to start — it drives the local `claude` CLI on your subscription,
+and when the reviewer is the same model it says so and runs in a fresh, isolated context window.
+Other things worth knowing: `--verify` re-runs to REFUTE each finding, `--input <file>` reviews a
+spec or a rail-set rather than a diff (which is how P1 and P3 get a real review), and
+`--findings-ledger` appends straight into `.adlc/findings.jsonl` for P7.
+
+**It cannot run on Windows**, which is why it has never run here. Two hard stops, both measured: the
+assembled prompt (~18 KB) exceeds Windows' argv limit (~16 KB) and the local agent rejects it on
+stdin, and the `claude` CLI itself refuses to start without a POSIX shell. Linux has neither limit.
+Until the move, P5 falls back to the prosecutor panel — and if that is unavailable too, **say so in
+the PR** rather than letting self-review pass silently, because that is the precise failure the
+independence rule exists to prevent.
 
 **P1 — the deliverable is a WORKING SPEC at `.adlc/specs/NN-slug.md`**, never prose staged into
 `spec/`. `spec/` is the HISTORICAL record, written only at landing; treating it as the design

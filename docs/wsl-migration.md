@@ -22,10 +22,16 @@ Two consequences worth naming before you start:
 
 1. **CLAUDE.md carries a fallback phase index** for exactly this reason. It is deliberately thin;
    the skill is authoritative whenever it loads.
-2. **P5's independent reviewer is no longer automatic.** The prosecutor panel is the plugin's. The
-   CLI equivalent is `adversarial-review --providers <a,b>`, which needs provider keys. Quietly
-   falling back to self-review re-creates the failure the independence rule exists to prevent — say
-   so in the PR instead.
+2. **P5's independent reviewer gets BETTER, not worse.** The prosecutor panel is the plugin's and
+   goes dark — but `adversarial-review` is a CLI, so it survives, and it is the stronger
+   instrument: `--providers gpt,gemini,claude` merges independent reviews with cross-provider
+   corroboration, which is the cross-model independence ADLC gates P5 on. No API keys needed to
+   start; it drives the local `claude` CLI on your subscription and, when the reviewer is the same
+   model, runs it in a fresh isolated context and says so.
+
+   **This is a reason to move, not a cost of moving.** It cannot run on Windows at all: the
+   assembled prompt (~18 KB) exceeds the ~16 KB argv limit and the local agent rejects it on stdin,
+   and the `claude` CLI refuses to start without a POSIX shell. Both vanish on Linux.
 
 The in-session rail hook is also gone, which makes `scripts/rails-guard-ci.mjs` the only rail
 enforcement left. It already runs on every PR and does not depend on the plugin.
