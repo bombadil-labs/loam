@@ -96,6 +96,38 @@ describe("§11 at rest — sqlite", () => {
     expect(anyFileContains(dir, MARKER)).toBeUndefined();
   });
 
+  it("a RETRY whose DELETE finds nothing still truncates the WAL (ticket T67)", async () => {
+    // The documented partial-erasure path: the first attempt deletes the rows and then fails to
+    // truncate the WAL, so the caller holds "a partial erasure to retry, not a failed one to redo."
+    // `purge` used to gate its `wal_checkpoint(TRUNCATE)` on `removed > 0` — and on that very retry
+    // the rows are already gone, so `removed` is 0, so the checkpoint the retry EXISTS to perform
+    // was skipped in silence. The plaintext stayed in the sidecar and every caller reported
+    // success. The work outstanding on a retry is the truncation, not the DELETE.
+    const dir = scratch();
+    const file = join(dir, "store.db");
+    const store = new SqliteBackend(file);
+    const target = canary(MARKER, 1000);
+    await store.append([target]);
+
+    // Attempt 1, with the truncation sabotaged mid-purge: rows deleted, WAL left holding their
+    // pre-delete page images. A second live handle is what does this in the wild; here the pragma
+    // is intercepted so the rail is deterministic rather than a race.
+    const db = (store as unknown as { db: { pragma: (s: string, o?: unknown) => unknown } }).db;
+    const realPragma = db.pragma.bind(db);
+    db.pragma = (sql: string, opts?: unknown) =>
+      sql.startsWith("wal_checkpoint") ? [{ busy: 1 }] : realPragma(sql, opts);
+    await expect(store.purge([target.id])).rejects.toThrow(/write-ahead log|INCOMPLETE/i);
+    expect(anyFileContains(dir, MARKER)).toBeDefined(); // still at rest, as the error says
+
+    // The operator idles the other handle and re-runs, exactly as the error instructs. The DELETE
+    // now finds nothing — and the checkpoint must still happen.
+    db.pragma = realPragma;
+    expect(await store.purge([target.id])).toBe(0); // no rows left to remove...
+    expect(anyFileContains(dir, MARKER)).toBeUndefined(); // ...and the bytes are finally gone
+
+    await store.close();
+  });
+
   it("purging EVERY delta leaves no plaintext anywhere in the database directory", async () => {
     const dir = scratch();
     const file = join(dir, "store.db");

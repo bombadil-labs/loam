@@ -235,11 +235,19 @@ export async function eraseImpl(
   // would mean no call to `erase` could ever finish that sweep; only a boot-time `heal(exclude)`
   // could, which is exactly the delay a synchronous verdict exists to remove. The tombstone is
   // append-only and durable, so it is the honest anchor for "this erasure is outstanding."
+  // It must be a tombstone that ERASES this id, not merely one that MENTIONS it. `eraseDefect`
+  // constrains the COUNT of `erases` pointers and the `spoken-by`, and forbids nothing else — so a
+  // lawful tombstone erasing X may carry another delta-kind pointer at Y under some other role.
+  // A membership test that accepted any such pointer would match that tombstone for `erase(Y)`,
+  // skip minting Y's tombstone entirely, purge Y's bytes, and return `{ erased: Y }`: the store
+  // would destroy a record while recording nothing about having done so, and admission would let Y
+  // straight back in. `tombstoneParts` reads the same single `erases` pointer `readTombstones`
+  // binds, so the retry anchor and the dead set cannot disagree about what a tombstone is for.
   const already = [...gw.reactor.snapshot()].find(
     (d) =>
       isTombstone(d.claims) &&
       d.claims.author === gw.operatorAuthor &&
-      d.claims.pointers.some((p) => p.target.kind === "delta" && p.target.deltaRef.delta === id),
+      tombstoneParts(d.claims).targetId === id,
   );
   const target = gw.reactor.get(id);
   if (target === undefined && already === undefined) {

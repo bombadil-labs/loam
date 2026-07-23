@@ -111,6 +111,81 @@ describe("§24.8 rail (b) — failure is loud", () => {
   });
 });
 
+// A pool backend that ACCEPTS the removal order and quietly keeps the bytes — `purge` reports 0 and
+// removes nothing. The read-only-mount shape, on the tier §11 is easiest to evade. Honest about
+// what it holds: `holds` is inherited unchanged, so it tells the truth about the retention.
+class RetainingBackend extends MemoryBackend {
+  retain = true;
+  override async purge(ids: Iterable<string>): Promise<number> {
+    if (this.retain) return 0;
+    return super.purge(ids);
+  }
+}
+
+describe("§24.8 rail (g) — a pool that retains makes the primary's erase REFUSE (ticket T67)", () => {
+  it("a retaining pool cannot report a completion it did not deliver", async () => {
+    // Before T67 the fan-out called `purge` and discarded the count entirely — it did not even have
+    // the ambiguous `removed === 0` gate the mirror path had. A pool whose store silently kept the
+    // bytes reported success outward, and the primary's `erase` resolved over it: a forgotten
+    // record living on inside the operator's own walls, which is the one thing §24.8 exists to stop.
+    const FORGOTTEN = "a-pool-is-not-a-hiding-place";
+    const primary = await bootPrimary();
+    const secret = observed(FERN, "message", FORGOTTEN, 2000, OP_SEED);
+    await primary.append([secret]);
+    const poolBackend = new RetainingBackend();
+    const q = await primary.openQuarantine({ backend: poolBackend });
+    expect(await poolBackend.holds(secret.id)).toBe(true);
+
+    await expect(primary.erase(secret.id, { reason: "the subject asked" })).rejects.toThrow(
+      /STILL HOLDS|pool/i,
+    );
+    expect(await poolBackend.holds(secret.id)).toBe(true); // the rail's premise, still true
+
+    // And the remedy works: fix the pool's store, re-run, and the erasure completes.
+    poolBackend.retain = false;
+    await expect(primary.erase(secret.id, { reason: "the subject asked" })).resolves.toMatchObject({
+      erased: secret.id,
+    });
+    await backendForgot(poolBackend, secret.id, FORGOTTEN);
+    await q.drop();
+    await primary.close();
+  });
+
+  it("a NESTED pool that retains refuses outward too — the law is transitive", async () => {
+    const FORGOTTEN = "depth-is-not-a-defence";
+    const primary = await bootPrimary();
+    const secret = observed(FERN, "message", FORGOTTEN, 2000, OP_SEED);
+    await primary.append([secret]);
+    const qBackend = new MemoryBackend();
+    const rBackend = new RetainingBackend(); // only the DEEPEST replica retains
+    const q = await primary.openQuarantine({ backend: qBackend });
+    const r = await q.gateway.openQuarantine({ backend: rBackend });
+    expect(await rBackend.holds(secret.id)).toBe(true);
+
+    await expect(primary.erase(secret.id, { reason: "the subject asked" })).rejects.toThrow(
+      /STILL HOLDS|pool/i,
+    );
+    await r.drop();
+    await q.drop();
+    await primary.close();
+  });
+
+  it("POSITIVE CONTROL: the same two-pool shape with nothing retained completes normally", async () => {
+    // Without this, both rails above would pass against an `erase` that always threw.
+    const primary = await bootPrimary();
+    const secret = observed(FERN, "message", "control", 2000, OP_SEED);
+    await primary.append([secret]);
+    const q = await primary.openQuarantine({ backend: new MemoryBackend() });
+    const r = await q.gateway.openQuarantine({ backend: new MemoryBackend() });
+    await expect(primary.erase(secret.id, { reason: "the subject asked" })).resolves.toMatchObject({
+      erased: secret.id,
+    });
+    await r.drop();
+    await q.drop();
+    await primary.close();
+  });
+});
+
 describe("§24.8 rail (d) — the fan-out is transitive", () => {
   it("erase in P purges P → Q → R: a nested pool holds zero bytes", async () => {
     const FORGOTTEN = "nested-pools-are-not-outside-the-law";

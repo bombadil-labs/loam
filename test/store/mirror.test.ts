@@ -214,11 +214,17 @@ describe("MirrorBackend", () => {
     expect(await store.holds(d2.id)).toBe(false); // and false is still reachable
   });
 
-  it("a tier that cannot answer makes holds REJECT, never resolve false", async () => {
+  it("a tier that cannot answer makes holds REJECT, never resolve false — and NAMES the tier", async () => {
     // The one failure mode that would reinstate the bug: swallowing a tier's error turns "I could
-    // not check" into "it is gone." Purge composes its failures this way; so does this.
+    // not check" into "it is gone." Purge composes its failures this way; so does this. The tier is
+    // named because the operator's next move depends on WHICH store to go look at, and the driver's
+    // own error is kept as `cause` rather than flattened away.
     const store = new MirrorBackend(new MemoryBackend(), unreachable());
-    await expect(store.holds(d1.id)).rejects.toThrow(/unreachable/);
+    await expect(store.holds(d1.id)).rejects.toThrow(/mirror tier could not be proven clean/);
+    await expect(store.holds(d1.id)).rejects.toThrow(/unreachable/); // the cause survives
+    // ...and the other direction, so the label is read from the failing side rather than hardcoded.
+    const flipped = new MirrorBackend(unreachable(), new MemoryBackend());
+    await expect(flipped.holds(d1.id)).rejects.toThrow(/primary tier could not be proven clean/);
   });
 
   it("close() closes both sides even when one refuses, then reports the refusal", async () => {

@@ -110,13 +110,25 @@ describe("erase is complete only when every TIER is clean", () => {
     const backend = new MirrorBackend(retaining(primaryInner), mirror);
     const { gateway, fact } = await groveOn(backend);
 
-    // The mirror holds a straggler of its own, so its purge returns a positive count for this batch.
-    expect(await backend.purge([fact.id])).toBe(1);
-    expect(await primaryInner.holds(fact.id)).toBe(true); // ...and the primary kept it anyway
+    // NOTHING is purged before the erase. An earlier draft asserted `backend.purge([fact.id])`
+    // here to "set up" the mirror's positive count — which CONSUMED the mirror's copy, so
+    // `eraseImpl`'s own purge then saw max(0, 0) = 0, the old gate ran its scan, the scan read the
+    // retaining PRIMARY, and the pre-fix code threw. The rail was green with the fix reverted: a
+    // fixture that spends the very condition it exists to create. Probed, not reasoned about —
+    // reverting the verdict turned the other three rails red and left this one passing.
+    //
+    // Left alone, the mirror still holds the target when `erase` runs, so its purge legitimately
+    // removes one, the retaining primary removes none, and `MirrorBackend.purge` reports
+    // max(0, 1) = 1 — the aggregate that made the old `removed === 0` gate skip the scan entirely.
+    expect(await primaryInner.holds(fact.id)).toBe(true);
+    expect(await mirror.holds(fact.id)).toBe(true);
 
     await expect(gateway.erase(fact.id, { reason: "the subject asked" })).rejects.toThrow(
       /STILL HELD|not complete/i,
     );
+    // The primary is what kept it — name the tier, so a pass cannot come from the wrong side.
+    expect(await primaryInner.holds(fact.id)).toBe(true);
+    expect(await mirror.holds(fact.id)).toBe(false); // the mirror did its job
     await gateway.close();
   });
 

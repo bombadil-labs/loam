@@ -239,8 +239,16 @@ export class ArchiveBackend implements StoreBackend {
       let names: readonly string[];
       try {
         names = readdirSync(join(this.root, fan));
-      } catch {
-        continue; // a fan that vanished between listing and reading holds nothing
+      } catch (err) {
+        // ENOENT only: a fan that vanished between listing and reading genuinely holds nothing.
+        // Anything else — EACCES on a vault whose mode changed or that a container opened under a
+        // different uid, EIO on a failing disk, EMFILE under load — means this fan was NOT
+        // examined, and a fan that could not be read may still hold the bytes. Answering `false`
+        // there would hand `erase` a clean verdict over an unread directory, which is this
+        // ticket's own bug wearing a different tier. `purge` may swallow the same error because
+        // its output is evidence of work; this one IS the verdict, so it refuses.
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+        continue;
       }
       for (const name of names) {
         const cut = name.endsWith(".json")

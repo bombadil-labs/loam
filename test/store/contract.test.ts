@@ -290,6 +290,26 @@ for (const makeHarness of harnesses) {
       await store.close();
     });
 
+    if (sample.reopen !== undefined) {
+      it("holds asks the STORE, not this handle's bookkeeping", async () => {
+        // Append through one handle, probe through another. Without this, a `holds` implemented as
+        // `this.onDisk.has(id)` passes every other test in this file — `append` adds to that index
+        // and `purge` deletes from it, so the symmetry holds while the answer comes from a cache of
+        // what this handle DID rather than from the bytes. A second handle's row is still a row
+        // this store holds, and the byte a crash left behind was never in anyone's index (H8).
+        const h = makeHarness();
+        const writer = h.open();
+        await writer.append([signed1]);
+        await writer.close();
+
+        const reader = h.reopen!();
+        expect(await reader.holds(signed1.id)).toBe(true); // never written by THIS handle
+        expect(await reader.purge([signed1.id])).toBe(1);
+        expect(await reader.holds(signed1.id)).toBe(false);
+        await reader.close();
+      });
+    }
+
     it("holds sees at least what purge reaches: a positive count is never a surprise", async () => {
       // The governing invariant. A driver whose `purge` can remove bytes its `holds` cannot see
       // would report a completion the store never delivered — H7 with the evidence inverted.

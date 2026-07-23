@@ -79,10 +79,22 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
   // reported. A tier that cannot answer has not proven it forgot anything, so this REJECTS rather
   // than resolving false — treating "I could not check" as "it is gone" is the precise false
   // completion this method exists to prevent.
+  // The refusal NAMES ITS TIER. "Something could not be checked" sends an operator to read both
+  // stores; "the mirror tier could not be checked" sends them to one. The cause is carried as
+  // `cause` rather than flattened into the message, so the driver's own error — the ENOENT, the
+  // EACCES, the SQLITE_BUSY — survives for whoever is debugging underneath.
   async holds(id: string): Promise<boolean> {
     const results = await Promise.allSettled([this.primary.holds(id), this.mirror.holds(id)]);
-    const failed = results.find((r) => r.status === "rejected");
-    if (failed !== undefined) throw failed.reason;
+    const tiers = ["primary", "mirror"] as const;
+    for (const [i, r] of results.entries()) {
+      if (r.status === "rejected") {
+        throw new Error(
+          `the ${tiers[i]} tier could not be proven clean of ${id}: ` +
+            `${r.reason instanceof Error ? r.reason.message : String(r.reason)}`,
+          { cause: r.reason },
+        );
+      }
+    }
     return results.some((r) => (r as PromiseFulfilledResult<boolean>).value);
   }
 
