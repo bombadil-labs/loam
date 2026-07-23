@@ -120,10 +120,18 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
     if (owed !== undefined) {
       try {
         const ids = JSON.parse(owed.value) as unknown;
-        if (Array.isArray(ids))
-          for (const i of ids)
+        // BRACES, deliberately: an earlier form of this fix wrote `if (Array.isArray) for ... if
+        // ... else`, and the else bound to the INNER if — a dangling-else that let a debt row
+        // parsing to valid non-array JSON fall through both branches and owe nothing. Caught by a
+        // cross-model review at confidence 1.00, one commit after it shipped.
+        if (Array.isArray(ids)) {
+          for (const i of ids) {
             if (typeof i === "string") this.truncationOwed.add(i);
-            else this.truncationUnknown = true; // a debt row that is not an id list still owes
+            else this.truncationUnknown = true; // a non-string entry is a debt it cannot name
+          }
+        } else {
+          this.truncationUnknown = true; // a debt row that is not an id list still owes
+        }
       } catch {
         // An unreadable debt row cannot name its ids — which makes every id unprovable, not none
         // of them. Failing open here silently reproduced the stranding for whichever ids the

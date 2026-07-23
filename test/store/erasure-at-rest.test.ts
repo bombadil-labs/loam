@@ -232,6 +232,20 @@ describe("§11 at rest — sqlite", () => {
     await reopened.purge([canary(MARKER, 9999).id]);
     expect(await reopened.holds(canary(MARKER, 9999).id)).toBe(false);
     await reopened.close();
+
+    // And the dangling-else shape: VALID JSON that is not an array owes exactly the same way. An
+    // earlier fix let this case fall through both branches (the else bound to the inner if) —
+    // "{corrupt" was caught while "5" walked free.
+    const raw2 = new Database(file);
+    raw2
+      .prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('truncation-outstanding', ?)")
+      .run("5");
+    raw2.close();
+    const again = new SqliteBackend(file);
+    expect(await again.holds(canary(MARKER, 9999).id)).toBe(true);
+    await again.purge([canary(MARKER, 9999).id]);
+    expect(await again.holds(canary(MARKER, 9999).id)).toBe(false);
+    await again.close();
   });
 
   it("a purge that matched NOTHING does not fail on a busy checkpoint (ticket T67)", async () => {

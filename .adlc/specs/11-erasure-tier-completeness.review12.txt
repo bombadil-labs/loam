@@ -1,0 +1,40 @@
+ℹ Target: branch t67-tier-blind-erasure vs main (merge-base 060d7a2ec780b58fbd23a24b4d97e88ed86b7283)
+  ▪ 42 file(s), 317133 diff bytes, mode: inline-diff
+ℹ Using LLM provider: gemini (model: gemini-3.5-flash)
+  ▪ Verification pass: trying to refute 3 finding(s)...
+⚠ Finding "Persisted truncation debt fails open on non-array JSON values": quoted evidence was not found in the provided context — confidence halved for gating.
+
+ NEEDS ATTENTION   branch t67-tier-blind-erasure vs main (merge-base 060d7a2ec780b58fbd23a24b4d97e88ed86b7283)
+
+Summary
+  Do not ship this branch as written. While the tier-blindness fix itself is well-constructed and well-railed, the implementation introduces critical correctness, data-loss, and performance hazards. Specifically, the catch-up loop in Gateway.reseat() can leave the gateway half-torn-down with a stale reactor if a backend read fails, version-skewed truncation debt rows silently fail open (violating privacy guarantees), and the synchronous file system traversals in ArchiveBackend.holds() block the single-threaded Node.js event loop under bulk operations.
+
+Coverage
+  6 file(s) examined, 4 skipped: CLAUDE.md, JOURNAL.md, journal/2026-07-23-the-first-full-lap.md, .adlc/specs/11-erasure-tier-completeness.md
+
+Findings (3)
+
+  HIGH     [concurrency] Gateway.reseat() catch-up loop failures leave the gateway in a half-torn-down state  conf 0.90
+    src/gateway/gateway.ts:643-665
+    While Gateway.reseat() reorders reads to prevent starting a destructive teardown when the backend is unreachable, the new catch-up loop (introduced to close the asynchronous yield window) calls `this.backend.deltasSince` again after the channels have already been ended and the caches cleared. If this second read throws an error (e.g., due to database busy/lock/disconnection), the exception propagates out, leaving the gateway with all active channels terminated but with `this._reactor` still bound to the stale, pre-erase reactor state.
+    ✗ failure: A client initiates an erasure which runs `purge()` and calls `reseat()`. `reseat()` successfully performs the initial read, ends active channels, and clears all internal caches. During the catch-up loop, a concurrent reader holds a database lock, causing the second `deltasSince()` call to time out or throw a busy exception. The exception aborts `reseat()`, leaving the gateway's core state stale while its active subscribers have already been killed with no chance of recovery.
+    → fix: Perform the entire quiesce-and-loop sequence before tearing down any channels or clearing the resolver caches. Once the final quiet reactor is fully built synchronously, end the channels and perform the atomic pointer swap without any intervening `await` yields.
+
+  HIGH     [data-loss] Persisted truncation debt fails open on non-array JSON values  conf 1.00
+    src/store/sqlite.ts:105-125
+    The SqliteBackend constructor parses the persisted WAL-truncation debt row. If the JSON value is syntactically valid but does not parse into an array (such as an object representing metadata or carrying a schema version in a mixed-fleet environment), the `try` block succeeds but the `Array.isArray(ids)` guard evaluates to `false`. Because there is no `else` branch for this guard, it exits quietly without setting `this.truncationUnknown = true`. This leaves the backend with an empty `truncationOwed` list and a falsified clean bill of health.
+    ✗ failure: A database contains a debt row written by a future version of the software in an object structure like `{"version":2,"ids":["abc"]}`. When an older service handle opens this database, `JSON.parse` succeeds, but `Array.isArray` returns false. The handle initializes with zero debt and `truncationUnknown = false`. On an operator's retry, `holds()` returns false for 'abc' even though the plaintext remains in the un-checkpointed WAL sidecar. The gateway reports successful completion of the erasure, leaking private data.
+    → fix: Add an explicit `else` branch to the `Array.isArray(ids)` test. Any non-array or unparseable metadata structure must trigger `this.truncationUnknown = true` to fail-closed.
+    ⚠ ungrounded: quoted evidence was not found in the provided context — confidence halved for gating
+
+  MEDIUM   [resource-exhaustion] Synchronous directory traversal in ArchiveBackend.holds() blocks the Node.js event loop  conf 0.95
+    src/store/archive.ts:230-260
+    ArchiveBackend.holds() is called multiple times per erasure operation. When the canonical path is absent, it executes `readdirSync` synchronously across all fan directories under the vault root to detect stragglers or misfiled copies. Since this file system I/O runs synchronously on the main thread, a large archive vault with tens of thousands of deltas will block the event loop entirely.
+    ✗ failure: Under a bulk subject request or during automated compliance scans, multiple parallel/sequential erasures are executed against an ArchiveBackend holding 100,000 files. Each absent query causes extensive synchronous filesystem operations, locking up the Node.js process and causing unrelated client requests, API routes, and keep-alives to time out.
+    → fix: Refactor holds() and other directory scanning routines to use asynchronous non-blocking filesystem APIs (such as `fs.promises.readdir`) so the event loop can yield to concurrent operations.
+
+Next steps
+  • Move the quiescence loops in `Gateway.reseat` ahead of destructive channel terminations to avoid half-torn-down gateway states.
+  • Refactor `SqliteBackend` constructor to correctly handle non-array objects in the metadata table by setting `this.truncationUnknown = true` when `Array.isArray` is false.
+  • Convert synchronous file traversals in `ArchiveBackend.holds` into non-blocking asynchronous alternatives.
+
