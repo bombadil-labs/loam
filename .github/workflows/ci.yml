@@ -21,6 +21,11 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      # The trust-root gate suite (test/scripts/rails-guard-ci.test.ts) drives the REAL adlc CLI
+      # against fixture repositories, and it FAILS CLOSED on CI when the CLI is missing — a runner
+      # that lost its provisioning must not report the gate suite green having run none of it. So
+      # the test job provisions what the suite refuses to fake.
+      - run: npm i -g @adlc/cli
       - name: format + lint + typecheck + tests
         run: npm run check
 
