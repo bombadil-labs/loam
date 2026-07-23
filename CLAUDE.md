@@ -442,6 +442,17 @@ busy.
   file.** Don't restate a hazard `SUBSTRATE-HAZARDS.md` already owns — cite it (`H6`) in one line.
   A test header says what the rail asserts and what it deliberately does not; not its rewrite
   history. Legacy cruft is not free: it churns tokens forever and crowds the real signal.
+  **TIGHTENED (Myk, 2026-07-23): the only comments committed are concise documentation of
+  decisions whose purpose is not clear from the code itself.** The night this tightening landed,
+  a single PR shipped 1,500 added lines of which 456 were comments — reviewer attributions,
+  round numbers, confidence scores, the phrase "an earlier form of this fix" — every one written
+  by a model that had the 2026-07-21 rule in context. So the bar is now mechanical enough to
+  check in review: a comment earns its lines by stating an INVARIANT, a NON-OBVIOUS hazard, or a
+  WHY-NOT-THE-OBVIOUS-THING, in the fewest lines that carry it — usually one to three. Everything
+  else — how it was found, who found it, what the previous attempt got wrong, how sure anyone
+  was — lives in the commit message and the journal, which a reader reaches on demand instead of
+  paying for on every read. The token budget of a large codebase is a real budget; comments spend
+  it on every context that ever loads the file.
 - **Every breaking on-wire change ships a migration** (Myk, 2026-07-12) — if a change alters the
   bytes/roles of any delta that older stores already hold, add a step to `src/migrate/` (the
   `MIGRATIONS` chain) in the SAME PR. A migration is grow-only: it re-signs each changed delta into
