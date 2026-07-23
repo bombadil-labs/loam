@@ -1,0 +1,32 @@
+ℹ Target: branch t67-tier-blind-erasure vs main (merge-base 060d7a2ec780b58fbd23a24b4d97e88ed86b7283)
+  ▪ 38 file(s), 282314 diff bytes, mode: inline-diff
+ℹ Using LLM provider: gemini (model: gemini-3.5-flash)
+  ▪ Verification pass: trying to refute 2 finding(s)...
+
+ NEEDS ATTENTION   branch t67-tier-blind-erasure vs main (merge-base 060d7a2ec780b58fbd23a24b4d97e88ed86b7283)
+
+Summary
+  The core byte-presence holds() check is well-designed and resolves the primary tier-blindness issue. However, concurrent writes during the asynchronous reseat teardown window can be permanently dropped from the gateway's reactor, and synchronous filesystem traversals in ArchiveBackend.holds can cause event loop blockage under load.
+
+Coverage
+  6 file(s) examined
+
+Findings (2)
+
+  HIGH     [concurrency] Asynchronous teardown window in Gateway.reseat allows concurrent writes to be permanently dropped from the active reactor  conf 0.80
+    src/gateway/gateway.ts:625-645
+    In Gateway.reseat(), the read-before-teardown reordering introduces an asynchronous window. When await channel.return() is awaited for each channel, the event loop yields. If a concurrent Gateway.append() is called during this window, the newly appended delta is ingested into the old reactor and written asynchronously to the backend. However, if the backend write has not yet completed when this.backend.deltasSince(known) runs in the catch-up loop, the delta will be missed by the differential read. Once the catch-up loop finishes and the new reactor is swapped in, the new delta will be permanently missing from the active reactor despite being persisted in the database.
+    ✗ failure: 1. Client A initiates an erasure, triggering gw.reseat(). 2. reseat() reads the backend and yields during the asynchronous teardown window await channel.return(). 3. Client B concurrently calls Gateway.append([Y]), which writes to the database. 4. reseat() resumes and queries deltasSince() before B's database write completes. 5. reseat() swaps the new reactor in, which lacks delta Y, leaving the gateway in a permanently out-of-sync state.
+    → fix: Acquire the fresh delta set (or buffer incoming concurrent ingests) synchronously or immediately before setting this._reactor = reactor without any intervening asynchronous yield points.
+
+  MEDIUM   [performance] Synchronous directory listings in ArchiveBackend.holds block the single-threaded Node.js event loop under stress  conf 0.95
+    src/store/archive.ts:228-260
+    The ArchiveBackend.holds() implementation utilizes synchronous filesystem APIs (readdirSync) to recursively scan all fan directories of the archive backend to determine if an ID is present. Since holds() is called multiple times per erasure (unconditionally at the end of eraseImpl, in erasureOutstanding, and recursively for all quarantine pools), executing this synchronous file I/O on a production system with large archives will completely block Node's single-threaded event loop, leading to extreme request latency, timeouts, and potential denial of service.
+    ✗ failure: Under a bulk subject request or high-volume concurrent erasure operations, multiple threads of directory traversal are forced synchronously. The single-threaded Node.js event loop is completely blocked by synchronous disk operations, causing the entire gateway service to stop responding to other requests and time out.
+    → fix: Refactor holds() to use asynchronous filesystem APIs (such as fs.promises.readdir) so directory scanning yields to the event loop, or optimize/cache negative lookup results to avoid repeated full-vault scans.
+
+Next steps
+  • Refactor Gateway.reseat() to eliminate asynchronous gaps between reading from the backend and swapping in the active reactor.
+  • Migrate ArchiveBackend.holds() and general filesystem scans to asynchronous non-blocking APIs to preserve event loop throughput.
+  • Verify test suite and mutation tests cover the concurrent append cases during reseat.
+

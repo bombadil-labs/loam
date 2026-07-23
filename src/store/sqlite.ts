@@ -14,7 +14,7 @@
 /* eslint-disable @typescript-eslint/require-await -- the async keyword is load-bearing: it
    turns every synchronous throw (SQLITE_BUSY, a closed handle, a refused delta) into the
    rejected promise the seam promises. */
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import Database from "better-sqlite3";
 import {
@@ -106,9 +106,17 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
     );
     this.selectAll = this.db.prepare("SELECT id, claims, sig FROM deltas ORDER BY seq");
     // A previous handle's unfinished truncation is this handle's debt from the first moment.
-    const owed = this.db
+    let owed = this.db
       .prepare("SELECT value FROM meta WHERE key = 'truncation-outstanding'")
       .get() as { value: string } | undefined;
+    // Belt and braces: a debt row whose sidecar no longer exists is provably moot — close()'s own
+    // implicit checkpoint (or any later one) truncated and unlinked the -wal after the row was
+    // written. Trusting the stale row would make holds() a permanent false positive for its ids
+    // and hand erase() a phantom to "complete". The file is the evidence; consult it.
+    if (owed !== undefined && !existsSync(`${filePath}-wal`)) {
+      this.db.prepare("DELETE FROM meta WHERE key = 'truncation-outstanding'").run();
+      owed = undefined;
+    }
     if (owed !== undefined) {
       try {
         const ids = JSON.parse(owed.value) as unknown;
