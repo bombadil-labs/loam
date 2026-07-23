@@ -173,6 +173,46 @@ describe.skipIf(!hasAdlc)("rails-guard-ci: the freeze survives the ticket's land
     expect(code).toBe(0);
     expect(out).toContain("nothing is frozen yet");
   });
+
+  it("a `**` glob freezes the whole subtree it names — the glob path is exercised, not assumed", () => {
+    // The wrapper's only non-literal glob support. Left untested, hollow-test showed its regex
+    // translation could be corrupted with every fixture still green, because every other case
+    // uses literal paths.
+    const root = fixture({
+      baseArchive: { "t6--ffff.json": ticket("T6", ["test/deep/**"]) },
+      baseFiles: { "test/deep/nested/foo.test.ts": "expect(true).toBe(true)\n" },
+      branchEdits: { "test/deep/nested/foo.test.ts": "expect(true).toBe(true) // edited\n" },
+    });
+    expect(runGate(root).code).toBe(2);
+  });
+
+  it("GREEN: a declared rail whose file is not on the base yet is unborn, and unborn is exit 0", () => {
+    // The pre-declared-ticket case. If this exits non-zero, every PR fails CI from the moment any
+    // ticket declares a rail it has not yet written — the gate would train everyone to bypass it.
+    const root = fixture({
+      baseTickets: { "t7--0000.json": ticket("T7", ["test/not-written-yet.test.ts"]) },
+      baseFiles: { "src/other.ts": "export {};\n" },
+      branchEdits: { "src/other.ts": "export const x = 1;\n" },
+    });
+    const { code, out } = runGate(root);
+    expect(code).toBe(0);
+    expect(out).toContain("nothing to protect");
+  });
+
+  it("an unreadable base is an OPERATIONAL error (exit 1), never a rail verdict (exit 2)", () => {
+    // CI treats exit 2 as "a frozen rail was edited" and blames the PR. A gate that cannot even
+    // read its base has no verdict to give, and must say so in the operational lane.
+    const root = fixture({
+      baseFiles: { "src/other.ts": "export {};\n" },
+      branchEdits: { "src/other.ts": "export const x = 1;\n" },
+    });
+    try {
+      execFileSync("node", [WRAPPER, "no-such-ref"], { cwd: root, encoding: "utf8" });
+      expect.unreachable("the gate accepted a base ref that does not exist");
+    } catch (err) {
+      expect((err as { status?: number }).status).toBe(1);
+    }
+  });
 });
 
 describe.skipIf(hasAdlc)("rails-guard-ci fixture suite", () => {
