@@ -1,0 +1,13 @@
+{
+  "body": "AUDIT of #152/#153/#154 (2026-07-21), finding F1. CONFIRMED, byte-verified. **Highest priority of the audit batch.**\n\n`src/gateway/container-identity.ts:50` embeds LITERAL U+0000 bytes as the domain separator rather than `\\u0000` escapes. Two consequences:\n\n(1) **The file is BINARY to git.** `.gitattributes` is `* text=auto`; a NUL flips detection. `git diff 979ea6e~1..979ea6e -- src/gateway/container-identity.ts` reports `Bin 0 -> 4015 bytes, 0 insertions(+), 0 deletions(-)`. The KEYSTONE file of #152 — the one defining module-version identity — passed review **with no visible diff at all**.\n\n(2) **Every `ModuleVersion.id` ever minted is hostage to a control character surviving a round-trip.** Prettier, an editor save, a lint autofix, a copy-paste, a git filter, a future codegen pass — any silent normalization changes the hash preimage and re-mints every module-version address in existence. §27.2's promise ('two consumers who froze the same members agree without coordinating') dies SILENTLY; nothing errors.\n\nFIX: write the separator as `\\u0000` escapes in the template literal. Byte-identical output, plain-text file, reviewable diff.\n\nTHE RAIL THAT MUST COME WITH IT: pin `addressOf` over a FIXED member set to a LITERAL expected hash. Today's rails all compare two computed ids to each other, so they agree under ANY separator — they cannot see this class at all. A literal-hash rail fails loudly if the preimage ever moves.\n\nNOTE (upstream precedent): ADLC hit this exact class in its own source and fixed it — `d566e95 fix: remove raw control bytes from source and guard against their return (#218)`. Worth reading their guard for the shape of a repo-wide check.\n\nSWEEP: `grep -rlP '\\x00' src/ test/` — `src/gateway/resolvers.ts` is known to hold a deliberate NUL in its memo key and has the same exposure.",
+  "edges": [],
+  "id": "T48",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "src/gateway/container-identity.ts",
+    "test/gateway/container-identity.test.ts"
+  ],
+  "status": "todo",
+  "title": "container-identity.ts holds raw NUL bytes — its PR merged as a zero-line binary diff"
+}

@@ -1,0 +1,16 @@
+{
+  "body": "AUDIT 2026-07-21, angle 'erasure reach'. CONFIRMED EVASION, and the spec already knows its name.\n\n`QuarantineOptions.backend` accepts any `StoreBackend` ('pass a durable backend for a long-running quarantine', `quarantine-pool.ts:39`). The pool is tracked ONLY in `gw.quarantinePools`, an in-process `Set<Gateway>` (:109), and `eraseImpl` fans out over exactly that Set (`erase.ts:254`). Nothing persists the pool's existence - the auditor grepped for a pool registry or boot re-attachment and found none.\n\nSCENARIO: operator opens a quarantine over `new SqliteBackend('pool.db')`, seeded from P. Process exits. New process boots P. Operator erases `d`. `gw.quarantinePools` is empty, the fan-out loop runs ZERO times, `erase` returns success - and `d`'s bytes sit in `pool.db` forever, inside the operator's own walls.\n\nThis is verbatim the premortem finding §24.8 records AND TURNS INTO A BUILD RULE: 'a durable quarantine must be REGISTERED (a record the primary reads at boot, re-attaching the pool to the fan-out) or it may not be durable; an unregistered durable pool is an erasure-evasion channel and the erase operation must refuse to report completeness it cannot deliver.' NEITHER HALF IS IMPLEMENTED - no registration, and no refusal. `test/gateway/erasure-fanout.test.ts` rails five behaviors; none survives a restart, because all five use in-process handles.\n\nSECOND, RELATED (same ticket - the fan-out's recovery): a partially-failed fan-out CANNOT BE RETRIED. `eraseImpl` iterates pools sequentially; the first `eraseReplica` that throws aborts the loop, so every pool after it never receives the tombstone, and `erase` rejects. That much is the documented best-effort-and-loud contract. But the primary already purged and re-seated, so a second `Gateway.erase(id)` hits `erase.ts:227` - 'nothing to erase' - and throws. The rejection also never names which pools were reached. The operator holds a known-incomplete erasure with the public remedy closed. A retry-safe `erase` (tolerating an already-purged target when a lawful tombstone for it stands, and reporting per-pool outcomes) closes this without weakening loudness.\n\nRAILS: a durable pool re-attaches at boot and receives a later erasure (assert at the BYTE level in the pool's backend); an unregistered durable pool makes `erase` REFUSE to report completeness; a fan-out that fails partway can be retried to completion and reports per-pool outcomes.\n\nCARE: erasure + federation surface -> Myk's merge (P6). This is the largest architectural hole the audit found.",
+  "edges": [],
+  "id": "T44",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "src/gateway/quarantine-pool.ts",
+    "src/gateway/erase.ts",
+    "src/gateway/gateway.ts",
+    "spec/24-quarantine.md",
+    "test/gateway/"
+  ],
+  "status": "todo",
+  "title": "A durable quarantine pool escapes the erasure fan-out across a restart - §24.8's own build rule is unbuilt"
+}

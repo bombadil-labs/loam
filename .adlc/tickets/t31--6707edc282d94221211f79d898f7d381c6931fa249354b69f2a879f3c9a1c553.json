@@ -1,0 +1,22 @@
+{
+  "body": "DESIGN-STAGE, and it lands on the CAPABILITY surface — so this PR is Myk's merge (P6) regardless of how clean it is. Deliverable: drafted SPEC prose amending §27.6 plus answered questions, then STOP for Myk in chat.\n\nTHE QUESTION, as §27.6 states it: a loaded module carries LAW (schemas, renderers, grants). Inert-by-default (§8/§12) says it binds nothing until blessed; 'install a module' is load + a scoped promotion of its law (§27.3, and §24.4 says promotion-of-law is the ordinary publish path remembering its probation). What is the SMALLEST SAFE BLESSING — the whole module's law at once, or a per-export grant?\n\nRecommendation to argue from, not to assume: PER-EXPORT, because the whole-module blessing is the thing §6 spent the arc refusing — authority never rides in on data, and 'I trust this package' is exactly the ambient grant that makes supply chains dangerous. But argue the cost honestly: per-export blessing means a module with twenty exports is twenty operator acts, and an install flow nobody completes is its own security failure. The interesting middle is a blessing that is per-export in the RECORD (so an audit can say which export bound and who blessed it) while being one operator act at the UI (§24.7's promotion controls at the frame's edge). Say whether that middle is honest or a fig leaf.\n\nQUESTIONS TO ANSWER:\n1. Whole-module vs per-export vs the recorded-per-export/one-act middle. Recommend one.\n2. Does blessing a module's law inherit §6's two-authority discipline — blessing the CODE and granting its PEN are different keys (§23.3, restated in §24.4)? Presume yes; state where the seam is for a module.\n3. What does UNBLESSING look like? A blessed export is a published registration in the operator's own voice (§24.4), so withdrawal is negation — but the module version it came from is immutable. Does unblessing one export leave the rest bound? (This is where per-export earns or loses its keep.)\n4. Does a module version pin the law it was blessed WITH — i.e. does upgrading to a new module version RE-REQUIRE blessing? Presume yes and say why: a new version is a new content address, so anything else is a silent authority upgrade.\n5. What does the quarantine posture (§24) give here for free? A module loaded by REFERENCE into a container is already the probation story; blessing is promotion out. State the identity explicitly so the two do not drift into parallel mechanisms.\n\nDo NOT decide a reserved '(Myk)' call unilaterally. If any question above turns out to need his sentence rather than a recommendation, name it as such in the PR and leave it open.",
+  "edges": [
+    {
+      "contract": "The `trust` knob is one of the five in §27.1's vector, and it is the knob that decides whether exclusion may be a PROPERTY or must be a WALL. T32 cannot set that knob correctly until T31 has decided what blessing a container's law actually means.",
+      "to": "T32"
+    },
+    {
+      "contract": "promote-LAW is the built form of the blessing T31 designs. If T31 recommends a per-export shape, T33 builds that shape rather than inventing a parallel one — so the design must land first or the two mechanisms drift.",
+      "to": "T33"
+    }
+  ],
+  "id": "T31",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "spec/27-containers.md",
+    "test/gateway/"
+  ],
+  "status": "todo",
+  "title": "§27.6 q3: trust on load — the smallest safe blessing for a module's law"
+}

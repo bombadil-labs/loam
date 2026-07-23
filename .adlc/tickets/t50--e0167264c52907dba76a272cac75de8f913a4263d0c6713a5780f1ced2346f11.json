@@ -1,0 +1,13 @@
+{
+  "body": "AUDIT of #152/#153/#154 (2026-07-21), finding F4. CONFIRMED. Also my own T40 fix.\n\n`src/store/archive.ts:187-189`:\n\n    try { namesByFan.set(fan, readdirSync(join(this.root, fan))); }\n    catch { namesByFan.set(fan, []); }\n\nThe comment justifies this as ENOENT tolerance ('a fan that vanishes between listing and reading'), but the catch is UNQUALIFIED — EACCES, EMFILE, ENOTDIR all land here too. An unreadable fan contributes no straggler names, its `.tmp` files survive the purge, and `purge` returns its count with no signal. That is §11's byte-removal promise reported as kept when it was not: **hazard H7 verbatim**.\n\nThe tell is the asymmetry INSIDE ONE TICKET: the sqlite sibling in the same PR refuses loudly on an incomplete erasure, with a paragraph explaining why silence is not permitted. This path went the other way, in the same change, written the same hour.\n\nFIX: rethrow unless `(err as NodeJS.ErrnoException).code === 'ENOENT'`.\n\nRAIL: make a fan unreadable (chmod, or a file where a directory is expected) and assert `purge` REFUSES rather than returning a count. Skip on platforms where the permission cannot be arranged, and say so in the test rather than silently passing.",
+  "edges": [],
+  "id": "T50",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "src/store/archive.ts",
+    "test/store/"
+  ],
+  "status": "todo",
+  "title": "archive purge swallows every readdir error, reporting a completeness it did not deliver"
+}

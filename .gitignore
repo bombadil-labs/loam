@@ -14,6 +14,11 @@ site-dist/
 # ticket-transactions/ — is per-worktree evidence that gates assert against locally, and committing
 # it would collide across branches. If an adlc upgrade adds a new contract file, re-run `adlc init`
 # to pick up its negation rather than hand-adding one here.
+#
+# ORDER IS LOAD-BEARING: `.adlc/*` must stay FIRST. git is last-match-wins, so a negation above it
+# is dead. `adlc ticket store migrate --write` has been seen to reorder this block and strand
+# `!.adlc/config.json` above the wildcard — check `git check-ignore -v --no-index .adlc/config.json`
+# after any adlc command that touches this file.
 .adlc/*
 !.adlc/config.json
 !.adlc/tickets.json

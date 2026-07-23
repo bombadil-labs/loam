@@ -1,0 +1,15 @@
+{
+  "body": "AUDIT of #152/#153/#154 (2026-07-21), finding F6. CONFIRMED. Three parts, one root: a behavior change landed without its documentation or its rails.\n\n`Gateway.freeze` now returns `select(term) union negation-closure`. That is the RIGHT call and the gateway comment argues it well. But:\n\n(1) **THE SPEC WAS NOT TOLD.** `spec/27-containers.md` contains no occurrence of 'closure', 'negation', 'struck', or 'retract' ANYWHERE. §27.2's provenance describes `freeze` as evaluating the Term once and naming the result, with no hint that members EXCEED the Term's dset. Per CLAUDE.md the spec is the record of what IS, and it now under-describes the built behavior on its keystone property. Amend §27.2 to state that a version carries the closure — and that two stores with the same members but different retraction states get DIFFERENT (correct) addresses. Also fix `container-identity.ts:56`'s 'freeze IS select plus an address', which is about the Term DOOR but will be read as members.\n\n(2) **THE VILLAGE ENCODES THE PRE-CLOSURE INVARIANT AS A PASSING CHECK.** `demos/village/phase-membership.mjs:68` asserts `version.members.length === members.length` (freeze/select cardinality equality) and `:103` compares the frozen count against a live `select` count. Both hold today ONLY because the demo's scope happens to contain any operator-authored retraction already. Add one retraction the scope excludes and MEMBER.1b flips RED for a CORRECT system. Rewrite both against the READING rather than the count.\n\n(3) **`freeze` IS NOT ROUTED THROUGH THE NARROWING HELPERS.** `test/gateway/narrowing.ts:5` names 'a frozen module version' as exactly this class and instructs every new narrowing operation to use `assertPreservesSuppression` / `assertClosureDoesNotLeak`. `freeze`'s bespoke rail (`container-identity.test.ts:233`) asserts SET MEMBERSHIP — which `narrowing.ts:13-17` explicitly calls the weaker rail 'that passed while the bug shipped'. There is no leak rail and no transitivity rail for freeze. Route it through both.",
+  "edges": [],
+  "id": "T52",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "spec/27-containers.md",
+    "demos/village/phase-membership.mjs",
+    "test/gateway/container-identity.test.ts",
+    "test/gateway/narrowing.ts"
+  ],
+  "status": "todo",
+  "title": "freeze now exceeds select, and neither the spec nor the village was told"
+}

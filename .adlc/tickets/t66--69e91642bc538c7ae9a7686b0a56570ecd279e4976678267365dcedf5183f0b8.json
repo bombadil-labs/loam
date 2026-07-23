@@ -1,0 +1,17 @@
+{
+  "body": "SPLIT FROM T57 during the overnight churn (2026-07-22). T57 bundled two safety improvements for the \"a quarantined negation revives its target\" bug; the DISCLOSURE half (the operator is told a strike fell out) landed as T57. This is the RECOVERY half, split off because it touches delicate INSERT/heal semantics across two drivers and warrants its own careful pass — the T55 lesson: a naive fix on erasure-critical recovery code can be worse than the bug.\n\nTHE REMAINING BUG. A corrupt negation row squats on its id. The deltas table declares `id UNIQUE` and append uses `INSERT OR IGNORE`, so `heal` replanting the archive's HEALTHY copy of that same negation is silently ignored (changes === 0). `MirrorBackend.deltasSince` delegates to the primary only, so the archive's good copy is never read on a normal boot either. `repair re-admit` re-runs admission on the same bad bytes and fails again. So the revival is DURABLE until a human runs `repair discard` + re-federate. After T57 the operator is at least TOLD (the negates field + repair-list warning), but recovery is still manual.\n\nTHE FIX (design choice to settle): make a corrupt row REPLACEABLE by a healthy copy of the same id. Two candidate shapes named in the original T57 body:\n  (a) an INSERT OR REPLACE reserved to a new `repair re-admit --from-mirror <key>` verb — the operator explicitly pulls the healthy copy from the archive/mirror over the corrupt primary row, or\n  (b) a discard-then-heal step folded into `heal` itself — when heal has a valid delta from the archive whose id is currently QUARANTINED in the primary, it replaces the corrupt row.\n\nSAFETY CONSTRAINT (the delicate part): a replace must NOT let a wrong/malicious delta overwrite a good one. The invariant: replace only when (i) the incoming delta ADMITS (parses, id matches, signature valid) AND (ii) the existing primary row for that id is currently QUARANTINED (failed admission). Never replace an admitted row. This check has to run inside the append/heal path with visibility into quarantine status, which is why it is more than a one-line change.\n\nlocal-storage.ts has the identical INSERT-OR-IGNORE-equivalent shape and needs the same treatment.\n\nRAILS — BOTH LEVELS, and USE test/gateway/narrowing.ts `assertPreservesSuppression`. Strike a claim, corrupt the negation row in the primary, seed the HEALTHY copy in the mirror/archive, run heal (or repair re-admit --from-mirror), then: object level — the claim does NOT read live through a Schema (the strike is restored); delta level — the primary now holds the healthy negation bytes, and no admitted row was overwritten (a sibling healthy claim survives untouched). Add the negative rail: an admitted row is NEVER replaced by a re-federated delta.\n\nCARE: REPAIR of stated §11/§25 behavior, but it touches heal + INSERT semantics on erasure-critical paths — prosecute hard, and consider whether Myk should eye the replace-invariant before merge (an over-broad replace is an erasure-integrity hazard).\n",
+  "edges": [],
+  "id": "T66",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "src/store/sqlite.ts",
+    "src/store/local-storage.ts",
+    "src/store/mirror.ts",
+    "src/gateway/repair.ts",
+    "src/cli/cli.ts",
+    "test/store/"
+  ],
+  "status": "todo",
+  "title": "Recovery for a corrupt negation row: heal must be able to REPLACE it from a healthy copy (split from T57)"
+}
