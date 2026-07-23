@@ -128,6 +128,39 @@ describe("§11 at rest — sqlite", () => {
     await store.close();
   });
 
+  it("the truncation debt SURVIVES A CRASH: a reopened handle still knows, and still refuses to lie (ticket T67)", async () => {
+    // The same partial erasure, ended by a process death instead of a retry. A latch that lived
+    // only in handle memory made the reopened store look clean — rows gone, holds false — while
+    // the sidecar still carried the plaintext, and the operator's retry was refused as `nothing
+    // to erase`: the stranding class this ticket exists to delete, moved across a process
+    // boundary. The debt is durable now, and this rail spans the boundary to prove it.
+    const dir = scratch();
+    const file = join(dir, "store.db");
+    const first = new SqliteBackend(file);
+    const target = canary(MARKER, 1000);
+    await first.append([target]);
+
+    const db1 = (first as unknown as { db: { pragma: (s: string, o?: unknown) => unknown } }).db;
+    const real1 = db1.pragma.bind(db1);
+    db1.pragma = (sql: string, opts?: unknown) =>
+      sql.startsWith("wal_checkpoint") ? [{ busy: 1 }] : real1(sql, opts);
+    await expect(first.purge([target.id])).rejects.toThrow(/INCOMPLETE/);
+    // NO close() — close would checkpoint and settle the debt gracefully, which is exactly the
+    // path a crash does not take. The handle is simply abandoned.
+
+    const reopened = new SqliteBackend(file);
+    // The reopened store owes a truncation it cannot prove is done, so byte-presence for the
+    // purged id is UNPROVABLE — and unprovable answers true, never false (H9). This is what lets
+    // the gateway's retry through instead of refusing it as `nothing to erase`.
+    expect(await reopened.holds(target.id)).toBe(true);
+    // The retry's own purge drives the checkpoint, clears the debt, and only THEN does the store
+    // report the bytes gone.
+    expect(await reopened.purge([target.id])).toBe(0);
+    expect(await reopened.holds(target.id)).toBe(false);
+    expect(anyFileContains(dir, MARKER)).toBeUndefined();
+    await reopened.close();
+  });
+
   it("a purge that matched NOTHING does not fail on a busy checkpoint (ticket T67)", async () => {
     // The other side of ungating the checkpoint. `purge` is called on every attached quarantine
     // pool and on every boot `heal` sweep carrying the whole accumulated tombstone set, and those

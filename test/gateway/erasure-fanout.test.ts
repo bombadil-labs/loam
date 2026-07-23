@@ -170,6 +170,30 @@ describe("§24.8 rail (g) — a pool that retains makes the primary's erase REFU
     await primary.close();
   });
 
+  it("a pool that retains AND a nested pool that retains are reported TOGETHER, not one per re-run", async () => {
+    // The remedy every erasure error prescribes is "resolve the fault and re-run" — so a report
+    // that surfaces one fault at a time from a set the code already collected costs the operator
+    // a re-run per replica. Both faults, one message: the pool's own retention must not mask the
+    // nested refusal it gathered a line earlier, nor the reverse.
+    const primary = await bootPrimary();
+    const secret = observed(FERN, "message", "every-fault-once", 2000, OP_SEED);
+    await primary.append([secret]);
+    const qBackend = new RetainingBackend(); // the pool retains...
+    const q = await primary.openQuarantine({ backend: qBackend });
+    const rBackend = new RetainingBackend(); // ...and so does its child
+    const r = await q.gateway.openQuarantine({ backend: rBackend });
+
+    const rejection = await primary.erase(secret.id, { reason: "the subject asked" }).then(
+      () => undefined,
+      (err: Error) => err.message,
+    );
+    expect(rejection).toBeDefined();
+    expect(rejection).toMatch(/2 fault\(s\)/);
+    await r.drop();
+    await q.drop();
+    await primary.close();
+  });
+
   it("a retaining pool does not starve the pools ORDERED BEHIND it", async () => {
     // The verdict is thrown AFTER the transitive walk, and the walk is settled before reporting.
     // Placed before, the first retaining pool aborts the sequential fan-out: every sibling and

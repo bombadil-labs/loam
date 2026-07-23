@@ -47,6 +47,13 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
   // images may still be legible in the `-wal` sidecar. It is the difference between "this call
   // removed nothing, and nothing is owed" and "an earlier call left truncation outstanding" —
   // which is exactly what `removed` alone cannot tell a retry.
+  //
+  // AS DURABLE AS THE ERASURE IT BELONGS TO. The obligation outlives the handle: a crash between
+  // the refused checkpoint and the operator's retry hands the new handle a clean-looking store
+  // whose sidecar still carries the plaintext, and a latch that lived only in memory would let the
+  // retry be refused as `nothing to erase` — the stranding this ticket exists to delete, moved
+  // across a process boundary. So the latch is mirrored into a one-row `meta` table (best-effort
+  // on set, transactional on clear) and read back at open.
   private truncationOutstanding = false;
 
   private readonly insertDelta: Database.Statement;
@@ -84,11 +91,19 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
         claims TEXT NOT NULL,
         sig    TEXT
       );
+      CREATE TABLE IF NOT EXISTS meta (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
     `);
     this.insertDelta = this.db.prepare(
       "INSERT OR IGNORE INTO deltas (id, claims, sig) VALUES (?, ?, ?)",
     );
     this.selectAll = this.db.prepare("SELECT id, claims, sig FROM deltas ORDER BY seq");
+    // A previous handle's unfinished truncation is this handle's debt from the first moment.
+    this.truncationOutstanding =
+      this.db.prepare("SELECT 1 FROM meta WHERE key = 'truncation-outstanding'").get() !==
+      undefined;
   }
 
   private assertOpen(): void {
@@ -230,10 +245,25 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
       // rows or an earlier one left truncation outstanding.
       const [status] = this.db.pragma("wal_checkpoint(TRUNCATE)") as Array<{ busy: number }>;
       const busy = status !== undefined && status.busy !== 0;
-      if (!busy)
-        this.truncationOutstanding = false; // the sidecar is empty; nothing is owed
-      else if (removed > 0 || this.truncationOutstanding) {
-        this.truncationOutstanding = true; // survives the throw, so the retry still knows
+      if (!busy) {
+        // The sidecar is empty; nothing is owed — in memory and on disk.
+        this.truncationOutstanding = false;
+        this.db.prepare("DELETE FROM meta WHERE key = 'truncation-outstanding'").run();
+      } else if (removed > 0 || this.truncationOutstanding) {
+        // Survives the throw AND the process: a crash before the retry hands the next handle a
+        // clean-looking table over a sidecar still carrying the plaintext. Best-effort — if this
+        // write also fails, the in-memory latch still guards this handle, and the enclosing throw
+        // already tells the operator the erasure is incomplete.
+        this.truncationOutstanding = true;
+        try {
+          this.db
+            .prepare(
+              "INSERT OR REPLACE INTO meta (key, value) VALUES ('truncation-outstanding', '1')",
+            )
+            .run();
+        } catch {
+          /* the loud throw below is the primary signal */
+        }
         throw new Error(
           `purge: the write-ahead log could not be truncated (a concurrent reader held it past ` +
             `busy_timeout). ${
@@ -257,6 +287,12 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
 
   async holds(id: string): Promise<boolean> {
     this.assertOpen();
+    // While a truncation is outstanding, the `-wal` sidecar may hold ANY purged id's pre-delete
+    // page images — so byte-presence is unprovable for every id, and unprovable answers TRUE (H9:
+    // "could not check" must never read as "it is gone"). This is also what un-strands the
+    // post-restart retry: the tombstone anchors it, `holds` lets it through, and the retry's own
+    // purge drives the checkpoint that clears the debt.
+    if (this.truncationOutstanding) return true;
     // A targeted lookup, not a scan: erasures are rare and the id is the primary key. This asks the
     // TABLE rather than `onDisk`, which is an index of what this handle wrote — a second handle's
     // row is still a row this store holds.
