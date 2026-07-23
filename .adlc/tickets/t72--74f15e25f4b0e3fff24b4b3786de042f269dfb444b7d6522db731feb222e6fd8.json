@@ -1,0 +1,13 @@
+{
+  "body": "MEDIUM, erasure-integrity. Found by the loam-erasure lens during T67's P5 (2026-07-23).\n\nTHE BUG. `QuarantinePool.drop()` removes the pool from `gw.quarantinePools` and closes it. Its interface comment says drop 'detaches the pool from the primary's erasure fan-out, closes it, and DISCARDS ITS STORE WHOLESALE'. That is true only for the default MemoryBackend. With `QuarantineOptions.backend` set to a sqlite or archive store — the documented way to run a long-running quarantine — drop closes the handle and leaves the seeded copies ON DISK.\n\nAfter that, every `erase` walks `gw.quarantinePools` and so never reaches that file, and T67's new `holds` verdict is asked only of `gw.backend`. A record erased afterward survives inside the operator's own walls, in a store nothing will ever sweep again — precisely the erasure-evasion channel §24.8's fan-out exists to prevent. And `erase` reports a clean completion over it.\n\nThe comment OVERCLAIMS what drop delivers, which is its own defect: a reader trusting it would believe dropping is safe.\n\nTHE FIX (Myk's call on which):\n  (a) drop() purges the pool's store of everything it was seeded with before closing — 'discards wholesale' made true; or\n  (b) drop() REFUSES for a caller-supplied durable backend, forcing an explicit `drop({ purge: true })` or a documented hand-off; or\n  (c) the primary records dropped-pool locators and future erasures sweep them too — most complete, most machinery.\nRecommend (a) for a pool the gateway seeded, since the pool's whole contents are by construction a replica the primary can reconstruct.\n\nRAILS: drop a pool backed by a real ArchiveBackend, then erase a record the pool held, and assert at the FILESYSTEM that the vault holds no bytes of it. Object level, not API level — the pool object is gone by then, so an API assertion cannot see this class at all.\n",
+  "edges": [],
+  "id": "T72",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "src/gateway/quarantine-pool.ts",
+    "test/gateway/erasure-fanout.test.ts"
+  ],
+  "status": "todo",
+  "title": "QuarantinePool.drop() leaves a durable pool's bytes on disk, outside every future erasure's reach"
+}
