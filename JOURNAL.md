@@ -95,3 +95,4 @@ entry is a NEW FILE and two concurrent landings never touch the same one (the sa
 | 2026-07-22 | [T46: a struck adoption leaves the trail](journal/2026-07-22-t46-a-struck-adoption-leaves-the-trail.md) |
 | 2026-07-22 | [T54: the translator door gets the promote guard](journal/2026-07-22-t54-the-translator-door-gets-the-promote-guard.md) |
 | 2026-07-22 | [T56: genesis mints per-lens](journal/2026-07-22-t56-genesis-mints-per-lens.md) |
+| 2026-07-22 | [The init that never ran](journal/2026-07-22-the-init-that-never-ran.md) |
