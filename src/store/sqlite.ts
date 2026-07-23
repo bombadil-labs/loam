@@ -318,6 +318,24 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
   }
 
   async close(): Promise<void> {
+    // Discharge the debt where it is actually discharged. Closing the last connection checkpoints
+    // and unlinks the sidecar anyway — that is WHY a graceful shutdown settles the obligation —
+    // but done implicitly it left the persisted debt row behind, and the reopened handle carried a
+    // phantom: `holds` true over provably-absent bytes, and a second `erase` of a cleanly-erased
+    // id riding that phantom through the retry bypass to a completion report for no work. So the
+    // checkpoint runs explicitly, and only a SUCCESS clears the record — a busy checkpoint at
+    // close leaves the debt standing, which is the honest state of a sidecar still unfolded.
+    if (this.truncationOwed.size > 0 && this.db.open) {
+      try {
+        const [status] = this.db.pragma("wal_checkpoint(TRUNCATE)") as Array<{ busy: number }>;
+        if (status === undefined || status.busy === 0) {
+          this.truncationOwed.clear();
+          this.db.prepare("DELETE FROM meta WHERE key = 'truncation-outstanding'").run();
+        }
+      } catch {
+        /* close() must still close; the debt row stays, which is the fail-closed direction */
+      }
+    }
     this.db.close();
   }
 }

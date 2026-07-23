@@ -255,6 +255,32 @@ describe("§24.8 rail (g) — a pool that retains makes the primary's erase REFU
     await primary.close();
   });
 
+  it("a pool that never HELD the id but never RECEIVED the tombstone is outstanding work: the retry completes it", async () => {
+    // The guard's fault model is the verdict's fault model. The verdict rejects on failed
+    // tombstone delivery; a guard that asked only about BYTES then stranded exactly that erasure —
+    // the pool held nothing, so the retry read "nothing to erase" while the pool still lacked the
+    // one delta that keeps it from re-admitting the id forever.
+    const primary = await bootPrimary();
+    const secret = observed(FERN, "message", "delivery-is-work-too", 2000, OP_SEED);
+    await primary.append([secret]);
+    const poolBackend = new FailingBackend();
+    // Seeded empty on purpose: the pool never holds the secret's bytes, so ONLY the missing
+    // tombstone can mark the erasure outstanding here.
+    const q = await primary.openQuarantine({ backend: poolBackend, admit: () => false });
+    expect(holds(q.gateway, secret.id)).toBe(false);
+
+    poolBackend.fail = true; // the pool's store refuses the tombstone during the fan-out
+    await expect(primary.erase(secret.id, { reason: "the subject asked" })).rejects.toThrow();
+
+    poolBackend.fail = false; // the operator repairs the pool and re-runs, as instructed
+    await expect(primary.erase(secret.id, { reason: "the subject asked" })).resolves.toMatchObject({
+      erased: secret.id,
+    });
+    expect(readTombstones(q.gateway.reactor, OP).has(secret.id)).toBe(true); // delivered at last
+    await q.drop();
+    await primary.close();
+  });
+
   it("POSITIVE CONTROL: the same two-pool shape with nothing retained completes normally", async () => {
     // Without this, both rails above would pass against an `erase` that always threw.
     const primary = await bootPrimary();

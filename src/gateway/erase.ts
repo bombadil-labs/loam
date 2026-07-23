@@ -264,7 +264,7 @@ export async function eraseImpl(
   // pool-retention case exactly as asking only the reactor stranded the mirror one: the primary
   // purges cleanly, the pool keeps the bytes, `erase` refuses — and the re-run the operator is told
   // to make finds a clean local store and reports nothing to erase. Same bug, one level out.
-  if (target === undefined && (already === undefined || !(await heldAnywhere(gw, id)))) {
+  if (target === undefined && (already === undefined || !(await erasureOutstanding(gw, id)))) {
     throw new Error(`nothing to erase: ${id} is not held here`);
   }
   if (target !== undefined && isTombstone(target.claims)) {
@@ -313,7 +313,14 @@ export async function eraseImpl(
   } catch (err) {
     localPurge = err;
   }
-  await gw.reseat();
+  try {
+    await gw.reseat();
+  } catch (err) {
+    // The re-read hits the same backend the purge just used, so the fault the catch above
+    // survives would otherwise abort here anyway — pools denied the tombstone, the collected
+    // fault discarded. One tier's fault stays one fault.
+    localPurge = localPurge ?? err;
+  }
   // §24.8 — the erasure reaches every attached QUARANTINE POOL (the operator's own replicas of this
   // ground): the same tombstone lands there and the byte is purged there too, so a forgotten record can
   // never live on in a staging area inside the operator's own walls. §11 reaches through the one-way
@@ -363,11 +370,18 @@ export async function eraseImpl(
   return { erased: id, citations };
 }
 
-// Does this ground, or any replica of it, still hold bytes filed under `id`? The question the retry
-// guard asks — "is there anything left to sweep" — and it has to reach as far as the sweep does, or
-// it strands whatever it cannot see. A tier that REFUSES counts as holding: an unprovable store has
-// not shown the erasure is finished, so the retry must be allowed through to try again (H9).
-async function heldAnywhere(gw: Gateway, id: string, seen = new Set<Gateway>()): Promise<boolean> {
+// Is this erasure still OUTSTANDING anywhere in reach — this ground or any replica of it? The
+// retry guard's question, and its fault model must be THE VERDICT'S fault model, or the two drift:
+// the verdict rejects on retained bytes AND on failed tombstone delivery, so a guard that asked
+// only about bytes stranded exactly the erasure a tombstone-refusing pool had just rejected — the
+// stranding class this ticket deletes, moved one level out. Outstanding therefore means: bytes
+// held (or unprovable — a tier that refuses has shown nothing; H9), OR a reachable replica that
+// does not yet carry the operator's tombstone for the id.
+async function erasureOutstanding(
+  gw: Gateway,
+  id: string,
+  seen = new Set<Gateway>(),
+): Promise<boolean> {
   if (seen.has(gw)) return false;
   seen.add(gw);
   try {
@@ -375,8 +389,9 @@ async function heldAnywhere(gw: Gateway, id: string, seen = new Set<Gateway>()):
   } catch {
     return true; // could not be proven clean — treat as outstanding, never as done
   }
+  if (!readTombstones(gw.reactor, gw.operatorAuthor).has(id)) return true; // delivery still owed
   for (const pool of gw.quarantinePools) {
-    if (await heldAnywhere(pool, id, seen)) return true;
+    if (await erasureOutstanding(pool, id, seen)) return true;
   }
   return false;
 }
@@ -460,7 +475,11 @@ export async function eraseReplicaImpl(
   } catch (err) {
     localPurge = err; // collected below — a pool tier's fault must not starve its own children
   }
-  await gw.reseat();
+  try {
+    await gw.reseat();
+  } catch (err) {
+    localPurge = localPurge ?? err; // same fault class, same collection — see eraseImpl
+  }
   // Transitive FIRST, verdict LAST — the same order `eraseImpl` keeps, and for the same reason.
   // A verdict thrown before the walk would abort delivery to every pool ordered behind this one
   // and to every pool nested beneath it: siblings that previously received the tombstone and the

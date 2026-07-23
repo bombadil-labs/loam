@@ -617,7 +617,18 @@ export class Gateway {
   // re-attaches its runner, as the village does after the crash).
   /** @internal — T19 seam (erase.ts) */
   async reseat(): Promise<void> {
-    // End live subscriptions first: a parked reader must not keep serving a view built on the
+    // READ FIRST, TEAR DOWN AFTER. The re-read is the one step here that can fail (the same
+    // faulting backend whose purge may just have refused), and everything below it is
+    // destructive: channels ended, caches cleared, persistence detached. Ordered the other way, a
+    // failed read left the gateway half-torn-down — every subscription killed, the reactor still
+    // seated on pre-purge ground, nothing re-attached — with the erase call already gone.
+    const reactor = new Reactor();
+    for (const d of await this.backend.deltasSince(new Set())) {
+      if (reactor.ingest(d).status === "rejected") {
+        throw new Error(`reseat: the store handed back an unacceptable delta ${d.id}`);
+      }
+    }
+    // End live subscriptions: a parked reader must not keep serving a view built on the
     // pre-erase ground (the removed record could still sit in its last snapshot). They wake
     // with `done` and resubscribe against the fresh reactor — the same reconnect a crash
     // reopen or a schema evolution asks of them. Their sinks watched the old reactor; drop them.
@@ -629,12 +640,6 @@ export class Gateway {
     // Drop the resolver memo (SPEC §22.5/§11): keying already forbids serving a value over erased
     // bytes, but a re-seat is exactly the moment the ground forgot — clear it so nothing lingers.
     this.resolverMemo.clear();
-    const reactor = new Reactor();
-    for (const d of await this.backend.deltasSince(new Set())) {
-      if (reactor.ingest(d).status === "rejected") {
-        throw new Error(`reseat: the store handed back an unacceptable delta ${d.id}`);
-      }
-    }
     this._reactor = reactor;
     this.ingestVia = (d) => this.reactor.ingest(d);
     this.attachPersistence(reactor);

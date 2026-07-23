@@ -185,6 +185,30 @@ describe("§11 at rest — sqlite", () => {
     await store.close();
   });
 
+  it("a GRACEFUL close settles the debt it discharges: no phantom on reopen", async () => {
+    // The complement of the crash rail above. close() checkpoints and unlinks the sidecar — the
+    // debt is genuinely satisfied — so it must also clear the persisted record, or the reopened
+    // handle reports retention over provably-absent bytes and a second erase of a cleanly-erased
+    // id rides the phantom through the retry bypass to a completion report for no work.
+    const dir = scratch();
+    const file = join(dir, "store.db");
+    const first = new SqliteBackend(file);
+    const target = canary(MARKER, 1000);
+    await first.append([target]);
+    const db1 = (first as unknown as { db: { pragma: (s: string, o?: unknown) => unknown } }).db;
+    const real1 = db1.pragma.bind(db1);
+    db1.pragma = (sql: string, opts?: unknown) =>
+      sql.startsWith("wal_checkpoint") ? [{ busy: 1 }] : real1(sql, opts);
+    await expect(first.purge([target.id])).rejects.toThrow(/INCOMPLETE/);
+    db1.pragma = real1; // the reader is gone by shutdown — close's own checkpoint will land
+    await first.close();
+
+    const reopened = new SqliteBackend(file);
+    expect(await reopened.holds(target.id)).toBe(false); // no phantom debt
+    expect(anyFileContains(dir, MARKER)).toBeUndefined(); // and the bytes really are gone
+    await reopened.close();
+  });
+
   it("a purge that matched NOTHING does not fail on a busy checkpoint (ticket T67)", async () => {
     // The other side of ungating the checkpoint. `purge` is called on every attached quarantine
     // pool and on every boot `heal` sweep carrying the whole accumulated tombstone set, and those
