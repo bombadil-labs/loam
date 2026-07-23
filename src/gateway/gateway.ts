@@ -617,10 +617,10 @@ export class Gateway {
   // re-attaches its runner, as the village does after the crash).
   /** @internal — T19 seam (erase.ts) */
   async reseat(): Promise<void> {
-    // READ FIRST, TEAR DOWN AFTER. The re-read is the one step here that can fail (the same
-    // faulting backend whose purge may just have refused), and everything below it is
-    // destructive: channels ended, caches cleared, persistence detached. Ordered the other way, a
-    // failed read left the gateway half-torn-down — every subscription killed, the reactor still
+    // READ FIRST, TEAR DOWN AFTER, CATCH UP LAST. The first read is the one step here that can
+    // fail (the same faulting backend whose purge may just have refused), and everything after it
+    // is destructive: channels ended, caches cleared, persistence detached. Ordered the other way,
+    // a failed read left the gateway half-torn-down — every subscription killed, the reactor still
     // seated on pre-purge ground, nothing re-attached — with the erase call already gone.
     const reactor = new Reactor();
     for (const d of await this.backend.deltasSince(new Set())) {
@@ -640,6 +640,17 @@ export class Gateway {
     // Drop the resolver memo (SPEC §22.5/§11): keying already forbids serving a value over erased
     // bytes, but a re-seat is exactly the moment the ground forgot — clear it so nothing lingers.
     this.resolverMemo.clear();
+    // CATCH UP on the teardown window. Every await above is a seam another task can append
+    // through: the delta lands in the backend and the OLD reactor, and a swap to the snapshot
+    // alone would drop it from the live ground until a restart — after which a later `erase` of
+    // that id would answer `nothing to erase` over bytes still at rest, the exact hazard family
+    // this seam exists to close. One differential read picks up the stragglers.
+    const known = new Set(reactor.snapshot().ids());
+    for (const d of await this.backend.deltasSince(known)) {
+      if (reactor.ingest(d).status === "rejected") {
+        throw new Error(`reseat: the store handed back an unacceptable delta ${d.id}`);
+      }
+    }
     this._reactor = reactor;
     this.ingestVia = (d) => this.reactor.ingest(d);
     this.attachPersistence(reactor);
