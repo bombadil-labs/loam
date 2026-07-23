@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
       - run: npm ci
       - name: format + lint + typecheck + tests
@@ -37,7 +37,7 @@ jobs:
           fetch-depth: 0 # the gate diffs against the base ref; a shallow clone has no base
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
       - run: npm i -g @adlc/cli
       - name: no frozen rail was edited
         run: |
