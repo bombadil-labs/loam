@@ -1,0 +1,13 @@
+{
+  "body": "LOW-MEDIUM, on-wire compatibility. Found MECHANICALLY by the survivor inventory (2026-07-23): hollow-test mutated the operator-marker timestamp (0 -> 1) and the genesis clock base (1 -> 2) and the whole suite stayed green.\n\nTHE GAP. Genesis deltas are content-addressed, and their timestamps are load-bearing INPUTS to those addresses. The comment at genesis.ts:40 says the marker timestamp is 'fixed, so the marker is the same delta on every boot' — but nothing pins WHICH delta. Both mutants keep genesis deterministic (still the same ids on every boot) while silently changing EVERY genesis id: an existing store re-booted under the mutated constants would mint a parallel constitution — duplicate markers, duplicate grants, two operator declarations — and no test would say a word. This is the §20 corollary (identity lives in the bytes) applied to the store's own birth certificate.\n\nTHE RAIL (the whole ticket): golden ids. Boot a genesis with a fixed seed and assert the exact content addresses of the marker and each constitution delta as literal hex strings in the test. Anyone changing a genesis constant then meets a red bar that says 'you are re-minting the constitution of every existing store' — which is sometimes intended (and then ships a §20 migration) and must never be silent.\n\nEvidence: .adlc/specs/ inventory notes in the journal entry of 2026-07-23; both mutants named there.\n",
+  "edges": [],
+  "id": "T74",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "src/gateway/genesis.ts",
+    "test/gateway/genesis.test.ts"
+  ],
+  "status": "todo",
+  "title": "Genesis ids are golden — pin the marker and constitution deltas so a drive-by constant cannot re-mint them"
+}
