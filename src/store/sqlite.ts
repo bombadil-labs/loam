@@ -56,6 +56,10 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
   // across a process boundary. So the set is mirrored into a one-row `meta` table (best-effort on
   // set, cleared when a checkpoint finally lands) and read back at open.
   private truncationOwed = new Set<string>();
+  // Set when the persisted debt row exists but cannot be read: the debt is real and its ids are
+  // unknown, so EVERY id is unprovable until a checkpoint lands (H9 — an unreadable debt must
+  // never read as "nothing owed"). Cleared exactly where the owed set is.
+  private truncationUnknown = false;
 
   private readonly insertDelta: Database.Statement;
   private readonly selectAll: Database.Statement;
@@ -109,9 +113,14 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
       try {
         const ids = JSON.parse(owed.value) as unknown;
         if (Array.isArray(ids))
-          for (const i of ids) if (typeof i === "string") this.truncationOwed.add(i);
+          for (const i of ids)
+            if (typeof i === "string") this.truncationOwed.add(i);
+            else this.truncationUnknown = true; // a debt row that is not an id list still owes
       } catch {
-        /* an unreadable debt row cannot name its ids; the purge path below re-earns or clears it */
+        // An unreadable debt row cannot name its ids — which makes every id unprovable, not none
+        // of them. Failing open here silently reproduced the stranding for whichever ids the
+        // corrupted row carried.
+        this.truncationUnknown = true;
       }
     }
   }
@@ -269,13 +278,19 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
       // belongs to the ids whose pre-delete images the sidecar may hold: this call's deletions,
       // plus any prior owed id this call was asked about.
       const [status] = this.db.pragma("wal_checkpoint(TRUNCATE)") as Array<{ busy: number }>;
-      const busy = status !== undefined && status.busy !== 0;
+      // A result this code cannot read is NOT a success — treating an absent row as "truncated"
+      // would clear a real debt on evidence of nothing (H9).
+      const busy = status === undefined || status.busy !== 0;
       if (!busy) {
         // The sidecar is empty; nothing is owed by anyone — in memory and on disk.
         this.truncationOwed.clear();
+        this.truncationUnknown = false;
         this.db.prepare("DELETE FROM meta WHERE key = 'truncation-outstanding'").run();
       } else {
-        const owedHere = deletedNow.length > 0 || batch.some((id) => this.truncationOwed.has(id));
+        const owedHere =
+          deletedNow.length > 0 ||
+          this.truncationUnknown ||
+          batch.some((id) => this.truncationOwed.has(id));
         if (owedHere) {
           throw new Error(
             `purge: the write-ahead log could not be truncated (a concurrent reader held it past ` +
@@ -307,7 +322,7 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
     // by one erasure must not make every other record unprovable. This is also what un-strands
     // the post-restart retry: the tombstone anchors it, `holds` lets it through, and the retry's
     // own purge drives the checkpoint that clears the debt.
-    if (this.truncationOwed.has(id)) return true;
+    if (this.truncationUnknown || this.truncationOwed.has(id)) return true;
     // A targeted lookup, not a scan: erasures are rare and the id is the primary key. This asks the
     // TABLE rather than `onDisk`, which is an index of what this handle wrote — a second handle's
     // row is still a row this store holds.
@@ -322,11 +337,12 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
     // id riding that phantom through the retry bypass to a completion report for no work. So the
     // checkpoint runs explicitly, and only a SUCCESS clears the record — a busy checkpoint at
     // close leaves the debt standing, which is the honest state of a sidecar still unfolded.
-    if (this.truncationOwed.size > 0 && this.db.open) {
+    if ((this.truncationOwed.size > 0 || this.truncationUnknown) && this.db.open) {
       try {
         const [status] = this.db.pragma("wal_checkpoint(TRUNCATE)") as Array<{ busy: number }>;
-        if (status === undefined || status.busy === 0) {
+        if (status !== undefined && status.busy === 0) {
           this.truncationOwed.clear();
+          this.truncationUnknown = false;
           this.db.prepare("DELETE FROM meta WHERE key = 'truncation-outstanding'").run();
         }
       } catch {

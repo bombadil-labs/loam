@@ -9,6 +9,7 @@
 // So these rails read the FILE. That is the whole point: an API-level assertion cannot see this
 // class of failure, and writing one would have produced a green bar over a leak (again).
 
+import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -206,6 +207,30 @@ describe("§11 at rest — sqlite", () => {
     const reopened = new SqliteBackend(file);
     expect(await reopened.holds(target.id)).toBe(false); // no phantom debt
     expect(anyFileContains(dir, MARKER)).toBeUndefined(); // and the bytes really are gone
+    await reopened.close();
+  });
+
+  it("an UNREADABLE debt row owes for everyone, and a landed checkpoint forgives it", async () => {
+    // The debt row exists but cannot name its ids: every id is unprovable, not none of them.
+    // Failing open here silently reproduced the stranding for whichever ids the corrupted row
+    // carried — H9 in the recovery path of the H9 fix.
+    const dir = scratch();
+    const file = join(dir, "store.db");
+    const setup = new SqliteBackend(file);
+    await setup.append([canary(SURVIVOR, 1000)]);
+    await setup.close();
+    // Corrupt the debt row behind the seam, as a crash mid-write or a foreign writer would.
+    const raw = new Database(file);
+    raw
+      .prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('truncation-outstanding', ?)")
+      .run("{corrupt");
+    raw.close();
+
+    const reopened = new SqliteBackend(file);
+    expect(await reopened.holds(canary(MARKER, 9999).id)).toBe(true); // unknown debt: all unprovable
+    // The next successful checkpoint forgives it — any purge drives one.
+    await reopened.purge([canary(MARKER, 9999).id]);
+    expect(await reopened.holds(canary(MARKER, 9999).id)).toBe(false);
     await reopened.close();
   });
 
