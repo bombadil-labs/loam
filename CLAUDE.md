@@ -13,7 +13,12 @@ carries a `**Provenance.**` footer linking the PR(s) that landed it and naming t
 one long reliable history with links to the PRs that go deeper. Speculative, unbuilt, or partially
 designed work does **not** live in the spec; it lives as a **ticket** in the store until it
 lands, and the landing PR **adds its section as a new `spec/NN-slug.md` file** (with its Provenance
-footer) plus a row in the `SPEC.md` index, in the same change — and removes the ticket it realized.
+footer) plus a row in the `SPEC.md` index, in the same change — and **ARCHIVES the ticket it
+realized** (`adlc ticket archive <id> --write --authorize`, moving the shard to
+`.adlc/ticket-archive/`), never deletes it. The distinction is load-bearing (T69): the CI rail
+backstop computes its frozen set from the base tree's shards in BOTH directories, so a deleted
+ticket un-freezes its rails at the exact moment they start protecting landed behavior — the freeze
+would live only while the work was unfinished.
 Each landing writing its *own* file is deliberate: disjoint sections stop colliding, so concurrent
 landings almost never touch the same file (editing an existing section file is the rare exception —
 a bugfix or one-off correction).
@@ -331,8 +336,11 @@ only step that reads the code without the ticket's assumptions.
 
 **P6 — the landing PR writes the ticket's design as a new `spec/NN-slug.md` file, the LAST step and
 the only step that touches `spec/`**: the whole section closed by its `**Provenance.**` footer (the
-PR link(s) + a short implementation note), plus its row in the `SPEC.md` index, and it removes the
-realized ticket from the store. It is written FROM the settled working spec, re-cast as narrative —
+PR link(s) + a short implementation note), plus its row in the `SPEC.md` index, and it ARCHIVES the
+realized ticket (`adlc ticket archive <id> --write --authorize` — never a deletion: an archived
+ticket's `rails` stay in the frozen set the CI backstop reads, and a deleted ticket's rails
+un-freeze at the exact moment they start protecting landed behavior; T69).
+It is written FROM the settled working spec, re-cast as narrative —
 `spec/` records what IS, in prose, for a reader; the working spec was a gateable instrument for a
 builder. Different genres, different lifetimes; do not paste one into the other. The spec grows only
 here, never speculatively; a new file is the default, editing an existing section the rare
@@ -422,6 +430,21 @@ busy.
   `.adlc/specs/NN-slug.md` (gateable, criteria-bearing, P1's instrument), which becomes a `spec/`
   section only at landing. `spec/` is the archive, never the drafting table. Do not accumulate more
   root markdown; fold, don't add.
+- **A flaky test is fixed NOW, not managed** (Myk, 2026-07-23). The gates' exit codes are VERDICTS,
+  and the rails drive a state machine on top of them: P5 evidence binds a revision, rails freeze at
+  landing, a self-merge hangs on a green bar, `hollow-test` refuses a non-green baseline outright. A
+  test that is sometimes red makes every one of those a coin flip — and worse, it trains whoever
+  reads a red bar to re-run instead of investigate, which deletes the entire value of red. Measured
+  cost the day this rule landed: one load-flake (T73) forced two clean-`main` probe worktrees just
+  to attribute blame, narrowed a mutation baseline enough to hide survivors, and smeared "is the bar
+  green" across thirteen review rounds. So: the moment a test is OBSERVED flaky, fixing it outranks
+  the ticket in hand. Measure both directions first (fails under load, passes in isolation, on the
+  branch AND on main) so the blame lands on the test rather than the diff. The fix is never widening
+  the assertion — that deletes the rail while appearing to repair it — and never a retry loop;
+  determine whether it is a RAIL bug (fixture not forceful enough to pin the behavior) or a
+  SPEC-ACCURACY bug (the promise is genuinely weaker than stated) and fix that one. If it truly
+  cannot be fixed same-day, it is `it.skip` with the ticket id in the test title — an honest skip is
+  a visible hole; a flake is a hidden one.
 - **Strict in PRs, creative and aggressive in execution.** Ship real vertical slices; don't
   gold-plate; don't reward-hack a green bar.
 - **Match rhizomatic's vocabulary** — the concepts are HyperSchema / HyperView / View / Schema /
