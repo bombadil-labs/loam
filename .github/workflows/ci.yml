@@ -24,6 +24,20 @@ jobs:
       - name: format + lint + typecheck + tests
         run: npm run check
 
+  # The comment budget: CLAUDE.md's comment discipline made checkable. Added lines only; the
+  # override is a Comment-Budget trailer in the HEAD commit, so exceptions are auditable prose.
+  comment-budget:
+    name: comment-budget
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node scripts/comment-budget-ci.mjs origin/${{ github.base_ref || 'main' }}
+
   # The rail backstop. ADLC's in-session PreToolUse hook cannot gate Bash — a shell can't be reliably
   # parsed — so a rail edited through a shell command is caught here or nowhere. Linux only: the two
   # Windows patches this repo carries are for `adlc review` and `adlc init`, neither of which runs
