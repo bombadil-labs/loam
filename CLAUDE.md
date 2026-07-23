@@ -231,9 +231,23 @@ words, and violated it **three hours later** in a function whose entire stated p
 promise about completeness. Maximal proximity, freshest possible memory, still shipped.
 
 **P5's default is an INDEPENDENT reviewer that did not write the diff** — a subagent with the diff,
-`src/gateway/SUBSTRATE-HAZARDS.md`, and no access to the author's reasoning. The
-`adlc:prosecutor-{correctness,security,tests,contract,diff}` panel IS that reviewer; use it rather
-than hand-rolling prompts beside a shipped panel. Self-review is the **exception** and must be
+`src/gateway/SUBSTRATE-HAZARDS.md`, and no access to the author's reasoning. Three instruments, in
+descending order of independence:
+
+1. **`adversarial-review --providers gpt,gemini,claude`** — cross-model, the real thing. Linux only.
+2. **`.claude/agents/loam-*`** — the local panel, tracked in this repo: `loam-erasure` (H7 / §11
+   completeness), `loam-suppression` (H1 / negation closure, both levels), `loam-hollow-rail` (could
+   this test pass with the fix reverted?), `loam-lens-name` (H6), `loam-scan-scale` (H8 and the
+   stale-index trap), plus `loam-verifier`, which takes ONE finding and tries to refute it. Project
+   agents are not plugin-provided, so unlike the `adlc:prosecutor-*` panel they survive a WSL
+   session. **Pick 2–4 lenses by what the diff touches** — running all six on a small change is how
+   a panel starts padding.
+3. **`adlc:prosecutor-*`** — the shipped generic panel. Fine, and gone without the plugin.
+
+The local lenses exist because CLAUDE.md's own audit doctrine says angles drawn from what has
+actually bitten beat a generic checklist, and every one of them is a bug this repo has already paid
+for. Keep them current: a hazard that recurs earns a lens, and a lens whose hazard becomes
+impossible by construction should be deleted, not admired. Self-review is the **exception** and must be
 justified in the PR body — and "small mechanical diff" is not a justification, since the worst
 finding of 2026-07-21 was in a tiny one. The one-careful-pass budget is **retired**; it was priced
 honestly that day:

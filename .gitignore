@@ -5,9 +5,15 @@ dist/
 
 # The village's disposable stores and seeds (the code and docs are tracked; see demos/village/README.md)
 demos/village/homes/
-.claude/
 site-dist/
-.claude/settings.local.json
+
+# `.claude/` is local session state EXCEPT the prosecution lenses, which are a reviewed, versioned
+# defense and belong to the repo. Written as a wildcard + negation rather than `.claude/`, because
+# git will not descend into an excluded DIRECTORY — a negation under `.claude/` would never match.
+# Same ordering rule as the .adlc block below: the wildcard must stay above every negation.
+.claude/*
+!.claude/agents/
+!.claude/agents/**
 
 # ADLC runtime — an ALLOWLIST, and `adlc init` owns these lines. What is committed is the CONTRACT
 # (config, tickets, specs); everything else under .adlc/ — findings.jsonl, manifest.jsonl,
