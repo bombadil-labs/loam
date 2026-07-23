@@ -17,9 +17,9 @@ import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
+import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
-import { isTombstone } from "../../src/gateway/erase.js";
+import { isTombstone, readTombstones } from "../../src/gateway/erase.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import type { StoreBackend } from "../../src/store/backend.js";
@@ -237,6 +237,57 @@ describe("erase is complete only when every TIER is clean", () => {
       erased: fact.id,
     });
     expect(tombstones()).toBe(1); // still ONE — a fresh timestamp would have minted a second
+    await gateway.close();
+  });
+});
+
+// The retry anchor is a SURVIVING tombstone, and "surviving" is the whole of the rule. A struck
+// tombstone is forgiveness — `readTombstones` drops it and the id may return — so reusing one as an
+// anchor would purge the bytes while the dead set says the record was pardoned.
+describe("the retry anchor honors forgiveness", () => {
+  const strike = async (gateway: Gateway, targetId: string): Promise<void> => {
+    const tomb = [...gateway.reactor.snapshot()].find(
+      (d) =>
+        isTombstone(d.claims) &&
+        d.claims.pointers.some(
+          (p) => p.target.kind === "delta" && p.target.deltaRef.delta === targetId,
+        ),
+    );
+    await gateway.append([signClaims(makeNegationClaims(OPERATOR, 9000, tomb!.id), OP_SEED)]);
+  };
+
+  it("erasing again AFTER forgiveness mints a SECOND tombstone rather than reusing the struck one", async () => {
+    const primary = new MemoryBackend();
+    const { gateway, fact, tombstones } = await groveOn(
+      new MirrorBackend(primary, new MemoryBackend()),
+    );
+    await gateway.erase(fact.id, { reason: "the subject asked" });
+    expect(tombstones()).toBe(1);
+
+    await strike(gateway, fact.id); // forgiveness: the id may return
+    expect(readTombstones(gateway.reactor, OPERATOR).has(fact.id)).toBe(false);
+    await gateway.append([fact]); // ...and it does
+
+    // A second request. Anchoring on the STRUCK tombstone would purge the bytes and append
+    // nothing, leaving the dead set saying `fact` was pardoned while the data is in fact gone:
+    // admission would re-admit it and `forgottenSince` would confess nothing.
+    await gateway.erase(fact.id, { reason: "asked again, after the pardon" });
+    expect(tombstones()).toBe(2);
+    expect(readTombstones(gateway.reactor, OPERATOR).has(fact.id)).toBe(true);
+    expect(await primary.holds(fact.id)).toBe(false);
+    await gateway.close();
+  });
+
+  it("a struck tombstone is not a licence to report a completion: erase with no target REFUSES", async () => {
+    const { gateway, fact } = await groveOn(
+      new MirrorBackend(new MemoryBackend(), new MemoryBackend()),
+    );
+    await gateway.erase(fact.id, { reason: "the subject asked" });
+    await strike(gateway, fact.id); // forgiven, and NOT re-admitted — the store holds nothing
+
+    // Without the surviving-tombstone rule this returns `{ erased }` for work never done — H7, in
+    // the function whose whole subject is H7.
+    await expect(gateway.erase(fact.id)).rejects.toThrow(/nothing to erase/);
     await gateway.close();
   });
 });

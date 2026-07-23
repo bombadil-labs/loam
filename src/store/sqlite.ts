@@ -221,10 +221,18 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
       // outstanding here is the truncation, not the DELETE.
       const [status] = this.db.pragma("wal_checkpoint(TRUNCATE)") as Array<{ busy: number }>;
       if (status !== undefined && status.busy !== 0) {
+        // The message has to match what actually happened. Ungated, this fires on a sweep that
+        // deleted nothing — a `heal` boot carrying the whole accumulated tombstone set, or the
+        // retry whose DELETE already ran — and asserting "the rows are deleted" there would tell
+        // an operator a partial erasure occurred on records purged months ago.
         throw new Error(
-          "purge: the write-ahead log could not be truncated (a concurrent reader held it past " +
-            "busy_timeout). The rows are deleted, but their plaintext may remain in the -wal " +
-            "sidecar, so this erasure is INCOMPLETE (§11). Retry once the other handle is idle.",
+          `purge: the write-ahead log could not be truncated (a concurrent reader held it past ` +
+            `busy_timeout). ${
+              removed > 0
+                ? "The rows are deleted, but their plaintext may remain in the -wal sidecar"
+                : "No rows matched — the outstanding work was the truncation itself, and earlier " +
+                  "deletions' plaintext may remain in the -wal sidecar"
+            }, so this erasure is INCOMPLETE (§11). Retry once the other handle is idle.`,
         );
       }
     } catch (err) {

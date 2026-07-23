@@ -170,6 +170,34 @@ describe("§24.8 rail (g) — a pool that retains makes the primary's erase REFU
     await primary.close();
   });
 
+  it("a retaining pool does not starve the pools ORDERED BEHIND it", async () => {
+    // The verdict is thrown AFTER the transitive walk, and the walk is settled before reporting.
+    // Placed before, the first retaining pool aborts the sequential fan-out: every sibling and
+    // every nested pool behind it receives neither the tombstone nor the purge, so they keep the
+    // bytes AND stay able to re-admit the id — and the retry fails identically for as long as the
+    // one faulty replica is broken. That trades a silent leak in one replica for a blocking leak
+    // across all the others.
+    const FORGOTTEN = "a-broken-replica-must-not-shield-the-others";
+    const primary = await bootPrimary();
+    const secret = observed(FERN, "message", FORGOTTEN, 2000, OP_SEED);
+    await primary.append([secret]);
+    const sick = new RetainingBackend();
+    const healthy = new MemoryBackend();
+    const q1 = await primary.openQuarantine({ backend: sick }); // attached FIRST
+    const q2 = await primary.openQuarantine({ backend: healthy }); // ...and ordered behind it
+
+    await expect(primary.erase(secret.id, { reason: "the subject asked" })).rejects.toThrow(
+      /STILL HOLDS|pool/i,
+    );
+
+    // The healthy replica was still swept and still tombstoned, despite its sibling's fault.
+    await backendForgot(healthy, secret.id, FORGOTTEN);
+    expect(readTombstones(q2.gateway.reactor, OP).has(secret.id)).toBe(true);
+    await q2.drop();
+    await q1.drop();
+    await primary.close();
+  });
+
   it("POSITIVE CONTROL: the same two-pool shape with nothing retained completes normally", async () => {
     // Without this, both rails above would pass against an `erase` that always threw.
     const primary = await bootPrimary();
