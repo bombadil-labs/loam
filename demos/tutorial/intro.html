@@ -1,0 +1,1010 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="description" content="An introduction to Loam and rhizomatic data — signed deltas, shared ground, apps as lenses." />
+<title>An Introduction to Loam &amp; Rhizomatic Data</title>
+<style>
+  :root {
+    --ground: #141009;
+    --panel: #1d1710;
+    --ink: #ece3d1;
+    --muted: #9c8f7a;
+    --faint: #57503f;
+    --alice: #e2a63c;   --alice-fill: #382b12;
+    --bob: #82aedc;     --bob-fill: #1d2836;
+    --entity: #93bd73;  --entity-fill: #242f1b;
+    --prim: #d8c79b;    --prim-fill: #2e2919;
+    --dead: #c05a3f;    --dead-fill: #331a12;
+    --serif: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+    --mono: "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--ground); color: var(--ink); font-family: var(--serif); overflow: hidden; }
+  #deck { position: fixed; inset: 0 0 64px 0; }
+  .slide {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 1.5rem; padding: 2.5rem 3rem;
+    opacity: 0; pointer-events: none;
+    transition: opacity .45s ease;
+  }
+  .slide.on { opacity: 1; pointer-events: auto; }
+  .kicker { font-family: var(--mono); font-size: .74rem; letter-spacing: .22em; text-transform: uppercase; color: var(--muted); }
+  h1 { font-size: clamp(2.2rem, 5vw, 3.6rem); font-weight: 500; margin: 0; text-align: center; text-wrap: balance; max-width: 22ch; line-height: 1.15; }
+  h2 { font-size: clamp(1.5rem, 3.2vw, 2.3rem); font-weight: 500; margin: 0; text-align: center; text-wrap: balance; max-width: 32ch; line-height: 1.25; }
+  .said {
+    font-size: clamp(1.15rem, 2vw, 1.5rem); text-align: center; margin: 0; text-wrap: balance;
+    font-style: italic; color: var(--ink); max-width: 50ch;
+  }
+  .said .aA { color: var(--alice); font-style: normal; }
+  .said .aB { color: var(--bob); font-style: normal; }
+  .said .aO { color: var(--dead); font-style: normal; }
+  .cap { font-size: clamp(1rem, 1.6vw, 1.22rem); color: var(--muted); text-align: center; max-width: 62ch; line-height: 1.55; margin: 0; text-wrap: balance; }
+  .cap em { color: var(--ink); font-style: italic; }
+  .fig { flex: 0 1 auto; }
+  .fig svg { display: block; max-height: 54vh; max-width: 90vw; height: auto; }
+  svg text { font-family: var(--mono); }
+  .frag { opacity: 0; transition: opacity .5s ease, transform .5s ease; transform: translateY(10px); }
+  .frag.in { opacity: 1; transform: none; }
+  .quote { font-size: clamp(1.25rem, 2.6vw, 1.9rem); line-height: 1.45; text-align: center; max-width: 34ch; margin: 0; text-wrap: balance; font-style: italic; }
+  .duo { display: flex; gap: 3.2rem; align-items: flex-start; }
+  .duo .col { display: flex; flex-direction: column; align-items: center; gap: .9rem; }
+  .refrain { font-family: var(--mono); font-size: .8rem; letter-spacing: .28em; text-transform: uppercase; color: var(--alice); }
+  #stream {
+    position: fixed; left: 0; right: 0; bottom: 0; height: 64px;
+    background: linear-gradient(180deg, transparent, rgba(29,23,16,.9) 30%);
+    border-top: 1px solid #2a2318;
+    display: flex; align-items: center; gap: 14px; padding: 0 18px; overflow: hidden;
+  }
+  #stream .label { font-family: var(--mono); font-size: .62rem; letter-spacing: .2em; text-transform: uppercase; color: var(--faint); white-space: nowrap; margin-right: 6px; }
+  .mote { flex: 0 0 auto; animation: settle .8s ease; }
+  @keyframes settle { from { transform: translateY(-40px) scale(1.6); opacity: 0; } to { transform: none; opacity: 1; } }
+  #tip {
+    position: fixed; pointer-events: none; z-index: 10;
+    font-family: var(--mono); font-size: 1.05rem; letter-spacing: .06em;
+    padding: .55rem .9rem; border-radius: 9px;
+    background: var(--panel); border: 1.6px solid var(--ink); color: var(--ink);
+    opacity: 0; transform: translate(-50%, -140%) scale(.96);
+    transition: opacity .15s ease, transform .15s ease;
+    box-shadow: 0 6px 24px rgba(0,0,0,.5); white-space: nowrap;
+  }
+  #tip.on { opacity: 1; transform: translate(-50%, -140%) scale(1); }
+  #pager { position: fixed; top: 16px; right: 20px; font-family: var(--mono); font-size: .7rem; color: var(--faint); letter-spacing: .15em; }
+  #hint { position: fixed; top: 16px; left: 20px; font-family: var(--mono); font-size: .7rem; color: var(--faint); letter-spacing: .12em; opacity: .8; }
+  .who { display: flex; gap: 2.4rem; }
+  .who span { font-family: var(--mono); font-size: .8rem; letter-spacing: .1em; }
+  ul.ask { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1.1rem; }
+  ul.ask li { font-size: clamp(1.1rem, 2vw, 1.5rem); text-align: center; }
+  ul.ask li::before { content: "Δ "; color: var(--alice); font-family: var(--mono); }
+  @keyframes breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.03); } }
+  .breathe { animation: breathe 6s ease-in-out infinite; transform-origin: center; }
+  @media (prefers-reduced-motion: reduce) {
+    .breathe { animation: none; } .mote { animation: none; }
+    .slide, .frag { transition: none; }
+  }
+</style>
+</head>
+<body>
+<div id="hint">→ advance · ← back</div>
+<div id="pager"></div>
+
+<div id="deck">
+
+<!-- 1 · TITLE -->
+<section class="slide" data-motes="1">
+  <div class="kicker">bombadil labs</div>
+  <h1>An Introduction to Loam &amp; Rhizomatic&nbsp;Data</h1>
+  <div class="fig breathe" data-fig="title"></div>
+  <p class="cap">signed facts &nbsp;·&nbsp; shared ground &nbsp;·&nbsp; apps as lenses</p>
+</section>
+
+<!-- 2 · THE DELTA -->
+<section class="slide" data-motes="1">
+  <h2>This is a delta.</h2>
+  <div class="fig" data-fig="delta"></div>
+  <p class="said"><span class="aA">Alice</span> says: we have two bottles of olive oil.</p>
+  <p class="cap">A delta represents a single claim, sealed by its author.<br>
+  It never changes, and it depends on nothing — no order, no chain.</p>
+</section>
+
+<!-- 3 · DELTAS MEET -->
+<section class="slide" data-motes="1">
+  <h2>Deltas meet.</h2>
+  <div class="fig" data-fig="meet"></div>
+  <p class="said"><span class="aB">Bob</span> says: the olive oil is in the pantry.</p>
+  <p class="cap"><em>Nobody created olive-oil.</em> The id is just a string two people used —<br>
+  the object exists only as the intersection of deltas that reference it.</p>
+</section>
+
+<!-- 4 · PIN AND FLIP -->
+<section class="slide" data-motes="0">
+  <h2>Pin it. Let everything else hang.</h2>
+  <div class="fig" data-fig="flip"></div>
+  <p class="cap">Nothing new was said — these are the same two deltas, seen from the object they made.<br>
+  From the object's perspective, <em>every property contains the deltas that referenced it.</em></p>
+</section>
+
+<!-- 5 · A RECIPE APPEARS -->
+<section class="slide" data-motes="1">
+  <h2>Anything can be an object.</h2>
+  <div class="fig" data-fig="recipe"></div>
+  <p class="said"><span class="aA">Alice</span> says: there's a recipe called Grandma's Carbonara.</p>
+  <p class="cap">A new id, spoken for the first time. The delta that names it is the delta that makes it real.</p>
+</section>
+
+<!-- 6 · STRUCTURE -->
+<section class="slide" data-motes="1">
+  <h2>It has structure.</h2>
+  <div class="fig" data-fig="nest"></div>
+  <p class="said"><span class="aA">Alice</span> says: the carbonara uses two tablespoons of the olive oil.</p>
+  <p class="cap">One delta, three pointers — and now the recipe reaches the pantry.<br>
+  Objects hold deltas, deltas point at objects, down to a value at every tip.<br>
+  <em>A rhizome that reads as a tree from wherever you stand.</em></p>
+</section>
+
+<!-- 6b · SECOND INGREDIENT -->
+<section class="slide" data-motes="1">
+  <h2>Ingredients accumulate.</h2>
+  <div class="fig" data-fig="nest2"></div>
+  <p class="said"><span class="aB">Bob</span> says: the carbonara uses one onion.</p>
+  <p class="cap">A second delta grips the <em>same property</em> — watch the two lines land on one point.<br>
+  The recipe's ingredients are now two claims deep, from two voices.</p>
+</section>
+
+<!-- 6c · LIFT ANY OBJECT -->
+<section class="slide" data-motes="0">
+  <h2>Lift any object.</h2>
+  <div class="fig" data-fig="perspectives"></div>
+  <p class="cap">Nothing new was said — this is the same rhizome, pegged at three different points.<br>
+  Every delta sets properties on everything it touches, so <em>every object is the root of its own tree.</em></p>
+</section>
+
+<!-- 7 · COLLAPSE -->
+<section class="slide" data-motes="0">
+  <h2>Apply a lens. Get a view.</h2>
+  <div class="fig" data-fig="collapse"></div>
+  <p class="cap">Nothing new was said — the delta layer is folded away, and each property points<br>
+  straight at its answer: a value, or another object to keep walking into.<br>
+  <em>That fold is a schema. This is what an application sees.</em></p>
+</section>
+
+<!-- 8 · DISAGREEMENT -->
+<section class="slide" data-motes="1">
+  <h2>Disagreement is data.</h2>
+  <div class="duo">
+    <div class="col">
+      <div class="fig" data-fig="conflict"></div>
+      <div class="kicker">one shared record</div>
+    </div>
+    <div class="col frag">
+      <div class="fig" data-fig="twolens"></div>
+      <div class="kicker">two honest views</div>
+    </div>
+  </div>
+  <p class="said"><span class="aB">Bob</span> says: we're out of olive oil.</p>
+  <p class="cap"><em>Conflict resolution should always have been an application concern.</em><br>
+  Last-write-wins is a compromise we all accepted.</p>
+</section>
+
+<!-- 9 · RETRACTION -->
+<section class="slide" data-motes="1">
+  <div class="refrain">it's just appended data</div>
+  <h2>Retraction</h2>
+  <div class="fig" data-fig="negate"></div>
+  <p class="said"><span class="aB">Bob</span> says: disregard that — the delivery came.</p>
+  <p class="cap">A delta about a delta. Nothing was edited, nothing was deleted —<br>
+  and now <em>every</em> lens reads 2, because the record itself got more honest.</p>
+</section>
+
+<!-- 10 · ERASURE -->
+<section class="slide" data-motes="1">
+  <div class="refrain">it's just appended data</div>
+  <h2>Erasure</h2>
+  <div class="fig" data-fig="erase"></div>
+  <p class="said"><span class="aO">The operator</span> says: forget that delta — and prove the bytes are gone.</p>
+  <p class="cap">The order to forget is itself appended. The bytes go — verified, on every tier —<br>
+  and the signed hole stays. <em>The ground remembers that it forgot. Never what.</em></p>
+</section>
+
+<!-- 11 · SCHEMAS -->
+<section class="slide" data-motes="1">
+  <div class="refrain">it's just appended data</div>
+  <h2>Schemas</h2>
+  <div class="fig" data-fig="schemas"></div>
+  <p class="said"><span class="aA">Alice</span> says: to read a Pantry, take each item's latest quantity and location.</p>
+  <p class="cap">A lens is just more deltas — the same shapes you already know, one binding a field to a
+  rule for resolving it. <em>The schema is an object in the ground, assembled exactly like the pantry it reads.</em></p>
+</section>
+
+<!-- 12 · RENDERERS -->
+<section class="slide" data-motes="1">
+  <div class="refrain">it's just appended data</div>
+  <h2>Renderers</h2>
+  <div class="fig" data-fig="render"></div>
+  <p class="said"><span class="aA">Alice</span> says: here is a page that shows the Pantry.</p>
+  <p class="cap">A renderer is an object too — a route, the fields it reads, a bundle of real code —<br>
+  and every part of it is a delta. <em>Push deltas, get software.</em></p>
+</section>
+
+<!-- 13 · APPS -->
+<section class="slide" data-motes="2">
+  <h2>Apps are just deltas.</h2>
+  <div class="fig" data-fig="apps"></div>
+  <p class="cap">There are no kinds of delta — every one has the same shape. Data, a schema, a renderer<br>
+  are just regions of one ground, differing only in what they point at. <em>An app is a region, not a thing —<br>
+  delete it and the ground doesn't even notice.</em></p>
+</section>
+
+<!-- 14 · FEDERATION -->
+<section class="slide" data-motes="3">
+  <h2>Federation, federation, federation.</h2>
+  <div class="fig" data-fig="fed"></div>
+  <p class="cap">Two grounds swap signed facts and each keeps its own lenses.<br>
+  No consensus, no platform in the middle — <em>disagreement travels intact.</em></p>
+</section>
+
+<!-- 15 · PROTOCOL -->
+<section class="slide" data-motes="1">
+  <h2>Rhizomatic is the wire. Loam is one home for it.</h2>
+  <p class="cap">The delta format, the signatures, the merge — that's an open protocol.<br>
+  Any store that speaks it interoperates. <em>You don't have to use Loam;<br>
+  the ground outlives any one implementation.</em></p>
+</section>
+
+<!-- 16 · MCP / VISION -->
+<section class="slide" data-motes="2">
+  <div class="kicker">…and there's an MCP server</div>
+  <h2>Software small enough to be spoken.</h2>
+  <p class="quote">"Track what's in the pantry, and warn me when the carbonara isn't possible."</p>
+  <p class="cap">A sentence to Claude becomes a schema, a lens, a page — live over your ground,<br>
+  interoperable with every other app on it, shareable with a friend, forkable, mergeable.<br>
+  <em>Ephemeral apps on demand, over data that is permanently, provably yours.</em></p>
+</section>
+
+<!-- 17 · CLOSE -->
+<section class="slide" data-motes="2">
+  <h2>Everything we just said.</h2>
+  <div class="fig" data-fig="whole"></div>
+  <p class="cap">One rhizome — every delta from this conversation, still here, still signed.<br>
+  <em>Hover anything.</em></p>
+</section>
+
+</div>
+
+<div id="stream"><span class="label">the ground · append-only</span></div>
+<div id="tip"></div>
+
+<script>
+(function () {
+  "use strict";
+  const NS = "http://www.w3.org/2000/svg";
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+  function el(tag, attrs, parent) {
+    const n = document.createElementNS(NS, tag);
+    for (const k in attrs) n.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+
+  // Ports: an edge grips a node at a small solid circle on its rim — the port. A port on a
+  // delta is one of its pointers (hover: role); a port on an object is one of its properties
+  // (hover: property). Edges from different deltas that bind the SAME property converge on the
+  // same port — the conflict is drawn, not described. Port color: the color of the node the edge
+  // originated from; when several origins share a port, parchment.
+  function node(svg, n) {
+    const palette = {
+      delta:  { stroke: n.color || css("--ink"),  fill: n.fill || css("--panel"), r: 32 },
+      entity: { stroke: css("--entity"), fill: css("--entity-fill"), r: 20 },
+      prim:   { stroke: css("--prim"),   fill: css("--prim-fill"),   r: 17 },
+      dead:   { stroke: css("--dead"),   fill: css("--dead-fill"),   r: 32 },
+      ghost:  { stroke: css("--ink"),    fill: "none",               r: 28 },
+    };
+    const p = palette[n.kind];
+    n._r = n.r || p.r;
+    n._stroke = n.kind === "delta" || n.kind === "dead" ? (n.color || p.stroke) : p.stroke;
+    const c = el("circle", { cx: n.x, cy: n.y, r: n._r, fill: p.fill, stroke: p.stroke, "stroke-width": 2.4 }, svg);
+    if (n.tip) {
+      const col = n.kind === "delta" ? (n.color || css("--ink")) : p.stroke;
+      c.style.cursor = "pointer";
+      c.addEventListener("pointerenter", () => {
+        const tip = document.getElementById("tip");
+        const box = c.getBoundingClientRect();
+        tip.textContent = n.tip;
+        tip.style.borderColor = col; tip.style.color = col;
+        tip.style.left = box.left + box.width / 2 + "px";
+        tip.style.top = box.top + "px";
+        tip.classList.add("on");
+      });
+      c.addEventListener("pointerleave", () => document.getElementById("tip").classList.remove("on"));
+    }
+    if (n.kind === "dead") c.setAttribute("stroke", css("--dead"));
+    if (n.kind === "delta") c.setAttribute("stroke", n.color || css("--ink"));
+    if (n.kind === "ghost") { c.setAttribute("stroke-dasharray", "4 4"); c.setAttribute("stroke-width", 1.8); }
+    if (n.dim) c.setAttribute("stroke-opacity", n.dim); // fill stays opaque: a circle must occlude the edge beneath it
+
+    if (n.meta) {
+      const side = n.metaSide || 1;
+      const mx = n.x + side * (n._r + 12);
+      const anchor = side > 0 ? "start" : "end";
+      const y0 = n.y - ((n.meta.length - 1) * 16) / 2;
+      n.meta.forEach((line, idx) => {
+        const t = el("text", { x: mx, y: y0 + idx * 16 + 4, "text-anchor": anchor, "font-size": 12.5,
+          fill: idx === 0 ? css("--ink") : (n.color || css("--muted")), "letter-spacing": ".05em" }, svg);
+        if (n.dim) t.setAttribute("opacity", n.dim);
+        t.textContent = line;
+      });
+    }
+    if (n.label) {
+      const lines = Array.isArray(n.label) ? n.label : [n.label];
+      lines.forEach((line, idx) => {
+        const t = el("text", { x: n.x, y: n.y + n._r + 22 + idx * 17, "text-anchor": "middle", "font-size": 14.5,
+          fill: n.kind === "entity" ? css("--entity") : css("--prim") }, svg);
+        if (n.dim) t.setAttribute("opacity", n.dim);
+        t.textContent = line;
+      });
+    }
+  }
+
+  function draw(fig) {
+    const svg = el("svg", { viewBox: `0 0 ${fig.w} ${fig.h}`, width: fig.w });
+    const N = fig.nodes;
+    // measure radii first (node() also draws, so precompute radius here)
+    const RAD = { delta: 32, entity: 20, prim: 17, dead: 32, ghost: 28 };
+    for (const k in N) N[k]._r = N[k].r || RAD[N[k].kind];
+
+    // resolve ports: key (node, portName) — unnamed endpoints get a private key (no convergence)
+    const ports = new Map(); // key -> {node, name, others:[], color:set, dim}
+    let auto = 0;
+    const endpoint = (nodeName, portName, otherName, originName, dim) => {
+      const key = nodeName + "|" + (portName || "@" + auto++);
+      if (!ports.has(key)) ports.set(key, { node: nodeName, name: portName, others: [], origins: new Set(), dim: 1 });
+      const rec = ports.get(key);
+      rec.others.push(otherName);
+      rec.origins.add(originName);
+      if (!dim) rec.dim = 0; else rec.dim = Math.min(rec.dim === 0 ? 0 : rec.dim, dim);
+      return key;
+    };
+    const eps = [];
+    for (const e of fig.edges || []) {
+      eps.push({
+        e,
+        a: endpoint(e.from, e.fromPort, e.to, e.from, e.dim),
+        b: endpoint(e.to, e.toPort, e.from, e.from, e.dim),
+      });
+    }
+    // port positions: on the rim, at the mean direction of the connected far endpoints
+    const pos = new Map();
+    for (const [key, rec] of ports) {
+      const n = N[rec.node];
+      let dx = 0, dy = 0;
+      if (rec.angle !== undefined) { /* reserved */ }
+      const angOverride = (N[rec.node].ports || {})[rec.name];
+      if (angOverride !== undefined) {
+        const a = angOverride * Math.PI / 180;
+        dx = Math.cos(a); dy = Math.sin(a);
+      } else {
+        for (const o of rec.others) {
+          const m = N[o];
+          const len = Math.hypot(m.x - n.x, m.y - n.y) || 1;
+          dx += (m.x - n.x) / len; dy += (m.y - n.y) / len;
+        }
+        const len = Math.hypot(dx, dy) || 1;
+        dx /= len; dy /= len;
+      }
+      pos.set(key, { x: n.x + dx * n._r, y: n.y + dy * n._r });
+    }
+    // edges: port to port, beneath the circles
+    for (const { e, a, b } of eps) {
+      const pa = pos.get(a), pb = pos.get(b);
+      const line = el("line", { x1: pa.x, y1: pa.y, x2: pb.x, y2: pb.y,
+        stroke: e.color || css("--faint"), "stroke-width": 2 }, svg);
+      if (e.dash) line.setAttribute("stroke-dasharray", e.dash);
+      if (e.dim) line.setAttribute("opacity", e.dim);
+    }
+    for (const k in N) node(svg, N[k]);
+    if (fig.extra) fig.extra(svg, N, pos);
+    // ports LAST — the absolute top of the stack. A port takes the stroke color of the node at
+    // the OTHER end of its edge: a little of A on B and a little of B on A, for every edge. A
+    // port several far nodes share (a contested property) goes parchment.
+    const strokeOf = (n) => {
+      if (n.kind === "delta") return n.color || css("--ink");
+      if (n.kind === "dead") return css("--dead");
+      if (n.kind === "entity") return css("--entity");
+      if (n.kind === "prim") return css("--prim");
+      return css("--ink");
+    };
+    for (const [key, rec] of ports) {
+      if (!rec.name) continue; // a dot that answers nothing on hover is a broken promise —
+                               // an unnamed grip (a bare primitive) is just the line meeting the rim
+      const n = N[rec.node];
+      const pp = pos.get(key);
+      const farColors = new Set(rec.others.map((o) => strokeOf(N[o])));
+      const color = farColors.size === 1 ? [...farColors][0] : css("--ink");
+      const dot = el("circle", { cx: pp.x, cy: pp.y, r: 6, fill: color, stroke: css("--ground"), "stroke-width": 1.4 }, svg);
+      if (rec.dim && rec.dim < 1) dot.setAttribute("opacity", Math.max(rec.dim, 0.55));
+      if (rec.name) {
+        const kindWord = (n.kind === "delta" || n.kind === "dead") ? "role" : "property";
+        dot.style.cursor = "pointer";
+        dot.addEventListener("pointerenter", () => {
+          const tip = document.getElementById("tip");
+          const box = dot.getBoundingClientRect();
+          tip.textContent = kindWord + ': "' + rec.name + '"';
+          tip.style.borderColor = color;
+          tip.style.color = color;
+          tip.style.left = box.left + box.width / 2 + "px";
+          tip.style.top = box.top + "px";
+          tip.classList.add("on");
+        });
+        dot.addEventListener("pointerleave", () => document.getElementById("tip").classList.remove("on"));
+      }
+    }
+    return svg;
+  }
+
+  const A = css("--alice"), B = css("--bob"), AF = css("--alice-fill"), BF = css("--bob-fill");
+  const E = () => css("--entity");
+
+  // ── figures: one new delta per slide, prior facts dimmed to memory ────────
+  // Edges are always authored delta → target (pointers belong to deltas), whatever the layout.
+  const DIM = 0.35;
+  const FIGS = {
+
+    title: () => draw({
+      w: 420, h: 250,
+      nodes: {
+        d: { kind: "delta", x: 210, y: 60, color: A, fill: AF },
+        e: { kind: "entity", x: 110, y: 200 },
+        p: { kind: "prim", x: 310, y: 200 },
+      },
+      edges: [
+        { from: "d", to: "e", fromPort: "item", toPort: "quantity" },
+        { from: "d", to: "p", fromPort: "quantity" },
+      ],
+    }),
+
+    delta: () => draw({
+      w: 660, h: 360,
+      nodes: {
+        d: { kind: "delta", x: 330, y: 70, color: A, fill: AF,
+             meta: ["Δ 1e20c4…", "alice · 09:00"] },
+        e: { kind: "entity", x: 180, y: 280, label: ['id: "olive-oil"'] },
+        p: { kind: "prim", x: 480, y: 280, label: "2" },
+      },
+      edges: [
+        { from: "d", to: "e", fromPort: "item", toPort: "quantity" },
+        { from: "d", to: "p", fromPort: "quantity" },
+      ],
+    }),
+
+    meet: () => draw({
+      w: 880, h: 380,
+      nodes: {
+        da: { kind: "delta", x: 260, y: 70, color: A, fill: AF, dim: DIM, metaSide: -1,
+              meta: ["Δ alice", "09:00"] },
+        db: { kind: "delta", x: 620, y: 70, color: B, fill: BF,
+              meta: ["Δ bob", "11:30"] },
+        e:  { kind: "entity", x: 440, y: 290, r: 24, label: ['id: "olive-oil"'] },
+        p1: { kind: "prim", x: 120, y: 290, dim: DIM, label: "2" },
+        p2: { kind: "entity", x: 760, y: 290, label: ['id: "pantry"'] },
+      },
+      edges: [
+        { from: "da", to: "e", fromPort: "item", toPort: "quantity", dim: DIM },
+        { from: "da", to: "p1", fromPort: "quantity", dim: DIM },
+        { from: "db", to: "e", fromPort: "item", toPort: "location" },
+        { from: "db", to: "p2", fromPort: "location", toPort: "contents" },
+      ],
+    }),
+
+    flip: () => draw({
+      w: 860, h: 420,
+      nodes: {
+        e:  { kind: "entity", x: 430, y: 60, r: 24 },
+        da: { kind: "delta", x: 250, y: 230, color: A, fill: AF, metaSide: -1, meta: ["Δ alice", "09:00"] },
+        db: { kind: "delta", x: 610, y: 230, color: B, fill: BF, meta: ["Δ bob", "11:30"] },
+        p1: { kind: "prim", x: 250, y: 370, label: "2" },
+        p2: { kind: "entity", x: 610, y: 370, r: 17, label: ['id: "pantry"'] },
+      },
+      edges: [
+        { from: "da", to: "e", fromPort: "item", toPort: "quantity" },
+        { from: "db", to: "e", fromPort: "item", toPort: "location" },
+        { from: "da", to: "p1", fromPort: "quantity" },
+        { from: "db", to: "p2", fromPort: "location", toPort: "contents" },
+      ],
+      extra: (svg, N) => {
+        const t = el("text", { x: N.e.x, y: N.e.y - 38, "text-anchor": "middle", "font-size": 15, fill: E() }, svg);
+        t.textContent = 'id: "olive-oil"';
+      },
+    }),
+
+    recipe: () => draw({
+      w: 660, h: 360,
+      nodes: {
+        d: { kind: "delta", x: 330, y: 70, color: A, fill: AF,
+             meta: ["Δ alice", "12:00"] },
+        e: { kind: "entity", x: 180, y: 280, label: ['id: "recipe:carbonara"'] },
+        p: { kind: "prim", x: 480, y: 280, label: '"Grandma\'s Carbonara"' },
+      },
+      edges: [
+        { from: "d", to: "e", fromPort: "item", toPort: "title" },
+        { from: "d", to: "p", fromPort: "title" },
+      ],
+    }),
+
+    nest: () => draw({
+      w: 940, h: 500,
+      nodes: {
+        ds: { kind: "delta", x: 400, y: 70, color: A, fill: AF, r: 30, metaSide: 1,
+              meta: ["Δ alice", "12:05"] },
+        oe: { kind: "entity", x: 170, y: 280, r: 20 },
+        pa: { kind: "prim", x: 400, y: 300, label: '"2 tbsp"' },
+        r:  { kind: "entity", x: 660, y: 280, r: 20, label: ['id: "recipe:carbonara"'] },
+        da: { kind: "delta", x: 90, y: 415, color: A, fill: AF, r: 20, dim: DIM },
+        db: { kind: "delta", x: 270, y: 415, color: B, fill: BF, r: 20, dim: DIM },
+      },
+      edges: [
+        { from: "ds", to: "oe", fromPort: "uses", toPort: "used-in" },
+        { from: "ds", to: "pa", fromPort: "amount" },
+        { from: "ds", to: "r", fromPort: "recipe", toPort: "ingredients" },
+        { from: "da", to: "oe", fromPort: "quantity", toPort: "quantity", dim: DIM },
+        { from: "db", to: "oe", fromPort: "location", toPort: "location", dim: DIM },
+      ],
+      extra: (svg, N) => {
+        const t2 = el("text", { x: N.oe.x - 30, y: N.oe.y - 24, "text-anchor": "end", "font-size": 14, fill: E() }, svg);
+        t2.textContent = 'id: "olive-oil"';
+        const rem = el("text", { x: 180, y: 478, "text-anchor": "middle", "font-size": 11.5, fill: css("--faint"), "letter-spacing": ".1em" }, svg);
+        rem.textContent = "yesterday's deltas, still here";
+      },
+    }),
+
+    // Bob's onion delta grips the SAME ingredients port — convergence at the object
+    nest2: () => draw({
+      w: 960, h: 460,
+      nodes: {
+        ds1: { kind: "delta", x: 250, y: 80, color: A, fill: AF, r: 24, dim: 0.55, metaSide: -1,
+               meta: ["Δ alice", "12:05"] },
+        oe:  { kind: "entity", x: 100, y: 260, r: 16, dim: 0.55, label: ['id: "olive-oil"'] },
+        pa1: { kind: "prim", x: 250, y: 280, r: 14, dim: 0.55, label: '"2 tbsp"' },
+        r:   { kind: "entity", x: 480, y: 300, r: 22, label: ['id: "recipe:carbonara"'] },
+        ds2: { kind: "delta", x: 700, y: 80, color: B, fill: BF, r: 30,
+               meta: ["Δ bob", "12:10"] },
+        on:  { kind: "entity", x: 860, y: 260, r: 16, label: ['id: "onions"'] },
+        pa2: { kind: "prim", x: 700, y: 280, r: 14, label: '"1"' },
+      },
+      edges: [
+        { from: "ds1", to: "oe", fromPort: "uses", toPort: "used-in", dim: 0.55 },
+        { from: "ds1", to: "pa1", fromPort: "amount", dim: 0.55 },
+        { from: "ds1", to: "r", fromPort: "recipe", toPort: "ingredients", dim: 0.55 },
+        { from: "ds2", to: "on", fromPort: "uses", toPort: "used-in" },
+        { from: "ds2", to: "pa2", fromPort: "amount" },
+        { from: "ds2", to: "r", fromPort: "recipe", toPort: "ingredients" },
+      ],
+      extra: (svg, N) => {
+        const c = el("text", { x: N.r.x, y: N.r.y + 66, "text-anchor": "middle", "font-size": 11.5, fill: css("--ink"), "letter-spacing": ".08em" }, svg);
+        c.textContent = "two deltas, one property";
+      },
+    }),
+
+    // the same rhizome, three different roots — three layers deep, so the deltas' far sides show
+    perspectives: () => draw({
+      w: 1140, h: 400,
+      nodes: {
+        c:   { kind: "entity", x: 180, y: 60, r: 18 },
+        cd1: { kind: "delta", x: 100, y: 185, color: A, fill: AF, r: 16 },
+        cd2: { kind: "delta", x: 260, y: 185, color: B, fill: BF, r: 16 },
+        cl1: { kind: "entity", x: 40,  y: 310, r: 11 },
+        cl2: { kind: "prim",  x: 150, y: 310, r: 11 },
+        cl3: { kind: "entity", x: 230, y: 310, r: 11 },
+        cl4: { kind: "prim",  x: 330, y: 310, r: 11 },
+        o:   { kind: "entity", x: 570, y: 60, r: 18 },
+        od1: { kind: "delta", x: 460, y: 185, color: A, fill: AF, r: 16 },
+        od2: { kind: "delta", x: 570, y: 185, color: B, fill: BF, r: 16 },
+        od3: { kind: "delta", x: 690, y: 185, color: A, fill: AF, r: 16 },
+        ol1: { kind: "prim",  x: 440, y: 310, r: 11 },
+        ol2: { kind: "entity", x: 570, y: 310, r: 11 },
+        ol3: { kind: "entity", x: 660, y: 310, r: 11 },
+        ol4: { kind: "prim",  x: 750, y: 310, r: 11 },
+        p:   { kind: "entity", x: 985, y: 60, r: 18 },
+        pd1: { kind: "delta", x: 985, y: 185, color: B, fill: BF, r: 16 },
+        pl1: { kind: "entity", x: 985, y: 310, r: 11 },
+      },
+      edges: [
+        { from: "cd1", to: "c", fromPort: "recipe", toPort: "ingredients" },
+        { from: "cd2", to: "c", fromPort: "recipe", toPort: "ingredients" },
+        { from: "cd1", to: "cl1", fromPort: "uses" },
+        { from: "cd1", to: "cl2", fromPort: "amount" },
+        { from: "cd2", to: "cl3", fromPort: "uses" },
+        { from: "cd2", to: "cl4", fromPort: "amount" },
+        { from: "od1", to: "o", fromPort: "item", toPort: "quantity" },
+        { from: "od2", to: "o", fromPort: "item", toPort: "location" },
+        { from: "od3", to: "o", fromPort: "uses", toPort: "used-in" },
+        { from: "od1", to: "ol1", fromPort: "quantity" },
+        { from: "od2", to: "ol2", fromPort: "location" },
+        { from: "od3", to: "ol3", fromPort: "recipe" },
+        { from: "od3", to: "ol4", fromPort: "amount" },
+        { from: "pd1", to: "p", fromPort: "location", toPort: "contents" },
+        { from: "pd1", to: "pl1", fromPort: "item" },
+      ],
+      extra: (svg, N) => {
+        const lab = (n, txt) => {
+          const t = el("text", { x: n.x, y: n.y - 32, "text-anchor": "middle", "font-size": 13.5, fill: E() }, svg);
+          t.textContent = txt;
+        };
+        lab(N.c, 'lift "recipe:carbonara"');
+        lab(N.o, 'lift "olive-oil"');
+        lab(N.p, 'lift "pantry"');
+        const tiny = (n, txt) => {
+          const t = el("text", { x: n.x, y: n.y + 30, "text-anchor": "middle", "font-size": 10.5, fill: css("--muted") }, svg);
+          t.textContent = txt;
+        };
+        tiny(N.cl1, "olive-oil"); tiny(N.cl2, '"2 tbsp"'); tiny(N.cl3, "onions"); tiny(N.cl4, '"1"');
+        tiny(N.ol1, '"2"'); tiny(N.ol2, "pantry"); tiny(N.ol3, "carbonara"); tiny(N.ol4, '"2 tbsp"');
+        tiny(N.pl1, "olive-oil");
+      },
+    }),
+
+    // the folded view: object wired straight to its values, deltas gone — a labeled DAG
+    collapse: () => draw({
+      w: 760, h: 400,
+      nodes: {
+        e:  { kind: "entity", x: 380, y: 64, r: 24 },
+        p1: { kind: "prim", x: 240, y: 320, label: "2" },
+        p2: { kind: "entity", x: 520, y: 320, r: 17, label: ['id: "pantry"'] },
+      },
+      edges: [
+        { from: "e", to: "p1", fromPort: "quantity" },
+        { from: "e", to: "p2", fromPort: "location" },
+      ],
+      extra: (svg, N) => {
+        const t = el("text", { x: N.e.x, y: N.e.y - 38, "text-anchor": "middle", "font-size": 15, fill: E() }, svg);
+        t.textContent = 'id: "olive-oil"';
+        const lab = (a, b, txt, dx) => {
+          const mx = (N[a].x + N[b].x) / 2 + dx, my = (N[a].y + N[b].y) / 2;
+          const n = el("text", { x: mx, y: my, "text-anchor": "middle", "font-size": 13.5, fill: E(), "letter-spacing": ".06em" }, svg);
+          n.textContent = txt;
+        };
+        lab("e", "p1", "quantity", -46);
+        lab("e", "p2", "location", 46);
+      },
+    }),
+
+    conflict: () => draw({
+      w: 430, h: 360,
+      nodes: {
+        e:  { kind: "entity", x: 215, y: 52, r: 20 },
+        da: { kind: "delta", x: 110, y: 185, color: A, fill: AF, r: 26, dim: DIM, metaSide: -1, meta: ["Δ alice", "09:00"] },
+        db: { kind: "delta", x: 320, y: 185, color: B, fill: BF, r: 26, meta: ["Δ bob", "18:00"] },
+        p1: { kind: "prim", x: 110, y: 305, dim: DIM, label: "2" },
+        p2: { kind: "prim", x: 320, y: 305, label: "0" },
+      },
+      edges: [
+        { from: "da", to: "e", fromPort: "item", toPort: "quantity", dim: DIM },
+        { from: "db", to: "e", fromPort: "item", toPort: "quantity" },
+        { from: "da", to: "p1", fromPort: "quantity", dim: DIM },
+        { from: "db", to: "p2", fromPort: "quantity" },
+      ],
+      extra: (svg, N) => {
+        const t = el("text", { x: N.e.x, y: N.e.y - 32, "text-anchor": "middle", "font-size": 14.5, fill: E() }, svg);
+        t.textContent = 'id: "olive-oil"';
+        const c = el("text", { x: N.e.x, y: N.e.y + 52, "text-anchor": "middle", "font-size": 11.5, fill: css("--ink"), "letter-spacing": ".08em" }, svg);
+        c.textContent = "two voices, one property";
+      },
+    }),
+
+    twolens: () => draw({
+      w: 440, h: 360,
+      nodes: {
+        e1: { kind: "entity", x: 110, y: 105, r: 18 },
+        v1: { kind: "prim", x: 110, y: 240, label: "0" },
+        e2: { kind: "entity", x: 330, y: 105, r: 18 },
+        v2: { kind: "prim", x: 330, y: 240, label: "2" },
+      },
+      edges: [
+        { from: "e1", to: "v1", fromPort: "quantity" },
+        { from: "e2", to: "v2", fromPort: "quantity" },
+      ],
+      extra: (svg) => {
+        const l1 = el("text", { x: 110, y: 38, "text-anchor": "middle", "font-size": 13, fill: css("--bob"), "letter-spacing": ".12em" }, svg);
+        l1.textContent = "LENS: LATEST WINS";
+        const l2 = el("text", { x: 330, y: 38, "text-anchor": "middle", "font-size": 13, fill: css("--alice"), "letter-spacing": ".12em" }, svg);
+        l2.textContent = "LENS: TRUST ALICE";
+        const l3 = el("text", { x: 220, y: 330, "text-anchor": "middle", "font-size": 13, fill: css("--muted"), "letter-spacing": ".14em" }, svg);
+        l3.textContent = "same rhizome · different trees";
+      },
+    }),
+
+    negate: () => draw({
+      w: 740, h: 330,
+      nodes: {
+        db: { kind: "delta", x: 230, y: 110, color: B, fill: BF, dim: 0.45, r: 28, metaSide: -1,
+              meta: ["Δ bob", "18:00"] },
+        p:  { kind: "prim", x: 130, y: 280, dim: 0.45, label: "0" },
+        e:  { kind: "entity", x: 340, y: 280, dim: 0.45 },
+        dn: { kind: "delta", x: 560, y: 110, color: B, fill: BF, r: 28,
+              meta: ["Δ bob", "19:00"] },
+      },
+      edges: [
+        { from: "db", to: "p", fromPort: "quantity", dim: 0.45 },
+        { from: "db", to: "e", fromPort: "item", dim: 0.45 },
+        { from: "dn", to: "db", fromPort: "negates", color: css("--dead") },
+      ],
+      extra: (svg, N) => {
+        el("line", { x1: N.db.x - 22, y1: N.db.y + 22, x2: N.db.x + 22, y2: N.db.y - 22, stroke: css("--dead"), "stroke-width": 2.4 }, svg);
+        const t = el("text", { x: N.e.x, y: N.e.y + 44, "text-anchor": "middle", "font-size": 13, fill: E(), opacity: 0.45 }, svg);
+        t.textContent = 'id: "olive-oil"';
+      },
+    }),
+
+    erase: () => draw({
+      w: 740, h: 300,
+      nodes: {
+        g:  { kind: "ghost", x: 230, y: 125 },
+        dt: { kind: "dead", x: 560, y: 125, r: 30,
+              meta: ["Δ operator", "tombstone", "who · when"] },
+      },
+      edges: [
+        { from: "dt", to: "g", fromPort: "erases", color: css("--dead") },
+      ],
+      extra: (svg, N) => {
+        const t = el("text", { x: N.g.x, y: N.g.y + 6, "text-anchor": "middle", "font-size": 18, fill: css("--faint") }, svg);
+        t.textContent = "∅";
+        const b = el("text", { x: N.g.x, y: N.g.y + 58, "text-anchor": "middle", "font-size": 13, fill: css("--muted") }, svg);
+        b.textContent = "bytes gone · hash remains";
+      },
+    }),
+
+    // a schema is an OBJECT built from deltas, exactly like the pantry it describes: each delta
+    // binds one field to one resolution policy, gripping the schema's props the way ingredients
+    // grip a recipe
+    schemas: () => draw({
+      w: 860, h: 470,
+      nodes: {
+        se: { kind: "entity", x: 430, y: 60, r: 22, label: ['id: "schema:pantry"'] },
+        da: { kind: "delta", x: 250, y: 210, color: A, fill: AF, r: 26, metaSide: -1, meta: ["Δ alice"] },
+        db: { kind: "delta", x: 610, y: 210, color: A, fill: AF, r: 26, meta: ["Δ alice"] },
+        f1: { kind: "prim", x: 150, y: 370, r: 15, label: '"quantity"' },
+        p1: { kind: "prim", x: 310, y: 370, r: 15, label: "pick: latest" },
+        f2: { kind: "prim", x: 530, y: 370, r: 15, label: '"location"' },
+        p2: { kind: "prim", x: 700, y: 370, r: 15, label: "pick: latest" },
+      },
+      edges: [
+        { from: "da", to: "se", fromPort: "binds", toPort: "props" },
+        { from: "db", to: "se", fromPort: "binds", toPort: "props" },
+        { from: "da", to: "f1", fromPort: "field" },
+        { from: "da", to: "p1", fromPort: "policy" },
+        { from: "db", to: "f2", fromPort: "field" },
+        { from: "db", to: "p2", fromPort: "policy" },
+      ],
+      extra: (svg, N) => {
+        const c = el("text", { x: N.se.x, y: N.se.y + 52, "text-anchor": "middle", "font-size": 11.5, fill: css("--muted"), "letter-spacing": ".08em" }, svg);
+        c.textContent = "one delta per field · policy at every tip";
+      },
+    }),
+
+    // a renderer is an object too: a route, the fields it reads, a bundle of code — every part a
+    // delta, exactly like the schema and the pantry
+    render: () => draw({
+      w: 980, h: 440,
+      nodes: {
+        re: { kind: "entity", x: 220, y: 60, r: 22, label: ['id: "renderer:pantry"'] },
+        d1: { kind: "delta", x: 90,  y: 195, color: A, fill: AF, r: 22 },
+        d2: { kind: "delta", x: 220, y: 195, color: A, fill: AF, r: 22 },
+        d3: { kind: "delta", x: 350, y: 195, color: A, fill: AF, r: 22 },
+        p1: { kind: "prim", x: 90,  y: 330, r: 14, label: '"GET /pantry"' },
+        sc: { kind: "entity", x: 220, y: 330, r: 16, label: ['schema:pantry'] },
+        p3: { kind: "prim", x: 360, y: 330, r: 14, label: "≈ 300 lines" },
+      },
+      edges: [
+        { from: "d1", to: "re", fromPort: "part", toPort: "route" },
+        { from: "d2", to: "re", fromPort: "part", toPort: "reads" },
+        { from: "d3", to: "re", fromPort: "part", toPort: "bundle" },
+        { from: "d1", to: "p1", fromPort: "route" },
+        { from: "d2", to: "sc", fromPort: "reads" },
+        { from: "d3", to: "p3", fromPort: "bundle" },
+      ],
+      extra: (svg) => {
+        const arrow = el("text", { x: 500, y: 218, "text-anchor": "middle", "font-size": 26, fill: css("--faint") }, svg);
+        arrow.textContent = "→";
+        el("rect", { x: 580, y: 95, width: 320, height: 230, rx: 12, fill: css("--panel"), stroke: css("--faint"), "stroke-width": 1.4 }, svg);
+        const h = el("text", { x: 740, y: 138, "text-anchor": "middle", "font-size": 20, fill: E() }, svg);
+        h.textContent = "Pantry";
+        el("line", { x1: 606, y1: 160, x2: 874, y2: 160, stroke: css("--faint"), "stroke-width": 1 }, svg);
+        const r1k = el("text", { x: 612, y: 200, "font-size": 16, fill: css("--ink") }, svg); r1k.textContent = "olive-oil";
+        const r1v = el("text", { x: 868, y: 200, "text-anchor": "end", "font-size": 16, fill: css("--alice") }, svg); r1v.textContent = "2 · pantry";
+        const r2k = el("text", { x: 612, y: 242, "font-size": 16, fill: css("--ink") }, svg); r2k.textContent = "carbonara";
+        const r2v = el("text", { x: 868, y: 242, "text-anchor": "end", "font-size": 16, fill: E() }, svg); r2v.textContent = "possible ✓";
+        const f = el("text", { x: 740, y: 302, "text-anchor": "middle", "font-size": 12, fill: css("--faint"), "letter-spacing": ".12em" }, svg);
+        f.textContent = "SERVED FROM THE GROUND";
+      },
+    }),
+
+    // no kinds of delta — one cloud, identical in form; "data / schema / renderer" are only
+    // regions of it, differing in what they point at
+    apps: () => {
+      const svg = el("svg", { viewBox: "0 0 900 380", width: 900 });
+      // soft overlapping regions FIRST, behind the deltas
+      const region = (cx, cy, rx, ry, label, lx, ly) => {
+        el("ellipse", { cx, cy, rx, ry, fill: "rgba(147,189,115,0.05)", stroke: css("--faint"), "stroke-width": 1.2, "stroke-dasharray": "5 5" }, svg);
+        const t = el("text", { x: lx, y: ly, "text-anchor": "middle", "font-size": 13, fill: css("--muted"), "letter-spacing": ".18em" }, svg);
+        t.textContent = label;
+      };
+      region(270, 200, 210, 130, "DATA", 190, 90);
+      region(480, 210, 190, 120, "A SCHEMA", 470, 350);
+      region(660, 200, 200, 130, "A RENDERER", 720, 92);
+      // one field of deltas, all the same glyph, colors mixed, straddling the regions
+      const pts = [
+        [150,180,A],[210,240,B],[190,140,A],[260,190,A],[300,250,B],[240,300,A],[330,160,B],
+        [380,220,A],[430,270,A],[470,180,B],[440,150,A],[510,230,A],[490,290,B],[540,190,A],
+        [560,260,A],[600,180,B],[640,240,A],[610,150,A],[680,200,B],[700,270,A],[730,170,A],
+        [660,300,B],[760,230,A],[350,300,B],[560,320,A],[280,150,A],
+      ];
+      for (const [x, y, c] of pts) {
+        el("line", { x1: x, y1: y - 5, x2: x - 7, y2: y + 8, stroke: css("--faint"), "stroke-width": 1.1 }, svg);
+        el("line", { x1: x, y1: y - 5, x2: x + 7, y2: y + 8, stroke: css("--faint"), "stroke-width": 1.1 }, svg);
+        el("circle", { cx: x, cy: y - 6, r: 6, fill: c === A ? AF : BF, stroke: c, "stroke-width": 1.8 }, svg);
+      }
+      return svg;
+    },
+
+    fed: () => draw({
+      w: 880, h: 330,
+      nodes: {
+        x1: { kind: "delta", x: 130, y: 140, color: A, fill: AF, r: 20 },
+        x2: { kind: "delta", x: 200, y: 178, color: A, fill: AF, r: 20 },
+        x3: { kind: "delta", x: 263, y: 120, color: B, fill: BF, r: 20 },
+        y1: { kind: "delta", x: 615, y: 150, color: B, fill: BF, r: 20 },
+        y2: { kind: "delta", x: 690, y: 115, color: B, fill: BF, r: 20 },
+        y3: { kind: "delta", x: 758, y: 175, color: A, fill: AF, r: 20 },
+      },
+      edges: [],
+      extra: (svg) => {
+        el("rect", { x: 60, y: 70, width: 280, height: 165, rx: 12, fill: "none", stroke: css("--faint"), "stroke-width": 1.6 }, svg);
+        el("rect", { x: 540, y: 70, width: 280, height: 165, rx: 12, fill: "none", stroke: css("--faint"), "stroke-width": 1.6 }, svg);
+        const l1 = el("text", { x: 200, y: 52, "text-anchor": "middle", "font-size": 13, fill: css("--muted"), "letter-spacing": ".14em" }, svg);
+        l1.textContent = "ALICE'S GROUND";
+        const l2 = el("text", { x: 680, y: 52, "text-anchor": "middle", "font-size": 13, fill: css("--muted"), "letter-spacing": ".14em" }, svg);
+        l2.textContent = "BOB'S GROUND";
+        el("path", { d: "M 342 152 C 400 118, 480 118, 538 152", fill: "none", stroke: E(), "stroke-width": 2, "stroke-dasharray": "5 5" }, svg);
+        const m = el("text", { x: 440, y: 106, "text-anchor": "middle", "font-size": 13, fill: E(), "letter-spacing": ".1em" }, svg);
+        m.textContent = "union is the merge";
+        const b = el("text", { x: 440, y: 292, "text-anchor": "middle", "font-size": 13, fill: css("--muted"), "letter-spacing": ".08em" }, svg);
+        b.textContent = "share like commits · fork · merge · trust is the reader's dial";
+      },
+    }),
+  };
+
+  FIGS.whole = () => {
+    const D = (x, y, color, fill, tip, r) => ({ kind: "delta", x, y, color, fill, r: r || 20, tip });
+    const En = (x, y, tip, r) => ({ kind: "entity", x, y, r: r || 15, tip });
+    const Pr = (x, y, tip) => ({ kind: "prim", x, y, r: 11, tip });
+    return draw({
+      w: 1240, h: 640,
+      nodes: {
+        oil: En(430, 300, 'id: "olive-oil"', 20),
+        pan: En(255, 470, 'id: "pantry"'),
+        car: En(750, 220, 'id: "recipe:carbonara"', 18),
+        oni: En(1035, 420, 'id: "onions"'),
+        sch: En(255, 585, 'id: "schema:pantry"', 15),
+        ren: En(880, 560, 'id: "renderer:pantry"', 15),
+        da:  D(255, 140, A, AF, "Δ alice · 09:00 · quantity 2"),
+        dq:  D(475, 115, B, BF, "Δ bob · 18:00 · quantity 0"),
+        dn:  D(660, 60, B, BF, "Δ bob · 19:00 · negates the 18:00 claim", 16),
+        db:  D(170, 330, B, BF, "Δ bob · 11:30 · into the pantry"),
+        ds1: D(590, 360, A, AF, "Δ alice · 12:05 · carbonara uses olive oil"),
+        dr:  D(860, 95, A, AF, "Δ alice · 12:00 · names the recipe", 17),
+        ds2: D(920, 330, B, BF, "Δ bob · 12:10 · carbonara uses an onion"),
+        dt:  { kind: "dead", x: 1140, y: 130, r: 18, tip: "Δ operator · tombstone" },
+        gh:  { kind: "ghost", x: 1020, y: 200, r: 14, tip: "erased — bytes gone, hash remains" },
+        sa1: D(120, 470, A, AF, 'Δ alice · schema field "quantity": latest', 15),
+        sa2: D(395, 505, A, AF, 'Δ alice · schema field "location": latest', 15),
+        ra1: D(680, 480, A, AF, 'Δ alice · route "GET /pantry"', 15),
+        ra2: D(800, 445, A, AF, "Δ alice · reads schema:pantry", 15),
+        ra3: D(1010, 520, A, AF, "Δ alice · bundle, ≈300 lines", 15),
+        v2:  Pr(120, 235, "2"),
+        v0:  Pr(560, 205, "0"),
+        vt:  Pr(985, 60, '"Grandma\'s Carbonara"'),
+        va:  Pr(610, 490, '"2 tbsp"'),
+        v1:  Pr(1105, 300, '"1"'),
+        vf1: Pr(45, 560, '"quantity"'),
+        vp1: Pr(150, 585, "pick: latest"),
+        vf2: Pr(455, 610, '"location"'),
+        vp2: Pr(340, 630, "pick: latest"),
+        vr:  Pr(600, 570, '"GET /pantry"'),
+        vb:  Pr(1105, 600, "≈ 300 lines"),
+      },
+      edges: [
+        { from: "da", to: "oil", fromPort: "item", toPort: "quantity" },
+        { from: "da", to: "v2", fromPort: "quantity" },
+        { from: "dq", to: "oil", fromPort: "item", toPort: "quantity" },
+        { from: "dq", to: "v0", fromPort: "quantity" },
+        { from: "dn", to: "dq", fromPort: "negates", color: css("--dead") },
+        { from: "db", to: "oil", fromPort: "item", toPort: "location" },
+        { from: "db", to: "pan", fromPort: "location", toPort: "contents" },
+        { from: "ds1", to: "car", fromPort: "recipe", toPort: "ingredients" },
+        { from: "ds1", to: "oil", fromPort: "uses", toPort: "used-in" },
+        { from: "ds1", to: "va", fromPort: "amount" },
+        { from: "dr", to: "car", fromPort: "item", toPort: "title" },
+        { from: "dr", to: "vt", fromPort: "title" },
+        { from: "ds2", to: "car", fromPort: "recipe", toPort: "ingredients" },
+        { from: "ds2", to: "oni", fromPort: "uses", toPort: "used-in" },
+        { from: "ds2", to: "v1", fromPort: "amount" },
+        { from: "dt", to: "gh", fromPort: "erases", color: css("--dead") },
+        { from: "sa1", to: "sch", fromPort: "binds", toPort: "props" },
+        { from: "sa1", to: "vf1", fromPort: "field" },
+        { from: "sa1", to: "vp1", fromPort: "policy" },
+        { from: "sa2", to: "sch", fromPort: "binds", toPort: "props" },
+        { from: "sa2", to: "vf2", fromPort: "field" },
+        { from: "sa2", to: "vp2", fromPort: "policy" },
+        { from: "ra1", to: "ren", fromPort: "part", toPort: "route" },
+        { from: "ra1", to: "vr", fromPort: "route" },
+        { from: "ra2", to: "ren", fromPort: "part", toPort: "reads" },
+        { from: "ra2", to: "sch", fromPort: "reads" },
+        { from: "ra3", to: "ren", fromPort: "part", toPort: "bundle" },
+        { from: "ra3", to: "vb", fromPort: "bundle" },
+      ],
+    });
+  };
+
+  document.querySelectorAll("[data-fig]").forEach((holder) => {
+    const make = FIGS[holder.dataset.fig];
+    if (make) holder.appendChild(make(holder));
+  });
+
+  // ── deck engine + accreting ground ────────────────────────────────────────
+  const slides = Array.from(document.querySelectorAll(".slide"));
+  const stream = document.getElementById("stream");
+  const pager = document.getElementById("pager");
+  const authors = [css("--alice"), css("--bob")];
+  let i = 0, deposited = 0;
+
+  function mote(color) {
+    const svg = el("svg", { viewBox: "0 0 30 24", width: 26 });
+    svg.classList.add("mote");
+    el("line", { x1: 15, y1: 8, x2: 6, y2: 21, stroke: css("--faint"), "stroke-width": 1.2 }, svg);
+    el("line", { x1: 15, y1: 8, x2: 24, y2: 21, stroke: css("--faint"), "stroke-width": 1.2 }, svg);
+    el("circle", { cx: 15, cy: 7, r: 5, fill: css("--panel"), stroke: color, "stroke-width": 1.6 }, svg);
+    return svg;
+  }
+  function deposit(n) {
+    for (let k = 0; k < n; k++) {
+      stream.appendChild(mote(authors[deposited % 2]));
+      deposited++;
+      const motes = stream.querySelectorAll(".mote");
+      if (motes.length > 60) motes[0].remove();
+    }
+  }
+  const frags = (s) => Array.from(s.querySelectorAll(".frag"));
+  function show(n) {
+    slides[i].classList.remove("on");
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides[i].classList.add("on");
+    pager.textContent = (i + 1) + " / " + slides.length;
+  }
+  function next() {
+    const pending = frags(slides[i]).filter((f) => !f.classList.contains("in"));
+    if (pending.length > 0) { pending[0].classList.add("in"); return; }
+    if (i < slides.length - 1) {
+      deposit(parseInt(slides[i].dataset.motes || "0", 10));
+      show(i + 1);
+    }
+  }
+  function prev() {
+    if (i > 0) show(i - 1);
+    frags(slides[i]).forEach((f) => f.classList.add("in"));
+  }
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowRight" || e.key === " " || e.key === "PageDown") { e.preventDefault(); next(); }
+    else if (e.key === "ArrowLeft" || e.key === "PageUp") { e.preventDefault(); prev(); }
+    else if (e.key === "Home") show(0);
+    else if (e.key === "End") show(slides.length - 1);
+  });
+  document.getElementById("deck").addEventListener("click", next);
+  show(0);
+})();
+</script>
+
+</body>
+</html>

@@ -33,5 +33,7 @@ await build({
 cpSync(join(root, "demos", "tutorial", "index.html"), join(out, "index.html"));
 cpSync(join(root, "demos", "tutorial", "style.css"), join(out, "style.css"));
 cpSync(join(root, "demos", "tutorial", "packets"), join(out, "packets"), { recursive: true });
+// The concept deck: a self-contained standalone page the landing links to, no bundling needed.
+cpSync(join(root, "demos", "tutorial", "intro.html"), join(out, "intro.html"));
 
 console.log("loam: built site-dist/ (the tutorial, self-contained)");
