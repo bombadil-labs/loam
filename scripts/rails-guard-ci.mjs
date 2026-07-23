@@ -16,30 +16,20 @@
 // false positive, at the cost of not guarding the authoring commit itself — which the in-session
 // hook already covers, and which a reviewer reads directly.
 //
-// FROZEN MEANS DECLARED ON THE BASE, NOT MERELY PRESENT ON IT. The first version asked only whether
-// the rail's FILE existed on the base, and read the declarations from the WORKING store. Both halves
-// were wrong, in opposite directions:
+// FROZEN MEANS DECLARED ON THE BASE, NOT MERELY PRESENT ON IT — the definition is two-sided:
 //
-//   - Too strict. A ticket earns its rails at P3 by writing tests, and those tests usually land
-//     inside a suite that already exists (`test/store/contract.test.ts` is where a seam contract is
-//     witnessed — that is the point of a contract suite). Declaring such a file and extending it in
-//     the same PR made the PR fail its own gate, which is precisely the every-ticket bypass the
-//     paragraph above exists to prevent. It just moved from added files to extended ones.
-//   - Too lax. Reading declarations from the working store let a branch DELETE a ticket's `rails`
-//     entry and then edit the file freely — the freeze evaporated on request. Asking the base what
-//     was frozen closes that: a branch cannot un-declare its way out of a rail it inherited.
+//   - Too strict: rails usually land inside a suite that already exists on the base (the point of
+//     a contract suite), so a gate keyed on the FILE's presence makes a PR that declares and
+//     extends such a suite fail its own gate — the every-ticket bypass again, moved from added
+//     files to extended ones.
+//   - Too lax: declarations read from the WORKING store let a branch delete a ticket's `rails`
+//     entry and then edit the file freely. Only the base can say what the base froze.
 //
-// So the guarded set is computed from the base tree's own ticket shards. A rail becomes frozen at
-// the merge that declares it, and stays frozen no matter what the branch says about it afterward.
-//
-// AND THE FREEZE MUST SURVIVE THE TICKET'S LANDING (ticket T69). Read from `.adlc/tickets/` alone,
-// the freeze evaporates at the exact moment it starts mattering: P6 used to REMOVE the realized
-// ticket from the store, so a rail was frozen only while its work was unfinished, and the tests
-// guarding a bug the repo had already paid for went unguarded forever after. Landing therefore
-// ARCHIVES the ticket into `.adlc/ticket-archive/` (the committed allowlist has always reserved the
-// directory), and this gate reads BOTH directories: a live ticket's rails and a landed ticket's
-// rails are equally frozen. A branch cannot un-archive its way out either — the union is computed
-// from the base tree, same as everything else here.
+// So the guarded set is computed from the base tree's own ticket shards — and the freeze survives
+// the ticket's landing: P6 archives the realized ticket into `.adlc/ticket-archive/`, and this
+// gate reads BOTH directories, so a live ticket's rails and a landed ticket's rails are equally
+// frozen. A branch can neither un-declare nor un-archive its way out; the union is computed from
+// the base tree, same as everything else here.
 //
 // Exit codes are rails-guard's own: 0 pass, 1 operational, 2 a rail was edited.
 
@@ -80,11 +70,10 @@ try {
   ])
     .split("\n")
     .filter((p) => p.endsWith(".json") && !p.endsWith("/.store.json"));
-  // One `git cat-file --batch` for every shard, not one `git show` each: tombstones accumulate and
-  // (post-T69) so do archived tickets, so the per-shard spawn is the shape that grows forever —
-  // H8's own trap, on the file whose job is enforcement. Batch output is length-prefixed and sliced
-  // as BYTES before decoding: ticket bodies carry multi-byte characters, and a char-indexed slice
-  // would tear the record after them.
+  // One `git cat-file --batch` for every shard, not one `git show` each: tombstones and archived
+  // tickets accumulate, so the per-shard spawn is the shape that grows forever (H8). Batch output
+  // is length-prefixed and sliced as BYTES before decoding: ticket bodies carry multi-byte
+  // characters, and a char-indexed slice would tear the record after them.
   tickets = [];
   const raw = execFileSync("git", ["cat-file", "--batch"], {
     input: shards.map((p) => `${base}:${p}`).join("\n"),

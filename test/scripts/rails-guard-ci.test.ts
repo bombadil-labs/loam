@@ -1,10 +1,7 @@
-// The rail backstop's own rails (ticket T69). The wrapper is trust-root — it decides which frozen
-// tests a PR may not touch — and it shipped twice with a freeze that was not one: first freezing on
-// file-presence while reading declarations from the WORKING store (a branch could un-declare its
-// way out), then reading the base's live tickets only, so the freeze evaporated at the exact moment
-// P6 archived the realized ticket. These tests drive the wrapper against real fixture repositories,
-// because the failure modes were all in what git state it consulted — a unit test of the glob logic
-// would have been green through both bugs.
+// The rail backstop's own rails. The wrapper is trust-root — it decides which frozen tests a PR
+// may not touch — and its failure modes live in WHICH git state it consults, so these tests drive
+// it against real fixture repositories; a unit test of the glob logic alone cannot see a freeze
+// read from the wrong store.
 //
 // The wrapper's last step execs the real `adlc` CLI, so these tests need it on PATH; they skip
 // loudly when it is absent rather than fake the gate they exist to prove.
@@ -117,9 +114,8 @@ const ticket = (id: string, rails: string[]): object => ({
 
 describe.skipIf(!hasAdlc)("rails-guard-ci: the freeze survives the ticket's landing", () => {
   it("RED: a branch edits a rail declared by an ARCHIVED (landed) ticket", () => {
-    // The case that was silently green for the gate's whole life: P6 archives the realized
-    // ticket, and a rail nobody still lists in tickets/ is exactly the rail guarding a bug the
-    // repo already paid for.
+    // P6 archives the realized ticket, and a rail nobody still lists in tickets/ is exactly the
+    // rail guarding a bug the repo already paid for — it must stay frozen.
     const root = fixture({
       baseArchive: { "t1--aaaa.json": ticket("T1", ["test/foo.test.ts"]) },
       baseFiles: { "test/foo.test.ts": "expect(true).toBe(true) // the rail\n" },
@@ -140,9 +136,9 @@ describe.skipIf(!hasAdlc)("rails-guard-ci: the freeze survives the ticket's land
   });
 
   it("GREEN: a branch FIRST-DECLARING a rail inside a pre-existing suite passes its own gate", () => {
-    // T67's exact shape: the suite exists on the base, no base ticket declares it, and the branch
-    // both declares and extends it. Failing this is the every-ticket bypass the wrapper exists to
-    // prevent — it would teach everyone to reach for ADLC_RAILS_BYPASS as routine.
+    // The suite exists on the base, no base ticket declares it, and the branch both declares and
+    // extends it. Failing this is the every-ticket bypass the wrapper exists to prevent — it
+    // would teach everyone to reach for ADLC_RAILS_BYPASS as routine.
     const root = fixture({
       baseFiles: { "test/existing.test.ts": "expect(1).toBe(1)\n" },
       branchTickets: { "t3--cccc.json": ticket("T3", ["test/existing.test.ts"]) },
@@ -155,7 +151,7 @@ describe.skipIf(!hasAdlc)("rails-guard-ci: the freeze survives the ticket's land
 
   it("GREEN: a branch cannot un-archive its way out — deleting the archived shard changes nothing", () => {
     // The working store is never consulted, so removing the declaration on the branch leaves the
-    // base's freeze intact. (The same property that already held for tickets/ under-declaration.)
+    // base's freeze intact.
     const root = fixture({
       baseArchive: { "t4--dddd.json": ticket("T4", ["test/foo.test.ts"]) },
       baseFiles: { "test/foo.test.ts": "expect(true).toBe(true)\n" },
@@ -188,9 +184,8 @@ describe.skipIf(!hasAdlc)("rails-guard-ci: the freeze survives the ticket's land
   });
 
   it("a `**` glob freezes the whole subtree it names — the glob path is exercised, not assumed", () => {
-    // The wrapper's only non-literal glob support. Left untested, hollow-test showed its regex
-    // translation could be corrupted with every fixture still green, because every other case
-    // uses literal paths.
+    // The wrapper's only non-literal glob support; every other case uses literal paths, so only
+    // this fixture exercises the regex translation.
     const root = fixture({
       baseArchive: { "t6--ffff.json": ticket("T6", ["test/deep/**"]) },
       baseFiles: { "test/deep/nested/foo.test.ts": "expect(true).toBe(true)\n" },
@@ -200,9 +195,8 @@ describe.skipIf(!hasAdlc)("rails-guard-ci: the freeze survives the ticket's land
   });
 
   it("a `*` WITHIN a segment is a wildcard, not a literal — `test/store/*.test.ts` freezes the directory", () => {
-    // Pinned because a cross-model review claimed the escape class swallowed `*` (it misquoted the
-    // code — the class deliberately omits `*` so the second replace can translate it). A fixture is
-    // cheaper than an argument, and it keeps the claim decided forever.
+    // The escape class deliberately omits `*` so the second replace can translate it into a
+    // within-segment wildcard; this fixture keeps that decided.
     const root = fixture({
       baseArchive: { "t9--2222.json": ticket("T9", ["test/store/*.test.ts"]) },
       baseFiles: { "test/store/mirror.test.ts": "expect(true).toBe(true)\n" },
@@ -212,9 +206,8 @@ describe.skipIf(!hasAdlc)("rails-guard-ci: the freeze survives the ticket's land
   });
 
   it("a base tree with NO ticket-archive directory is handled, not fatal", () => {
-    // Also claimed by review: that a missing pathspec makes git ls-tree fatal and bricks CI on any
-    // repo that has never archived. Verified false empirically (a missing pathspec lists nothing,
-    // exit 0) — and pinned here so the empty-archive repo shape stays a first-class case.
+    // A pathspec matching nothing makes `git ls-tree` list nothing (exit 0), not fail — pinned
+    // so the never-archived repo shape stays a first-class case.
     const root = fixture({
       baseTickets: { "t10--3333.json": ticket("T10", ["test/foo.test.ts"]) },
       baseFiles: { "test/foo.test.ts": "expect(true).toBe(true)\n" },
@@ -225,9 +218,9 @@ describe.skipIf(!hasAdlc)("rails-guard-ci: the freeze survives the ticket's land
   });
 
   it("a mid-path `**` matches ZERO directories too — `test/**/pin.test.ts` freezes `test/pin.test.ts`", () => {
-    // The collapse of `[^\0]*/` into `(?:.*/)?` is what makes the intermediate segment optional.
-    // hollow-test corrupted that replace with every other fixture green; under the mutant this
-    // rail reads as unborn (the file stops matching the glob) and the edit sails through.
+    // The collapse of `[^\0]*/` into `(?:.*/)?` is what makes the intermediate segment optional;
+    // without it the file stops matching the glob, the rail reads as unborn, and the edit sails
+    // through. No other fixture reaches that replace.
     const root = fixture({
       baseArchive: { "t8--1111.json": ticket("T8", ["test/**/pin.test.ts"]) },
       baseFiles: { "test/pin.test.ts": "expect(true).toBe(true)\n" },

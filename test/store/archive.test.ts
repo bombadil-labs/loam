@@ -23,10 +23,9 @@ import { ArchiveBackend } from "../../src/store/archive.js";
 import { FERN, GARDENER_SEED, SURVEYOR_SEED, observed } from "../spike/garden.js";
 
 // The archive does real filesystem work — one file per delta, write+fsync+rename each — and the
-// many-ids purge sweep writes ~100 of them. Under a loaded CI runner (Windows especially, where
-// fsync is dearer) that blows vitest's 5s default. The same generous hang-guard the other heavy
-// suites carry (contract.test.ts, pack.test.ts — which learned this first): it only ever matters
-// when something is genuinely stuck.
+// many-ids purge sweep writes ~100 of them, which blows vitest's 5s default on a loaded CI
+// runner. The same generous hang-guard the other heavy suites carry; it only ever matters when
+// something is genuinely stuck.
 vi.setConfig({ testTimeout: 15000 });
 
 const signed = observed(FERN, "height", 30, 1000, GARDENER_SEED);
