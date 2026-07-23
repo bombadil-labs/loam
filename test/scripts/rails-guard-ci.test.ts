@@ -186,6 +186,18 @@ describe.skipIf(!hasAdlc)("rails-guard-ci: the freeze survives the ticket's land
     expect(runGate(root).code).toBe(2);
   });
 
+  it("a mid-path `**` matches ZERO directories too — `test/**/pin.test.ts` freezes `test/pin.test.ts`", () => {
+    // The collapse of `[^\0]*/` into `(?:.*/)?` is what makes the intermediate segment optional.
+    // hollow-test corrupted that replace with every other fixture green; under the mutant this
+    // rail reads as unborn (the file stops matching the glob) and the edit sails through.
+    const root = fixture({
+      baseArchive: { "t8--1111.json": ticket("T8", ["test/**/pin.test.ts"]) },
+      baseFiles: { "test/pin.test.ts": "expect(true).toBe(true)\n" },
+      branchEdits: { "test/pin.test.ts": "expect(true).toBe(true) // edited\n" },
+    });
+    expect(runGate(root).code).toBe(2);
+  });
+
   it("GREEN: a declared rail whose file is not on the base yet is unborn, and unborn is exit 0", () => {
     // The pre-declared-ticket case. If this exits non-zero, every PR fails CI from the moment any
     // ticket declares a rail it has not yet written — the gate would train everyone to bypass it.
