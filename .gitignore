@@ -33,3 +33,8 @@ site-dist/
 !.adlc/ticket-archive/
 !.adlc/ticket-archive/**
 !.adlc/specs/
+
+# A failed rename leaves an orphaned temp file wearing this shape (archive.ts writes
+# <target>.<pid>.tmp then renames); a mutation run does it in the repo root. Never committable —
+# one of these once carried the erasure canary INTO git history on the PR about byte-erasure.
+/*.tmp

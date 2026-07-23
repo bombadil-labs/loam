@@ -326,10 +326,21 @@ describe("erase refuses to report a completion it cannot evidence", () => {
     const { gateway, backend, fact } = await grove();
     // The documented partial-success: sqlite's purge deletes the rows and may still throw when it
     // cannot truncate the WAL, leaving the caller "a partial erasure to retry, not a failed one to
-    // redo". Modelled here as a purge that removes the bytes and then refuses.
+    // redo". Modelled as a purge that removes the rows and refuses — AND a `holds` that answers
+    // UNPROVABLE while the debt stands, because that is what the real driver does (the owed-id
+    // set): a double whose purge cries INCOMPLETE while its holds says all-clean is a double that
+    // lies about what it holds, and the retry guard would read the lie as a finished erasure.
     const real = backend.purge.bind(backend);
+    const realHolds = backend.holds.bind(backend);
+    // The debt's whole lifecycle, as the real driver keeps it: unprovable from the refused
+    // checkpoint until a later purge's checkpoint SUCCEEDS — which happens DURING the retry, not
+    // before it. The guard must see the debt (that is what lets the retry through); the verdict
+    // after the retry's own purge must see it cleared.
+    let debtOwed = false;
+    backend.holds = (id) => (debtOwed ? Promise.resolve(true) : realHolds(id));
     backend.purge = async (ids) => {
       await real(ids);
+      debtOwed = true;
       throw new Error(
         "purge: the rows were deleted but the write-ahead log could not be truncated",
       );
@@ -342,8 +353,13 @@ describe("erase refuses to report a completion it cannot evidence", () => {
     ).length;
 
     // The operator re-runs, exactly as the error instructs. The bytes are already gone, so purge
-    // now returns 0 — which must NOT read as failure, and must NOT append a second tombstone.
-    backend.purge = real;
+    // now returns 0 — which must NOT read as failure, and must NOT append a second tombstone. Its
+    // checkpoint lands this time, settling the debt mid-call, exactly as sqlite's does.
+    backend.purge = async (ids) => {
+      const n = await real(ids);
+      debtOwed = false;
+      return n;
+    };
     await expect(gateway.erase(fact.id, { reason: "the subject asked" })).resolves.toMatchObject({
       erased: fact.id,
     });

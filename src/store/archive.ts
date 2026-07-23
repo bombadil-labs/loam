@@ -106,7 +106,17 @@ export class ArchiveBackend implements StoreBackend {
       } finally {
         closeSync(fd);
       }
-      renameSync(tmp, target);
+      try {
+        renameSync(tmp, target);
+      } catch (err) {
+        // A failed rename must not leave the temp file behind: it holds a FULL delta under a name
+        // no read returns, which is exactly the byte-at-rest shape `holds` and §11 exist to hunt —
+        // and wherever the write landed (a bad target puts it in the process CWD), the next
+        // `git add -A` offers it to history, where no purge can ever reach it. That is not a
+        // hypothetical: a mutation run once committed this repo's own erasure canary that way.
+        rmSync(tmp, { force: true });
+        throw err;
+      }
       this.onDisk.add(d.id);
       stored += 1;
     }
@@ -227,6 +237,12 @@ export class ArchiveBackend implements StoreBackend {
 
   async holds(id: string): Promise<boolean> {
     this.assertOpen();
+    // Fast path: a delta at its canonical name is held, one stat, no walk. Only the POSITIVE
+    // answer may short-circuit — absence still pays the exhaustive sweep below, because the bytes
+    // worth finding are exactly the ones not at their canonical name (a crash-left `.tmp`, a
+    // misfiled copy), and a fast path that answered "absent" from one stat would hollow the
+    // straggler rails outright.
+    if (existsSync(this.fileFor(id))) return true;
     // The same reach as `purge`, deliberately: every fan (a misfiled copy is still the bytes) and
     // both name shapes (`<id>.json` and the `<id>.json.<pid>.tmp` a crash leaves between fsync and
     // rename). NOT `deltasSince`, which skips the straggler by design, and NOT `onDisk`, which

@@ -1,1 +1,0 @@
-{"claims":{"timestamp":5000,"author":"ed25519:bc7cbcb5636375fa1d82434d466724d92377f53b980695dd49d26d0ce12205a5","pointers":[{"role":"subject","target":{"id":"plant:fern","context":"height"}},{"role":"value","target":0}]},"sig":"a86ffe87d234fdb8bc2b087e6d0ebe4c2d8f3f14ff88b5cddc262cbfba5cf8402746b14078603133e940f84daff77ca7bcec6504b0a9a419641e8e3c683c410e"}

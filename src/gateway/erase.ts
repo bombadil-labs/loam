@@ -303,7 +303,16 @@ export async function eraseImpl(
   // clean pair while the other tier quietly keeps the bytes. Only byte-presence answers §11, and it
   // is asked at the end of this function — after re-seating and after the pool fan-out, so no tier
   // is skipped by a local miss.
-  await gw.backend.purge([id]);
+  // The local tier's refusal is a FAULT TO COLLECT, never an abort: thrown here it would deny the
+  // tombstone and the sweep to every attached pool — one tier's fault becoming every replica's
+  // leak, the exact rule the pool walk below exists to keep. The bytes it failed to remove are
+  // still reported: `holds` sees them (or the tier's owed-truncation debt) in the verdict.
+  let localPurge: unknown;
+  try {
+    await gw.backend.purge([id]);
+  } catch (err) {
+    localPurge = err;
+  }
   await gw.reseat();
   // §24.8 — the erasure reaches every attached QUARANTINE POOL (the operator's own replicas of this
   // ground): the same tombstone lands there and the byte is purged there too, so a forgotten record can
@@ -315,9 +324,15 @@ export async function eraseImpl(
   // id, and the retry starves them identically for as long as the one faulty replica stays broken.
   // One replica's fault must not become every other replica's leak; `MirrorBackend.purge`/`close`
   // compose failures this way for the same reason.
+  // Membership is claimed SYNCHRONOUSLY at dispatch. The walk is concurrent now, and
+  // `quarantinePools` is a public mutable set — one pool attached beneath two parents is
+  // reachable — so a claim recorded only after the child's own awaits would let two branches
+  // dispatch the same gateway before either wrote it down.
   const seen = new Set<Gateway>([gw]);
+  const targets = [...gw.quarantinePools].filter((pool) => !seen.has(pool));
+  for (const pool of targets) seen.add(pool);
   const fanned = await Promise.allSettled(
-    [...gw.quarantinePools].map((pool) => pool.eraseReplica(tombstone, id, seen)),
+    targets.map((pool) => pool.eraseReplica(tombstone, id, seen)),
   );
   // NOW the verdict, once every tier has been swept — asked of the BYTES, unconditionally. The
   // count no longer gates it: a positive count proves some tier removed something, never that every
@@ -330,6 +345,12 @@ export async function eraseImpl(
   // this ground also retains — or its own `holds` rejects, which is the unreachable-tier case — an
   // early throw would discard every replica refusal already collected.
   const faults = await incompleteErasureFaults(gw, id, fanned);
+  if (localPurge !== undefined) {
+    faults.unshift({
+      what: `this store's purge refused: ${localPurge instanceof Error ? localPurge.message : JSON.stringify(localPurge)}`,
+      cause: localPurge,
+    });
+  }
   if (faults.length > 0) {
     throw new Error(
       `erase ${id}: the tombstone is recorded and every tier was swept, but the content is STILL ` +
@@ -433,7 +454,12 @@ export async function eraseReplicaImpl(
       `the erasure did not complete: the operator's tombstone for ${id} could not land in an attached pool`,
     );
   }
-  await gw.backend.purge([id]);
+  let localPurge: unknown;
+  try {
+    await gw.backend.purge([id]);
+  } catch (err) {
+    localPurge = err; // collected below — a pool tier's fault must not starve its own children
+  }
   await gw.reseat();
   // Transitive FIRST, verdict LAST — the same order `eraseImpl` keeps, and for the same reason.
   // A verdict thrown before the walk would abort delivery to every pool ordered behind this one
@@ -448,10 +474,10 @@ export async function eraseReplicaImpl(
   // not hide the sibling that also could not, which is exactly how `MirrorBackend.purge` and
   // `close` already compose their failures.
   seen.add(gw);
+  const nested = [...gw.quarantinePools].filter((pool) => !seen.has(pool));
+  for (const pool of nested) seen.add(pool); // claimed at dispatch — see the eraseImpl note
   const walked = await Promise.allSettled(
-    [...gw.quarantinePools]
-      .filter((pool) => !seen.has(pool))
-      .map((pool) => pool.eraseReplica(tombstone, id, seen)),
+    nested.map((pool) => pool.eraseReplica(tombstone, id, seen)),
   );
   // This tier's own bytes AND every nested refusal, in ONE report — the same collector `eraseImpl`
   // uses, shared so the two halves of the fan-out cannot drift on how faults compose. A pool is
@@ -462,6 +488,12 @@ export async function eraseReplicaImpl(
   // whose store cannot be ASKED is a fault to report beside the others, never an escape hatch that
   // drops the nested refusals already in hand.
   const faults = await incompleteErasureFaults(gw, id, walked);
+  if (localPurge !== undefined) {
+    faults.unshift({
+      what: `this pool's purge refused: ${localPurge instanceof Error ? localPurge.message : JSON.stringify(localPurge)}`,
+      cause: localPurge,
+    });
+  }
   if (faults.length > 0) {
     throw new Error(
       `the erasure did not complete in an attached quarantine pool: a forgotten record must not ` +

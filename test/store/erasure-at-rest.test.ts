@@ -161,6 +161,30 @@ describe("§11 at rest — sqlite", () => {
     await reopened.close();
   });
 
+  it("a latched debt belongs to ITS ids: an unrelated purge under the same busy WAL is untouched", async () => {
+    // The handle-wide version of the latch failed every later purge while any reader held the
+    // WAL — including for ids this store never held — persisted forever, across restarts. The
+    // debt is a set of ids now: A's owed truncation cannot refuse B's erasure.
+    const dir = scratch();
+    const store = new SqliteBackend(join(dir, "store.db"));
+    const owed = canary(MARKER, 1000);
+    await store.append([owed]);
+    const db = (store as unknown as { db: { pragma: (s: string, o?: unknown) => unknown } }).db;
+    const realPragma = db.pragma.bind(db);
+    db.pragma = (sql: string, opts?: unknown) =>
+      sql.startsWith("wal_checkpoint") ? [{ busy: 1 }] : realPragma(sql, opts);
+    await expect(store.purge([owed.id])).rejects.toThrow(/INCOMPLETE/); // A owes a truncation
+
+    // B was never here; the checkpoint is STILL busy. B's purge must not inherit A's debt...
+    await expect(store.purge([canary(SURVIVOR, 2000).id])).resolves.toBe(0);
+    // ...and byte-presence stays scoped the same way: A unprovable, B provably absent.
+    expect(await store.holds(owed.id)).toBe(true);
+    expect(await store.holds(canary(SURVIVOR, 2000).id)).toBe(false);
+
+    db.pragma = realPragma;
+    await store.close();
+  });
+
   it("a purge that matched NOTHING does not fail on a busy checkpoint (ticket T67)", async () => {
     // The other side of ungating the checkpoint. `purge` is called on every attached quarantine
     // pool and on every boot `heal` sweep carrying the whole accumulated tombstone set, and those

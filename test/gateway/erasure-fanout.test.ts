@@ -222,6 +222,39 @@ describe("§24.8 rail (g) — a pool that retains makes the primary's erase REFU
     await primary.close();
   });
 
+  it("a pool attached beneath TWO parents is visited exactly once — the walk claims before it awaits", async () => {
+    // quarantinePools is a public mutable set, so a diamond is reachable; under the concurrent
+    // fan-out a membership claim recorded only after the child's own awaits would let both
+    // parents dispatch the same gateway. Two overlapping federate/flush/reseat sequences against
+    // one reactor is the blast radius; visited-once is the property.
+    const primary = await bootPrimary();
+    const secret = observed(FERN, "message", "one-visit-only", 2000, OP_SEED);
+    await primary.append([secret]);
+    const p1 = await primary.openQuarantine({ backend: new MemoryBackend() });
+    const p2 = await primary.openQuarantine({ backend: new MemoryBackend() });
+    const cBackend = new MemoryBackend();
+    const c = await p1.gateway.openQuarantine({ backend: cBackend });
+    p2.gateway.quarantinePools.add(c.gateway); // the diamond: C beneath P1 AND P2
+
+    let visits = 0;
+    const orig = c.gateway.eraseReplica.bind(c.gateway);
+    c.gateway.eraseReplica = (tomb, id, seen) => {
+      visits += 1;
+      return orig(tomb, id, seen);
+    };
+
+    await expect(primary.erase(secret.id, { reason: "the subject asked" })).resolves.toMatchObject({
+      erased: secret.id,
+    });
+    expect(visits).toBe(1);
+    await backendForgot(cBackend, secret.id, "one-visit-only");
+    p2.gateway.quarantinePools.delete(c.gateway);
+    await c.drop();
+    await p2.drop();
+    await p1.drop();
+    await primary.close();
+  });
+
   it("POSITIVE CONTROL: the same two-pool shape with nothing retained completes normally", async () => {
     // Without this, both rails above would pass against an `erase` that always threw.
     const primary = await bootPrimary();
