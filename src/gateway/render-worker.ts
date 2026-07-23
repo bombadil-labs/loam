@@ -80,7 +80,19 @@ export function renderInWorker(bundle: string, node: unknown): Promise<RenderRes
       void worker.terminate();
       resolve(r);
     };
-    const timer = setTimeout(() => finish(timedOut), RENDER_TIMEOUT_MS);
+    // TWO clocks, not one. Armed only at construction, the timer charged worker SPAWN — thread
+    // start, isolate init, first schedule — against the render's budget, and under host load spawn
+    // alone consumed most of it: legitimate renders timed out before executing a line, and the
+    // memory bound could never win its race with the timer (the T73 flake — the §23.9 rail was
+    // right and the clock was wrong). So construction arms a SPAWN bound, and `online` — the
+    // moment the bundle can actually run — re-arms a fresh RENDER bound. Both windows stay hard;
+    // no path is unbounded.
+    let timer = setTimeout(() => finish(timedOut), RENDER_TIMEOUT_MS);
+    worker.once("online", () => {
+      if (settled) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => finish(timedOut), RENDER_TIMEOUT_MS);
+    });
     worker.on("message", (msg: { kind?: string; html?: string }) => {
       if (msg.kind === "ok" && typeof msg.html === "string") {
         finish({ status: 200, contentType: HTML, body: msg.html });
