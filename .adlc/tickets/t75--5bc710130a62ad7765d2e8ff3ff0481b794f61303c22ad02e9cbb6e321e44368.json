@@ -1,0 +1,15 @@
+{
+  "body": "LOW-MEDIUM, test reliability / render-path robustness. Observed 2026-07-24 while landing T74: on a FULL `vitest run`, `renderers.test.ts > publishes a renderer and serves the route as HTML` and `render-sandbox.test.ts > the happy path is unchanged ... (rail b)` each returned 500 instead of 200 — ONCE. Both passed on re-run and pass 24/24 in isolation. So it is a load flake, not a broken renderer: the render path spawns a bounded worker (§23.9) to execute a bundle, and under full-suite CPU contention the worker's own deadline (or spawn) is missed, surfacing as a 500 from `serveRoute`.\n\nWHY IT MATTERS. A 500-under-contention is indistinguishable, to a caller, from a genuinely broken renderer — and the §23.9 bounded-worker rail exists precisely to keep a bad bundle from wedging the host, so a false 500 on a GOOD bundle erodes the exact guarantee that rail asserts. It also trains a red-bar reader to re-run instead of investigate (the flake discipline's named harm).\n\nMEASURE FIRST (flake discipline). Reproduce under load (e.g. run the full suite repeatedly, or pin CPU) and confirm: happy-path 500s only under contention, never in isolation; on the branch AND on main. Attribute to the worker's timeout/spawn, not the bundle.\n\nTHE FIX (determine which, do not widen the assertion). Either (a) the worker's happy-path render deadline is too tight to survive contention and should be raised / made wall-clock-fair while KEEPING the bad-bundle timeout rail meaningful (the two deadlines may need to differ: a real render gets generous time, a wedged bundle is still killed), or (b) the test spawns workers with insufficient isolation and should serialize the render-worker tests. Prefer (a) if the production path is genuinely fragile under load — that is a real robustness bug, not just a test issue.\n\nEvidence: PR #188 description (the timeout-flake fix that surfaced this); the render worker lives in src/gateway/render-worker.ts and is invoked from serveRoute in src/gateway/renderers.ts.",
+  "edges": [],
+  "id": "T75",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "src/gateway/render-worker.ts",
+    "src/gateway/renderers.ts",
+    "test/gateway/renderers.test.ts",
+    "test/gateway/render-sandbox.test.ts"
+  ],
+  "status": "todo",
+  "title": "Render worker starves under full-suite CPU contention — a 500 that only appears at load"
+}
