@@ -7,7 +7,7 @@
 // curated, since bytes follow posture — that is neither attached nor covered by a surviving
 // detach record. An unreachable wall is a named fault, never a silent gap.
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -35,27 +35,27 @@ const genesis = () =>
   });
 
 describe("T32 criterion 11 — no §20 step needed, proven", () => {
-  it("a pre-mint store opens with identical ids and identical resolved views", async () => {
+  it("the previous release's actual bytes open with identical ids and identical resolved views", async () => {
+    // The golden store at test/fixtures/pre-t32/ was WRITTEN BY MAIN'S OWN CODE (a probe
+    // worktree at the pre-T32 revision ran the generator; expected.json captured that build's
+    // ids and resolved view). This is the byte-for-byte previous-release fixture the criterion
+    // demands — a store both sessions of the LIFTED build wrote would prove only
+    // reopen-idempotence, and would stay green through exactly the regression class a §20 step
+    // exists for. Regenerate deliberately, from a pre-T32 revision, never from this branch.
+    const golden = join("test", "fixtures", "pre-t32");
+    const expected = JSON.parse(readFileSync(join(golden, "expected.json"), "utf8")) as {
+      ids: string[];
+      view: unknown;
+    };
     const path = join(tmp, "pre-mint.db");
-    // Session one: a store holding ONLY pre-T32 vocabulary — genesis, registrations, facts.
-    const before = await Gateway.boot(new SqliteBackend(path), genesis());
-    await before.append([
-      observed(FERN, "height", 30, 1000, OP_SEED),
-      observed(FERN, "height", 34, 2000, OP_SEED),
-      observed(FERN, "tag", "shade", 1500, OP_SEED),
-    ]);
-    await before.flush();
-    const idsBefore = [...before.reactor.snapshot()].map((d) => d.id).sort();
-    const viewBefore = await before.query(`{ Plant(entity: "${FERN}") { height tag } }`);
-    await before.close();
+    copyFileSync(join(golden, "store.db"), path); // never write beside the checked-in artifact
 
-    // Session two, lifted code: same ids, same view, an empty container table, zero defects.
     const after = await Gateway.open(new SqliteBackend(path), { seed: OP_SEED });
     after.replayRegistrations();
     await after.preloadResolvers();
-    expect([...after.reactor.snapshot()].map((d) => d.id).sort()).toEqual(idsBefore);
+    expect([...after.reactor.snapshot()].map((d) => d.id).sort()).toEqual(expected.ids);
     const viewAfter = await after.query(`{ Plant(entity: "${FERN}") { height tag } }`);
-    expect(viewAfter).toEqual(viewBefore);
+    expect(viewAfter).toEqual(expected.view);
     const table = after.containers();
     expect(table.containers.size).toBe(0);
     expect(table.defects).toEqual([]);

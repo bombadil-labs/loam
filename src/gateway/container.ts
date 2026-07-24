@@ -597,11 +597,18 @@ export function containerScopeImpl(
     return { deltas: gw.select(term), ground: gw };
   };
 
-  const union = new Map<string, { delta: Delta; ground: Gateway }>();
+  // EVERY contributing ground is remembered per delta, never a first-wins home (the suppression
+  // lens's finding): a wall's snapshot and a property query can admit the SAME id, and only one
+  // of their grounds may hold the strike — the wall is a point-in-time copy, the primary is
+  // live. Closing over one arbitrary contributor made the reader's verdict depend on the
+  // lexicographic sort of container names; closing over every contributor cannot.
+  const contributions = new Map<Gateway, Map<string, Delta>>();
   for (const name of requested) {
     if (!isActive(name)) continue; // a detach cover contributes NOTHING, without any exclusion
     const { deltas, ground } = membersOf(name);
-    for (const d of deltas) if (!union.has(d.id)) union.set(d.id, { delta: d, ground });
+    const per = contributions.get(ground) ?? new Map<string, Delta>();
+    for (const d of deltas) if (!per.has(d.id)) per.set(d.id, d);
+    contributions.set(ground, per);
   }
 
   // The minus side: members of every excluded, declared, ACTIVE container — a detached container
@@ -613,18 +620,12 @@ export function containerScopeImpl(
   }
 
   // Subtract, THEN close: the closure re-admits any negation whose target survives the
-  // subtraction — from admitted deltas to the negations OF them, per home ground, never the
-  // reverse (narrowing may drop a claim; it must never revive one).
-  const survivors = [...union.values()].filter(({ delta }) => !minus.has(delta.id));
-  const byGround = new Map<Gateway, Delta[]>();
-  for (const { delta, ground } of survivors) {
-    const list = byGround.get(ground) ?? [];
-    list.push(delta);
-    byGround.set(ground, list);
-  }
+  // subtraction — from admitted deltas to the negations OF them, over EVERY ground that admitted
+  // the delta, never the reverse (narrowing may drop a claim; it must never revive one).
   const out = new Map<string, Delta>();
-  for (const [ground, deltas] of byGround) {
-    for (const d of withNegationClosure(ground, deltas)) if (!out.has(d.id)) out.set(d.id, d);
+  for (const [ground, per] of contributions) {
+    const survivors = [...per.values()].filter((d) => !minus.has(d.id));
+    for (const d of withNegationClosure(ground, survivors)) if (!out.has(d.id)) out.set(d.id, d);
   }
   return [...out.values()];
 }
@@ -652,7 +653,12 @@ export interface Container {
   readonly posture: ContainerPosture;
   /** A WALL's own gateway over its own store; a property container has none — that is criterion 6. */
   readonly gateway?: Gateway;
-  /** The current members: a property's live query, a wall's surviving ground. */
+  /**
+   * The current members, as a READING-safe set on both postures: a property's live query PLUS
+   * the forward negation closure of what it admits (H1 — a struck member crosses with its
+   * strike, deliberately more than `select`'s raw dset), or a wall's surviving ground (which
+   * carries its strikes natively). One name, one closure contract.
+   */
   members(): Delta[];
   /** Re-pulse the one-way inbound seeding edge. Walls only; a property container refuses. */
   reseed(): Promise<FederationReport>;
@@ -798,7 +804,7 @@ function openProperty(
     ...(spec.entity !== undefined ? { entity: spec.entity } : {}),
     trust: spec.trust,
     posture: "property",
-    members: () => gw.select(resolveTerm()),
+    members: () => withNegationClosure(gw, gw.select(resolveTerm())),
     reseed: () => {
       return Promise.reject(
         new Error(
@@ -926,26 +932,40 @@ async function openWall(
   pool.replayRegistrations();
   await pool.preloadResolvers();
   gw.quarantinePools.add(pool);
-  if (spec.entity !== undefined) {
-    gw.attachedContainers.set(spec.entity, pool);
-    // Reattach settles the LISTING: negate EVERY surviving detach record for this entity (H4 —
-    // two detaches mint two records; one negation must not leave the container half-listed).
-    // After the attach succeeded, never before: a refused attach must leave the records standing.
-    const table = readContainerTable(gw.reactor, gw.operatorAuthor);
-    for (const record of table.detached.get(spec.entity) ?? []) {
-      await gw.append([
-        signClaims(
-          retractionOf(record.id, gw.operatorAuthor!, gw.nextTimestamp()),
-          gw.options.seed,
-        ),
-      ]);
-    }
-  }
 
   const unregister = (): void => {
     gw.quarantinePools.delete(pool);
     if (spec.entity !== undefined) gw.attachedContainers.delete(spec.entity);
   };
+
+  if (spec.entity !== undefined) {
+    gw.attachedContainers.set(spec.entity, pool);
+    // Reattach settles the LISTING: negate EVERY surviving detach record for this entity, in ONE
+    // batch — append validates and lands a batch whole, so two records clear together or not at
+    // all (H4: one negation must not leave the container half-listed). After the attach
+    // succeeded, never before: a refused attach must leave the records standing. And if the
+    // batch itself cannot land, the attach ROLLS BACK — the alternative is an attached pool the
+    // caller holds no handle to, listed as detached while it is not.
+    const table = readContainerTable(gw.reactor, gw.operatorAuthor);
+    const records = table.detached.get(spec.entity) ?? [];
+    if (records.length > 0) {
+      const strikes = records.map((r) =>
+        signClaims(retractionOf(r.id, gw.operatorAuthor!, gw.nextTimestamp()), gw.options.seed!),
+      );
+      try {
+        await gw.append(strikes);
+      } catch (err) {
+        unregister();
+        await pool.close();
+        throw new Error(
+          `${voice}: the reattach could not clear the detach record(s), so the attach was ` +
+            `rolled back — the listing never half-clears (H4). ` +
+            `${err instanceof Error ? err.message : String(err)}`,
+          { cause: err },
+        );
+      }
+    }
+  }
 
   return {
     ...(spec.entity !== undefined ? { entity: spec.entity } : {}),
@@ -979,6 +999,9 @@ async function openWall(
         if (isRepairable(pool.backend)) {
           for (const row of await pool.backend.quarantine()) {
             await pool.backend.discardRow(row.key);
+            // A pen key is the row's id where the driver knows one (sqlite) — feed it to the
+            // byte verdict below too; discardRow's boolean is evidence, never the verdict (H7).
+            ids.add(row.key);
           }
         }
         if (ids.size > 0) {
@@ -997,6 +1020,18 @@ async function openWall(
             refuse(
               `this pool's store still holds ${survivors.size} of ${batch.length} delta(s) ` +
                 `after the discard purge`,
+            );
+          }
+        }
+        // The pen's own byte verdict: quarantine() recomputes only when a read walks the origin,
+        // so walk it again and ask — a discardRow that returned true while removing nothing
+        // (or a storage-keyed row the id probe cannot see) must refuse here, not read as clean.
+        if (isRepairable(pool.backend)) {
+          await pool.backend.deltasSince(new Set());
+          const pen = await pool.backend.quarantine();
+          if (pen.length > 0) {
+            refuse(
+              `this pool's §25 pen still holds ${pen.length} set-aside row(s) after the sweep`,
             );
           }
         }
@@ -1055,8 +1090,26 @@ export function unreachableWallReport(gw: Gateway): { faults: string[]; kept: st
   const table = readContainerTable(gw.reactor, gw.operatorAuthor);
   const faults: string[] = [];
   const kept: string[] = [];
+  // §28.4's knobs must not flip through the survival algebra either (the erasure lens's
+  // finding): strike the earliest declaration while a federated flip survives, and the binding
+  // posture would change wall→property with the wall's bytes still on disk — dissolving this
+  // guard through a door no validator watches. So the guard remembers: an entity still ALIVE in
+  // the table whose lineage holds a STRUCK wall declaration is treated as a wall. Forgetting the
+  // container WHOLE (striking every declaration) still ends the entity and clears the guard —
+  // that is the honest forget, unchanged.
+  const struckWalls = new Set<string>();
+  if (gw.operatorAuthor !== undefined) {
+    const negated = lawfulNegated(gw.reactor, gw.operatorAuthor);
+    for (const delta of lawfulSnapshot(gw.reactor, gw.operatorAuthor)) {
+      if (!negated(delta.id)) continue;
+      const name = containerRef(delta.claims, CTX_CONTAINER);
+      if (name !== undefined && primitives(delta.claims, "posture")[0] === "wall") {
+        struckWalls.add(name);
+      }
+    }
+  }
   for (const [entity, rec] of table.containers) {
-    if (rec.posture !== "wall") continue;
+    if (rec.posture !== "wall" && !struckWalls.has(entity)) continue;
     const attached = gw.attachedContainers.get(entity);
     if (attached !== undefined && gw.quarantinePools.has(attached)) continue;
     if (table.detached.has(entity)) {
@@ -1064,10 +1117,20 @@ export function unreachableWallReport(gw: Gateway): { faults: string[]; kept: st
       continue;
     }
     faults.push(
-      `the declared wall container "${entity}" is neither attached nor covered by a detach ` +
-        `record — its store may hold bytes outside this sweep. Attach it (openContainer) and ` +
-        `re-run, or detach() it on the record to keep it deliberately.`,
+      rec.posture === "wall"
+        ? `the declared wall container "${entity}" is neither attached nor covered by a detach ` +
+            `record — its store may hold bytes outside this sweep. Attach it (openContainer) and ` +
+            `re-run, or detach() it on the record to keep it deliberately.`
+        : `container "${entity}" resolves posture "${rec.posture}", but a struck declaration in ` +
+            `its lineage named it a WALL — its store may still hold bytes outside this sweep ` +
+            `(§28.4: the knobs do not flip through the survival algebra). Cover it with a detach ` +
+            `record, or forget the container whole and declare a new name.`,
     );
+  }
+  // A surviving detach record whose declaration is gone is a store mid-forget: still parked at
+  // the operator's own say-so, so it is reported kept rather than silently absent.
+  for (const entity of table.detached.keys()) {
+    if (!table.containers.has(entity) && !kept.includes(entity)) kept.push(entity);
   }
   faults.sort();
   kept.sort();

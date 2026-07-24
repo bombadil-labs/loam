@@ -12,8 +12,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { CTX_TRUST, readTrustPolicy } from "../../src/gateway/trust.js";
 import { containerAdmission, containerClaims } from "../../src/gateway/container.js";
-import { FERN } from "../spike/garden.js";
-import { GARDENER } from "../spike/garden.js";
+import { FERN, GARDENER, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
 
 const OP_SEED = "3c".repeat(32);
@@ -89,6 +88,38 @@ describe("T32 criterion 10 — admission and effectiveness are independent axes"
     expect(after?.posture).toBe(before?.posture);
     expect(after?.trust).toBe("curated");
     expect(after?.posture).toBe("wall");
+    await gw.close();
+  });
+
+  it("a closed roster does not touch the copy rule: the wall still opens and still pays copies", async () => {
+    // The behavioral half of "posture legality and the copy rule unmoved" (P5 fold): the
+    // table-field comparison above cannot go red on its own, so drive the open itself under the
+    // tightest possible admission and watch the bytes land anyway — admission governs who may
+    // federate INTO the container, never whether the operator's own attach seeds it.
+    const gw = await boot();
+    const h = observed(FERN, "height", 30, 1000, OP_SEED);
+    await gw.append([h]);
+    await gw.append([
+      declare(
+        {
+          container: "container:shut",
+          trust: "curated",
+          posture: "wall",
+          membership: {
+            op: "select",
+            pred: { hasPointer: { context: { exact: "height" } } },
+            in: "input",
+          },
+        },
+        28_000,
+      ),
+    ]);
+    await gw.append([signClaims(trustAt("container:shut", "closed", [], 28_100), OP_SEED)]);
+    const wallStore = new MemoryBackend();
+    const c = await gw.openContainer({ name: "container:shut", backend: wallStore });
+    expect(c.posture).toBe("wall");
+    expect(await wallStore.holds(h.id)).toBe(true); // copies paid — the roster never read
+    await c.drop();
     await gw.close();
   });
 

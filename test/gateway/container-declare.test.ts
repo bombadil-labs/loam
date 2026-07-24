@@ -167,10 +167,20 @@ describe("T32 criterion 3 — a knob change is a delta, not a restart", () => {
 });
 
 describe("T32 criterion 12 — the preset options stay assignment-compatible", () => {
-  it("every QuarantineOptions value is a lawful ContainerOptions value", () => {
+  it("every QuarantineOptions value is a lawful ContainerOptions value, knob for knob", () => {
     // Compile-time rail: if the lifting narrowed the preset's options, this file stops building.
-    const q: QuarantineOptions = { membership: HEIGHTS };
-    const c: ContainerOptions = q;
+    // The Required<Pick<...>> form is the load-bearing half (P5 fold): a plain variable
+    // assignment tolerates source-side excess properties, so it would still compile if
+    // ContainerOptions silently LOST `admit` or `backend` — precisely the divergence this
+    // criterion exists to prevent. Pick fails to typecheck the moment a key disappears.
+    const q: Required<QuarantineOptions> = {
+      backend: new MemoryBackend(),
+      admit: () => true,
+      membership: HEIGHTS,
+    };
+    const c: Required<Pick<ContainerOptions, "backend" | "admit" | "membership">> = q;
     expect(c.membership).toBe(HEIGHTS);
+    expect(typeof c.admit).toBe("function");
+    expect(c.backend).toBe(q.backend);
   });
 });

@@ -196,6 +196,11 @@ describe("T32 criterion 13 — exclusion never revives a strike (H1, fourth site
       destination: dest,
       struckClaim: target.id,
     });
+    // And the TOP level — a Schema-resolved View, not the negation index (the P3 doctrine: the
+    // middle is not the top). A lens over the destination must not serve the struck value.
+    dest.register(PLANT, PLANT_POLICY, [FERN], undefined, [...PLANT_WRITABLE]);
+    const view = await dest.query(`{ Plant(entity: "${FERN}") { height } }`);
+    expect((view.data?.Plant as { height?: unknown } | undefined)?.height ?? null).not.toBe(30);
     await dest.close();
     await gw.close();
   });
@@ -228,6 +233,112 @@ describe("T32 criterion 13 — exclusion never revives a strike (H1, fourth site
       itsRetraction: messageStrike.id,
     });
     await dest.close();
+    await gw.close();
+  });
+});
+
+describe("T32 — the wall side of the union (P5 fold: the positive leg, and the cross-ground strike)", () => {
+  it("an attached wall contributes its members to the scoped read", async () => {
+    // The refusal leg alone (criterion 19) could be satisfied by an implementation that refuses
+    // EVERY wall — this is the leg that makes the attached-wall branch load-bearing.
+    const gw = await boot();
+    const h = observed(FERN, "height", 30, 1000, OP_SEED);
+    const m = observed(FERN, "message", "hello", 1100, OP_SEED);
+    await gw.append([h, m]);
+    await gw.append([
+      declare(
+        { container: "container:aw", trust: "untrusted", posture: "wall", membership: HEIGHTS },
+        30_000,
+      ),
+      declare(
+        { container: "container:pp", trust: "curated", posture: "property", membership: MESSAGES },
+        30_001,
+      ),
+    ]);
+    const wall = await gw.openContainer({ name: "container:aw", backend: new MemoryBackend() });
+    const wallOnly = gw.containerScope({ containers: ["container:aw"] }).map((d) => d.id);
+    expect(wallOnly).toContain(h.id);
+    const both = gw
+      .containerScope({ containers: ["container:aw", "container:pp"] })
+      .map((d) => d.id);
+    expect(both).toContain(h.id);
+    expect(both).toContain(m.id);
+    await wall.drop();
+    await gw.close();
+  });
+
+  it("a member shared by a wall and a property container still carries the primary's strike", async () => {
+    // The suppression lens's confirmed resurrection: the wall's snapshot was seeded BEFORE the
+    // strike landed (no reseed), so only the PRIMARY ground holds the negation — and a
+    // first-wins ground assignment would close the shared member over the wall alone, handing
+    // the reader the claim live. The closure must run over EVERY ground that admitted it. The
+    // wall's name sorts FIRST on purpose: that is exactly the order that picked the wrong home.
+    const gw = await boot();
+    const target = observed(FERN, "height", 30, 1000, OP_SEED);
+    await gw.append([target]);
+    await gw.append([
+      declare(
+        {
+          container: "container:aa-wall",
+          trust: "untrusted",
+          posture: "wall",
+          membership: HEIGHTS,
+        },
+        31_000,
+      ),
+      declare(
+        {
+          container: "container:zz-prop",
+          trust: "curated",
+          posture: "property",
+          membership: HEIGHTS,
+        },
+        31_001,
+      ),
+    ]);
+    const wall = await gw.openContainer({
+      name: "container:aa-wall",
+      backend: new MemoryBackend(),
+    });
+    expect(wall.gateway!.reactor.get(target.id)).toBeDefined(); // seeded pre-strike
+    await gw.append([retraction(target.id, OP, OP_SEED, 31_100)]); // no reseed — the pool never sees it
+
+    const scoped = gw.containerScope({ containers: ["container:aa-wall", "container:zz-prop"] });
+    const dest = await Gateway.open(new MemoryBackend(), {});
+    await dest.federate(scoped, { admit: () => true });
+    assertPreservesSuppression({
+      what: "container-scoped read (wall and property sharing a member across grounds)",
+      source: gw,
+      destination: dest,
+      struckClaim: target.id,
+    });
+    await dest.close();
+    await wall.drop();
+    await gw.close();
+  });
+
+  it("members() on a property container is a reading, not a raw dset (H1)", async () => {
+    // One name, one closure contract: a struck member crosses WITH its strike on both postures.
+    const gw = await boot();
+    const target = observed(FERN, "height", 30, 1000, OP_SEED);
+    await gw.append([target]);
+    const strike = retraction(target.id, OP, OP_SEED, 32_000);
+    await gw.append([strike]);
+    await gw.append([
+      declare(
+        {
+          container: "container:reading",
+          trust: "curated",
+          posture: "property",
+          membership: HEIGHTS,
+        },
+        32_100,
+      ),
+    ]);
+    const c = await gw.openContainer({ name: "container:reading" });
+    const ids = c.members().map((d) => d.id);
+    expect(ids).toContain(target.id);
+    expect(ids).toContain(strike.id); // the closure rode along — no consumer inherits a live ghost
     await gw.close();
   });
 });

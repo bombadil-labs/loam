@@ -13,6 +13,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { readTombstones } from "../../src/gateway/erase.js";
 import { containerClaims } from "../../src/gateway/container.js";
+import { retraction } from "./narrowing.js";
 import { FERN, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
 
@@ -138,6 +139,67 @@ describe("T32 criterion 14 — erasure reaches the generalized wall", () => {
     expect(await wallStore.holds(secret.id)).toBe(false);
     expect(readTombstones(c.gateway!.reactor, OP).has(secret.id)).toBe(true);
     await c.drop();
+    await gw.close();
+  });
+
+  it("drop verifies the §25 pen at the bytes — a discardRow that lies is refused (H7)", async () => {
+    // P5 fold: the pen sweep's only proof used to be discardRow's boolean, which is evidence,
+    // never the verdict. A repairable store whose pen row survives every discard must refuse
+    // the drop — success over set-aside legible bytes is the erasure-evasion shape.
+    const gw = await boot();
+    const inner = new MemoryBackend();
+    const stuckRow = { key: "corrupt-row-1", reason: "unparseable" as const, preview: "…" };
+    const lying: import("../../src/store/quarantine.js").RepairableBackend = {
+      append: (d) => inner.append(d),
+      deltasSince: (k) => inner.deltasSince(k),
+      purge: (ids) => inner.purge(ids),
+      holds: (id) => inner.holds(id),
+      close: () => inner.close(),
+      quarantine: () => Promise.resolve([stuckRow]), // the origin's bytes keep the row, every walk
+      discardRow: () => Promise.resolve(true), // "removed it", removing nothing
+    };
+    const pool = await gw.openQuarantine({ backend: lying });
+    await expect(pool.drop()).rejects.toThrow(/pen still holds/);
+    expect(gw.quarantinePools.has(pool.gateway)).toBe(true); // refused = still in erasure reach
+    await pool.detach();
+    await gw.close();
+  });
+
+  it("the guard survives a struck-declaration posture flip — §28.4 has no survival-algebra door", async () => {
+    // P5 fold (the erasure lens's finding): land a federated property re-declaration (a named
+    // defect, not binding), then strike the EARLIEST declaration — the binding posture would
+    // flip wall→property and dissolve the guard while the wall's bytes sit on disk. The guard
+    // remembers the struck wall lineage; only a cover, or forgetting the container WHOLE,
+    // clears it.
+    const gw = await boot();
+    const fact = observed(FERN, "height", 30, 1000, OP_SEED);
+    await gw.append([fact]);
+    const d1 = signClaims(
+      containerClaims({ container: "container:flip", trust: "curated", posture: "wall" }, OP, 9400),
+      OP_SEED,
+    );
+    await gw.append([d1]);
+    const d2 = signClaims(
+      containerClaims(
+        {
+          container: "container:flip",
+          trust: "curated",
+          posture: "property",
+          membership: HEIGHTS,
+        },
+        OP,
+        9500,
+      ),
+      OP_SEED,
+    );
+    await gw.federate([d2], { admit: () => true }); // the flip lands as data, defect named
+    await gw.append([retraction(d1.id, OP, OP_SEED, 9600)]); // the earliest falls; d2 would bind
+    expect(gw.containers().containers.get("container:flip")?.posture).toBe("property");
+
+    await expect(gw.erase(fact.id)).rejects.toThrow(/container:flip/); // lineage remembered
+    // Forgetting the container WHOLE is still the honest exit.
+    await gw.append([retraction(d2.id, OP, OP_SEED, 9700)]);
+    await expect(gw.erase(fact.id)).resolves.toMatchObject({ erased: fact.id });
     await gw.close();
   });
 

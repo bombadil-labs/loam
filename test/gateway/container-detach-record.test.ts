@@ -97,6 +97,60 @@ describe("T32 criterion 9 — the record lands, lists, and never half-clears", (
     ).rejects.toThrow(/NUL/);
     const c = await gw.openContainer({ name: "container:bounded", backend: new MemoryBackend() });
     await expect(c.detach(oversized)).rejects.toThrow(/256/);
+    // A refused detach leaves the wall ATTACHED (P5 fold: the stated seam, railed): the record
+    // never landed, so unregistering would put the store outside the fan-out with no cover —
+    // exactly what the record exists to prevent. Still in erasure reach, not listed, and a
+    // lawful detach afterwards works.
+    expect(gw.quarantinePools.has(c.gateway!)).toBe(true);
+    expect(gw.containers().detached.has("container:bounded")).toBe(false);
+    await c.detach("a lawful note");
+    expect(gw.containers().detached.has("container:bounded")).toBe(true);
+    await gw.close();
+  });
+
+  it("a reattach that cannot clear the records rolls the attach back — never half-listed", async () => {
+    // Two records standing; the reattach's clearing batch is refused by the primary's store.
+    // The batch lands whole or not at all (append persists before it serves), and on refusal
+    // the attach itself rolls back: no attached-but-handleless pool, no half-cleared listing.
+    const inner = new MemoryBackend();
+    let refuseAppends = false;
+    const flaky: import("../../src/store/backend.js").StoreBackend = {
+      append: (d) => (refuseAppends ? Promise.reject(new Error("disk says no")) : inner.append(d)),
+      deltasSince: (k) => inner.deltasSince(k),
+      purge: (ids) => inner.purge(ids),
+      holds: (id) => inner.holds(id),
+      close: () => inner.close(),
+    };
+    const gw = await Gateway.boot(
+      flaky,
+      assembleGenesis({
+        operatorSeed: OP_SEED,
+        registrations: [
+          {
+            hyperschema: PLANT,
+            schema: PLANT_POLICY,
+            roots: [FERN],
+            writable: [...PLANT_WRITABLE],
+          },
+        ],
+      }),
+    );
+    await gw.append([declareWall("container:flaky", 25_000)]);
+    const c = await gw.openContainer({ name: "container:flaky", backend: new MemoryBackend() });
+    await c.detach("first");
+    await gw.append([signClaims(detachClaims("container:flaky", "second", OP, 25_100), OP_SEED)]);
+    expect(gw.containers().detached.get("container:flaky")?.length).toBe(2);
+
+    refuseAppends = true;
+    await expect(
+      gw.openContainer({ name: "container:flaky", backend: new MemoryBackend() }),
+    ).rejects.toThrow(/H4/);
+    // BOTH records still stand (never one), and nothing is left attached without a handle.
+    expect(gw.containers().detached.get("container:flaky")?.length).toBe(2);
+    refuseAppends = false;
+    const back = await gw.openContainer({ name: "container:flaky", backend: new MemoryBackend() });
+    expect(gw.containers().detached.has("container:flaky")).toBe(false); // now both cleared
+    await back.drop();
     await gw.close();
   });
 });
@@ -144,6 +198,22 @@ describe("T32 criterion 23 — forgetting is two-part, in order", () => {
     const verdict = await gw.erase(fact.id);
     expect(verdict.erased).toBe(fact.id);
     expect(verdict.kept).toEqual([]); // the table is clean — nothing kept, nothing faulted
+    await gw.close();
+  });
+
+  it("mid-forget — record surviving, declaration gone — still reports the store as kept", async () => {
+    // P5 fold: `kept` iterating only declared containers under-reported the in-between state.
+    // A surviving record whose declaration is struck is a store parked at the operator's own
+    // say-so, and the completeness verdict says so instead of going silent.
+    const gw = await boot();
+    const fact = observed(FERN, "height", 30, 1000, OP_SEED);
+    await gw.append([fact]);
+    const declaration = declareWall("container:midway", 26_000);
+    await gw.append([declaration]);
+    await gw.append([signClaims(detachClaims("container:midway", "parked", OP, 26_100), OP_SEED)]);
+    await gw.append([retraction(declaration.id, OP, OP_SEED, 26_200)]);
+    expect(gw.containers().containers.has("container:midway")).toBe(false); // mid-forget
+    await expect(gw.erase(fact.id)).resolves.toMatchObject({ kept: ["container:midway"] });
     await gw.close();
   });
 });
