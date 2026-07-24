@@ -538,7 +538,7 @@ the unit of search is the EXPORT — "the best Post schema" — and a manifest's
 by address equality) that act is frequent, per-export-shaped, and must cost ONE GESTURE. T31's working
 spec carries the recommendation.
 
-**§27.7 CONTAINER LIFTED, §27.1 VOCABULARY MINTED** [#PRNUM](https://github.com/bombadil-labs/loam/pull/PRNUM)
+**§27.7 CONTAINER LIFTED, §27.1 VOCABULARY MINTED** [#198](https://github.com/bombadil-labs/loam/pull/198)
 (realizes ticket T32, 2026-07-24) — the generalization this section's whole arc waited on:
 `src/gateway/container.ts` is the named `Container`, the quarantine is one preset of it
 (`openQuarantine` unchanged at every call site, the four §24 suites untouched and green over the lifted
