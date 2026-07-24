@@ -13,6 +13,7 @@
 // Deferred, named: the detach GROUND RECORD (who detached what) waits for T32's container
 // vocabulary mint rather than minting a one-off loam.* shape it would have to migrate.
 
+import Database from "better-sqlite3";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -169,6 +170,52 @@ describe("T72: drop() discards at the bytes, on every backend", () => {
   });
 });
 
+describe("T72: drop names MORE than the readable surface", () => {
+  it("a store whose READ is blind still refuses — the session reactor remembers what deltasSince cannot", async () => {
+    // The retry shape the erasure lens confirmed: after a partial purge, the readable surface is
+    // empty (a mirror's read is primary-only) while a tier retains everything — the old zero-ids
+    // path skipped the verdict and reported success. The reactor names what the read cannot.
+    const gw = await boot();
+    const secret = observed(FERN, "note", MARKER, 1000, OP_SEED);
+    await gw.append([secret]);
+    const inner = new MemoryBackend();
+    const blindRead: StoreBackend = {
+      append: (d) => inner.append(d),
+      deltasSince: () => Promise.resolve([]), // the read names NOTHING...
+      purge: () => Promise.resolve(0), // ...and the purge quietly does nothing
+      holds: (id) => inner.holds(id), // ...while the bytes are honestly still there
+      close: () => inner.close(),
+    };
+    const pool = await gw.openQuarantine({ backend: blindRead });
+    expect(await inner.holds(secret.id)).toBe(true); // seeded: the tier holds the byte
+
+    await expect(pool.drop()).rejects.toThrow(/still holds/);
+    expect(gw.quarantinePools.has(pool.gateway)).toBe(true);
+    await gw.close();
+  });
+
+  it("a §25-quarantined row — legible bytes a read SET ASIDE — is swept by drop, not skipped", async () => {
+    // deltasSince quarantines a corrupt row and does not return it, so an id-keyed purge can
+    // never reach it: without the pen sweep, drop verified clean over retained plaintext.
+    const gw = await boot();
+    await gw.append([observed(FERN, "height", 30, 1000, OP_SEED)]);
+    const path = join(tmp, "pen-pool.db");
+    const pool = await gw.openQuarantine({ backend: new SqliteBackend(path) });
+    // Corrupt a row behind the seam, as a crash or foreign writer would: legible marker bytes
+    // under a key whose content no longer parses as a delta.
+    const raw = new Database(path);
+    raw
+      .prepare("INSERT INTO deltas (id, claims, sig) VALUES (?, ?, ?)")
+      .run("zz" + "0".repeat(66), `{"broken":"${MARKER}"`, null);
+    raw.close();
+
+    await pool.drop();
+    const file = readFileSync(path);
+    expect(file.includes(Buffer.from(MARKER))).toBe(false); // the pen row is GONE at the bytes
+    await gw.close();
+  });
+});
+
 describe("T72: detach() keeps the bytes deliberately, and reattachment restores the law's reach", () => {
   it("detach closes without purging; reattach + erase sweeps the surviving store", async () => {
     const gw = await boot();
@@ -190,6 +237,50 @@ describe("T72: detach() keeps the bytes deliberately, and reattachment restores 
     await gw.erase(secret.id);
     expect(await surviving.holds(secret.id)).toBe(false); // swept through the reattached glass
     await reattached.drop();
+    await gw.close();
+  });
+
+  it("an erasure issued DURING the window is settled AT reattach — before the pool's reader exists", async () => {
+    // The suppression lens's finding: the seeding edge delivers a tombstone as data and executes
+    // nothing, so a naive reattach boots a reader that resolves the forgotten byte LIVE while the
+    // tombstone sits beside it. Settle runs before Gateway.open, so both levels come back clean.
+    const gw = await boot();
+    const secret = observed(FERN, "note", MARKER, 1000, OP_SEED);
+    await gw.append([secret]);
+    const path = join(tmp, "window-pool.db");
+    const pool = await gw.openQuarantine({ backend: new SqliteBackend(path) });
+    await pool.detach();
+
+    await gw.erase(secret.id); // decided while the store was away — fans to NO pool
+
+    const surviving = new SqliteBackend(path);
+    const reattached = await gw.openQuarantine({ backend: surviving });
+    // Object level: the reattached pool's reader never saw the byte...
+    expect(reattached.gateway.reactor.has(secret.id)).toBe(false);
+    // ...and byte level: the store was swept before the reader existed.
+    expect(await surviving.holds(secret.id)).toBe(false);
+    await reattached.drop();
+    expect(readFileSync(path).includes(Buffer.from(MARKER))).toBe(false);
+    await gw.close();
+  });
+
+  it("a store that cannot be PROVEN clean of window debt refuses to attach at all (H9)", async () => {
+    const gw = await boot();
+    const secret = observed(FERN, "note", MARKER, 1000, OP_SEED);
+    await gw.append([secret]);
+    await gw.erase(secret.id); // the debt exists before this pool is ever opened
+    const inner = new MemoryBackend();
+    await inner.append([secret]); // a store that still holds the forgotten byte...
+    const stuck: StoreBackend = {
+      append: (d) => inner.append(d),
+      deltasSince: (k) => inner.deltasSince(k),
+      purge: () => Promise.reject(new Error("read-only mount")), // ...and cannot purge it
+      holds: (id) => inner.holds(id),
+      close: () => inner.close(),
+    };
+    await expect(gw.openQuarantine({ backend: stuck })).rejects.toThrow(
+      /erasure debt that could not be settled/,
+    );
     await gw.close();
   });
 });
