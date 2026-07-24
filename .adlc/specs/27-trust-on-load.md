@@ -71,16 +71,46 @@ verb covers schemas, bridges, resolvers, renderers: `adopt <thing>@<address>`.
   latest-wins living semantics — so an unguarded adoption would silently capture an existing root
   `Post`, re-pointing every subsequent root read (and the hub world guarantees the collision
   arrives, benignly at first, then as a one-line confused-deputy attack). Therefore: **adoption
-  REFUSES when the target's semantic name already carries a root registration with different
-  content**, and proceeds only with an explicit `supersede` (take over the living name, eyes
-  open) or `as <name>` (bless under a different root name). Same-content collision is the
-  idempotent no-op.
+  REFUSES when the target's semantic name's CURRENTLY-WINNING root registration has different
+  content** (the winning one, explicitly — a superseded historical registration neither blocks
+  nor no-ops an adoption), and proceeds only with an explicit `supersede` or `as <name>` (bless
+  under a different root name). Same-content-as-the-winner is the idempotent no-op. Two
+  semantics the review demanded be stated rather than assumed (adversarial review, 2026-07-24):
+  - **The guard is ATOMIC, and the mechanism is NAMED: the single-writer gateway** (round-2
+    review, 2026-07-24 — a CAS with no mechanism is a wish). The store doctrine already holds
+    that one writing gateway fronts a store, and lawfulness is authorship: a registration BINDS
+    only when operator-signed, and the only mint path for operator-signed law is this gateway's
+    own doors — a registration arriving by federation lands as data and binds nothing. So
+    serializing the adoption door serializes everything the guard defends: the door holds the
+    name-check and the append in ONE critical section per semantic name (an in-process queue —
+    door logic like every other refusal, not a substrate primitive; rhizomatic needs nothing).
+    The adoption CARRIES the winner it observed; if the winner moved by its turn in the queue,
+    it refuses naming the mover. Concurrent different-content adoptions resolve to exactly one
+    success and one refusal, never two publishes.
+  - **The guard covers every law kind's living surface, not schemas alone.** Each kind has a
+    latest-wins name a stranger's row could capture: a schema its semantic name, a renderer its
+    ROUTE (§23.5 is latest-per-route — the same shape), a resolver its binding name. One rule,
+    three surfaces: adoption refuses when the kind's currently-winning holder differs in content,
+    with the same `supersede`/`as` outs. "Different content" is STRUCTURAL identity — the same
+    content-address arithmetic as everything else — so two semantically-equivalent but
+    differently-written programs refuse as different. Deliberate and fail-safe: semantic
+    equivalence is not decidable, and the false positive costs one explicit `supersede`/`as`
+    gesture, while a false negative would silently swap law.
+  - **`supersede` OUTRANKS; it never negates.** It is the ordinary §21 latest-wins publish, eyes
+    open: the prior registration remains on the ground, negatable separately, and if the
+    superseding registration is itself later negated the prior one RESURFACES as the winner —
+    which is §21's living semantics, stated here so no implementation invents a destructive
+    variant.
 - **Idempotent by CONTENT ADDRESS** (never the living name — implementing identity as the living
   name would hand findings 1 and 3 a bypass). Adopting a row whose target content address is
   already blessed is a no-op — recorded as a DISTINGUISHABLE record kind, **witnessed** rather
   than **adopted-from**, so a module exporting a row matching law you already trust can never
   claim origination credit in your ledger (premortem finding 5), and no future revoke-by-module
-  tool mistakes a redundant witness for a source.
+  tool mistakes a redundant witness for a source. **A witness of an identical (source version,
+  alias, content address) tuple is minted ONCE** — re-running the same adoption is wholly silent
+  (round-2 review: an hourly scheduled `blessAll` must not append narrative forever), which also
+  makes re-running the natural RECOVERY for a partially-failed `blessAll`: landed rows witness
+  silently, remaining rows adopt.
 - **"Bless all" is enumeration**, not a distinct mechanism: N rows, N adoptions, N provenance
   records, one gesture. Partial failure refuses the remainder loudly rather than half-installing
   silently. Two disclosure rules keep the sugar from quietly becoming the primitive (premortem
@@ -91,19 +121,44 @@ verb covers schemas, bridges, resolvers, renderers: `adopt <thing>@<address>`.
   supply-chain move (the alias carries the reputation; the swap inherits it), so it never rides
   `blessAll` silently: it requires its own explicit confirmation, checked against the prior
   adoption record's alias→address binding — pure address arithmetic over records that already
-  exist.
+  exist. **And the classification the guards run on has ONE source of truth: the verified,
+  content-addressed export itself — never a manifest field** (adversarial review, 2026-07-24).
+  The module is a stranger's; its manifest's kind labels are display copy. A row IS a renderer
+  because the bytes at its address are a renderer binding; it HOLDS a pen because that binding
+  names one — both read from the export the address resolves to, so a manifest that misdeclares
+  a pen-holding renderer as a schema changes nothing: the pen guard classifies from the bytes
+  and still refuses. A manifest row whose address resolves to NOTHING, or to bytes that classify
+  as no law kind, refuses the whole call naming that row — a stranger's manifest gets no silent
+  skips (a skip is how a crafted manifest hides a row); an empty manifest refuses as "exports no
+  law", same as the facts-only module.
 - **Adoption records are NARRATIVE, never a revocation index** (premortem finding 4). Twelve
   months in they overcount (records outlive negated bindings; witnesses accumulate) and undercount
   (directly-published law has none). The authoritative "what law of module M binds in my root?"
   query is **content-address intersection** between currently-bound law and M's manifest —
   arithmetic, always current — and it ships as a first-class query (`lawFrom`) so the right tool
-  exists before anyone writes the wrong one against the records.
+  exists before anyone writes the wrong one against the records. Its semantics are stated
+  precisely because shared law would otherwise over-attribute (adversarial review, 2026-07-24):
+  `lawFrom(M)` answers **"law this root currently binds that ANY manifest version of M this
+  store holds also lists" — the UNION across versions, set membership, NOT provenance** (round-3
+  review: intersecting only the latest manifest would report "no exposure" for a row adopted
+  from `@1` that `@7` later dropped — the exact miss the query exists to prevent; a version
+  argument NARROWS from the union, never replaces it). A common `Post` bound at this root reports under `lawFrom(M)`
+  AND `lawFrom(N)` when both manifests list it, and that is the correct answer to the incident
+  question ("am I exposed through M?"). What no tool may do is treat it as origination: a
+  revoke-by-module tool acts on exposure only with the operator confirming each shared row —
+  the witnessed-vs-adopted-from records (above) exist precisely so origination, where it is
+  wanted, is asked of the ledger and never inferred from arithmetic.
 - **Version skew gets eyes** (premortem finding 6). The honest answer to "these travel together"
   is the version identity as a social contract — but honoring a contract requires seeing when you
   are outside it. Adopting a row while a SIBLING row of the same module is bound from a different
   version reports the skew (the manifests carry both frozen sets; this is address comparison, not
   machinery). A note, not a refusal: mixed versions are lawful, silently mixed versions are how
-  wrong-winner resolutions get blamed on authors who never shipped that combination.
+  wrong-winner resolutions get blamed on authors who never shipped that combination. Scope,
+  stated honestly: a sibling's bound version is determined from its ADOPTION RECORDS (the
+  narrative is good enough for a courtesy note, unlike revocation), so skew detection covers
+  adopted rows only — a sibling the operator directly published carries no version attribution
+  and is invisible to the note. The blind spot is named rather than papered: `lawFrom` still
+  reports such a row's exposure; only the which-version courtesy is unavailable for it.
 - **The counterargument, answered rather than omitted.** Per-export means a module can run with
   its schema blessed and its resolver still on probation — a configuration its author never
   tested. True, and already true of any store: law is independently negatable after any blessing,
@@ -166,6 +221,38 @@ its MECHANISM (ordinary publish + adoption provenance), and its IDEMPOTENCE rule
 13. **Skew is reported.** Adopting one row of `social@7` while a sibling row is bound from
     `social@1` returns a coherence note naming both versions; adopting when all siblings match is
     silent. — `test/gateway/adopt-law.test.ts`.
+
+14. **The guard is atomic, and the rail FORCES the race.** Using the adoption door's test seam
+    (a post-check hold — the same injected-barrier idiom the store suites already use for WAL
+    races), adoption A is held between its name-check and its append while adoption B of
+    different-content same-name law runs to completion; releasing A yields exactly one bound
+    registration and one refusal naming the mover. A sequential pass of the same pair proves
+    nothing and the rail must not be satisfiable that way. — `test/gateway/adopt-law.test.ts`.
+15. **A lying manifest cannot smuggle a pen.** Against a module whose manifest declares its
+    pen-holding renderer as a schema row: `blessAll` without the pen flag STILL refuses, naming
+    the renderer — classification read from the export bytes, not the manifest. —
+    `test/gateway/adopt-law.test.ts`.
+16. **`supersede` outranks and is reversible.** After `supersede`-adopting a module's `Post` over
+    the root's original: root reads resolve through the module's law; negating the superseding
+    registration resurfaces the ORIGINAL as the winner (object level, at the door). —
+    `test/gateway/adopt-law.test.ts`.
+17. **`lawFrom` is exposure, not origination.** With a common schema listed by two modules'
+    manifests and bound once: it reports under BOTH `lawFrom` calls, and the witnessed/adopted
+    record kinds still distinguish the originating module. — `test/gateway/adopt-law.test.ts`.
+
+18. **A witness never accumulates.** Running the identical adoption three times leaves exactly
+    one witness record for that (source, alias, address) tuple; the ground's delta count is
+    unchanged between run two and run three. — `test/gateway/adopt-law.test.ts`.
+19. **A dangling manifest row refuses the call.** A manifest listing a row whose address resolves
+    to nothing (and a second whose bytes classify as no law kind) refuses `blessAll` naming the
+    offending row; no partial adoption lands. — `test/gateway/adopt-law.test.ts`.
+20. **The route is a living name too.** Adopting a module renderer whose ROUTE is already served
+    by different-content root law refuses without `supersede` — the §23.5 latest-per-route
+    surface gets the same guard as the schema name. — `test/gateway/adopt-law.test.ts`.
+
+21. **`lawFrom` unions across manifest versions.** A row adopted from `social@1`, still bound,
+    dropped from `social@7`'s manifest: `lawFrom(social)` still reports it; `lawFrom(social@7)`
+    (the narrowing form) does not. — `test/gateway/adopt-law.test.ts`.
 
 ## Open for Myk (the decision itself)
 
