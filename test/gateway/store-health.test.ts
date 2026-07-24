@@ -32,7 +32,13 @@ describe("T70: gateway.health() — the live byte verdict over every erasure pro
     const gw = await boot(new MemoryBackend());
     const health = await gw.health();
     expect(health.status).toBe("ok");
-    expect(health.erasure).toMatchObject({ settled: true, pending: 0, outstanding: [] });
+    expect(health.erasure).toEqual({
+      settled: true,
+      tombstones: 0,
+      pending: 0,
+      outstanding: [],
+      unproven: false,
+    });
     await gw.close();
   });
 
