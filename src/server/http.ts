@@ -688,6 +688,19 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         case "mcp":
           await handleMcp(gateway, identity, req, res);
           return;
+        // The settling report (T70): has every erasure this store promised settled to bytes?
+        // Operator-token GET only, and the refusal is the UNIFORM one rather than register's 403:
+        // the outstanding list names ids the operator ordered forgotten, and even that a store is
+        // still forgetting is the operator's business alone — a closed door here must look like
+        // every other closed door.
+        case "health": {
+          if (req.method !== "GET" || identity.operator !== true) {
+            refused(res);
+            return;
+          }
+          json(res, 200, await gateway.health());
+          return;
+        }
         // The other doors (SPEC §17): the same registrations, spoken in REST/OpenAPI. The
         // token carries the SAME identity discipline — an actor token writes as that actor,
         // an operator token as the operator; the hooks enforce standing, not the transport.

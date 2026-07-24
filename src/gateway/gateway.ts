@@ -28,7 +28,7 @@ import { graphql, type GraphQLSchema } from "graphql";
 import type { StoreBackend } from "../store/backend.js";
 import { isRepairable } from "../store/quarantine.js";
 import { promoteImpl, readAdoptions, type Adoption } from "./adopt.js";
-import { eraseImpl, eraseReplicaImpl } from "./erase.js";
+import { eraseImpl, eraseReplicaImpl, healthImpl, type StoreHealth } from "./erase.js";
 import { Channel } from "./channel.js";
 import { STORE_ENTITY, operatorMarkerClaims, type Genesis } from "./genesis.js";
 import {
@@ -581,6 +581,14 @@ export class Gateway {
     opts: { reason?: string } = {},
   ): Promise<{ erased: string; citations: string[] }> {
     return eraseImpl(this, id, opts);
+  }
+
+  // The settling report (T70): does every erasure this ground has promised hold at the bytes,
+  // NOW? Live — the reactor's surviving tombstones against the backend's own byte probe — because
+  // this store is eventually consistent about forgetting, and the gap between a tombstone landing
+  // and the bytes leaving every tier is a health state to watch, not a fault to boot past.
+  async health(): Promise<StoreHealth> {
+    return healthImpl(this);
   }
 
   // The quarantine pools attached to this store (SPEC §24.8): the operator's own one-way replicas that an

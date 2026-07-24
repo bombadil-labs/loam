@@ -456,3 +456,76 @@ export async function eraseReplicaImpl(
     );
   }
 }
+
+// --- health: the settling report (T70; Myk, 2026-07-24) --------------------------------------------
+//
+// This store is eventually consistent about FORGETTING: an erasure is decided the moment its
+// tombstone lands, but the bytes leave each tier on that tier's own time — a lagging mirror, a
+// locked WAL, a pool that was offline. That gap is a HEALTH state, not a fault: serve keeps
+// serving, and health() answers, live, whether every erasure this ground has promised has settled
+// to bytes. Live means computed NOW, from the reactor's surviving tombstones and the backend's own
+// byte probe — never a boot-time snapshot that goes stale as erasures land or bytes resurface.
+
+export interface ErasureHealth {
+  readonly settled: boolean; // every promised erasure is bytes-gone on every tier this store owns
+  readonly tombstones: number; // erasures promised (surviving, operator-signed)
+  readonly pending: number; // of those, ids whose bytes still rest somewhere
+  readonly outstanding: readonly string[]; // the ids themselves — operator-only surface
+  readonly unproven: boolean; // a tier could not be examined: not settled, not failed — unproven (H9)
+}
+
+export interface StoreHealth {
+  // "ok"       — every promise settled, nothing lagging.
+  // "settling" — debt outstanding or a mirror behind; the store is converging, not broken.
+  // "unproven" — a tier could not answer; treat as settling at best, never as ok (H9).
+  readonly status: "ok" | "settling" | "unproven";
+  readonly erasure: ErasureHealth;
+  readonly lagging?: boolean; // present when the backend exposes mirror lag (MirrorBackend)
+}
+
+export async function healthImpl(gw: Gateway): Promise<StoreHealth> {
+  const dead = readTombstones(gw.reactor, gw.operatorAuthor);
+  const ids = [...dead];
+  let erasure: ErasureHealth;
+  if (ids.length === 0) {
+    erasure = { settled: true, tombstones: 0, pending: 0, outstanding: [], unproven: false };
+  } else {
+    try {
+      let held: Set<string>;
+      if (gw.backend.heldAmong) {
+        held = await gw.backend.heldAmong(ids);
+      } else {
+        held = new Set<string>();
+        for (const id of ids) if (await gw.backend.holds(id)) held.add(id);
+      }
+      erasure = {
+        settled: held.size === 0,
+        tombstones: ids.length,
+        pending: held.size,
+        outstanding: [...held].sort(),
+        unproven: false,
+      };
+    } catch {
+      // H9: a tier that cannot answer has proven nothing — the whole promised set is unproven,
+      // reported as such rather than laundered into either "settled" or "failed".
+      erasure = {
+        settled: false,
+        tombstones: ids.length,
+        pending: ids.length,
+        outstanding: [...ids].sort(),
+        unproven: true,
+      };
+    }
+  }
+  const lagging = (gw.backend as { lagging?: unknown }).lagging;
+  const status = erasure.unproven
+    ? "unproven"
+    : erasure.settled && lagging !== true
+      ? "ok"
+      : "settling";
+  return {
+    status,
+    erasure,
+    ...(typeof lagging === "boolean" && { lagging }),
+  };
+}

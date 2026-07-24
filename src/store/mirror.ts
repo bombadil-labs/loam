@@ -91,6 +91,37 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
     return results.some((r) => (r as PromiseFulfilledResult<boolean>).value);
   }
 
+  // The batch probe, forwarded so its single-pass economy survives this combinator: a health poll
+  // hands the WHOLE live tombstone set to the store the gateway actually holds — which is this —
+  // and falling back to the composite per-id `holds` would pay one archive sweep per absent id,
+  // the exact cliff `heldAmong` exists to avoid. Same composition as `holds`: both tiers asked
+  // (each by its own batch probe if it offers one, else its cheap per-id `holds`), answers
+  // unioned, and a tier that cannot answer rejects the whole probe (H9), naming itself.
+  async heldAmong(ids: Iterable<string>): Promise<Set<string>> {
+    const batch = [...ids];
+    const ask = async (tier: StoreBackend): Promise<Set<string>> => {
+      if (tier.heldAmong) return tier.heldAmong(batch);
+      const held = new Set<string>();
+      for (const id of batch) if (await tier.holds(id)) held.add(id);
+      return held;
+    };
+    const results = await Promise.allSettled([ask(this.primary), ask(this.mirror)]);
+    const tiers = ["primary", "mirror"] as const;
+    for (const [i, r] of results.entries()) {
+      if (r.status === "rejected") {
+        throw new Error(
+          `the ${tiers[i]} tier could not be proven clean: ` +
+            `${r.reason instanceof Error ? r.reason.message : String(r.reason)}`,
+          { cause: r.reason },
+        );
+      }
+    }
+    const held = new Set<string>();
+    for (const r of results)
+      for (const id of (r as PromiseFulfilledResult<Set<string>>).value) held.add(id);
+    return held;
+  }
+
   // Reads answer from the primary, so its quarantine (SPEC §25) is the store's quarantine — a
   // corrupt row set aside on the hot side. A primary that cannot quarantine (a bare memory tier)
   // holds nothing to repair, so the pen is empty.
