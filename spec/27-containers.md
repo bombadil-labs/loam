@@ -494,5 +494,13 @@ primitive, *quarantine* and *module* are POSTURES of it and remain PROSE (never 
 discipline "lens" runs under), and the manifest is precisely what promotes a container to a module. Only
 `ModuleVersion` (built) and `Container` (§27.7, unbuilt) are type names.
 
-**Design-stage: awaits Myk (P6).** Question 3 (trust on load) remains open and now has a concrete domain —
-the four law rows above — as ticket T31.
+**§27.8 MANIFEST DECIDED (Myk, 2026-07-24, in chat)** — accepted as drafted, all five shapes: the manifest
+is member deltas (never citing its own version address); the closed export list split law/fact; targets by
+most-stable-identifier plus a module-local alias; a minimum substrate version and nothing more; exports
+name by content address and never hold bytes. Question 3 (trust on load) remains open as ticket T31, and
+the same conversation reframed its ground: **install is containment; blessing is adoption** — a loaded
+module RUNS fully inside its container (its law binds there; its doors serve from there), so blessing law
+into the root is a separate, deliberate act, and in the discovery world Myk described (a public hub where
+the unit of search is the EXPORT — "the best Post schema" — and a manifest's mirroring claim is verifiable
+by address equality) that act is frequent, per-export-shaped, and must cost ONE GESTURE. T31's working
+spec carries the recommendation.
