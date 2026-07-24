@@ -63,6 +63,46 @@ describe("T72: drop() discards at the bytes, on every backend", () => {
     await gw.close();
   });
 
+  it("a pool holding exactly ONE delta is still purged — the boundary is zero, not one", async () => {
+    // hollow-test's off-by-one mutant: `ids.length > 0` -> `> 1` skips the purge for a
+    // single-delta pool and drop reports success over retained bytes. Build that exact pool
+    // (an admit filter that seeds only the secret) and hold the boundary.
+    const gw = await boot();
+    const secret = observed(FERN, "note", MARKER, 1000, OP_SEED);
+    await gw.append([secret]);
+    const path = join(tmp, "single-delta-pool.db");
+    const pool = await gw.openQuarantine({
+      backend: new SqliteBackend(path),
+      admit: (d) => d.id === secret.id,
+    });
+
+    await pool.drop();
+    const reopened = new SqliteBackend(path);
+    expect(await reopened.holds(secret.id)).toBe(false); // the one delta is gone
+    await reopened.close();
+    await gw.close();
+  });
+
+  it("a store retaining exactly ONE byte still refuses — the verdict's boundary is zero too", async () => {
+    const gw = await boot();
+    const secret = observed(FERN, "note", MARKER, 1000, OP_SEED);
+    await gw.append([secret]);
+    const inner = new MemoryBackend();
+    // Purges everything EXCEPT the secret: count is honest-looking, one byte remains.
+    const keepOne: StoreBackend = {
+      append: (d) => inner.append(d),
+      deltasSince: (k) => inner.deltasSince(k),
+      purge: async (ids) => inner.purge([...ids].filter((id) => id !== secret.id)),
+      holds: (id) => inner.holds(id),
+      close: () => inner.close(),
+    };
+    const pool = await gw.openQuarantine({ backend: keepOne });
+
+    await expect(pool.drop()).rejects.toThrow(/still holds 1 of/);
+    expect(gw.quarantinePools.has(pool.gateway)).toBe(true);
+    await gw.close();
+  });
+
   it("a drop that cannot PROVE discard refuses and leaves the pool ATTACHED (fail-safe)", async () => {
     const gw = await boot();
     await gw.append([observed(FERN, "height", 30, 1000, OP_SEED)]);
