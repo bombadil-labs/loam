@@ -1,8 +1,10 @@
 // T70 (health) — the door. GET /:mount/health answers the operator's question "have my store's
 // promises settled to bytes?" over HTTP. Operator-token only: the outstanding list names ids the
 // operator ordered forgotten, and advertising WHAT a store is still trying to forget — or even
-// that it is trying — belongs to whoever governs it, nobody else. Everyone else gets the same
-// uniform refusal every other closed door gives (no 404-vs-401 oracle).
+// that it is trying — belongs to whoever governs it, nobody else. To any other identity or
+// method the door DOES NOT EXIST: byte-for-byte the 404 an unknown verb gets, so a valid token
+// cannot even learn the route is real (no exists-oracle). Anonymous callers are refused upstream
+// like every verb.
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -60,17 +62,21 @@ describe("T70: GET /:mount/health — the operator's settling report", () => {
     await backend.purge([target.id]); // restore for any later assertion
   });
 
-  it("a non-operator token is refused — the same refusal as any closed door", async () => {
+  it("to a non-operator token the door does not exist — byte-for-byte an unknown verb's 404", async () => {
     const res = await get("/garden/health", "reader-token");
-    expect(res.status).toBe(401);
+    const uniform = await get("/garden/nonesuch-verb", "reader-token");
+    expect(res.status).toBe(404);
+    expect(uniform.status).toBe(404);
+    // Same body too: a distinctive refusal would be the exists-oracle in a party mask.
+    expect(await res.text()).toBe(await uniform.text());
   });
 
-  it("anonymous is refused, and a write-shaped method is refused even for the operator", async () => {
-    expect((await get("/garden/health")).status).toBe(401);
+  it("anonymous is refused upstream; a write-shaped method does not exist even for the operator", async () => {
+    expect((await get("/garden/health")).status).toBe(401); // every verb refuses anonymous alike
     const post = await fetch(`${base}/garden/health`, {
       method: "POST",
       headers: { authorization: "Bearer op-token" },
     });
-    expect(post.status).toBe(401);
+    expect(post.status).toBe(404); // not refused-as-closed: nonexistent, like any unknown surface
   });
 });
