@@ -383,25 +383,36 @@ describe("§11 at rest — inherited freelist (ticket T71)", () => {
     legacy.exec(
       "CREATE TABLE IF NOT EXISTS deltas (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, claims TEXT NOT NULL, sig TEXT)",
     );
-    legacy
-      .prepare("INSERT INTO deltas (id, claims, sig) VALUES (?, ?, ?)")
-      .run("legacy", MARKER.repeat(8000), null);
-    legacy.prepare("DELETE FROM deltas WHERE id = ?").run("legacy");
+    const ins = legacy.prepare("INSERT INTO deltas (id, claims, sig) VALUES (?, ?, ?)");
+    ins.run("deleted", MARKER.repeat(8000), null); // freed below → its bytes must be scrubbed
+    ins.run("kept", SURVIVOR.repeat(8000), null); // live → its bytes must SURVIVE the scrub
+    legacy.prepare("DELETE FROM deltas WHERE id = ?").run("deleted");
     const freed = legacy.pragma("freelist_count", { simple: true }) as number;
     legacy.close();
 
-    // Precondition: the leak is real — freed pages exist and still spell the marker.
+    // Precondition: the leak is real — freed pages exist and still spell the deleted marker.
     expect(freed).toBeGreaterThan(0);
     expect(anyFileContains(dir, MARKER)).toBeDefined();
 
     // Open with the current driver. Its constructor sees freelist_count > 0 and VACUUMs once.
+    const scrubbed = new SqliteBackend(file);
+
+    // VACUUM ran, asserted through Loam's OWN handle rather than inferred from the file: the store
+    // now holds zero freed pages. This is the direct evidence the constructor did the work.
+    const owed = (
+      scrubbed as unknown as { db: { pragma: (s: string, o?: unknown) => unknown } }
+    ).db.pragma("freelist_count", { simple: true });
+    expect(owed).toBe(0);
+
     // Scan AFTER close: VACUUM rewrites through the WAL, so the scrubbed pages reach the main file
     // only at the closing checkpoint. Close never COMPACTS freed pages though — it just folds the
     // WAL in — so without the open VACUUM the plaintext would survive this close and be found. That
     // is what keeps the assertion a real discriminator and not something close alone satisfies.
-    const scrubbed = new SqliteBackend(file);
     return scrubbed.close().then(() => {
+      // TWO-SIDED: the deleted row's freed bytes are gone, the live row's bytes remain. A "fix"
+      // that nuked the whole file would fail the second clause.
       expect(anyFileContains(dir, MARKER)).toBeUndefined();
+      expect(anyFileContains(dir, SURVIVOR)).toBeDefined();
     });
   });
 });
