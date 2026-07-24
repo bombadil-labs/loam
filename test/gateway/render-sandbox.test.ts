@@ -52,7 +52,12 @@ const staged = async (options: { renderTimeoutMs?: number } = {}): Promise<Gatew
 
 describe("§23.9: a bounded worker keeps a bad bundle from wedging the host", () => {
   it("the happy path is unchanged — a normal bundle still renders 200 with correct HTML (rail b)", async () => {
-    const gw = await staged();
+    // A generous clock, same reasoning as the memory rail below: this observes that a GOOD bundle
+    // renders correctly, not that it beats the default 500ms — and 500ms includes worker SPAWN, which
+    // under full-suite CPU contention can eat the whole window and 500 a legitimate render (T75). The
+    // timeout bound itself is proven by the hang rail (default clock) and the 1ms rail; giving the
+    // happy path room is removing a competing bound to observe the one under test, not weakening it.
+    const gw = await staged({ renderTimeoutMs: 10_000 });
     const out = await gw.serveRoute("ok", FERN, "full");
     expect(out.status).toBe(200);
     expect(out.contentType).toContain("text/html");
