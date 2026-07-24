@@ -77,7 +77,9 @@ criterion 2):
   (round-2 review): BOTH roles on one declaration refuses naming the conflict; NEITHER is lawful
   for a WALL (a seeded arena needs no scope Term — the quarantine's own shape) and refuses for a
   PROPERTY container, which IS its membership and without one would be the silent-empty H9 shape
-  through a different door.
+  through a different door. On a WALL, a membership role is lawful and means what it already
+  means on the quarantine: the SEEDING scope (which of the primary's offered deltas cross the
+  glass) — never a read-scope over shared ground, which a wall does not have.
 - **Exclusion is a claim, and re-inclusion is its lawful negation**: context
   **`loam.container.excluded`**, operator-signed, naming the container entity. No member delta is
   ever re-signed by either direction — only the exclusion claim itself moves, which is why the
@@ -142,9 +144,11 @@ a declaration that would close a cycle, naming it — and that check runs on EVE
 carrying `parent`, re-declarations included (round-1 review: latest-wins means the likely cycle
 arrives by re-pointing an EXISTING container's parent, not by the initial build). The READER is cycle-guarded independently: a
 cycle that arrives by federation (two devices, each locally acyclic, unioned) or sits in a
-replayed ground resolves DETERMINISTICALLY and loudly — the cycle-closing edge (latest by
-(timestamp, id)) is treated as not-binding and surfaced as a defect; a boot never refuses, a
-parent-chain walk never hangs. Railed by criteria 8 and 16.
+replayed ground resolves DETERMINISTICALLY and loudly — acyclicity is RESTORED, not spot-fixed
+(round-4 review: federation can deliver several disjoint cycles at once): while any cycle
+remains, its latest edge (by (timestamp, id), within that cycle) is treated as not-binding and
+surfaced as a defect, until the resolved graph is a forest; a boot never refuses, a parent-chain
+walk never hangs. Railed by criteria 8 and 16.
 
 ## Scope-merge (the new operation)
 
@@ -164,7 +168,9 @@ subtracted — that is what makes re-inclusion a pure negation). Criterion 18 pi
 
 **An unresolvable membership fails the read CLOSED** (round-1 review): a `membershipAt` address
 that resolves to nothing — partial federation, a missing publish, a degraded backend — REFUSES
-the scoped read naming the address. An empty-set fallback would silently shrink a scoped result
+the scoped read naming the address. The same rule covers a WALL whose separate backend cannot be
+reached while a scope includes it (round-4 review): refuse naming the container, never resolve
+as if it were empty. An empty-set fallback would silently shrink a scoped result
 into something indistinguishable from a legitimately empty container: partial data with no
 error, the H9 shape on the read side. Criterion 19 pins it.
 
@@ -263,10 +269,10 @@ is exactly: vocabulary ROOM for per-container trust + posture, and the enforced 
     re-attaching it: `erase` refuses completeness naming the unreachable container; after a
     detach record covers it, the same erase completes with the container listed as deliberately
     kept. — `test/gateway/container-compat.test.ts`.
-16. **A federated or replayed cycle cannot hang a read.** Union two locally-acyclic grounds whose
-    parent edges close a cycle: the table resolves with the cycle-closing edge not-binding and a
-    named defect; a reopened store holding the same ground boots and answers reads. —
-    `test/gateway/container-tree.test.ts`.
+16. **Federated or replayed cycles — plural — cannot hang a read.** Union grounds whose parent
+    edges close TWO disjoint cycles: the table resolves with each cycle's closing edge
+    not-binding and both defects named; a reopened store holding the same ground boots and
+    answers reads. — `test/gateway/container-tree.test.ts`.
 17. **A stranger's container claims are inert.** Federate a non-operator declaration, exclusion,
     and detach record: all three land in the ground; the container table, scoped reads, and the
     detached listing are unmoved — both levels asserted. — `test/gateway/container-vocab.test.ts`.
@@ -275,9 +281,10 @@ is exactly: vocabulary ROOM for per-container trust + posture, and the enforced 
     the union of their members; a container covered by a surviving detach record contributes
     NOTHING even without any exclusion; a child's members do not ride its parent's activation. —
     `test/gateway/container-scope.test.ts`.
-19. **An unresolvable membership refuses, never shrinks.** A container whose `membershipAt`
-    address resolves to nothing fails the scoped read loudly, naming the address — the read is
-    never silently evaluated as if that container were empty. — `test/gateway/container-scope.test.ts`.
+19. **An unresolvable dependency refuses, never shrinks.** A container whose `membershipAt`
+    address resolves to nothing — and separately, a scope including a WALL whose backend is
+    unreachable — fails the scoped read loudly, naming the address or container; the read is
+    never silently evaluated as if the container were empty. — `test/gateway/container-scope.test.ts`.
 20. **A re-declared parent cannot close a cycle.** With A→B→C standing, re-declaring A's parent
     to C refuses at the door naming the cycle (the latest-wins path, distinct from criterion 8's
     initial build). — `test/gateway/container-tree.test.ts`.
