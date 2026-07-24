@@ -4,7 +4,10 @@
   "id": "T70",
   "phase": "P3",
   "rails": [
-    "test/store/heal-byte-verdict.test.ts"
+    "test/gateway/store-health.test.ts",
+    "test/server/health-route.test.ts",
+    "test/store/heal-byte-verdict.test.ts",
+    "test/store/mirror-heldamong.test.ts"
   ],
   "scope": [
     "src/store/mirror.ts",
