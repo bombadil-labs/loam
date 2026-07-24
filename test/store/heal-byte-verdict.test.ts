@@ -10,6 +10,13 @@
 // Object level, not count: every assertion turns on `holds(id)` — what the bytes say — and on what
 // heal REPORTS, never on `purgedPrimary`/`purgedMirror`, which are evidence of work and not the
 // verdict. A count-only rail is exactly what let this survive T67.
+//
+// Coverage seams named deliberately (each half is railed, the composition is trivial): heal's PREFER
+// -the-batch-probe logic is bound with a hand-rolled double, and `ArchiveBackend.heldAmong`'s reach
+// is bound against a real on-disk archive — but no single test mounts a real ArchiveBackend inside a
+// MirrorBackend and heals it on the boot path. And `heldAmong` does not propagate through a nested
+// `Mirror(Mirror(_, archive), _)`, so that non-standard topology would revive per-id `holds` on the
+// archive (pre-existing; T70 did not introduce it). Both are coverage gaps, not hollow rails.
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
