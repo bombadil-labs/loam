@@ -14,12 +14,22 @@ PRESET (UNTRUSTED · one-way-seeded · live · droppable). `openQuarantine` keep
 its behavior, implemented over the primitive. `Container` and `ModuleVersion` are the only type
 names; "module" and "quarantine" remain prose postures (the "lens" discipline).
 
-**The trust knob is the copy knob, now stated as a rule** (Myk, 2026-07-20): a CURATED container
-is a query over shared ground — pointer arrangement, zero copies; an UNTRUSTED container is a
-separate arena — real bytes, because discard-with-zero-trace is the one thing sharing cannot
-provide. The Container pays bytes exactly where it needs a wall and nowhere else. Both directions
-are railed (criteria 5–6): a curated container that copies is a bug; an untrusted container that
-merely filters is a hole.
+**Bytes follow the POSTURE; law follows the TRUST — the four outcomes, enumerated** (round-1
+review reconciled the two knobs' division of labor): a PROPERTY container is a query over shared
+ground — pointer arrangement, zero copies; a WALL is a separate arena — real bytes, because
+discard-with-zero-trace is the one thing sharing cannot provide (Myk's copy-knob framing,
+2026-07-20). Trust decides which postures are LAWFUL; posture decides where bytes are paid:
+
+| trust | posture | outcome |
+|---|---|---|
+| curated | property | the zero-copy scope — shared ground, flippable exclusion |
+| curated | wall | lawful and deliberate: your OWN separate store (tenant isolation's default shape, §28.4) — copies paid on purpose |
+| untrusted | wall | the quarantine — copies paid of necessity |
+| untrusted | property | **REFUSED** (§28.3: delegated admission over shared ground) |
+
+The Container pays bytes exactly where a wall stands and nowhere else. Both directions railed
+(criteria 5–6): a property container that copies is a bug; an untrusted container that merely
+filters is a hole.
 
 ## The vocabulary mint (the permanent part)
 
@@ -62,8 +72,14 @@ criterion 2):
   Re-attach negates **every surviving** detach record for that entity (H4: two detaches mint two
   records; one negation must not leave the container half-listed). An anonymous pool — today's
   nameless `openQuarantine` — has no entity to cite and detaches recordless, stated here rather
-  than discovered. A reader — `loam repair`, a future health extension — can thereafter LIST
-  detached stores instead of forgetting them.
+  than discovered. The note is validated like a name (no NUL, bounded at 256 bytes) — it is
+  permanent metadata and must not become a dumping surface. The record is an ORDINARY claim:
+  §24.8 erasure reaches it like anything else (an operator who must forget that a quarantine
+  existed erases its record — the listing then honestly forgets), and a store that is
+  permanently LOST is written off by the operator NEGATING the record directly — reattach is
+  the ordinary negation path, not the only one; a detached record never dangles beyond the
+  operator's own say-so. A reader — `loam repair`, a future health extension — can thereafter
+  LIST detached stores instead of forgetting them.
 - **Only lawful claims bind, at every `loam.container*` context** (premortem, 2026-07-24):
   the reader filters through the operator-rooted lawful read, so a federated stranger's
   declaration, exclusion, or detach record lands as data and moves NOTHING — a stranger must not
@@ -75,6 +91,12 @@ criterion 2):
 - **Trust AT a container needs no new vocabulary**: §28.6 (DECIDED) already gave the existing
   `loam:trust` declaration shape a subject — filed at the container's entity. This ticket only
   ensures the declaration and admission plumbing accept a container entity as that subject.
+
+**Two knobs stay OFF the at-rest mint, deliberately** (round-1 review asked): `seeding` remains
+an open-time behavior of the preset (its at-rest descriptor — module import sources — arrives
+with T33's promote-law/import work), and `boundary` names OPERATIONS (reference / the two
+merges), not state. Neither gets a role until a consumer fixes its shape; minting placeholders
+now is how vocabularies grow barnacles.
 
 ## Erasure reach must match the table's width (premortem, 2026-07-24)
 
@@ -90,7 +112,9 @@ restart shape.)
 
 `parent` claims form the containment tree — and enforcement lives at BOTH levels, because a
 cycle has two arrival paths and only one passes a door (premortem, 2026-07-24). The DOOR refuses
-a declaration that would close a cycle, naming it. The READER is cycle-guarded independently: a
+a declaration that would close a cycle, naming it — and that check runs on EVERY declaration
+carrying `parent`, re-declarations included (round-1 review: latest-wins means the likely cycle
+arrives by re-pointing an EXISTING container's parent, not by the initial build). The READER is cycle-guarded independently: a
 cycle that arrives by federation (two devices, each locally acyclic, unioned) or sits in a
 replayed ground resolves DETERMINISTICALLY and loudly — the cycle-closing edge (latest by
 (timestamp, id)) is treated as not-binding and surfaced as a defect; a boot never refuses, a
@@ -104,6 +128,19 @@ formalism — **scope is chosen at query time**: exclusion changes what a scope-
 (`select`/`watch`/`freeze`, and the offered lens when the operator configures one) resolves; it
 does not silently rewrite the default door reads. Scope-merge = negating the exclusion claim —
 authorship never changed, so nothing re-signs.
+
+**"Active" is defined, not implied** (round-1 review): a container is ACTIVE iff its
+declaration survives (unstruck) AND no surviving `loam.container.detached` record covers it.
+The `parent` edge is a containment/trust relation and NEVER an auto-inclusion — a child
+participates in a scope by its own membership, not by riding its parent. Exclusion operates on
+the ACTIVE union (active is pre-exclusion; excluded-but-declared is in the union and then
+subtracted — that is what makes re-inclusion a pure negation). Criterion 18 pins the union side.
+
+**An unresolvable membership fails the read CLOSED** (round-1 review): a `membershipAt` address
+that resolves to nothing — partial federation, a missing publish, a degraded backend — REFUSES
+the scoped read naming the address. An empty-set fallback would silently shrink a scoped result
+into something indistinguishable from a legitimately empty container: partial data with no
+error, the H9 shape on the read side. Criterion 19 pins it.
 
 **And the scoped read carries the forward negation closure of what it admits — H1, named at its
 fourth site before it ships rather than after (premortem, 2026-07-24).** `negated(d, D)` ranges
@@ -148,17 +185,18 @@ is exactly: vocabulary ROOM for per-container trust + posture, and the enforced 
    reopen; a reopened store resolves the same table from the ground; and a re-declaration
    changing `trust`, `posture`, or a cross-trust `parent` REFUSES naming §28.4. —
    `test/gateway/container-declare.test.ts`.
-4. **Curated = property, at zero copies.** Excluding a curated container removes its members from
-   a container-scoped read; negating the exclusion returns them; the member delta ids before and
-   after are IDENTICAL (no re-sign, no churn), and the backend's delta count never moved beyond
-   the exclusion claims themselves. — `test/gateway/container-curated.test.ts`.
-5. **Untrusted refuses the property model, loudly.** Declaring `trust: "untrusted"` with
-   `posture: "property"` refuses at the door naming §28.3; an untrusted container's members live
-   in a genuinely separate store (its backend holds byte copies; the primary's ground is
-   unchanged by its existence). — `test/gateway/container-wall.test.ts`.
-6. **A curated container never copies.** Opening and reading a curated container adds ZERO deltas
-   to any backend (primary count unchanged; no second backend exists for it) — the dual of 5. —
-   `test/gateway/container-curated.test.ts`.
+4. **Property = flippable exclusion at zero churn.** Excluding a curated/property container
+   removes its members from a container-scoped read; negating the exclusion returns them; the
+   member delta ids before and after are IDENTICAL (no re-sign), and the ground never moved
+   beyond the exclusion claims themselves. — `test/gateway/container-curated.test.ts`.
+5. **Untrusted must be a wall, and a wall is real bytes.** Declaring `trust: "untrusted"` with
+   `posture: "property"` refuses at the door naming §28.3; a wall container's members live in a
+   genuinely separate store (its backend holds byte copies; the primary's ground is unchanged by
+   its existence) — asserted for BOTH the untrusted wall and the curated wall (the lawful
+   tenant-isolation shape). — `test/gateway/container-wall.test.ts`.
+6. **A property container never copies.** Opening and reading a property-posture container adds
+   ZERO deltas to any backend (primary count unchanged; no second backend exists for it) — the
+   dual of 5. — `test/gateway/container-curated.test.ts`.
 7. **Nested exclusion composes.** A scope built as difference-against-difference (a container
    defined relative to another, both with exclusions) resolves the correct member set — the
    pre-0.6.0-impossible case. — `test/gateway/container-scope.test.ts`.
@@ -200,6 +238,17 @@ is exactly: vocabulary ROOM for per-container trust + posture, and the enforced 
 17. **A stranger's container claims are inert.** Federate a non-operator declaration, exclusion,
     and detach record: all three land in the ground; the container table, scoped reads, and the
     detached listing are unmoved — both levels asserted. — `test/gateway/container-vocab.test.ts`.
+
+18. **The union side of the formula is pinned.** Two active property containers scope-read as
+    the union of their members; a container covered by a surviving detach record contributes
+    NOTHING even without any exclusion; a child's members do not ride its parent's activation. —
+    `test/gateway/container-scope.test.ts`.
+19. **An unresolvable membership refuses, never shrinks.** A container whose `membershipAt`
+    address resolves to nothing fails the scoped read loudly, naming the address — the read is
+    never silently evaluated as if that container were empty. — `test/gateway/container-scope.test.ts`.
+20. **A re-declared parent cannot close a cycle.** With A→B→C standing, re-declaring A's parent
+    to C refuses at the door naming the cycle (the latest-wins path, distinct from criterion 8's
+    initial build). — `test/gateway/container-tree.test.ts`.
 
 ## Open for Myk (at the PR, none blocking the build)
 
