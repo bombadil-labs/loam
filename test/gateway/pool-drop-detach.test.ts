@@ -254,6 +254,7 @@ describe("T72: detach() keeps the bytes deliberately, and reattachment restores 
     await gw.erase(secret.id); // decided while the store was away — fans to NO pool
 
     const surviving = new SqliteBackend(path);
+    expect(await surviving.holds(secret.id)).toBe(true); // premise: the byte truly survived the window
     const reattached = await gw.openQuarantine({ backend: surviving });
     // Object level: the reattached pool's reader never saw the byte...
     expect(reattached.gateway.reactor.has(secret.id)).toBe(false);
