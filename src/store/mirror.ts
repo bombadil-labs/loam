@@ -158,6 +158,43 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
     const replant = fromMirror.filter((d) => !dead.has(d.id));
     const purgedMirror = await sweep(this.mirror);
     const toPrimary = await this.primary.append(replant);
+    // The BYTE verdict (§11, hazard H7). A purge's count is EVIDENCE OF WORK, never proof: a tier
+    // can report success while a freelist page, a `.tmp` straggler, or a WAL image still holds the
+    // plaintext — the exact readability-vs-byte-presence conflation §11 forbids and T40 caught at the
+    // door. So after the sweep, ASK each tier whether any dead id is still held. A survivor — or a
+    // tier that cannot answer (H9: silence is not proof it forgot) — routes to `purgeFailures`
+    // alongside a refused sweep, because both mean the same thing: the erasure did not verifiably
+    // finish, and the boot path already surfaces that channel loudly rather than serving as if clean.
+    const survivor = (label: string, id: string): string =>
+      `${label} still holds ${id} after purge — bytes at rest (§11 verdict)`;
+    const unprovable = (label: string, id: string, why: string): string =>
+      `${label} could not confirm ${id} is forgotten: ${why}`;
+    const verify = async (tier: StoreBackend, label: string): Promise<void> => {
+      if (ids.length === 0) return;
+      // Prefer the batch probe where a tier offers one: the archive's per-id `holds` is a full sweep
+      // on absence, so asking one id at a time over the whole tombstone set is O(dead × files). A tier
+      // without it (memory, sqlite) has a cheap `holds`, so the per-id fallback below costs nothing.
+      if (tier.heldAmong) {
+        try {
+          for (const id of await tier.heldAmong(ids)) purgeFailures.push(survivor(label, id));
+        } catch (err) {
+          // The batch probe refused: the WHOLE set is unproven (H9), never silently clean.
+          const why = err instanceof Error ? err.message : String(err);
+          for (const id of ids) purgeFailures.push(unprovable(label, id, why));
+        }
+        return;
+      }
+      for (const id of ids) {
+        try {
+          if (await tier.holds(id)) purgeFailures.push(survivor(label, id));
+        } catch (err) {
+          const why = err instanceof Error ? err.message : String(err);
+          purgeFailures.push(unprovable(label, id, why));
+        }
+      }
+    };
+    await verify(this.primary, "primary");
+    await verify(this.mirror, "mirror");
     if (this.#lagEpoch === epoch) this.#lagging = false;
     return { toMirror, toPrimary, purgedPrimary, purgedMirror, purgeFailures };
   }

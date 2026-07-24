@@ -52,6 +52,16 @@ export interface StoreBackend {
   // this handle believes it wrote.
   holds(id: string): Promise<boolean>;
 
+  // OPTIONAL batch companion to `holds`: of `ids`, which does this backend still hold — answered
+  // in ONE pass, not one `holds` sweep per id. It exists for the tier where per-id is a cliff:
+  // `heal` hands the whole accumulated tombstone set to its byte verdict, and an archive whose
+  // `holds` pays a full directory sweep on every ABSENT id turns that verdict into O(dead × files).
+  // A driver implements this only when its `holds` is not already cheap (the archive does; sqlite's
+  // indexed lookup and memory's Set do not need to). Callers MUST fall back to per-id `holds` when
+  // it is absent. It keeps `holds`'s guarantees exactly — same byte reach, same fail-closed (a tier
+  // that cannot examine part of its store REJECTS rather than answer a false clean, H9).
+  heldAmong?(ids: Iterable<string>): Promise<Set<string>>;
+
   // Release held resources.
   close(): Promise<void>;
 }
