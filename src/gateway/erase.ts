@@ -456,3 +456,97 @@ export async function eraseReplicaImpl(
     );
   }
 }
+
+// --- health: the settling report (T70; Myk, 2026-07-24) --------------------------------------------
+//
+// This store is eventually consistent about FORGETTING: an erasure is decided the moment its
+// tombstone lands, but the bytes leave each tier on that tier's own time — a lagging mirror, a
+// locked WAL, a pool that was offline. That gap is a HEALTH state, not a fault: serve keeps
+// serving, and health() answers, live, whether every erasure this ground has promised has settled
+// to bytes. Live means computed NOW, from the reactor's surviving tombstones and a byte probe over
+// the backend AND every attached quarantine pool — never a boot-time snapshot that goes stale as
+// erasures land or bytes resurface. (Scope, honestly: the promise SET reads through the reactor,
+// which seeds from the primary's deltasSince — a primary that lost its tombstones mid-run while a
+// mirror kept a forgotten byte is out of this instrument's sight until the next boot heal.)
+
+export interface ErasureHealth {
+  readonly settled: boolean; // every promise is bytes-gone on every tier owned AND every attached pool
+  readonly promised: number; // ids promised forgotten (targets of surviving operator tombstones)
+  readonly pending: number; // of those, ids not yet settled everywhere in reach
+  readonly outstanding: readonly string[]; // the ids themselves — operator-only surface
+  readonly unproven: boolean; // some tier could not be examined: not settled, not failed (H9)
+}
+
+export interface StoreHealth {
+  // "ok"       — every promise settled, nothing lagging.
+  // "settling" — converging, not broken: erasure debt outstanding somewhere in reach, or a mirror
+  //              behind on DURABILITY (lag is missing copies, not retained bytes — a different debt
+  //              folded into the same "not yet ok").
+  // "unproven" — a tier could not answer; treat as settling at best, never as ok (H9).
+  readonly status: "ok" | "settling" | "unproven";
+  readonly erasure: ErasureHealth;
+  readonly lagging?: boolean; // present when the backend exposes mirror lag (MirrorBackend)
+}
+
+// The whole promised set, asked everywhere at once — `erasureOutstanding` above is this same fault
+// model per id (the two MUST agree or the erase door and the health door drift): an id is
+// outstanding where bytes are held, where a tier cannot answer (H9 — unprovable is not clean), or
+// where a reachable replica does not yet carry the tombstone (delivery still owed). Batched so the
+// backend's single-pass probe (`heldAmong`) carries the whole set in one sweep per store.
+async function outstandingAmong(
+  gw: Gateway,
+  ids: readonly string[],
+  seen: Set<Gateway>,
+): Promise<{ outstanding: Set<string>; unproven: boolean }> {
+  const outstanding = new Set<string>();
+  let unproven = false;
+  if (seen.has(gw)) return { outstanding, unproven };
+  seen.add(gw);
+  try {
+    if (gw.backend.heldAmong) {
+      for (const id of await gw.backend.heldAmong(ids)) outstanding.add(id);
+    } else {
+      for (const id of ids) if (await gw.backend.holds(id)) outstanding.add(id);
+    }
+  } catch {
+    for (const id of ids) outstanding.add(id); // proven nothing: the whole set is unproven here
+    unproven = true;
+  }
+  const tombs = readTombstones(gw.reactor, gw.operatorAuthor);
+  for (const id of ids) if (!tombs.has(id)) outstanding.add(id); // delivery still owed
+  for (const pool of gw.quarantinePools) {
+    const sub = await outstandingAmong(pool, ids, seen);
+    for (const id of sub.outstanding) outstanding.add(id);
+    unproven ||= sub.unproven;
+  }
+  return { outstanding, unproven };
+}
+
+export async function healthImpl(gw: Gateway): Promise<StoreHealth> {
+  const dead = readTombstones(gw.reactor, gw.operatorAuthor);
+  const ids = [...dead];
+  let erasure: ErasureHealth;
+  if (ids.length === 0) {
+    erasure = { settled: true, promised: 0, pending: 0, outstanding: [], unproven: false };
+  } else {
+    const verdict = await outstandingAmong(gw, ids, new Set());
+    erasure = {
+      settled: verdict.outstanding.size === 0,
+      promised: ids.length,
+      pending: verdict.outstanding.size,
+      outstanding: [...verdict.outstanding].sort(),
+      unproven: verdict.unproven,
+    };
+  }
+  const lagging = (gw.backend as { lagging?: unknown }).lagging;
+  const status = erasure.unproven
+    ? "unproven"
+    : erasure.settled && lagging !== true
+      ? "ok"
+      : "settling";
+  return {
+    status,
+    erasure,
+    ...(typeof lagging === "boolean" && { lagging }),
+  };
+}

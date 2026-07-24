@@ -688,6 +688,20 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         case "mcp":
           await handleMcp(gateway, identity, req, res);
           return;
+        // The settling report (T70): has every erasure this store promised settled to bytes?
+        // Operator-token GET only. To ANY other identity or method the door does not exist —
+        // byte-for-byte the 404 an unknown verb gets — because the outstanding list names ids the
+        // operator ordered forgotten, and even that a store is STILL forgetting is the operator's
+        // business alone. (register's 403 reveals its own existence on purpose: it is in every
+        // mount's public shape. This door's existence is itself the operator's.)
+        case "health": {
+          if (req.method !== "GET" || identity.operator !== true) {
+            json(res, 404, { errors: ["no such surface"] });
+            return;
+          }
+          json(res, 200, await gateway.health());
+          return;
+        }
         // The other doors (SPEC §17): the same registrations, spoken in REST/OpenAPI. The
         // token carries the SAME identity discipline — an actor token writes as that actor,
         // an operator token as the operator; the hooks enforce standing, not the transport.
