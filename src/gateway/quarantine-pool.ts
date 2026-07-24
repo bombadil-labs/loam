@@ -31,6 +31,11 @@ export interface QuarantinePool {
   readonly gateway: Gateway;
   reseed(): Promise<FederationReport>;
   drop(): Promise<void>;
+  // The deliberate KEEP (Myk, 2026-07-24): close WITHOUT purging — detach a suspect pool to debug
+  // it, then reattach by opening a pool over the surviving store, which restores erasure reach.
+  // Until reattached, the store's bytes are outside the fan-out: that is the point, and it is the
+  // caller's named responsibility. (The at-rest detach RECORD waits for T32's vocabulary mint.)
+  detach(): Promise<void>;
 }
 
 export interface QuarantineOptions {
@@ -110,7 +115,53 @@ export async function openQuarantineImpl(
   return {
     gateway: pool,
     reseed,
+    // Drop DISCARDS — at the bytes, on every backend (T72). The old body detached and closed,
+    // which "discarded" only the default MemoryBackend; a durable pool's seeded copies survived
+    // on disk, outside every future erasure's reach (erase walks only ATTACHED pools) — the
+    // evasion channel §24.8 exists to prevent, opened by the cleanup call. So: purge everything,
+    // then VERIFY at the bytes (holds — a purge's count is evidence, never the verdict, T70),
+    // and on any survivor REFUSE while leaving the pool attached: a store that cannot prove
+    // discard stays inside the erasure fan-out rather than slipping out of it.
     drop: async () => {
+      const ids = (await pool.backend.deltasSince(new Set())).map((d) => d.id);
+      if (ids.length > 0) {
+        await pool.backend.purge(ids);
+        // The verdict, H9-closed: a probe that cannot answer has proven nothing, so a rejecting
+        // store refuses the drop exactly like a retaining one — unproven is not discarded.
+        let survivors: Set<string>;
+        try {
+          if (pool.backend.heldAmong) {
+            survivors = await pool.backend.heldAmong(ids);
+          } else {
+            survivors = new Set<string>();
+            for (const id of ids) if (await pool.backend.holds(id)) survivors.add(id);
+          }
+        } catch (err) {
+          throw new Error(
+            `drop refused: this pool's store could not be proven clean (${
+              err instanceof Error ? err.message : String(err)
+            }) — a dropped pool must not become bytes outside the erasure fan-out. The pool ` +
+              `remains ATTACHED; resolve the store fault and drop again, or detach() to keep ` +
+              `it deliberately.`,
+            { cause: err },
+          );
+        }
+        if (survivors.size > 0) {
+          throw new Error(
+            `drop refused: this pool's store still holds ${survivors.size} of ${ids.length} ` +
+              `delta(s) after the discard purge — a dropped pool must not become bytes outside ` +
+              `the erasure fan-out. The pool remains ATTACHED (still in erasure reach); resolve ` +
+              `the store fault and drop again, or detach() to keep it deliberately.`,
+          );
+        }
+      }
+      gw.quarantinePools.delete(pool);
+      await pool.close();
+    },
+    // Detach KEEPS — the deliberate act, distinct in name from the discard. No purge, no
+    // verification: the caller is choosing to hold these bytes outside the fan-out (debugging a
+    // suspect pool), and reattachment is openQuarantine over the surviving store.
+    detach: async () => {
       gw.quarantinePools.delete(pool);
       await pool.close();
     },
