@@ -41,7 +41,10 @@ criterion 2):
 - **The container is an entity** the operator names (`container:<name>` by convention, not
   enforced), **declared** by an operator-signed claim at context **`loam.container`**: role
   `container` → the entity; role `trust` → `"curated"` | `"untrusted"`; role `posture` → `"wall"`
-  | `"property"` (§28.7's mint — absent reads as the §28.4 default, a wall); role `parent` → the
+  | `"property"` (§28.7's mint — REQUIRED, like trust: a wall silently allocated by an omitted
+  role is a store nobody asked for, and explicitness beats defaults on the permanent surface;
+  the refusal names §28.4's recommendation, wall, so the default lives in the MESSAGE and the
+  CLI's suggestion, never in silent vocabulary semantics); role `parent` → the
   containing container's entity, absent for a root-attached container. The declaration is the
   at-rest form of the knob vector; a knob change is a fresh declaration (latest-wins, like every
   living declaration), and §28.3's derivation is ENFORCED at the door: declaring
@@ -59,8 +62,9 @@ criterion 2):
   EARLIEST surviving declaration (by (timestamp, id)); a later declaration differing in either
   resolves as not-binding for those roles and surfaces as a named defect. Latest-wins never
   applies to the two knobs §28.4 proved are not flags. Criterion 21 drives the federated shape.
-  **The trust role is REQUIRED** — a declaration without it refuses at the door (explicitness
-  over defaults on the permanent surface); only posture carries a default (wall, §28.4).
+  **Both `trust` and `posture` are REQUIRED** — a declaration missing either refuses at the
+  door; §28.4's wall-default survives as the refusal's named recommendation, not as a silent
+  allocation.
 - **Membership** is the built #132 surface (a Term); the declaration references it under TWO
   DISTINCT ROLES so the shapes can never blur (the §20 corollary, applied here too): role
   `membership` → primitive, the Term's canonical JSON inline; role `membershipAt` → primitive,
@@ -104,9 +108,15 @@ criterion 2):
   unmoved) by criterion 17. The §28.6 grant-rooted widening (admin standing IN the container,
   recursing to the root) is the NAMED extension point — later work widens who counts as lawful;
   it never reinterprets the context.
-- **Trust AT a container needs no new vocabulary**: §28.6 (DECIDED) already gave the existing
-  `loam:trust` declaration shape a subject — filed at the container's entity. This ticket only
-  ensures the declaration and admission plumbing accept a container entity as that subject.
+- **Trust AT a container needs no new vocabulary — and the two "trusts" are §28.1's two AXES,
+  not one value that could disagree** (round-3 review asked for the wiring rule): the knob's
+  `trust` role is the EFFECTIVENESS axis — whose trust domain the container's content belongs
+  to, deciding posture lawfulness and where bytes are paid (curated = the operator's own;
+  untrusted = binds inside only, crosses only by promotion). The `loam:trust` declaration filed
+  AT the container entity (§28.6, DECIDED) is the ADMISSION axis — who may federate INTO it
+  (open/roster/closed). Admission plumbing gates on the subject declaration and NEVER on the
+  knob; posture legality and the copy rule gate on the knob and NEVER on the roster. Criterion
+  10 drives both directions of that independence.
 
 **Two knobs stay OFF the at-rest mint, deliberately** (round-1 review asked): `seeding` remains
 an open-time behavior of the preset (its at-rest descriptor — module import sources — arrives
@@ -194,8 +204,9 @@ is exactly: vocabulary ROOM for per-container trust + posture, and the enforced 
    erasure law included. — existing suites, diff-audited.
 2. **The mint collides with nothing, and malformations refuse.** A vocabulary rail asserts
    every new context begins `loam.container` and no pre-existing reserved context or role
-   shares the prefix; the door refuses a NUL in a container name, a declaration missing `trust`,
-   a declaration carrying BOTH membership roles, and a PROPERTY declaration carrying neither. —
+   shares the prefix; the door refuses a NUL in a container name, a declaration missing `trust`
+   OR `posture` (the posture refusal naming the §28.4 recommendation), a declaration carrying
+   BOTH membership roles, and a PROPERTY declaration carrying neither. —
    `test/gateway/container-vocab.test.ts`.
 3. **A knob change is a delta, not a restart — for the MUTABLE knobs.** Re-declaring a
    container with a changed membership updates the RUNNING gateway's table (latest-wins) with no
@@ -224,11 +235,14 @@ is exactly: vocabulary ROOM for per-container trust + posture, and the enforced 
 9. **The detach record lands, lists, and never half-clears (H4).** `detach()` on a named
    container lands the `loam.container.detached` claim (note included); TWO detaches accrue two
    records and ONE reattach negates BOTH (ground level: both negations present; listing level:
-   the container absent); a reader lists currently-detached containers from the ground alone. —
+   the container absent); a reader lists currently-detached containers from the ground alone;
+   and the note's bounds are railed — an oversized (>256 bytes) or NUL-bearing note refuses. —
    `test/gateway/container-detach-record.test.ts` (new file — the T72 rail is frozen).
-10. **Trust files at a container entity.** A `loam:trust` declaration whose subject is a declared
-    container entity is accepted and resolvable per §28.6's shape; admission plumbing reads it
-    for that container without disturbing the root's declaration. — `test/gateway/container-trust-subject.test.ts`.
+10. **The two trust axes are independent, both ways.** A `loam:trust` declaration whose subject
+    is a declared container entity is accepted and resolvable per §28.6 without disturbing the
+    root's; tightening that roster changes ADMISSION only (posture legality and the copy rule
+    unmoved); flipping nothing but the knob would-be changes admission not at all — each axis
+    driven with the other held fixed. — `test/gateway/container-trust-subject.test.ts`.
 11. **No §20 step needed, proven.** A store written entirely by the PREVIOUS release (a fixture
     from the current test corpus, byte-for-byte) opens under the lifted code with identical
     resolved views and identical delta ids — nothing at rest changed meaning. — `test/gateway/container-compat.test.ts`.
