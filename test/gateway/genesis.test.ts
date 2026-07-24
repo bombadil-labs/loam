@@ -161,6 +161,60 @@ describe("genesis: a fresh store, born governed and registered", () => {
   });
 });
 
+describe("genesis ids are golden: a drive-by constant cannot re-mint the constitution (T74)", () => {
+  // Genesis deltas are content-addressed and their fixed timestamps are load-bearing INPUTS to
+  // those addresses: the marker's `timestamp: 0` and the registration clock's base of 1. Mutating
+  // either keeps boot deterministic (still the same ids every boot) while silently re-minting EVERY
+  // genesis id — an existing store re-booted under the changed constant grows a PARALLEL
+  // constitution (a second marker, duplicate grants) and nothing complains. These golden hexes are
+  // the store's birth certificate: changing a genesis constant is sometimes intended (§20 corollary
+  // — identity lives in the bytes — and then ships a migration) but must never be silent. The
+  // hyperschema and root are local and frozen; the only shared inputs are stable primitives
+  // (`pickLatest`, `GARDENER`), so in practice a genesis-internals change is what moves these hexes.
+  // Scope: this pins the two timestamp constants (marker `timestamp: 0`, clock base `1`) via one
+  // registration + one grant. It does NOT exercise the multi-registration lens-dedup path or
+  // `spec.extra` — a change confined to those re-mints nothing in this fixture; widen the fixture
+  // to pin them.
+  const GOLDEN_HS: HyperSchema = {
+    name: "GoldenType",
+    alg: 1,
+    body: parseTerm({ op: "mask", policy: "drop", in: "input" }),
+  };
+  const GOLDEN_ROOT = "golden:root";
+  const goldenGenesis = () =>
+    assembleGenesis({
+      operatorSeed: OPERATOR_SEED,
+      registrations: [
+        {
+          hyperschema: GOLDEN_HS,
+          schema: { props: new Map(), default: pickLatest },
+          roots: [GOLDEN_ROOT],
+        },
+      ],
+      grants: [grantClaims(STORE_ENTITY, GARDENER, "write", OPERATOR, 2)],
+    });
+
+  it("the marker id is fixed by the operator alone — pins the marker's timestamp", () => {
+    // Depends only on the operator seed, so the marker-timestamp mutant (0 -> 1) moves it here;
+    // the clock-base mutant does not (the marker predates the clock). That asymmetry is why the
+    // full-list assertion below exists too — neither alone sees both mutants.
+    const marker = goldenGenesis().deltas[0]!;
+    expect(marker.id).toBe("1e208c2b970b22107c5b5baf13d3e14d6a492ec9f11f1068137b19e9afb409ed37d0");
+  });
+
+  it("every genesis delta id, in order — pins the clock base and the whole constitution", () => {
+    const ids = goldenGenesis().deltas.map((d) => d.id);
+    expect(ids).toEqual([
+      "1e208c2b970b22107c5b5baf13d3e14d6a492ec9f11f1068137b19e9afb409ed37d0", // marker
+      "1e20cd6f5b660cee168b9ec524b899049ecc3657982069c39e323e177be76186d724", // hyperschema definition
+      "1e2046d8c0b6ac67adb9d965da1317864380aad84669b852a87c8047362139657fa1", // living schema
+      "1e2006e329ab31a8b6d5ffd1d4b1bd21b155c15dafa99dd022bd93acbb9b3816e1ca", // frozen snapshot
+      "1e20bca161bd5a271cea3ba9f141901850286c2dafce53a9032cbafe78a08d54eb1b", // binding
+      "1e202cef7789d2444f75e99b776899e6fff54cd6f00fdb464e901e008e391cd3b203", // operator grant
+    ]);
+  });
+});
+
 // The v2 body gathers heights only — tags fall out of the hyperview, so evolution is
 // observable through an unchanged policy: the DEFINITION drove the change.
 const HEIGHTS_ONLY = parseTerm({
