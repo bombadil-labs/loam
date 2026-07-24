@@ -1,0 +1,14 @@
+{
+  "body": "BUILD (small, load-bearing for the vision). Found stress-testing 'behind glass' from the serving side (Myk, 2026-07-24): a container is a Gateway over its own store, and §28's wall governs writes, law-reach, and trust-crossing — NEVER visibility. A loaded module should serve its full door set (GraphQL, SSE, REST, rendered routes) to the host server's consumers at its own mount. The machinery already speaks mounts: serve({ mounts }) routes /:mount/:verb per gateway. The gap is purely that mounts are FIXED AT BOOT — a container spawned at runtime is not reachable until restart, which breaks 'ingest this module and run it, now'.\n\nBUILD: give the ServerHandle (or ServeOptions) a mount/unmount pair — addMount(name, gateway) / removeMount(name) — with the rules that keep it boring: a mount name is validated like a static one (no collision with a live mount; removal closes streams on that mount cleanly); the token table is UNCHANGED (a dynamic mount answers under the same identities — a container needing its own tokens is a later design, not this ticket); drop/detach of the underlying container removes its mount (a dangling mount must 404, never 500). Wire the natural attach point: opening a pool/container with a name registers it; drop unregisters.\n\nRAILS: mount-after-boot serves 200 on /name/graphql where pre-mount it was the uniform refusal; unmount returns the door to indistinguishable-from-never-there; a dropped container's mount is gone on the next request (no zombie gateway); the static mounts are untouched throughout; SSE streams on a removed mount end cleanly rather than hanging. Object level: what the HTTP door answers, before and after.\n\nNOTE the anonymous-door interplay: a dynamic mount with a public surface joins the tokenless switch exactly like a static one — assert one public read through a dynamically-mounted container so the public path is pinned too.",
+  "edges": [],
+  "id": "T78",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "src/server/http.ts",
+    "src/gateway/quarantine-pool.ts",
+    "test/server/dynamic-mounts.test.ts"
+  ],
+  "status": "todo",
+  "title": "Dynamic container mounts — load a module and it is live at /name/* on the running server"
+}
