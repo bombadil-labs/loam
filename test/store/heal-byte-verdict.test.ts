@@ -11,13 +11,21 @@
 // heal REPORTS, never on `purgedPrimary`/`purgedMirror`, which are evidence of work and not the
 // verdict. A count-only rail is exactly what let this survive T67.
 
-import { describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
 import type { StoreBackend } from "../../src/store/backend.js";
+import { ArchiveBackend } from "../../src/store/archive.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { MirrorBackend } from "../../src/store/mirror.js";
 import { FERN, GARDENER_SEED, observed } from "../spike/garden.js";
 
 const dead = observed(FERN, "height", 30, 1000, GARDENER_SEED);
+const other = observed(FERN, "height", 34, 2000, GARDENER_SEED);
+
+const tmp = mkdtempSync(join(tmpdir(), "loam-heal-verdict-"));
+afterAll(() => rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
 
 // A tier that LIES: its `purge` reports it removed the ids, but removes nothing — so the bytes
 // remain and `holds` stays true. The shape T40 found: success reported, plaintext retained.
@@ -87,5 +95,77 @@ describe("T70: heal reports a byte verdict, never trusts a purge's count", () =>
     expect(await primary.holds(dead.id)).toBe(false);
     expect(await mirror.holds(dead.id)).toBe(false);
     expect(report.purgeFailures).toEqual([]);
+  });
+});
+
+// The verdict's fast path: on the archive, per-id `holds` is a full sweep on absence, so heal asks a
+// single-pass `heldAmong` instead (avoiding the O(dead × files) boot cliff). These rail the primitive
+// at the DRIVER level — against a real on-disk straggler, not a combinator-level simulated lie — and
+// prove heal actually prefers it and honours its refusal.
+describe("T70: ArchiveBackend.heldAmong — one pass over the bytes, holds's reach", () => {
+  it("finds a canonical byte AND a misfiled straggler; an absent id is not reported held", async () => {
+    const root = join(tmp, "archive-heldamong");
+    const archive = new ArchiveBackend(root);
+    await archive.append([dead]); // canonical <fan>/<dead.id>.json
+    // A crash-left straggler for `other`, MISFILED into a foreign fan — the bytes §11 must still see
+    // (a plain file any backup sweeps up), and the reach `deltasSince` skips by design.
+    const alienFan = join(root, "zz");
+    mkdirSync(alienFan, { recursive: true });
+    writeFileSync(join(alienFan, `${other.id}.json.99999.tmp`), "{}");
+
+    const held = await archive.heldAmong([dead.id, other.id, "de".repeat(32)]);
+    expect(held.has(dead.id)).toBe(true); // canonical
+    expect(held.has(other.id)).toBe(true); // misfiled straggler
+    expect(held.size).toBe(2); // the absent id is not held
+    expect(await archive.heldAmong([])).toEqual(new Set()); // asks nothing, walks nothing
+    await archive.close();
+  });
+});
+
+describe("T70: heal prefers the batch probe and honours its refusal", () => {
+  const probeDouble = (
+    heldAmong: () => Promise<Set<string>>,
+    holdsCalled: { value: boolean },
+  ): StoreBackend => {
+    const inner = new MemoryBackend();
+    return {
+      append: (d) => inner.append(d),
+      deltasSince: (k) => inner.deltasSince(k),
+      purge: (batch) => inner.purge(batch),
+      holds: (id) => {
+        holdsCalled.value = true; // heal must NOT fall back here when heldAmong exists
+        return inner.holds(id);
+      },
+      heldAmong,
+      close: () => inner.close(),
+    };
+  };
+
+  it("uses heldAmong, not per-id holds, on a tier that offers it", async () => {
+    const holdsCalled = { value: false };
+    const mirror = probeDouble(() => Promise.resolve(new Set([dead.id])), holdsCalled);
+    const store = new MirrorBackend(new MemoryBackend(), mirror);
+
+    const report = await store.heal(new Set([dead.id]));
+
+    expect(report.purgeFailures.some((m) => m.includes(dead.id))).toBe(true); // survivor from the batch
+    expect(holdsCalled.value).toBe(false); // per-id holds never consulted on that tier
+    await store.close();
+  });
+
+  it("a batch probe that REJECTS marks the whole set unproven, never clean (H9)", async () => {
+    const holdsCalled = { value: false };
+    const mirror = probeDouble(
+      () => Promise.reject(new Error("archive fan unreadable")),
+      holdsCalled,
+    );
+    const store = new MirrorBackend(new MemoryBackend(), mirror);
+
+    const report = await store.heal(new Set([dead.id]));
+
+    expect(report.purgeFailures.some((m) => m.includes(dead.id) && m.includes("unreadable"))).toBe(
+      true,
+    );
+    await store.close();
   });
 });

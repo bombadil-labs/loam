@@ -271,6 +271,44 @@ export class ArchiveBackend implements StoreBackend {
     return false;
   }
 
+  // The batch companion to `holds` (SPEC §11 byte verdict). `heal` asks its verdict about the whole
+  // accumulated tombstone set at once; answering with per-id `holds` would pay a full sweep for every
+  // ABSENT id (the common clean case), so O(dead × files) on the boot path. This walks the FILES ONCE
+  // — the same file-outer inversion `purge` uses — and reports which requested ids are present. Same
+  // reach as `holds`: every fan, both name shapes (`<id>.json` and the crash-left `<id>.json.<pid>.tmp`),
+  // never `onDisk`. Same H9 fail-closed as `holds`, and DELIBERATELY unlike `purge`: a fan it cannot
+  // read (beyond ENOENT) is bytes left unexamined, so it REJECTS rather than answer a false clean —
+  // this is the verdict, not evidence of work.
+  async heldAmong(ids: Iterable<string>): Promise<Set<string>> {
+    this.assertOpen();
+    const want = new Set(ids);
+    const held = new Set<string>();
+    if (want.size === 0) return held;
+    const fans = readdirSync(this.root, { withFileTypes: true })
+      .filter((f) => f.isDirectory())
+      .map((f) => f.name);
+    for (const fan of fans) {
+      let names: readonly string[];
+      try {
+        names = readdirSync(join(this.root, fan));
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+        continue; // a fan that vanished between listing and reading holds nothing
+      }
+      for (const name of names) {
+        const cut = name.endsWith(".json")
+          ? name.length - ".json".length
+          : name.endsWith(".tmp")
+            ? name.indexOf(".json.")
+            : -1;
+        if (cut <= 0) continue;
+        const id = name.slice(0, cut);
+        if (want.has(id)) held.add(id);
+      }
+    }
+    return held;
+  }
+
   async close(): Promise<void> {
     this.closed = true;
   }
