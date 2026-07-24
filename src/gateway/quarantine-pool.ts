@@ -19,18 +19,28 @@
 import type { Delta } from "@bombadil/rhizomatic";
 import type { StoreBackend } from "../store/backend.js";
 import { MemoryBackend } from "../store/memory.js";
-import { isTombstone } from "./erase.js";
+import { isRepairable } from "../store/quarantine.js";
+import { isTombstone, readTombstones } from "./erase.js";
 import { withNegationClosure } from "./ingest.js";
 import { Gateway, type FederationReport } from "./gateway.js";
 
 // A live quarantine pool (returned by `Gateway.openQuarantine`). `gateway` is the pool's own gateway — its
 // own backend, the operator's seed, seeded one-way from the primary. `reseed` re-pulses the one-way inbound
 // edge (the primary's ground is live: a fresh pull sees new facts and, crucially, new tombstones). `drop`
-// detaches the pool from the primary's erasure fan-out, closes it, and discards its store wholesale.
+// DISCARDS: purges everything the pool can name (readable surface + session memory + the §25 pen),
+// verifies at the bytes, and only then detaches and closes — refusing, still attached, when it cannot
+// prove the discard. A straggler bearing an id no read ever named is heal's domain, not drop's.
 export interface QuarantinePool {
   readonly gateway: Gateway;
   reseed(): Promise<FederationReport>;
   drop(): Promise<void>;
+  // The deliberate KEEP (Myk, 2026-07-24): close WITHOUT purging — detach a suspect pool to debug
+  // it, then reattach by opening a pool over the surviving store. Until then the bytes are outside
+  // the fan-out: that is the point, and the caller's named responsibility. Reattachment restores
+  // reach going FORWARD and settles the debt of the window — openQuarantine sweeps any id the
+  // primary tombstoned while the store was away, before the pool's reader exists, refusing to
+  // attach a store it cannot prove clean. (The at-rest detach RECORD waits for T32's mint.)
+  detach(): Promise<void>;
 }
 
 export interface QuarantineOptions {
@@ -65,7 +75,42 @@ export async function openQuarantineImpl(
   if (gw.options.seed === undefined) {
     throw new Error("only an operated store can open a quarantine pool (§24.1)");
   }
-  const backend = opts.backend ?? new MemoryBackend();
+  const backend: StoreBackend = opts.backend ?? new MemoryBackend();
+  // SETTLE ERASURE DEBT BEFORE THE POOL EXISTS (T72). A durable store being (re)opened as a pool
+  // may hold bytes whose tombstones landed at the primary while it was detached — the seeding
+  // edge DELIVERS a tombstone as data and executes nothing, so attaching first would boot a
+  // reader that resolves the forgotten byte LIVE while the tombstone sits beside it in its own
+  // ground. The primary's surviving tombstones are authoritative here (the pool shares its
+  // operator), so the debt is swept at the bytes NOW — before any reactor replays the store —
+  // and a store that cannot be proven clean of it refuses to attach at all (H9: unproven bytes
+  // do not come back inside the walls).
+  const dead = [...readTombstones(gw.reactor, gw.operatorAuthor)];
+  if (dead.length > 0) {
+    let owed: Set<string>;
+    try {
+      if (backend.heldAmong) {
+        owed = await backend.heldAmong(dead);
+      } else {
+        owed = new Set<string>();
+        for (const id of dead) if (await backend.holds(id)) owed.add(id);
+      }
+      if (owed.size > 0) {
+        await backend.purge([...owed]);
+        for (const id of owed) {
+          if (await backend.holds(id)) {
+            throw new Error(`the store still holds ${id} after the settling purge`);
+          }
+        }
+      }
+    } catch (err) {
+      throw new Error(
+        `openQuarantine refused: this store carries erasure debt that could not be settled — ` +
+          `bytes the operator ordered forgotten must not come back inside the walls as a live ` +
+          `reader. ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      );
+    }
+  }
   const pool = await Gateway.open(backend, { seed: gw.options.seed });
   // A membership filter narrows what the pool SEES, never what it must FORGET (§24.8): the
   // operator's tombstones pass the seeding edge unconditionally, exactly as `eraseReplica`
@@ -110,7 +155,74 @@ export async function openQuarantineImpl(
   return {
     gateway: pool,
     reseed,
+    // Drop DISCARDS — at the bytes, on every backend (T72). The old body detached and closed,
+    // which "discarded" only the default MemoryBackend; a durable pool's seeded copies survived
+    // on disk, outside every future erasure's reach (erase walks only ATTACHED pools) — the
+    // evasion channel §24.8 exists to prevent, opened by the cleanup call. So: purge everything,
+    // then VERIFY at the bytes (holds — a purge's count is evidence, never the verdict, T70),
+    // and on any survivor REFUSE while leaving the pool attached: a store that cannot prove
+    // discard stays inside the erasure fan-out rather than slipping out of it.
     drop: async () => {
+      const refuse = (why: string, cause?: unknown): never => {
+        throw new Error(
+          `drop refused: ${why} — a dropped pool must not become bytes outside the erasure ` +
+            `fan-out. The pool remains ATTACHED (still in erasure reach); resolve the store ` +
+            `fault and drop again, or detach() to keep it deliberately.`,
+          cause === undefined ? undefined : { cause },
+        );
+      };
+      try {
+        // The dead set is everything this pool can NAME — and a read alone cannot name it all
+        // (the erasure lens's finding): a mirror's `deltasSince` is primary-only, and a RETRY
+        // after a partial purge reads EMPTY, which made the old zero-ids path skip the verdict
+        // entirely and report success over a retaining tier. The session reactor remembers what
+        // the read cannot, so the enumeration is their union; and the §25 quarantine pen — rows
+        // a read SET ASIDE as corrupt, still legible bytes on disk — is swept by its own door,
+        // since no id-keyed purge can reach a row whose id was never returned.
+        const ids = new Set((await pool.backend.deltasSince(new Set())).map((d) => d.id));
+        for (const d of pool.reactor.snapshot()) ids.add(d.id);
+        if (isRepairable(pool.backend)) {
+          for (const row of await pool.backend.quarantine()) {
+            await pool.backend.discardRow(row.key);
+          }
+        }
+        if (ids.size > 0) {
+          const batch = [...ids];
+          await pool.backend.purge(batch);
+          // The verdict, H9-closed: a probe that cannot answer has proven nothing, so a
+          // rejecting store refuses the drop exactly like a retaining one.
+          let survivors: Set<string>;
+          if (pool.backend.heldAmong) {
+            survivors = await pool.backend.heldAmong(batch);
+          } else {
+            survivors = new Set<string>();
+            for (const id of batch) if (await pool.backend.holds(id)) survivors.add(id);
+          }
+          if (survivors.size > 0) {
+            refuse(
+              `this pool's store still holds ${survivors.size} of ${batch.length} delta(s) ` +
+                `after the discard purge`,
+            );
+          }
+        }
+        // What no read and no session ever named is outside drop's jurisdiction — a straggler
+        // bearing an unlisted id is heal's domain (§11), stated rather than implied clean.
+      } catch (err) {
+        if (err instanceof Error && err.message.startsWith("drop refused:")) throw err;
+        refuse(
+          `this pool's store could not be proven clean (${
+            err instanceof Error ? err.message : String(err)
+          })`,
+          err,
+        );
+      }
+      gw.quarantinePools.delete(pool);
+      await pool.close();
+    },
+    // Detach KEEPS — the deliberate act, distinct in name from the discard. No purge, no
+    // verification: the caller is choosing to hold these bytes outside the fan-out (debugging a
+    // suspect pool), and reattachment is openQuarantine over the surviving store.
+    detach: async () => {
       gw.quarantinePools.delete(pool);
       await pool.close();
     },
