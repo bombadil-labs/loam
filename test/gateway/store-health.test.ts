@@ -156,7 +156,10 @@ describe("T70: gateway.health() — the live byte verdict over every erasure pro
     const pool = await boot(poolBackend);
     const tombstone = (await backend.deltasSince(new Set())).find((d) => isTombstone(d.claims))!;
     await pool.append([tombstone]); // the promise arrived...
-    await poolBackend.append([target]); // ...but the bytes are still at rest there
+    // ...and provably LANDED (else this phase silently degrades into a second delivery-owed
+    // test and the pool-level BYTE probe goes unpinned) — then the bytes are still at rest.
+    expect((await pool.health()).erasure.promised).toBe(1);
+    await poolBackend.append([target]); // the retained plaintext
     gw.quarantinePools.add(pool);
     const retained = await gw.health();
     expect(retained.status).toBe("settling");
