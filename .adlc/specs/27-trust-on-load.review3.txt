@@ -1,0 +1,30 @@
+[34mℹ[39m Verification dropped 2 finding(s) that could not be defended.
+
+[31m[1m NEEDS ATTENTION [22m[39m  [2martifact .adlc/specs/27-trust-on-load.md[22m
+
+[1mSummary[22m
+  Thorough, self-hardened design, but three material gaps remain before build: the re-point supply-chain confirmation is anchored to adoption records the spec itself calls unreliable, `lawFrom`'s manifest-version basis is unspecified so the incident query can undercount exposure, and the guard's atomicity rests silently on a single writing-process assumption. Not approvable as written until these decisions are made.
+
+[1mCoverage[22m
+  1 file(s) examined
+
+[1mFindings (2)[22m
+
+  [31mHIGH    [39m [35m[correctness][39m [1mlawFrom(M)'s manifest-version basis is unspecified, so the incident query can undercount exposure[22m  [2mconf 0.60[22m
+    [36m.adlc/specs/27-trust-on-load.md:70-74[39m
+    lawFrom is declared THE authoritative 'am I exposed through M?' query, explicitly because records over/undercount. It is defined as content-address intersection between 'currently-bound law and M's manifest.' But a module has many versions with per-version frozen manifests, and an operator may have adopted rows across several versions of M. The spec never states whether lawFrom takes a version, unions across all versions M ever listed, or uses only the latest manifest. If it intersects against a single manifest version, a row present in an older manifest, still bound (adopted from that older version), but dropped from the latest manifest, is reported as NOT exposed — the exact miss the query exists to prevent.
+    [33m✗ failure:[39m Operator adopts a row from social@1 whose alias social@7 later drops. A vulnerability is disclosed in that row. During incident response the operator runs lawFrom(social), which intersects currently-bound law against social's latest (v7) manifest; the still-bound v1 row is absent from that manifest, so lawFrom reports no exposure, and the operator leaves live, vulnerable law bound.
+    [32m→ fix:[39m State lawFrom's manifest basis explicitly — union of every manifest version M has published (so it captures rows adopted from older versions still bound), or make the version an argument — and add an acceptance criterion where a row bound from an older version but absent from the latest manifest is still reported.
+
+  [90mLOW     [39m [35m[other][39m [1m'Different content' collision test is byte-identity, giving false-positive refusals for semantically-equivalent registrations, and no criterion covers the near-miss[22m  [2mconf 0.50[22m
+    [36m.adlc/specs/27-trust-on-load.md:30-35[39m
+    The root-name guard refuses when the winning registration 'has different content,' and idempotence is 'by CONTENT ADDRESS.' Content-address (byte) identity means a semantically-identical schema that differs only in serialization (field order, incidental metadata) is treated as different content, forcing an unnecessary supersede/as detour. The acceptance criteria test only clearly-different-content (8) and identical-content (4/18) cases; the near-miss (equivalent-but-not-byte-identical) is untested, so two engineers could reasonably diverge on whether normalization occurs before the comparison.
+    [33m✗ failure:[39m Two publishers ship the same schema with different field ordering, yielding different content addresses. A consumer with one bound tries to adopt the other; the guard refuses as 'different content,' the operator supersedes, and the root's living name now churns between byte-variants of the same schema on every adoption — friction the design intends to avoid.
+    [32m→ fix:[39m State explicitly that the content comparison is over the canonical content-addressed bundle with no normalization (accepting the byte-variant friction), or specify a normalization step; add an acceptance criterion for a semantically-equivalent-but-byte-different registration.
+
+[1mNext steps[22m
+  • Decide and record whether re-point detection runs against currently-bound law (arithmetic) or adoption records, and cover the record-less prior case with a test.
+  • Pin lawFrom's manifest-version semantics (union across versions vs latest vs parameterized) and add a cross-version exposure criterion.
+  • Make the single-writer-process assumption an explicit stated precondition of the atomicity guarantee, or specify cross-process serialization.
+  • Clarify the content-equality basis for the collision/idempotence checks and test the semantically-equivalent near-miss.
+

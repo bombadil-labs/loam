@@ -265,9 +265,21 @@ trust knob determines the boundary knob** (§28.3), so wall-vs-property is deriv
 **per-tenant configurable posture with WALLS AS THE DEFAULT** (§28.4), on the ratchet argument — and with
 it, the resolution of the CLAUDE.md/§7 drift in favor of the stronger promise holding by default.
 
-RECOMMENDATIONS awaiting his word: where the declaration lives and who may author it (§28.6); the
-no-cache prohibition as the staleness guard (§28.6); reuse rather than replacement of §7's tenant
-vocabulary, with no §20 step (§28.7); and unbounded depth resting on an enforced tree rule (§28.8).
+RECOMMENDATIONS → **DECIDED (Myk, 2026-07-24, in chat), all six**: the declaration lives as a knob-claim
+at the container's entity in the existing `loam:trust` shape, so the root needs no migration (§28.6); it
+binds when authored with admin standing in that container, grant-rooted, recursing to the root (§28.6);
+the closure runs BOTH routes keyed on the question — host-flatten per request for binding (zero lag),
+the derived author for audit (§28.6); the staleness guard is the ABSENCE of a cache, stated as a
+prohibition (§28.6); §7's tenant vocabulary is reused rather than replaced, with no §20 step (§28.7);
+and depth is unbounded on a tree rule T32 must ENFORCE at attach and rail (§28.8).
+
+The same conversation stress-tested the boundary from the serving side and it held with a clarification
+worth the record: **the glass is not darkness.** A container is a Gateway over its own store, so a loaded
+module serves its FULL door set (GraphQL, SSE, REST, rendered routes) from its own mount on the host's
+server — what the wall governs is writes, law-reach, and trust-crossing, never visibility of the app to
+the host's consumers. The named gap is plumbing, not posture: mounts are fixed at boot today, and
+"load a module, it is live at `/name/*` on the running server" is an unbuilt convenience (ticketed with
+the T32→T35 chain).
 
 **Substrate position (rhizomatic#27, answered 2026-07-21).** Stratification at depth 1 is **permanent by
 design**, with both recursive routes sanctioned and their tradeoff named — host-flatten for freshness,

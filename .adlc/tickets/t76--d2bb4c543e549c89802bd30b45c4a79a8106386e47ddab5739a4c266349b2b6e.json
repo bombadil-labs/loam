@@ -1,0 +1,18 @@
+{
+  "body": "DESIGN-then-BUILD. §27.2 built module identity at rung 2 of the §22.3/§23.10 economics ladder (a domain-tagged hash over the SORTED member ids) and deliberately deferred rung 3 — the Merkle-set — until something consumed what it buys. That consumer arrived (Myk, 2026-07-24, in chat): the hub/composition vision. A user assembles a movie-night module by ad-hoc selection across unrelated sources (games, meal planning, IMDB data, profile schemas), freezes it to one address, republishes it — and OTHER stores must be able to reason about that address: 'I already hold the trivia subtree and the Post schema; ship me the rest.'\n\nWHAT RUNG 3 BUYS, precisely: (1) partial overlap visible at the ADDRESS level — shared member subsets hash to shared subtrees, so overlap between two versions is computable from their trees without shipping member lists; (2) incremental transfer — pulling a version costs the diff against what the puller already holds; (3) address arithmetic — the union of two frozen sets is computable from their two trees (compose-by-address, the literal 'composition of content addresses' Myk asked for).\n\nTHE MIGRATION IS PRE-PAID: §27.2 kept the id OPAQUE behind one helper; no call site parses it. The rung change must keep that opacity (the new id is still an opaque string; a helper answers overlap/diff questions). DESIGN QUESTIONS for P1: the tree's chunking function (fixed-arity over the sorted id space vs content-defined boundaries — pick for stable subtrees under single-member churn); whether rung-2 ids remain valid names for already-frozen versions (recommendation: yes — an id is forever; rung 3 applies to NEW freezes, and a helper answers 'same members?' across rungs by re-deriving); and the wire shape of a tree exchange (belongs beside the federation door, not in ModuleVersion itself).\n\nRails at build: order-freedom and cross-store determinism inherited from the rung-2 suite (same members, same address, regardless of arrival path); overlap: two versions sharing k members yield trees whose shared-subtree set identifies exactly those k (property-tested across random partitions); diff: the members shipped for a pull equal exactly the set difference; and NON-GOALS named — rung 3 does not change what a member IS, and no §20 migration (the address is computed, never at rest in prior deltas).\n\nEvidence: spec/27-containers.md §27.2 IDENTITY BUILT provenance ('rung 3 is the named next step'); the 2026-07-24 chat (movie-night composition, loamhub).",
+  "edges": [
+    {
+      "contract": "The hub's economics assume incremental pull and address-level overlap ('I already hold 80% of this module'); rung 2 can only answer that by shipping member lists. T76 is what makes T77's discovery story cheap at scale.",
+      "to": "T77"
+    }
+  ],
+  "id": "T76",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "src/gateway/container-identity.ts",
+    "test/gateway/container-identity.test.ts"
+  ],
+  "status": "todo",
+  "title": "Rung 3: the Merkle-set — module identity whose ADDRESS is compositional"
+}
