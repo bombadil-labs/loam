@@ -163,7 +163,9 @@ describe("§24.8 rail (g) — a pool that retains makes the primary's erase REFU
     await expect(primary.erase(secret.id, { reason: "the subject asked" })).rejects.toThrow(
       /STILL HOLDS|pool/i,
     );
-    await r.drop();
+    // T72: drop() now verifies discard, so a deliberately-retaining fixture is detach()'s case
+    // (the named keep); the healthy pool above it still drops clean.
+    await r.detach();
     await q.drop();
     await primary.close();
   });
@@ -187,8 +189,8 @@ describe("§24.8 rail (g) — a pool that retains makes the primary's erase REFU
     );
     expect(rejection).toBeDefined();
     expect(rejection).toMatch(/2 fault\(s\)/);
-    await r.drop();
-    await q.drop();
+    await r.detach(); // both fixtures retain by design — detach is the honest teardown (T72)
+    await q.detach();
     await primary.close();
   });
 
@@ -214,7 +216,7 @@ describe("§24.8 rail (g) — a pool that retains makes the primary's erase REFU
     await backendForgot(healthy, secret.id, FORGOTTEN);
     expect(readTombstones(q2.gateway.reactor, OP).has(secret.id)).toBe(true);
     await q2.drop();
-    await q1.drop();
+    await q1.detach(); // the sick fixture cannot prove discard — detach, deliberately (T72)
     await primary.close();
   });
 
