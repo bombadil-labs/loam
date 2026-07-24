@@ -22,6 +22,11 @@ const OP = authorForSeed(OP_SEED);
 // A v1 renderer: a resolved node in, HTML out. Reads `height` and paints it.
 const HEIGHT_CARD = 'export default (n) => `<p class="h">height: ${n.view.height}</p>`;';
 
+// A generous render clock, the #190 pattern: every bundle in this file is a GOOD one, and these
+// rails observe correct rendering — not that a render beats the default 500ms, whose spawn window
+// under full-suite CPU contention can starve a legitimate render into a 500 (T75). The timeout
+// bound itself is proven in render-sandbox.test.ts (the hang rail at the default clock, the 1ms
+// rail); a long clock here removes the competing bound from the frame, it does not weaken it.
 const boot = (): Promise<Gateway> =>
   Gateway.boot(
     new MemoryBackend(),
@@ -31,6 +36,7 @@ const boot = (): Promise<Gateway> =>
         { hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN], writable: [...PLANT_WRITABLE] },
       ],
     }),
+    { renderTimeoutMs: 10_000 },
   );
 
 const spec = (over: Record<string, unknown> = {}) => ({
