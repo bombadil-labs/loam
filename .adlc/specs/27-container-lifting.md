@@ -52,7 +52,15 @@ criterion 2):
   root's admission — so a re-declaration changing `trust` or `posture` REFUSES at the door
   naming §28.4, and a different trust posture is a NEW container. A `parent` re-declaration
   that would move a container under a parent of different trust refuses the same way (the same
-  transition wearing a tree edit). Every OTHER knob stays latest-wins.
+  transition wearing a tree edit). Every OTHER knob stays latest-wins. **And immutability is
+  enforced at the READER too, exactly like the tree rule** (round-2 review: the same two arrival
+  paths exist — a flip can sit in a replayed ground or federate from the operator's own other
+  device, and no local door sees either): a container's trust and posture are fixed by its
+  EARLIEST surviving declaration (by (timestamp, id)); a later declaration differing in either
+  resolves as not-binding for those roles and surfaces as a named defect. Latest-wins never
+  applies to the two knobs §28.4 proved are not flags. Criterion 21 drives the federated shape.
+  **The trust role is REQUIRED** — a declaration without it refuses at the door (explicitness
+  over defaults on the permanent surface); only posture carries a default (wall, §28.4).
 - **Membership** is the built #132 surface (a Term); the declaration references it under TWO
   DISTINCT ROLES so the shapes can never blur (the §20 corollary, applied here too): role
   `membership` → primitive, the Term's canonical JSON inline; role `membershipAt` → primitive,
@@ -61,7 +69,11 @@ criterion 2):
   declaration may cite a frozen version under role `version` → primitive, the ModuleVersion
   address: the citation vocabulary §27.2's provenance forwarded to this ticket, minted here so
   T76/T77 inherit its shape instead of guessing one. (T34's budget rides the §28.6 subject
-  mechanism like trust — no room needed here.)
+  mechanism like trust — no room needed here.) The malformation rules are the door's, stated
+  (round-2 review): BOTH roles on one declaration refuses naming the conflict; NEITHER is lawful
+  for a WALL (a seeded arena needs no scope Term — the quarantine's own shape) and refuses for a
+  PROPERTY container, which IS its membership and without one would be the silent-empty H9 shape
+  through a different door.
 - **Exclusion is a claim, and re-inclusion is its lawful negation**: context
   **`loam.container.excluded`**, operator-signed, naming the container entity. No member delta is
   ever re-signed by either direction — only the exclusion claim itself moves, which is why the
@@ -73,12 +85,16 @@ criterion 2):
   records; one negation must not leave the container half-listed). An anonymous pool — today's
   nameless `openQuarantine` — has no entity to cite and detaches recordless, stated here rather
   than discovered. The note is validated like a name (no NUL, bounded at 256 bytes) — it is
-  permanent metadata and must not become a dumping surface. The record is an ORDINARY claim:
-  §24.8 erasure reaches it like anything else (an operator who must forget that a quarantine
-  existed erases its record — the listing then honestly forgets), and a store that is
-  permanently LOST is written off by the operator NEGATING the record directly — reattach is
-  the ordinary negation path, not the only one; a detached record never dangles beyond the
-  operator's own say-so. A reader — `loam repair`, a future health extension — can thereafter
+  permanent metadata and must not become a dumping surface. The record is an ORDINARY claim,
+  reachable by §24.8 erasure like anything else — but **forgetting a container is a two-part
+  act, ordered** (round-2 review caught the contradiction): the record covers an unreachable
+  wall in the completeness guard, so erasing the record while the DECLARATION still stands
+  would flip every future erase into refusing over a container the operator was told they
+  forgot. The honest forget strikes the declaration (removing the container from the resolved
+  table) and then erases or negates the record; erasing the record of a still-declared
+  unreachable wall is itself the named fault the guard reports. A store permanently LOST is
+  written off the same way — strike the declaration, negate the record; a detached record
+  never dangles beyond the operator's own say-so. A reader — `loam repair`, a future health extension — can thereafter
   LIST detached stores instead of forgetting them.
 - **Only lawful claims bind, at every `loam.container*` context** (premortem, 2026-07-24):
   the reader filters through the operator-rooted lawful read, so a federated stranger's
@@ -103,10 +119,10 @@ now is how vocabularies grow barnacles.
 The mint makes containers enumerable AT REST, and `erase` fans out over the ATTACHED set — after
 a restart those can differ, and §24.8's own premortem named the hole. T32 ships the honest rule
 rather than the full locator machinery (which rides T78's mounts): **`erase` refuses to report
-completeness while the resolved container table names an `untrusted` container that is neither
-currently attached nor covered by a surviving `loam.container.detached` record.** An unreachable
-wall is a named fault, never a silent gap in the sweep. (Criteria 14–15 drive it, including the
-restart shape.)
+completeness while the resolved container table names a WALL-posture container — untrusted OR
+curated, since bytes follow posture — that is neither currently attached nor covered by a
+surviving `loam.container.detached` record.** An unreachable wall is a named fault, never a
+silent gap in the sweep. (Criteria 14–15 drive it, including the restart shape.)
 
 ## The tree rule, enforced (§28.8's demand on this ticket)
 
@@ -176,9 +192,10 @@ is exactly: vocabulary ROOM for per-container trust + posture, and the enforced 
    `test/gateway/pool-drop-detach.test.ts` run over the lifted implementation and stay green with
    **no assertion softened** (the diff to those files is empty or teardown-only) — §24.8's
    erasure law included. — existing suites, diff-audited.
-2. **The mint collides with nothing.** A vocabulary rail asserts every new context begins
-   `loam.container` and that no pre-existing reserved context or role in `src/` shares that
-   prefix; the declaration door refuses a NUL in a container name. —
+2. **The mint collides with nothing, and malformations refuse.** A vocabulary rail asserts
+   every new context begins `loam.container` and no pre-existing reserved context or role
+   shares the prefix; the door refuses a NUL in a container name, a declaration missing `trust`,
+   a declaration carrying BOTH membership roles, and a PROPERTY declaration carrying neither. —
    `test/gateway/container-vocab.test.ts`.
 3. **A knob change is a delta, not a restart — for the MUTABLE knobs.** Re-declaring a
    container with a changed membership updates the RUNNING gateway's table (latest-wins) with no
@@ -204,10 +221,11 @@ is exactly: vocabulary ROOM for per-container trust + posture, and the enforced 
    closing edge, naming the cycle; the refusal arrives at declaration time, never as a hang at
    read time (the rail drives a read after the refusal to prove the tree stayed sound). —
    `test/gateway/container-tree.test.ts`.
-9. **The detach record lands and lists.** `detach()` on a named container lands the
-   `loam.container.detached` claim (note included); reattaching negates it; a reader can list
-   currently-detached containers from the ground alone. — `test/gateway/container-detach-record.test.ts`
-   (new file — the T72 rail is frozen).
+9. **The detach record lands, lists, and never half-clears (H4).** `detach()` on a named
+   container lands the `loam.container.detached` claim (note included); TWO detaches accrue two
+   records and ONE reattach negates BOTH (ground level: both negations present; listing level:
+   the container absent); a reader lists currently-detached containers from the ground alone. —
+   `test/gateway/container-detach-record.test.ts` (new file — the T72 rail is frozen).
 10. **Trust files at a container entity.** A `loam:trust` declaration whose subject is a declared
     container entity is accepted and resolvable per §28.6's shape; admission plumbing reads it
     for that container without disturbing the root's declaration. — `test/gateway/container-trust-subject.test.ts`.
@@ -249,6 +267,17 @@ is exactly: vocabulary ROOM for per-container trust + posture, and the enforced 
 20. **A re-declared parent cannot close a cycle.** With A→B→C standing, re-declaring A's parent
     to C refuses at the door naming the cycle (the latest-wins path, distinct from criterion 8's
     initial build). — `test/gateway/container-tree.test.ts`.
+
+21. **A federated trust flip is not-binding.** Union a ground holding a later declaration that
+    flips a container's `trust` (no door involved): the reader resolves the ORIGINAL trust, the
+    flip surfaces as a named defect, and a reopened store resolves the same — the criterion-16
+    shape, applied to immutability. — `test/gateway/container-tree.test.ts`.
+22. **The completeness guard covers every wall.** An unreachable CURATED wall (the tenant shape)
+    triggers the same erase refusal as an untrusted one — bytes follow posture, so the guard
+    does too. — `test/gateway/container-compat.test.ts`.
+23. **Forgetting is two-part, in order.** Erasing a detach record while the declaration stands is
+    reported as the named fault on the next erase; striking the declaration THEN clearing the
+    record leaves the table clean and completeness unimpeded. — `test/gateway/container-detach-record.test.ts`.
 
 ## Open for Myk (at the PR, none blocking the build)
 
