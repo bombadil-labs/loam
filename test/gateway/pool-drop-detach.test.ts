@@ -123,6 +123,32 @@ describe("T72: drop() discards at the bytes, on every backend", () => {
     await gw.close();
   });
 
+  it("a BATCH probe that returns survivors refuses through the batch branch too", async () => {
+    // The heldAmong-preferred branch, driven to a NON-EMPTY answer (the mute test binds only its
+    // throw shape): a batch-probing store that retains must refuse exactly like a per-id one.
+    const gw = await boot();
+    const secret = observed(FERN, "note", MARKER, 1000, OP_SEED);
+    await gw.append([secret]);
+    const inner = new MemoryBackend();
+    const keepOneBatch: StoreBackend = {
+      append: (d) => inner.append(d),
+      deltasSince: (k) => inner.deltasSince(k),
+      purge: async (ids) => inner.purge([...ids].filter((id) => id !== secret.id)),
+      holds: () => Promise.reject(new Error("per-id must not be consulted")), // batch answers
+      heldAmong: async (ids) => {
+        const held = new Set<string>();
+        for (const id of ids) if (await inner.holds(id)) held.add(id);
+        return held;
+      },
+      close: () => inner.close(),
+    };
+    const pool = await gw.openQuarantine({ backend: keepOneBatch });
+
+    await expect(pool.drop()).rejects.toThrow(/still holds 1 of/);
+    expect(gw.quarantinePools.has(pool.gateway)).toBe(true);
+    await gw.close();
+  });
+
   it("a probe that cannot ANSWER refuses the same way — unproven is not discarded (H9)", async () => {
     const gw = await boot();
     await gw.append([observed(FERN, "height", 30, 1000, OP_SEED)]);
