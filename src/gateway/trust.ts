@@ -101,6 +101,18 @@ export function trustDefect(claims: Claims): string | undefined {
 // is no lawful voice to declare with, and honoring anyone's would let one federated stranger's
 // "closed" delta brick a pull-only aggregator. Govern the store to govern the door.
 export function readTrustPolicy(reactor: Reactor, operator?: string): TrustPolicy {
+  return readTrustPolicyAt(reactor, TRUST_ENTITY, operator);
+}
+
+// The same shape, filed at any SUBJECT entity (SPEC §28.6): the root's policy is the
+// TRUST_ENTITY case above; a container's ADMISSION axis reads through here with the container
+// entity as subject. One resolver, so the negation algebra and the roster-union rule can never
+// drift between the store's door and a container's.
+export function readTrustPolicyAt(
+  reactor: Reactor,
+  subject: string,
+  operator?: string,
+): TrustPolicy {
   if (operator === undefined) return { mode: "open", roster: new Set() };
   const negated = lawfulNegated(reactor, operator);
   const roster = new Set<string>();
@@ -109,7 +121,7 @@ export function readTrustPolicy(reactor: Reactor, operator?: string): TrustPolic
     const declares = delta.claims.pointers.some(
       (p) =>
         p.target.kind === "entity" &&
-        p.target.entity.id === TRUST_ENTITY &&
+        p.target.entity.id === subject &&
         p.target.entity.context === CTX_TRUST,
     );
     if (!declares || negated(delta.id)) continue;

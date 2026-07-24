@@ -23,6 +23,7 @@ import { bytesToHex } from "@noble/hashes/utils.js";
 import { Reactor, signClaims } from "@bombadil/rhizomatic";
 import type { Claims, Delta } from "@bombadil/rhizomatic";
 import { lawfulNegated } from "./registration.js";
+import { unreachableWallReport } from "./container.js";
 import type { Gateway } from "./gateway.js";
 
 export const ERASE_ENTITY = "loam:erasure";
@@ -214,13 +215,29 @@ export async function eraseImpl(
   gw: Gateway,
   id: string,
   opts: { reason?: string } = {},
-): Promise<{ erased: string; citations: string[] }> {
+): Promise<{ erased: string; citations: string[]; kept: string[] }> {
   // Erasure is the operator's alone (SPEC §11): destructive, so the only signer is the store's
   // own operator. A data subject's request is honored BY the operator, never by the subject
   // directly — there is no actor override here on purpose.
   const seed = gw.options.seed;
   if (seed === undefined || gw.operatorAuthor === undefined) {
     throw new Error("erasure is the instance operator's alone, and this store has no operator");
+  }
+  // The completeness guard (SPEC §27.7, T32), BEFORE any work: the mint made containers
+  // enumerable AT REST while this fan-out walks only the ATTACHED set — after a restart those
+  // can differ. A declared WALL-posture container (bytes follow posture, so curated and
+  // untrusted alike) that is neither attached nor covered by a surviving detach record could
+  // hold this byte outside the sweep, so the erase refuses UP FRONT — nothing half-done, no
+  // tombstone standing over an unreported gap. A covered wall is returned in `kept`, on the
+  // record; erasing a detach record out of order re-arms this guard for the NEXT erase.
+  const walls = unreachableWallReport(gw);
+  if (walls.faults.length > 0) {
+    throw new Error(
+      `erase ${id} refused before any work began: the resolved container table names a wall ` +
+        `this sweep cannot reach, and an unreachable wall would be a silent gap in §11's ` +
+        `fan-out. ${walls.faults.length} fault(s):\n  ${walls.faults.join("\n  ")}\n` +
+        `Attach the container(s) (openContainer), or detach() them onto the record, then re-run.`,
+    );
   }
   // Retry anchors on the TOMBSTONE, read before the `nothing to erase` guard: a partial attempt
   // can leave the target gone from the reactor while a tier still holds the bytes, and a re-run
@@ -319,7 +336,9 @@ export async function eraseImpl(
       { cause: faults[0]?.cause },
     );
   }
-  return { erased: id, citations };
+  // `kept` is the guard's entry-time reading — the walls a surviving detach record deliberately
+  // holds outside this sweep, reported rather than silent.
+  return { erased: id, citations, kept: walls.kept };
 }
 
 // Is this erasure still OUTSTANDING anywhere in reach — this ground or any replica of it? Its

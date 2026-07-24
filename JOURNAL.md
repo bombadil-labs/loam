@@ -100,3 +100,4 @@ entry is a NEW FILE and two concurrent landings never touch the same one (the sa
 | 2026-07-23 | [The survivor inventory — the catch-up, measured](journal/2026-07-23-the-survivor-inventory.md) |
 | 2026-07-24 | [The hardening night — four landings, one seam](journal/2026-07-24-the-hardening-night.md) |
 | 2026-07-24 | [The night the arc opened — a riff becomes a roadmap](journal/2026-07-24-the-night-the-arc-opened.md) |
+| 2026-07-24 | [The container lifting — quarantine becomes one preset (T32)](journal/2026-07-24-the-container-lifting.md) |

@@ -15,8 +15,18 @@
     }
   ],
   "id": "T32",
-  "phase": "P1",
-  "rails": [],
+  "phase": "P6",
+  "rails": [
+    "test/gateway/container-vocab.test.ts",
+    "test/gateway/container-declare.test.ts",
+    "test/gateway/container-curated.test.ts",
+    "test/gateway/container-wall.test.ts",
+    "test/gateway/container-scope.test.ts",
+    "test/gateway/container-tree.test.ts",
+    "test/gateway/container-detach-record.test.ts",
+    "test/gateway/container-trust-subject.test.ts",
+    "test/gateway/container-compat.test.ts"
+  ],
   "scope": [
     "spec/27-containers.md",
     "src/gateway/quarantine-pool.ts",
@@ -24,6 +34,6 @@
     "src/gateway/gateway.ts",
     "test/gateway/"
   ],
-  "status": "todo",
+  "status": "doing",
   "title": "§27.7: the Container lifting — quarantine becomes one preset of a named primitive"
 }

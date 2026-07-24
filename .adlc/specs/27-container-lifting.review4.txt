@@ -1,0 +1,25 @@
+
+  [33mMEDIUM  [39m [35m[correctness][39m [1mReader cycle-guard is specified for a single cycle; federation can yield several disjoint ones[22m  [2mconf 0.60[22m
+    [36m.adlc/specs/27-container-lifting.md:143-147[39m
+    The reader guard says a cycle 'resolves DETERMINISTICALLY and loudly — the cycle-closing edge (latest by (timestamp, id)) is treated as not-binding ... a parent-chain walk never hangs.' Because each container's parent is latest-wins (one edge per node), the resolved graph is functional (out-degree ≤ 1), whose cycles are disjoint — a federated union of two locally-acyclic grounds can therefore present MULTIPLE independent cycles. The rule as written drops 'the cycle-closing edge' (singular, the single globally-latest one), which breaks only one cycle and leaves the others intact, so a parent-chain walk over a node in a surviving cycle can still hang — contradicting the stated guarantee. Criterion 16 only exercises 'a cycle' (one).
+    [33m✗ failure:[39m Two devices union grounds whose resolved parent edges form two disjoint cycles: A→B→A and C→D→C. The single latest edge (say B→A) is dropped, breaking the first cycle; C→D→C survives. A reader walking C's parent chain loops forever, or 'never hangs' is only true by accident of which edge was latest.
+    [32m→ fix:[39m Specify the guard as an algorithm that guarantees acyclicity for arbitrary graphs (e.g. drop the latest cycle-closing edge of EACH detected cycle, or bound every parent-chain walk with a visited-set). Extend criterion 16 to a ground presenting two or more disjoint cycles and assert every parent-chain walk terminates.
+
+  [33mMEDIUM  [39m [35m[error-handling][39m [1mScoped reads over a WALL whose separate backend is unreachable are unspecified[22m  [2mconf 0.55[22m
+    [36m.adlc/specs/27-container-lifting.md:165-169[39m
+    The fail-closed rule for degraded dependencies is stated only for property containers via membershipAt: 'a membershipAt address that resolves to nothing ... REFUSES the scoped read.' A WALL's members live 'in a genuinely separate store.' A scope is 'union(active containers) MINUS excluded', so a scoped read must read each active wall's backend. The spec addresses an unreachable wall only for ERASE completeness (it refuses), but says nothing about a scoped READ when a wall's backend is degraded/unreachable. An implementer could reasonably treat an unreachable wall backend as contributing the empty set — the exact H9 silent-shrink the membershipAt rule was written to prevent, now through a different door.
+    [33m✗ failure:[39m A wall container is active and attached, but its backend store is temporarily unreachable (disk, network, degraded backend). A select over the merged scope reads the wall as empty and returns a partial result with no error — a legitimately-empty wall and an unreachable wall are indistinguishable to the caller.
+    [32m→ fix:[39m Extend the fail-closed rule to cover an active wall whose backend cannot be read during a scoped read: it must REFUSE naming the container, not contribute an empty set. Add a criterion for a scoped read over an active-but-unreadable wall backend.
+
+  [90mLOW     [39m [35m[other][39m [1mA WALL declaration that carries a membership role is left undefined[22m  [2mconf 0.50[22m
+    [36m.adlc/specs/27-container-lifting.md:77-80[39m
+    The malformation rules cover BOTH membership roles on one declaration (refuse), and NEITHER on a PROPERTY container (refuse), and state NEITHER is 'lawful for a WALL.' But the converse — a WALL declaration that DOES carry a membership or membershipAt role — is not specified as refused or ignored. Two engineers will implement this differently (one rejects it as malformed, one silently ignores it), and a silently-ignored membership on a wall could mask an operator's mistaken belief that a wall is scoped by that Term. Criterion 2 does not test this case.
+    [33m✗ failure:[39m An operator declares trust:untrusted/posture:wall AND includes a membershipAt role, expecting the wall to be scoped by that Term. One implementation ignores the role; the operator believes a filter is in force that is not, admitting content they meant to exclude.
+    [32m→ fix:[39m State explicitly whether a WALL declaration bearing a membership/membershipAt role refuses at the door or is ignored, and add it to criterion 2's malformation set.
+
+[1mNext steps[22m
+  • Decide and document how the immutability anchor behaves when the earliest trust/posture-bearing declaration is struck or erased; add a criterion proving a strike cannot re-anchor.
+  • Replace the wall-clock (timestamp,id) anchor for immutability with a tamper-evident ordering, and add a cross-device lower-timestamp-but-later-arrival criterion.
+  • Generalize the reader cycle-guard to arbitrary multi-cycle graphs and bound every parent-chain walk; extend criterion 16 accordingly.
+  • Extend the fail-closed read rule to unreachable wall backends and specify the wall-with-membership-role malformation case.
+

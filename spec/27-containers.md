@@ -57,6 +57,35 @@ data, negatable and forkable like everything else (trust is data, §8, arriving 
 particular the sandbox/exclusion is a **property**: a claim "container C is excluded," and merging C in is
 negating that claim (§27.3's scope-merge — flip the flag, no re-sign).
 
+**The at-rest vocabulary (LANDED, T32).** Three contexts, following the `loam:trust`/`loam:budget`
+precedent — declarations re-resolved from live deltas, so a knob change is a delta and never a restart:
+
+- **`loam.container`** — the declaration: role `container` → the entity (named by convention
+  `container:<name>`), `trust` → `"curated" | "untrusted"`, `posture` → `"wall" | "property"` (both
+  REQUIRED; a missing posture refuses naming §28.4's recommendation, wall — the default lives in the
+  message, never in silent semantics), `parent` → the containing container, `membership` (a Term's
+  canonical JSON inline) OR `membershipAt` (the content address of a published Term) — never both, and a
+  property container must carry one — and `version` → a ModuleVersion citation (§27.2). **Trust and
+  posture are IMMUTABLE per container entity**, enforced at the door (a flip refuses naming §28.4, as does
+  a parent re-point across trust domains or an edge that would close a containment cycle) AND at the
+  reader (earliest surviving declaration wins; a federated flip resolves as a named defect; a federated
+  cycle is restored to a forest by dropping each cycle's latest edge, loudly). Every other knob is
+  latest-wins. `trust` here is §28.1's EFFECTIVENESS axis; the ADMISSION axis is a `loam:trust`-shaped
+  declaration filed AT the container entity (§28.6) — the two never read each other.
+- **`loam.container.excluded`** — exclusion is a claim naming the container; re-inclusion is its lawful
+  negation. The scoped read is `union(active containers) MINUS excluded` on the §27.4 set algebra, carried
+  through the forward negation closure (exclusion may narrow what a scope sees, never revive what was
+  struck), and it FAILS CLOSED on any unresolvable dependency — a dangling `membershipAt`, an unreachable
+  wall — rather than resolving as if the container were empty. ACTIVE means: declaration survives and no
+  surviving detach record covers it; a parent edge never auto-includes a child.
+- **`loam.container.detached`** — the operator's record that a wall's store is deliberately held outside
+  the erasure fan-out (a bounded note says where); reattaching negates every surviving record for the
+  entity. `erase` refuses up front while the table names a wall neither attached nor covered, and reports
+  covered walls in its `kept` — an unreachable wall is a named fault, never a silent gap (§24.8).
+
+Only lawful claims bind at all three contexts — a federated stranger's declaration, exclusion, or detach
+record lands as data and moves nothing.
+
 **When exclusion is a property, and when it must be a wall.** §24.1 proved *you cannot discard a mark* — a
 "sandboxed" flag on canonical deltas that every reader must honor forever, discarded only by negating each
 delta with residue. That argument is about UNTRUSTED foreign law, and there it stands: a stranger's law needs
@@ -249,13 +278,17 @@ The questions that DO remain open:
 
 ### 27.7 What this means for the build
 
-Nothing here demands a rewrite; it is a LIFTING. The quarantine pool (§24, PR #109) is the primitive's first
-and only instance today, with its knobs hard-wired to the quarantine posture. Taken seriously, the arc's
-next moves are: build **promotion** (§24.3) — which is *the first container operation*, merge-load with kept
-provenance, and worth building regardless of how far this framing goes; then, when a second policy wants the
-same object (a trusted module import, a shipped app), generalize the pool into a named `Container` with the
-`{membership, seeding, trust, boundary, identity}` vector and let **quarantine be one preset**. The Container
-primitive is the north star; promotion is the next commit; the two are the same direction.
+**CLOSED (T32).** The lifting this section forecast has landed: `src/gateway/container.ts` carries the
+named `Container` with the `{membership, seeding, trust, boundary, identity}` vector, and the quarantine
+is ONE PRESET of it (untrusted · wall · one-way-seeded · droppable) — `openQuarantine` keeps its exact
+signature, behavior, and refusal voice, its body now `openContainerImpl` with the knobs preset. Bytes
+follow the POSTURE (a property container is a query over shared ground, zero copies; a wall pays real
+byte copies — the one thing sharing cannot provide is discard-with-zero-trace); law follows the TRUST
+(untrusted must be a wall, §28.3, refused at door and opener alike). Two knobs stayed off the at-rest
+mint deliberately: `seeding` remains an open-time behavior of the preset (its at-rest descriptor arrives
+with T33's import work) and `boundary` names operations, not state — neither gets a role until a consumer
+fixes its shape. The mint is new vocabulary only — no delta any store held changed bytes or meaning, so
+no §20 step, proven by a pre-mint fixture opening with identical ids and views.
 
 ### 27.8 The manifest — a module's interface, and the honesty about what "internal" means
 
@@ -504,3 +537,16 @@ into the root is a separate, deliberate act, and in the discovery world Myk desc
 the unit of search is the EXPORT — "the best Post schema" — and a manifest's mirroring claim is verifiable
 by address equality) that act is frequent, per-export-shaped, and must cost ONE GESTURE. T31's working
 spec carries the recommendation.
+
+**§27.7 CONTAINER LIFTED, §27.1 VOCABULARY MINTED** [#198](https://github.com/bombadil-labs/loam/pull/198)
+(realizes ticket T32, 2026-07-24) — the generalization this section's whole arc waited on:
+`src/gateway/container.ts` is the named `Container`, the quarantine is one preset of it
+(`openQuarantine` unchanged at every call site, the four §24 suites untouched and green over the lifted
+body), and the knob vector's at-rest form is the three `loam.container*` contexts §27.1 now records.
+Trust/posture immutability, the containment tree, and the two trust axes are enforced at BOTH levels —
+door and reader — per §28.4/§28.8; the scope-merge read carries H1's forward negation closure at its
+fourth site and fails closed on every unresolvable dependency; `erase` gained the §24.8 completeness
+guard (an unreachable wall is a named fault before any work; a detach-covered one is reported `kept`).
+Designed under `.adlc/specs/27-container-lifting.md` — 23 criteria, an independent premortem and four
+adversarial-review rounds at design time, each criterion naming its rail; 43 rails across nine files
+carry them. Store-boundary/erasure/federation surface + a vocabulary mint → Myk's merge (P6).
