@@ -98,3 +98,4 @@ entry is a NEW FILE and two concurrent landings never touch the same one (the sa
 | 2026-07-22 | [The init that never ran](journal/2026-07-22-the-init-that-never-ran.md) |
 | 2026-07-23 | [The first full lap, and what independence actually costs](journal/2026-07-23-the-first-full-lap.md) |
 | 2026-07-23 | [The survivor inventory — the catch-up, measured](journal/2026-07-23-the-survivor-inventory.md) |
+| 2026-07-24 | [The hardening night — four landings, one seam](journal/2026-07-24-the-hardening-night.md) |
