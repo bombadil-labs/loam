@@ -15,7 +15,7 @@
     }
   ],
   "id": "T32",
-  "phase": "P4",
+  "phase": "P6",
   "rails": [
     "test/gateway/container-vocab.test.ts",
     "test/gateway/container-declare.test.ts",
