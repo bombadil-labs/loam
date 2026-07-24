@@ -25,6 +25,7 @@ import { eraseDefect } from "./erase.js";
 import { publicDefect } from "./public.js";
 import { trustDefect } from "./trust.js";
 import { budgetDefect } from "./budget.js";
+import { containerDefect } from "./container.js";
 
 export const CTX_TENANT = "loam.tenant";
 export const CTX_MEMBERS = "loam.members";
@@ -393,6 +394,7 @@ export function authorize(
     trustDefect(delta.claims) ??
     publicDefect(delta.claims) ??
     budgetDefect(delta.claims) ??
+    containerDefect(delta, reactor, operator) ??
     eraseDefect(delta, reactor, operator);
   if (defect !== undefined) {
     return { ok: false, refusal: `delta ${delta.id} is malformed law: ${defect}` };

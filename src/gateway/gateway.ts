@@ -82,6 +82,14 @@ import {
   type QuarantinePool,
 } from "./quarantine-pool.js";
 import {
+  containerScopeImpl,
+  openContainerImpl,
+  readContainerTable,
+  type Container,
+  type ContainerOptions,
+  type ContainerTable,
+} from "./container.js";
+import {
   prepareRouteImpl,
   publishRendererImpl,
   readRenderers,
@@ -576,10 +584,12 @@ export class Gateway {
   // --- erasure (SPEC §11) ------------------------------------------------------------------------
 
   // Erase one delta (SPEC §11): the body lives beside the tombstone vocabulary in erase.ts.
+  // `kept` lists the declared walls a surviving detach record deliberately holds outside this
+  // sweep (SPEC §27.7's completeness guard) — on the record, never silent.
   async erase(
     id: string,
     opts: { reason?: string } = {},
-  ): Promise<{ erased: string; citations: string[] }> {
+  ): Promise<{ erased: string; citations: string[]; kept: string[] }> {
     return eraseImpl(this, id, opts);
   }
 
@@ -591,14 +601,45 @@ export class Gateway {
     return healthImpl(this);
   }
 
-  // The quarantine pools attached to this store (SPEC §24.8): the operator's own one-way replicas that an
-  // erasure here must fan out to. Live Gateway handles registered by `openQuarantine`, dropped on `drop`.
-  /** @internal — T19 seam (erase.ts, quarantine-pool.ts) */
+  // The wall gateways attached to this store (SPEC §24.8/§27): the operator's own one-way
+  // replicas that an erasure here must fan out to. This Set is the CANONICAL runtime registry of
+  // erasure reach — every attach inserts here, every drop/detach removes here, and the fan-out,
+  // the health probe, and the scope reads all walk it. It stays a real mutable Set (rails reach
+  // in to build fixtures); the named index below is bookkeeping over it, checked against it.
+  /** @internal — T19 seam (erase.ts, container.ts) */
   readonly quarantinePools = new Set<Gateway>();
 
-  // Open a QUARANTINE POOL over this store (SPEC §24): the body lives in quarantine-pool.ts.
+  // The NAMED attachments (SPEC §27, T32): declared container entity → its attached wall
+  // gateway. An entry here is meaningful only while its gateway is also in quarantinePools —
+  // readers ask both, so the two can never silently diverge on erasure reach.
+  /** @internal — T19 seam (container.ts) */
+  readonly attachedContainers = new Map<string, Gateway>();
+
+  // Open a QUARANTINE POOL over this store (SPEC §24): the body lives in quarantine-pool.ts,
+  // which re-expresses it as the untrusted-wall PRESET of the container primitive below.
   async openQuarantine(opts: QuarantineOptions = {}): Promise<QuarantinePool> {
     return openQuarantineImpl(this, opts);
+  }
+
+  // --- containers (SPEC §27, ticket T32) ---------------------------------------------------------
+
+  // The resolved container table: declarations, exclusions, detach records, and the reader-level
+  // defects (immutable-knob flips, restored cycles) — live from the ground, like trust.
+  containers(): ContainerTable {
+    return readContainerTable(this.reactor, this.operatorAuthor);
+  }
+
+  // Open a container over this store (SPEC §27): a declared one by name, or an anonymous one
+  // with explicit knobs. The body lives in container.ts.
+  async openContainer(opts: ContainerOptions = {}): Promise<Container> {
+    return openContainerImpl(this, opts);
+  }
+
+  // The scope-merge read (SPEC §27.4): union(active containers) MINUS excluded, closed under
+  // forward negation (H1), failing closed on any unresolvable dependency. Scope is chosen at
+  // QUERY time — this never rewrites the default door reads.
+  containerScope(opts: { containers?: readonly string[] } = {}): Delta[] {
+    return containerScopeImpl(this, opts);
   }
 
   // Promote a delta a quarantine produced into THIS store (SPEC §24.3 — promote-outputs): the body
