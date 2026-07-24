@@ -121,7 +121,11 @@ verb covers schemas, bridges, resolvers, renderers: `adopt <thing>@<address>`.
   supply-chain move (the alias carries the reputation; the swap inherits it), so it never rides
   `blessAll` silently: it requires its own explicit confirmation, checked against the prior
   adoption record's alias→address binding — pure address arithmetic over records that already
-  exist. **And the classification the guards run on has ONE source of truth: the verified,
+  exist. A root-name collision inside a `blessAll` REFUSES THE WHOLE CALL, listing every
+  colliding row (round-4 review): a collision is a per-row DECISION (`supersede` vs `as`), and
+  decisions do not ride bulk gestures — the operator resolves the named rows singly and re-runs;
+  idempotence makes the re-run cheap. **And the classification the guards run on has ONE source
+  of truth: the verified,
   content-addressed export itself — never a manifest field** (adversarial review, 2026-07-24).
   The module is a stranger's; its manifest's kind labels are display copy. A row IS a renderer
   because the bytes at its address are a renderer binding; it HOLDS a pen because that binding
@@ -142,7 +146,11 @@ verb covers schemas, bridges, resolvers, renderers: `adopt <thing>@<address>`.
   store holds also lists" — the UNION across versions, set membership, NOT provenance** (round-3
   review: intersecting only the latest manifest would report "no exposure" for a row adopted
   from `@1` that `@7` later dropped — the exact miss the query exists to prevent; a version
-  argument NARROWS from the union, never replaces it). A common `Post` bound at this root reports under `lawFrom(M)`
+  argument NARROWS from the union, never replaces it). The union's retention invariant is stated
+  rather than assumed (round-4 review): an adopted manifest's deltas are ordinary grow-only
+  ground, so every version ever adopted from is held BY CONSTRUCTION — and the one lawful hole,
+  a historical manifest delta the operator ERASED (§11), makes `lawFrom` report that module
+  PARTIALLY UNPROVABLE rather than silently narrower. A common `Post` bound at this root reports under `lawFrom(M)`
   AND `lawFrom(N)` when both manifests list it, and that is the correct answer to the incident
   question ("am I exposed through M?"). What no tool may do is treat it as origination: a
   revoke-by-module tool acts on exposure only with the operator confirming each shared row —
@@ -253,6 +261,11 @@ its MECHANISM (ordinary publish + adoption provenance), and its IDEMPOTENCE rule
 21. **`lawFrom` unions across manifest versions.** A row adopted from `social@1`, still bound,
     dropped from `social@7`'s manifest: `lawFrom(social)` still reports it; `lawFrom(social@7)`
     (the narrowing form) does not. — `test/gateway/adopt-law.test.ts`.
+
+22. **A colliding row stops the bulk gesture.** `blessAll` over a suite whose row 4 collides
+    with existing root law refuses the whole call naming the collision; no row lands; resolving
+    row 4 singly with `as` then re-running blesses the rest with row-4's witness silent. —
+    `test/gateway/adopt-law.test.ts`.
 
 ## Open for Myk (the decision itself)
 
