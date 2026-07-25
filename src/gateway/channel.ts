@@ -17,6 +17,12 @@ interface Waiter<T> {
   readonly reject: (e: Error) => void;
 }
 
+// What TEARDOWN needs of a live subscription, whatever it carries: a way to end it. The gateway
+// holds every open stream in ONE set so a re-seat or a close reaches all of them — typing that set
+// by this capability rather than by a payload keeps a second kind of channel (a membership watch is
+// not a patch stream) from needing a second set that the next teardown could forget.
+export type LiveStream = Pick<AsyncGenerator<unknown, void, unknown>, "return">;
+
 export class Channel<T> implements AsyncGenerator<T, void, unknown> {
   private readonly queue: T[] = [];
   private readonly waiters: Waiter<T>[] = [];
@@ -82,6 +88,15 @@ export class Channel<T> implements AsyncGenerator<T, void, unknown> {
   private close(): void {
     if (this.closed) return;
     this.closed = true;
+    // Leaving a stream FORGETS what it was holding. An undrained value is a reading of ground that
+    // may since have been erased (SPEC §11) — a re-seat closes every channel precisely because the
+    // purge happened — and `next()` consults the queue BEFORE this flag, so keeping it would let a
+    // slow reader drain purged bytes from a closed stream. Dropping it is what makes a close a
+    // teardown rather than a pause. `fail()` funnels through here too, so a dying stream discards
+    // its undrained value as well and the reader gets the error in its place — acceptable because
+    // the error IS the instruction to resubscribe, and a resubscribe re-reads current state; a
+    // stale value delivered first would be the one thing it could not correct for.
+    this.queue.length = 0;
     for (const waiter of this.waiters.splice(0)) waiter.resolve({ value: undefined, done: true });
     this.onClose?.();
   }

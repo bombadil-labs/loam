@@ -42,7 +42,7 @@ import {
   type LawFromRow,
 } from "./adopt-law.js";
 import { eraseImpl, eraseReplicaImpl, healthImpl, type StoreHealth } from "./erase.js";
-import { Channel } from "./channel.js";
+import type { LiveStream } from "./channel.js";
 import { STORE_ENTITY, operatorMarkerClaims, type Genesis } from "./genesis.js";
 import {
   admitForImpl,
@@ -261,8 +261,13 @@ export class Gateway {
   // never the authenticated surface. Cleared wherever lazyMats is.
   /** @internal - T19 seam (lifecycle.ts) */
   readonly publicLazyMats = new Set<string>();
-  /** @internal — T19 seam (reads.ts) */
-  readonly channels = new Set<Channel<PatchNode>>();
+  // EVERY open stream, of every kind — a patch stream (reads.ts) and a membership watch (ingest.ts)
+  // alike. `reseat()` and `close()` end what is in this set and nothing else, so a stream missing
+  // from it survives an erasure: still serving its pre-purge reading, still bound to the replaced
+  // reactor. Typed by the one thing teardown does with a member (`return()`), so no payload shape
+  // ever justifies a second set for the next teardown to overlook.
+  /** @internal — T19 seam (reads.ts, ingest.ts) */
+  readonly channels = new Set<LiveStream>();
   // Ids append() has already persisted this tick: the raw-stream subscriber skips them, so a
   // direct append is written exactly once (the raw stream still catches every OTHER emitter —
   // a future DerivationHost's emissions ride it into the ground).
@@ -784,6 +789,15 @@ export class Gateway {
     this.ingestVia = (d) => this.reactor.ingest(d);
     this.attachPersistence(reactor);
     if (this.registered.length > 0) rebindImpl(this, this.registered);
+    // The registered set is a PARSED COPY of definition content — hyperschema bodies, schemas,
+    // resolver source — so it is a tier like any other (§11), and rebinding it alone would keep
+    // serving law whose bytes this cut just removed: `surface()`, the GraphQL schema and every
+    // door built from them would outlive the ground until a restart. Re-derive instead. The
+    // rebind above still has to happen first — it is what puts materializations on the FRESH
+    // reactor — and the replay is a no-op when nothing was forgotten (it compares sets and
+    // returns), so the second bind is paid only when the cut actually took law away. Manual
+    // registrations are this process's own, not the ground's: the replay keeps them by origin.
+    this.replayRegistrations();
   }
 
   // --- federation ------------------------------------------------------------------------------

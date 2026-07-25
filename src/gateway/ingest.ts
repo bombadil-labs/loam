@@ -143,6 +143,23 @@ export function withNegationClosure(gw: Gateway, admitted: readonly Delta[]): De
   return [...out.values()];
 }
 
+const NO_DEAD: ReadonlySet<string> = new Set();
+
+// The ids this store has been ordered to forget, for a caller that runs PER PULSE. `readTombstones`
+// costs two full-ground passes (a lawful-negation materialization, then a walk), and a store that
+// holds no removal order at all can answer without paying either: an ungoverned store honors no
+// erasure (§11), and a tombstone must BE in the ground to bind. The existence probe is exact rather
+// than heuristic, and it deliberately decides nothing else — which tombstones SURVIVE, and whose
+// author confirms them, stays the one place that owns those rules (H8: the cheap answer must not
+// become a second implementation of the expensive one).
+function deadSet(gw: Gateway): ReadonlySet<string> {
+  if (gw.operatorAuthor === undefined) return NO_DEAD;
+  for (const d of gw.reactor.snapshot()) {
+    if (isTombstone(d.claims)) return readTombstones(gw.reactor, gw.operatorAuthor);
+  }
+  return NO_DEAD;
+}
+
 // The surviving deltas this store offers a peer — everything, or what the offered lens selects,
 // plus whatever struck it (above): offering a claim while withholding its retraction would
 // republish something the operator had struck.
@@ -158,8 +175,11 @@ export function offeredDeltasImpl(gw: Gateway): Delta[] {
 // rhizomatic Term — the JSON `op` profile — over this store's SURVIVING ground, once. The Term
 // must select a DELTA SET (`difference`/`intersect` compose here, at the Term layer, to any
 // depth — never inside `inView` predicates, whose depth-1 stratification §24.10 pins); anything
-// else is refused loudly at the door. This is `offeredDeltas` parameterized: the same reading a
-// federation peer gets, under a scope the caller names.
+// else is refused loudly at the door. This is `offeredDeltas` parameterized IN ITS SCOPE — the same
+// Term evaluation under a scope the caller names — and NOT the same reading: `offeredDeltas` adds
+// the negation closure a peer must not be denied (H1), and `watch` additionally withholds what a
+// surviving tombstone has condemned (§11). A `select` caller gets neither. Aligning the three doors
+// is T90's business; until then this one hands back exactly what the Term selected, no more.
 export function selectImpl(gw: Gateway, term: unknown): Delta[] {
   const parsed = parseTerm(term);
   const result = evalTerm(parsed, gw.reactor.snapshot());
@@ -184,11 +204,62 @@ export function watchImpl(gw: Gateway, term: unknown): AsyncGenerator<Delta[], v
       `watch: the membership term must evaluate to a delta set (dset), not a ${initial.sort}`,
     );
   }
+  // A frame is a NARROWED delta set, so it owes the negation closure (hazard H1): suppression is a
+  // property of the operand set, and an entity- or context-scoped Term structurally CANNOT select
+  // the retraction of a claim it selects — a negation carries only its `negates` pointer, no entity
+  // and no context. Without the closure a reader lifting a frame into a View resolves a retracted
+  // claim as LIVE, which is the same bug three narrowing doors already paid for.
+  //
+  // Then, and only then, drop what the store has been ORDERED to forget (SPEC §11): the tombstone
+  // is ground BEFORE its target is purged — erase sequences it that way on purpose — so the pulse
+  // that fires in that window is the tombstone's own, carrying a member whose bytes are going away.
+  //
+  // ORDER IS LOAD-BEARING, and it is the mirror of `containerScopeImpl`'s "subtract, THEN close":
+  // there, closing last stops a narrowing from REVIVING a claim. Here the closure runs first and the
+  // forgetting has the last word, so a strike survives unless the strike ITSELF was erased — and
+  // erasing a retraction genuinely does revive its target, which is exactly what the reader's own
+  // ground will say once the purge lands. Closing last would instead re-admit a negation the
+  // operator ordered erased, defeating the drop.
+  //
+  // HONEST SCOPE OF THE DROP: it makes THIS door honor a removal order the point-read doors do not
+  // yet honor — `select`, `freeze` and `offeredDeltas` apply no dead-set filter (tracked as T90),
+  // and the inbound doors' `dead.has(d.id)` check is a different question (refusing re-entry, not
+  // withholding a reading). The states where the divergence shows are not only intra-erase, and not
+  // only transient: a tombstone appended directly never purges anything, and a purge fault is
+  // COLLECTED rather than unwound — the tombstone then stands over retained bytes indefinitely, so
+  // this door hides the delta for good while the point-read doors keep serving and republishing it.
+  const live = (members: readonly Delta[]): Delta[] => {
+    const withStrikes = withNegationClosure(gw, members);
+    const dead = deadSet(gw);
+    if (dead.size === 0) return withStrikes;
+    const kept = new Map(withStrikes.filter((d) => !dead.has(d.id)).map((d) => [d.id, d]));
+    // Dropping a condemned delta can revive what it was HOLDING DOWN: a retraction is a member like
+    // any other, and once §11 withholds it, its target would read live in this frame while the store
+    // still holds the strike. So the target goes with it — and transitively, since a target may be
+    // the strike that was keeping something else down. The invariant this settles on: no delta is
+    // served whose strike the store holds and this frame does not carry. A purged strike is not one
+    // of those (it is gone, and the revival is what erasing a retraction MEANS); a condemned one is.
+    // Withholding more can only disclose less, which is the single direction this door may err in.
+    for (let moved = true; moved;) {
+      moved = false;
+      for (const id of [...kept.keys()]) {
+        const stranded = gw.reactor
+          .negationsOf(id)
+          .some((s) => !kept.has(s) && gw.reactor.get(s) !== undefined);
+        if (!stranded) continue;
+        kept.delete(id);
+        moved = true;
+      }
+    }
+    return [...kept.values()];
+  };
   let closed = false;
-  let lastIds = new Set([...initial.set].map((d) => d.id));
-  const channel = new Channel<Delta[]>(
+  const initialMembers = live([...initial.set]);
+  let lastIds = new Set(initialMembers.map((d) => d.id));
+  const channel: Channel<Delta[]> = new Channel<Delta[]>(
     () => {
       closed = true;
+      gw.channels.delete(channel);
     },
     (_pending, incoming) => incoming, // a slow reader gets the newest membership, nothing stale
   );
@@ -198,13 +269,17 @@ export function watchImpl(gw: Gateway, term: unknown): AsyncGenerator<Delta[], v
     if (closed) return;
     const next = evalTerm(parsed, gw.reactor.snapshot());
     if (next.sort !== "dset") return; // the term's sort is content-independent; unreachable
-    const members = [...next.set];
+    const members = live([...next.set]);
     const ids = new Set(members.map((d) => d.id));
     if (ids.size === lastIds.size && [...ids].every((id) => lastIds.has(id))) return;
     lastIds = ids;
     channel.push(members);
   });
-  channel.push([...initial.set]);
+  // Registered where teardown can reach it: this subscription is bound to TODAY's reactor, and an
+  // erase replaces that reactor — unregistered, the watcher would neither be woken nor ever fire
+  // again, freezing on its pre-erase membership with no `done` to notice by.
+  gw.channels.add(channel);
+  channel.push(initialMembers);
   return channel;
 }
 
