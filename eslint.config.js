@@ -19,6 +19,10 @@ export default tseslint.config(
       "demos/pachyderm/**",
       "scripts/**",
       ".adlc/**",
+      // Per-ticket agent worktrees: whole checkouts of this repo, each with its own copy of every
+      // source file. git ignores them; eslint would otherwise lint N copies of the tree and bury
+      // the real bar under thousands of duplicate findings (measured: 2973 from six worktrees).
+      ".claude/worktrees/**",
     ],
   },
   js.configs.recommended,
