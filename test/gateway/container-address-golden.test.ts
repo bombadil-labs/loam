@@ -9,8 +9,12 @@
 // This is a CHARACTERIZATION rail. It PASSED the first time it ran, which is correct and is the
 // entire point: it was written against the source while the separator was still two raw 0x00
 // bytes, so that rewriting them as escapes could be PROVEN byte-identical rather than assumed.
-// The proof that it is not vacuous runs in the other direction — swap the separator for a space
-// and all three goldens go red.
+// The proof that it is not vacuous runs in the other direction — swap the separator in the source
+// for a space and four of the five rails below go red (the door rail does not, and should not: it
+// asserts a linkage, not a value). That the pre-escape source really held the raw byte (and not, say,
+// a space, which would make these goldens the record of a break rather than of continuity) is
+// re-checkable from history, and the check is one command:
+//   git show <rev>:src/gateway/container-identity.ts | perl -0777 -ne '$c=()=/\x00/g; print "$c\n"'
 //
 // The member ids are synthetic on purpose. `addressOf` sees nothing but `d.id`, so freezing real
 // signed deltas would bolt a second moving part (rhizomatic's id format) onto a rail whose only
@@ -86,11 +90,16 @@ describe("§27.2 the module-version address is pinned, byte for byte", () => {
     const preimage = (sep: string): string =>
       `loam.container.v1${sep}${[A, B, C].sort().join(sep)}`;
 
-    expect(contentAddress(new TextEncoder().encode(preimage(NUL)))).toBe(THREE);
+    // Compared against what the SOURCE computes, not against the constant above: a test that only
+    // related `contentAddress` to a literal in its own file would be a statement about rhizomatic's
+    // hash, green no matter what this repo's separator became.
+    const fromSource = freezeMembers([member(A), member(B), member(C)]).id;
+    expect(contentAddress(new TextEncoder().encode(preimage(NUL)))).toBe(fromSource);
+    expect(fromSource).toBe(THREE);
     // The negative half — this is what makes the goldens a rail rather than a note. If the control
     // byte is ever silently normalized away, the address lands somewhere else and says so.
     for (const sep of [" ", ",", "|", "", "\\u0000"]) {
-      expect(contentAddress(new TextEncoder().encode(preimage(sep)))).not.toBe(THREE);
+      expect(contentAddress(new TextEncoder().encode(preimage(sep)))).not.toBe(fromSource);
     }
   });
 
