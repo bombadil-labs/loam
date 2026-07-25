@@ -118,27 +118,21 @@ curl -s localhost:4321/default/graphql \
 Everything the CLI and server do is a small API you can drive directly.
 
 ```ts
-import { Gateway, MemoryBackend, SqliteBackend, serve } from "@bombadil/loam";
-import { parseTerm } from "@bombadil/rhizomatic";
+import { Gateway, MemoryBackend, SqliteBackend, entityGatherBody, serve } from "@bombadil/loam";
 
 // A store, governed by an operator seed. Omit the seed for an ungoverned local store.
 const gateway = await Gateway.open(new SqliteBackend("./store.sqlite"), { seed: operatorSeedHex });
 
 // Register a (HyperSchema, Schema) over the roots you want held live. The schema's body is a
 // rhizomatic term; the policy's props name the GraphQL fields and their shapes.
+// `entityGatherBody()` is the ordinary one — everything pointing at the root, bucketed by context.
+// It is a named constructor for the term "Schemas are data" spells out stage by stage below; reach
+// for `expandedGatherBody({ role, schema, reading })` when a field expands into a child's own view.
 gateway.register(
   {
     name: "Plant",
     alg: 1,
-    body: parseTerm({
-      op: "group",
-      key: "byTargetContext",
-      in: {
-        op: "select",
-        pred: { hasPointer: { targetEntity: { var: "root" } } },
-        in: { op: "mask", policy: "drop", in: "input" },
-      },
-    }),
+    body: entityGatherBody(),
   },
   {
     props: new Map([["height", { kind: "pick", order: { kind: "byTimestamp", dir: "desc" } }]]),
