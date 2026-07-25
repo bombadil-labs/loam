@@ -129,17 +129,27 @@ export function admitForImpl(gw: Gateway): (d: Delta) => boolean {
 // a scope into a leak. Transitive because a struck strike REVIVES: carrying one link would leave a
 // revived claim wrongly suppressed, which is the same failure mirrored.
 //
-// Terminates because the output set only grows and is bounded by the snapshot (and the chain is
+// Terminates because the output set only grows and is bounded by the store (and the chain is
 // acyclic anyway — content addressing means a negation cannot precede its target).
+//
+// It asks the ground exactly two questions, both answered from the reactor's INDEXES: who negates
+// this id, and is that negation still held? Materializing the store into a private id→delta map
+// instead would cost a pass over every delta plus a content re-address of each (`snapshot()` is
+// `DeltaSet.from`) — per call, on a path six callers share, one of which runs it per accepted delta
+// per watcher (H8: the affordance that avoids the scan must itself be correct; here the index IS the
+// affordance, and `get` returning undefined for a purged negation is the same answer the map gave).
+//
+// THE CLOSURE IS DRAWN FROM THE LOCAL GROUND. A caller handing it deltas that are not in this store
+// would silently under-close — the negations it needs are not local yet. That is the inbound
+// federation case, and it has its own batch-scoped closure below.
 export function withNegationClosure(gw: Gateway, admitted: readonly Delta[]): Delta[] {
-  const byId = new Map([...gw.reactor.snapshot()].map((d) => [d.id, d]));
   const out = new Map(admitted.map((d) => [d.id, d]));
   const pending = [...out.keys()];
   while (pending.length > 0) {
     const id = pending.pop() as string;
     for (const negationId of gw.reactor.negationsOf(id)) {
       if (out.has(negationId)) continue;
-      const negation = byId.get(negationId);
+      const negation = gw.reactor.get(negationId);
       if (negation === undefined) continue; // purged (§11) — the hole is the point
       out.set(negationId, negation);
       pending.push(negationId);
