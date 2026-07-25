@@ -27,6 +27,7 @@ import { esmAddress } from "../../src/gateway/esm.js";
 import { RENDER_TIMEOUT_MS } from "../../src/gateway/render-worker.js";
 import { bundleFromPage, coordinatesFromPage } from "../../src/gateway/artifact-page.js";
 import { artifactClaims, artifactDefect } from "../../src/gateway/artifact.js";
+import { HOST_GLOBALS, scanHostReferences } from "../../src/gateway/artifact-scan.js";
 import { eraseClaims } from "../../src/gateway/erase.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
 import { FERN, observed } from "../spike/garden.js";
@@ -383,6 +384,69 @@ describe("§30 criterion 14: withdrawal darkens the emission and the route toget
   });
 });
 
+// EVERY name the refusal set owes, written out here rather than read from `HOST_GLOBALS`. Deriving the
+// expectation from the table under test is what let seven of them go unexercised: `pack()` was the only
+// reach into the scan, so deleting `navigator` (or `claude`, or `location`) from the table left the whole
+// suite green while a bundle reaching `navigator.storage` packed silently. This is the discipline
+// `artifact-realm.test.ts`'s MUST_SEAL already runs, applied to the second list this change ships.
+const MUST_REFUSE: Readonly<Record<string, readonly string[]>> = {
+  browser: [
+    "window",
+    "document",
+    "claude",
+    "localStorage",
+    "sessionStorage",
+    "navigator",
+    "location",
+  ],
+  node: ["require", "Buffer", "process", "module", "__dirname", "__filename"],
+  worker: [
+    "indexedDB",
+    "caches",
+    "BroadcastChannel",
+    "importScripts",
+    "self",
+    "globalThis",
+    "fetch",
+    "XMLHttpRequest",
+    "WebSocket",
+  ],
+  eval: ["eval", "Function"],
+};
+
+describe("§30 criterion 20: the refusal set covers every name it owes", () => {
+  it("the shipped table names each one, in its own family", () => {
+    for (const [family, names] of Object.entries(MUST_REFUSE)) {
+      for (const name of names) {
+        expect(HOST_GLOBALS[family], `${family}/${name}`).toContain(name);
+      }
+    }
+  });
+
+  it("and the SCAN reports each one, by name and family, from a bare reference", () => {
+    // Driven through `scanHostReferences` directly, so a name is exercised whether or not a pack
+    // fixture happens to reach it. Nothing else in this suite touched the scan's own surface.
+    for (const [family, names] of Object.entries(MUST_REFUSE)) {
+      for (const name of names) {
+        const source = `export default function (node) { var held = ${name}; return "<p>" + node.view.height + "</p>"; }`;
+        const found = scanHostReferences(source);
+        expect(
+          found.map((r) => r.name),
+          name,
+        ).toContain(name);
+        expect(found.find((r) => r.name === name)?.family, name).toBe(family);
+      }
+    }
+  });
+
+  it("a conforming pure RenderFn reaches NOTHING — the two-sided half", () => {
+    // Without this, a scan that reported every identifier would satisfy the loop above.
+    expect(
+      scanHostReferences('export default (node) => "<p>" + node.view.height + "</p>";'),
+    ).toEqual([]);
+  });
+});
+
 describe("§30 criterion 20: a reference scan, not a substring scan", () => {
   const cases: ReadonlyArray<readonly [string, string]> = [
     ["window", 'export default (n) => window.claude ? "a" : "b";'],
@@ -495,12 +559,16 @@ describe("§30 criterion 34c: a store that OUTLIVES the realm is refused at pack
   // sufficient — but it DOES have these, as bare identifiers, so `terminate()` alone does NOT empty
   // the compartment. A byte-scan over one conforming page could never have seen it.
   it.each(["indexedDB", "caches", "BroadcastChannel", "importScripts"])(
-    "refuses a bundle reaching %s by name",
+    "refuses a bundle reaching %s, and names THAT channel rather than a boilerplate list",
     async (channel) => {
-      const gw = await ready({
-        bundle: `export default (n) => { var k = ${channel}; return "<p>" + n.view.height + "</p>"; };`,
-      });
-      expect(() => pack(gw)).toThrow(new RegExp(channel));
+      // The refusal message also interpolates the first three worker-family names as prose, so a bare
+      // `new RegExp(channel)` matched boilerplate present regardless of what the scan reported — a scan
+      // that always named the wrong global passed this for three of the four cases. Anchored on the
+      // scan's own report instead, which is the only part that varies.
+      const bundle = `export default (n) => { var k = ${channel}; return "<p>" + n.view.height + "</p>"; };`;
+      expect(scanHostReferences(bundle).map((r) => r.name)).toEqual([channel]);
+      const gw = await ready({ bundle });
+      expect(() => pack(gw)).toThrow(new RegExp(`globals — ${channel} \\(worker\\)`));
       await gw.close();
     },
   );

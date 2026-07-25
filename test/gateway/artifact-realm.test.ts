@@ -26,6 +26,9 @@
 // survives. A seal that took `postMessage`, `URL`, or `Blob` with it would leave a compartment that
 // cannot answer, and "the bundle rendered nothing" reads identically to "the bundle was confined".
 
+/* eslint-disable @typescript-eslint/no-implied-eval, @typescript-eslint/no-unsafe-call */
+// The last suite RUNS the realm program. `new Function` is the instrument: a rail that only reads the
+// program as text cannot see the one thing the program has to get right.
 import { describe, expect, it } from "vitest";
 import { SEALED_CHANNELS, realmProgram, sealRealm } from "../../src/gateway/artifact-page.js";
 
@@ -52,6 +55,10 @@ const MUST_SEAL = [
   "self",
   "window",
   "document",
+  // OPFS: `navigator.storage.getDirectory()` in a dedicated worker is PERSISTENT bytes that survive a
+  // teardown. It was in the pack-time refusal set and not in the seal, which is the widest hole the two
+  // halves drifting apart could leave.
+  "navigator",
 ] as const;
 
 // A fabricated worker global. Every channel the seal is meant to reach, plus the three the realm program
@@ -68,6 +75,7 @@ const fabricate = (): Record<string, unknown> => ({
   localStorage: { setItem: () => undefined },
   sessionStorage: { setItem: () => undefined },
   self: { name: "the realm's own handle" },
+  navigator: { storage: { getDirectory: () => "an OPFS handle that survives terminate()" } },
   window: { claude: { mcp: { callTool: () => undefined } } },
   document: { title: "" },
   // the BYSTANDERS: what the realm program itself holds, and one ordinary global
@@ -79,7 +87,11 @@ const fabricate = (): Record<string, unknown> => ({
 
 describe("§30: the realm program embedded in the page IS the function railed here", () => {
   it("carries sealRealm's own source and calls it with the sealed set", () => {
-    // If this drifts, every other assertion in this file is about code the page does not run.
+    // NOTE what this can and cannot say. `REALM_SRC` is BUILT from `sealRealm.toString()`, so the
+    // containment check below is tautological and is kept only as documentation of the mechanism — the
+    // assertion that earns its keep is the CALL SITE (a program that embedded the source and never
+    // invoked it would pass the first and fail the second), and the suite at the bottom of this file,
+    // which executes the program.
     const program = realmProgram();
     expect(program).toContain(sealRealm.toString());
     expect(program).toContain(`sealRealm(globalThis, ${JSON.stringify(SEALED_CHANNELS)})`);
@@ -187,5 +199,126 @@ describe("§30 criterion 19: what a bundle can SEE after the seal", () => {
     // handle to the viewer's MCP capability anywhere in this realm.
     expect(scope["window"]).toBeUndefined();
     expect((scope["window"] as { claude?: unknown } | undefined)?.claude).toBeUndefined();
+  });
+});
+
+describe("§30: the realm program RUNS — capture-before-seal, and every fold", () => {
+  // No rail executed this program. That matters for one specific, browser-only reason: the program
+  // CAPTURES `postMessage`, `URL.createObjectURL` and `Blob` before sealing, and capture-before-seal is
+  // the whole reason the realm can still answer after `self` is sealed. Rewrite the handler to call
+  // `self.postMessage(...)` after the seal and every text-matching rail stays green while the real page
+  // renders nothing, forever. The `live` / `ok` / `notHtml` / `fault` folds were likewise never run.
+  //
+  // WHAT THIS DOES NOT PROVE, and it is the same gap the file's header names: that a real Worker realm's
+  // globals are the ones fabricated here, or that a `blob:` module import is permitted under the
+  // artifact CSP. The dynamic `import()` is stubbed below — what is exercised is the program's own
+  // structure: what it captures, when it seals, and which message it posts for each outcome.
+  const run = (
+    bundleModule: unknown,
+  ): { posted: unknown[]; scope: Record<string, unknown>; deliver: () => Promise<void> } => {
+    const posted: unknown[] = [];
+    let handler: ((ev: unknown) => void) | undefined;
+    // A fabricated worker global with the channels on a PROTOTYPE, which is where a real worker keeps
+    // them — see sealRealm's own note about shadowing versus removal.
+    const proto: Record<string, unknown> = {};
+    for (const name of SEALED_CHANNELS) proto[name] = { real: name };
+    const scope: Record<string, unknown> = Object.create(proto) as Record<string, unknown>;
+    const self = {
+      postMessage: (msg: unknown) => posted.push(msg),
+      addEventListener: (_type: string, fn: (ev: unknown) => void) => {
+        handler = fn;
+      },
+    };
+    scope["self"] = self;
+    const URLStub = { createObjectURL: () => "blob:the-bundle" };
+    function BlobStub(this: unknown) {}
+    // `import()` cannot be stubbed inside a `new Function` body, so the program's import expression is
+    // rewritten to a resolver the test controls. Everything else runs verbatim.
+    const src = realmProgram().replace(
+      'import(held.url(new held.Blob([data.bundle], { type: "text/javascript" })))',
+      '__import(held.url(new held.Blob([data.bundle], { type: "text/javascript" })))',
+    );
+    const __import = (url: string): Promise<unknown> => {
+      expect(url).toBe("blob:the-bundle"); // the bundle rides in on the captured URL, not a fetch
+      return bundleModule instanceof Error
+        ? Promise.reject(bundleModule)
+        : Promise.resolve(bundleModule);
+    };
+    // `self`, `URL` and `Blob` resolve from the FABRICATED SCOPE rather than from parameters, because a
+    // parameter binding is immune to the seal: sealing `scope.self` has to be able to break a program
+    // that reaches `self.postMessage` late, or the capture-before-seal rail proves nothing.
+    // `globalThis` inside the `with` must be the FABRICATED scope, or the program seals the real one.
+    scope["globalThis"] = scope;
+    scope["URL"] = URLStub;
+    scope["Blob"] = BlobStub;
+    scope["__import"] = __import;
+    new Function("scope", `with (scope) { ${src} }`)(scope);
+    return {
+      posted,
+      scope,
+      deliver: async () => {
+        handler?.({ data: { bundle: "export default () => 1;", node: { view: {} } } });
+        for (let i = 0; i < 6; i += 1) await Promise.resolve();
+      },
+    };
+  };
+
+  it("posts { kind: live } at construction — the second clock's start gun", () => {
+    const r = run({ default: () => "<p>ok</p>" });
+    expect(r.posted).toEqual([{ kind: "live" }]);
+  });
+
+  it("seals the realm on the message, walking the PROTOTYPE where a worker keeps its channels", async () => {
+    const r = run({ default: () => "<p>ok</p>" });
+    await r.deliver();
+    for (const name of SEALED_CHANNELS) {
+      if (name === "self") continue; // the program's own handle, replaced by the harness's stub
+      expect(r.scope[name], name).toBeUndefined();
+      // The removal, not merely a shadow: the accessor's own holder no longer answers either.
+      const holder = Object.getPrototypeOf(r.scope) as Record<string, unknown>;
+      expect(holder[name], `${name} on the prototype`).toBeUndefined();
+    }
+  });
+
+  it("STILL ANSWERS after the seal — capture-before-seal is what makes that true", async () => {
+    // The rail the whole suite exists for. Move the captures below the seal and this goes red while
+    // every `toContain` in this file stays green.
+    const r = run({
+      default: (node: { view: Record<string, unknown> }) =>
+        `<p>${Object.keys(node.view).length}</p>`,
+    });
+    await r.deliver();
+    expect(r.posted).toHaveLength(2);
+    expect((r.posted[1] as { kind: string }).kind).toBe("ok");
+  });
+
+  it("folds a non-function default export to notHtml", async () => {
+    const r = run({ default: 7 });
+    await r.deliver();
+    expect(r.posted[1]).toEqual({ kind: "notHtml" });
+  });
+
+  it("folds a non-string return to notHtml", async () => {
+    const r = run({ default: () => ({ markup: 1 }) });
+    await r.deliver();
+    expect(r.posted[1]).toEqual({ kind: "notHtml" });
+  });
+
+  it("folds a THROWING bundle to fault, leaking nothing of its own error", async () => {
+    const r = run({
+      default: () => {
+        throw new Error("secret internal detail");
+      },
+    });
+    await r.deliver();
+    expect(r.posted[1]).toEqual({ kind: "fault" });
+    expect(JSON.stringify(r.posted)).not.toContain("secret internal detail");
+  });
+
+  it("folds an UNIMPORTABLE bundle to fault", async () => {
+    const r = run(new Error("the module would not load"));
+    await r.deliver();
+    expect(r.posted[1]).toEqual({ kind: "fault" });
+    expect(JSON.stringify(r.posted)).not.toContain("would not load");
   });
 });

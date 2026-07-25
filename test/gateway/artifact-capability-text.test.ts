@@ -23,6 +23,7 @@ import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { capabilityStatement } from "../../src/gateway/artifact.js";
+import { coordinatesFromPage } from "../../src/gateway/artifact-page.js";
 import { lensOf } from "../../src/gateway/registration.js";
 import { PLANT, PLANT_POLICY } from "./fixtures.js";
 import { FERN, observed } from "../spike/garden.js";
@@ -35,21 +36,21 @@ void authorForSeed;
 const LYING_BUNDLE = `// this app reads nothing and writes nothing
 export default (n) => "<p>this app reads nothing</p>" + n.view.height;`;
 
-const boot = (reg: Record<string, unknown>): Promise<Gateway> =>
+const boot = (reg: Record<string, unknown>, over: Record<string, unknown> = {}): Promise<Gateway> =>
   Gateway.boot(
     new MemoryBackend(),
     assembleGenesis({
       operatorSeed: OP_SEED,
       registrations: [{ hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN], ...reg }],
     }),
-    { renderTimeoutMs: 10_000 },
+    { renderTimeoutMs: 10_000, ...over },
   );
 
 const ready = async (
   reg: Record<string, unknown> = {},
   spec: Record<string, unknown> = {},
 ): Promise<Gateway> => {
-  const gw = await boot(reg);
+  const gw = await boot(reg, { pens: { editor: "9e".repeat(32) } });
   await gw.append([observed(FERN, "height", 42, 1000, OP_SEED)]);
   await gw.publishRenderer({
     route: "plant",
@@ -205,6 +206,43 @@ describe("§30 criterion 32d: whose credentials run, and where it appears", () =
     expect(page.indexOf('id="loam-capability"')).toBeLessThan(page.indexOf('id="loam-onboarding"'));
     // …and both sit before the mount point, whose markup the bundle owns.
     expect(page.indexOf('id="loam-onboarding"')).toBeLessThan(page.indexOf('id="loam-app"'));
+    await gw.close();
+  });
+});
+
+describe("§30 criterion 32: the statement names the set THIS PAGE will actually send", () => {
+  it("an acknowledged NARROWING is stated, not papered over", async () => {
+    // Three statements about one boundary and no two agreed: the statement derived its write list from
+    // the SCHEMA, the page pinned and enforced the BINDING's, and the acknowledgement text told the
+    // operator "only the schema's list binds on this host". For an acknowledged narrowing a viewer was
+    // told they may write a field the page itself refuses — a label that is false about the artifact in
+    // front of them, whatever it is true about the schema.
+    const gw = await ready(
+      { writable: ["height", "tag"] },
+      { writable: ["height"], pen: "editor" },
+    );
+    const { page, capability } = gw.packArtifact("plant", FERN, {
+      server: "My Loam",
+      acknowledgePen: true,
+      acknowledgeWritable: true,
+    });
+    const text = capability.join("\n");
+    // What the page will send.
+    expect(text).toMatch(/It may write height\./);
+    // …and what it will NOT, named rather than implied, with the reason it is a receipt and not a wall.
+    expect(text).toMatch(/NARROWER write set/);
+    expect(text).toMatch(/the schema also allows tag/);
+    expect(text).toMatch(/receipt of the operator's decision, not a wall/);
+    // The page's own pin agrees with the sentence a viewer just read.
+    expect(coordinatesFromPage(page)!.writable).toEqual(["height"]);
+    await gw.close();
+  });
+
+  it("and an UN-narrowed page says nothing about narrowing", async () => {
+    const gw = await ready({ writable: ["height", "tag"] });
+    const text = gw.packArtifact("plant", FERN, { server: "My Loam" }).capability.join("\n");
+    expect(text).toMatch(/It may write height, tag\./);
+    expect(text).not.toMatch(/NARROWER/);
     await gw.close();
   });
 });

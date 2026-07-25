@@ -166,9 +166,16 @@ export function capabilityStatement(
   registered: Registered,
   binding: RendererBinding,
   manifest: readonly string[],
+  // The set THIS PAGE was published to write — `binding.writable` where the operator acknowledged a
+  // narrowing, else the schema's. Passed in rather than re-derived so the statement and the page's own
+  // pin cannot disagree: a viewer told they may write a field the page then refuses has been read a
+  // label that is false about the artifact in front of them, whatever it is true about the schema.
+  pinned?: readonly string[],
 ): string[] {
   const props = [...registered.schema.props.keys()].sort();
-  const writable = [...(registered.writable ?? [])].sort();
+  const schemaWritable = [...(registered.writable ?? [])].sort();
+  const writable = [...(pinned ?? registered.writable ?? [])].sort();
+  const narrowed = schemaWritable.filter((f) => !writable.includes(f));
   const templates = Object.keys(registered.mutations ?? {}).sort();
   const consumes = [...binding.consumes].sort();
   const lens = lensOf(registered);
@@ -189,6 +196,14 @@ export function capabilityStatement(
         (templates.length === 0
           ? `.`
           : `, and may file these claim templates: ${list(templates)}.`),
+    ...(narrowed.length === 0
+      ? []
+      : [
+          `This page was published for a NARROWER write set than the schema opens: the schema also ` +
+            `allows ${list(narrowed)}, which this page will not send. That narrowing is a receipt of ` +
+            `the operator's decision, not a wall — the same document sent with your own token is ` +
+            `accepted by the store either way.`,
+        ]),
     `Reading happens against the store your connector points at — not the store that published this ` +
       `page — and writing happens as YOUR own author standing, with your own credentials. This page ` +
       `holds no key, no pen, and no boundary of its own.`,
@@ -324,8 +339,10 @@ export function packArtifactImpl(
   if (narrowed && opts.acknowledgeWritable !== true) {
     refuse(
       `artifact: this renderer narrows writes to [${bindingWritable.join(", ")}] while the schema ` +
-        `allows [${schemaWritable.join(", ")}], and only the schema's list binds on this host. ` +
-        `Acknowledge to pack it anyway.`,
+        `allows [${schemaWritable.join(", ")}]. On the host route the binding's own list is enforced ` +
+        `at the door; on this host nothing but the schema binds, so the page carries the narrower set ` +
+        `as a RECEIPT of your decision rather than as a wall — a viewer's own token is accepted by the ` +
+        `store either way. Acknowledge to pack it anyway.`,
     );
   }
   // (5) A bundle that REFERENCES a host-specific global. The cheap half of confinement, and what makes
@@ -355,7 +372,7 @@ export function packArtifactImpl(
   // The write surface the page is PINNED to: the binding's own list where it has one, else the schema's.
   // A receipt of the operator's decision, not an allow-list.
   const acknowledgedWritable = bindingWritable ?? schemaWritable;
-  const capability = capabilityStatement(registered, binding, manifest);
+  const capability = capabilityStatement(registered, binding, manifest, acknowledgedWritable);
   const coordinates: ArtifactCoordinates = {
     server,
     route,

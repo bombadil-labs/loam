@@ -195,7 +195,7 @@ export {
   type ArtifactCoordinates,
 } from "./gateway/artifact-page.js";
 export { HOST_GLOBALS, scanHostReferences, type HostReference } from "./gateway/artifact-scan.js";
-export { queryFieldFor } from "./gateway/gql.js";
+export { legalNameFor, queryFieldFor } from "./gateway/gql.js";
 export {
   Runner,
   bindingDefinitionClaims,

@@ -392,8 +392,11 @@ export function scanHostReferences(source: string): HostReference[] {
     if (isDead(i)) continue;
     add(t.text);
   }
-  // The two syntax forms no identifier rule covers. Both are checked against the source with strings
-  // and comments already stripped by the lexer, so a `node:` inside a comment is not a reach.
+  // The two syntax forms no identifier rule covers, and they read DIFFERENT inputs — which the previous
+  // comment claimed of both and was only true of one. `import(` is tested against the lexed token
+  // stream with strings and comments already gone. `node:` is tested against the STRING TOKENS, because
+  // a module specifier is always inside a string literal: that is where a real one lives, and it keeps a
+  // `// see node:fs` in a comment from being refused. Both stay fail-closed on anything they do see.
   const code = tokens
     .filter((t) => t.kind !== "string")
     .map((t) => t.text)
@@ -401,7 +404,11 @@ export function scanHostReferences(source: string): HostReference[] {
   if (IMPORT_CALL.test(code)) {
     found.set("import(", { name: "import(", family: "browser" });
   }
-  if (NODE_SPECIFIER.test(source)) {
+  const literals = tokens
+    .filter((t) => t.kind === "string")
+    .map((t) => t.text)
+    .join(" ");
+  if (NODE_SPECIFIER.test(literals)) {
     found.set(`${NODE_PREFIX}:`, { name: `${NODE_PREFIX}:`, family: NODE_PREFIX });
   }
   return [...found.values()];

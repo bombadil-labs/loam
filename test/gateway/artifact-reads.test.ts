@@ -40,10 +40,17 @@ import { queryFieldFor } from "../../src/gateway/gql.js";
 import { coordinatesFromPage } from "../../src/gateway/artifact-page.js";
 import { FERN, GARDENER, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
+import { legalNameFor } from "../../src/gateway/gql.js";
+import { lensOf, programOf } from "../../src/gateway/registration.js";
+import { capabilityStatement } from "../../src/gateway/artifact.js";
 
 const OP_SEED = "0e".repeat(32);
 const OP = authorForSeed(OP_SEED);
 const MOSS = "moss";
+
+// A hyperschema whose gather body is PLANT's, under its own name, so the capital-initial reading
+// below does not collide with the shared `Plant` registration on the main mount.
+const CAPS_HYPER = { ...PLANT, name: "Plant" };
 
 // A floor bundle that DRAWS both new members, so a host that handed it the wrong shape would render
 // differently rather than silently agreeing.
@@ -271,49 +278,143 @@ describe("§30 criterion 28: the SCHEMA is the request surface, and the boundary
   });
 });
 
-describe("§30: the document the PAGE composes executes against the REAL schema", () => {
-  // The rail a stub cannot be: a harness that echoes whatever field the document names will agree with
-  // any spelling, so the page's field-name derivation has to be checked against the schema the gateway
-  // actually built. Two steps, both load-bearing and neither guessable: legal() mangling, then an
-  // initial lowercase. `Plant` is the VIEW TYPE's name and `plant` is the field's.
-  const shellLegalName = (page: string): ((lens: string) => string) => {
-    const m = /function legalName\(s\) \{[\s\S]*?\n {2}\}/.exec(page);
-    expect(m, "the page carries its own legalName").not.toBeNull();
-    return new Function(`${m![0]}; return legalName;`)() as (lens: string) => string;
+describe("§30: the page's TWO manglings, both executed against the real schema", () => {
+  // The read side already had this rail and it is why the write side's bug was confined to writes. The
+  // store has TWO manglings — `legalNameFor` for the view type, every prop field, and every per-prop
+  // MUTATION ARGUMENT; `queryFieldFor` (the same, initial-lowercased) for the query-root and
+  // mutation-root FIELD — and they differ by exactly one character, for exactly the names whose initial
+  // is an uppercase ASCII letter. A page carrying one function for both sites spells the ARGUMENT wrong
+  // and nothing else, so the read path is unaffected: the page paints correctly and every form is
+  // silently dead. That is the shape a stub cannot see, because a stub echoes back whatever it was sent.
+  const shellFns = (
+    page: string,
+  ): { legalName: (s: string) => string; rootField: (s: string) => string } => {
+    const m =
+      /function legalName\(s\) \{[\s\S]*?\n {2}\}\n {2}function rootField\(s\) \{[\s\S]*?\n {2}\}/.exec(
+        page,
+      );
+    expect(m, "the page carries BOTH manglings").not.toBeNull();
+    return new Function(`${m![0]}; return { legalName: legalName, rootField: rootField };`)() as {
+      legalName: (s: string) => string;
+      rootField: (s: string) => string;
+    };
   };
 
-  it("the page's own legalName agrees with gql.ts's queryFieldFor", async () => {
+  it("both agree with gql.ts, and they DIVERGE on a capital initial", async () => {
     await gateway.declareArtifact(["plant"]);
     const { page } = gateway.packArtifact("plant", FERN, { server: "My Loam" });
-    const shellName = shellLegalName(page);
-    for (const lens of ["Plant", "plant", "NotesByTag", "a-b c", "9lives", "_x", "Ledger"]) {
-      expect(shellName(lens), lens).toBe(queryFieldFor(lens));
+    const fns = shellFns(page);
+    for (const name of ["Plant", "plant", "Height", "NotesByTag", "a-b c", "9lives", "_x", "A"]) {
+      expect(fns.legalName(name), `legalName(${name})`).toBe(legalNameFor(name));
+      expect(fns.rootField(name), `rootField(${name})`).toBe(queryFieldFor(name));
     }
+    // The divergence is real and is the whole reason there are two: a rail that only checked names
+    // already lowercase would pass with one function doing both jobs.
+    expect(fns.legalName("Height")).toBe("Height");
+    expect(fns.rootField("Height")).toBe("height");
+    expect(fns.legalName("Height")).not.toBe(fns.rootField("Height"));
   });
 
-  it("and the composed root document RETURNS DATA from the live door", async () => {
-    await gateway.declareArtifact(["plant"]);
-    const { page } = gateway.packArtifact("plant", FERN, { server: "My Loam" });
-    const coords = coordinatesFromPage(page)!;
-    const shellName = shellLegalName(page);
-    const document = `query { ${shellName(coords.lens)}(entity: ${JSON.stringify(
-      coords.entity,
-    )}) { _entity _hex _view } }`;
-    const res = await fetch(`${base}/garden/graphql`, {
+  it("the page's composed MUTATION executes against the live door for a CAPITAL-initial prop", async () => {
+    // The rail the write side did not have. A store whose `writable` names `Height` — the store builds
+    // `Mutation.plant(entity: ID!, Height: PrimitiveValue)`, so a page that lowercased the argument
+    // would be refused `Unknown argument "height"` on every form, forever, while painting perfectly.
+    const capital = await Gateway.open(new MemoryBackend(), {
+      seed: OP_SEED,
+      renderTimeoutMs: 10_000,
+    });
+    await capital.append([
+      signClaims(grantClaims(STORE_ENTITY, GARDENER, "write", OP, 9002), OP_SEED),
+    ]);
+    // `Height` and NOT `height`: the lowercased spelling must have no argument to land on, or the bug
+    // would be masked by the very prop it mis-spells into.
+    const CAPS = {
+      ...PLANT_POLICY,
+      props: new Map(
+        [...PLANT_POLICY.props].map(([k, v]) => [k === "height" ? "Height" : k, v] as const),
+      ),
+    };
+    capital.register(CAPS_HYPER, CAPS, [FERN], undefined, ["Height", "tag", "watered", "readings"]);
+    await capital.publishRenderer({
+      route: "caps",
+      schema: "Plant",
+      consumes: ["Height"],
+      bundle: FLOOR,
+    });
+    await capital.declareArtifact(["caps"]);
+    handle.addMount("caps", capital);
+    const { page } = capital.packArtifact("caps", FERN, { server: "My Loam" });
+    const fns = shellFns(page);
+    // Compose exactly as the shell's submit handler does: the ROOT FIELD for the field, and
+    // `legalName` for each argument.
+    const doc =
+      `mutation { ${fns.rootField("Plant")}(entity: ${JSON.stringify(FERN)}, ` +
+      `${fns.legalName("Height")}: 42) { _entity _hex _view } }`;
+    const res = await fetch(`${base}/caps/graphql`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: "Bearer op-token" },
-      body: JSON.stringify({ query: document }),
+      body: JSON.stringify({ query: doc }),
     });
-    const body = (await res.json()) as { data?: Record<string, unknown>; errors?: string[] };
+    const body = (await res.json()) as { data?: unknown; errors?: string[] };
     expect(body.errors, JSON.stringify(body.errors)).toBeUndefined();
-    // The projection is the fixed selection set, and `_view` really is the whole resolved view — wider
-    // than `consumes`, which is exactly what makes the two hosts equal by construction.
-    const node = body.data![shellName(coords.lens)] as { _view: Record<string, unknown> };
-    expect(Object.keys(node._view)).toContain("height");
-    // `watered` resolves through an `absentAs` policy with no fact behind it — present in the view,
-    // absent from `consumes`. A document restricted to `consumes` would have handed the bundle a
-    // strictly narrower view on this host than `serveRouteImpl` hands it on the other.
-    expect(Object.keys(node._view)).toContain("watered");
-    expect(coords.consumes).toEqual(["height"]);
+    expect(JSON.stringify(body.data)).toContain("42");
+    // And the wrong spelling — the bug — is refused, so this rail is not passing by everything working.
+    const wrong = await fetch(`${base}/caps/graphql`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer op-token" },
+      body: JSON.stringify({
+        query: `mutation { ${fns.rootField("Plant")}(entity: ${JSON.stringify(FERN)}, ${fns.rootField("Height")}: 43) { _entity } }`,
+      }),
+    });
+    expect(JSON.stringify(await wrong.json())).toContain("Unknown argument");
+    await handle.removeMount("caps");
+    await capital.close();
+  });
+});
+
+describe("§30: a lens name is not a program name — §21.7 coexistence, packed", () => {
+  // Every other artifact fixture registers PLANT with no `lensName`, so the LENS name and the PROGRAM
+  // name coincide — which is exactly the fixture shape H6's own footnote says cannot see the hazard: the
+  // suite would pass identically if a future edit read `r.hyperschema.name` where a reading was meant.
+  // One hyperschema, two readings differing only by sort direction, packed for one of them.
+  it("the capability statement and the coordinates name the READING, not the hyperschema", async () => {
+    const two = await Gateway.open(new MemoryBackend(), { seed: OP_SEED, renderTimeoutMs: 10_000 });
+    await two.append([observed(FERN, "height", 1, 1000, OP_SEED)]);
+    // ONE reading whose LENS name is its own — the hyperschema is `Plant`, the reading is `PlantDesc`.
+    // That is all the fixture needs: the two names no longer coincide, so a path that read the program
+    // name where a reading was meant now answers the wrong string. (Two sibling readings collide on the
+    // materialization through `register()`, which is `coexistence.test.ts`'s territory, not this one's.)
+    const desc = { ...PLANT_POLICY, name: "PlantDesc" };
+    two.register(PLANT, desc, [FERN], undefined, PLANT_WRITABLE);
+    const readings = two.registered;
+    expect(readings.map((r) => lensOf(r))).toEqual(["PlantDesc"]);
+    expect(readings.map((r) => programOf(r))).toEqual(["Plant"]);
+    expect(lensOf(readings[0]!)).not.toBe(programOf(readings[0]!));
+    await two.publishRenderer({
+      route: "desc",
+      schema: "PlantDesc",
+      consumes: ["height"],
+      bundle: FLOOR,
+    });
+    await two.declareArtifact(["desc"]);
+    const { page, capability } = two.packArtifact("desc", FERN, { server: "My Loam" });
+    // The load-bearing assertions: both name the READING. Swapping `lensOf` for `hyperschema.name`
+    // anywhere on this path turns these red — which is the whole point of the fixture.
+    expect(capability.join(" ")).toContain("PlantDesc");
+    expect(capability.join(" ")).not.toContain('lens "Plant"');
+    expect(coordinatesFromPage(page)!.lens).toBe("PlantDesc");
+    // …and the shell's own document names the reading too, executed against this store's live schema —
+    // the program name would be `plant` and the reading's is `plantDesc`.
+    expect(queryFieldFor("PlantDesc")).toBe("plantDesc");
+    const served = await two.query(
+      `query { ${queryFieldFor("PlantDesc")}(entity: ${JSON.stringify(FERN)}) { _entity _hex } }`,
+    );
+    expect(served.errors).toBeUndefined();
+    const byProgram = await two.query(
+      `query { ${queryFieldFor("Plant")}(entity: ${JSON.stringify(FERN)}) { _entity } }`,
+    );
+    expect(byProgram.errors?.join(" ")).toMatch(/Cannot query field/);
+    void capabilityStatement;
+    await two.close();
   });
 });

@@ -33,7 +33,7 @@ import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { SEALED_CHANNELS, sealRealm } from "../../src/gateway/artifact-page.js";
-import { queryFieldFor } from "../../src/gateway/gql.js";
+import { legalNameFor, queryFieldFor } from "../../src/gateway/gql.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
 import { FERN, observed } from "../spike/garden.js";
 
@@ -57,6 +57,7 @@ const FLOOR = `export default function (node) {
     " page=" + (node.state.page === undefined ? "0" : node.state.page) + " state=" + st + "</div>" +
     "<div id=drawn>" + drawn + "</div>" +
     "<a id=drill data-loam-read=Plant data-loam-entity=" + ${JSON.stringify(MOSS)} + " data-loam-page=2 href=#>more</a>" +
+    "<a id=drillA data-loam-read=A data-loam-entity=" + ${JSON.stringify(MOSS)} + " href=#>short</a>" +
     "<form id=edit><input name=height value=99><button>save</button></form>" +
     "<form id=search data-loam-read=Plant data-loam-entity-field=q><input name=q value=" + ${JSON.stringify(MOSS)} + "></form>";
 }`;
@@ -130,7 +131,11 @@ const packOne = async (bundle?: string): Promise<string> => {
 // --- the harness -----------------------------------------------------------------------------------
 
 interface Recorded {
-  readonly kind: "watch" | "call";
+  // `invalidate` is recorded because THREE behaviours are invisible without it: the retry policy (the
+  // retry path calls only `invalidate`), the post-write refetch, and the cache clear on an erasure —
+  // which is the §11-relevant half of criterion 23. A harness that drops it makes every assertion about
+  // them a count of zero that no policy can move.
+  readonly kind: "watch" | "call" | "invalidate";
   readonly server: string;
   readonly tool: string;
   readonly input: { query?: string; mutation?: string };
@@ -163,6 +168,14 @@ const answerFor = (document: string, view: Record<string, unknown>, hex = "h0"):
   const entity = m?.[2] ?? FERN;
   return { data: { [field]: { _entity: entity, _hex: hex, _view: view } } };
 };
+
+// When set, the Worker shim posts its `live` signal and then says nothing — the one way a same-thread
+// harness can drive the shell's RENDER clock without wedging itself.
+let silentRealm = false;
+// When set, the shim DELAYS its answer, which is the only way to observe a render landing after the
+// world has moved. A real spawn plus a blob: module import is tens of milliseconds; a microtask-fast
+// shim makes the ordering the epoch guard exists for impossible to reach.
+let slowRealmMs = 0;
 
 // Listeners the last shell attached to `document`. A shell delegates from the document (one seam for
 // both verbs), so nothing else can find them again — the harness has to hold them itself.
@@ -224,21 +237,25 @@ const load = (page: string, connector: Connector): Harness => {
       this.live = false;
     }
     postMessage(msg: { bundle: string; node: unknown }): void {
+      // EVERY channel in the shipped list, not a subset. With five of them absent, a bundle naming one
+      // fell through `with (scope)` to the real happy-dom global — including the storage traps this file
+      // installs — so the probe's "saw nothing" was shaped to the harness rather than to the seal.
       const scope: Record<string, unknown> = {
-        indexedDB: { open: () => undefined },
-        caches: {},
-        BroadcastChannel: function BroadcastChannel() {},
-        fetch: () => undefined,
-        self: {},
-        window: { claude: { mcp: { callTool: () => undefined } } },
-        document: {},
         JSON,
         Object,
         String,
         Array,
       };
+      for (const name of SEALED_CHANNELS) {
+        scope[name] = name === "window" ? { claude: { mcp: { callTool: () => undefined } } } : {};
+      }
       sealRealm(scope, SEALED_CHANNELS);
-      queueMicrotask(() => {
+      if (silentRealm) return; // posts nothing: the shell's render clock is the only thing left
+      const later = (fn: () => void): void => {
+        if (slowRealmMs > 0) setTimeout(fn, slowRealmMs);
+        else queueMicrotask(fn);
+      };
+      later(() => {
         try {
           // The bundle's own body, evaluated with ONLY the sealed scope's bindings in view. A real
           // module import in a real worker realm; here, a function whose free names resolve to the
@@ -291,7 +308,14 @@ const load = (page: string, connector: Connector): Harness => {
       pending.push(p.catch(() => undefined));
       return p;
     },
-    invalidate: () => {
+    invalidate: (server?: string, tool?: string) => {
+      calls.push({
+        kind: "invalidate",
+        server: server ?? "",
+        tool: tool ?? "",
+        input: {},
+        options: undefined,
+      });
       const p = Promise.resolve();
       pending.push(p);
       return p;
@@ -693,24 +717,51 @@ describe("§30 criterion 15: degraded states branch on code, exhaustively, and n
   });
 
   it("needs_reauth, server_not_connected and selection_required produce ZERO retries", async () => {
+    // TWO ways this rail was vacuous before, both worth naming because both are the shape that keeps a
+    // green bar over a deleted policy. (a) It counted `kind === "call"`, and the retry path issues an
+    // `invalidate` — a channel the harness did not record, so the count was zero under EVERY policy,
+    // including one that retried all three codes forever. (b) The fixture set no `retryable`, so
+    // `degrade`'s guard was never even reached: "these codes are excluded" and "the fixture forgot the
+    // flag" were the same green.
+    //
+    // So the fixture now STAMPS `retryable: true` on each of the three — the hostile case, since the
+    // runtime never stamps it on them — and the assertion counts the channel a retry actually uses.
     for (const code of ["needs_reauth", "server_not_connected", "selection_required"]) {
       const h = load(PAGE, answering({ height: 1, tag: "t" }));
-      h.error({ code, message: "" });
+      h.error({ code, message: "", retryable: true, retryAfterMs: 1 });
       await h.settle();
-      // Repeating these cannot succeed: credential refresh is exhausted, or no connector exists.
+      // Repeating these cannot succeed: credential refresh is exhausted upstream, or no connector
+      // exists at all. The runtime's own doctrine says never retry them.
       expect(
-        h.calls.filter((c) => c.kind === "call"),
+        h.calls.filter((c) => c.kind === "invalidate"),
         code,
       ).toHaveLength(0);
+      expect(h.calls.filter((c) => c.kind === "call")).toHaveLength(0);
     }
   });
 
-  it("server_unavailable produces AT MOST one retry, honouring retryAfterMs", async () => {
+  it("server_unavailable retries EXACTLY once however many times it arrives", async () => {
+    // The companion, and the half that was asserting a status string while the policy could have been
+    // deleted. Five arrivals, one retry: `retried[code]` is what bounds it, and dropping that line now
+    // turns this red.
     const h = load(PAGE, answering({ height: 1, tag: "t" }));
-    h.error({ code: "server_unavailable", message: "", retryable: true, retryAfterMs: 1 });
-    h.error({ code: "server_unavailable", message: "", retryable: true, retryAfterMs: 1 });
+    for (let i = 0; i < 5; i += 1) {
+      h.error({ code: "server_unavailable", message: "", retryable: true, retryAfterMs: 1 });
+    }
     await h.settle();
+    await h.settle();
+    expect(h.calls.filter((c) => c.kind === "invalidate")).toHaveLength(1);
     expect(h.html("loam-status")).toContain("unreachable right now");
+  });
+
+  it("an error with NO retryable stamp is never retried, whatever its code", async () => {
+    // `retryable` is stamped only as `true`, only by the layer that produced the error, and absent
+    // means do-not-retry. Asserted so the guard cannot be widened to "retry anything transient".
+    const h = load(PAGE, answering({ height: 1, tag: "t" }));
+    h.error({ code: "server_unavailable", message: "" });
+    await h.settle();
+    await h.settle();
+    expect(h.calls.filter((c) => c.kind === "invalidate")).toHaveLength(0);
   });
 
   it("with window.claude ABSENT entirely the page still renders its static shell", () => {
@@ -823,14 +874,131 @@ describe("§30 criterion 23: no non-data event leaves a previous view painted", 
     await h.settle();
     h.click("drill");
     await h.settle();
-    h.deliver(answerFor(h.calls[0]!.input.query!, {})); // the value no longer resolves
+    const before = h.calls.filter((c) => c.kind === "invalidate").length;
+    h.deliver(answerFor(h.calls[0]!.input.query!, {}, "h-moved")); // the value no longer resolves
     await h.settle();
     expect(h.html("loam-app")).not.toContain(SENTINEL);
     expect(h.html("drawn")).toBe("");
+    // The §11-relevant half, and it was asserted nowhere: the shell clears the CONNECTOR's cache, so
+    // the runtime cannot replay a pre-erasure answer from the other side of the wall.
+    expect(h.calls.filter((c) => c.kind === "invalidate").length).toBe(before + 1);
+  });
+
+  it("the teardown fires on a MOVED root, not only on a vanished key", async () => {
+    // The correction the erasure lens earned. A top-level key vanishing is not what erasure usually
+    // looks like: a cleared prop under `absentAs(false)` reads `false`, an `all` policy resolves to a
+    // LIST that merely gets shorter, and a nested value can lose a member with its outer key intact. So
+    // the trigger is the root's `_hex` — the content address of the WHOLE resolved view — which moves
+    // for every one of those shapes.
+    const h = load(PAGE, answering({ height: 7, tag: "t" }));
+    h.deliver(answerFor(h.calls[0]!.input.query!, { height: SENTINEL, tag: "t" }, "hex-1"));
+    await h.settle();
+    h.click("drill");
+    await h.settle();
+    expect(h.html("drawn")).not.toBe("");
+    // A LIST that shortens: every key still present, every value non-null. The old key-presence probe
+    // returned false here and kept the drilled-down copy.
+    h.deliver(answerFor(h.calls[0]!.input.query!, { height: SENTINEL, tag: ["a"] }, "hex-2"));
+    await h.settle();
+    expect(h.html("drawn")).toBe("");
+  });
+
+  it("…and a poll that changes NOTHING keeps the drill-downs a viewer is looking at", async () => {
+    // The other side, or the trigger would be a teardown on every 30-second poll.
+    const h = load(PAGE, answering({ height: 7, tag: "t" }));
+    h.deliver(answerFor(h.calls[0]!.input.query!, { height: SENTINEL, tag: "t" }, "hex-1"));
+    await h.settle();
+    h.click("drill");
+    await h.settle();
+    const drawn = h.html("drawn");
+    expect(drawn).not.toBe("");
+    h.deliver(answerFor(h.calls[0]!.input.query!, { height: SENTINEL, tag: "t" }, "hex-1"));
+    await h.settle();
+    expect(h.html("drawn")).toBe(drawn);
+  });
+});
+
+describe("§30 criterion 23: the teardown is FINAL, not merely first", () => {
+  it("a render that lands after a clearing event paints NOTHING", async () => {
+    // The epoch guard. Without it: root answer A arrives, worker A spawns, an erasure or a refusal
+    // clears the mount, then worker A posts and writes the PRE-ERASURE markup back into the DOM from a
+    // node captured before the teardown — criterion 23 falsified by a race whose loser is the viewer.
+    // A microtask-fast shim can never reach that ordering, which is why this one is slowed.
+    slowRealmMs = 40;
+    try {
+      const h = load(PAGE, answering({ height: SENTINEL, tag: "t" }));
+      h.deliver(answerFor(h.calls[0]!.input.query!, { height: SENTINEL, tag: "t" }, "hex-1"));
+      // The render is in flight. Clear the world before it lands.
+      await new Promise((r) => setTimeout(r, 5));
+      h.error({ code: "server_unavailable", message: "" });
+      await new Promise((r) => setTimeout(r, 120));
+      expect(h.html("loam-app")).not.toContain(SENTINEL);
+      expect(h.html("loam-app")).toBe("");
+    } finally {
+      slowRealmMs = 0;
+    }
+  });
+
+  it("…and a render that lands normally still paints — the guard is not a blanket refusal", async () => {
+    slowRealmMs = 40;
+    try {
+      const h = load(PAGE, answering({ height: SENTINEL, tag: "t" }));
+      h.deliver(answerFor(h.calls[0]!.input.query!, { height: SENTINEL, tag: "t" }, "hex-1"));
+      await new Promise((r) => setTimeout(r, 120));
+      expect(h.html("loam-app")).toContain(SENTINEL);
+    } finally {
+      slowRealmMs = 0;
+    }
+  });
+});
+
+describe("§30 criterion 31: not_served is ANCHORED, not a substring", () => {
+  // A lens whose derived field name is ONE CHARACTER is the pathological case and the only shape in
+  // which the anchoring is observable: lens "A" is served at field "a", and a message naming an unknown
+  // SUBfield of AView contains that letter inside the word "Cannot", so a bare substring probe reports
+  // not_served for a lens the store DOES serve. The floor's four codes are what a bundle branches on
+  // across BOTH hosts, so a miscoded refusal is a cross-host divergence behind one content address —
+  // which is why what the BUNDLE receives is what these assert, not the status text.
+  const subfieldError = { errors: [{ message: 'Cannot query field "_nope" on type "AView".' }] };
+  const rootFieldError = { errors: [{ message: 'Cannot query field "a" on type "Query".' }] };
+
+  it("a SUBfield error on a one-character lens maps to refused", async () => {
+    const h = load(PAGE, {
+      answer: (doc) =>
+        /^query \{ a\(/.test(doc)
+          ? subfieldError
+          : (answerFor(doc, { height: 1 }) as { data?: unknown }),
+    });
+    h.deliver(answerFor(h.calls[0]!.input.query!, { height: 1 }));
+    await h.settle();
+    h.click("drillA");
+    await h.settle();
+    expect(h.html("drawn")).toContain("A@moss!refused");
+    expect(h.html("drawn")).not.toContain("!not_served");
+  });
+
+  it("…while an unknown ROOT field on the same lens IS not_served", async () => {
+    // The other side: the anchored probe must still recognise the real thing, or this would be a rail
+    // satisfied by never reporting not_served at all.
+    const h = load(PAGE, {
+      answer: (doc) =>
+        /^query \{ a\(/.test(doc)
+          ? rootFieldError
+          : (answerFor(doc, { height: 1 }) as { data?: unknown }),
+    });
+    h.deliver(answerFor(h.calls[0]!.input.query!, { height: 1 }));
+    await h.settle();
+    h.click("drillA");
+    await h.settle();
+    expect(h.html("drawn")).toContain("A@moss!not_served");
   });
 });
 
 describe("§30 criterion 34: the compartment retains nothing", () => {
+  // HONEST ABOUT WHICH LAYER THIS PROVES. The shim builds a fresh `new Function` per message, so module
+  // scope resets whether or not the shell spawns a new Worker — hoist `worker = new Worker(...)` out of
+  // `paint` and this still passes. What pins the shell's behaviour is the sibling below (a distinct realm
+  // instance per render); this one pins the OBSERVABLE the criterion names, and the pair covers it.
   it("a bundle that memoizes in MODULE SCOPE cannot paint a previous render's value", async () => {
     const memo = await packOne(MEMOIZING);
     const h = load(memo, answering({ height: SENTINEL, tag: "t" }));
@@ -865,9 +1033,19 @@ describe("§30 criterion 34: the compartment retains nothing", () => {
     h.error({ code: "server_unavailable", message: "" });
     await h.settle();
     expect(h.storageWrites).toEqual([]);
-    // …and the emitted bytes reference none of them.
-    for (const api of ["localStorage.", "sessionStorage.", "indexedDB.", "document.cookie"]) {
-      expect(PAGE.split("SEALED")[0]!).not.toContain(api);
+    // …and the emitted bytes CALL none of them. The names DO appear once each — inside the realm's own
+    // sealed-channel list, which exists to take them away — so the assertion is about a call site, not a
+    // mention. (The previous form sliced the page at a marker string that never appears in it, so the
+    // slice was the whole page and the comment implied an exclusion that was not happening. Harmless,
+    // because it made the assertion stronger; corrected because a comment that misdescribes its own
+    // assertion is how the next reader is misled.)
+    for (const api of [
+      "localStorage.setItem",
+      "sessionStorage.setItem",
+      "indexedDB.open",
+      "document.cookie",
+    ]) {
+      expect(PAGE).not.toContain(api);
     }
   });
 });
@@ -879,15 +1057,17 @@ describe("§30 criterion 19: TOTAL MCP traffic equals the shell's own calls", ()
     // The offending bundle is substituted into an already-packed page rather than packed — the
     // pack-time reference scan refuses it (test/gateway/artifact-pack.test.ts, criterion 37a), and
     // this is the enforcing half: the same motion a viewer editing their own file would make.
+    // The probe reports on EVERY channel the shipped list seals, generated from that list rather than
+    // hand-picked — a hand-picked six happened to be exactly the six the shim fabricated, so "saw
+    // nothing" was a statement about the harness. `typeof` is how a bundle must ask, and the pack-time
+    // scan suppresses a `typeof` operand precisely so it can.
+    const probes = SEALED_CHANNELS.map(
+      (n) => `if (typeof ${n} !== "undefined") seen.push(${JSON.stringify(n)});`,
+    ).join("\n  ");
     const reaching = `export default function (node) {
   try { window.claude.mcp.callTool("My Loam", "loam_mutate", { mutation: "mutation { plant(entity: \\"x\\", height: 1) { _entity } }" }); } catch (sealed) { /* the realm has no window */ }
   var seen = [];
-  if (typeof window !== "undefined") seen.push("window");
-  if (typeof self !== "undefined") seen.push("self");
-  if (typeof indexedDB !== "undefined") seen.push("indexedDB");
-  if (typeof caches !== "undefined") seen.push("caches");
-  if (typeof BroadcastChannel !== "undefined") seen.push("BroadcastChannel");
-  if (typeof fetch !== "undefined") seen.push("fetch");
+  ${probes}
   return "<div id=body>saw=[" + seen.join(",") + "]</div>";
 }`;
     const tampered = PAGE.replace(
@@ -899,7 +1079,11 @@ describe("§30 criterion 19: TOTAL MCP traffic equals the shell's own calls", ()
     await h.settle();
     // The bundle TRIED. A fixture that never reaches for a door proves the boundary is decorative.
     expect(h.html("loam-app")).toContain("saw=[]");
-    // Exactly the shell's own: one watch, and nothing else.
+    // Exactly the shell's own: one watch, and nothing else. NOTE the honest limit of the count alone —
+    // the shim hands the bundle its own stub `callTool` which does not record here, so with the seal
+    // reverted this count would be unchanged and only the `saw=[]` line above would catch it. The
+    // enforcing evidence for the seal is `test/gateway/artifact-realm.test.ts`, which runs the realm
+    // program; this rail's own job is the SHELL's traffic at the one seam that holds a real handle.
     expect(h.calls).toHaveLength(1);
     expect(h.calls[0]!.kind).toBe("watch");
   });
@@ -940,6 +1124,23 @@ describe("§30 criterion 21 (the fold half): a failing bundle refuses cleanly, n
     await h.settle();
     expect(h.html("loam-app")).toContain("did not return HTML");
   });
+
+  it("a SILENT realm hits the render clock and paints the timeout fold", async () => {
+    // The fold that no rail reached, and the stated reason did not cover it: a same-thread shim cannot
+    // model a WEDGED bundle, but a SILENT one drives the very same clock. `renderTimeoutMs` is 2s in
+    // these fixtures, so this also proves the number is READ rather than merely emitted — an assertion
+    // that the string "renderTimeoutMs" appears in the page is satisfied by the JSON key alone, and
+    // would stay green if `C.renderTimeoutMs` resolved to undefined.
+    silentRealm = true;
+    try {
+      const h = load(PAGE, answering({ height: 1, tag: "t" }));
+      h.deliver(answerFor(h.calls[0]!.input.query!, { height: 1, tag: "t" }));
+      await new Promise((r) => setTimeout(r, 2400));
+      expect(h.html("loam-app")).toContain("the renderer timed out");
+    } finally {
+      silentRealm = false;
+    }
+  }, 20_000);
 
   it("WHAT IS NOT PROVEN HERE: termination of a wedged bundle, and the memory residual", async () => {
     // Two honest holes, named rather than papered over.
@@ -1016,6 +1217,42 @@ describe("§30 criterion 25: the write surface is pinned to the ACKNOWLEDGED wri
     await h.settle();
     expect(h.calls.filter((c) => c.tool === "loam_mutate")).toHaveLength(0);
     expect(h.html("loam-status")).toContain("not published to write");
+  });
+});
+
+describe("§30 criterion 25: a REFUSED write is not silent", () => {
+  it("a store refusal on the RESOLVED branch reaches the status line", async () => {
+    // This is how a store refusal actually arrives: `handleMcp` answers a GraphQL error as a 200 whose
+    // text block is { errors: [...] }, so a declined mutate RESOLVES exactly like an accepted one. Both
+    // read paths already inspected `p.errors` for that reason; the write path did not, so a refused
+    // write and a successful write were byte-identical to a viewer — no status line either way — on the
+    // one surface a viewer ACTS on.
+    const h = load(PAGE, {
+      answer: (doc) =>
+        /^mutation/.test(doc)
+          ? { errors: ['field "height" is not writable'] }
+          : (answerFor(doc, { height: SENTINEL, tag: "t" }) as { data?: unknown }),
+    });
+    h.deliver(answerFor(h.calls[0]!.input.query!, { height: SENTINEL, tag: "t" }));
+    await h.settle();
+    h.submit("edit");
+    await h.settle();
+    expect(h.calls.filter((c) => c.tool === "loam_mutate")).toHaveLength(1);
+    expect(h.html("loam-status")).toContain("not writable");
+    // …and a refused write does NOT clear the connector's cache, because nothing changed.
+    expect(h.calls.filter((c) => c.kind === "invalidate")).toHaveLength(0);
+  });
+
+  it("an ACCEPTED write says so, and refetches", async () => {
+    // The two outcomes must be distinguishable; asserting only the refusal would be satisfied by a
+    // page that reported failure for everything.
+    const h = load(PAGE, answering({ height: SENTINEL, tag: "t" }));
+    h.deliver(answerFor(h.calls[0]!.input.query!, { height: SENTINEL, tag: "t" }));
+    await h.settle();
+    h.submit("edit");
+    await h.settle();
+    expect(h.html("loam-status")).toContain("saved");
+    expect(h.calls.filter((c) => c.kind === "invalidate")).toHaveLength(1);
   });
 });
 
@@ -1178,5 +1415,78 @@ describe("§30 criterion 13b: an undeclared bytes leaf degrades legibly", () => 
     );
     await inline.settle();
     expect(inline.html("loam-app")).toContain("data:image/png;base64,AAAA");
+  });
+});
+
+describe("§30: the SHELL's own composed MUTATION executes against a real schema", () => {
+  // The rail the write side did not have, and the one that would have caught the argument-mangling bug.
+  // The read side already had its twin (`artifact-reads.test.ts`), which is exactly why the bug was
+  // confined to writes: the page paints correctly and every form is silently dead.
+  //
+  // The harness's `answerFor` is an ECHO — it pulls the field name out of the document the page just
+  // composed and reflects it — so it agrees with ANY spelling. Nothing but a real GraphQL schema can
+  // disagree. So: take the document the shell actually built and hand it to a live gateway.
+  const writingStore = async (capitalProp: boolean): Promise<{ gw: Gateway; page: string }> => {
+    const props = new Map(
+      [...PLANT_POLICY.props].map(
+        ([k, v]) => [capitalProp && k === "height" ? "Height" : k, v] as const,
+      ),
+    );
+    const writable = capitalProp ? ["Height", "tag", "watered", "readings"] : [...PLANT_WRITABLE];
+    const gw = await Gateway.boot(
+      new MemoryBackend(),
+      assembleGenesis({
+        operatorSeed: OP_SEED,
+        registrations: [
+          { hyperschema: PLANT, schema: { ...PLANT_POLICY, props }, roots: [FERN], writable },
+        ],
+      }),
+      { renderTimeoutMs: 2_000 },
+    );
+    const field = capitalProp ? "Height" : "height";
+    const bundle = `export default function (node) {
+  return "<form id=edit><input name=${field} value=99></form>";
+}`;
+    await gw.publishRenderer({ route: "plant", schema: "Plant", consumes: [field], bundle });
+    await gw.declareArtifact(["plant"]);
+    return { gw, page: gw.packArtifact("plant", FERN, { server: "My Loam" }).page };
+  };
+
+  const composedMutation = async (page: string): Promise<string> => {
+    const h = load(page, answering({ height: 1 }));
+    h.deliver(answerFor(h.calls[0]!.input.query!, { height: 1 }));
+    await h.settle();
+    h.submit("edit");
+    await h.settle();
+    const write = h.calls.find((c) => c.tool === "loam_mutate");
+    expect(write, "the shell issued a loam_mutate").toBeDefined();
+    return write!.input.mutation!;
+  };
+
+  it("a lowercase-initial writable prop: the shell's document is ACCEPTED by the store", async () => {
+    const { gw, page } = await writingStore(false);
+    const doc = await composedMutation(page);
+    const result = await gw.query(doc);
+    expect(result.errors, JSON.stringify(result.errors)).toBeUndefined();
+    expect(JSON.stringify(result.data)).toContain("99");
+    await gw.close();
+  });
+
+  it("a CAPITAL-initial writable prop: still accepted — the two manglings are kept apart", async () => {
+    // The store builds `Mutation.plant(entity: ID!, Height: PrimitiveValue)`: the ROOT FIELD is
+    // lowercased and the ARGUMENT is not. A page carrying one function for both sites emits
+    // `height: "99"` and is refused `Unknown argument "height"` on every form, forever, while the read
+    // path — which names no prop — keeps painting perfectly.
+    const { gw, page } = await writingStore(true);
+    const doc = await composedMutation(page);
+    expect(doc).toContain(`${queryFieldFor("Plant")}(`);
+    expect(doc).toContain(`${legalNameFor("Height")}:`);
+    const result = await gw.query(doc);
+    expect(result.errors, JSON.stringify(result.errors)).toBeUndefined();
+    expect(JSON.stringify(result.data)).toContain("99");
+    // …and the WRONG spelling is refused by that same store, so this is not passing by both working.
+    const wrong = await gw.query(doc.replace("Height:", "height:"));
+    expect(wrong.errors?.join(" ")).toMatch(/Unknown argument/);
+    await gw.close();
   });
 });

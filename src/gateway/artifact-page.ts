@@ -29,29 +29,33 @@ export const MAX_CONNECTOR_NAME = 128;
 // A GraphQL-legal name from a store-native one — the SAME mangling `legal()` runs in gql.ts, which is
 // where the store-side truth lives. It is duplicated here because the shell is a standalone page that
 // cannot import from the gateway, and `test/gateway/artifact-reads.test.ts` pins the two to agree.
-// The QUERY-ROOT field name for a lens, as `queryFieldFor` derives it in gql.ts: GraphQL-legal, then
-// initial-lowercased. Both steps are load-bearing and neither is guessable from the lens name —
-// `Plant` is the VIEW TYPE's name and `plant` is the field's, so a page composing `Plant(entity:)`
-// names a field no store ever built. It is duplicated here because the shell is a standalone page that
-// cannot import from the gateway, and `test/gateway/artifact-reads.test.ts` pins the two to agree
-// against the REAL GraphQL schema rather than against a stub that would echo either.
+// THE STORE HAS TWO MANGLINGS AND THEY DIFFER BY ONE CHARACTER, so the page carries two. Mirrors
+// `legalNameFor` and `queryFieldFor` in gql.ts exactly, and the split is the whole point:
+//
+//   `legalName(s)`  — GraphQL-legal only. The VIEW TYPE, every PROP FIELD, and every per-prop MUTATION
+//                     ARGUMENT (`gql.ts` builds those with `legal(prop)`). `Height` stays `Height`.
+//   `rootField(s)`  — the same, then initial-lowercased. The QUERY-ROOT and MUTATION-ROOT field of a
+//                     lens. Lens `Plant` is served at field `plant`.
+//
+// A page carrying only one of them spells one of the two sites wrong for exactly the names whose
+// initial is an uppercase ASCII letter — and only the WRITE site, since a read names no prop. The
+// failure looks like nothing: the page paints correctly and every form is quietly dead.
+//
+// Duplicated here because the shell is a standalone page that cannot import from the gateway;
+// `test/gateway/artifact-reads.test.ts` pins BOTH against the REAL GraphQL schema, and executes the
+// page's own composed query AND its own composed mutation against the live door — a stub that echoes
+// the document back agrees with either spelling, which is how this survived a green suite once.
 const LEGAL_JS = `function legalName(s) {
     var cleaned = String(s).replace(/[^_A-Za-z0-9]/g, "_");
-    var legal = /^[A-Za-z_]/.test(cleaned) ? cleaned : "_" + cleaned;
-    return legal.replace(/^[A-Z]/, function (c) { return c.toLowerCase(); });
+    return /^[A-Za-z_]/.test(cleaned) ? cleaned : "_" + cleaned;
+  }
+  function rootField(s) {
+    return legalName(s).replace(/^[A-Z]/, function (c) { return c.toLowerCase(); });
   }`;
 
 // The confined realm's whole program. It runs in a Worker global scope — no `window`, no `document`, and
 // therefore no `window.claude`: absent by CONSTRUCTION rather than filtered, which is the difference
 // between a boundary and a scrub.
-//
-// It then SCRUBS the channels that would outlive the realm. A worker global scope has no `localStorage`,
-// which is what makes the realm look sufficient at a glance — but `indexedDB`, `caches`, and
-// `BroadcastChannel` are bare identifiers there, so `terminate()` alone does NOT empty the compartment: a
-// bundle calling `indexedDB.open("keep")` would hold a copy across every render and every teardown, in a
-// store §11 cannot reach and the shell cannot enumerate. Unlike the page realm — where filtering a locked,
-// kernel-installed object the shell itself needs would be theatre — nothing here is kernel-installed and
-// the shell needs none of it, so the scrub is a real second layer beneath the pack-time refusal.
 //
 // Its protocol is `render-worker.ts`'s, message for message: `{ bundle, node }` in, `{ kind: "ok", html }`
 // / `{ kind: "notHtml" }` / `{ kind: "fault" }` back, so a fault folds to a clean refusal leaking nothing
@@ -77,6 +81,12 @@ export const SEALED_CHANNELS: readonly string[] = [
   "self",
   "window",
   "document",
+  // `navigator` was in the pack-time refusal set and NOT here, which left the widest hole of all: a
+  // dedicated worker's `navigator.storage.getDirectory()` is OPFS — persistent bytes that survive
+  // `terminate()`, in a store §11 cannot reach and the shell cannot enumerate. Exactly the class this
+  // seal exists to close, reachable through an identifier the scan was already refusing, which is the
+  // tell that the two halves had drifted apart.
+  "navigator",
 ];
 
 // Seal a realm: make every named channel `undefined` and non-writable, and report which ones were
@@ -95,16 +105,46 @@ export function sealRealm(scope: object, channels: readonly string[]): string[] 
   for (let i = 0; i < channels.length; i += 1) {
     const name = channels[i]!;
     if (!(name in scope)) continue;
-    try {
-      Object.defineProperty(scope, name, {
-        value: undefined,
-        writable: false,
-        configurable: true,
-      });
-      sealed.push(name);
-    } catch {
-      // A non-configurable global stays; the pack-time reference refusal is the other half.
+    let took = false;
+    // WALK THE PROTOTYPE CHAIN. In a real worker these are WebIDL attributes on
+    // `WorkerGlobalScope.prototype`, not own properties — so an own `undefined` SHADOWS the accessor
+    // for a bare identifier and leaves `getOwnPropertyDescriptor(getPrototypeOf(globalThis), "…").get`
+    // callable, which is a filter rather than a removal. Redefining wherever the property actually
+    // lives is what makes it a removal. A flat scope with own data properties is the one shape in
+    // which shadowing and removal look identical, so a rail must fabricate the chain to see this.
+    for (
+      let holder: object | null = scope;
+      holder !== null;
+      holder = Object.getPrototypeOf(holder) as object | null
+    ) {
+      if (!Object.prototype.hasOwnProperty.call(holder, name)) continue;
+      try {
+        Object.defineProperty(holder, name, {
+          value: undefined,
+          writable: false,
+          configurable: true,
+        });
+        took = true;
+      } catch {
+        // A non-configurable global stays; the pack-time reference refusal is the other half.
+      }
     }
+    // …and an own shadow on the scope itself, so a name inherited from a holder we could not take
+    // still resolves to undefined for a bare identifier.
+    if (!Object.prototype.hasOwnProperty.call(scope, name)) {
+      try {
+        Object.defineProperty(scope, name, {
+          value: undefined,
+          writable: false,
+          configurable: true,
+        });
+        took = true;
+      } catch {
+        /* nothing more to try */
+      }
+    }
+    // Report only what is ACTUALLY gone. Claiming a seal we could not take is H7 at this layer.
+    if (took && (scope as Record<string, unknown>)[name] === undefined) sealed.push(name);
   }
   return sealed;
 }
@@ -134,11 +174,19 @@ self.addEventListener("message", function (ev) {
     return;
   }
   mod.then(function (m) {
-    var fn = m && m.default;
-    if (typeof fn !== "function") { held.post({ kind: "notHtml" }); return; }
-    var html = fn(data.node);
-    if (typeof html !== "string") { held.post({ kind: "notHtml" }); return; }
-    held.post({ kind: "ok", html });
+    // The bundle's own THROW has to be caught HERE. A throw inside a then-success callback does not
+    // reach that same then's rejection handler — it rejects the derived promise, which nobody is
+    // holding — so without this the realm posts NOTHING and a faulting bundle is indistinguishable
+    // from a silent one: the shell recovers only when its render clock expires, seconds later.
+    try {
+      var fn = m && m.default;
+      if (typeof fn !== "function") { held.post({ kind: "notHtml" }); return; }
+      var html = fn(data.node);
+      if (typeof html !== "string") { held.post({ kind: "notHtml" }); return; }
+      held.post({ kind: "ok", html });
+    } catch (threwInside) {
+      held.post({ kind: "fault" });
+    }
   }, function (threw) { held.post({ kind: "fault" }); });
 });
 held.post({ kind: "live" });`;
@@ -216,6 +264,16 @@ function shellSource(): string {
   // RETAIN: a bundle handed a fresh realm per render cannot hold a copy across renders, because there is
   // nothing for it to hold the copy in. TWO CLOCKS: a spawn bound armed at construction, re-armed as a
   // fresh render bound when the realm signals it is live.
+  // Every render carries an EPOCH, and a render whose epoch has passed paints nothing. Without this a
+  // real spawn plus a blob: module import is tens of milliseconds during which the world can move: root
+  // answer A arrives, worker A spawns, an erasure lands and clears the mount, then worker A posts and
+  // writes the PRE-ERASURE markup back into the DOM from a node captured before the teardown. The
+  // teardown has to be final, not merely first. darken and the loss path both bump the epoch, so a
+  // stale render is discarded rather than raced.
+  function stale(epoch) {
+    return epoch !== live;
+  }
+
   function paint(node) {
     var worker;
     try {
@@ -225,6 +283,7 @@ function shellSource(): string {
       return;
     }
     live += 1;
+    var epoch = live;
     var settled = false;
     var timer = setTimeout(function () { done({ kind: "timeout" }); }, C.renderTimeoutMs);
     function done(msg) {
@@ -232,6 +291,9 @@ function shellSource(): string {
       settled = true;
       clearTimeout(timer);
       try { worker.terminate(); } catch (gone) { /* already down */ }
+      // A render the world has moved past writes NOTHING. Its worker is still terminated above, so a
+      // superseded bundle cannot keep running either.
+      if (stale(epoch)) return;
       if (msg.kind === "ok") { mount.innerHTML = msg.html; return; }
       mount.textContent = msg.kind === "timeout"
         ? "the renderer timed out"
@@ -243,6 +305,7 @@ function shellSource(): string {
       var msg = ev.data || {};
       if (msg.kind === "live") {
         if (settled) return;
+        if (stale(epoch)) { done({ kind: "superseded" }); return; }
         clearTimeout(timer);
         timer = setTimeout(function () { done({ kind: "timeout" }); }, C.renderTimeoutMs);
         return;
@@ -272,6 +335,9 @@ function shellSource(): string {
     root = null;
     reads = {};
     state = {};
+    // Bump the epoch so any render already in flight paints nothing when it lands. Clearing the mount
+    // without this leaves a race whose loser is the viewer: the old markup comes back a moment later.
+    live += 1;
     mount.textContent = "";
     line.textContent = text;
   }
@@ -331,6 +397,16 @@ function shellSource(): string {
     }
   }
 
+  // Codes a repeat can NEVER fix, whatever the error is stamped with. The runtime's own doctrine: a
+  // needs_reauth means credential refresh was already exhausted upstream, a server_not_connected means
+  // no connector is configured at all, and a selection_required persists until the viewer chooses. A
+  // retryable stamp on one of these is a lie, or an older shell's mistake, and honouring it turns a
+  // dead end into a loop. So the exclusion is by CODE and the stamp is only ever a second condition.
+  function neverRetry(code) {
+    return code === "needs_reauth" || code === "server_not_connected" || code === "selection_required"
+      || code === "not_granted" || code === "capability_disabled" || code === "capability_removed";
+  }
+
   var retried = {};
   function degrade(err) {
     var code = (err && err.code) || "upstream_error";
@@ -340,7 +416,7 @@ function shellSource(): string {
       onboarding.removeAttribute("hidden");
     }
     // Retry only what a repeat can fix, and at most once per visible refresh.
-    if (err && err.retryable === true && retried[code] !== true) {
+    if (err && err.retryable === true && !neverRetry(code) && retried[code] !== true) {
       retried[code] = true;
       var wait = typeof err.retryAfterMs === "number" ? err.retryAfterMs : 1000;
       setTimeout(function () { void window.claude.mcp.invalidate(C.server, "loam_query"); }, wait);
@@ -352,7 +428,7 @@ function shellSource(): string {
   // resolved view, which is exactly what the server host already hands the bundle. Asking for consumes
   // instead would hand the same bundle a strictly NARROWER view on one host.
   function document_for(lens, entity) {
-    return "query { " + legalName(lens) + "(entity: " + JSON.stringify(entity) + ") { _entity _hex _view } }";
+    return "query { " + rootField(lens) + "(entity: " + JSON.stringify(entity) + ") { _entity _hex _view } }";
   }
 
   function payloadOf(result) {
@@ -366,19 +442,45 @@ function shellSource(): string {
   // else the store answered and declined is refused.
   function readErrorOf(errors, lens) {
     var text = errors.map(function (e) { return typeof e === "string" ? e : (e && e.message) || ""; }).join("; ");
-    var unknownField = /Cannot query field/.test(text) && text.indexOf(legalName(lens)) >= 0;
+    // ANCHORED on the quoted field, never a bare substring. A derived name can be one character long —
+    // lens A is served at field a, and a message naming an unknown SUBfield of AView contains
+    // that letter inside the word "Cannot", so a substring probe reports not_served for a lens the store
+    // DOES serve. The floor's four codes are what a bundle branches on across both hosts, so a miscoded
+    // refusal is a cross-host divergence behind one content address.
+    var named = text.indexOf('field "' + rootField(lens) + '"') >= 0;
+    var unknownField = /Cannot query field/.test(text) && named;
     return { code: unknownField ? "not_served" : "refused", message: text };
   }
 
-  // Did this reading LOSE something? A root view that no longer carries a value it carried a moment ago
-  // is an erasure or a retraction landing, and it is the only notification Loam gets on the client: there
-  // is no erasure event to subscribe to. When it happens the accumulated reads must be dropped WHOLE and
-  // not merely repainted over — a drilled-down copy of a value the store has forgotten is content living
-  // on the viewer's side of the wall, where §11 has no reach.
+  // DID THE ROOT READING MOVE AT ALL? That, not "did a top-level key vanish", is the teardown trigger,
+  // and the correction matters because a top-level key vanishing is NOT what erasure usually looks like:
+  // a cleared prop under an absentAs(false) policy reads false rather than absent (§14), an all or
+  // conflicts policy resolves to a LIST that merely gets shorter, and a nested value (a bytes envelope,
+  // an object-typed resolver output) can lose a member with its outer key intact. A key-presence probe
+  // sees none of those, and on a schema whose consumed props are all absentAs it is dead code.
   //
-  // A poll that changes nothing, or that adds a field, is not a loss and keeps the drill-downs a viewer
-  // is looking at. Only shrinkage tears down.
-  function lostSomething(before, after) {
+  // _hex is the content address of the WHOLE resolved view, so it moves for every one of those shapes.
+  // Using it means the shell cannot tell an erasure from an ordinary write — and it does not need to: a
+  // drilled-down reading fetched before the root moved is no longer known-good, so discarding it is
+  // right either way. A poll that changes nothing leaves _hex equal and keeps the drill-downs a viewer
+  // is looking at, which is the only thing that made the narrower probe attractive.
+  //
+  // WHAT THIS STILL DOES NOT REACH, named here because a comment is the only place a reader will find
+  // it: an erasure at a DRILLED-DOWN entity while the root is untouched. A drill-down is a one-shot —
+  // nothing ever re-reads that entity — so the root's _hex does not move and the entry survives. The
+  // two ways to close it both change what §30 promises rather than repair it (re-issue every accumulated
+  // read per poll, which the criteria that COUNT traffic would have to be re-decided; or expire the map
+  // on a clock, a rule §30 does not state), so it is stated rather than chosen. lostView below is kept
+  // as the belt for a store that serves no _hex.
+  function rootMoved(beforeHex, afterHex, beforeView, afterView) {
+    if (beforeHex === null) return false;
+    if (typeof afterHex === "string" && typeof beforeHex === "string" && afterHex !== "") {
+      return afterHex !== beforeHex;
+    }
+    return lostView(beforeView, afterView);
+  }
+
+  function lostView(before, after) {
     if (before === null) return false;
     for (var k in before) {
       if (!Object.prototype.hasOwnProperty.call(before, k)) continue;
@@ -392,15 +494,19 @@ function shellSource(): string {
     var p = payloadOf(result);
     if (p === null) { degrade({ code: "tool_error", message: "the store returned no readable payload" }); return; }
     if (p.errors && p.errors.length > 0) { degrade({ code: "tool_error", message: readErrorOf(p.errors, C.lens).message }); return; }
-    var node = p.data && p.data[legalName(C.lens)];
+    var node = p.data && p.data[rootField(C.lens)];
     if (!node) { degrade({ code: "tool_error", message: "the store served no view for the lens \\u201c" + C.lens + "\\u201d" }); return; }
     line.textContent = "";
     onboarding.setAttribute("hidden", "");
     retried = {};
     var view = node._view || {};
-    if (lostSomething(root === null ? null : root.view, view)) {
+    if (
+      rootMoved(root === null ? null : root.hex, node._hex, root === null ? null : root.view, view)
+    ) {
       reads = {};
       state = {};
+      // Bump the epoch too: a render in flight was composed from the map we just dropped.
+      live += 1;
       void window.claude.mcp.invalidate(C.server, "loam_query");
     }
     root = { entity: node._entity, view: view, hex: node._hex };
@@ -420,7 +526,7 @@ function shellSource(): string {
         if (p === null) { reads[key] = { error: { code: "refused", message: "the store returned no readable payload" } }; }
         else if (p.errors && p.errors.length > 0) { reads[key] = { error: readErrorOf(p.errors, lens) }; }
         else {
-          var node = p.data && p.data[legalName(lens)];
+          var node = p.data && p.data[rootField(lens)];
           reads[key] = node
             ? { entity: node._entity, view: node._view || {}, hex: node._hex }
             : { error: { code: "not_served", message: "this store does not serve the lens \\u201c" + lens + "\\u201d" } };
@@ -486,13 +592,29 @@ function shellSource(): string {
         line.textContent = "this page was not published to write \\u201c" + name + "\\u201d.";
         return;
       }
+      // legalName, NOT rootField: gql.ts builds a per-prop mutation argument with legal(prop)
+      // and no lowercasing, so a writable prop named Height is the argument Height. This is the one
+      // site where the two manglings diverge.
       args.push(legalName(name) + ": " + JSON.stringify(fields[name]));
     }
     if (args.length === 0) { line.textContent = "the form wrote no fields."; return; }
-    var doc = "mutation { " + legalName(C.lens) + "(entity: " + JSON.stringify(C.entity) + ", "
+    var doc = "mutation { " + rootField(C.lens) + "(entity: " + JSON.stringify(C.entity) + ", "
       + args.join(", ") + ") { _entity _hex _view } }";
+    // A store REFUSAL arrives on the RESOLVED branch, not the rejected one: handleMcp answers a
+    // GraphQL error as a 200 whose text block is { errors: [...] }, so a mutate the store declined
+    // resolves exactly like one it accepted. Both read paths already inspect p.errors for this reason;
+    // the write path did not, so a refused write and a successful write were byte-identical to a viewer
+    // — no status line either way — on the one surface a viewer ACTS on. That is H7 at the page layer.
     window.claude.mcp.callTool(C.server, "loam_mutate", { mutation: doc }).then(
-      function () { void window.claude.mcp.invalidate(C.server, "loam_query"); },
+      function (result) {
+        var p = payloadOf(result);
+        if (p !== null && p.errors && p.errors.length > 0) {
+          line.textContent = fixFor("tool_error", readErrorOf(p.errors, C.lens).message, C.server);
+          return;
+        }
+        line.textContent = "saved.";
+        void window.claude.mcp.invalidate(C.server, "loam_query");
+      },
       function (err) { line.textContent = fixFor((err && err.code) || "upstream_error", (err && err.message) || "", C.server); }
     );
   }
