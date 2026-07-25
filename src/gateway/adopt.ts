@@ -74,6 +74,10 @@ export function promotionRefusal(claims: Claims): string | undefined {
     // `rhizomatic.hyperschema.*` / `rhizomatic.schema.*` roles. Reading contexts alone let the most
     // load-bearing law in the store — the gather program every read resolves through — cross by
     // promote-outputs, past every §24.4 guard (T33 criterion 23: there is ONE door).
+    // Railed at the ADOPT call site (test/gateway/adopt-law.test.ts, T33 criterion 23), not at the
+    // translate door: `test/federation/translate-reserved-guard.test.ts` covers the reserved-CONTEXT
+    // path only, so a change here that broke translate's role path would be caught by the adopt rail
+    // alone. Widen that suite if this branch grows a translate-specific case.
     if (p.role.startsWith("loam.") || p.role.startsWith("rhizomatic.")) {
       return `it speaks the reserved role ${p.role} — law crosses by adoptLaw (§24.4), not adoption`;
     }

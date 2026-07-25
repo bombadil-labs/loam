@@ -21,6 +21,27 @@
 // the blessing itself. The incumbent's bytes stay on the ground, and striking the blessing revives
 // it as the winner — the negation stops counting the moment its carrier is struck (§21's living
 // semantics through the negation algebra), which is exactly the reversibility §27's spec demands.
+//
+// THAT MAKES `negates` RIDE A SUBSTANTIVE DELTA — the first in this codebase — and it has two
+// consequences a reader must not discover the hard way. Both were weighed against the alternative
+// (a separate negation delta) and the alternative LOSES: with the strike on its own delta, undoing
+// one blessing takes two §14 acts in the right order, and an operator who performs only the first
+// leaves their OWN law retired while believing they restored it. One gesture, one strike, is worth
+// more than these two, which are bounded, named, and railed:
+//
+//  1. NARROWING LEAK. `withNegationClosure` pulls "the negations of what I admit" into every
+//     narrowed set — safe while a negation was content-free, which it no longer is. A membership
+//     Term or an `offeredLens` that admits the INCUMBENT binding now also ships the BLESSED one, a
+//     full registration the Term deliberately excluded. Law travels where its strike travels. The
+//     escape, if this ever outranks the reversibility: filter law by role at the offer, or move the
+//     negation to its own delta and pay the two-act undo.
+//  2. THE §17 DOOR READS IT AS WITHDRAWAL. `survivingCandidates` files a struck registration into
+//     the WITHDRAWN list, which is the sole source of §17's 410 — so `{supersede: true}` turns the
+//     operator's own previously-live registration hash from 200 into "410 Gone — withdrawn by the
+//     operator" with no §14 act by the operator at all. It IS retired (the door is not lying), but
+//     the WORD is wrong, and the transition is railed in adopt-law.test.ts so it stays a known
+//     consequence rather than a surprise. Bounded: the 410 distinction is full-door only, and
+//     `declarePublic` pins by deltaId, so the anonymous door fails closed either way.
 
 import {
   DeltaSet,
@@ -36,6 +57,7 @@ import {
   type Schema,
 } from "@bombadil/rhizomatic";
 import { ADOPTION_ENTITY, CTX_ADOPTION, isAdoption } from "./adopt.js";
+import { bytesRefOf } from "./bytes.js";
 import { CTX_CONTAINER } from "./container.js";
 import type { ModuleVersion } from "./container-identity.js";
 import type { Gateway } from "./gateway.js";
@@ -43,6 +65,7 @@ import { publishRegistrationImpl } from "./lifecycle.js";
 import {
   CTX_REGISTRATION,
   lawfulNegated,
+  lawfulSnapshot,
   lensOf,
   parseClaimTemplates,
   parseResolvers,
@@ -206,12 +229,26 @@ export function readManifest(members: readonly Delta[]): ManifestRow[] {
 
 // --- survival inside a version's members --------------------------------------------------------
 
-// The negation algebra over a version's MEMBERS ALONE — no author filter, because a module version
-// IS one trust domain: the frozen set is the shipper's own, and `Gateway.freeze` carries the
-// forward negation closure of what it admits (H1), so a strike that reached the members is the
-// shipper's word about their own law. Same recursive rule as `lawfulNegated`: a negation retires
-// its target only while it survives itself, so negating a negation revives.
+// The negation algebra over a version's MEMBERS, scoped by AUTHORSHIP — the rule every sibling
+// constitutional reader keeps (`lawfulNegated`, migrate's survivor walk), stated here for a
+// member set rather than a store:
+//
+//   **A strike binds a member only when the member's OWN AUTHOR signed it.**
+//
+// A shipper takes back their own word; nobody takes it back for them. The membership is NOT one
+// trust domain and must not be read as one: `Gateway.freeze` is `freezeMembers(withNegationClosure(
+// …))`, and that closure walks `negationsOf` with no author filter precisely so foreign strikes
+// travel with what they strike — so "in the members" means "somebody, anybody, struck this", and
+// multi-author freeze terms are a supported shape. Unscoped, the algebra had two failures at once:
+// a hostile co-tenant's strike on a shipper's law would REFUSE a lawful adoption, and a foreign
+// negation-of-the-negation would REVIVE law the shipper genuinely withdrew (the second defeats the
+// survival refusal outright — H1's shape at the blessing door).
+//
+// Recursion is unchanged: a strike retires its target only while it survives itself, so the
+// shipper negating their own retraction revives their law. The scope applies at every rung — a
+// foreign strike on a strike counts for nothing.
 function survivalOver(members: readonly Delta[]): (id: string) => boolean {
+  const byId = new Map(members.map((d) => [d.id, d]));
   const strikes = new Map<string, string[]>();
   for (const d of members) {
     for (const p of d.claims.pointers) {
@@ -226,8 +263,12 @@ function survivalOver(members: readonly Delta[]): (id: string) => boolean {
   const negated = (id: string): boolean => {
     const seen = memo.get(id);
     if (seen !== undefined) return seen;
+    const target = byId.get(id);
+    if (target === undefined) return false; // not a member: nothing in this set speaks about it
     memo.set(id, false); // in-progress: surviving (content addressing keeps the chain acyclic)
-    const verdict = (strikes.get(id) ?? []).some((n) => !negated(n));
+    const verdict = (strikes.get(id) ?? []).some(
+      (n) => byId.get(n)?.claims.author === target.claims.author && !negated(n),
+    );
     memo.set(id, verdict);
     return verdict;
   };
@@ -295,6 +336,8 @@ interface SchemaExport {
   readonly sourceDelta: string;
   readonly producedBy: string;
   readonly address: string;
+  /** Every source delta this export stands on — what a survival verdict ranges over. */
+  readonly lineage: readonly string[];
 }
 
 interface RendererExport {
@@ -310,6 +353,7 @@ interface RendererExport {
   readonly sourceDelta: string;
   readonly producedBy: string;
   readonly address: string;
+  readonly lineage: readonly string[];
 }
 
 interface FactExport {
@@ -331,6 +375,13 @@ const jsonList = (claims: Claims, role: string): string[] | undefined => {
   return undefined;
 };
 
+// Do any of these members carry the raw bytes at this content address? `bytesRefOf` is the same hash
+// rhizomatic's bytes-target identity uses, so a manifest citation and a claim's payload agree.
+const carriesBytes = (members: readonly Delta[], ref: string): boolean =>
+  members.some((d) =>
+    d.claims.pointers.some((p) => p.target.kind === "bytes" && bytesRefOf(p.target.value) === ref),
+  );
+
 const isRendererBinding = (claims: Claims): boolean =>
   claims.pointers.some(
     (p) =>
@@ -345,11 +396,22 @@ const isRegistrationBinding = (claims: Claims): boolean =>
   );
 
 // Everything a row's classification needs, computed once per version.
+//
+// TWO READINGS, one classifier. A BLESSING reads for SURVIVAL: law its author took back is refused,
+// and `dset` holds only what survives. `lawFrom` reads for EXPOSURE, which is a different question
+// and must not collapse into the first: the root may still be SERVING a row the upstream later
+// withdrew, and that is the one moment the query must answer "yes — and the author withdrew it".
+// So the exposure reading classifies over PRESENCE (the members with their counted strikes removed)
+// and reports the withdrawal as a flag. Sharing one `classify` is deliberate: two classifiers would
+// drift, and the drift would land exactly on the rows that matter.
 interface Source {
   readonly version: ModuleVersion;
   readonly members: readonly Delta[];
+  /** The verdict `classify` gates on — real survival for a blessing, always-true for exposure. */
   readonly survives: (id: string) => boolean;
-  /** The surviving members as a DeltaSet — what `loadHyperSchema` / `loadSchema` gather over. */
+  /** The real algebra, whichever reading this is: exposure still needs the withdrawal verdict. */
+  readonly livesAtSource: (id: string) => boolean;
+  /** What `loadHyperSchema` / `loadSchema` gather over — survivors, or presence for exposure. */
   readonly dset: DeltaSet;
   /** The declared container the members came from, joinable to the T32 table. */
   readonly container?: string;
@@ -368,6 +430,13 @@ function classify(src: Source, row: ManifestRow): Export {
   if (row.by === "address") {
     const target = src.members.find((d) => d.id === row.target);
     if (target === undefined) {
+      // §27.8 names a BYTE-BLOB by its content address, and that is not a delta id — so before an
+      // address is called dangling, ask whether any member actually carries those bytes. A blob is a
+      // FACT: it binds nothing, it needs no blessing, and it must not be mistaken for the crafted
+      // dangling row the no-silent-skips rule exists to catch.
+      if (carriesBytes(src.members, row.target)) {
+        return { kind: "fact", what: `the byte-blob ${row.target.slice(0, 12)}…` };
+      }
       throw new Error(
         `adoption refused: manifest row "${row.alias}" names ${row.target}, which resolves to ` +
           `nothing in this module version — a stranger's manifest gets no silent skips`,
@@ -449,6 +518,7 @@ function rendererExport(row: ManifestRow, target: Delta): RendererExport {
     sourceDelta: target.id,
     producedBy: claims.author,
     address: rendererLawAddress(core),
+    lineage: [target.id],
   };
 }
 
@@ -543,6 +613,9 @@ function schemaExport(src: Source, row: ManifestRow, definitions: readonly Delta
     sourceDelta: binding.id,
     producedBy: binding.claims.author,
     address: schemaLawAddress(hyperschema, schema),
+    lineage: [definition.id, livingDelta?.id, snapshotDelta?.id, binding.id].filter(
+      (id): id is string => id !== undefined,
+    ),
   };
 }
 
@@ -573,14 +646,64 @@ function containerOf(gw: Gateway, version: ModuleVersion): string | undefined {
   return hits[0];
 }
 
-function sourceOf(gw: Gateway, version: ModuleVersion): Source {
-  const survives = survivalOver(version.members);
+// Which strikes among these members COUNT (author-scoped, as above), and which are negations of a
+// member at all. Both are needed to build the operand set the loaders read.
+function strikeIndex(members: readonly Delta[]): {
+  counted: Set<string>;
+  aboutAMember: Set<string>;
+} {
+  const byId = new Map(members.map((d) => [d.id, d]));
+  const counted = new Set<string>();
+  const aboutAMember = new Set<string>();
+  for (const d of members) {
+    for (const p of d.claims.pointers) {
+      if (p.role !== "negates" || p.target.kind !== "delta") continue;
+      const target = byId.get(p.target.deltaRef.delta);
+      if (target === undefined) continue;
+      aboutAMember.add(d.id);
+      if (target.claims.author === d.claims.author) counted.add(d.id);
+    }
+  }
+  return { counted, aboutAMember };
+}
+
+// THE OPERAND SET IS WHERE THE SCOPE LIVES OR DIES. `loadHyperSchema` / `loadSchema` gather through
+// rhizomatic's own bootstrap, whose body begins `mask policy: "drop"` — an AUTHOR-BLIND suppression
+// over whatever set it is handed. So filtering only the negated MEMBERS is not enough: hand the
+// loaders a foreign strike and rhizomatic drops the definition this module's algebra says survives,
+// and the scope is undone one layer down (H1's shape — a reader seeing something the deltas, read
+// under the right rule, do not say). The set therefore carries only the strikes that COUNT.
+function operandSet(
+  members: readonly Delta[],
+  lives: (id: string) => boolean,
+  reading: "blessing" | "exposure",
+): DeltaSet {
+  const { counted, aboutAMember } = strikeIndex(members);
+  return DeltaSet.from(
+    members.filter((d) => {
+      // EXPOSURE reads PRESENCE: what the module shipped, before anybody's second thoughts. Every
+      // strike about a member steps aside, so a row its author withdrew still classifies — `lawFrom`
+      // reports it flagged, and dropping it would answer "not exposed" about law still serving here.
+      if (reading === "exposure") return !aboutAMember.has(d.id);
+      if (!lives(d.id)) return false; // struck under the scoped algebra: gone, at both levels
+      return !aboutAMember.has(d.id) || counted.has(d.id);
+    }),
+  );
+}
+
+function sourceOf(
+  gw: Gateway,
+  version: ModuleVersion,
+  reading: "blessing" | "exposure" = "blessing",
+): Source {
+  const livesAtSource = survivalOver(version.members);
   const container = containerOf(gw, version);
   return {
     version,
     members: version.members,
-    survives,
-    dset: DeltaSet.from(version.members.filter((d) => survives(d.id))),
+    survives: reading === "blessing" ? livesAtSource : () => true,
+    livesAtSource,
+    dset: operandSet(version.members, livesAtSource, reading),
     ...(container === undefined ? {} : { container }),
     from: container ?? "quarantine",
   };
@@ -667,12 +790,16 @@ function lawAdoptionRecordClaims(spec: RecordSpec, operator: string, timestamp: 
  * provenance. Fact adoptions (promote-outputs) carry no `record-kind` and are not returned here,
  * so `adoptions()` and `lawAdoptions()` each answer their own question over one shared context.
  */
-export function readLawAdoptions(reactor: Reactor, operator: string): LawAdoption[] {
+export function readLawAdoptions(
+  reactor: Reactor,
+  operator: string,
+  opts?: { includeStruck?: boolean },
+): LawAdoption[] {
   const negated = lawfulNegated(reactor, operator);
   const out: LawAdoption[] = [];
   for (const d of reactor.snapshot()) {
     if (d.claims.author !== operator || !isAdoption(d.claims)) continue;
-    if (negated(d.id)) continue;
+    if (opts?.includeStruck !== true && negated(d.id)) continue;
     const kind = primitiveOf(d.claims, ROLE_RECORD_KIND);
     if (kind !== "adopted-from" && kind !== "witnessed") continue; // a FACT adoption, not law
     const adoptedPtr = d.claims.pointers.find((p) => p.role === "adopted");
@@ -811,6 +938,67 @@ function boundElsewhere(gw: Gateway, ex: SchemaExport | RendererExport): Winner 
   return undefined;
 }
 
+// The hyperschema ENTITY guard (§21: identity is the ENTITY, not the name).
+//
+// A schema row names its export by an entity the SHIPPER chose, and `schemaEntityFor` lets an
+// explicit entity override the default — so a manifest may point at `hyperschema:Plant`, the
+// operator's own. Nothing else stops it: the publish door's trial refuses a rival body per PROGRAM
+// name (a fresh program name walks past it) and the living-name guard defends the LENS (a free lens
+// name walks past that). What lands is an OPERATOR-SIGNED definition at the operator's own entity,
+// and `loadHyperSchema` takes the latest by CLAIMED timestamp — so a shipper's chosen timestamp
+// decides whose gather body the operator's own lens resolves through. That is a confused deputy on
+// the most load-bearing law in the store, and it needs its own guard.
+//
+// The rule: a blessing may not land a definition at an entity the root's own lawful ground ALREADY
+// DEFINES WITH DIFFERENT CONTENT. Same-content is the idempotent case (re-blessing, or law the
+// operator already published themselves) and passes untouched.
+//
+// No `as`-style escape, deliberately. `as` exists because two readings of the SAME program
+// legitimately coexist under different lens names; there is no corresponding legitimate act here —
+// "replace the gather program my own lens resolves through, using a stranger's bytes, at my own
+// entity" is the attack, not a use case. An operator who genuinely wants to change their program
+// republishes it themselves, at their own entity, with their own body: a deliberate act through the
+// ordinary door, not a side effect of blessing something else. Rewriting the blessing's entity
+// instead (namespacing it) was the other candidate and is worse: the entity is what a republish
+// EVOLVES (§21), so a rewritten entity would silently sever the module's own next bump from the law
+// this store blessed, and break `lawFrom`'s address arithmetic with it.
+function entityCaptureRefusal(gw: Gateway, ex: SchemaExport): string | undefined {
+  const held = boundHyperschemaAt(gw, ex.schemaEntity);
+  if (held === undefined || hyperschemaAddress(held) === hyperschemaAddress(ex.hyperschema)) {
+    return undefined;
+  }
+  return (
+    `the export names the hyperschema entity ${ex.schemaEntity}, which this store's own lawful ` +
+    `ground already defines as "${held.name}" with a DIFFERENT gather body — blessing it would ` +
+    `land operator-signed bytes at the operator's own definition entity, and §21's latest-wins ` +
+    `would let the module's timestamp decide which body every lens filed there resolves through. ` +
+    `A module may not name one of your entities. Have the shipper publish at their own ` +
+    `(\`hyperschema:<Name>\` of a name you do not use), or republish your own program yourself.`
+  );
+}
+
+// The latest lawful surviving definition at an entity, or undefined when this store defines none.
+// Reads the OPERATOR's slice — a federated stranger's definition binds nothing and must not be
+// mistaken for an incumbent (that would refuse honest blessings on a store that merely holds the
+// module's bytes).
+function boundHyperschemaAt(gw: Gateway, entity: string): HyperSchema | undefined {
+  try {
+    return loadHyperSchema(lawfulSnapshot(gw.reactor, gw.operatorAuthor), entity);
+  } catch {
+    return undefined;
+  }
+}
+
+// Structural identity of a GATHER PROGRAM alone — the definition's own content, without any
+// resolution schema. This is what the entity guard compares, because the definition is what a
+// shared entity would capture.
+const hyperschemaAddress = (hs: HyperSchema): string =>
+  contentAddress(
+    new TextEncoder().encode(
+      ["loam.law.hyperschema", hs.name, String(hs.alg ?? 1), termCanonicalHex(hs.body)].join(NUL),
+    ),
+  );
+
 const livingNameOf = (ex: SchemaExport | RendererExport, opts: AdoptLawOptions): string =>
   ex.kind === "schema" ? (opts.as ?? ex.lensName) : ex.route;
 
@@ -872,6 +1060,14 @@ async function adoptOne(
         `Blessing still confers no write standing: the pen must be granted and provisioned ` +
         `separately (§6's two keys).`,
     );
+  }
+
+  // The shipper does not get to name one of OUR definition entities. Checked before the witness
+  // short-circuit is irrelevant either way (a captured entity can never be already-bound law), but
+  // checked before the publish it is the whole guard.
+  if (ex.kind === "schema") {
+    const capture = entityCaptureRefusal(gw, ex);
+    if (capture !== undefined) throw new Error(`adoption refused: ${capture}`);
   }
 
   // Already bound, by CONTENT ADDRESS under any name: a silent witness, never a second publish.
@@ -1001,8 +1197,25 @@ async function publish(
         }`,
       );
     }
+    // The POST-CONDITION, not a formality (H7: an operation must never report a success it did not
+    // achieve). `outcome.bound` proves only that SOMETHING binds at (entity, lens); it never looks
+    // at the body. A definition entity shared with other law resolves latest-wins by CLAIMED
+    // timestamp, so a blessing can persist, report bound, and leave the lens resolving through
+    // somebody else's gather program. So the address the store actually binds is compared against
+    // the address that was classified, and a mismatch REFUSES — loudly, after the deltas are down
+    // (append-only ground cannot take them back), rather than minting `adopted-from` over law this
+    // store did not bind.
     const winner = schemaWinner(gw, lens);
-    return winner === undefined ? [] : [winner.deltaId];
+    if (winner?.address !== ex.address) {
+      throw new Error(
+        `adoption refused after the append: "${lens}" persisted, but this store now binds ` +
+          `DIFFERENT law there (${winner === undefined ? "nothing binds" : winner.deltaId}) — the ` +
+          `blessed definition did not win its entity ${ex.schemaEntity}, so the blessing would be ` +
+          `a provenance record over law that is not serving. The deltas persist (the ground is ` +
+          `append-only); no adoption was recorded. Resolve the entity conflict and bless again.`,
+      );
+    }
+    return [winner.deltaId];
   }
   await publishRendererImpl(
     gw,
@@ -1017,12 +1230,33 @@ async function publish(
     undefined,
     { timestamp: ex.timestamp, negates },
   );
+  // The same post-condition on the route: latest-per-route is a race too, so what the door will
+  // actually serve is compared against what was classified before any provenance is minted.
   const winner = routeWinner(gw, ex.route);
-  return winner === undefined ? [] : [winner.deltaId];
+  if (winner?.address !== ex.address) {
+    throw new Error(
+      `adoption refused after the append: the renderer at route "${ex.route}" persisted, but this ` +
+        `store now serves DIFFERENT law there (${
+          winner === undefined ? "nothing binds" : winner.deltaId
+        }) — no adoption was recorded over law that is not serving.`,
+    );
+  }
+  return [winner.deltaId];
 }
 
 // One record per (module version, alias, law address) — minted ONCE, so an hourly `blessAll` never
 // appends narrative forever and re-running is the natural recovery for a partial one.
+//
+// The record INHERITS THE MANIFEST ROW'S TIMESTAMP, for the same reason the law it records inherits
+// the source's (H4): a delta id hashes {author, pointers, timestamp}, so a wall-clock stamp mints a
+// FRESH id on every run. That is not merely noisy — it strands the operator's own §14 retraction.
+// Strike the record, re-run the adoption, and a fresh-id record reappears in the trail while the
+// strike sits pointing at an id nobody mints again. With the row's timestamp the gesture re-mints
+// the SAME id, so the re-append is a no-op the standing strike still covers: the withdrawal holds,
+// and "minted ONCE" is true in the presence of a strike as well as in its absence.
+//
+// `at` therefore reads as WHEN THE MODULE SAID IT, not when the operator ran the command — stated
+// plainly because the fact-side `Adoption.at` is a wall clock, and the two must not be confused.
 async function record(
   gw: Gateway,
   src: Source,
@@ -1031,7 +1265,15 @@ async function record(
   kind: "adopted-from" | "witnessed",
   adoptedDelta: string,
 ): Promise<string[]> {
-  const held = readLawAdoptions(gw.reactor, gw.operatorAuthor!).some(
+  // The dedup reads the trail INCLUDING STRUCK records, and that is the point: striking a provenance
+  // record is the operator's §14 word that they do not want it, so a re-run must not re-assert it —
+  // not even under the other record KIND, which is where a live-trail dedup let it back in (the
+  // second run of a blessed row takes the `witnessed` path, whose content differs from the
+  // `adopted-from` record that was struck, so it is a different delta and no id-level identity can
+  // catch it). Promote-outputs deliberately reads the LIVE trail, because striking a FACT's record
+  // re-opens re-promotion of the value; law is the other way round — the law is already bound, and
+  // the only thing a re-run could add is narrative the operator has already refused.
+  const held = readLawAdoptions(gw.reactor, gw.operatorAuthor!, { includeStruck: true }).some(
     (r) =>
       r.moduleVersion === src.version.id && r.alias === row.alias && r.lawAddress === ex.address,
   );
@@ -1051,7 +1293,7 @@ async function record(
         producedBy: ex.producedBy,
       },
       gw.operatorAuthor!,
-      gw.nextTimestamp(),
+      row.timestamp,
     ),
     gw.options.seed!,
   );
@@ -1110,6 +1352,7 @@ export async function blessAllImpl(
   const witnessed: string[] = [];
   const plan: Planned[] = [];
   const pens: string[] = [];
+  const captures: string[] = [];
   const collisions: string[] = [];
   let lawRows = 0;
   // The trail is read ONCE for the whole pre-flight: it walks the ground, and re-reading it per row
@@ -1131,6 +1374,13 @@ export async function blessAllImpl(
     if (ex.kind === "renderer" && ex.pen !== undefined && opts.pen !== true) {
       pens.push(`"${row.alias}" (route ${ex.route}, pen ${ex.pen})`);
       continue;
+    }
+    if (ex.kind === "schema") {
+      const capture = entityCaptureRefusal(gw, ex);
+      if (capture !== undefined) {
+        captures.push(`"${row.alias}": ${capture}`);
+        continue;
+      }
     }
     // The three-way diff (unchanged / added / RE-POINTED) against the records that already exist.
     // A re-point is the supply-chain move — the alias carries the reputation and the swap inherits
@@ -1169,6 +1419,12 @@ export async function blessAllImpl(
       `blessAll refused: ${pens.join(", ")} hold a PEN — a write-capable renderer never rides the ` +
         `bulk gesture. Re-run with { pen: true } once you mean it, or bless the rest singly. ` +
         `Nothing was blessed.`,
+    );
+  }
+  if (captures.length > 0) {
+    throw new Error(
+      `blessAll refused: ${captures.join("; ")} NOTHING was blessed — an entity capture is not a ` +
+        `per-row decision the operator can confirm away.`,
     );
   }
   if (collisions.length > 0) {
@@ -1238,6 +1494,12 @@ export interface LawFromRow {
   readonly kind: "schema" | "renderer";
   /** The manifest versions that list it — set membership, deliberately not provenance. */
   readonly versions: readonly string[];
+  /**
+   * The upstream author RETRACTED this row inside their own container after you blessed it. The law
+   * is still BOUND here — that is why the row is reported at all — and this flag is the reason to
+   * look: an incident query must never answer "not exposed" about law whose author withdrew it.
+   */
+  readonly withdrawnAtSource?: boolean;
 }
 
 /**
@@ -1253,11 +1515,20 @@ export interface LawFromRow {
  * origination: a common schema listed by two modules reports under both, which is the correct
  * answer to "am I exposed through M?" — ask the ledger's witnessed/adopted-from records for who
  * originated it.
+ *
+ * It reads for EXPOSURE, not survival, and the difference is the whole point at the one moment that
+ * matters. When the upstream author RETRACTS a row inside their container, the blessing this store
+ * performed is untouched — the law is still bound here, still serving. Classifying for survival made
+ * the row unclassifiable and the query answered "not exposed": the safe-sounding word, at exactly
+ * the moment the honest one is "yes, and the author withdrew it" — an H9 whose FALSE licenses
+ * inaction. So a withdrawn row is REPORTED, flagged (`withdrawnAtSource`), never dropped. Only a
+ * row that is genuinely unprovable (dangling, or bytes that classify as no law kind) exposes
+ * nothing, because there is nothing it could be bound as.
  */
 export function lawFromImpl(gw: Gateway, versions: readonly ModuleVersion[]): LawFromRow[] {
   const out = new Map<string, { row: LawFromRow; versions: Set<string> }>();
   for (const version of versions) {
-    const src = sourceOf(gw, version);
+    const src = sourceOf(gw, version, "exposure");
     for (const row of readManifest(src.members)) {
       let ex: Export;
       try {
@@ -1267,15 +1538,23 @@ export function lawFromImpl(gw: Gateway, versions: readonly ModuleVersion[]): La
       }
       if (ex.kind === "fact") continue;
       if (boundElsewhere(gw, ex) === undefined) continue; // listed, not bound: no exposure
+      const withdrawn = ex.lineage.some((id) => !src.livesAtSource(id));
       const key = [ex.kind, ex.address, row.alias].join(NUL);
       const held = out.get(key);
       if (held === undefined) {
         out.set(key, {
-          row: { alias: row.alias, address: ex.address, kind: ex.kind, versions: [] },
+          row: {
+            alias: row.alias,
+            address: ex.address,
+            kind: ex.kind,
+            versions: [],
+            ...(withdrawn ? { withdrawnAtSource: true } : {}),
+          },
           versions: new Set([version.id]),
         });
       } else {
         held.versions.add(version.id);
+        if (withdrawn) held.row = { ...held.row, withdrawnAtSource: true };
       }
     }
   }
