@@ -57,6 +57,13 @@ commands:
 
 run \`loam <command> --help\` for a command's options.`;
 
+// Every store this CLI opens, opened the same way: the sqlite driver's one-time freelist scrub is
+// best-effort — a second handle can refuse it and the store opens regardless — so its deferral
+// rides the operator's log. A scrub nobody hears about is a §11 promise quietly left unkept.
+function openStore(path: string, io: IO): SqliteBackend {
+  return new SqliteBackend(path, { onScrubDeferred: (why) => io.err(why) });
+}
+
 function cmdInit(args: readonly string[], io: IO): number {
   const parsed = parseArgs(args, new Set());
   rejectUnknown(parsed, new Set(["home", "seed"]), "init");
@@ -111,7 +118,7 @@ async function cmdServe(
   // replanted from the archive's memory before the gateway ever looks. Lag is safe (union) but
   // never silent: it reaches the operator's log.
   const vault = archivePath(home, parsed.flags.get("archive"));
-  let backend: StoreBackend = new SqliteBackend(path);
+  let backend: StoreBackend = openStore(path, io);
   if (vault !== undefined) {
     const archive = new ArchiveBackend(vault);
     const mirror = new MirrorBackend(backend, archive, {
@@ -226,7 +233,7 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
   const init = initHome(home);
   if (init.created) io.out(`loam: initialized ${home}\n  operator ${init.operator}`);
   const gateway = await Gateway.boot(
-    new SqliteBackend(storePath(home, parsed.flags.get("store"))),
+    openStore(storePath(home, parsed.flags.get("store")), io),
     assembleGenesis({ operatorSeed: readSeed(home) }),
   );
   try {
@@ -303,7 +310,7 @@ async function cmdPull(args: readonly string[], io: IO): Promise<number> {
   const init = initHome(home);
   if (init.created) io.out(`loam: initialized ${home}\n  operator ${init.operator}`);
   const gateway = await Gateway.boot(
-    new SqliteBackend(storePath(home, parsed.flags.get("store"))),
+    openStore(storePath(home, parsed.flags.get("store")), io),
     assembleGenesis({ operatorSeed: readSeed(home) }),
   );
   let report: FederationReport;
@@ -394,7 +401,7 @@ async function cmdStore(args: readonly string[], io: IO): Promise<number> {
   rejectUnknown(parsed, new Set(["home", "store"]), "store");
   const home = parsed.flags.get("home") ?? defaultHome();
   const path = storePath(home, parsed.flags.get("store"));
-  const backend = new SqliteBackend(path);
+  const backend = openStore(path, io);
   const deltas = await backend.deltasSince(new Set());
   await backend.close();
   io.out(`loam store ${path}\n  ${deltas.length} deltas`);
@@ -432,7 +439,7 @@ async function cmdRepair(args: readonly string[], io: IO): Promise<number> {
   }
   const operator = authorForSeed(seed);
   const path = storePath(home, parsed.flags.get("store"));
-  const backend = new SqliteBackend(path);
+  const backend = openStore(path, io);
   try {
     switch (sub) {
       case "list": {
