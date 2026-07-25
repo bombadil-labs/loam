@@ -184,11 +184,24 @@ export function watchImpl(gw: Gateway, term: unknown): AsyncGenerator<Delta[], v
       `watch: the membership term must evaluate to a delta set (dset), not a ${initial.sort}`,
     );
   }
+  // This door serves no delta the store has been ORDERED to forget (SPEC §11). The tombstone is
+  // ground BEFORE its target is purged — erase sequences it that way on purpose — so between the two
+  // the erased delta is still in the snapshot, and the pulse that fires in that window is the
+  // tombstone's own. Filtering here makes the removal-order bite the instant it lands: the watcher
+  // sees the member LEAVE, then the erase's re-seat ends the stream. The same dead-set read the
+  // federation door runs, and the same order of cost — a pulse already re-evaluates the whole Term
+  // over the whole snapshot.
+  const live = (members: readonly Delta[]): Delta[] => {
+    const dead = readTombstones(gw.reactor, gw.operatorAuthor);
+    return dead.size === 0 ? [...members] : members.filter((d) => !dead.has(d.id));
+  };
   let closed = false;
-  let lastIds = new Set([...initial.set].map((d) => d.id));
-  const channel = new Channel<Delta[]>(
+  const initialMembers = live([...initial.set]);
+  let lastIds = new Set(initialMembers.map((d) => d.id));
+  const channel: Channel<Delta[]> = new Channel<Delta[]>(
     () => {
       closed = true;
+      gw.channels.delete(channel);
     },
     (_pending, incoming) => incoming, // a slow reader gets the newest membership, nothing stale
   );
@@ -198,13 +211,17 @@ export function watchImpl(gw: Gateway, term: unknown): AsyncGenerator<Delta[], v
     if (closed) return;
     const next = evalTerm(parsed, gw.reactor.snapshot());
     if (next.sort !== "dset") return; // the term's sort is content-independent; unreachable
-    const members = [...next.set];
+    const members = live([...next.set]);
     const ids = new Set(members.map((d) => d.id));
     if (ids.size === lastIds.size && [...ids].every((id) => lastIds.has(id))) return;
     lastIds = ids;
     channel.push(members);
   });
-  channel.push([...initial.set]);
+  // Registered where teardown can reach it: this subscription is bound to TODAY's reactor, and an
+  // erase replaces that reactor — unregistered, the watcher would neither be woken nor ever fire
+  // again, freezing on its pre-erase membership with no `done` to notice by.
+  gw.channels.add(channel);
+  channel.push(initialMembers);
   return channel;
 }
 

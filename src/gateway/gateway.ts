@@ -29,7 +29,7 @@ import type { StoreBackend } from "../store/backend.js";
 import { isRepairable } from "../store/quarantine.js";
 import { promoteImpl, readAdoptions, type Adoption } from "./adopt.js";
 import { eraseImpl, eraseReplicaImpl, healthImpl, type StoreHealth } from "./erase.js";
-import { Channel } from "./channel.js";
+import type { LiveStream } from "./channel.js";
 import { STORE_ENTITY, operatorMarkerClaims, type Genesis } from "./genesis.js";
 import {
   admitForImpl,
@@ -248,8 +248,13 @@ export class Gateway {
   // never the authenticated surface. Cleared wherever lazyMats is.
   /** @internal - T19 seam (lifecycle.ts) */
   readonly publicLazyMats = new Set<string>();
-  /** @internal — T19 seam (reads.ts) */
-  readonly channels = new Set<Channel<PatchNode>>();
+  // EVERY open stream, of every kind — a patch stream (reads.ts) and a membership watch (ingest.ts)
+  // alike. `reseat()` and `close()` end what is in this set and nothing else, so a stream missing
+  // from it survives an erasure: still serving its pre-purge reading, still bound to the replaced
+  // reactor. Typed by the one thing teardown does with a member (`return()`), so no payload shape
+  // ever justifies a second set for the next teardown to overlook.
+  /** @internal — T19 seam (reads.ts, ingest.ts) */
+  readonly channels = new Set<LiveStream>();
   // Ids append() has already persisted this tick: the raw-stream subscriber skips them, so a
   // direct append is written exactly once (the raw stream still catches every OTHER emitter —
   // a future DerivationHost's emissions ride it into the ground).
