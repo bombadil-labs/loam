@@ -103,3 +103,4 @@ entry is a NEW FILE and two concurrent landings never touch the same one (the sa
 | 2026-07-24 | [The container lifting — quarantine becomes one preset (T32)](journal/2026-07-24-the-container-lifting.md) |
 | 2026-07-25 | [The blessing is an ordinary publish that remembers its probation (T33)](journal/2026-07-25-t33-the-blessing-remembers-its-probation.md) |
 | 2026-07-25 | [The mount table goes live — a container answers at its own name, now (T78)](journal/2026-07-25-t78-the-mount-table-goes-live.md) |
+| 2026-07-25 | [T62 re-verified after T50 and T45 — the archival holds](journal/2026-07-25-t62-reverified-after-t50-and-t45.md) |
