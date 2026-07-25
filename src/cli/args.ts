@@ -8,6 +8,10 @@ export interface Parsed {
   readonly positionals: string[];
 }
 
+// A malformed invocation, not a malfunction. `run` maps it to exit 2 — the code every other refusal
+// in this CLI already uses — so a typo'd flag stays distinguishable from an internal error (1).
+export class UsageError extends Error {}
+
 export function parseArgs(args: readonly string[], booleanFlags: ReadonlySet<string>): Parsed {
   const flags = new Map<string, string>();
   const booleans = new Set<string>();
@@ -25,7 +29,7 @@ export function parseArgs(args: readonly string[], booleanFlags: ReadonlySet<str
       } else {
         const value = args[i + 1];
         if (value === undefined || value.startsWith("--")) {
-          throw new Error(`flag --${body} needs a value`);
+          throw new UsageError(`flag --${body} needs a value`);
         }
         flags.set(body, value);
         i += 1;
@@ -39,6 +43,8 @@ export function parseArgs(args: readonly string[], booleanFlags: ReadonlySet<str
 
 export function rejectUnknown(parsed: Parsed, allowed: ReadonlySet<string>, command: string): void {
   for (const name of [...parsed.flags.keys(), ...parsed.booleans]) {
-    if (!allowed.has(name)) throw new Error(`${command}: unknown flag --${name}`);
+    if (!allowed.has(name)) {
+      throw new UsageError(`${command}: unknown flag --${name} (run \`loam ${command} --help\`)`);
+    }
   }
 }
