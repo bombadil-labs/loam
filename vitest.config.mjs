@@ -9,5 +9,11 @@ export default defineConfig({
   test: {
     testTimeout: 20_000,
     hookTimeout: 20_000,
+    // Parallel work happens in git worktrees under `.claude/worktrees/`, and each one carries a full
+    // copy of this suite. Without this line the default glob collects them all: a run from the main
+    // checkout inherits every in-flight branch's red bar and every fixed-port test races its own
+    // copies, which reads exactly like a defect in the code you are actually holding. `eslint`
+    // already ignores the same path.
+    exclude: ["**/node_modules/**", "**/dist/**", ".claude/worktrees/**"],
   },
 });
