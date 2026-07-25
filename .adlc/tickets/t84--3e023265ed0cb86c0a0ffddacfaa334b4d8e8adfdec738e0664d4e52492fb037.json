@@ -2,11 +2,14 @@
   "body": "FINDING (verified). package.json:49-51 pins `\"engines\": { \"node\": \">=24\" }`. All four GitHub workflows (`.github/workflows/ci.yml:21,45`, `pages.yml:29`, `release.yml:35`) run `node-version: 24`. This was a deliberate change: commit b57c617 (\"Node 24 — the Active LTS, and the version we already release from\", #175, 2026-07-22) raised the floor from `>=22.13` explicitly because Node 22 entered Maintenance LTS and release.yml had already been running 24 while ci.yml/pages.yml still ran 22 — \"the green bar has therefore never once run on the version we would publish from.\" That commit updated package.json, all workflow files, the Dockerfile (`node:24`/`node:24-slim`), and spec/08 (which names the base image) — but missed README.md.\n\nREADME.md:34 still reads: \"Loam is a Node package (Node ≥ 22.13) that ships both a library and a `loam` CLI.\" This is the one remaining place in the repo asserting the old floor; a reader provisioning Node 22.13 per the README would fail `npm install` against the `engines` field (or silently violate a promise CI does not actually verify at that version).\n\nFIX SHAPE: one-line edit, README.md:34, `Node ≥ 22.13` → `Node ≥ 24`.\n\nRAILS: none needed as a dedicated test — this is a doc-only single-fact correction with no executable surface of its own. If desired, a trivial guard (`test/`-level string-consistency check that README's stated floor matches package.json `engines.node`) would prevent recurrence, but is optional scope-creep for a one-line fix; note it as a nice-to-have rather than a blocking rail.\n\nCARE: pure documentation correction, zero behavior change — self-mergeable once landed (trivially green; P5 optional given the diff is a single literal).",
   "edges": [],
   "id": "T84",
-  "phase": "P1",
-  "rails": [],
-  "scope": [
-    "README.md"
+  "phase": "P4",
+  "rails": [
+    "test/docs/node-floor.test.ts"
   ],
-  "status": "todo",
+  "scope": [
+    "README.md",
+    "test/docs/node-floor.test.ts"
+  ],
+  "status": "in-progress",
   "title": "README's Node floor (≥ 22.13) is stale — package.json and CI have run ≥24 since #175"
 }

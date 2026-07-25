@@ -27,7 +27,7 @@ import { MirrorBackend } from "../store/mirror.js";
 import { SqliteBackend } from "../store/sqlite.js";
 import { legibilityWarnings, reAdmit } from "../gateway/repair.js";
 import { strandedStrikeWarnings } from "../store/quarantine.js";
-import { parseArgs, rejectUnknown } from "./args.js";
+import { parseArgs, rejectUnknown, UsageError, type Parsed } from "./args.js";
 import { archivePath, initHome, readSeed, storePath } from "./config.js";
 
 export interface IO {
@@ -42,20 +42,142 @@ export interface RunOptions {
 
 const VERSION = "0.1.0";
 
-const HELP = `loam — a general database grown on rhizomatic
+type CommandName = "init" | "serve" | "register" | "pull" | "migrate" | "store" | "repair";
 
-usage: loam <command> [options]
+interface CommandSpec {
+  readonly summary: string; // the line the top-level help shows
+  readonly usage: string; // the invocation, positionals spelled out
+  readonly flags: ReadonlySet<string>; // the whole allowlist — what rejectUnknown permits
+  readonly booleans?: ReadonlySet<string>; // the subset taking no value — what parseArgs is told
+  readonly notes?: readonly string[]; // the prose a flag list cannot carry
+}
 
-commands:
-  init      create a home, mint or import the operator seed, write config
-  serve     boot a store and serve it (GraphQL + SSE + MCP over HTTP)
-  register  define a schema from a file and register it in the home's store
-  pull      land a peer's deltas — a live URL or a frozen offer file
-  migrate   read an offer, re-express it in the current format, write it back
-  store     inspect a store
-  repair    list and settle a store's quarantine (SPEC §25)
+// Each command's vocabulary, ONCE: the sets `--help` prints are the very sets the parser and the
+// allowlist are handed (via parseFor), so a command's manual cannot drift from what it accepts.
+const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
+  init: {
+    summary: "create a home, mint or import the operator seed, write config",
+    usage: "loam init [options]",
+    flags: new Set(["home", "seed"]),
+    notes: ["The seed is written 0600 and never printed. A second init keeps the first identity."],
+  },
+  serve: {
+    summary: "boot a store and serve it (GraphQL + SSE + MCP over HTTP)",
+    usage: "loam serve --http [options]",
+    flags: new Set(["home", "store", "port", "token", "http", "archive"]),
+    booleans: new Set(["http"]),
+    notes: [
+      "A fresh home self-initializes: it mints (or, via LOAM_SEED, imports) an operator identity,",
+      "so a container serves with nothing but a token.",
+    ],
+  },
+  register: {
+    summary: "define a schema from a file and register it in the home's store",
+    usage: "loam register <schema.json> [options]",
+    flags: new Set(["home", "store"]),
+    notes: [
+      "The file: { hyperschema: { name, alg?, body }, schema, roots, entity?, mutations?, writable? }",
+      "— the same object POST /:mount/register and the MCP loam_register tool take. The store is",
+      "single-writer, so register before serving (a running server takes the same body over HTTP).",
+    ],
+  },
+  pull: {
+    summary: "land a peer's deltas — a live URL or a frozen offer file",
+    usage: "loam pull <url|file> [options]",
+    flags: new Set(["home", "store", "token"]),
+    notes: [
+      "A URL is one anti-entropy step against a live peer (and wants a token); a file is a frozen",
+      "offer — the body of GET /federate, saved, or a browser store's export.",
+    ],
+  },
+  migrate: {
+    summary: "read an offer, re-express it in the current format, write it back",
+    usage: "loam migrate <file> [options]",
+    flags: new Set(["home", "out"]),
+    notes: [
+      "Definitions are RE-SIGNED, so run it against the home whose operator authored them:",
+      "`loam init --seed <hex>` with the store's original seed first. Without --out, to stdout.",
+    ],
+  },
+  store: {
+    summary: "inspect a store",
+    usage: "loam store [options]",
+    flags: new Set(["home", "store"]),
+  },
+  repair: {
+    summary: "list and settle a store's quarantine (SPEC §25)",
+    usage: "loam repair <list|discard|re-admit|leave> [<key>] [options]",
+    flags: new Set(["home", "store"]),
+    notes: [
+      "subcommands:",
+      "  list             every quarantined row + why, plus entity-id legibility warnings",
+      "  discard <key>    remove a quarantined row's bytes from the origin (garbage out)",
+      "  re-admit <key>   re-run admission; a row whose transient cause cleared returns",
+      "  leave <key>      inaction is legal — an idempotent no-op that says so",
+      "",
+      "Repair is the operator's alone, like erasure (§11): it needs the home's seed.",
+    ],
+  },
+};
 
-run \`loam <command> --help\` for a command's options.`;
+// One blurb per flag NAME — a name means the same thing in every command that takes it. The LIST a
+// command shows comes from its own allowlist, so a flag added there appears in its help whether or
+// not anyone wrote it a blurb: an unexplained flag is still printed, never silently omitted.
+const FLAG_HELP: Readonly<Record<string, { readonly arg: string; readonly note: string }>> = {
+  home: { arg: "<dir>", note: "the home to work in (default $LOAM_HOME, else .loam)" },
+  store: { arg: "<file>", note: "the store file inside the home (default store.sqlite)" },
+  seed: { arg: "<hex>", note: "import an operator seed instead of minting one ($LOAM_SEED)" },
+  port: { arg: "<n>", note: "the port to listen on — 0 for ephemeral (default 4321)" },
+  token: { arg: "<secret>", note: "the bearer token for the door ($LOAM_TOKEN)" },
+  http: { arg: "", note: "serve over HTTP — the only transport today" },
+  archive: { arg: "<dir>", note: "mirror every delta into a cold store, relative to the home" },
+  out: { arg: "<file>", note: "write the re-expressed offer here (default stdout)" },
+};
+
+function topHelp(): string {
+  const commands = (Object.keys(COMMANDS) as CommandName[]).map(
+    (name) => `  ${name.padEnd(10)}${COMMANDS[name].summary}`,
+  );
+  return [
+    "loam — a general database grown on rhizomatic",
+    "",
+    "usage: loam <command> [options]",
+    "",
+    "commands:",
+    ...commands,
+    "",
+    "run `loam <command> --help` for a command's options.",
+  ].join("\n");
+}
+
+function helpFor(command: CommandName): string {
+  const spec = COMMANDS[command];
+  const options = [...spec.flags].map((name) => {
+    const { arg, note } = FLAG_HELP[name] ?? { arg: "<value>", note: "" };
+    const shown =
+      spec.booleans?.has(name) === true || arg === "" ? `--${name}` : `--${name} ${arg}`;
+    return `  ${shown.padEnd(18)}${note}`.trimEnd();
+  });
+  return [
+    `loam ${command} — ${spec.summary}`,
+    "",
+    `usage: ${spec.usage}`,
+    "",
+    "options:",
+    ...options,
+    ...(spec.notes === undefined ? [] : ["", ...spec.notes]),
+  ].join("\n");
+}
+
+const isCommand = (name: string): name is CommandName => Object.hasOwn(COMMANDS, name);
+
+// Parse a command's arguments through its OWN spec — the one the help text renders.
+function parseFor(command: CommandName, args: readonly string[]): Parsed {
+  const spec = COMMANDS[command];
+  const parsed = parseArgs(args, spec.booleans ?? new Set());
+  rejectUnknown(parsed, spec.flags, command);
+  return parsed;
+}
 
 // Every store this CLI opens, opened the same way: the sqlite driver's one-time freelist scrub is
 // best-effort — a second handle can refuse it and the store opens regardless — so its deferral
@@ -65,8 +187,7 @@ function openStore(path: string, io: IO): SqliteBackend {
 }
 
 function cmdInit(args: readonly string[], io: IO): number {
-  const parsed = parseArgs(args, new Set());
-  rejectUnknown(parsed, new Set(["home", "seed"]), "init");
+  const parsed = parseFor("init", args);
   if (parsed.positionals.length > 0) {
     // `loam init <seed>` is the natural typo for `--seed <seed>` — refuse it, and NEVER echo
     // the value, lest a seed reach a terminal or a shell history via the error.
@@ -88,8 +209,7 @@ async function cmdServe(
   io: IO,
   options: RunOptions,
 ): Promise<number | ServerHandle> {
-  const parsed = parseArgs(args, new Set(["http"]));
-  rejectUnknown(parsed, new Set(["home", "store", "port", "token", "http", "archive"]), "serve");
+  const parsed = parseFor("serve", args);
   if (!parsed.booleans.has("http")) {
     io.err("serve: only --http is supported today (pass --http)");
     return 2;
@@ -200,8 +320,7 @@ async function cmdServe(
 // design (the store is single-writer): register before serving, or use POST /:mount/register
 // against a running server.
 async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
-  const parsed = parseArgs(args, new Set());
-  rejectUnknown(parsed, new Set(["home", "store"]), "register");
+  const parsed = parseFor("register", args);
   const file = parsed.positionals[0];
   if (file === undefined) {
     io.err(
@@ -266,8 +385,7 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
 // No standing needed — union is union; whether the imported law BINDS is decided by whose
 // operator seed this home holds, never by this command.
 async function cmdPull(args: readonly string[], io: IO): Promise<number> {
-  const parsed = parseArgs(args, new Set());
-  rejectUnknown(parsed, new Set(["home", "store", "token"]), "pull");
+  const parsed = parseFor("pull", args);
   const source = parsed.positionals[0];
   if (source === undefined) {
     io.err(
@@ -346,8 +464,7 @@ async function cmdPull(args: readonly string[], io: IO): Promise<number> {
 // Re-signing needs the seed that authored those definitions: run it against the home whose
 // operator minted the store (`loam init --seed <hex>` first, with the store's original seed).
 function cmdMigrate(args: readonly string[], io: IO): number {
-  const parsed = parseArgs(args, new Set());
-  rejectUnknown(parsed, new Set(["home", "out"]), "migrate");
+  const parsed = parseFor("migrate", args);
   const source = parsed.positionals[0];
   if (source === undefined) {
     io.err(
@@ -397,8 +514,7 @@ function cmdMigrate(args: readonly string[], io: IO): number {
 }
 
 async function cmdStore(args: readonly string[], io: IO): Promise<number> {
-  const parsed = parseArgs(args, new Set());
-  rejectUnknown(parsed, new Set(["home", "store"]), "store");
+  const parsed = parseFor("store", args);
   const home = parsed.flags.get("home") ?? defaultHome();
   const path = storePath(home, parsed.flags.get("store"));
   const backend = openStore(path, io);
@@ -417,8 +533,7 @@ async function cmdStore(args: readonly string[], io: IO): Promise<number> {
 //   loam repair re-admit  <key>     — re-run admission; a row whose transient cause cleared returns
 //   loam repair leave     <key>     — inaction is legal; an idempotent no-op that says so
 async function cmdRepair(args: readonly string[], io: IO): Promise<number> {
-  const parsed = parseArgs(args, new Set());
-  rejectUnknown(parsed, new Set(["home", "store"]), "repair");
+  const parsed = parseFor("repair", args);
   const sub = parsed.positionals[0];
   if (sub === undefined) {
     io.err(
@@ -577,11 +692,18 @@ export async function run(
 ): Promise<number | ServerHandle> {
   const [command, ...rest] = argv;
   if (command === undefined || command === "--help" || command === "help") {
-    io.out(HELP);
+    io.out(topHelp());
     return 0;
   }
   if (command === "--version" || command === "version") {
     io.out(options.version ?? VERSION);
+    return 0;
+  }
+  // Per-command help, answered HERE rather than in each cmd: the top-level help promises it for
+  // every command, and one gate keeps a new command from forgetting to make good on that. It lands
+  // before any parsing, so `--help` is never mistaken for a flag hungry for a value.
+  if (isCommand(command) && rest.some((arg) => arg === "--help" || arg === "-h")) {
+    io.out(helpFor(command));
     return 0;
   }
   try {
@@ -606,7 +728,9 @@ export async function run(
     }
   } catch (err) {
     io.err(`loam: ${err instanceof Error ? err.message : String(err)}`);
-    return 1;
+    // A malformed invocation is 2, like every hand-written refusal above; 1 stays what it always
+    // meant — something went wrong inside.
+    return err instanceof UsageError ? 2 : 1;
   }
 }
 

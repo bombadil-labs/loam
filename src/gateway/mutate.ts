@@ -260,7 +260,8 @@ function assertWritable(gw: Gateway, name: string, fields: readonly string[]): v
   for (const field of fields) {
     if (!allowed.has(field)) {
       throw new Error(
-        `field "${field}" of ${name} is read-only: the registration does not open it for writes`,
+        `field "${field}" of ${name} is read-only: name it in the registration's \`writable\` ` +
+          "list to open it for surface writes",
       );
     }
   }
