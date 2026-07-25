@@ -11,14 +11,16 @@
     }
   ],
   "id": "T33",
-  "phase": "P1",
-  "rails": [],
+  "phase": "P6",
+  "rails": [
+    "test/gateway/adopt-law.test.ts"
+  ],
   "scope": [
     "src/gateway/adopt.ts",
     "src/gateway/gateway.ts",
     "spec/24-quarantine.md",
     "test/gateway/"
   ],
-  "status": "todo",
+  "status": "doing",
   "title": "§24.4: promote-LAW — the graduation is an ordinary publish that remembers its probation"
 }
