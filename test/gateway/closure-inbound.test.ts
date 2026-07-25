@@ -237,6 +237,63 @@ describe("T43(b) — a rostered inbound door carries the strikes of what it admi
     });
   });
 
+  it("only a `negates` pointer AT A DELTA is a strike — no other pointer shape rides in", async () => {
+    const { peer, post } = await peerWithAWithdrawnPost();
+    // Two off-roster deltas the closure must ignore whole. One points at the admitted post with a
+    // DIFFERENT role: supersession is not suppression, and reading it as a strike would let a
+    // stranger's delta cross on the post's coattails. The other's `negates` names an ENTITY rather
+    // than a delta — a shape any peer is free to send, and one this door must not read a `deltaRef`
+    // out of. (`hollow-test` found both: swapping the guard's `||` for `&&` passed every other rail.)
+    const supersedes = signClaims(
+      {
+        timestamp: 1500,
+        author: MODERATOR,
+        pointers: [
+          { role: "supersededBy", target: { kind: "delta", deltaRef: { delta: post.id } } },
+        ],
+      },
+      MODERATOR_SEED,
+    );
+    const negatesAnEntity = signClaims(
+      {
+        timestamp: 1600,
+        author: MODERATOR,
+        pointers: [
+          { role: "negates", target: { kind: "entity", entity: { id: FERN, context: "height" } } },
+        ],
+      },
+      MODERATOR_SEED,
+    );
+    await peer.append([supersedes, negatesAnEntity]);
+    const puller = await rosteredPuller([ALICE]);
+
+    await puller.federate(peer.offeredDeltas());
+
+    expect(isPresent(puller, supersedes.id)).toBe(false);
+    expect(isPresent(puller, negatesAnEntity.id)).toBe(false);
+    // And the genuine strike still crossed, so this is not passing by admitting nothing.
+    assertPreservesSuppression({
+      what: "federate under the store's roster policy",
+      source: peer,
+      destination: puller,
+      struckClaim: post.id,
+    });
+  });
+
+  it("the report counts refusals it made — a duplicate in the offer is not one", async () => {
+    const { peer, post } = await peerWithAWithdrawnPost();
+    const offer = peer.offeredDeltas();
+    // The same door, the same offer, one delta sent twice. Union dedups and the closure keys by id,
+    // so a count inferred from set sizes would report a refusal that never happened (H7: a report
+    // that can be false). Two fresh pullers, because a store's second pull sees different ground.
+    const once = await (await rosteredPuller([ALICE])).federate(offer);
+    const twice = await (await rosteredPuller([ALICE])).federate([...offer, post]);
+
+    expect(twice.offered).toBe(once.offered + 1);
+    expect(twice.rejected).toBe(once.rejected);
+    expect(once.rejected).toBeGreaterThan(0); // the peer's own law is off-roster and truly refused
+  });
+
   it("END TO END: pullFrom over the wire carries the withdrawal the roster would refuse", async () => {
     const { peer, post } = await peerWithAWithdrawnPost();
     const handle = await serve({

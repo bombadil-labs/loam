@@ -390,7 +390,10 @@ export async function federateImpl(
   if (byPolicy && admitted.length < lawful.length) {
     admitted = withBatchNegationClosure(lawful, admitted);
   }
-  const rejected = all.length - admitted.length;
+  // Counted per offered delta rather than inferred from set sizes: the closure keys by id, so a peer
+  // that offers the same delta twice would otherwise be reported as one refusal that never happened.
+  const crossed = new Set(admitted.map((d) => d.id));
+  const rejected = all.reduce((n, d) => (crossed.has(d.id) ? n : n + 1), 0);
   let accepted = 0;
   if (admitted.length > 0) {
     await gw.backend.append(admitted);
