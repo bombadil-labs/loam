@@ -9,12 +9,58 @@ decisions are Myk's at the PR**, because it lands on the publication and capabil
 separately, but T79 should not become a third claimant.)
 
 An independent premortem read this design cold against the code and returned six confirmed
-narratives. Two of them changed what the ticket BUILDS rather than what it asserts, and both are now
-Myk calls: **the bundle's realm** (§*Confinement* — the artifact target is the first host where a
-renderer holds authority at all, so the bundle must be confined; Recommendation 9) and **the emitted
-page's residual** (an already-published page is the one thing withdrawal cannot reach; Recommendation
-11). The other four narrowed or repaired criteria that were hollow, contradictory, or unsatisfiable as
-first written; each is noted where it landed.
+narratives. Two of them changed what the ticket BUILDS rather than what it asserts: **the bundle's
+realm** (§*Confinement* — the artifact target is the first host where a renderer holds authority at
+all, so the bundle must be confined; Recommendation 9) and **the emitted page's residual** (an
+already-published page is the one thing withdrawal cannot reach; Recommendation 11). The other four
+narrowed or repaired criteria that were hollow, contradictory, or unsatisfiable as first written; each
+is noted where it landed.
+
+**CONFINEMENT IS DECIDED (Myk, 2026-07-25, in chat), and the decision widened the ticket.** His words:
+*"I'd rather spec out the complex complete thing than ship a demo we have to walk back later. There
+will be an elegant solution we just have to find it!"* So Recommendation 9's sealed compartment is the
+build, and this spec no longer describes a forms-only first version. The premortem was right that a
+confined bundle cannot reach `window.claude`, and right that this costs the DATA path nothing — the
+shell resolves the view and hands it over. What it left unspecified is everything past a single form:
+pagination, search, drill-down, following a relation — every case where the rendered app wants MORE
+than its `consumes` set. In a sealed compartment that is a **mediated request channel**: the app asks,
+the shell decides, the store answers. §*The mediated request channel* designs it, and it is where the
+elegant solution turned out to be hiding twice over — the app never asks *at runtime*, and **the
+capability declaration already existed.**
+
+**THE APP MODEL — DECIDED (Myk, 2026-07-25, in chat), and it is the sentence the whole request surface
+collapses into.** *"A 'renderer' is one part of an 'app' — an app fuses a renderer to its data through
+a schema. If I build an app and send it to my friend, I'm sending deltas for the renderer and the
+schema, and maybe some seed data too, but their app when they run it is served against **their** loam
+not mine."* And on capability: *"the renderer can do whatever the schema allows, and the schema is
+provisioned with read and write access based on the user that has deployed it. So I write the app, I
+send it to you, you install it, it builds the schema, it serves that schema up via MCP, the renderer
+hits the schema — it's **your** credentials, into **your** store."*
+
+**A SECOND independent premortem read this round's new material cold against the code and returned eight
+confirmed findings — every one repaired in place, and three of them changed the design rather than a
+criterion.** The three: the shell **cannot enumerate a gesture-chosen lens's fields** (GraphQL has no
+wildcard, names are `legal()`-mangled), which forced the projection to `_view` and simultaneously fixed a
+divergence where the two hosts handed the same bundle different view sets; **reads are identity-independent
+inside a mount** (`hooks.resolve` takes no identity — only mutations read `ctx.actor`), which corrected
+four sentences of the trust story and made two rails satisfiable; and **`terminate()` does not empty a
+worker realm** (`indexedDB` / `caches` / `BroadcastChannel` survive it), which is the one memory §11 was
+invoked to reach. The other five: MCP broker codes cannot cross into the bundle's node (no broker exists on
+the server host), pagination state had nowhere legal to live, `asOf` is a surface axis the capability
+statement did not name, a substring scan would have refused nearly every real React bundle while its rail
+stayed green, and the write-pin vs no-read-filter asymmetry needed its reason stated. Each landing is
+marked where it lands; the criteria carry the "what is deliberately NOT asserted" notes.
+
+An earlier draft of this round designed a new capability vocabulary for the request surface — declared
+readings, entity domains, a `reads` role at rest, a shell-side validator. **All of it is retired**, and
+the reason is worth stating rather than quietly deleting: it was a second declaration of a fact the
+model already declares. **The SCHEMA is the request surface.** It is the artifact the viewer installs,
+it names every readable field and every writable one, it is readable BEFORE installing, and it is
+already governed by §21 law with a frozen version identity. A parallel capability system beside it
+would have been a near-synonym for a thing that exists — the failure mode CLAUDE.md's vocabulary rule
+exists to prevent — and worse, a shell-side allow-list would have been a boundary that looks like
+security and is not, since the page is the viewer's own file (criterion 36). §*The mediated request
+channel* is now much shorter, and it names the ONE gap the schema genuinely cannot cover.
 
 ## The reframe: nothing about the renderer is dual
 
@@ -133,10 +179,27 @@ Therefore the emitted page names: **a connector display name, a tool name or two
 entity, and the `consumes` field list.** It does not name a host, an origin, a mount, a token, a
 seed, or a single byte of view data.
 
-Which means the wedge in the strategy note is not a thing we build toward — it falls out. The same
-published page, byte-identical, reads whichever store the viewer's connector points at. "Provisioned
-to your account" is literal: the page is store-agnostic and the connector is the binding. Hand
-someone a link; they add a connector; they are looking at their own ground through your app.
+Which means the wedge in the strategy note is not a thing we build toward — it falls out. **The page's
+DATA PATH is store-agnostic**: a connector display name, a tool name, a lens name, an entity, and a
+projection (`_view`) that needs no field list — so the same bytes read whichever store the connector points
+at, and no `legal()`-mangled field name is frozen into them. Be exact about what IS frozen, because an
+earlier draft over-claimed here: the capability statement (Recommendation 17), the acknowledged `writable`
+set (criterion 25), and the `consumes` list are all pack-time text from the store that packed the page.
+Under the federation model that is coherent — the VIEWER's own gateway packs their page from their own
+surviving law — and it would be a lie if one operator's page were handed to a stranger's store. Which is
+the other reason distribution is federation rather than a link.
+
+**But the distribution channel is NOT a public link, and the earlier draft of this paragraph said it
+was.** The live capability contract is explicit that a page declaring an `mcp` manifest **cannot be
+shared publicly** — the manifest is a viewer-consented grant, so the runtime will not hand it to
+anonymous strangers. Read against Myk's workflow this is not a limitation; it is the workflow. The app
+travels as **deltas through federation** (§8/§12), not as a URL: build it in a chat → push it to your
+store → federate the renderer binding to a friend → they accept it (inert until blessed) → their own
+Claude, on their own connector, packs and renders it against their own store. Each viewer's page is
+emitted for that viewer, from their own surviving law, which is why the capability statement
+(Recommendation 17) belongs on the **federated offer** and not only on the page. The store-agnostic page
+is what makes the bytes identical for everyone; federation is how they get there. **(Myk)** — this
+re-tells the demo story, so confirm the telling.
 
 **Recommendation 4 — live via MCP; a publish-time snapshot is refused.** Embedding a snapshot is the
 one option that must not ship, and the reason is not performance:
@@ -201,9 +264,23 @@ hold is the declaration at pack time** — Recommendation 12.
 `TokenIdentity` (`{ actor }` or `{ operator: true }`), compared timing-safely. A connector is
 configured by the VIEWER with the MCP URL and their own bearer token; one connector is one token is
 one identity, and the page never sees it (`window.claude.mcp` runs "with the viewer's credentials;
-your code never sees tokens"). Per-viewer isolation is therefore the isolation §7 already has: a
-separate mount (their own store or container — which is where T78 earns its edge) or a distinct actor
-token on a shared one.
+your code never sees tokens").
+
+**And per-viewer isolation is the MOUNT, for reads — not the token. This spec had it wrong and the code
+is unambiguous.** `SurfaceHooks.resolve(schemaName, entity, asOf?)` takes no identity
+(`src/surface/surface.ts`), and every GraphQL query field resolves with
+`hooks.resolve(lensOf(def), args.entity, …)` — the context value is not even a parameter
+(`src/gateway/gql.ts`). Only the MUTATION resolvers read `ctx.actor`. `Gateway.surface(door)` hands every
+caller the same hooks over one schema built once. So **two distinct actor tokens on one mount get
+byte-identical readings**, and "a token with no read standing on that lens" does not exist on the full
+door. §7 says so in its own words: *one mount = one store = one isolated world*, and what a token
+individuates is WRITE standing.
+
+Restated correctly, then, and it costs the design nothing: **the read boundary is the mount the connector
+points at; the write boundary is the token's own author standing.** Per-viewer isolation is a separate
+mount — their own store or container, which is exactly where T78 earns its edge — and a shared mount with
+distinct actor tokens isolates writes, not reads. Everything else in this section survives, because the
+page never held either boundary; it holds coordinates.
 
 **And note what is absent: there is no MCP door on the public branch.** `case "mcp"` appears only in
 the token switch of `src/server/http.ts`; the anonymous door serves `graphql`, `subscribe`,
@@ -214,10 +291,11 @@ decision. **(Myk)** — flagged, not assumed.
 
 ## Trust: which door, and whose hand writes
 
-**The content comes from the FULL door, under the viewer's own identity.** Because the MCP door is
+**The content comes from the FULL door, under the viewer's own connector.** Because the MCP door is
 token-bearing, the artifact is not outward-facing publication of CONTENT; it is publication of a
-READING. The page shows precisely what that viewer's token may read and nothing more, enforced by the
-store they pointed at, at §7's boundary. The page itself is public and inert.
+READING. The page shows exactly what the STORE that connector points at serves — enforced at §7's mount
+boundary, not by a per-token read filter (see the correction above) — and it writes as that token's own
+author. The page itself is public and inert.
 
 **Writes are the viewer's own, and never a pen.** §23.3's pen is server-side custody by construction:
 the seed lives in `GatewayOptions.pens`, and `writeRoute` signs the delta AS the pen so provenance
@@ -310,20 +388,28 @@ premise that the bundle is a pure function. It is a pure function by *signature*
 be one by *reach*.
 
 **Recommendation 9 — the bundle runs CONFINED, in a realm where `window.claude` does not exist.**
-**(Myk)** — this changes what the ticket builds, so it is his call. The argument for paying now:
+**DECIDED (Myk, 2026-07-25)** — *"the sealed compartment is right … there will be an elegant solution
+we just have to find it."* The argument that earned it:
 
 `RenderFn` is `(node: RenderNode) => string`, pure and synchronous. That signature is the whole reason
 confinement is cheap *here* and would be expensive almost anywhere else — there is nothing to plumb
 across the boundary but one structured-cloneable value in and one string out. Confinement is a dozen
 lines, not an architecture.
 
-- **Recommended: a Web Worker.** A module worker's global scope has no `window` and no `document`, so
-  `window.claude` is not filtered — it is **absent by construction**. `postMessage({ node })` in, a
-  string back, written into the mount point exactly as the server writes it into a response body. And
-  it is the same motion `src/gateway/render-worker.ts` already performs: the two hosts converge on one
-  shape — source in, node in, bounded time, string out — which is the structural symmetry
-  Recommendation 1 has been claiming all along. Confinement also hands us the time bound for free (a
-  worker can be terminated), which is half of the divergence the next section is about.
+- **Recommended: a Web Worker, spawned PER RENDER.** A module worker's global scope has no `window` and
+  no `document`, so `window.claude` is not filtered — it is **absent by construction**.
+  `postMessage({ bundle, node })` in, `{ kind: "ok", html }` back, written into the mount point exactly
+  as the server writes it into a response body. That is not merely *similar* to
+  `src/gateway/render-worker.ts` — it is that file's protocol, message for message, including its
+  `notHtml` / `fault` folds. And the per-render lifetime is the server's too: `renderInWorker` spawns a
+  Worker, posts one message, and terminates it in `finally`, every render. Adopting the same lifetime
+  buys three things at once — the time bound (a worker can be terminated), the structural symmetry
+  Recommendation 1 has been claiming, and, unexpectedly, the whole answer to what a compartment may
+  RETAIN (§*What forgetting costs*): a bundle handed a fresh realm per render cannot hold a copy of
+  anything across renders, because there is nothing for it to hold the copy in.
+  T73's lesson transfers with the protocol: **two clocks, not one** — arm a SPAWN bound at construction
+  and re-arm a fresh RENDER bound when the worker signals it is live, or a slow spawn under a loaded tab
+  charges startup against the render's budget and times out legitimate work.
 - **Fallback: a sandboxed sub-frame** (`<iframe sandbox="allow-scripts">`), whose realm is its own and
   onto which the kernel installs nothing. Weaker on the merits: it keeps a DOM the `RenderFn` contract
   does not need, it needs the same `postMessage` plumbing anyway, and `allow-scripts` is a coarser
@@ -338,6 +424,444 @@ single seam the shell owns, and assert that TOTAL MCP traffic equals the shell's
 a fixture bundle that deliberately attempts one. A fixture that tries and fails is the only evidence
 that the boundary is load-bearing rather than decorative.
 
+## The mediated request channel — the app is renderer + SCHEMA, and the schema is the surface
+
+The compartment is sealed, which settles authority and opens a design question the forms-only sketch
+never had to answer: **an app that wants more data than its `consumes` set cannot go get it.** Every
+interesting interaction is that case — a second page of a list, a search box, a click into a detail
+view, following a relation.
+
+**And the answer is not a new capability system, because the app already ships its own.** Myk's app
+model (above) is the load-bearing sentence: an app is a renderer FUSED TO A SCHEMA, both travel as
+deltas, and the friend who installs it registers that schema in their own store, which then serves it
+over MCP under their own credentials. So:
+
+> **An app may ask anything its schema exposes, at any entity, and nothing else — because the schema is
+> the thing the viewer installed, and the viewer's own token is what resolves it.**
+
+That single sentence answers three of the six questions, and the code agrees with it exactly.
+
+### Why the schema IS the declaration — read the query root, then read what a registration already says
+
+**Loam's entire read root is entity-addressed, and every degree of freedom in it comes from the
+schema.** `buildGqlSchema` emits, per REGISTERED lens, one query field — `<lens>(entity: ID!, asOf:
+Float)` — whose type carries one field per `schema.props` (legal-mangled) plus the meta set, one
+subscription field, and mutation fields for exactly the props in `writable` plus the registration's
+named claim templates (`src/gateway/gql.ts`). There is **no list query, no filter argument, no cursor,
+no `first`/`after`, and no free-text search anywhere.** A caller's only choices are *which lens, which
+entity, which fields, which moment* — and the first and third of those are fixed by the registration.
+
+So a registration is already a complete, legible, versioned statement of *what may be read and what may
+be written*, published under §21 law with a frozen version identity. Note what that gives for free,
+without a line of new vocabulary:
+
+- **Readable set** = the lens's props. Not a subset of them, not a superset: what `buildGqlSchema` built.
+- **Writable set** = `writable` plus the claim templates, and §21's **immutable-by-default** already
+  fail-closes it — *"absent `writable` → NO prop is writable"*.
+- **Frozen and inspectable before installing** = §21's version identity, so a viewer can read the schema
+  they are being asked to adopt, and an app cannot swap it without minting a different version.
+- **Scoped to the viewer** = §7's MOUNT boundary for reads (`hooks.resolve` carries no identity), and
+  `contextFor(identity)` — the token's own author standing — for writes. Two different mechanisms, and
+  §*What the page names* has the correction that says why conflating them was wrong.
+- **What it does NOT bound, stated because criterion 32 depends on it:** the schema names fields, not
+  MOMENTS. Every query field carries `asOf` and every view type carries `_asOf` / `_forgotten`
+  (`src/gateway/gql.ts`), so an installed schema is also a licence to read those fields' HISTORY. Erasure
+  still wins — `groundAsOfImpl` filters the surviving snapshot — but a RETRACTED value is legible at an
+  earlier moment. The shell composes no `asOf` today (criterion 30 asserts its absence) and the capability
+  statement names the time axis anyway, because a future gesture verb could carry one.
+
+**Recommendation 14 — the request surface is the app's own SCHEMA, and T79 adds no capability
+vocabulary at all.** The gesture names a lens and an entity; the shell issues `loam_query`; the STORE
+answers or refuses. What bounds the app is the pair (*the schemas this viewer installed*, *the MOUNT their connector points
+at*) — two existing boundaries, both governed, neither invented here. Note which the second one is not: a
+per-token read filter, which does not exist (§*What the page names* has the correction).
+An earlier draft of this round proposed declared readings with entity domains and a shell-side
+validator; it is retired, and the three reasons it was wrong are each worth keeping:
+
+- **It duplicated a declaration the model already makes.** A `reads` role beside `consumes` and
+  `writable` would be a near-synonym for the registration — precisely the parallel-vocabulary failure
+  Loam's naming rule forbids.
+- **A shell-side allow-list is a boundary that only looks like one.** The page is the viewer's own file;
+  they may edit the embedded declaration freely (criterion 36 asserts what happens when they do). A
+  guard on that side of the wall constrains the APP, never the viewer — which is fine as an appetite
+  statement and dishonest as a capability claim.
+- **It would have made an app less portable than its own schema.** The whole point of Myk's model is
+  that the same app runs against a different store; a second declaration frozen into the page at pack
+  time is one more thing that can disagree with the store the app actually met.
+
+**Recommendation 16 — the answer to "where does the declaration live at rest" is NOWHERE NEW.** This is
+worth its own number because it is the question that most looked like it needed vocabulary, and the answer
+is that both halves already have homes: the request surface lives where the SCHEMA lives (§21's
+registration, versioned, frozen, inspectable), and the app's appetite lives where it already lives (the
+binding's `consumes`). Nothing is added to `rendererBindingClaims`, so §23.5's latest-per-route law is
+untouched, §20 owes no migration, and there is no new at-rest shape for a future reader to misparse.
+
+**What `consumes` becomes, precisely: the FIRST-PAINT appetite, not the boundary.** It keeps exactly the
+job `publishRendererImpl` gives it — proven at push against the pinned reading's props (§23.4), so a
+renderer can never name a field its lens cannot fill — and it is what the shell's root `loam_query`
+document asks for. It was never a capability bound and this spec should not promote it to one.
+
+**And what a version bump means, since the earlier draft owed an answer.** Under Recommendation 14 the
+answer is the ordinary one: re-registering the SCHEMA with a wider surface widens what any app over it may
+read, on the next request, in every store that installed it — governed by §21's own version law and
+readable in the capability statement, which re-derives. Re-pushing the RENDERER at the same route moves the
+latest binding (§23.5) and changes what the app asks for on first paint, not what it may ask for. Neither
+motion widens an already-emitted page's authority, because the page never held any (criterion 36).
+
+**One structural consequence, stated because it is the only at-rest question left.** `RendererCore` names
+a SINGLE lens (`schemaName: LensName`), so a renderer binding today is bound to one lens — while an app
+fusing several (a `Note` lens and a `NotesByTag` index lens) needs to read more than one. Under
+Recommendation 14 that costs nothing: the gesture carries the lens name, the shell asks, and the store
+serves it if that lens is registered for this viewer. **No new role on the binding, no lens list, no
+migration.** The binding's `schemaName` stays what it is — the lens the ROUTE is about, and the one the
+root watch reads.
+
+### The one real gap, named precisely: read-time parameters
+
+Three of the four interaction shapes need nothing beyond Recommendation 14, and it is worth being exact
+about which, because "we need a query language" is the conclusion a hurried reading reaches:
+
+- **Drill-down and following a relation: no gap.** A relation field renders its targets as entity ids
+  (`renderTarget`, `src/gateway/resolvers.ts`); following one is another entity-addressed read through a
+  lens the viewer installed. This is the common case and it is free.
+- **Pagination: no gap, but an honest COST.** A collection in Loam is an ENTITY whose field gathers its
+  members, and an `all` / `concatSorted` policy hands over the whole id list in one resolved view
+  (`fieldTypeOf`, `src/gateway/gql.ts`). There is nothing to paginate server-side; a page is a slice of
+  a list the app already holds, so paging is usually a re-render with no store traffic at all. The cost
+  is that the whole list crosses the wire once — real, bounded by §23.10's economics, and not a
+  capability question.
+- **Keyed search: no gap.** "Notes tagged *harvest*" is a lens the operator authored rooted at
+  `tag:harvest` — the selection algebra lives in the hyperschema's `Term` (`select` / `intersect` /
+  `difference` / `group` / `prune`, evaluated at `evalTerm(def.hyperschema.body, ground, entity,
+  registry)`, `src/gateway/reads.ts`). Any search whose key is an ENTITY works today.
+- **Free-text search: THE GAP, and it is one missing argument wide.** "Notes containing the word
+  *harvest*" needs a value the viewer just typed to reach the SELECTION, and Loam passes no such value.
+  rhizomatic HAS the mechanism — `Hole`, `Bindings`, `substituteHoles`, and `evalTerm` accepts a
+  `bindings` argument (`pred.d.ts`, `eval.d.ts`) — and **Loam supplies it from no door**, so a lens with
+  holes in its Term cannot be driven from anywhere.
+
+**Recommendation 15 — name that gap as its own follow-on and design nothing for it here. (Myk)** — it is
+the one piece of the request surface that genuinely needs new door vocabulary, so its scoping is his. Its
+shape is already visible and reassuringly narrow: a lens whose Term carries `Hole`s, a read door that accepts
+`bindings`, and a decision about what a caller may bind. The narrowness is the point — **a hole binds a
+PRIMITIVE, never a Term** (`Bindings = ReadonlyMap<string, Primitive>`), so the caller supplies values
+into a query the operator wrote, which is exactly the authority property "operator-authored parameterized
+queries" was reaching for, arriving through §21/§22's own vocabulary instead of a new one. That is a
+read-surface change with its own disclosure question, and it is not T79's. Until it lands, an app that
+needs free-text search ships an operator-authored index entity per term or does its filtering
+client-side over a list it already holds — both honest, both limited, and the limit is named here rather
+than discovered by a viewer.
+
+**And a caller-supplied `Term` stays refused on the merits, not deferred.** Handing an app the gather
+algebra means `select` over the whole ground and `inView` subqueries — the widest disclosure surface in
+the system — and "validate the Term against a declared bound" means a static analysis of an algebra,
+which is the kind of guard that is defeated once and trusted forever.
+
+### What a viewer sees before accepting — derived from the schema
+
+**Recommendation 17 — the capability statement is DERIVED, by one function, from the SCHEMA and the
+binding, and no author-supplied prose reaches it.** The value is legibility at the moment of installing:
+*"this app reads Post.height and Post.planted; it may write Post.height; it reads and writes as you, in
+your store."* One function — `capabilityStatement(registered, binding, manifest)` in
+`src/gateway/renderers.ts` — assembles that from the registration's props, its `writable` set, its claim
+templates, the binding's `consumes`, and the tool manifest. Three properties, and the third is what
+makes it non-lying:
+
+- **(a) Author prose can never enter it.** The bundle SOURCE is not an input. A renderer whose markup
+  claims "reads nothing" changes nothing, and the statement renders OUTSIDE and AFTER the mount point —
+  the same structural rule criterion 9 uses for writer identity, for the same reason: the host gets the
+  last sentence.
+- **(b) It describes the SCHEMA's surface, including the axes that are easy to forget, and says whose
+  credentials run.** §27.8's decided invariant is the model — *a manifest is an interface promise, not an
+  access control*, and "internal" means not-advertised, never not-readable. So the statement names what
+  the schema exposes and states that reading happens against the store this connector points at, and
+  writing happens as the viewer's own author. Three things it must name that a fields-only reading of a
+  registration would drop: **the whole resolved view** (the shell's projection is `_view`, which is wider
+  than `schema.props` — Recommendation 18), **the time axis** (`asOf` / `_forgotten` are on every query
+  field, so an installed schema is a licence to read those fields' history), and **the write templates**
+  (`mutations`, not just `writable`). It does not imply a wall the page holds, because the page holds
+  none. A label that overclaims is worse than none: T33's trap is the same shape one layer down —
+  blessing code and granting its pen are different keys, and a label that conflates them lies.
+- **(c) The label and the SERVER read the same value.** The statement is derived from the registration
+  that the gateway actually serves, so it cannot drift from what a request will get: if the schema
+  narrows, the statement narrows, and the store refuses the removed field either way. There is no second
+  source of truth to keep in sync — which is the structural reason this label stays honest, and the main
+  dividend of retiring the parallel declaration.
+
+**Which door serves it: the ones that already exist, and NO new MCP read.** Three surfaces, one
+function: (a) the **emitted page** carries it above the connector onboarding copy — the page is inert
+until a connector exists, so "connect your store" IS the acceptance gesture and the statement sits in
+front of it; (b) the **pack door** returns it for the operator's own review, where "look at this once"
+already happens for a pen or a narrowed `writable`; and (c) — the surface Myk's workflow needs — the
+**federated offer**, because installing an app is accepting DELTAS (§8/§12, inert-by-default) and the
+moment a friend blesses a schema and a renderer binding is the moment "what will this app do in my
+store" must be readable. §27.8's export table already lists both rows acceptance must range over
+(`HyperSchema` / `Schema` / `renderer binding`, all LAW); this gives them their text.
+
+**Does this subsume the premortem's `loam_manifest(route)`? No — and the two are easy to confuse.** The
+capability statement answers *what does this app's schema expose*, decidable at pack time and derivable
+in any store that installed it. `loam_manifest` answers *is this route still declared and bound, and at
+what address* — a LIVENESS question about the operator's CURRENT law, asked at mount time by a page that
+already exists. The first needs no new door; the second is a new read over constitutional publication
+state, and it stays where Recommendation 11 left it: named, small, optional, and not this ticket.
+
+### A Loam app is not free-floating: the store is its other half
+
+**State the precondition in the spec's own voice, because it is a property of the design rather than a
+limitation of the runtime (Myk, 2026-07-25):** *"artifacts as renderers for loam apps do require a host
+store, they need MCP as their I/O … it's not like there's a 'general Loam app' they can be pointed at.
+You wanna run a loam app you gotta have a loam server with MCP configured and your user has to be
+associated with that somehow."*
+
+The runtime agrees on every clause: the artifact CSP blocks every external host, so there is no
+arbitrary HTTP I/O available even in principle, and `window.claude.mcp` is the only channel out. And
+§*The tool manifest* already established the other half — there is **no MCP door on the public branch**,
+so an artifact with no connector reads nothing at all, not a narrowed public view.
+
+The consequence for the page is a posture, not an error path: **a page with no connector is in its FIRST
+RUN, not in a failure.** `server_not_connected` renders "connect your store" onboarding copy — the one
+place the store's URL appears, as text a viewer reads rather than a target the page requests — and the
+static shell renders first so a viewer always sees something legible. A store the viewer has not
+connected yet is the expected initial state of every app they install, and the copy says so. Calling
+that an error would be the design telling a viewer they did something wrong on the way to doing the
+right thing.
+
+### The shell's mediation contract — and the elegant part: the app never asks
+
+Here is where the sealed compartment stops being a cost. The obvious design is a channel: give the
+worker a `request()` function, plumb `postMessage` both ways, await the answer. **Do not build that**,
+and the reason is the signature. `RenderFn` is `(node: RenderNode) => string` — pure and synchronous.
+An asking bundle is an async bundle, and an async bundle is a different contract on the artifact host
+than on the server host, which is precisely the "one address, two envelopes" failure the next section
+is about. The whole ticket's claim — one bundle, one content address, one behavior — would go.
+
+**Recommendation 18 — a request is MARKUP, not a call. The renderer renders the gesture; the host
+intercepts it.** §23.3 already established the idiom and this is the same motion: a write-enabled
+renderer emits a `<form>` that POSTs to `/:mount/app/<route>/<entity>`, and the host intercepts submit
+and routes it. A read gesture is an element carrying the request as data attributes —
+`<a data-loam-read="NotesByTag" data-loam-entity="tag:harvest">`, or a `<form data-loam-read="…">`
+whose field supplies the entity — where the read names **a lens and an entity, and nothing else**, which
+is all the read root has to offer (Recommendation 14). The host intercepts the click or the submit
+exactly as it already intercepts a write. Everything follows:
+
+- **`RenderFn` is untouched**: pure, synchronous, no channel out of the compartment, no async. The
+  worker protocol stays the ONE message `render-worker.ts` already sends. Criterion 19's traffic count
+  is unchanged after any number of gestures, because the bundle's reach did not grow by a single byte.
+- **The bundle needs no channel because it does not outlive the render.** With a per-render worker there
+  is nobody inside to await an answer. Requests are gestures on markup that already exists.
+- **The answer arrives as DATA on the next render.** `RenderNode` grows two members:
+  `reads: Record<string, ReadResult>`, keyed `<lens>@<entity>`, where a `ReadResult` is either
+  `{ entity, view, hex }` — the same shape the root node has — or `{ error: { code, message } }`; and
+  `state: Record<string, string>` (below). Both are **always present and always objects**, empty until a
+  gesture is honored, so the two hosts hand the bundle the same shape from the first render (an optional
+  member would be exactly N6's one-address / two-envelopes bug in miniature).
+- **The projection is `_view`, on BOTH reads, and this is a correction the draft owed.** A mediated read
+  names a lens the page learned from a gesture, and the page cannot enumerate that lens's fields:
+  GraphQL has no wildcard selection, and the field names are `legal()`-mangled store-side
+  (`src/gateway/gql.ts`), so a store-native prop name does not even predict them. The three ways out are
+  all barred except one — introspecting first costs a second call per gesture (breaking criteria 30 and
+  33), and baking a per-lens field list into the page is the frozen second declaration Recommendation 14
+  retires by name. So **every read the shell composes is `<lens>(entity:) { _entity _hex _view }`**, and
+  `_view` is *"the whole resolved view, dynamic properties included"* (`gql.ts`).
+
+  **And that fixes a divergence the `consumes`-only document had already created**, which is the more
+  important half: `serveRouteImpl` hands the bundle `view: bytesEnvelope(node.view)` — the ENTIRE
+  resolved view, which is wider than `schema.props` (rhizomatic's `resolveView` resolves unnamed props
+  through `schema.default`, then decoration and resolvers add more). A document restricted to `consumes`
+  would have handed the same bundle a strictly NARROWER view on the artifact host, so any bundle touching
+  a prop outside `consumes` — which §23.4's push check does not forbid, it only proves `consumes ⊆ props`
+  — renders differently on the two hosts. `_view` makes the two hosts equal by construction rather than
+  by a fixture's good luck. The cost is stated plainly: **the artifact host no longer minimizes what
+  crosses the wire**, it asks for exactly what the server host already resolves. Minimization would
+  require a per-lens field list, which is the thing that cannot be honestly frozen into a store-agnostic
+  page; §7 governs what may be read either way.
+- **UI state rides `state`, because there is nowhere else for it to live.** Paging is the case: the
+  collection field already delivered every id, so a page is a slice of a list the bundle holds and needs
+  no store traffic — but the page INDEX has no home. Module scope dies with the per-render realm
+  (deliberately — §*What forgetting costs*), the worker has no `document` to read the previous paint from,
+  and `reads` is keyed by lens and entity and holds answers. So the floor carries
+  `state: Record<string, string>`, echoed verbatim by the shell from the honored gesture's `data-loam-*`
+  attributes and by the host route from its query string. One member, no statefulness inside the
+  compartment, and `RenderFn` stays a pure function of its argument.
+
+**The postMessage shape, mirrored from the server:**
+
+```
+shell → worker:  { bundle, node }              // node = { entity, view, hex, reads, state }
+worker → shell:  { kind: "ok", html } | { kind: "notHtml" } | { kind: "fault" }
+```
+
+Byte-for-byte the vocabulary of `render-worker.ts`, including that a fault folds to a clean refusal
+that leaks nothing of the bundle's internals. The request never crosses the worker boundary at all — it
+crosses the DOM boundary, where the shell is already listening.
+
+**What the shell does on a gesture — and note how little judgement it holds.** (a) It composes
+`<lens>(entity: "<entity>") { _entity _hex _view }` — no field list, no `asOf`; (b) it issues one uncached
+`callTool`; (c) it writes the result into `reads[key]`, echoes the gesture's `data-loam-*` attributes into
+`state`, and re-renders; and (d) a refusal writes `reads[key] = { error: { code, message } }` and
+re-renders too. **There is no shadow allow-list.** The shell does not adjudicate whether the app may read
+that lens — the STORE does, from the registration the viewer installed, which is the entire point of
+Recommendation 14. A lens this viewer's store does not serve comes back as the store's own refusal, and
+that refusal is more accurate than anything the page could have decided, because the page is not where
+the law lives.
+
+**The refusal CODE is Loam's, not the runtime's — and this is the second correction the draft owed.** An
+earlier draft said the MCP error codes pass straight through into `reads[key].error.code`. They cannot:
+those codes (`needs_reauth`, `server_not_connected`, `selection_required`, …) are the artifact broker's
+enum, and the server-rendered host resolving a `?read=` in-process has no broker and can never produce
+one. A bundle branching on them would be N6's bug in the very member added to prevent it. So the floor
+owns **a small host-neutral enum** — `not_served` (this store does not serve that lens), `refused` (the
+store answered and declined), `unavailable` (transient; retry is the host's business, not the bundle's),
+and `needs_connection` (no store is reachable from this host at all) — and each host maps its own
+failures onto it at its own seam. The runtime's richer code still drives the SHELL's own degraded states
+(§*What the page is, mechanically*'s table is unchanged); it just does not cross into the bundle's node,
+where only a host-neutral vocabulary can be honest.
+
+**Which means refusal is legible by construction, not by discipline.** The refusal is DATA the renderer
+draws — a bundle that renders `reads` at all renders the error in the place the answer would have gone.
+And for a bundle that ignores it, the shell's own status line, outside and after the mount point, states
+the last refusal in the host's voice. There is no path to a blank: the previous markup is still painted,
+the error is in the node, and the host has the last sentence. The MCP error codes of §*What the page is,
+mechanically* pass straight through this path, so a mediated read that meets `needs_reauth` renders the
+reconnect copy in the section that asked.
+
+**And one refusal is not a refusal at all, which is worth calling out because it is the search gap's
+runtime face.** A read at an entity the store simply has nothing for is a SUCCESS carrying an empty view
+— `gql.ts` says so in its own words, *"absence is an answer, not an error"*. So a search box driven at
+`tag:nonexistent` gets an empty view, not a code, and the renderer must draw "nothing here" rather than
+a spinner or a blank. That is the one place the design asks something of the renderer author, and the
+shell cannot do it for them: an empty view and an unfetched one are different states, and only the app
+knows what its own emptiness should look like.
+
+**Writes round-trip identically, which is the symmetry to keep.** A form submit maps to `loam_mutate`
+against the acknowledged `writable` set, then `invalidate()` so the root watch refetches; a read gesture
+maps to a one-shot `loam_query`, then a re-render. One interception seam, two verbs, and the author
+wrote ordinary markup for both.
+
+**Recommendation 19 — a mediated read is a one-shot `callTool` with `cache: false`, and never a
+watch.** Three reasons, all from the live contract: (a) `watchTool`'s per-view ceiling is 64 and a
+duplicate registration is `bad_request`, so a watch per drill-down is a defect that arrives as a bug
+report about page 65; (b) a watch IS a cache by design — it replays a stored entry on registration; and
+(c) `callTool` accepts `cache: false` — *"never cache this call, including where the read-only default
+would apply"* — which is a stronger statement than the `gcTime: 0` Recommendation 12 has to settle for
+on the watch, because `watchTool`'s options accept only `{ staleTime, gcTime }`. So the page holds
+exactly **one** watch (its root reading, cache pinned off) and issues uncached one-shots for everything
+else. The 64-watch ceiling stops being reachable at all.
+
+### Two DEPLOY SURFACES, one floor — not one handwavey runtime
+
+The premortem's claim was that the artifact shell IS a §23.2 host and the React host becomes a swap of
+the data client. That claim is right about the FLOOR and wrong if it is read as "one runtime", and Myk
+made the correction explicitly (2026-07-25): *"artifact vs embedded React host also offer fundamentally
+different affordances — apps built to run in artifacts can use MCP and `sendPrompt` from Claude, for
+instance, so it's worth thinking about how these are actually different deploy surfaces and not just a
+handwavey 'yeah you know, a runtime.'"*
+
+**So the shared seam is a FLOOR, never a ceiling.** The floor is small, precise, and worth naming
+exactly, because it is what makes one content address honestly one app: a `RenderFn` that is pure and
+synchronous; a `RenderNode` of `{ entity, view, hex, reads, state }`; `_view` as the projection on every
+read; `data-loam-read` and `<form>` gestures that name a lens and an entity; a host-neutral four-code
+refusal vocabulary; and the app's SCHEMA as the request surface. A bundle that stays on the floor runs
+anywhere, and criteria 1 and 35 are its conformance rails — output-equality for one entity, and then for
+one gesture.
+
+Above the floor the two surfaces genuinely differ, and pretending otherwise is how one address grows two
+capability envelopes (the premortem's N6 class):
+
+| | artifact surface | embedded React host (§23.11) |
+|---|---|---|
+| I/O | `window.claude.mcp` ONLY — CSP blocks every other host | `fetch` / SSE to its own origin, and whatever else the operator serves |
+| liveness | `watchTool` polling, coalesced, paused while hidden | a real `/:mount/subscribe` stream |
+| routing | one page, one `(route, entity)` | a router derived from the store (§23's own ambition) |
+| who builds the page | **Claude does**, from the deltas | the operator's build |
+| affordances the OTHER cannot have | asking Claude to do something (`sendPrompt`-class), the downloads capability, running inside a conversation | service workers, real navigation, its own origin's storage, no CSP wall |
+| bundle size | bounded by an artifact page's practical size (§23.10) | ordinary web economics |
+
+**And the affordance question has a sharp consequence confinement already decided.** A bundle that used
+`sendPrompt` would need `window.claude`, which the compartment removes and Recommendation 10's source
+scan refuses at pack time. That is not an oversight; it is the floor holding. Two honest options for an
+app that wants a host affordance, and the design should say which: (a) **mediate it, exactly like a read**
+— the shell offers the affordance and the bundle asks for it with markup (`data-loam-prompt="…"`), so the
+compartment still holds no authority and the gesture vocabulary grows by one verb; or (b) the app opts
+OUT of the floor and is artifact-only, which means it is no longer one bundle for two hosts and should say
+so in its own text. **(a) is the recommendation** and the mechanism is already built by Recommendation 18
+— but T79 does not ship a prompt verb; it ships the seam that makes adding one a one-line vocabulary
+extension rather than a new architecture. **(Myk)** — confirm that the floor is the deliverable and the
+affordance verbs are follow-ons.
+
+**The server-rendered host is the one that proves the floor TODAY.** It honors the same gesture as a GET
+with a repeatable `?read=<lens>:<entity>`, resolved under the door's own discipline, populating the same
+`reads` and `state` members — so an unenhanced link works with no JavaScript at all, and criterion 1's
+output-parity claim extends from the first render to an interaction. A floor proven across two hosts is a
+floor; a floor described for one is a plan.
+
+**Two constraints on that gesture, both from `serveRouteImpl`'s existing discipline rather than invented
+here.** (a) **`?read=` is FULL-DOOR only.** The anonymous door's whole posture is that *every* refusal is
+a uniform 404 that leaks nothing about what exists (§17) — so a per-lens "this store does not serve that
+lens" on the public app route would be exactly the lens-existence oracle that door closed. On the public
+door a `?read=` is ignored and the route renders as it does today; the floor's refusal vocabulary is a
+full-door affordance. (b) **Each `?read=` counts against the render budget.** `maxPublicRenders` caps
+worker RENDERS, not resolutions, and a repeatable parameter multiplies resolutions per request — H8's
+full-scan cost, N times, on one GET. So the count is per-request and bounded, named here because a
+repeatable read parameter is precisely the shape that turns a cap into a suggestion.
+
+**One divergence remains, and it is about TRUST rather than envelope.** The host route resolves a gesture
+in the gateway, against live law; the artifact shell composes a query in the page and lets the store
+answer. Both end at the same boundary — §7's mount, the viewer's own token — but only one of them is
+*inside* it. State the consequence rather than hiding it: **the page holds no boundary of its own.** A
+viewer may edit the emitted page freely (it is their file), and what they get back is exactly what their
+own token may read, which is what they could always have read at `/:mount/graphql`. That is why
+Recommendation 17's statement describes the SCHEMA's surface and names whose credentials run, instead of
+claiming a wall the page does not hold — and criterion 36 asserts it in both directions.
+
+### What forgetting costs — and the surprise: the compartment is what makes §11 reach the client
+
+The premortem's N3 pinned `gcTime: 0` on the shell's own watch because a cached pre-erasure answer,
+replayed on a re-boot, is content living where §11 has no reach. A mediated channel makes that question
+bigger: an interactive app accumulates readings. Four disciplines, and the last one is the reason
+confinement pays for itself twice.
+
+- **(a) Every mediated read is uncached at the runtime**, per Recommendation 19 — `cache: false`, the
+  strongest expression available, and available exactly because it is a one-shot. Nothing enters the
+  call cache to be replayed.
+- **(b) The shell's accumulated `reads` map is memory-only and dropped WHOLE.** No `localStorage`, no
+  `sessionStorage`, no IndexedDB, no cookie — a re-boot starts with an empty map and nothing but the
+  page's own root coordinates. And it is dropped in full on every non-data event on the root watch,
+  not merely repainted: criterion 23's rule extended from the mount point to the accumulated set,
+  because clearing the painted view while three drilled-down copies sit in a map is an H7-shaped claim —
+  reporting a completeness the bytes do not have.
+- **(c) An erasure arrives as an ordinary answer, and the shell tears down on it.** §11 lands, the root
+  watch's next result no longer carries the value (or refuses), and the shell drops the map, calls
+  `invalidate()`, and re-renders from the fresh node. There is no erasure notification to design; the
+  live read IS the notification, which is §23.6's principle ("an app is a live view over surviving
+  deltas") arriving on the client for the first time.
+- **(d) And the compartment is the only thing that can reach the app's OWN memory.** This is the part
+  worth stating loudly, because it inverts how confinement was justified. Dropping the shell's map does
+  not reach inside the bundle: a renderer that memoized its node in module scope holds a copy the shell
+  cannot see, cannot enumerate, and cannot negate. `Worker.terminate()` reaches it — it discards the
+  realm wholesale. That is §23.6's own third instrument, quarantine-drop, at this host: *"the app's
+  deltas are gone, so the app is gone."* With a per-render worker the property is not even a teardown
+  step; it is the default, because no render's realm survives to hold anything. **Confinement was
+  adopted for authority and turns out to be the mechanism by which forgetting reaches a client at all.**
+  Unconfined, the bundle's copies live in the page realm and nothing short of a full reload removes
+  them — and the page has no way to force one.
+
+  **But `terminate()` alone is NOT enough, and this is the correction that keeps the claim true.** A
+  worker global scope has no `window` and no `localStorage` — which is what made the first draft of this
+  bullet sound complete — and it DOES have `indexedDB`, `caches`, and `BroadcastChannel`, as bare
+  identifiers. A bundle calling `indexedDB.open("keep")` holds a copy across every render and every
+  teardown, in a store §11 cannot reach and the shell cannot enumerate: the exact failure this section
+  claims confinement prevents, in the one memory it was invoked for. So the boundary is **two things, not
+  one** — the per-render realm AND Recommendation 10's pack-time refusal of every channel that outlives a
+  realm. Criterion 34(c) is that half, and it is a pack-time refusal per channel rather than a byte-scan,
+  because a scan over one conforming page could never have seen it.
+
+**One residual stays, and it is the shell's own DOM.** The last successful markup is painted until the
+next render replaces it, so between an erasure landing and the next root event a viewer is looking at a
+pre-erasure string on their own screen. That is not fixable from the store side and it is the same
+residual any live client has; criterion 23 bounds it to "the next non-data event clears it", and the
+honest sentence is that Loam's reach ends at the last delivered answer.
+
 ## One address, two envelopes
 
 Recommendation 1's claim — one bundle, one content address, two hosts — is right, and criterion 1 as
@@ -347,43 +871,75 @@ never asserts that the two hosts produce the same rendering. One address is not 
 
 | | host target | artifact target |
 |---|---|---|
-| realm | `{eval:true}` CommonJS Worker — `require`, `Buffer`, reachable `node:*` | a browser realm: `document`, `window.claude`, no Node builtins |
-| time | `RENDER_TIMEOUT_MS` = 500 ms, terminate on overrun | none, as first drafted |
+| realm | `{eval:true}` CommonJS Worker — `require`, `Buffer`, reachable `node:*` | a module Worker: no `window`, no `document`, no `window.claude`, no Node builtins |
+| time | `RENDER_TIMEOUT_MS` = 500 ms, terminate on overrun | the same budget, two clocks (spawn, then render) |
 | memory | `resourceLimits`, 128 / 32 MB | none, and no browser equivalent |
 | the node | `bytesEnvelope(node.view)`, a real `node.hex` | assembled from `result.payload` |
+| the gesture | `?read=<lens>:<entity>` on the route, full door only | intercepted in the page, composed into a `loam_query` |
+| the projection | `bytesEnvelope(node.view)` — the whole resolved view | `_view`, deliberately the same set |
+| a read refusal | the door's own refusal, mapped to the floor's enum | an MCP code, mapped to the floor's enum |
 
 Two instances are ready to bite, today, without anyone writing an unusual bundle:
 
-1. **`node.hex` is a META field.** `RenderNode` is `{ entity, view, hex }` — and two of its three
-   members come from `gql.ts`'s meta set (`_entity`, `_hex`), not from `consumes`. Criterion 5's
-   "every field in `consumes` and nothing outside it," read literally by a builder, hands the bundle an
-   empty or fabricated hex. A bundle using it as an ETag, a cache key, or a change detector then
-   misbehaves on **one host only** — the divergence that is hardest to find, because the code is
-   provably the same code.
+1. **`node.hex` is a META field, and `node.view` is WIDER than `consumes`.** `RenderNode`'s members come
+   from `gql.ts`'s meta set (`_entity`, `_hex`) as much as from props, and `serveRouteImpl` hands over
+   `bytesEnvelope(node.view)` — the whole resolved view, which rhizomatic's `resolveView` fills beyond
+   `schema.props` (unnamed props through `schema.default`, then decoration and resolvers). An artifact
+   document restricted to `consumes` would therefore hand the same bundle an empty `hex` AND a narrower
+   view, so a bundle using `hex` as a cache key, or touching a prop outside `consumes` — which §23.4 does
+   not forbid; it only proves `consumes ⊆ props` — misbehaves on **one host only**: the divergence that is
+   hardest to find, because the code is provably the same code. Recommendation 18's `_view` projection is
+   the resolution, and criterion 1's fixture must read an out-of-`consumes` prop or it cannot see this.
 2. **`Buffer`, or 501 milliseconds.** A bundle that uses a Node builtin, or that renders in 600 ms,
    works fine in the artifact and 500s on the host route. The operator ships an app that only works
    where they happened to test it.
 
-Three resolutions, and they compose:
+**Two more instances the mediated channel would have created**, both caught before they were built and
+both fixed the same way — by making the floor's shape identical rather than nearly identical. An OPTIONAL
+`reads` (or `state`) member: a bundle that draws it on a host where it is absent throws or paints nothing,
+on one host only — hence Recommendation 18's insistence that both are **always present and always
+objects**, empty until a gesture is honored. And an MCP-shaped refusal code inside `reads[key].error`: the
+server host has no broker and can never produce `needs_reauth`, so a bundle branching on it diverges — hence
+the floor's own four-code enum, mapped at each host's seam.
+
+Five resolutions, and they compose:
 
 - **Criterion 1 compares OUTPUT.** The shell's rendered mount-point markup equals the host route's
-  HTML body for one entity, over a fixture bundle that reads `consumes` fields AND `hex`. Bundle
-  byte-equality stays — it is §23.1's attestation — and stops being the whole claim.
-- **Criterion 5's field list is `consumes` PLUS the meta fields the `RenderNode` contract requires**:
-  `_entity` and `_hex`, named, and nothing else. "Nothing outside it" was right in spirit and wrong by
-  exactly two fields, and reading it literally is what would have emptied the hex.
-- **Recommendation 10 — a fifth pack refusal: a bundle whose SOURCE names a host-specific global.**
-  Two families, both statically decidable from source the packer already holds: browser reach
-  (`window`, `document`, `globalThis`, a dynamic `import(`) and Node reach (`require(`, `node:`,
-  `Buffer`, `process`). A conforming `RenderFn` needs none of them; it is a pure function of its
-  argument. This is the cheap pack-time half of confinement, and it is also what makes criterion 1's
-  output-equality **achievable rather than aspirational** — a bundle that packs is a bundle that
-  behaves the same on both hosts.
+  HTML body for one entity, over a fixture bundle that reads `consumes` fields, `hex`, AND a prop outside
+  `consumes`. Bundle byte-equality stays — it is §23.1's attestation — and stops being the whole claim.
+- **Criterion 35 compares output after a GESTURE**, which is the same claim extended to the interactive
+  app: `reads` and `state` structurally equal on both hosts for the same request, and the same
+  host-neutral code when it fails.
+- **Criterion 5's projection is `{ _entity _hex _view }`, and it is a FIXED selection set rather than a
+  field list at all.** The first draft asked for "every field in `consumes` and nothing outside it," which
+  was wrong twice: it would have emptied the hex (two of the node's three original members are meta), and
+  it would have narrowed the view below what the other host serves. A fixed selection set has no list to
+  get wrong and no `legal()`-mangled name to guess.
+- **Recommendation 10 — a fifth pack refusal: a bundle that REFERENCES a host-specific global.** Three
+  families, not two, because the earlier draft's list was drawn from the page realm and the bundle runs in
+  a WORKER realm: browser reach (`window`, `document`, a dynamic `import(`), Node reach (`require(`,
+  `node:`, `Buffer`, `process`), and — the family that matters most and was missing —
+  **worker-realm reach that survives `terminate()`**: `indexedDB`, `caches`, `BroadcastChannel`,
+  `importScripts`, plus `self`, `globalThis`, and `fetch` as the doors to them. A worker global scope has
+  no `window` and no `localStorage`, which is what made the first list look complete; it does have those,
+  as bare identifiers, and a bundle calling `indexedDB.open("keep")` would hold a copy across every
+  render and every teardown — falsifying §*What forgetting costs* exactly where it claims confinement
+  makes §11 reach a client. A conforming `RenderFn` needs none of them; it is a pure function of its
+  argument.
 
-  Said honestly: a source scan is defeatable by string construction (`globalThis["win"+"dow"]`), so it
-  is the cheap half and never the enforcing one — Recommendation 9's boundary is. **Both, not either**,
-  which is the same discipline the other refusals already run: prove what is decidable, confine what
-  is not.
+  **And it scans REFERENCES, not substrings, which is the other repair this recommendation owed.** A
+  substring scan refuses the bundles §23.2 names as the target shape: *"a React renderer bundles its own
+  React and returns `renderToString(...)`"*, and bundler output for that routinely contains
+  `process.env.NODE_ENV` guards, a `globalThis` polyfill, and `typeof document !== "undefined"` checks. It
+  also refuses `processNote`, `documentTitle`, and any of the tokens inside a comment. A scan that
+  refuses nearly every real bundle is not a cheap guard, it is a broken door — and a rail that only
+  measures true positives stays green while it happens. So: parse the module, look at FREE identifiers
+  and member expressions, and criterion 20 carries a real bundled-React fixture that must **pack**.
+
+  Said honestly in the other direction too: even a reference scan is defeatable by construction
+  (`globalThis["win"+"dow"]`), so it is the cheap half and never the enforcing one — Recommendation 9's
+  boundary is. **Both, not either**, which is the same discipline the other refusals already run: prove
+  what is decidable, confine what is not.
 
 Time parity comes with the worker: the shell carries the same wall-clock budget, and
 `render-worker.ts` exports `RENDER_TIMEOUT_MS` precisely so a host may adopt or tighten it. **Memory
@@ -392,9 +948,22 @@ than papered over; the tab, not the store, is what a memory-hungry bundle can hu
 
 ## The page a stranger holds
 
-**Recommendation 11 — ACCEPT the residual in v1, name it as a property of this target, pin it with a
-rail, and mitigate the one half that is cheap. (Myk)** — the alternative changes scope, so it is his
-call. The argument:
+**Recommendation 11 — ACCEPT the residual, name it as a property of this target, pin it with a rail, and
+mitigate the one half that is cheap. DECIDED (Myk, 2026-07-25).** His framing is better than the one this
+section was reaching for, and it belongs in the prose: *"if I open a website and it's open in my browser
+and you take down the server, what's on my browser is still there until I close it. Artifacts are kinda
+like that, but with a bit more persistence, since Claude has to actually build the artifact using the code
+supplied by the deltas. Maybe we bake in a liveness check or something, or ask Claude to? I'm not too
+worried about this."*
+
+**The browser-tab analogy is the right register, and the ONE way an artifact differs from a tab is the
+thing to be honest about.** A tab holds a page a server sent, and closing it ends the matter. An artifact
+holds code CLAUDE BUILT from the deltas, and it persists where artifacts persist — a conversation, a
+gallery, a link a viewer can re-open next week. So the page is not merely a stale copy in flight; it is a
+durable reconstruction, and a renderer the operator withdrew can still be re-opened and re-run from it
+unless something checks. That is a real difference of degree, it is bounded (the DATA is never in the page
+— criterion 3 proves it at the bytes), and it is accepted. The liveness check is a **named follow-on, not a
+blocker**, exactly as Myk put it. The argument for why it is a follow-on rather than a line of plumbing:
 
 **Why not simply add the liveness read.** It sounds like a line in the shell — read the current
 binding's content address before mounting, darken if the route is no longer declared and bound — and
@@ -426,9 +995,12 @@ visible; an implied one is the kind that gets discovered by a stranger.
 
 ## Fail closed at pack time, where the answer is decidable
 
-**Six refusals** — four the first draft named, plus the two the premortem earned. Each is a case where
-the artifact host genuinely cannot honor something the host target promises, or where the two hosts
-would diverge behind one content address, and where quietly degrading would break a §23 guarantee.
+**Six refusals** — four the first draft named, two the premortem earned. Each is a case where the artifact
+host genuinely cannot honor something the host target promises, or where the two hosts would diverge
+behind one content address, and where quietly degrading would break a §23 guarantee. (A seventh and
+eighth were drafted for the retired request-surface declaration; retiring the declaration retired them,
+which is the smallest kind of evidence that Recommendation 14 is the simpler design — a boundary that
+needs no refusals of its own.)
 
 1. **A version-pinned binding refuses.** A pinned binding must resolve THAT frozen reading (§21/§23.6
    — a pin never silently slides). Pinned reads exist on the REST door (`/rest/@<deltaId>` →
@@ -463,6 +1035,10 @@ would diverge behind one content address, and where quietly degrading would brea
    connector the same thing is a collision the packer cannot see, and its runtime face is
    `selection_required` (below). That hazard is **documentation plus a degraded state**, never a
    refusal — the packer has no way to know what else a viewer has installed.
+Two things that are deliberately NOT refusals, because the store is a better judge than the packer: a
+gesture at a lens the viewer's store does not serve (the store's own refusal is more accurate — §*The
+shell's mediation contract*), and a read at an entity that does not exist (an empty view is a lawful
+answer, not an error — `gql.ts` says so).
 
 ## What the page is, mechanically
 
@@ -483,11 +1059,19 @@ posture agree here.
   implementation unknown here; the rail is the invariant (verbatim bytes, no eval, no external
   request, no ambient MCP), not the mechanism.
 - **The shell is the client HOST ADAPTER** — the seam that makes this ticket's second half cheap. It
-  holds the coordinates, calls `watchTool`, assembles a `RenderNode` (`{ entity, view, hex }`) from
-  `result.payload`, posts it to the confined bundle, and writes the returned string into its mount
-  point. **One watch per (lens, entity)** — well inside the 64-per-view limit, and coalesced by the
-  shell. Because the shell is the ONLY holder of an MCP handle, it is also the only place traffic can
+  holds the coordinates, calls `watchTool`, assembles a `RenderNode`
+  (`{ entity, view, hex, reads }` — `reads` present and empty on the first paint) from
+  `result.payload`, posts it to a freshly-spawned confined worker, and writes the returned string into
+  its mount point. **Exactly ONE watch, for the root reading** — every mediated read is an uncached
+  one-shot instead (Recommendation 19), so the 64-per-view ceiling is unreachable rather than merely
+  distant. Because the shell is the ONLY holder of an MCP handle, it is also the only place traffic can
   be counted, which is what makes Recommendation 9's rail assertable at all.
+- **The shell is also the MEDIATOR** — it intercepts `data-loam-read` gestures on the markup the bundle
+  returned, composes the `loam_query` one-shot for that lens and entity, folds the answer (or the
+  refusal) into `node.reads`, and re-renders in a fresh worker. It adjudicates nothing: the boundary is
+  the schema the viewer installed and the token their connector carries (Recommendation 14). The point to
+  carry here is that interception is ONE seam for both verbs — a `<form>` submit becomes `loam_mutate`, a
+  read gesture becomes `loam_query`, and the renderer author wrote ordinary markup for both.
 - **Recommendation 12 — the watch pins its cache OFF, explicitly, in the call.**
 
   ```js
@@ -569,6 +1153,13 @@ demonstrate. The React host becomes a swap of the data client. **This is worth M
 — the ticket title says "EITHER … OR", and this recommendation delivers one arm plus the seam rather
 than both arms. **(Myk)**
 
+**And the mediated channel is what makes that claim testable rather than rhetorical.** §*Does this
+unify* has the argument: because a request is `data-loam-read` MARKUP validated by one exported
+function, the seam is a declaration plus a gesture vocabulary rather than a client API — so the
+server-rendered host can honor the same gesture as a plain `?read=` navigation TODAY, in this ticket,
+which is the parity rail (criterion 35). A seam proven across two hosts is a seam; a seam described for
+one host is a plan.
+
 ## Sequencing with T78
 
 **T79's contract needs nothing from T78; T79's DEMO does.** A statically-mounted gateway already
@@ -590,20 +1181,38 @@ rendering with its onboarding copy.
 An anonymous (tokenless) MCP door — flagged for Myk above, deliberately out of scope. Pinned reads
 over MCP (the named follow-on behind refusal 1). **A `loam_manifest` read over constitutional
 publication state** — the named follow-on behind Recommendation 11, and the only thing that would let
-withdrawal reach an already-emitted page. The React host itself (§23.11's deferred unit, though this
-spec fixes the seam it will use). Non-custodial client signing — the viewer's *key* never enters this
+withdrawal reach an already-emitted page (it is NOT subsumed by the capability statement; see
+Recommendation 17 for why the two questions differ). **READ-TIME PARAMETERS — the one real gap, and the
+follow-on this spec most wants built** — rhizomatic has `Hole` / `Bindings` / `substituteHoles` and
+`evalTerm` accepts bindings; Loam supplies them from no door, so free-text search is unexpressible and
+waits on it (§*The one real gap*, Recommendation 15). **A caller-supplied `Term`** — refused on the
+merits, not deferred: handing an app the gather algebra is the widest disclosure surface in the system.
+**Host-affordance verbs** — a `data-loam-prompt`-style gesture for `sendPrompt`-class affordances is the
+named extension of Recommendation 18's vocabulary, deliberately not shipped here (§*Two deploy
+surfaces*). The React host itself (§23.11's deferred unit, though this
+spec fixes the floor it will conform to). Non-custodial client signing — the viewer's *key* never enters this
 design, only their *identity*, and §23.3's user's-own-pen variant still waits on the browser host.
 Chunked bundle economics (§23.10) and what happens when a bundle exceeds an artifact page's practical
 size. Multi-entity or entity-choosing pages: the page's identity is `(route, entity)`, exactly as the
 host route's is. Rating, discovery, and the manifest conventions a published artifact might carry
 (T77). And the §29/§30 numbering, which is a landing-time detail.
 
-**Three residuals stated rather than closed**, each named where it lives so nobody discovers it as a
+**Seven residuals stated rather than closed**, each named where it lives so nobody discovers it as a
 surprise: a browser worker takes no `resourceLimits`, so the artifact host has **no memory bound** (the
-tab is what a hungry bundle can hurt, not the store); the pack-time source scan is **defeatable by
-string construction**, which is why it is the cheap half of confinement and never the enforcing one; and
-a **cross-publisher connector-name collision** is invisible to the packer, so it is documentation plus
-the `selection_required` degraded state rather than a refusal.
+tab is what a hungry bundle can hurt, not the store); the pack-time reference scan is **defeatable by
+string construction**, which is why it is the cheap half of confinement and never the enforcing one;
+**GraphQL introspection is enabled on the full door** (the gateway passes no `validationRules`), so any
+token-bearing caller can enumerate every lens, prop, mutation, and claim template the store serves —
+pre-existing, not T79's to change, and named because it bounds how much the capability statement can
+honestly claim to be telling a viewer something they could not otherwise learn; **the artifact host asks
+for the whole resolved view** (`_view`) rather than a minimized field set, which is the price of a
+projection that needs no per-lens field list and is exactly what the server host already resolves; a
+**cross-publisher connector-name collision** is invisible to the packer, so it is documentation plus
+the `selection_required` degraded state rather than a refusal; **an emitted page is a durable
+reconstruction rather than a stale tab** — accepted (Recommendation 11), with the liveness check as a
+named follow-on; and **the last delivered answer stays painted**
+on the viewer's own screen until the next render replaces it, so Loam's reach ends at the last answer it
+served (criterion 23 bounds it to the next non-data event).
 
 ## Acceptance criteria (T79's build transcribes these; each names its verification)
 
@@ -612,10 +1221,13 @@ the `selection_required` degraded state rather than a refusal.
    (`esmAddress(recovered) === esmAddress(binding.bundle)`), and the same binding still serves its
    HTML unchanged at `GET /:mount/app/<route>/<entity>`. No `target` role exists in the binding's
    claims (the delta's pointer roles are asserted as the pre-T79 set). **And the two hosts AGREE on
-   output**: over a fixture bundle that reads both `consumes` fields and `hex`, the shell's rendered
-   mount-point markup equals the host route's HTML body for the same entity. Byte-equality alone would
+   output**: over a fixture bundle that reads `consumes` fields, `hex`, **and at least one prop OUTSIDE
+   `consumes`**, the shell's rendered mount-point markup equals the host route's HTML body for the same
+   entity. The out-of-`consumes` prop is the load-bearing part of the fixture, not a flourish: the host
+   route hands the bundle the whole resolved view, so a shell that asked only for `consumes` would render
+   differently here and a fixture reading only `consumes` could never see it. Byte-equality alone would
    pass while the two hosts rendered differently — that is the divergence this criterion exists to
-   catch, so the output comparison is the load-bearing half. — `test/gateway/artifact-pack.test.ts`
+   catch. — `test/gateway/artifact-pack.test.ts`
    (delta level: the binding's roles and the recovered bytes) + `test/site/artifact-shell.test.ts`
    (object level: both hosts' renderings compared).
 2. **Publication is a declaration, and it fail-closes both ways.** `packArtifact` on an UNDECLARED
@@ -635,15 +1247,17 @@ the `selection_required` degraded state rather than a refusal.
    first three are the channels CSP already closes; the fourth is the one it does not, and a harness
    that traps only the dead three proves nothing about the live one (criterion 19 is where that trap
    does its real work).
-5. **The read is LIVE, it is a watch, and it asks for exactly the contract's fields.** In a harness
-   with a stubbed `window.claude.mcp`: loading the page registers exactly one `watchTool` against
-   `(server, "loam_query")`, whose document names the binding's lens and **every field in `consumes`
-   plus exactly the meta fields the `RenderNode` contract requires — `_entity` and `_hex` — and nothing
-   else**; delivering a second `{type:"data"}` event with a changed value re-renders the mount point to
-   the new value. The meta fields are named explicitly because `RenderNode` is `{ entity, view, hex }`
-   and two of its three members are meta rather than consumed: a document restricted to `consumes`
-   alone would hand the bundle an empty `hex`, and a bundle using `hex` as a cache key would then
-   misbehave on this host only. — `test/site/artifact-shell.test.ts`.
+5. **The read is LIVE, it is a watch, and its projection is `_view` — the same view the other host
+   hands over.** In a harness with a stubbed `window.claude.mcp`: loading the page registers exactly one
+   `watchTool` against `(server, "loam_query")`, whose document is
+   `<lens>(entity:) { _entity _hex _view }` — asserted as that exact selection set, with **no enumerated
+   field list and no `asOf`**; delivering a second `{type:"data"}` event with a changed value re-renders
+   the mount point to the new value. The projection is asserted positively, and the reason belongs in the
+   test header: a `consumes`-only document would hand the bundle a strictly NARROWER view than
+   `serveRouteImpl`'s `bytesEnvelope(node.view)`, which is a divergence behind one content address, and it
+   could not name a gesture-chosen lens's fields at all (they are `legal()`-mangled store-side). **And the
+   node carries `reads` AND `state` as present, EMPTY objects on the first paint** — not absent — so a
+   renderer sees one shape on both hosts from the first render. — `test/site/artifact-shell.test.ts`.
 6. **The manifest is minimal, enumerated, and never constitutional.** A read-only binding's emitted
    capability declaration lists exactly `["loam_query"]`; a write-enabled one exactly
    `["loam_query","loam_mutate"]`; `loam_register` appears in no emitted manifest, and a pack forced
@@ -654,12 +1268,18 @@ the `selection_required` degraded state rather than a refusal.
    `annotations.readOnlyHint === true` for `loam_query` and `false` for `loam_mutate` and
    `loam_register`. — `test/server/mcp-tool-honesty.test.ts` (delta level: the ground before/after;
    object level: what the door answered). This rail must fail if the mutation-refusal is reverted.
-8. **Identity rides the connector, not the page.** The SAME emitted bytes, driven by two stubbed
-   connectors whose tokens map to two different `TokenIdentity` entries, render two different
-   readings; a token with no read standing on that lens renders the refusal path rather than partial
-   data. Neither token appears in the page. — `test/site/artifact-shell.test.ts` +
+8. **The STORE rides the connector, not the page — and the boundary asserted is the MOUNT.** The SAME
+   emitted bytes, driven by two stubbed connectors pointing at two different MOUNTS, render two different
+   readings; a connector pointing at a mount that does not serve that lens renders the refusal path rather
+   than partial data. Neither token appears in the page. **What is deliberately NOT asserted:** "two
+   actor tokens on ONE mount render two different readings" — unsatisfiable, because
+   `SurfaceHooks.resolve(schemaName, entity, asOf?)` carries no identity and every query field resolves
+   through it without a context value (`src/surface/surface.ts`, `src/gateway/gql.ts`); a token
+   individuates WRITE standing (criterion 10), and §7's isolation unit for reads is the mount. Asserting
+   the token version would have been satisfiable only by a stubbed harness inventing two answers — a green
+   rail over a false claim. — `test/site/artifact-shell.test.ts` +
    `test/server/mcp-tool-honesty.test.ts`
-   (the two identities' answers over real HTTP).
+   (two mounts' answers over real HTTP).
 9. **The pen never rides an artifact, and the HOST gets the last word about who writes.** Three
    assertions in place of the first draft's four. (a) Packing a pen-holding binding refuses without the
    explicit acknowledgement, naming the pen — and a bundle whose SOURCE contains the pen name refuses on
@@ -726,7 +1346,7 @@ the `selection_required` degraded state rather than a refusal.
 17. **The CLI is a thin client of the door.** `loam artifact pack <mount>/<route>/<entity>
     --connector <name> --out page.html`
     writes bytes byte-identical to the door's body, and refuses with the identical message on every one
-    of the six refusals — criteria 2, 9, 11, 12, 13, 20, and 27. — `test/cli/artifact.test.ts`.
+    of the six refusals — criteria 2, 9, 11, 12, 13, 20, 27, and 37. — `test/cli/artifact.test.ts`.
 18. **A dangling mount degrades, never blanks.** With the connector pointing at a mount that has been
     removed (T78's `removeMount`, or a mount that never existed), the page renders its degraded state
     with the onboarding copy rather than a blank or partially-populated view.
@@ -739,17 +1359,33 @@ the `selection_required` degraded state rather than a refusal.
     `watchTool` are instrumented at the single seam and a **fixture bundle that deliberately attempts
     `window.claude.mcp.callTool(server, "loam_mutate", …)`** is mounted. Assertions: the total call
     count equals the shell's own (one `watchTool`, plus any form-driven `loam_mutate` the test performs
-    itself) and not one more; the store's delta count is unchanged by the bundle's attempt; and inside
-    the bundle's realm `window` and `window.claude` are **undefined** rather than filtered. The fixture
+    itself) and not one more; the store's delta count is unchanged by the bundle's attempt; and the
+    fixture bundle **REPORTS, in its returned markup, which host globals it can see** — asserted to be
+    none of `window`, `self`, `indexedDB`, `caches`, `BroadcastChannel`, `fetch`. The report is positive
+    on purpose: "assert `window` is undefined inside the realm" is **vacuous in this repo's test
+    environment**, where `vitest.config.mjs` sets no `environment` and no DOM package is installed, so
+    `window` is undefined in every Node realm and that clause passes with confinement deleted. This
+    criterion therefore also fixes the harness: it needs a realm that HAS the globals outside the
+    compartment, or it proves nothing about the compartment. The fixture
     must actually try — a passing harness with a bundle that never reaches for a door proves the
-    boundary is decorative. **This rail must fail if the confinement is removed** and the bundle is
-    imported on the page instead. — `test/site/artifact-shell.test.ts` (object level: the traffic count
-    and the realm) + `test/server/artifact-write.test.ts` (delta level: nothing landed).
-20. **A bundle that names a host-specific global refuses at pack time.** Packing refuses, naming the
-    offending token, for each of `window`, `document`, `globalThis`, a dynamic `import(`, `require(`,
-    `node:`, `Buffer`, and `process` in the bundle source; a conforming pure `RenderFn` fixture packs
-    successfully. The test states in its header that a source scan is defeatable by string construction
-    and that criterion 19's boundary is the enforcing half — this is the cheap one.
+    boundary is decorative. **And the count still holds after INTERACTION**: driving three
+    `data-loam-read` gestures adds exactly three `callTool`s and no `watchTool`s, so mediation buys the
+    bundle no reach — the request surface is the shell's authority, never the compartment's. **This rail
+    must fail if the confinement is removed** and the bundle is imported on the page instead. —
+    `test/site/artifact-shell.test.ts` (object level: the traffic count and the realm) +
+    `test/server/artifact-write.test.ts` (delta level: nothing landed).
+20. **A bundle that REFERENCES a host-specific global refuses at pack time — and a real bundle still
+    packs.** (a) Packing refuses, naming the offending reference, for each of the three families:
+    `window` / `document` / dynamic `import(`; `require(` / `node:` / `Buffer` / `process`; and the
+    worker-realm family that survives a teardown — `indexedDB`, `caches`, `BroadcastChannel`,
+    `importScripts`, `self`, `globalThis`, `fetch`. (b) **A conforming pure `RenderFn` packs, AND so does
+    a real `esbuild`-bundled React renderer** — the shape §23.2 names as the target — whose output
+    contains `process.env.NODE_ENV`, a `globalThis` polyfill, and a `typeof document !== "undefined"`
+    guard inside dead branches, plus identifiers like `processNote` and `documentTitle`. (b) is the half
+    that makes this rail honest: a criterion measuring only true positives stays green while the door
+    refuses nearly every real bundle, so the scan must look at FREE IDENTIFIERS and member expressions
+    rather than substrings. The test header records that even a reference scan is defeatable by string
+    construction and that criterion 19's boundary is the enforcing half — this is the cheap one.
     — `test/gateway/artifact-pack.test.ts`.
 21. **The bundle runs under a wall-clock bound on BOTH hosts.** A fixture bundle that spins forever is
     terminated by the shell within the same budget the host uses (`RENDER_TIMEOUT_MS`, exported from
@@ -763,26 +1399,37 @@ the `selection_required` degraded state rather than a refusal.
     `cache: { staleTime: 0, gcTime: 0 }` — asserted on the recorded call, since zero `gcTime` is the
     only expression of "keep nothing" the API accepts and the inherited default from `readOnlyHint:
     true` is a five-minute retention. — `test/site/artifact-shell.test.ts`.
-23. **No non-data event ever leaves a previous view painted.** For EVERY non-data event the harness can
-    deliver — each error `code` in criterion 15, plus a `revalidating: true` replay — the mount point
-    no longer contains the sentinel value from the last successful render. Asserted by the **absence of
-    the sentinel**, never by the presence of a banner: a banner assertion passes while stale content
-    sits underneath it, and this criterion exists because that stale content may be post-erasure. A
-    re-boot of the page after the entity's deltas are erased paints no pre-erasure value. —
+23. **No non-data event ever leaves a previous view painted — in the mount point OR in the accumulated
+    readings.** For EVERY non-data event the harness can deliver — each error `code` in criterion 15,
+    plus a `revalidating: true` replay — (a) the mount point no longer contains the sentinel value from
+    the last successful render, and (b) the shell's accumulated `reads` map is
+    dropped WHOLE, asserted by re-rendering and finding no drilled-down sentinel either. Both halves are
+    asserted by the **absence of the sentinel**, never by the presence of a banner: a banner assertion
+    passes while stale content sits underneath it, and this criterion exists because that stale content
+    may be post-erasure. Clearing the paint while three drilled-down copies survive in a map is the
+    H7 shape — a completeness claim the bytes do not have. A re-boot of the page after the entity's
+    deltas are erased paints no pre-erasure value and starts with an empty map. —
     `test/site/artifact-shell.test.ts`
-    (object level: the mount point) + `test/gateway/artifact-pack.test.ts` (delta level: the erasure
-    landed and the store no longer serves it).
+    (object level: the mount point and the map) + `test/gateway/artifact-pack.test.ts` (delta level: the
+    erasure landed and the store no longer serves it).
 24. **A store that serves a DIFFERENT schema gets a named, actionable message.** With the stubbed
     connector answering `loam_query` as a store that does not serve the lens (and again as one whose
     prop names differ after `legal()` mangling), the mount point contains the lens name and the store's
     own reported error, and contains neither a blank body nor a partial view with `undefined` where a
     consumed field belongs. This is the `tool_error` path, and it is the case a published page meets
     most often. — `test/site/artifact-shell.test.ts`.
-25. **The emitted write surface is pinned to the acknowledged `writable` set.** The page carries the
-    set it was packed for; the shell maps a submitted form field to `loam_mutate` only if the field is
-    in that set, and a field outside it produces zero `loam_mutate` calls. Then: re-registering the
-    schema with a WIDER `writable` does not widen the already-emitted page (the same bytes still refuse
-    the new field), while the host route honors the wider set — the asymmetry stated as a rail. —
+25. **The emitted write surface is pinned to the acknowledged `writable` set — and that pin is an
+    ACKNOWLEDGEMENT, not an allow-list.** The page carries the set it was packed for; the shell maps a
+    submitted form field to `loam_mutate` only if the field is in that set, and a field outside it
+    produces zero `loam_mutate` calls. Then: re-registering the schema with a WIDER `writable` does not
+    widen the already-emitted page (the same bytes still refuse the new field), while the host route
+    honors the wider set — the asymmetry stated as a rail. **Why this does not contradict criterion
+    30(d)'s "no shadow allow-list" for reads**, which the test header must state or the two rails read as
+    opposites: a WRITE has a pack-time acknowledgement (Recommendation 8 — the operator looked at a pen or
+    a narrowed set and said yes), so the page's pin RECORDS a human decision, and widening it should
+    require making that decision again. A read has no analogue: there is nothing acknowledged, so a
+    page-side read filter would record nothing and merely constrain the app while claiming to constrain
+    the viewer. Neither pin is a boundary (criterion 36); one is a receipt. —
     `test/site/artifact-shell.test.ts`
     + `test/server/artifact-write.test.ts`.
 26. **The residual is PINNED, not implied: an emitted page outlives its withdrawal.** After
@@ -798,42 +1445,206 @@ the `selection_required` degraded state rather than a refusal.
     packs. The test header records that a cross-publisher name COLLISION is not refusable — the packer
     cannot see what else a viewer installed — and points at criterion 15's `selection_required` row as
     its runtime face. — `test/gateway/artifact-pack.test.ts`.
+28. **The SCHEMA is the request surface: T79 adds no capability vocabulary, and the boundary is the
+    store's.** (a) A renderer binding pushed after T79 carries the SAME pointer roles as before it —
+    asserted as an exact set over the binding delta's claims, so no `reads`-style role was smuggled in and
+    no migration is owed; (b) a gesture naming a lens the viewer's store HAS registered is served, and the
+    identical gesture against a store that has not registered that lens returns the STORE's refusal with
+    zero fabricated or partial data; and (c) the SAME emitted bytes produce different served sets against
+    two mounts whose registered lens sets differ — the positive form of the boundary claim. **What is
+    deliberately NOT asserted:** "a gesture naming a field the lens does not serve is refused" — a gesture
+    names a lens and an entity and never a field (Recommendation 18), and the projection is `_view`, so
+    there is no per-field gesture to refuse; asserting it would have meant hand-composing a document, i.e.
+    testing `/graphql` rather than the mediated channel. The test header states the design claim it
+    defends: the pair (installed schema, the mount the connector points at) is the whole read boundary. —
+    `test/gateway/artifact-reads.test.ts` (delta level:
+    the binding's roles) + `test/site/artifact-shell.test.ts` (object level: what each store answers).
+29. **The bundle never asks: `RenderFn` is unchanged and no channel crosses the compartment.** The
+    fixture app paginates, searches, and drills down, and throughout: (a) the bundle's default export is
+    still `(node) => string` — synchronous, its return value a string, asserted by calling it directly
+    outside the shell; (b) the worker receives exactly one message per render (`{ bundle, node }`) and
+    posts exactly one back (`{ kind }`), asserted on an instrumented port, so there is no request channel
+    to widen; (c) the SAME bundle bytes drive both hosts, `esmAddress`-equal; and (d) **the PAGINATING
+    half is asserted specifically**, because it is the one that had nowhere to live: the page index rides
+    `node.state`, echoed by the shell from the gesture's `data-loam-*` attributes, and the fixture holds no
+    module-scope state (criterion 34(a) asserts it could not) and never reads the DOM (it has no
+    `document`). A design that gave the bundle an async `request()` would fail (a); a design with no
+    `state` member would fail (d) — that is the point of asserting both. —
+    `test/site/artifact-shell.test.ts` + `test/gateway/renderers.test.ts`.
+30. **A gesture becomes exactly one query, with a fixed projection and no shadow allow-list.** In the
+    shell harness: (a) one `data-loam-read` gesture issues exactly ONE `loam_query` whose document is
+    `<lens>(entity:) { _entity _hex _view }` — asserted as that exact selection set, with no enumerated
+    field list (the page cannot know a gesture-chosen lens's `legal()`-mangled field names) and **no
+    `asOf`** (the time axis is reachable through the schema and the shell does not reach for it); (b) the
+    answer lands in `reads["<lens>@<entity>"]` on the node the worker next receives, and a second gesture
+    at a DIFFERENT entity leaves the first entry intact; (c) a read at an entity the store has nothing for
+    delivers a SUCCESS carrying an empty view — never an error code — so the renderer's own "nothing here"
+    path is what a viewer sees; and (d) the shell refuses NO gesture of its own accord: driving a lens the
+    store will serve produces a query rather than a page-side rejection, asserted so that a future shadow
+    allow-list would fail this rail. — `test/site/artifact-shell.test.ts`.
+31. **A refusal is legible INSIDE the app, in a HOST-NEUTRAL vocabulary, and the host has the last word.**
+    (a) Each MCP code from criterion 15 arriving on a mediated read maps to one of the floor's four codes —
+    `not_served`, `refused`, `unavailable`, `needs_connection` — and the next render's node carries
+    `reads[key].error` with THAT code and a message, asserted on the node the worker actually received. The
+    mapping is the load-bearing half: an MCP code reaching the bundle would be unproducible by the
+    server-rendered host, which has no broker, so a bundle branching on `needs_reauth` would behave
+    differently on one host behind one content address. (b) a fixture renderer
+    that draws `reads` paints the message where the answer would have gone, and the previously rendered
+    content is still present (a refused drill-down does not blank the page); and (c) with a fixture
+    renderer that IGNORES `reads` entirely, the shell's own status line — outside and after the mount
+    point, per criterion 9's DOM-order rule — still names the refusal, so no refusal is invisible. —
+    `test/site/artifact-shell.test.ts`.
+32. **The capability statement is DERIVED from the schema, cannot be authored, and names every axis the
+    schema opens.** (a) The statement names the registration's readable props, its `writable` set, its
+    claim templates, the binding's `consumes`, and the tool manifest — asserted against a binding whose
+    bundle SOURCE contains the false prose "this app reads nothing", which must neither appear in nor alter
+    the statement; (b) **it also names the three axes a fields-only derivation would drop**, each asserted
+    present: that a read returns the WHOLE resolved view (the projection is `_view`, wider than
+    `schema.props`), that the schema opens those fields' HISTORY (`asOf` / `_forgotten` ride every query
+    field), and that writes include the claim templates and not only `writable`. A statement listing only
+    props while the request surface carries all three would be the lying label this criterion exists to
+    prevent; (c) re-registering the schema with a NARROWER `writable` narrows the statement on the next
+    derivation, with no second source of truth to update, and the store refuses the removed field either
+    way; and (d) the statement says reads happen against the store the connector points at and writes
+    happen as the viewer's own author, and it appears both in the emitted page above the onboarding copy
+    and in the pack door's response. —
+    `test/gateway/artifact-capability-text.test.ts` (derivation) + `test/site/artifact-shell.test.ts` (its
+    place in the page).
+33. **A mediated read is an uncached one-shot, never a watch.** Over ten gestures: `watchTool` is called
+    exactly ONCE for the whole page's life (the root reading), every mediated read is a `callTool`
+    carrying `cache: false`, and no call carries a `cache` object with a non-zero `gcTime`. Asserted on
+    the recorded calls, because `cache: false` is stronger than the `gcTime: 0` criterion 22 pins on the
+    watch and is available only to the one-shot arm. The test header records why: the per-view watch
+    ceiling is 64 and a duplicate registration is `bad_request`, so watch-per-request is a defect that
+    surfaces as a bug report about page 65. — `test/site/artifact-shell.test.ts`.
+34. **The compartment retains nothing: a fresh realm per render, and no storage anywhere.** (a) A fixture
+    bundle that stores its node in module scope and returns the STORED value cannot paint a previous
+    render's value — proving the realm did not survive; (b) the worker instance the shell posts to is a
+    different instance on each render, asserted by identity; (c) **a bundle that reaches for a store that
+    OUTLIVES the realm is refused at pack time** — one fixture per channel (`indexedDB`, `caches`,
+    `BroadcastChannel`, `importScripts`), each refused by name, because a worker global scope has no
+    `window` and no `localStorage` but does have these, so `terminate()` alone does NOT empty the
+    compartment and the earlier draft's byte-scan over one conforming page could never have seen it; (d)
+    the SHELL writes no storage either — the emitted bytes reference no `localStorage`, `sessionStorage`,
+    `indexedDB`, or `document.cookie`, and a harness whose storage APIs are traps records zero writes
+    across a full interactive session; and (e) after an erasure lands and the root watch delivers, the map
+    is empty and the fixture bundle's stored copy is unreachable. This is the rail behind "confinement is
+    what makes §11 reach the client", and (c) is the half that makes the claim true rather than
+    aspirational — it must fail if the shell reuses one long-lived worker AND if the pack-time scan does
+    not cover the worker realm. — `test/site/artifact-shell.test.ts` (object level) +
+    `test/gateway/artifact-pack.test.ts` (the refusals, and delta level: the erasure landed).
+35. **The FLOOR is conformance, asserted on a GESTURE and not only on the first paint.** On the FULL door,
+    the host route honors the same gesture as `GET /:mount/app/<route>/<entity>?read=<lens>:<entity2>`: (a)
+    the `reads` AND `state` members the bundle receives are structurally equal to the ones the shell
+    assembles for the same gesture, and the rendered output is equal, over a fixture bundle that draws
+    both; (b) the same gesture against a lens the store does not serve yields the SAME host-neutral code
+    (`not_served`, criterion 31) on both hosts — equality of the refusal is asserted through that enum,
+    since the MCP broker's codes cannot exist on the server host; and (c) **on the PUBLIC door a `?read=`
+    is ignored and the route renders as it does today** — asserted, because a per-lens refusal there would
+    be the lens-existence oracle §17's uniform 404 closed, and because each honored `?read=` counts against
+    the render budget rather than multiplying resolutions per anonymous GET. The test header names the floor
+    explicitly — pure synchronous `RenderFn`, `{ entity, view, hex, reads, state }`, gesture markup, `_view`
+    as the projection, the schema as the surface — and names what is ABOVE it per host (the artifact's
+    `window.claude` affordances, the React host's own origin and streams), so no reader mistakes floor
+    conformance for one runtime. — `test/gateway/artifact-reads.test.ts` (the host
+    route, both doors) + `test/site/artifact-shell.test.ts` (the shell's side of the comparison).
+36. **The page holds no boundary of its own — and the viewer loses nothing by that.** Driving the shell
+    with a TAMPERED page whose embedded coordinates name a lens the app was never built around: the request
+    reaches the store and gets the STORE's answer — served if that mount has the lens REGISTERED, refused
+    with the store's own message if it does not — and in neither case does the tampered page exceed what
+    the same connector gets sending the same document to `/:mount/graphql`. Asserted against both a mount
+    that serves the extra lens and one that does not, so the criterion cannot pass by everything being
+    refused. The discriminator is deliberately the REGISTERED SET rather than "a token that may or may not
+    read it": `hooks.resolve` carries no identity, so a per-token read filter does not exist to assert
+    (criterion 8 records the same correction). The test header states the consequence plainly: the boundary
+    is the installed schema plus the mount, never the page. —
+    `test/site/artifact-shell.test.ts` + `test/server/mcp-tool-honesty.test.ts`.
+37. **A host-only affordance cannot reach a confined bundle, and the floor bundle uses none.** (a) A
+    fixture bundle that REFERENCES an artifact-only affordance (`window.claude.mcp`,
+    a `sendPrompt`-class call, `window.claude.downloads`) is REFUSED at pack time by
+    Recommendation 10's reference scan, naming it — so an app cannot silently become
+    artifact-only; and (b) the floor fixture, which uses none of them, packs and renders identically on
+    both hosts (criterion 35's comparison). The test header records the design decision this defends:
+    a host affordance reaches an app by MEDIATION (a gesture the shell honors), never by ambient reach,
+    and T79 ships the seam without shipping a prompt verb. — `test/gateway/artifact-pack.test.ts`
+    + `test/site/artifact-shell.test.ts`.
+
+## Decided since the premortem
+
+Four decisions from Myk, all 2026-07-25 in chat. The first widened the ticket; the second SHRANK it, which
+is the more valuable kind.
+
+**1. CONFINEMENT — DECIDED.** Recommendation 9 as written: the bundle runs in a Web Worker realm where
+`window.claude` does not exist, spawned per render, mirroring `src/gateway/render-worker.ts`'s protocol
+and lifetime, with the pack-time source scan (Recommendation 10) as its cheap half. *"I'd rather spec out
+the complex complete thing than ship a demo we have to walk back later. There will be an elegant solution
+we just have to find it!"* Shipping v1 unconfined with the reach merely NAMED is off the table. The
+decision widened the ticket rather than only settling it: a sealed compartment is what forced the request
+channel to be designed now instead of discovered later, and it is what makes §11 reach a client at all
+(§*What forgetting costs*, (d)). Criteria 19, 21, 29, 34, and 37 are its rails.
+
+**2. THE APP MODEL — DECIDED, and it retired a whole capability system.** An app fuses a renderer to a
+SCHEMA; both travel as deltas; the friend who installs it registers the schema in their own store, which
+serves it over MCP under their own credentials. *"The renderer can do whatever the schema allows, and the
+schema is provisioned with read and write access based on the user that has deployed it."* So the request
+surface is the app's own schema (Recommendation 14) and T79 adds **no capability vocabulary at all** — no
+`reads` role, no entity domains, no shell-side validator, no new refusals. The elegant solution was that
+the declaration already existed. Criteria 28, 30, 32, and 36 are its rails, and criterion 28's first
+clause is the one that keeps it honest: the binding's pointer roles are asserted UNCHANGED, so nobody can
+re-introduce a parallel declaration without a red test.
+
+**3. AN ARTIFACT REQUIRES A HOST STORE + MCP — DECIDED as a precondition, not a limitation.** *"You wanna
+run a loam app you gotta have a loam server with MCP configured and your user has to be associated with
+that somehow."* The runtime agrees in full: CSP blocks every other host, `window.claude.mcp` is the only
+channel, and there is no MCP door on the public branch. The design consequence is a POSTURE — a page with
+no connector is in its first run, not in a failure, and renders "connect your store" (§*A Loam app is not
+free-floating*).
+
+**4. THE EMITTED PAGE'S RESIDUAL — ACCEPTED.** *"If I open a website and it's open in my browser and you
+take down the server, what's on my browser is still there until I close it. Artifacts are kinda like that,
+but with a bit more persistence … I'm not too worried about this."* Recommendation 11 as recommended:
+accept it, state the asymmetry (the DATA never outlives its source, the CODE does), pin it with criterion
+26, ship the cheap `writable` mitigation (criterion 25), and keep the liveness check as a **named
+follow-on rather than a blocker**. The one honest difference from a browser tab is now in the prose: an
+artifact is a durable RECONSTRUCTION built from the deltas, so a withdrawn renderer can be re-opened and
+re-run from an old page unless something checks.
 
 ## Open for Myk
 
-The first two are new, they came out of the premortem, and they are first because they change what the
-ticket BUILDS rather than what it asserts.
+Two are new; the rest are confirmations. Everything the premortem left open has now been decided except
+these.
 
-1. **CONFINE the bundle** (Recommendation 9) — a Web Worker realm with no `window.claude`, mirroring
-   `render-worker.ts` server-side, plus the pack-time source scan (Recommendation 10) as its cheap half.
-   This is the recommendation. What it costs: the shell grows a worker boundary and a one-message
-   protocol — small, because `RenderFn` is already one value in and one string out, but not free. What
-   it buys: the artifact target is the **first host where a renderer holds authority at all**, and
-   unconfined, one line of operator-authored bundle code writes as the viewer across `gql.ts`'s entire
-   mutation root — on a shared multi-tenant mount, into fields no acknowledgement covered. The
-   alternative Myk may prefer is shipping v1 unconfined with the reach NAMED in the section and
-   restricted to single-tenant mounts; this spec does not recommend it, because §7's shared-mount case
-   is the common one and a named hazard in a spec is not a boundary in a page.
-2. **ACCEPT the emitted page's residual, or build the liveness read** (Recommendation 11). Recommended:
-   accept it in v1, state the asymmetry as a property of this target (the DATA never outlives its
-   source; the CODE always does), pin it with criterion 26, ship the cheap `writable` mitigation
-   (criterion 25), and name the follow-on — a `loam_manifest` read on the MCP door that the shell checks
-   before mounting. The alternative is building that read now, which means deciding what a viewer's
-   token may learn about the operator's publication law, and that is a disclosure decision of the same
-   weight as refusal 1's pinned read rather than a line of plumbing.
-3. **One arm plus the seam, not both arms** (Recommendation 13). T79 builds the artifact host and the
-   client-host seam; the React host stays a deferred §23.11 unit. Is that the right read of "EITHER …
-   OR"?
-4. **No anonymous MCP door.** Recommended unchanged: an artifact with no connector reads nothing.
+1. **The floor is the deliverable, and affordance verbs are follow-ons** (§*Two deploy surfaces*). The
+   artifact and React hosts are different DEPLOY SURFACES sharing a floor — pure synchronous `RenderFn`,
+   `{ entity, view, hex, reads }`, gesture markup, the schema as the surface — and each offers what the
+   other cannot. Confinement means an artifact-only affordance (`sendPrompt`-class, downloads) cannot
+   reach a bundle ambiently, so the recommendation is that such affordances arrive by MEDIATION, as one
+   more gesture verb the shell honors, and that T79 ships the seam without shipping a prompt verb
+   (criterion 37 refuses the ambient path at pack time). The alternative is letting an affordance-using
+   app opt out of the floor and be honestly artifact-only. Confirm which.
+2. **The demo story is FEDERATION, not a shared link.** The live capability contract says a page declaring
+   an `mcp` manifest cannot be shared publicly, so the app travels as deltas — push, federate, accept,
+   and the friend's own Claude packs and renders against their own store. This matches the workflow Myk
+   described and contradicts a sentence an earlier draft carried; confirming it also decides that the
+   capability statement rides the federated OFFER (Recommendation 17) and not only the page.
+3. **Read-time parameters are the follow-on this spec most wants** (Recommendation 15). The schema covers
+   drill-down, pagination, and keyed search; free-text search is unexpressible because Loam supplies no
+   `bindings` from any door, though rhizomatic has `Hole` / `substituteHoles`. The shape is narrow — a hole
+   binds a PRIMITIVE, never a Term — so it is values into a query the operator wrote. Confirm it is a
+   separate ticket rather than scope here.
+4. **One arm plus the floor, not both arms** (Recommendation 13). T79 builds the artifact host and the
+   floor; the React host stays a deferred §23.11 unit. Is that the right read of "EITHER … OR"? The
+   gesture design strengthens it: because a request is markup, the floor is provable across two hosts
+   inside this ticket (criterion 35) rather than promised for a third.
+5. **No anonymous MCP door.** Recommended unchanged: an artifact with no connector reads nothing.
    Opening a tokenless MCP surface is a separate trust decision.
-5. **Writes allowed, pen refused** (Recommendations 7 and 8). The artifact writes as the viewer, so
-   the pen cannot travel and the binding's `writable` narrowing does not bind — both refuse at pack
-   time unless acknowledged. The alternative (read-only artifacts in v1) is smaller and cuts the
-   demo's write half. Note that the pen obligation changed shape: the page cannot be required to omit
-   the pen NAME (unsatisfiable against a verbatim bundle), so the host takes the last word instead —
-   criterion 9.
-6. **The refusals that trade scope for honesty** — now six rather than four (a version-pinned binding, a
-   declared-`bytes` field, an undeclared route, a pen or narrowed `writable`, a host-specific global in
-   the source, an unusable connector name). Each names a small follow-on where one exists. Confirm the
-   refusals rather than the widenings.
-7. **Section number** — §30 recommended, since §29 already has two claimants (T64 and T77).
+6. **Writes allowed, pen refused** (Recommendations 7 and 8). The artifact writes as the viewer, so the
+   pen cannot travel and the binding's `writable` narrowing does not bind — both refuse at pack time
+   unless acknowledged. The alternative (read-only artifacts in v1) is smaller and cuts the demo's write
+   half. Note that the pen obligation changed shape: the page cannot be required to omit the pen NAME
+   (unsatisfiable against a verbatim bundle), so the host takes the last word instead — criterion 9.
+7. **The refusals that trade scope for honesty** — six (a version-pinned binding, a declared-`bytes`
+   field, an undeclared route, a pen or narrowed `writable`, a host-specific global in the source, an
+   unusable connector name). Each names a small follow-on where one exists. Confirm the refusals rather
+   than the widenings.
+8. **Section number** — §30 recommended, since §29 already has two claimants (T64 and T77).
