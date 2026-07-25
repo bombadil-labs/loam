@@ -35,6 +35,13 @@ interface DeltaRow {
   readonly sig: string | null;
 }
 
+export interface SqliteOptions {
+  // Called when the one-time open scrub (below) could not be completed. Wire this to a log: the
+  // store is open and correct either way, but a deferral means plaintext from erasures older than
+  // `secure_delete` may still be legible in the file, and only saying so keeps that honest.
+  readonly onScrubDeferred?: (reason: string) => void;
+}
+
 export class SqliteBackend implements StoreBackend, RepairableBackend {
   private readonly db: Database.Database;
   // Ids known durable (read or written by this handle) — the cheap fast-path; UNIQUE(id) is the
@@ -54,11 +61,16 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
   // unknown, so EVERY id is unprovable until a checkpoint lands (H9 — an unreadable debt must
   // never read as "nothing owed"). Cleared exactly where the owed set is.
   private truncationUnknown = false;
+  // Why the one-time open scrub did not finish, or undefined if it finished (or was never owed).
+  private deferredScrub: string | undefined;
 
   private readonly insertDelta: Database.Statement;
   private readonly selectAll: Database.Statement;
 
-  constructor(readonly filePath: string) {
+  constructor(
+    readonly filePath: string,
+    private readonly opts: SqliteOptions = {},
+  ) {
     mkdirSync(dirname(filePath), { recursive: true });
     this.db = new Database(filePath);
     // WAL + busy timeout + NORMAL syncs: concurrent handles wait their turn; a crash loses at
@@ -81,8 +93,34 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
     // there is inherited freelist to scrub. `freelist_count` is a cheap header read and is 0 on a
     // fresh store, so this is a no-op for anything created after this change. The cost is a
     // one-time rebuild on first open of a store that has erased before; correctness wins.
+    // ...and it is BEST-EFFORT, never open-blocking. VACUUM wants an exclusive write lock over the
+    // whole file and this constructor is not async, so a second handle mid-append would turn
+    // `new SqliteBackend(path)` into a synchronous SQLITE_BUSY — a throw the seam has no rejected
+    // promise for, out of the one call that used to take no lock at all. A store that will not OPEN
+    // is a worse §11 story than a scrub that runs on the next open, which `freelist_count` still
+    // asks for: the freelist is its own durable to-do list, so nothing needs recording here.
     const freelist = this.db.pragma("freelist_count", { simple: true }) as number;
-    if (freelist > 0) this.db.exec("VACUUM");
+    if (freelist > 0) {
+      try {
+        this.db.exec("VACUUM");
+        // In WAL mode the rebuilt pages land in the `-wal` sidecar and the main file keeps its
+        // legible freelist until a checkpoint folds them in — so the scrub is not AT REST until
+        // this lands, and a process killed before `close()` would leave the plaintext behind while
+        // the handle's own `freelist_count` read 0. CHECKED, like the purge path's: `wal_checkpoint`
+        // does not throw on contention, it RETURNS `busy`, and a discarded result is H7 verbatim.
+        const [status] = this.db.pragma("wal_checkpoint(TRUNCATE)") as Array<{ busy: number }>;
+        if (status === undefined || status.busy !== 0) {
+          this.deferScrub(
+            "the rebuilt pages could not be folded into the main file — a concurrent reader held " +
+              "the write-ahead log past busy_timeout",
+          );
+        }
+      } catch (err) {
+        this.deferScrub(
+          `the rebuild was refused — ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS deltas (
         seq    INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -128,6 +166,31 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
         // none of them (H9).
         this.truncationUnknown = true;
       }
+    }
+  }
+
+  // Why the one-time open scrub was deferred — undefined when there was nothing to scrub or the
+  // scrub completed. Set means the store is open and correct while inherited freelist plaintext may
+  // still be legible in the file (§11), until an uncontended open finishes the job.
+  get scrubDeferred(): string | undefined {
+    return this.deferredScrub;
+  }
+
+  // The scrub could not finish. It is reported and not swallowed, on two surfaces because they have
+  // different readers: the callback is the operator's line in the log, and `scrubDeferred` answers
+  // an embedder that never wired one. A `catch {}` here would fix one silent outcome by introducing
+  // another.
+  private deferScrub(reason: string): void {
+    this.deferredScrub =
+      `sqlite: the one-time freelist scrub of ${this.filePath} is DEFERRED — ${reason}. The store ` +
+      `is open and correct; plaintext from erasures older than \`secure_delete\` may still be ` +
+      `legible in the file until an uncontended open scrubs it (§11).`;
+    try {
+      this.opts.onScrubDeferred?.(this.deferredScrub);
+    } catch {
+      // A reporter that throws — stderr closed on the other end is an ordinary EPIPE — must not
+      // wedge the open either, which is the whole point of getting here. The report survives on
+      // `scrubDeferred`, the one surface that cannot fail.
     }
   }
 
