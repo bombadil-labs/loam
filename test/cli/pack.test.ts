@@ -25,6 +25,13 @@ describe("npm pack: the turnkey surface", () => {
     const paths = new Set(manifest.files.map((f) => f.path));
     expect(paths).toContain("dist/index.js");
     expect(paths).toContain("dist/index.d.ts");
+    // The barrel re-exports TYPES from these modules (SPEC §27's container and law surfaces), and a
+    // type re-export resolves through the declaration file it names — so a `files` field that
+    // shipped only `dist/index.d.ts` would hand a consumer `Container` and `ModuleVersion` as
+    // unresolvable. Named here rather than left to the glob because the glob is what would change.
+    expect(paths).toContain("dist/gateway/container.d.ts");
+    expect(paths).toContain("dist/gateway/container-identity.d.ts");
+    expect(paths).toContain("dist/gateway/adopt-law.d.ts");
     expect(paths).toContain("dist/cli/bin.js"); // the bin package.json points at
     expect(paths).toContain("dist/client/index.js"); // the ./client subpath: the browser CLIENT
     expect(paths).toContain("dist/client/index.d.ts");

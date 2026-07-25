@@ -52,6 +52,49 @@ export {
   type TrustMode,
   type TrustPolicy,
 } from "./gateway/trust.js";
+// The DOOR and its vocabulary, never the plumbing behind it. `Gateway.openContainer` /
+// `.containers` / `.adoptLaw` / `.blessAll` / `.lawFrom` are the reachable surface (SPEC §27); what
+// follows is what a caller needs to DESCRIBE, SIGN, and READ what those doors answer. A `*Impl`
+// body takes a `Gateway` because two modules in this package share one implementation, and
+// `withLivingNames` writes an `@internal` seam field — publishing either would freeze a seam as
+// API, so neither appears here however public the compiler thinks it is.
+export {
+  CONTAINER_CONTEXTS,
+  CTX_CONTAINER,
+  CTX_CONTAINER_DETACHED,
+  CTX_CONTAINER_EXCLUDED,
+  containerAdmission,
+  containerClaims,
+  containerDefect,
+  detachClaims,
+  exclusionClaims,
+  readContainerTable,
+  termClaims,
+  type Container,
+  type ContainerOptions,
+  type ContainerPosture,
+  type ContainerSpec,
+  type ContainerTable,
+  type ContainerTrust,
+  type DetachRecord,
+  type ResolvedContainer,
+} from "./gateway/container.js";
+export { freezeMembers, type ModuleVersion } from "./gateway/container-identity.js";
+export {
+  CTX_MANIFEST,
+  MANIFEST_ENTITY,
+  manifestExportClaims,
+  readLawAdoptions,
+  readManifest,
+  type AdoptLawOptions,
+  type AdoptionOutcome,
+  type BlessAllOptions,
+  type BlessAllReport,
+  type LawAdoption,
+  type LawFromRow,
+  type ManifestExport,
+  type ManifestRow,
+} from "./gateway/adopt-law.js";
 export {
   CTX_TRANSLATION,
   parseEmitTemplate,
