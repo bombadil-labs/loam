@@ -520,7 +520,11 @@ export function containerAdmission(
 }
 
 // The surviving lawful declaration ids for one entity — what a strike-the-declaration act negates.
-function survivingDeclarationIds(reactor: Reactor, operator: string, entity: string): string[] {
+export function survivingDeclarationIds(
+  reactor: Reactor,
+  operator: string,
+  entity: string,
+): string[] {
   const negated = lawfulNegated(reactor, operator);
   const out: string[] = [];
   for (const delta of lawfulSnapshot(reactor, operator)) {

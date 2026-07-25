@@ -77,6 +77,16 @@ import {
 } from "./gql.js";
 import { declarePublicImpl, readPublicSchemas } from "./public.js";
 import {
+  cutImpl,
+  deriveReceiptImpl,
+  readGraveyards,
+  slateReportsImpl,
+  type CutReport,
+  type GraveyardRecord,
+  type Receipt,
+  type SlateReport,
+} from "./slate.js";
+import {
   lensOf,
   programOf,
   readRegistrationVersions,
@@ -401,7 +411,7 @@ export class Gateway {
   /** @internal — T19 seam (lifecycle.ts: every surface (re)build threads the hooks through) */
   gqlHooks(door: "full" | "public" = "full"): GqlHooks {
     return {
-      resolve: (name, entity, asOf) => this.resolvedNode(name, entity, asOf),
+      resolve: (name, entity, asOf) => this.resolvedNode(name, entity, asOf), // Date.now() at the door
       mutate: (name, entity, props, actorSeed) => this.mutateEntity(name, entity, props, actorSeed),
       clear: (name, entity, fields, actorSeed) => this.clearEntity(name, entity, fields, actorSeed),
       remove: (name, entity, field, values, actorSeed) =>
@@ -458,8 +468,10 @@ export class Gateway {
   }
 
   // Pinned resolution (SPEC §17 versioning × §26 as-of): the body lives in reads.ts.
-  resolvePinned(reg: Registered, entity: string, asOf?: number): ResolvedNode {
-    return resolvePinnedImpl(this, reg, entity, asOf);
+  // The optional `now` is the caller's WALL-CLOCK moment for a slate's lapse (SPEC §29.4); absent,
+  // the door reads its own clock. The INTERNAL seam below requires it — see `requireMoment`.
+  resolvePinned(reg: Registered, entity: string, asOf?: number, now?: number): ResolvedNode {
+    return resolvePinnedImpl(this, reg, entity, now ?? Date.now(), asOf);
   }
 
   // Re-derive the store's slice of the surface and follow it. The desired set is the manual
@@ -611,10 +623,19 @@ export class Gateway {
   // Erase one delta (SPEC §11): the body lives beside the tombstone vocabulary in erase.ts.
   // `kept` lists the declared walls a surviving detach record deliberately holds outside this
   // sweep (SPEC §27.7's completeness guard) — on the record, never silent.
+  // `slate` is the §29.6 JOIN a cut stamps on each tombstone it mints; an ordinary erase leaves it
+  // absent, forever, and `tombstone`/`spokenBy` ride out so a cut can collect them per member rather
+  // than re-derive them from a ground the purge just moved.
   async erase(
     id: string,
-    opts: { reason?: string } = {},
-  ): Promise<{ erased: string; citations: string[]; kept: string[] }> {
+    opts: { reason?: string; slate?: string } = {},
+  ): Promise<{
+    erased: string;
+    citations: string[];
+    kept: string[];
+    tombstone: string;
+    spokenBy: string;
+  }> {
     return eraseImpl(this, id, opts);
   }
 
@@ -622,9 +643,58 @@ export class Gateway {
   // NOW? Live — the reactor's surviving tombstones against the backend's own byte probe — because
   // this store is eventually consistent about forgetting, and the gap between a tombstone landing
   // and the bytes leaving every tier is a health state to watch, not a fault to boot past.
-  async health(): Promise<StoreHealth> {
-    return healthImpl(this);
+  async health(now?: number): Promise<StoreHealth> {
+    return healthImpl(this, now ?? Date.now());
   }
+
+  // --- slating and graveyards (SPEC §29, ticket T64) ---------------------------------------------
+
+  /**
+   * The operator's REVIEW read over every standing slate (SPEC §29.3): the frozen members, the
+   * closures in force at `now`, the RESURFACING set (claims a cut will bring back to life — the
+   * genuine new value of the two-phase shape), the AFFECTED containers, and the `duplicates` links.
+   *
+   * Read closure never closes this. The operator is the controller and must be able to examine what
+   * they are about to destroy, so this evaluates over the UNNARROWED ground even for a slate that
+   * closes `read` — a read-closed slate that could not be reviewed would defeat itself.
+   */
+  slates(now?: number): SlateReport[] {
+    return slateReportsImpl(this, now ?? Date.now());
+  }
+
+  /** Every surviving lawful graveyard — the durable record of each erasure EVENT (SPEC §29.6). */
+  graveyards(): GraveyardRecord[] {
+    return readGraveyards(this.reactor, this.operatorAuthor);
+  }
+
+  /**
+   * THE CUT (SPEC §29.5): pre-flight all-or-refuse, then §11's ordinary erase per member, then the
+   * graveyard, then — the LAST act — the slate's container is dropped by striking its declaration.
+   * On ANY fault the slate STANDS: doors closed, declaration resolving, cut RESUMABLE.
+   */
+  async cut(slate: string, opts: { now?: number } = {}): Promise<CutReport> {
+    return cutImpl(this, slate, opts);
+  }
+
+  /**
+   * Re-derive a compliance receipt from the graveyard + the tombstones + the frozen version, plus a
+   * LIVE probe at the moment of issue (SPEC §29.7). Re-issuable at any time — which IS §11's
+   * testable-compliance promise. Every per-tier byte verdict is RE-PROBED here, never reprinted from
+   * a CutReport: a formatter that reprinted last month's snapshot would be the dry-run mistake this
+   * design rejects, wearing a letterhead. (The SIGNED DOCUMENT and its surface are §29.7's deferred
+   * half; this is the structured object it formats.)
+   */
+  async receipt(graveyard: string, opts: { now?: number } = {}): Promise<Receipt> {
+    return deriveReceiptImpl(this, graveyard, opts);
+  }
+
+  /**
+   * @internal — T64 seam (slate.ts): the injected hold the cut-order rail drives. Awaited between
+   * the graveyard's landing and the declaration's strike, so a test can interrupt exactly that
+   * window and prove the re-run lands exactly one graveyard. Undefined in production; nothing in the
+   * cut's logic depends on it being set.
+   */
+  cutHold: (() => Promise<void>) | undefined = undefined;
 
   // The wall gateways attached to this store (SPEC §24.8/§27): the operator's own one-way
   // replicas that an erasure here must fan out to. This Set is the CANONICAL runtime registry of
@@ -918,13 +988,13 @@ export class Gateway {
 
   // Gather the HView for (schema, entity): the body lives in reads.ts.
   /** @internal — T19 seam (mutate.ts: retraction reads the hview to find the caller's own claims) */
-  gather(name: string, entity: string, asOf?: number): HView {
-    return gatherImpl(this, name, entity, asOf);
+  gather(name: string, entity: string, asOf?: number, now?: number): HView {
+    return gatherImpl(this, name, entity, now ?? Date.now(), asOf);
   }
 
   /** @internal — T19 seam (mutate.ts: every write verb answers with the re-resolved node) */
-  resolvedNode(name: string, entity: string, asOf?: number): ResolvedNode {
-    return resolvedNodeImpl(this, name, entity, asOf);
+  resolvedNode(name: string, entity: string, asOf?: number, now?: number): ResolvedNode {
+    return resolvedNodeImpl(this, name, entity, now ?? Date.now(), asOf);
   }
 
   // --- the write seam --------------------------------------------------------------------------
@@ -1000,8 +1070,12 @@ export class Gateway {
     name: string,
     entity: string,
     door: "full" | "public" = "full",
+    now?: number,
   ): AsyncGenerator<PatchNode, void, unknown> {
-    return watchEntityImpl(this, name, entity, door);
+    // A stream outlives any single moment, so an unpinned watch re-reads the clock PER FRAME — the
+    // lapse of a deadline that passes mid-stream must take effect without a resubscribe. A pinned
+    // `now` is the rails' deterministic seam (the flaky-test rule).
+    return watchEntityImpl(this, name, entity, door, now === undefined ? undefined : () => now);
   }
 
   // --- the GraphQL surface ---------------------------------------------------------------------
