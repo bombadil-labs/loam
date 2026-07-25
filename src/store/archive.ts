@@ -50,6 +50,35 @@ interface ArchiveRow {
   readonly sig?: string;
 }
 
+// Every entry at the vault root that might be a fan, paired with whether a SWEEP may walk it.
+//
+// The filter is `!isFile()`, never `isDirectory()`, and the difference is load-bearing: readdir does
+// not follow links, so `isDirectory()` is FALSE for a symlink to a directory, and false again for a
+// `DT_UNKNOWN` dirent on a mount that does not fill `d_type`. Filtering on it EXCLUDES those entries
+// before anything opens them, which is the silent shape of H9 — a directory nobody examined counting
+// as a directory that holds nothing. So they are listed, each caller opens them, and what cannot be
+// opened is reported rather than dropped.
+//
+// `walkable` is what separates reading from removing. A verdict may read through any of these; a sweep
+// may only DELETE inside an entry the filesystem calls a real directory, because `rm` through a link
+// destroys whatever the link points at.
+function fanEntries(root: string): { name: string; walkable: boolean }[] {
+  return readdirSync(root, { withFileTypes: true })
+    .filter((e) => !e.isFile())
+    .map((e) => ({ name: e.name, walkable: e.isDirectory() }));
+}
+
+// The only two readdir failures that ANSWER the question instead of leaving it open: the fan is not
+// there (it vanished between the root's listing and its own read), or it is not a directory at all —
+// the porch, where a README or any other human clutter lives unbothered. Everything else means the
+// bytes were not looked at.
+function holdsNothing(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException).code;
+  return code === "ENOENT" || code === "ENOTDIR";
+}
+
+const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
 export class ArchiveBackend implements StoreBackend {
   private closed = false;
   // Ids known on disk (read or written by this handle) — the cheap fast-path; the filesystem
@@ -184,19 +213,28 @@ export class ArchiveBackend implements StoreBackend {
     // Purge hunts EVERY fan, not just the canonical one: a misfiled copy that stays readable
     // means the delta was never forgotten. Purges are rare; the walk is cheap enough to be
     // thorough.
-    const fans = readdirSync(this.root, { withFileTypes: true })
-      .filter((f) => f.isDirectory())
-      .map((f) => f.name);
+    const entries = fanEntries(this.root);
     // Read each fan ONCE, not once per id. `heal` passes the entire accumulated tombstone set as
     // `dead` (mirror.ts), so a store with 1,000 historical erasures would otherwise do ~256,000
     // directory reads per heal, growing forever. A fan that vanishes between listing and reading is
     // tolerated — the old `existsSync` path was ENOENT-safe and this must stay so.
     const namesByFan = new Map<string, readonly string[]>();
-    for (const fan of fans) {
+    // Two readdir failures are ANSWERS (`holdsNothing`): an absent fan, and an entry that is not a
+    // directory at all — the porch a README lives on. Every other one (EACCES, EIO, EMFILE) leaves a
+    // directory UNEXAMINED, and a count that omits it reads as "those ids are forgotten" — a
+    // completeness never delivered (H9). Sweep what can be reached first, then refuse: the refusal is
+    // the caller's to collect (`erase` files it as a fault, `heal` records it and keeps booting), and
+    // stopping at the wall would strand the bytes in every fan behind it.
+    const unexamined: string[] = [];
+    let firstFailure: unknown;
+    for (const { name: fan } of entries) {
       try {
         namesByFan.set(fan, readdirSync(join(this.root, fan)));
-      } catch {
+      } catch (err) {
         namesByFan.set(fan, []);
+        if (holdsNothing(err)) continue;
+        firstFailure ??= err;
+        unexamined.push(`fan ${fan} could not be read (${message(err)})`);
       }
     }
     // Walk the FILES once and ask each whether its id is dead — not the ids once and search every
@@ -212,7 +250,11 @@ export class ArchiveBackend implements StoreBackend {
     // copy). Index the work you have COMPLETED, never the data you expect to FIND.
     const dead = new Set(ids);
     const found = new Set<string>();
-    for (const fan of fans) {
+    // Bytes this sweep saw and did not remove — a locked file, and a dead byte lying behind an entry
+    // it refuses to delete THROUGH. Both are the same promise as `unexamined`: report what was not
+    // achieved rather than a count that reads as achievement.
+    const unremoved: string[] = [];
+    for (const { name: fan, walkable } of entries) {
       for (const name of namesByFan.get(fan) ?? []) {
         // `<id>.json` — the canonical file. `<id>.json.<pid>.tmp` — a straggler `append` left when
         // it fsynced and then died before the rename (ticket T40). Reads ignore the latter, which
@@ -226,11 +268,43 @@ export class ArchiveBackend implements StoreBackend {
         if (cut <= 0) continue;
         const id = name.slice(0, cut);
         if (!dead.has(id)) continue;
-        rmSync(join(this.root, fan, name), { force: true, maxRetries: 5, retryDelay: 100 });
-        found.add(id);
+        if (!walkable) {
+          // A dead byte read THROUGH an entry that is not a real directory — a symlink, or a dirent
+          // the filesystem would not classify. The sweep reports it and DELIBERATELY does not delete
+          // through it: an `rm` that follows a link deletes whatever the link points at, so a vault
+          // entry aimed at a home directory would make forgetting one delta erase someone's life.
+          // Widening the delete to reach here is a decision about what the store may destroy, not a
+          // repair of a false report — so this refuses to claim completeness and stops there.
+          unremoved.push(
+            `${join(fan, name)} lies behind an entry the sweep will not delete through`,
+          );
+          continue;
+        }
+        try {
+          rmSync(join(this.root, fan, name), { force: true, maxRetries: 5, retryDelay: 100 });
+          found.add(id);
+        } catch (err) {
+          // `force` suppresses only "already gone". EPERM (an immutable file, a read-only mount),
+          // EACCES, and a Windows sharing violation from a backup agent all still throw — and thrown
+          // from here they would abandon every fan behind this one, in an order `readdirSync` does
+          // not fix, so each retry would meet the same locked file and the removable copies would be
+          // retained forever. Collected instead: the sweep converges on what it can reach, and the
+          // refusal below names what it could not.
+          firstFailure ??= err;
+          unremoved.push(`${join(fan, name)} could not be removed (${message(err)})`);
+        }
       }
     }
     for (const id of dead) this.onDisk.delete(id);
+    const refusals = [...unexamined, ...unremoved];
+    if (refusals.length > 0) {
+      throw new Error(
+        `archive purge swept ${found.size} file(s) under ${this.root} and cannot be reported ` +
+          `complete — ${refusals.length} place(s) the content may still be:\n  ` +
+          `${refusals.join("\n  ")}`,
+        { cause: firstFailure },
+      );
+    }
     return found.size;
   }
 
@@ -243,21 +317,20 @@ export class ArchiveBackend implements StoreBackend {
     // The same reach as `purge`: every fan (a misfiled copy is still the bytes) and both name
     // shapes (`<id>.json`, and the `<id>.json.<pid>.tmp` a crash leaves between fsync and
     // rename). NOT `deltasSince` (skips the straggler by design) and NOT `onDisk` (knows only
-    // what this handle wrote).
-    const fans = readdirSync(this.root, { withFileTypes: true })
-      .filter((f) => f.isDirectory())
-      .map((f) => f.name);
-    for (const fan of fans) {
+    // what this handle wrote). A verdict READS through an entry `purge` will not delete through: a
+    // copy visible behind a symlink is still a copy, and reading one costs nothing irreversible.
+    for (const { name: fan } of fanEntries(this.root)) {
       let names: readonly string[];
       try {
         names = readdirSync(join(this.root, fan));
       } catch (err) {
-        // ENOENT only: a fan that vanished between listing and reading holds nothing. Any other
-        // error (EACCES, EIO, EMFILE) means this fan was NOT examined and may still hold the
-        // bytes — `purge` may swallow that because its count is evidence of work, but this IS
-        // the verdict, so it refuses rather than answer clean over an unread directory (H9).
-        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-        continue;
+        // An absent fan and a non-directory hold nothing. Any other error (EACCES, EIO, EMFILE)
+        // means this fan was NOT examined and may still hold the bytes, and a `false` from here
+        // would license an erasure report — so it refuses rather than answer clean over an unread
+        // directory (H9). `purge` draws the same line for the same reason: neither a verdict nor a
+        // count may cover a directory nobody opened.
+        if (holdsNothing(err)) continue;
+        throw err;
       }
       for (const name of names) {
         const cut = name.endsWith(".json")
@@ -276,24 +349,29 @@ export class ArchiveBackend implements StoreBackend {
   // ABSENT id (the common clean case), so O(dead × files) on the boot path. This walks the FILES ONCE
   // — the same file-outer inversion `purge` uses — and reports which requested ids are present. Same
   // reach as `holds`: every fan, both name shapes (`<id>.json` and the crash-left `<id>.json.<pid>.tmp`),
-  // never `onDisk`. Same H9 fail-closed as `holds`, and DELIBERATELY unlike `purge`: a fan it cannot
-  // read (beyond ENOENT) is bytes left unexamined, so it REJECTS rather than answer a false clean —
-  // this is the verdict, not evidence of work.
+  // never `onDisk`. Same H9 fail-closed as `holds` and `purge`: a fan it cannot read (beyond the two
+  // failures that answer) is bytes left unexamined, so it REJECTS rather than answer a false clean.
+  // The difference from `purge` is only WHEN it gives up — a sweep finishes the fans it can reach
+  // before refusing; a verdict has nothing to finish.
   async heldAmong(ids: Iterable<string>): Promise<Set<string>> {
     this.assertOpen();
     const want = new Set(ids);
     const held = new Set<string>();
     if (want.size === 0) return held;
-    const fans = readdirSync(this.root, { withFileTypes: true })
-      .filter((f) => f.isDirectory())
-      .map((f) => f.name);
-    for (const fan of fans) {
+    // `holds`'s canonical fast path, for the same reason and with the same asymmetry — only a
+    // POSITIVE answer may short-circuit. It is not only speed: `existsSync` FOLLOWS a symlink where
+    // a dirent does not, so without this probe the two verdicts could disagree about a canonical
+    // file sitting inside a symlinked fan — and this is the one on the boot, health and settle
+    // paths, where a disagreement reads as a clean bill of health.
+    for (const id of want) if (existsSync(this.fileFor(id))) held.add(id);
+    if (held.size === want.size) return held; // nothing left to prove ABSENT — the walk is for that
+    for (const { name: fan } of fanEntries(this.root)) {
       let names: readonly string[];
       try {
         names = readdirSync(join(this.root, fan));
       } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-        continue; // a fan that vanished between listing and reading holds nothing
+        if (holdsNothing(err)) continue; // absent, or not a directory at all
+        throw err;
       }
       for (const name of names) {
         const cut = name.endsWith(".json")
