@@ -192,11 +192,22 @@ export class ArchiveBackend implements StoreBackend {
     // directory reads per heal, growing forever. A fan that vanishes between listing and reading is
     // tolerated — the old `existsSync` path was ENOENT-safe and this must stay so.
     const namesByFan = new Map<string, readonly string[]>();
+    // ENOENT is the only readdir failure that is an ANSWER: an absent fan genuinely holds nothing.
+    // Every other one (EACCES, EIO, EMFILE) leaves a directory UNEXAMINED, and a count that omits it
+    // reads as "those ids are forgotten" — a completeness never delivered (H9). Sweep what can be
+    // reached first, then refuse: the refusal is the caller's to collect (`erase` files it as a
+    // fault, `heal` records it and keeps booting), and stopping at the wall would strand the bytes
+    // in every fan behind it.
+    const unexamined: string[] = [];
+    let firstFailure: unknown;
     for (const fan of fans) {
       try {
         namesByFan.set(fan, readdirSync(join(this.root, fan)));
-      } catch {
+      } catch (err) {
         namesByFan.set(fan, []);
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") continue;
+        firstFailure ??= err;
+        unexamined.push(`${fan} (${err instanceof Error ? err.message : String(err)})`);
       }
     }
     // Walk the FILES once and ask each whether its id is dead — not the ids once and search every
@@ -231,6 +242,14 @@ export class ArchiveBackend implements StoreBackend {
       }
     }
     for (const id of dead) this.onDisk.delete(id);
+    if (unexamined.length > 0) {
+      throw new Error(
+        `archive purge swept ${found.size} file(s) but could not read ${unexamined.length} fan(s) of ` +
+          `${this.root} — the bytes there were never examined, so this purge cannot be reported ` +
+          `complete: ${unexamined.join("; ")}`,
+        { cause: firstFailure },
+      );
+    }
     return found.size;
   }
 
@@ -254,8 +273,9 @@ export class ArchiveBackend implements StoreBackend {
       } catch (err) {
         // ENOENT only: a fan that vanished between listing and reading holds nothing. Any other
         // error (EACCES, EIO, EMFILE) means this fan was NOT examined and may still hold the
-        // bytes — `purge` may swallow that because its count is evidence of work, but this IS
-        // the verdict, so it refuses rather than answer clean over an unread directory (H9).
+        // bytes, and a `false` from here would license an erasure report — so it refuses rather
+        // than answer clean over an unread directory (H9). `purge` draws the same line for the
+        // same reason: neither a verdict nor a count may cover a directory nobody opened.
         if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
         continue;
       }
@@ -276,9 +296,10 @@ export class ArchiveBackend implements StoreBackend {
   // ABSENT id (the common clean case), so O(dead × files) on the boot path. This walks the FILES ONCE
   // — the same file-outer inversion `purge` uses — and reports which requested ids are present. Same
   // reach as `holds`: every fan, both name shapes (`<id>.json` and the crash-left `<id>.json.<pid>.tmp`),
-  // never `onDisk`. Same H9 fail-closed as `holds`, and DELIBERATELY unlike `purge`: a fan it cannot
-  // read (beyond ENOENT) is bytes left unexamined, so it REJECTS rather than answer a false clean —
-  // this is the verdict, not evidence of work.
+  // never `onDisk`. Same H9 fail-closed as `holds` and `purge`: a fan it cannot read (beyond ENOENT)
+  // is bytes left unexamined, so it REJECTS rather than answer a false clean. The difference from
+  // `purge` is only WHEN it gives up — a sweep finishes the fans it can reach before refusing;
+  // a verdict has nothing to finish.
   async heldAmong(ids: Iterable<string>): Promise<Set<string>> {
     this.assertOpen();
     const want = new Set(ids);
