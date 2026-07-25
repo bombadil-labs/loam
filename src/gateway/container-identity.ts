@@ -56,7 +56,9 @@ export interface ModuleVersion {
 // keeps a module-version address from ever colliding with some other content address computed over
 // the same bytes elsewhere in the store, and it is the seam a future rung changes.
 const addressOf = (memberIds: readonly string[]): string =>
-  contentAddress(new TextEncoder().encode(`loam.container.v1\u0000${[...memberIds].sort().join("\u0000")}`));
+  contentAddress(
+    new TextEncoder().encode(`loam.container.v1\u0000${[...memberIds].sort().join("\u0000")}`),
+  );
 
 /**
  * Freeze an already-evaluated membership into a module version (SPEC §27.2).
