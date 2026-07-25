@@ -74,7 +74,10 @@ describe("T32 criteria 15 & 22 — an unreachable wall is a named fault", () => 
     const fact = observed(FERN, "height", 30, 1000, OP_SEED);
     await gw1.append([fact]);
     await gw1.append([
-      signClaims(containerClaims({ container: name, trust, posture: "wall" }, OP, 28_000), OP_SEED),
+      signClaims(
+        containerClaims({ container: name, trust, posture: "separate" }, OP, 28_000),
+        OP_SEED,
+      ),
     ]);
     const c = await gw1.openContainer({ name, backend: new SqliteBackend(wallPath) });
     expect(c.gateway).toBeDefined();

@@ -6,11 +6,11 @@
 // out). This is §24.1's separate-store posture and §24.2's one-way glass, made concrete.
 //
 // SINCE T32 the pool is ONE PRESET of the container primitive (SPEC §27, container.ts):
-// UNTRUSTED · wall · one-way-seeded · droppable. `openQuarantine` keeps its exact signature and
+// UNTRUSTED · separate · one-way-seeded · droppable. `openQuarantine` keeps its exact signature and
 // behavior — the settle-before-boot ordering, the drop-verify, the refusal prefixes — and its
 // body is `openContainerImpl` with the knobs preset and the preset's own refusal voice. An
 // anonymous pool has no container entity to cite, so it detaches RECORDLESS — stated by the spec
-// rather than discovered; a NAMED wall lands the at-rest detach record (container.ts).
+// rather than discovered; a NAMED container lands the at-rest detach record (container.ts).
 //
 // NAMING: distinct from `src/store/quarantine.ts`, which is §25's ROW-CORRUPTION holding pen (a different
 // word for a different mechanism — unreadable bytes set aside for repair, not a federation sandbox).
@@ -66,17 +66,17 @@ export interface QuarantineOptions {
 }
 
 // Open a QUARANTINE POOL over a store (the body of `Gateway.openQuarantine`, SPEC §24): the
-// untrusted-wall preset of the container primitive, anonymous — no declaration, no at-rest
+// untrusted-and-separate preset of the container primitive, anonymous — no declaration, no at-rest
 // record, the preset's own refusal voice byte-for-byte. Everything §24 promises (the one-way
-// glass, the settle, §24.8's fan-out membership, drop's byte-verified discard) is the wall's
-// behavior in container.ts, unchanged by the lifting — that invariance is T32's criterion 1.
+// glass, the settle, §24.8's fan-out membership, drop's byte-verified discard) is the SEPARATE
+// posture's behavior in container.ts, unchanged by the lifting — that invariance is T32's criterion 1.
 export async function openQuarantineImpl(
   gw: Gateway,
   opts: QuarantineOptions = {},
 ): Promise<QuarantinePool> {
   const c = await openContainerImpl(
     gw,
-    { ...opts, trust: "untrusted", posture: "wall" },
+    { ...opts, trust: "untrusted", posture: "separate" },
     "openQuarantine",
   );
   return {

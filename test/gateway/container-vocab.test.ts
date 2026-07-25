@@ -105,7 +105,7 @@ describe("T32 criterion 2 — the mint collides with nothing", () => {
   it("the door refuses a NUL in a container name", async () => {
     const gw = await boot();
     const claims = containerClaims(
-      { container: "container:a\u0000b", trust: "curated", posture: "wall" },
+      { container: "container:a\u0000b", trust: "curated", posture: "separate" },
       OP,
       5000,
     );
@@ -115,17 +115,17 @@ describe("T32 criterion 2 — the mint collides with nothing", () => {
 
   it("a declaration missing trust refuses", async () => {
     const gw = await boot();
-    const claims = rawDeclaration("container:no-trust", [prim("posture", "wall")], 5001);
+    const claims = rawDeclaration("container:no-trust", [prim("posture", "separate")], 5001);
     await expect(gw.append([signClaims(claims, OP_SEED)])).rejects.toThrow(/trust/);
     await gw.close();
   });
 
-  it("a declaration missing posture refuses, naming the §28.4 recommendation (wall)", async () => {
+  it("a declaration missing posture refuses, naming the §28.4 recommendation (separate)", async () => {
     const gw = await boot();
     const claims = rawDeclaration("container:no-posture", [prim("trust", "curated")], 5002);
     // The default lives in the MESSAGE and never in silent vocabulary semantics: the refusal
-    // recommends "wall" rather than allocating one nobody asked for.
-    await expect(gw.append([signClaims(claims, OP_SEED)])).rejects.toThrow(/posture.*wall/s);
+    // recommends "separate" rather than allocating one nobody asked for.
+    await expect(gw.append([signClaims(claims, OP_SEED)])).rejects.toThrow(/posture.*separate/s);
     await gw.close();
   });
 
@@ -135,7 +135,7 @@ describe("T32 criterion 2 — the mint collides with nothing", () => {
       "container:both",
       [
         prim("trust", "curated"),
-        prim("posture", "property"),
+        prim("posture", "shared"),
         prim("membership", JSON.stringify(HEIGHTS)),
         prim("membershipAt", "some-content-address"),
       ],
@@ -149,7 +149,7 @@ describe("T32 criterion 2 — the mint collides with nothing", () => {
     const gw = await boot();
     const claims = rawDeclaration(
       "container:empty-property",
-      [prim("trust", "curated"), prim("posture", "property")],
+      [prim("trust", "curated"), prim("posture", "shared")],
       5004,
     );
     await expect(gw.append([signClaims(claims, OP_SEED)])).rejects.toThrow(/membership/);
@@ -158,7 +158,7 @@ describe("T32 criterion 2 — the mint collides with nothing", () => {
     // membership-less declaration regardless of posture.
     const wall = rawDeclaration(
       "container:bare-wall",
-      [prim("trust", "curated"), prim("posture", "wall")],
+      [prim("trust", "curated"), prim("posture", "separate")],
       5005,
     );
     await gw.append([signClaims(wall, OP_SEED)]);
@@ -178,7 +178,7 @@ describe("T32 criterion 17 — a stranger's container claims are inert", () => {
           {
             container: "container:mine",
             trust: "curated",
-            posture: "property",
+            posture: "shared",
             membership: HEIGHTS,
           },
           OP,
@@ -194,7 +194,7 @@ describe("T32 criterion 17 — a stranger's container claims are inert", () => {
         {
           container: "container:theirs",
           trust: "curated",
-          posture: "property",
+          posture: "shared",
           membership: HEIGHTS,
         },
         stranger,

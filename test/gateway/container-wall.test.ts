@@ -47,7 +47,7 @@ describe("T32 criterion 5 — untrusted must be a wall, and a wall is real bytes
             {
               container: "container:x",
               trust: "untrusted",
-              posture: "property",
+              posture: "shared",
               membership: HEIGHTS,
             },
             OP,
@@ -63,7 +63,7 @@ describe("T32 criterion 5 — untrusted must be a wall, and a wall is real bytes
   it("untrusted + property refuses at the runtime opener too — the anonymous path passes no door", async () => {
     const gw = await boot();
     await expect(
-      gw.openContainer({ trust: "untrusted", posture: "property", membership: HEIGHTS }),
+      gw.openContainer({ trust: "untrusted", posture: "shared", membership: HEIGHTS }),
     ).rejects.toThrow(/§28\.3/);
     await gw.close();
   });
@@ -75,7 +75,7 @@ describe("T32 criterion 5 — untrusted must be a wall, and a wall is real bytes
     await gw.append([
       signClaims(
         containerClaims(
-          { container: `container:${trust}-wall`, trust, posture: "wall", membership: HEIGHTS },
+          { container: `container:${trust}-wall`, trust, posture: "separate", membership: HEIGHTS },
           OP,
           9100,
         ),
@@ -87,7 +87,7 @@ describe("T32 criterion 5 — untrusted must be a wall, and a wall is real bytes
 
     const wallStore = new MemoryBackend();
     const c = await gw.openContainer({ name: `container:${trust}-wall`, backend: wallStore });
-    expect(c.posture).toBe("wall");
+    expect(c.posture).toBe("separate");
     expect(c.trust).toBe(trust);
     expect(c.gateway).toBeDefined();
 
@@ -119,7 +119,7 @@ describe("T32 criterion 14 — erasure reaches the generalized wall", () => {
           {
             container: "container:reach",
             trust: "untrusted",
-            posture: "wall",
+            posture: "separate",
             membership: HEIGHTS,
           },
           OP,
@@ -175,7 +175,11 @@ describe("T32 criterion 14 — erasure reaches the generalized wall", () => {
     const fact = observed(FERN, "height", 30, 1000, OP_SEED);
     await gw.append([fact]);
     const d1 = signClaims(
-      containerClaims({ container: "container:flip", trust: "curated", posture: "wall" }, OP, 9400),
+      containerClaims(
+        { container: "container:flip", trust: "curated", posture: "separate" },
+        OP,
+        9400,
+      ),
       OP_SEED,
     );
     await gw.append([d1]);
@@ -184,7 +188,7 @@ describe("T32 criterion 14 — erasure reaches the generalized wall", () => {
         {
           container: "container:flip",
           trust: "curated",
-          posture: "property",
+          posture: "shared",
           membership: HEIGHTS,
         },
         OP,
@@ -194,7 +198,7 @@ describe("T32 criterion 14 — erasure reaches the generalized wall", () => {
     );
     await gw.federate([d2], { admit: () => true }); // the flip lands as data, defect named
     await gw.append([retraction(d1.id, OP, OP_SEED, 9600)]); // the earliest falls; d2 would bind
-    expect(gw.containers().containers.get("container:flip")?.posture).toBe("property");
+    expect(gw.containers().containers.get("container:flip")?.posture).toBe("shared");
 
     await expect(gw.erase(fact.id)).rejects.toThrow(/container:flip/); // lineage remembered
     // Forgetting the container WHOLE is still the honest exit.
@@ -208,7 +212,7 @@ describe("T32 criterion 14 — erasure reaches the generalized wall", () => {
     await gw.append([
       signClaims(
         containerClaims(
-          { container: "container:gone", trust: "untrusted", posture: "wall" },
+          { container: "container:gone", trust: "untrusted", posture: "separate" },
           OP,
           9300,
         ),

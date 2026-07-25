@@ -29,6 +29,7 @@ import {
   type Delta,
   type Schema,
 } from "@bombadil/rhizomatic";
+import { CTX_CONTAINER, LEGACY_POSTURES } from "../gateway/container.js";
 import {
   CTX_REGISTRATION,
   parseClaimTemplates,
@@ -645,14 +646,101 @@ const EXPAND_READING: Migration = {
   },
 };
 
+// ---- the §27.1 step: the container posture says STORAGE ----------------------------------------
+//
+// A container's `posture` names one fact and one only: does this container hold its OWN bytes, or is
+// it a reading over ground the store already has? The first two words for that answer were
+// metaphors — `wall` and `property` — and the tell that they were the wrong words is that §27.1's own
+// gloss was more legible than its terms: it had to explain them as *a query over shared ground*
+// versus *a separate arena*. So the gloss became the vocabulary: `wall` → `separate`, `property` →
+// `shared`. (`physical | virtual` was considered and rejected: "virtual" imports a simulation the
+// shared posture is not, and "physical" is simply false — a separate container's sqlite file is no
+// more physical than the primary's. What is true of it is that it is its OWN.)
+//
+// Shape-detected like every step, and here the shape is the VALUE itself (the §20 corollary, met
+// without a version stamp): a declaration in the `loam.container` context whose `posture` primitive
+// reads `wall` or `property` predates the rename, and one reading `separate` or `shared` does not.
+// After the step the value is a current word, so `applies` goes false and re-migrating is a no-op.
+//
+// The rename is byte-for-byte the ONLY change: `toStorageWords` rewrites that one primitive and
+// copies everything else — trust, parent, membership, membershipAt, version, timestamp, author — so
+// the container the re-expression declares is the container the old bytes declared. The reader in
+// container.ts resolves the retired words too, which is what keeps the WINDOW before a migration
+// honest: `loam migrate` is something a person runs, and a store whose containers vanished until
+// they ran it would empty every scope and blind the erasure guard without a word (H9).
+
+const POSTURE_ROLE = "posture";
+
+// Is this a container DECLARATION carrying a retired posture word? Anchored on the container
+// context, so no other delta that happens to carry a `posture` primitive is in scope.
+const retiredPostureWord = (d: Delta): string | undefined => {
+  const filed = d.claims.pointers.some(
+    (p) =>
+      p.role === "container" &&
+      p.target.kind === "entity" &&
+      p.target.entity.context === CTX_CONTAINER,
+  );
+  if (!filed) return undefined;
+  const word = primitiveValue(d.claims, POSTURE_ROLE);
+  return word !== undefined && LEGACY_POSTURES.has(word) ? word : undefined;
+};
+
+// The new form: the posture primitive in the storage vocabulary, every other pointer untouched.
+const toStorageWords = (claims: Claims): Claims => ({
+  timestamp: claims.timestamp,
+  author: claims.author,
+  pointers: claims.pointers.map((p) => {
+    if (p.role !== POSTURE_ROLE || p.target.kind !== "primitive") return p;
+    const current =
+      typeof p.target.value === "string" ? LEGACY_POSTURES.get(p.target.value) : undefined;
+    return current === undefined
+      ? p
+      : { ...p, target: { kind: "primitive" as const, value: current } };
+  }),
+});
+
+const CONTAINER_POSTURE_STORAGE_WORDS: Migration = {
+  id: "container-posture-storage-words",
+  reason:
+    "migrated to §27.1's storage vocabulary: container posture wall → separate, property → shared — " +
+    "the axis is where the bytes live (its own store, or a reading over ground already held), not a metaphor",
+  applies: (deltas) => deltas.some((d) => retiredPostureWord(d) !== undefined),
+  additions(deltas, seed) {
+    const operator = authorForSeed(seed);
+    const survives = survivorsOf(deltas, operator);
+    const added: Delta[] = [];
+    for (const d of deltas) {
+      // Operator-authored and signature-proven only — `author` is self-asserted content, so
+      // re-signing an unverified delta would make the migrator a signing oracle (the guard every
+      // step shares). A stranger's declaration is inert law here anyway; its own operator migrates it.
+      if (d.claims.author !== operator || verifyDelta(d) !== "verified") continue;
+      // ...and only what the operator has not WITHDRAWN (T41): re-expressing struck law
+      // resurrects it under a new id that its retraction never named. A struck declaration
+      // therefore KEEPS its retired word forever, which is exactly what the erasure guard in
+      // container.ts reads through `asPosture` — a lineage that once held its own bytes still says so.
+      if (!survives(d.id)) continue;
+      if (retiredPostureWord(d) === undefined) continue;
+      const reExpressed = signClaims(toStorageWords(d.claims), seed);
+      const negation = signClaims(
+        supersession(operator, d.claims.timestamp, d.id, reExpressed.id, this.reason),
+        seed,
+      );
+      added.push(reExpressed, negation);
+    }
+    return added;
+  },
+};
+
 // The chain, in order. Add one entry per breaking on-wire format change, forever composable. A store
 // several versions back runs each in turn: hyperschema-roles (vocabulary), then the entity rename +
-// writability flip, then the inline-Schema lift, then the expand-reading fill.
+// writability flip, then the inline-Schema lift, then the expand-reading fill, then the container
+// posture's storage words.
 export const MIGRATIONS: readonly Migration[] = [
   HYPERSCHEMA_ROLES,
   SCHEMA_ENTITY_RENAME,
   INLINE_SCHEMA_TO_ENTITY,
   EXPAND_READING,
+  CONTAINER_POSTURE_STORAGE_WORDS,
 ];
 
 // ---- the driver --------------------------------------------------------------------------------

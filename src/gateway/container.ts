@@ -6,12 +6,13 @@
 // `trust` and `posture` are immutable per container entity, enforced at the door AND at the
 // reader, because a flip has two arrival paths and only one passes a door.
 //
-// Bytes follow the POSTURE; law follows the TRUST. A PROPERTY container is a query over shared
-// ground — pointer arrangement, zero copies. A WALL is a separate arena — real bytes, because
+// Bytes follow the POSTURE; law follows the TRUST. The posture axis is STORAGE, and the two words
+// say only that: a SHARED container is a query over ground this store already holds — pointer
+// arrangement, zero copies — and a SEPARATE container keeps its own bytes in its own store, because
 // discard-with-zero-trace is the one thing sharing cannot provide. Trust decides which postures
-// are lawful (§28.3: untrusted must be a wall — delegated admission over shared ground is
+// are lawful (§28.3: untrusted must be separate — delegated admission over shared ground is
 // refused); posture decides where bytes are paid. The quarantine (SPEC §24) is ONE PRESET of
-// this primitive: UNTRUSTED · wall · one-way-seeded · droppable — `openQuarantine` keeps its
+// this primitive: UNTRUSTED · separate · one-way-seeded · droppable — `openQuarantine` keeps its
 // signature and its behavior, implemented over `openContainerImpl` below.
 //
 // The two "trusts" are §28.1's two AXES, never one value: the knob's `trust` role is the
@@ -41,10 +42,34 @@ export const CONTAINER_CONTEXTS = [
 ] as const;
 
 export type ContainerTrust = "curated" | "untrusted";
-export type ContainerPosture = "wall" | "property";
+/** Where this container's bytes live: in its OWN store, or nowhere but the ground it reads. */
+export type ContainerPosture = "separate" | "shared";
 
 const TRUSTS = new Set<string>(["curated", "untrusted"]);
-const POSTURES = new Set<string>(["wall", "property"]);
+const POSTURES = new Set<string>(["separate", "shared"]);
+
+// The at-rest posture words before the storage rename, and what each one meant. The §20 step
+// `container-posture-storage-words` carries a surviving declaration forward; these stay legible here
+// for two reasons no migration can cover. A store is migrated only when someone RUNS `loam migrate`,
+// so until then the reader must resolve a legacy declaration exactly as it always did — a container
+// that dropped out of the table would drop out of every scope and out of the erasure guard, with no
+// error anywhere (the H9 shape). And the step re-signs only SURVIVING law, so a STRUCK legacy
+// declaration keeps these bytes forever — which is precisely what `unreachableStoreReport` reads to
+// ask whether anything in a lineage ever named a store of its own.
+export const LEGACY_POSTURES: ReadonlyMap<string, ContainerPosture> = new Map([
+  ["wall", "separate"],
+  ["property", "shared"],
+]);
+
+// The posture a primitive BINDS — current word or retired one. The door does not use this (it
+// refuses a retired word outright, naming the migration); every READER does, because a reader's job
+// is to resolve the bytes it was given rather than the bytes it wishes it had.
+const asPosture = (value: string | number | boolean | undefined): ContainerPosture | undefined =>
+  typeof value !== "string"
+    ? undefined
+    : POSTURES.has(value)
+      ? (value as ContainerPosture)
+      : LEGACY_POSTURES.get(value);
 const NUL = "\u0000";
 const NOTE_BYTES = 256;
 
@@ -189,18 +214,29 @@ export function containerDefect(
   }
   const postures = primitives(claims, "posture");
   if (postures.length !== 1 || typeof postures[0] !== "string" || !POSTURES.has(postures[0])) {
+    // A RETIRED word gets its own refusal. The door speaks one vocabulary and only the current one
+    // — but a declaration carrying the old bytes is a store that has not been migrated, not a
+    // malformed claim, and telling it so is the difference between a fixable error and a mystery.
+    const retired = typeof postures[0] === "string" ? LEGACY_POSTURES.get(postures[0]) : undefined;
+    if (retired !== undefined) {
+      return (
+        `posture "${postures[0]}" is the retired word for "${retired}" — the axis is STORAGE (its ` +
+        `own bytes, or a reading over ground already held), so the words say storage now. An older ` +
+        `store is carried forward by \`loam migrate\` (§20), never by re-minting the old bytes`
+      );
+    }
     return (
-      'a container declaration carries exactly one posture: "wall" or "property" — §28.4 ' +
-      'recommends "wall" (a separate store) when unsure; the recommendation lives in this ' +
-      "refusal, never in a silent default"
+      'a container declaration carries exactly one posture: "separate" (its own bytes in its own ' +
+      'store) or "shared" (a reading over ground this store already holds) — §28.4 recommends ' +
+      '"separate" when unsure; the recommendation lives in this refusal, never in a silent default'
     );
   }
   const trust = trusts[0] as ContainerTrust;
   const posture = postures[0] as ContainerPosture;
-  if (trust === "untrusted" && posture === "property") {
+  if (trust === "untrusted" && posture === "shared") {
     return (
-      'trust "untrusted" cannot take posture "property" — a container that admits what its ' +
-      "parent does not trust must be a wall (§28.3)"
+      'trust "untrusted" cannot take posture "shared" — a container that admits what its ' +
+      'parent does not trust keeps its own store, posture "separate" (§28.3)'
     );
   }
 
@@ -228,11 +264,12 @@ export function containerDefect(
   if (membershipAts.length === 1 && typeof membershipAts[0] !== "string") {
     return "a container declaration's membershipAt is one string content address";
   }
-  if (posture === "property" && memberships.length === 0 && membershipAts.length === 0) {
+  if (posture === "shared" && memberships.length === 0 && membershipAts.length === 0) {
     return (
-      "a property container IS its membership: declare membership or membershipAt — without one " +
+      "a shared container IS its membership: declare membership or membershipAt — without one " +
       "every scoped read would resolve it silently empty (the H9 shape through a different door). " +
-      'A WALL needs no scope Term; if a seeded arena is what you meant, declare posture "wall"'
+      "A SEPARATE container needs no scope Term; if a seeded arena is what you meant, declare " +
+      'posture "separate"'
     );
   }
 
@@ -380,13 +417,16 @@ export function readContainerTable(reactor: Reactor, operator: string | undefine
     const name = containerRef(claims, CTX_CONTAINER);
     if (name === undefined) continue;
     const trust = primitives(claims, "trust")[0];
-    const posture = primitives(claims, "posture")[0];
+    // A RETIRED posture word still binds HERE, unlike at the door: a store is migrated when someone
+    // runs `loam migrate`, and until then dropping its containers would empty every scope and blind
+    // the erasure guard without saying a word (H9). The word is normalized, never widened — the
+    // legacy pair maps onto the same two postures, so nothing new becomes lawful.
+    const posture = asPosture(primitives(claims, "posture")[0]);
     if (
       typeof trust !== "string" ||
       !TRUSTS.has(trust) ||
-      typeof posture !== "string" ||
-      !POSTURES.has(posture) ||
-      (trust === "untrusted" && posture === "property")
+      posture === undefined ||
+      (trust === "untrusted" && posture === "shared")
     ) {
       continue; // malformed law binds nothing, at the reader as at the door
     }
@@ -404,7 +444,7 @@ export function readContainerTable(reactor: Reactor, operator: string | undefine
       id: delta.id,
       ts: claims.timestamp,
       trust: trust as ContainerTrust,
-      posture: posture as ContainerPosture,
+      posture,
       ...(parentPtr?.target.kind === "entity" ? { parent: parentPtr.target.entity.id } : {}),
       ...(typeof membershipRaw === "string" ? { membershipRaw } : {}),
       ...(typeof membershipAt === "string" ? { membershipAt } : {}),
@@ -545,7 +585,7 @@ const retractionOf = (targetId: string, author: string, timestamp: number): Clai
 // then subtracted — that is what makes re-inclusion a pure negation), and the result carries the
 // forward negation closure of what it admits (H1, fourth site): exclusion may narrow what a
 // scope sees, never revive what was struck. Every unresolvable dependency FAILS THE READ CLOSED —
-// a dangling membershipAt, an unreachable wall — because an empty-set fallback would shrink a
+// a dangling membershipAt, an unreachable store — because an empty-set fallback would shrink a
 // scoped result into partial data with no error, the H9 shape on the read side.
 export function containerScopeImpl(
   gw: Gateway,
@@ -560,15 +600,15 @@ export function containerScopeImpl(
   }
   const isActive = (name: string): boolean => !table.detached.has(name);
 
-  // Each active container's members, from its own ground — the primary for a property scope,
-  // the wall's own store for an attached wall.
+  // Each active container's members, from its own ground — the primary for a shared scope,
+  // its own store for an attached separate container.
   const membersOf = (name: string): { deltas: Delta[]; ground: Gateway } => {
     const rec = table.containers.get(name)!;
-    if (rec.posture === "wall") {
+    if (rec.posture === "separate") {
       const pool = gw.attachedContainers.get(name);
       if (pool === undefined || !gw.quarantinePools.has(pool)) {
         throw new Error(
-          `containerScope refused: the wall container "${name}" is not attached — its bytes ` +
+          `containerScope refused: the separate container "${name}" is not attached — its bytes ` +
             `cannot be read, and a scope must never resolve as if it were empty (H9). Attach it ` +
             `(openContainer), or detach() it on the record to take it out of scope deliberately.`,
         );
@@ -590,7 +630,7 @@ export function containerScopeImpl(
     }
     if (term === undefined) {
       throw new Error(
-        `containerScope refused: container "${name}" resolves no membership — a property ` +
+        `containerScope refused: container "${name}" resolves no membership — a shared ` +
           `container IS its membership, and an empty fallback would be the H9 shape`,
       );
     }
@@ -598,8 +638,8 @@ export function containerScopeImpl(
   };
 
   // EVERY contributing ground is remembered per delta, never a first-wins home (the suppression
-  // lens's finding): a wall's snapshot and a property query can admit the SAME id, and only one
-  // of their grounds may hold the strike — the wall is a point-in-time copy, the primary is
+  // lens's finding): a separate store's snapshot and a shared query can admit the SAME id, and only
+  // one of their grounds may hold the strike — the snapshot is point-in-time, the primary is
   // live. Closing over one arbitrary contributor made the reader's verdict depend on the
   // lexicographic sort of container names; closing over every contributor cannot.
   const contributions = new Map<Gateway, Map<string, Delta>>();
@@ -633,11 +673,13 @@ export function containerScopeImpl(
 // --- the runtime handle ---------------------------------------------------------------------------
 
 export interface ContainerOptions {
-  /** The store a WALL lives in. Defaults to a fresh in-memory backend. */
+  /** The store a SEPARATE container lives in. Defaults to a fresh in-memory backend. */
   readonly backend?: StoreBackend;
-  /** The seeding predicate (§24.2) — the degenerate form of the membership knob. Walls only. */
+  /**
+   * The seeding predicate (§24.2) — the degenerate form of the membership knob. SEPARATE only.
+   */
   readonly admit?: (d: Delta) => boolean;
-  /** The membership Term (§24.10/§27.6): a wall's SEEDING scope, or a property's query. */
+  /** The membership Term (§24.10/§27.6): a SEPARATE container's SEEDING scope, or a SHARED one's query. */
   readonly membership?: unknown;
   /** Attach a DECLARED container: knobs and membership resolve from the table. */
   readonly name?: string;
@@ -651,18 +693,22 @@ export interface Container {
   readonly entity?: string;
   readonly trust: ContainerTrust;
   readonly posture: ContainerPosture;
-  /** A WALL's own gateway over its own store; a property container has none — that is criterion 6. */
+  /**
+   * A SEPARATE container's own gateway over its own store; a SHARED one has none — criterion 6.
+   */
   readonly gateway?: Gateway;
   /**
-   * The current members, as a READING-safe set on both postures: a property's live query PLUS
-   * the forward negation closure of what it admits (H1 — a struck member crosses with its
-   * strike, deliberately more than `select`'s raw dset), or a wall's surviving ground (which
-   * carries its strikes natively). One name, one closure contract.
+   * The current members, as a READING-safe set on both postures: a SHARED container's live query
+   * PLUS the forward negation closure of what it admits (H1 — a struck member crosses with its
+   * strike, deliberately more than `select`'s raw dset), or a SEPARATE one's surviving ground
+   * (which carries its strikes natively). One name, one closure contract.
    */
   members(): Delta[];
-  /** Re-pulse the one-way inbound seeding edge. Walls only; a property container refuses. */
+  /** Re-pulse the one-way inbound seeding edge. SEPARATE only; a SHARED container refuses. */
   reseed(): Promise<FederationReport>;
-  /** DISCARD: purge + byte-verify (walls), strike the declaration (named). Refuses over doubt. */
+  /**
+   * DISCARD: purge + byte-verify (SEPARATE), strike the declaration (named). Refuses over doubt.
+   */
   drop(): Promise<void>;
   /** KEEP: close without purging; a NAMED container lands the at-rest detach record. */
   detach(note?: string): Promise<void>;
@@ -722,15 +768,15 @@ export async function openContainerImpl(
       );
     }
   }
-  if (trust === "untrusted" && posture === "property") {
+  if (trust === "untrusted" && posture === "shared") {
     throw new Error(
-      `${voice}: trust "untrusted" cannot take posture "property" — a container that admits ` +
-        `what its parent does not trust must be a wall (§28.3)`,
+      `${voice}: trust "untrusted" cannot take posture "shared" — a container that admits ` +
+        `what its parent does not trust keeps its own store, posture "separate" (§28.3)`,
     );
   }
 
-  if (posture === "property") {
-    return openProperty(gw, {
+  if (posture === "shared") {
+    return openShared(gw, {
       trust,
       membership,
       ...(entity !== undefined ? { entity } : {}),
@@ -738,7 +784,7 @@ export async function openContainerImpl(
       ...(opts.admit !== undefined ? { admit: opts.admit } : {}),
     });
   }
-  return openWall(
+  return openSeparate(
     gw,
     {
       trust,
@@ -751,7 +797,7 @@ export async function openContainerImpl(
   );
 }
 
-function openProperty(
+function openShared(
   gw: Gateway,
   spec: {
     entity?: string;
@@ -763,7 +809,8 @@ function openProperty(
 ): Container {
   if (spec.admit !== undefined) {
     throw new Error(
-      "openContainer: a property container has no seeding edge — admit is a wall's knob (§24.2)",
+      "openContainer: a shared container has no seeding edge — admit is a separate container's " +
+        "knob (§24.2)",
     );
   }
   const resolveTerm = (): unknown => {
@@ -794,7 +841,7 @@ function openProperty(
     }
     if (spec.membership === undefined) {
       throw new Error(
-        "openContainer: a property container IS its membership — give a membership Term (H9)",
+        "openContainer: a shared container IS its membership — give a membership Term (H9)",
       );
     }
     return spec.membership;
@@ -803,18 +850,18 @@ function openProperty(
   return {
     ...(spec.entity !== undefined ? { entity: spec.entity } : {}),
     trust: spec.trust,
-    posture: "property",
+    posture: "shared",
     members: () => withNegationClosure(gw, gw.select(resolveTerm())),
     reseed: () => {
       return Promise.reject(
         new Error(
-          "a property container has no seeding edge — it is a query over shared ground; " +
+          "a shared container has no seeding edge — it is a query over shared ground; " +
             "reads re-evaluate live",
         ),
       );
     },
     drop: async () => {
-      // A property container holds no bytes of its own; dropping it is striking its declaration.
+      // A shared container holds no bytes of its own; dropping it is striking its declaration.
       if (spec.entity === undefined || gw.options.seed === undefined) return;
       const ids = survivingDeclarationIds(gw.reactor, gw.operatorAuthor!, spec.entity);
       for (const id of ids) {
@@ -835,12 +882,12 @@ function openProperty(
   };
 }
 
-// The WALL: a second gateway on its OWN backend, seeded ONE-WAY from the primary by federation,
-// sharing THE PRIMARY's operator (§24.1 — the one sanctioned shared-seed case: the wall is the
-// operator's own arena, so the operator's erasure stays authoritative there, §24.8). The edge is
-// inbound only — nothing is ever wired back. This is the T72 body, generalized: the settle, the
+// The SEPARATE posture: a second gateway on its OWN backend, seeded ONE-WAY from the primary by
+// federation, sharing THE PRIMARY's operator (§24.1 — the one sanctioned shared-seed case: the store
+// is the operator's own arena, so the operator's erasure stays authoritative there, §24.8). The edge
+// is inbound only — nothing is ever wired back. This is the T72 body, generalized: the settle, the
 // seeding closure, the drop-verify, and the detach are the invariants the lifting preserves.
-async function openWall(
+async function openSeparate(
   gw: Gateway,
   spec: {
     entity?: string;
@@ -855,7 +902,7 @@ async function openWall(
     throw new Error(
       voice === "openQuarantine"
         ? "only an operated store can open a quarantine pool (§24.1)"
-        : "only an operated store can attach a container wall (§24.1)",
+        : "only an operated store can attach a container's own store (§24.1)",
     );
   }
   if (spec.entity !== undefined && gw.attachedContainers.has(spec.entity)) {
@@ -864,11 +911,11 @@ async function openWall(
     );
   }
   const backend: StoreBackend = spec.backend ?? new MemoryBackend();
-  // SETTLE ERASURE DEBT BEFORE THE WALL EXISTS (T72). A durable store being (re)opened may hold
+  // SETTLE ERASURE DEBT BEFORE THE CONTAINER OPENS (T72). A durable store being (re)opened may hold
   // bytes whose tombstones landed at the primary while it was detached — the seeding edge
   // DELIVERS a tombstone as data and executes nothing, so attaching first would boot a reader
   // that resolves the forgotten byte LIVE beside its own tombstone. The primary's surviving
-  // tombstones are authoritative here (the wall shares its operator), so the debt is swept at
+  // tombstones are authoritative here (the container shares its operator), so the debt is swept at
   // the bytes NOW — before any reactor replays the store — and a store that cannot be proven
   // clean of it refuses to attach at all (H9: unproven bytes do not come back inside the walls).
   const dead = [...readTombstones(gw.reactor, gw.operatorAuthor)];
@@ -910,8 +957,8 @@ async function openWall(
   if (spec.membership !== undefined) gw.select(spec.membership);
   const base = spec.admit;
   // The members are the scope's dset PLUS its negation closure (§28.4). A scope may narrow what the
-  // wall sees; it may never resurrect what was struck — `negated` ranging over the operand set means
-  // a claim admitted without its retraction reads as live inside.
+  // container sees; it may never resurrect what was struck — `negated` ranging over the operand set
+  // means a claim admitted without its retraction reads as live inside.
   //
   // BOTH KNOBS OWE THIS, and the predicate is the one that looks exempt: it is applied per delta, so
   // there seems to be nothing to close over. There is — a predicate selects DOMAIN facts, and a
@@ -930,13 +977,13 @@ async function openWall(
     const admit = memberAdmit(offer);
     return pool.federate(
       offer,
-      // A scope narrows what the wall SEES, never what it must FORGET (§24.8): the operator's
+      // A scope narrows what the container SEES, never what it must FORGET (§24.8): the operator's
       // tombstones pass the seeding edge unconditionally, membership and predicate alike.
       admit === undefined ? {} : { admit: (d) => isTombstone(d.claims) || admit(d) },
     );
   };
   await reseed(); // one-way INBOUND seeding; the reverse leg is never wired
-  // Bind the operator's federated schemas so the wall RESOLVES the seeded ground — a dry-run
+  // Bind the operator's federated schemas so the container RESOLVES the seeded ground — a dry-run
   // reads a living lens, not raw deltas. (Foreign law stays inert until promoted.)
   pool.replayRegistrations();
   await pool.preloadResolvers();
@@ -979,13 +1026,13 @@ async function openWall(
   return {
     ...(spec.entity !== undefined ? { entity: spec.entity } : {}),
     trust: spec.trust,
-    posture: "wall",
+    posture: "separate",
     gateway: pool,
     members: () => [...pool.reactor.snapshot()],
     reseed,
-    // Drop DISCARDS — at the bytes, on every backend (T72). Purge everything the wall can NAME,
+    // Drop DISCARDS — at the bytes, on every backend (T72). Purge everything the container can NAME,
     // then VERIFY at the bytes (holds — a purge's count is evidence, never the verdict, T70),
-    // and on any survivor REFUSE while leaving the wall attached: a store that cannot prove
+    // and on any survivor REFUSE while leaving it attached: a store that cannot prove
     // discard stays inside the erasure fan-out rather than slipping out of it.
     drop: async () => {
       const refuse = (why: string, cause?: unknown): never => {
@@ -997,7 +1044,7 @@ async function openWall(
         );
       };
       try {
-        // The dead set is everything this wall can NAME — and a read alone cannot name it all
+        // The dead set is everything this container can NAME — and a read alone cannot name it all
         // (the erasure lens's finding): a mirror's `deltasSince` is primary-only, and a RETRY
         // after a partial purge reads EMPTY. The session reactor remembers what the read cannot,
         // so the enumeration is their union; and the §25 quarantine pen — rows a read SET ASIDE
@@ -1056,7 +1103,7 @@ async function openWall(
         );
       }
       unregister();
-      // A NAMED wall proven empty strikes its own declaration: leaving it standing would turn
+      // A NAMED container proven empty strikes its own declaration: leaving it standing would turn
       // every future erase into a completeness refusal over a store that provably ceased.
       if (spec.entity !== undefined) {
         for (const id of survivingDeclarationIds(gw.reactor, gw.operatorAuthor!, spec.entity)) {
@@ -1071,7 +1118,7 @@ async function openWall(
     // verification: the caller is choosing to hold these bytes outside the fan-out, and
     // reattachment is openContainer over the surviving store. A NAMED container lands the
     // at-rest record FIRST (T72's named deferral, fulfilled): if the record cannot land, the
-    // wall stays attached — the erasure guard must never lose sight of bytes it was promised.
+    // container stays attached — the erasure guard must never lose sight of bytes it was promised.
     detach: async (note?: string) => {
       if (spec.entity !== undefined) {
         await gw.append([
@@ -1091,34 +1138,39 @@ async function openWall(
 
 // The mint makes containers enumerable AT REST, and erase fans out over the ATTACHED set — after
 // a restart those can differ. The honest rule: erase refuses to report completeness while the
-// resolved table names a WALL-posture container — untrusted OR curated, since bytes follow
+// resolved table names a SEPARATE-posture container — untrusted OR curated, since bytes follow
 // posture — that is neither currently attached nor covered by a surviving detach record. An
-// unreachable wall is a named fault, never a silent gap; a covered one is listed as deliberately
+// unreachable store is a named fault, never a silent gap; a covered one is listed as deliberately
 // kept. (The full locator machinery rides T78's mounts; this is the rule, shipped with the mint.)
-export function unreachableWallReport(gw: Gateway): { faults: string[]; kept: string[] } {
+export function unreachableStoreReport(gw: Gateway): { faults: string[]; kept: string[] } {
   const table = readContainerTable(gw.reactor, gw.operatorAuthor);
   const faults: string[] = [];
   const kept: string[] = [];
   // §28.4's knobs must not flip through the survival algebra either (the erasure lens's
   // finding): strike the earliest declaration while a federated flip survives, and the binding
-  // posture would change wall→property with the wall's bytes still on disk — dissolving this
+  // posture would change separate→shared with the bytes still on disk — dissolving this
   // guard through a door no validator watches. So the guard remembers: an entity still ALIVE in
-  // the table whose lineage holds a STRUCK wall declaration is treated as a wall. Forgetting the
-  // container WHOLE (striking every declaration) still ends the entity and clears the guard —
+  // the table whose lineage holds a STRUCK separate declaration is treated as separate. Forgetting
+  // the container WHOLE (striking every declaration) still ends the entity and clears the guard —
   // that is the honest forget, unchanged.
-  const struckWalls = new Set<string>();
+  //
+  // The struck posture is read through `asPosture`, so a RETIRED word counts. The §20 rename step
+  // re-signs only SURVIVING law, which means a struck declaration keeps its legacy bytes forever;
+  // matching the current word alone would have quietly retired this guard for every store that
+  // predates the rename, and a guard that stops firing reports completeness it never proved (H7).
+  const struckSeparate = new Set<string>();
   if (gw.operatorAuthor !== undefined) {
     const negated = lawfulNegated(gw.reactor, gw.operatorAuthor);
     for (const delta of lawfulSnapshot(gw.reactor, gw.operatorAuthor)) {
       if (!negated(delta.id)) continue;
       const name = containerRef(delta.claims, CTX_CONTAINER);
-      if (name !== undefined && primitives(delta.claims, "posture")[0] === "wall") {
-        struckWalls.add(name);
+      if (name !== undefined && asPosture(primitives(delta.claims, "posture")[0]) === "separate") {
+        struckSeparate.add(name);
       }
     }
   }
   for (const [entity, rec] of table.containers) {
-    if (rec.posture !== "wall" && !struckWalls.has(entity)) continue;
+    if (rec.posture !== "separate" && !struckSeparate.has(entity)) continue;
     const attached = gw.attachedContainers.get(entity);
     if (attached !== undefined && gw.quarantinePools.has(attached)) continue;
     if (table.detached.has(entity)) {
@@ -1126,14 +1178,14 @@ export function unreachableWallReport(gw: Gateway): { faults: string[]; kept: st
       continue;
     }
     faults.push(
-      rec.posture === "wall"
-        ? `the declared wall container "${entity}" is neither attached nor covered by a detach ` +
+      rec.posture === "separate"
+        ? `the declared separate container "${entity}" is neither attached nor covered by a detach ` +
             `record — its store may hold bytes outside this sweep. Attach it (openContainer) and ` +
             `re-run, or detach() it on the record to keep it deliberately.`
         : `container "${entity}" resolves posture "${rec.posture}", but a struck declaration in ` +
-            `its lineage named it a WALL — its store may still hold bytes outside this sweep ` +
-            `(§28.4: the knobs do not flip through the survival algebra). Cover it with a detach ` +
-            `record, or forget the container whole and declare a new name.`,
+            `its lineage gave it a store of its OWN — which may still hold bytes outside this ` +
+            `sweep (§28.4: the knobs do not flip through the survival algebra). Cover it with a ` +
+            `detach record, or forget the container whole and declare a new name.`,
     );
   }
   // A surviving detach record whose declaration is gone is a store mid-forget: still parked at
