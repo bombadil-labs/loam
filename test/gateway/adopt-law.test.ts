@@ -1592,4 +1592,17 @@ describe("T33 vocabulary — the manifest mint collides with nothing", () => {
     expect(CTX_MANIFEST.startsWith("loam.adoption")).toBe(false);
     expect(CTX_MANIFEST.startsWith("rhizomatic.")).toBe(false);
   });
+
+  it("a malformed alias refuses — EACH shape alone, not only both together", () => {
+    // The mutation gate's surviving mutant was `alias === "" && alias.includes(NUL)`: with `&&`,
+    // an empty alias alone passes and a NUL alias alone passes, and no rail noticed. Each shape
+    // gets its own leg, because a conjunction is satisfied by neither.
+    const row = { targetEntity: "hyperschema:Post", kind: "schema" as const };
+    expect(() => manifestExportClaims({ ...row, alias: "" }, STRANGER, 60_000)).toThrow(/alias/);
+    expect(() => manifestExportClaims({ ...row, alias: "Po\u0000st" }, STRANGER, 60_001)).toThrow(
+      /NUL/,
+    );
+    // The positive leg, so the refusals cannot be satisfied by rejecting every alias.
+    expect(() => manifestExportClaims({ ...row, alias: "Post" }, STRANGER, 60_002)).not.toThrow();
+  });
 });

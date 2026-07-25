@@ -111,6 +111,9 @@ export function manifestExportClaims(
         "neither — the kind's most stable identifier is the one the consumer can verify (§27.8)",
     );
   }
+  // Each shape refuses ALONE (a conjunction here is satisfied by neither, and the mutation gate
+  // found exactly that mutant surviving): an empty alias names nothing a consumer could ask for,
+  // and NUL is the gateway's own separator.
   if (row.alias === "" || row.alias.includes(NUL)) {
     throw new Error("a manifest alias must be a non-empty name without NUL");
   }
