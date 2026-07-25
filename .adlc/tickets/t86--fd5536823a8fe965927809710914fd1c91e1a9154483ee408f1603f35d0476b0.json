@@ -1,0 +1,13 @@
+{
+  "body": "Found during T79's design lap (2026-07-24) and verified in the tree: `src/server/http.ts:506-517` routes `loam_query`'s `args.query` straight into `gateway.query(source, ...)`, which executes ANY GraphQL document — including a `mutation`. So the MCP tool named and described as the read surface will happily write, and a shell that caches or auto-refreshes 'read' tool calls (Claude's watchTool, any MCP client honoring readOnlyHint conventions) can be licensed to REPLAY a write. The companion gap: neither tool declares MCP `annotations` (`readOnlyHint`), so shells cannot tell the two apart even when the caller is honest.\n\nFIX (two small parts, one PR): (1) `loam_query` refuses a document whose operation is `mutation` or `subscription` — parse the document (graphql's `parse` + operation inspection; the gateway already depends on graphql) and refuse with a message naming `loam_mutate` as the door for writes. (2) Add `annotations: { readOnlyHint: true }` to `loam_query` and `readOnlyHint: false` (destructiveHint per spec taste) to `loam_mutate` in the tools manifest at `src/server/http.ts:364+`.\n\nRAILS: `test/server/mcp-readonly.test.ts` (new file) — (a) `loam_query` with a mutation document refuses naming loam_mutate, and the ground is UNCHANGED at both levels (delta count; a read through the door); (b) `loam_query` with a query document still answers; (c) `loam_mutate` still writes; (d) the tools/list manifest carries readOnlyHint true/false respectively.\n\nCARE: this REPAIRS the stated promise of the read tool (the manifest already presents loam_query as the read door) — merge-by-risk says repair, self-mergeable on green + P5 + audit. It touches the MCP surface T79's design builds on; land before T79.",
+  "edges": [],
+  "id": "T86",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "src/server/http.ts",
+    "test/server/"
+  ],
+  "status": "todo",
+  "title": "loam_query executes mutations — the MCP door's read-only scope is fiction"
+}
