@@ -251,9 +251,10 @@ reads is a swallowed error with extra steps.
 `readdirSync` error, not just `ENOENT`, so an unreadable fan answered "no bytes here" and `erase`
 reported a completion over legible plaintext — the very bug the ticket existed to fix, on the tier
 the fix was written for. `MirrorBackend.heal` records refused sweeps into `purgeFailures`, promising
-in its own comment that the operator is told; nothing in `src/` reads that field, so a boot sweep can
-fail in total silence (T70). And the pool fan-out aborted on its first refusal, so replicas ordered
-behind a broken one were never swept — an unexamined replica reported as a clean one.
+in its own comment that the operator is told; the CLI's boot sequence now reads that field and
+reports each failure to the operator on `stderr` (`cli.ts:146`), closing the T70 silence. And the
+pool fan-out aborted on its first refusal, so replicas ordered behind a broken one were never swept —
+an unexamined replica reported as a clean one.
 
 ---
 
