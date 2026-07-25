@@ -251,6 +251,14 @@ export interface TranslateReport {
   // only when the pass retracted something: the four counts above describe one pass's RENDERING,
   // and a reconciliation with nothing to do has nothing to add to them.
   readonly retracted?: number;
+  // Renderings this pass CANNOT retract: a delta citing a struck source under `translates`, signed
+  // by somebody other than this pass. A negation is an assertion and the pass speaks only for what
+  // it said, so these are LEFT LIVE — and named rather than dropped silently, because a live
+  // rendering of a retired fact is exactly the resurrection this pass exists to prevent. The usual
+  // cause is a rotated seed: run the pass once more under the seed that minted them, or have the
+  // operator strike them directly. (A foreign delta merely wearing the reserved role lands here
+  // too — the pass has no standing to speak for that either.) Present only when non-zero.
+  readonly stranded?: number;
 }
 
 // One pass of the generic translator: apply every lawful spec to every surviving,
@@ -334,21 +342,36 @@ export async function translate(
   // pulling `offeredDeltas` runs none of Loam's rules, and only deltas federate.
   //
   // One direction, and only one: source struck → rendering struck, never the reverse (a reading the
-  // operator rejects says nothing about the foreign claim it was read from) and never revival — a
-  // source whose strike is later struck does not un-retract what was already retired; the operator
-  // strikes that retraction if they mean to bring a rendering back. Scoped to THIS translator's own
-  // renderings, because a negation is an assertion and the pass speaks only for what it said.
+  // operator rejects says nothing about the foreign claim it was read from) and never revival. Two
+  // things can revive a SOURCE and will not revive its rendering: a strike that is itself struck,
+  // and a REVOKED GRANT — a grantee's strike is honored here as data, but the negation this pass
+  // materializes from it outlives their standing, so revoking the grant brings the source back for
+  // every governed reader while the rendering stays dead. Over-suppression is the fail-safe
+  // direction of the two, and the remedy for both is the same: the operator strikes the pass's
+  // retraction. Scoped to THIS translator's own renderings — a negation is an assertion, and the
+  // pass speaks only for what it said; everything else it must leave live is COUNTED (`stranded`),
+  // never dropped in silence.
+  //
   // Idempotent exactly as the emissions are: the retraction inherits its rendering's timestamp, so
-  // the same (rendering, translator) always mints the same negation and a re-run lands nothing.
+  // the same (rendering, translator) always mints the same negation, and a re-run lands a duplicate
+  // union swallows. That byte-identity is what lets an operator's revival HOLD — a claim shaped even
+  // slightly differently (a `reason` pointer, a fresh timestamp) would take a new id and re-kill
+  // every revived rendering on the next pass. The tripwire is the `negationsOf(...).toHaveLength(1)`
+  // assertion in test/federation/translate-suppression.test.ts; keep the claims derived.
   //
   // Runs whether or not any spec survives: a retired spec must not strand the renderings it made.
   const retractions: Delta[] = [];
+  let stranded = 0;
   for (const held of gateway.reactor.snapshot()) {
-    if (held.claims.author !== author || struck(held.id)) continue;
+    if (struck(held.id)) continue;
     const cite = held.claims.pointers.find(
       (p) => p.role === "translates" && p.target.kind === "delta",
     );
     if (cite?.target.kind !== "delta" || !struck(cite.target.deltaRef.delta)) continue;
+    if (held.claims.author !== author) {
+      stranded += 1;
+      continue;
+    }
     retractions.push(
       signClaims(makeNegationClaims(author, held.claims.timestamp, held.id), opts.seed),
     );
@@ -365,5 +388,6 @@ export async function translate(
     unbound,
     refused,
     ...(retractReceipt.accepted > 0 ? { retracted: retractReceipt.accepted } : {}),
+    ...(stranded > 0 ? { stranded } : {}),
   };
 }

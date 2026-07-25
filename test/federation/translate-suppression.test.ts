@@ -16,12 +16,21 @@
 // and the `assertClosureDoesNotLeak` leg (a peer receives the strike by the forward closure, never
 // by the offer widening backward onto a source it excluded).
 //
-// Not asserted here, deliberately: the HTTP doors — the peer leg goes through `offeredDeltas`,
-// which is what `GET /federate` serves (pinned byte-for-byte in offer.test.ts), so the door adds no
-// third behavior to pin. Nor an ERASED (§11-purged) source: a rendering whose source's bytes are
-// gone is an erasure-completeness question, and `dataStruck` answers only for deltas the store
-// still holds. The rail that would close it belongs with erasure — a tombstone on a source must
-// reach the renderings that cite it — and it is not a suppression rail.
+// Not asserted here, deliberately, and each with its reason:
+//
+//   * The HTTP doors. The peer leg goes through `offeredDeltas`, which is what `GET /federate`
+//     serves (pinned byte-for-byte in offer.test.ts), so the door adds no third behavior to pin.
+//   * An ERASED (§11-purged) source. A rendering whose source's bytes are gone is an
+//     erasure-completeness question, and `dataStruck` answers only for deltas the store still holds.
+//     The rail that would close it — a tombstone on a source must reach the renderings that cite
+//     it — belongs with erasure, and NO TICKET YET COVERS IT: T45 is the nearest neighbour (in-memory
+//     retention of erased bytes) and says nothing about translated copies.
+//   * The `drop`-masked reader's divergence from the pass. Suppression is materialized here under ONE
+//     chosen mask — the governed one — so for a `drop`-masked reading a NON-grantee's self-retraction
+//     binds on the source while the rendering keeps reading live. That is the price of the
+//     anti-heckler property the stranger-veto rail below pins deliberately: a pass that honored every
+//     negation present would let any federated author suppress a canonical rendering. The divergence
+//     is inherent to materializing a mask-relative fact, not an oversight of these rails.
 
 import { describe, expect, it } from "vitest";
 import {
@@ -322,8 +331,39 @@ describe("T58 — a retraction reaches the canonical rendering across the `trans
     await gateway.append([theirs]);
     const report = await translate(gateway, { seed: TRANSLATOR_SEED });
     expect(report.retracted ?? 0).toBe(0);
+    expect(report.stranded).toBe(1); // left live, and SAID so
     expect(isSuppressed(gateway, theirs.id)).toBe(false);
     expect(isPresent(gateway, theirs.id)).toBe(true);
+    await gateway.close();
+  });
+
+  it("a rotated seed cannot retract the old seed's renderings — and the report names them", async () => {
+    // The seed is a caller's argument, pinned by nothing in src/. So the pass that reconciles is
+    // not always the pass that rendered: after a rotation the emission stage skips the struck
+    // source and reconciliation cannot speak for another author's assertion, which would leave the
+    // rendering live and the report silent. Disclosure is the honest minimum — the bad state is
+    // real, and a count is what makes it findable.
+    const gateway = await translatedWorld();
+    const foreign = cinelogEntry(5000);
+    await gateway.federate([foreign]);
+    await translate(gateway, { seed: TRANSLATOR_SEED });
+    const rendering = renderingOf(gateway, foreign.id)!;
+    await gateway.append([retraction(foreign.id, OPERATOR, OPERATOR_SEED, 6000)]);
+
+    // The rotation: the next pass runs under a different seed — here the operator's own.
+    const rotated = await translate(gateway, { seed: OPERATOR_SEED });
+    expect(rotated.stranded).toBe(1);
+    expect(rotated.retracted ?? 0).toBe(0);
+    // The honest bad state, disclosed rather than papered over: still live, at both levels.
+    expect(isSuppressed(gateway, rendering.id)).toBe(false);
+    expect(await serves(gateway, "attendance")).toContain(STALKER);
+
+    // And the remedy the count points at: the minting seed runs once more.
+    const byItsAuthor = await translate(gateway, { seed: TRANSLATOR_SEED });
+    expect(byItsAuthor.retracted).toBe(1);
+    expect(byItsAuthor.stranded ?? 0).toBe(0);
+    expect(isSuppressed(gateway, rendering.id)).toBe(true);
+    expect(await serves(gateway, "attendance")).not.toContain(STALKER);
     await gateway.close();
   });
 
