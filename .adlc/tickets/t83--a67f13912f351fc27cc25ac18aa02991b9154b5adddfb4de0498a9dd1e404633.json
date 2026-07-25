@@ -1,0 +1,14 @@
+{
+  "body": "FINDING (verified, spun out from the container-export review as a sibling rather than folded in — different scope, different files, deserves its own rails). The canonical \"select the deltas pointing at this root, group them by pointer context\" gather term — `{ op: \"group\", key: \"byTargetContext\", in: { op: \"select\", pred: { hasPointer: { targetEntity: { var: \"root\" } } }, in: { op: \"mask\", policy: \"drop\", in: \"input\" } } }` — appears verbatim (grep `byTargetContext`) in 73 places across src/, test/, and demos/, including README.md's own tutorial example and every `demos/village/schemas/*.json` stock schema. It is the entity-scoped-gather idiom for a plain entity (no relation fan-out), and every author who registers a simple schema currently hand-writes this five-level nested Term rather than calling a named constructor.\n\nThis is a distinct concern from T82 (container types unreachable from the package barrel): this is about ergonomics for the common gather shape everyone reaches for, in `src/gateway/gql.ts` / wherever registration helpers live, or a new small module (e.g. `src/gateway/gather.ts`) exporting something like `plainEntityGather()` (returns the Term above) as a named constructor, re-exported from src/index.ts.\n\nFIX SHAPE: add one or two named constructors for the most common gather shapes (start with the plain-entity `byTargetContext` idiom seen above; consider whether the relation-fan-out shape used by `mutations`/claim-templates examples is common enough to warrant a second one — argue from actual repeat count, don't invent shapes nobody uses). Export from src/index.ts. Update README.md's quickstart to use the constructor instead of the raw Term literal, as a demonstration.\n\nRAILS: a unit test asserting the constructor produces a Term deep-equal to the hand-written literal used elsewhere (pin the two never drifting apart); a test registering a schema built via the constructor and querying through it end-to-end.\n\nCARE: additive ergonomics helper, no behavior change to existing raw-Term registrations — self-mergeable once green + P5 clean.",
+  "edges": [],
+  "id": "T83",
+  "phase": "P0",
+  "rails": [],
+  "scope": [
+    "src/index.ts",
+    "src/gateway/gql.ts",
+    "README.md"
+  ],
+  "status": "todo",
+  "title": "Named gather-Term constructors — `byTargetContext` is copy-pasted raw into 60+ files"
+}
