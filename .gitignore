@@ -1,4 +1,8 @@
-node_modules/
+# No trailing slash: a trailing-slash pattern matches a DIRECTORY only, so a `node_modules`
+# SYMLINK slipped past it and got committed (#204) — pointing at its own absolute path, so every
+# fresh checkout materialized a loop, ELOOP'd, and killed every test run with EMPTY OUTPUT.
+# A tool that says nothing is indistinguishable from a tool with nothing to say.
+node_modules
 dist/
 .DS_Store
 *.log
