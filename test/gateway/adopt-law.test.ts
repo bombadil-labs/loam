@@ -30,6 +30,7 @@ import { registrationDeltaClaims } from "../../src/gateway/registration.js";
 import { rendererBindingClaims } from "../../src/gateway/renderers.js";
 import { CTX_MANIFEST, manifestExportClaims } from "../../src/gateway/adopt-law.js";
 import type { ModuleVersion } from "../../src/gateway/container-identity.js";
+import { retraction } from "./narrowing.js";
 import { FERN, observed, PLANT_BODY } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE, pickLatest } from "./fixtures.js";
 
@@ -67,37 +68,57 @@ interface ModuleWorld {
   };
 }
 
-// Build the shared world. The module's membership is "the stranger's deltas" — the frozen
-// version carries them plus their negation closure (Gateway.freeze), so survival is computable
-// from the members alone.
-async function moduleWorld(opts: { schemaAlias?: string; withRenderer?: boolean } = {}): Promise<ModuleWorld> {
-  const gw = await boot();
+// Build a stranger module INTO an existing primary. The module's membership is "the stranger's
+// deltas" — the frozen version carries them plus their negation closure (Gateway.freeze), so
+// survival is computable from the members alone. `allHeights` switches the module's resolution
+// program (height: all vs pick-latest) — the guard rails' observable content difference.
+async function moduleWorldInto(
+  gw: Gateway,
+  opts: {
+    schemaAlias?: string;
+    withRenderer?: boolean;
+    allHeights?: boolean;
+    container?: string;
+    seed?: string;
+    baseTs?: number;
+  } = {},
+): Promise<{ wall: Container; version: ModuleVersion; parts: ModuleWorld["parts"] }> {
+  const seed = opts.seed ?? STRANGER_SEED;
+  const author = authorForSeed(seed);
+  const name = opts.container ?? "container:social";
+  const base = opts.baseTs ?? 41_000;
   await gw.append([
     signClaims(
-      containerClaims(
-        { container: "container:social", trust: "untrusted", posture: "wall" },
-        OP,
-        40_000,
-      ),
+      containerClaims({ container: name, trust: "untrusted", posture: "wall" }, OP, base - 1000),
       OP_SEED,
     ),
   ]);
-  const wall = await gw.openContainer({ name: "container:social", backend: new MemoryBackend() });
+  const wall = await gw.openContainer({ name, backend: new MemoryBackend() });
 
-  const definition = signClaims(publishHyperSchemaClaims(POST, "hyperschema:Post", STRANGER, 41_000), STRANGER_SEED);
-  let t = 41_001;
+  const schema: Schema = opts.allHeights
+    ? {
+        props: new Map([["height", { kind: "all", order: { kind: "byTimestamp", dir: "asc" } }]]),
+        default: pickLatest,
+        name: "Post",
+      }
+    : POST_SCHEMA;
+  const definition = signClaims(
+    publishHyperSchemaClaims(POST, "hyperschema:Post", author, base),
+    seed,
+  );
+  let t = base + 1;
   const reg = registrationDeltaClaims(
     "hyperschema:Post",
     "Post",
-    POST_SCHEMA,
+    schema,
     [FERN],
-    STRANGER,
+    author,
     () => t++,
     undefined,
     ["height"],
     undefined,
   );
-  const registration = [reg.living, reg.snapshot, reg.binding].map((c) => signClaims(c, STRANGER_SEED));
+  const registration = [reg.living, reg.snapshot, reg.binding].map((c) => signClaims(c, seed));
   const renderer = signClaims(
     rendererBindingClaims(
       {
@@ -107,19 +128,19 @@ async function moduleWorld(opts: { schemaAlias?: string; withRenderer?: boolean 
         bundle: "export default (n) => `<b>${n.view.height}</b>`;",
       },
       undefined,
-      STRANGER,
-      41_010,
+      author,
+      base + 10,
     ),
-    STRANGER_SEED,
+    seed,
   );
   const manifest = [
     signClaims(
       manifestExportClaims(
         { alias: opts.schemaAlias ?? "Post", targetEntity: "hyperschema:Post", kind: "schema" },
-        STRANGER,
-        41_020,
+        author,
+        base + 20,
       ),
-      STRANGER_SEED,
+      seed,
     ),
     ...(opts.withRenderer === false
       ? []
@@ -127,10 +148,10 @@ async function moduleWorld(opts: { schemaAlias?: string; withRenderer?: boolean 
           signClaims(
             manifestExportClaims(
               { alias: "Feed", targetAddress: renderer.id, kind: "renderer" },
-              STRANGER,
-              41_021,
+              author,
+              base + 21,
             ),
-            STRANGER_SEED,
+            seed,
           ),
         ]),
   ];
@@ -139,10 +160,18 @@ async function moduleWorld(opts: { schemaAlias?: string; withRenderer?: boolean 
   });
   const version = wall.gateway!.freeze({
     op: "select",
-    pred: { match: { field: "author", cmp: "eq", const: STRANGER } },
+    pred: { match: { field: "author", cmp: "eq", const: author } },
     in: "input",
   });
-  return { gw, wall, version, parts: { definition, registration, renderer, manifest } };
+  return { wall, version, parts: { definition, registration, renderer, manifest } };
+}
+
+async function moduleWorld(
+  opts: Parameters<typeof moduleWorldInto>[1] = {},
+): Promise<ModuleWorld> {
+  const gw = await boot();
+  const built = await moduleWorldInto(gw, opts);
+  return { gw, ...built };
 }
 
 const rootResolvesPost = async (gw: Gateway): Promise<boolean> => {
@@ -267,6 +296,173 @@ describe("T33 criterion 7 — a blessing crosses a wall only by re-signing", () 
     // …and the module's container still resolves through its ORIGINAL (stranger-signed) law:
     // the wall's ground still carries the stranger's definition, surviving and its own.
     expect(wall.gateway!.reactor.get(parts.definition.id)).toBeDefined();
+    await wall.drop();
+    await gw.close();
+  });
+});
+
+// The observable content difference for the guard rails: the ROOT's own Post resolves height
+// pick-latest (a scalar); the MODULE's Post resolves height "all" (a list). Different resolution
+// programs → different registration content (structural identity), and the WINNER is visible at
+// the door: the query's shape says whose law answered.
+const ROOT_POST_SCHEMA: Schema = {
+  props: new Map([["height", pickLatest]]),
+  default: pickLatest,
+  name: "Post",
+};
+
+const plantRootPost = async (gw: Gateway): Promise<void> => {
+  await gw.publishRegistration(POST, ROOT_POST_SCHEMA, [FERN]);
+};
+
+const heights = async (gw: Gateway, lens = "Post"): Promise<unknown> => {
+  const view = await gw.query(`{ ${lens}(entity: "${FERN}") { height } }`);
+  return (view.data?.[lens] as { height?: unknown } | undefined)?.height;
+};
+
+describe("T33 criteria 8 & 16 — the root-name guard, and supersede's reversibility", () => {
+  it("a different-content Post refuses; supersede takes the name; as serves side by side", async () => {
+    const { gw, wall, version } = await moduleWorld({ allHeights: true });
+    await plantRootPost(gw);
+    await gw.append([
+      observed(FERN, "height", 30, 43_000, OP_SEED),
+      observed(FERN, "height", 34, 43_001, OP_SEED),
+    ]);
+    expect(await heights(gw)).toBe(34); // the root's own law answers
+
+    // REFUSE: the currently-winning root registration has different content — and the
+    // pre-existing read still resolves through the ORIGINAL law (object level, at the door).
+    await expect(gw.adoptLaw(version, "Post")).rejects.toThrow(/Post/);
+    expect(await heights(gw)).toBe(34);
+
+    // AS: bless under a different root name — both readings serve side by side.
+    await gw.adoptLaw(version, "Post", { as: "TheirPost" });
+    expect(await heights(gw)).toBe(34);
+    expect(await heights(gw, "TheirPost")).toEqual([30, 34]);
+    await wall.drop();
+    await gw.close();
+  });
+
+  it("supersede outranks and is reversible — negating it resurfaces the original winner", async () => {
+    const { gw, wall, version } = await moduleWorld({ allHeights: true });
+    await plantRootPost(gw);
+    await gw.append([
+      observed(FERN, "height", 30, 43_100, OP_SEED),
+      observed(FERN, "height", 34, 43_101, OP_SEED),
+    ]);
+
+    await gw.adoptLaw(version, "Post", { supersede: true });
+    expect(await heights(gw)).toEqual([30, 34]); // the module's program answers now
+
+    // supersede never negates: the prior registration is still on the ground, and negating the
+    // SUPERSEDING registration resurfaces it as the winner — §21's living semantics, no
+    // destructive variant.
+    const superseding = [...gw.reactor.snapshot()].filter(
+      (d) =>
+        d.claims.author === OP &&
+        d.claims.pointers.some(
+          (p) =>
+            p.target.kind === "entity" &&
+            p.target.entity.context === "loam.registration" &&
+            p.target.entity.id === "registration:hyperschema:Post",
+        ) &&
+        d.claims.timestamp < 42_000, // the blessed binding inherited the SOURCE's timestamp
+    );
+    expect(superseding.length).toBe(1);
+    await gw.append([retraction(superseding[0]!.id, OP, OP_SEED, 43_200)]);
+    gw.replayRegistrations();
+    await gw.preloadResolvers();
+    expect(await heights(gw)).toBe(34); // the original is the winner again
+    await wall.drop();
+    await gw.close();
+  });
+});
+
+describe("T33 criterion 20 — the route is a living name too", () => {
+  it("adopting a renderer whose route the root already serves refuses without supersede", async () => {
+    const { gw, wall, version } = await moduleWorld();
+    await gw.publishRenderer({
+      route: "feed",
+      schema: "Plant",
+      consumes: ["height"],
+      bundle: "export default (n) => `<i>root</i>`;",
+    });
+    await expect(gw.adoptLaw(version, "Feed")).rejects.toThrow(/feed/);
+    const served = await gw.serveRoute("feed", FERN, "full");
+    expect(served.body).toContain("root"); // the original still answers at the door
+
+    await gw.adoptLaw(version, "Feed", { supersede: true, pen: false });
+    const after = await gw.serveRoute("feed", FERN, "full");
+    expect(after.body).toContain("<b>"); // the module's bundle answers now
+    await wall.drop();
+    await gw.close();
+  });
+});
+
+describe("T33 criterion 14 — the guard is atomic, and the rail forces the race", () => {
+  it("leg 1: two concurrent different-content adoptions — one publish, one refusal naming the mover", async () => {
+    const { gw, wall, version } = await moduleWorld(); // pick-latest Post
+    // A second stranger module exporting a DIFFERENT-content Post (the all-heights program).
+    const other = await moduleWorldInto(gw, {
+      allHeights: true,
+      container: "container:rival",
+      seed: "4c".repeat(32),
+    });
+
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let holds = 0;
+    gw.adoptionHold = async () => {
+      holds += 1;
+      if (holds === 1) await held; // hold ONLY adoption A between its name-check and its append
+    };
+    let aSettled = false;
+    const a = gw.adoptLaw(version, "Post").finally(() => (aSettled = true));
+    a.catch(() => undefined); // the refusal is asserted below; never unhandled
+    await gw.adoptLaw(other.version, "Post"); // B runs to completion THROUGH the same seam
+    expect(aSettled).toBe(false); // the overlap is real — a sequential pass cannot satisfy this
+    release();
+    await expect(a).rejects.toThrow(/moved|winner/); // refused, naming the mover
+    expect(await heights(gw)).toBeDefined(); // exactly one Post bound, and it answers
+    gw.adoptionHold = undefined;
+    await other.wall.drop();
+    await wall.drop();
+    await gw.close();
+  });
+
+  it("leg 2: the critical section covers the DIRECT publish door too", async () => {
+    const { gw, wall, version } = await moduleWorld();
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    gw.adoptionHold = async () => {
+      gw.adoptionHold = undefined; // only A holds; the direct publish must not consume the seam
+      await held;
+    };
+    let aSettled = false;
+    const a = gw.adoptLaw(version, "Post").finally(() => (aSettled = true));
+    a.catch(() => undefined);
+    await plantRootPost(gw); // a DIFFERENT-content Post lands through publishRegistration
+    expect(aSettled).toBe(false);
+    release();
+    await expect(a).rejects.toThrow(/moved|winner/); // the mover came through another door — still named
+    await wall.drop();
+    await gw.close();
+  });
+});
+
+describe("T33 criterion 22 — a colliding row stops the bulk gesture", () => {
+  it("blessAll refuses whole naming the collision; resolved singly, the re-run blesses the rest", async () => {
+    const { gw, wall, version } = await moduleWorld({ allHeights: true });
+    await plantRootPost(gw);
+    const before = [...gw.reactor.snapshot()].length;
+
+    await expect(gw.blessAll(version)).rejects.toThrow(/Post/);
+    expect([...gw.reactor.snapshot()].length).toBe(before); // NO row landed — decisions don't ride bulk
+
+    await gw.adoptLaw(version, "Post", { as: "TheirPost" }); // the named row, resolved singly
+    await gw.blessAll(version); // the rest lands; row 4's witness is silent
+    const served = await gw.serveRoute("feed", FERN, "full");
+    expect(served.status).toBe(200); // the renderer row rode the re-run
     await wall.drop();
     await gw.close();
   });
