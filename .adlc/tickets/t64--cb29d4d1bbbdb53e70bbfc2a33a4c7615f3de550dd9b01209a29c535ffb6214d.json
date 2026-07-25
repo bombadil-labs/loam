@@ -7,20 +7,24 @@
     "test/gateway/slate.test.ts",
     "test/gateway/slate-doors.test.ts",
     "test/gateway/slate-cut.test.ts",
+    "test/gateway/slate-translate.test.ts",
     "test/gateway/graveyard.test.ts",
-    "test/gateway/slate-receipt.test.ts"
+    "test/gateway/slate-receipt.test.ts",
+    "test/gateway/slating.ts"
   ],
   "scope": [
     "spec/",
-    "src/gateway/slate.ts",
-    "src/gateway/erase.ts",
-    "src/gateway/ingest.ts",
-    "src/gateway/reads.ts",
-    "src/gateway/container.ts",
+    "src/federation/translate.ts",
     "src/gateway/accounts.ts",
+    "src/gateway/container.ts",
+    "src/gateway/erase.ts",
     "src/gateway/gateway.ts",
-    "src/surface/surface.ts",
-    "src/gateway/quarantine-pool.ts"
+    "src/gateway/ingest.ts",
+    "src/gateway/mutate.ts",
+    "src/gateway/quarantine-pool.ts",
+    "src/gateway/reads.ts",
+    "src/gateway/slate.ts",
+    "src/surface/surface.ts"
   ],
   "status": "in-progress",
   "title": "Two-phase erasure: a slate is a container, and dropping it is the cut"
