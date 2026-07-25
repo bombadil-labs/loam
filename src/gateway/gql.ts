@@ -107,6 +107,13 @@ const legal = (s: string): string => {
   return /^[A-Za-z_]/.test(cleaned) ? cleaned : `_${cleaned}`;
 };
 
+// The QUERY-ROOT and MUTATION-ROOT field name for a lens: legal, then initial-lowercased. Exported
+// because it is not derivable by eye — a caller composing a document from a lens NAME needs exactly
+// this, and `Plant` (the VIEW TYPE's name) is not it. Anything that composes a document against a lens
+// must route through here or it will name a field the schema never built.
+export const queryFieldFor = (lens: string): string =>
+  legal(lens).replace(/^[A-Z]/, (c) => c.toLowerCase());
+
 function fieldTypeOf(pp: Policy): GraphQLOutputType {
   switch (pp.kind) {
     case "pick":
@@ -329,7 +336,7 @@ export function buildGqlSchema(
       }),
     });
 
-    const fieldName = typeName.replace(/^[A-Z]/, (c) => c.toLowerCase());
+    const fieldName = queryFieldFor(lensOf(def));
     // Own properties only: a schema named "toString" collides with nothing but itself.
     if (Object.hasOwn(queryFields, fieldName)) {
       throw new Error(

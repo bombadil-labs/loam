@@ -29,9 +29,16 @@ export const MAX_CONNECTOR_NAME = 128;
 // A GraphQL-legal name from a store-native one — the SAME mangling `legal()` runs in gql.ts, which is
 // where the store-side truth lives. It is duplicated here because the shell is a standalone page that
 // cannot import from the gateway, and `test/gateway/artifact-reads.test.ts` pins the two to agree.
+// The QUERY-ROOT field name for a lens, as `queryFieldFor` derives it in gql.ts: GraphQL-legal, then
+// initial-lowercased. Both steps are load-bearing and neither is guessable from the lens name —
+// `Plant` is the VIEW TYPE's name and `plant` is the field's, so a page composing `Plant(entity:)`
+// names a field no store ever built. It is duplicated here because the shell is a standalone page that
+// cannot import from the gateway, and `test/gateway/artifact-reads.test.ts` pins the two to agree
+// against the REAL GraphQL schema rather than against a stub that would echo either.
 const LEGAL_JS = `function legalName(s) {
     var cleaned = String(s).replace(/[^_A-Za-z0-9]/g, "_");
-    return /^[A-Za-z_]/.test(cleaned) ? cleaned : "_" + cleaned;
+    var legal = /^[A-Za-z_]/.test(cleaned) ? cleaned : "_" + cleaned;
+    return legal.replace(/^[A-Z]/, function (c) { return c.toLowerCase(); });
   }`;
 
 // The confined realm's whole program. It runs in a Worker global scope — no `window`, no `document`, and
@@ -50,19 +57,74 @@ const LEGAL_JS = `function legalName(s) {
 // / `{ kind: "notHtml" }` / `{ kind: "fault" }` back, so a fault folds to a clean refusal leaking nothing
 // of the bundle's internals. The extra `{ kind: "live" }` is the second clock's start gun (T73): a slow
 // spawn under a loaded tab must not charge startup against the render's budget.
-const REALM_SRC = `var held = {
+// The channels a Worker realm carries that would SURVIVE its teardown, plus the doors to them. A worker
+// global scope has no `window` and no `localStorage`, which is what makes the realm look sufficient at a
+// glance — but `indexedDB`, `caches`, and `BroadcastChannel` are bare identifiers there, so
+// `terminate()` alone does NOT empty the compartment: a bundle calling `indexedDB.open("keep")` holds a
+// copy across every render and every teardown, in a store §11 cannot reach and the shell cannot
+// enumerate. That is the one memory §11 was invoked to reach, so the boundary is TWO things — the
+// per-render realm AND this seal, beneath the pack-time refusal that is its cheap half.
+export const SEALED_CHANNELS: readonly string[] = [
+  "indexedDB",
+  "caches",
+  "BroadcastChannel",
+  "importScripts",
+  "fetch",
+  "XMLHttpRequest",
+  "WebSocket",
+  "localStorage",
+  "sessionStorage",
+  "self",
+  "window",
+  "document",
+];
+
+// Seal a realm: make every named channel `undefined` and non-writable, and report which ones were
+// actually there to seal. Returns the sealed names so a caller can tell "nothing to do" from "done" —
+// a seal that silently sealed nothing is the shape of a guard that has stopped guarding.
+//
+// UNLIKE THE PAGE REALM, this is a boundary rather than theatre. Filtering a locked, kernel-installed
+// object the shell itself needs would be defeated by any surviving reference; here nothing is
+// kernel-installed, the shell needs none of these, and the realm is discarded after one render anyway.
+//
+// WRITTEN TO BE SERIALIZED. The realm program below embeds this function's OWN SOURCE, so the code a
+// rail exercises in Node is the code that runs in the worker — there is no second implementation to
+// drift. It therefore takes its scope and its list as ARGUMENTS and closes over nothing.
+export function sealRealm(scope: object, channels: readonly string[]): string[] {
+  const sealed: string[] = [];
+  for (let i = 0; i < channels.length; i += 1) {
+    const name = channels[i]!;
+    if (!(name in scope)) continue;
+    try {
+      Object.defineProperty(scope, name, {
+        value: undefined,
+        writable: false,
+        configurable: true,
+      });
+      sealed.push(name);
+    } catch {
+      // A non-configurable global stays; the pack-time reference refusal is the other half.
+    }
+  }
+  return sealed;
+}
+
+// The confined realm's whole program. It runs in a Worker global scope — no `window`, no `document`,
+// and therefore no `window.claude`: absent by CONSTRUCTION rather than filtered, which is the
+// difference between a boundary and a scrub. Then it seals what a teardown would not reach.
+//
+// Its protocol is `render-worker.ts`'s, message for message: `{ bundle, node }` in, `{ kind: "ok", html }`
+// / `{ kind: "notHtml" }` / `{ kind: "fault" }` back, so a fault folds to a clean refusal leaking nothing
+// of the bundle's internals. The extra `{ kind: "live" }` is the second clock's start gun (T73): a slow
+// spawn under a loaded tab must not charge startup against the render's budget.
+const REALM_SRC = `${sealRealm.toString()}
+var held = {
   post: self.postMessage.bind(self),
   url: URL.createObjectURL.bind(URL),
   Blob: Blob,
 };
 self.addEventListener("message", function (ev) {
-  var keep = ["indexedDB", "caches", "BroadcastChannel", "importScripts", "fetch",
-    "XMLHttpRequest", "WebSocket", "localStorage", "sessionStorage", "self", "window", "document"];
-  for (var i = 0; i < keep.length; i += 1) {
-    try {
-      Object.defineProperty(globalThis, keep[i], { value: undefined, writable: false, configurable: true });
-    } catch (scrubbed) { /* a non-configurable global stays; the pack-time refusal is the other half */ }
-  }
+  sealRealm(globalThis, ${JSON.stringify(SEALED_CHANNELS)});
   var data = ev.data || {};
   var mod;
   try {
@@ -80,6 +142,10 @@ self.addEventListener("message", function (ev) {
   }, function (threw) { held.post({ kind: "fault" }); });
 });
 held.post({ kind: "live" });`;
+
+// The realm program as the page carries it — exported so a rail can read the bytes that will run
+// rather than a paraphrase of them.
+export const realmProgram = (): string => REALM_SRC;
 
 // The coordinates the page holds. Everything here is pack-time text from the store that packed the page;
 // nothing is view data (criterion 3 asserts that at the bytes).
@@ -304,6 +370,24 @@ function shellSource(): string {
     return { code: unknownField ? "not_served" : "refused", message: text };
   }
 
+  // Did this reading LOSE something? A root view that no longer carries a value it carried a moment ago
+  // is an erasure or a retraction landing, and it is the only notification Loam gets on the client: there
+  // is no erasure event to subscribe to. When it happens the accumulated reads must be dropped WHOLE and
+  // not merely repainted over — a drilled-down copy of a value the store has forgotten is content living
+  // on the viewer's side of the wall, where §11 has no reach.
+  //
+  // A poll that changes nothing, or that adds a field, is not a loss and keeps the drill-downs a viewer
+  // is looking at. Only shrinkage tears down.
+  function lostSomething(before, after) {
+    if (before === null) return false;
+    for (var k in before) {
+      if (!Object.prototype.hasOwnProperty.call(before, k)) continue;
+      if (before[k] === undefined || before[k] === null) continue;
+      if (after[k] === undefined || after[k] === null) return true;
+    }
+    return false;
+  }
+
   function foldRoot(result) {
     var p = payloadOf(result);
     if (p === null) { degrade({ code: "tool_error", message: "the store returned no readable payload" }); return; }
@@ -313,7 +397,13 @@ function shellSource(): string {
     line.textContent = "";
     onboarding.setAttribute("hidden", "");
     retried = {};
-    root = { entity: node._entity, view: node._view || {}, hex: node._hex };
+    var view = node._view || {};
+    if (lostSomething(root === null ? null : root.view, view)) {
+      reads = {};
+      state = {};
+      void window.claude.mcp.invalidate(C.server, "loam_query");
+    }
+    root = { entity: node._entity, view: view, hex: node._hex };
     paint(nodeNow());
   }
 

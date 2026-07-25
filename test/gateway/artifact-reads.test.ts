@@ -24,6 +24,9 @@
 // per-field gesture to refuse; asserting it would mean hand-composing a document — testing `/graphql`
 // rather than the mediated channel.
 
+/* eslint-disable @typescript-eslint/no-implied-eval, @typescript-eslint/no-unsafe-call */
+// The last suite here EVALUATES the page's own `legalName`, deliberately: comparing the emitted
+// function against `queryFieldFor` is the only way to see a drift that a stub would echo away.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
@@ -33,6 +36,8 @@ import { publicClaims } from "../../src/gateway/public.js";
 import { serve, type ServerHandle } from "../../src/server/http.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { readKey, parseReadGesture } from "../../src/gateway/renderers.js";
+import { queryFieldFor } from "../../src/gateway/gql.js";
+import { coordinatesFromPage } from "../../src/gateway/artifact-page.js";
 import { FERN, GARDENER, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
 
@@ -263,5 +268,52 @@ describe("§30 criterion 28: the SCHEMA is the request surface, and the boundary
     ).text();
     expect(viaOtherMountName).toBe(asOperator);
     await handle.removeMount("shared");
+  });
+});
+
+describe("§30: the document the PAGE composes executes against the REAL schema", () => {
+  // The rail a stub cannot be: a harness that echoes whatever field the document names will agree with
+  // any spelling, so the page's field-name derivation has to be checked against the schema the gateway
+  // actually built. Two steps, both load-bearing and neither guessable: legal() mangling, then an
+  // initial lowercase. `Plant` is the VIEW TYPE's name and `plant` is the field's.
+  const shellLegalName = (page: string): ((lens: string) => string) => {
+    const m = /function legalName\(s\) \{[\s\S]*?\n {2}\}/.exec(page);
+    expect(m, "the page carries its own legalName").not.toBeNull();
+    return new Function(`${m![0]}; return legalName;`)() as (lens: string) => string;
+  };
+
+  it("the page's own legalName agrees with gql.ts's queryFieldFor", async () => {
+    await gateway.declareArtifact(["plant"]);
+    const { page } = gateway.packArtifact("plant", FERN, { server: "My Loam" });
+    const shellName = shellLegalName(page);
+    for (const lens of ["Plant", "plant", "NotesByTag", "a-b c", "9lives", "_x", "Ledger"]) {
+      expect(shellName(lens), lens).toBe(queryFieldFor(lens));
+    }
+  });
+
+  it("and the composed root document RETURNS DATA from the live door", async () => {
+    await gateway.declareArtifact(["plant"]);
+    const { page } = gateway.packArtifact("plant", FERN, { server: "My Loam" });
+    const coords = coordinatesFromPage(page)!;
+    const shellName = shellLegalName(page);
+    const document = `query { ${shellName(coords.lens)}(entity: ${JSON.stringify(
+      coords.entity,
+    )}) { _entity _hex _view } }`;
+    const res = await fetch(`${base}/garden/graphql`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer op-token" },
+      body: JSON.stringify({ query: document }),
+    });
+    const body = (await res.json()) as { data?: Record<string, unknown>; errors?: string[] };
+    expect(body.errors, JSON.stringify(body.errors)).toBeUndefined();
+    // The projection is the fixed selection set, and `_view` really is the whole resolved view — wider
+    // than `consumes`, which is exactly what makes the two hosts equal by construction.
+    const node = body.data![shellName(coords.lens)] as { _view: Record<string, unknown> };
+    expect(Object.keys(node._view)).toContain("height");
+    // `watered` resolves through an `absentAs` policy with no fact behind it — present in the view,
+    // absent from `consumes`. A document restricted to `consumes` would have handed the bundle a
+    // strictly narrower view on this host than `serveRouteImpl` hands it on the other.
+    expect(Object.keys(node._view)).toContain("watered");
+    expect(coords.consumes).toEqual(["height"]);
   });
 });

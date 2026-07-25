@@ -186,12 +186,16 @@ export {
 } from "./gateway/artifact.js";
 export {
   MAX_CONNECTOR_NAME,
+  SEALED_CHANNELS,
   artifactPage,
+  realmProgram,
+  sealRealm,
   bundleFromPage,
   coordinatesFromPage,
   type ArtifactCoordinates,
 } from "./gateway/artifact-page.js";
 export { HOST_GLOBALS, scanHostReferences, type HostReference } from "./gateway/artifact-scan.js";
+export { queryFieldFor } from "./gateway/gql.js";
 export {
   Runner,
   bindingDefinitionClaims,
