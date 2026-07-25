@@ -31,7 +31,7 @@ real HTTP.
 
 ## Install
 
-Loam is a Node package (Node ≥ 22.13) that ships both a library and a `loam` CLI.
+Loam is a Node package (Node ≥ 24) that ships both a library and a `loam` CLI.
 
 ```sh
 npm install @bombadil/loam
