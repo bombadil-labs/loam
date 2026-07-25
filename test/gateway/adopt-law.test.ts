@@ -468,6 +468,391 @@ describe("T33 criterion 22 — a colliding row stops the bulk gesture", () => {
   });
 });
 
+// A second wave of module content for the version-bump rails: a Note schema and its manifest
+// row, federated into the SAME wall, then re-frozen — social@7 to the first freeze's social@1.
+async function bumpModule(
+  wall: Container,
+  opts: { seed?: string; base?: number; repointFeed?: boolean } = {},
+): Promise<{ version: ModuleVersion; noteDefinition: Delta; renderer2?: Delta }> {
+  const seed = opts.seed ?? STRANGER_SEED;
+  const author = authorForSeed(seed);
+  const base = opts.base ?? 44_000;
+  const NOTE: HyperSchema = { name: "Note", alg: 1, body: PLANT_BODY };
+  const NOTE_SCHEMA: Schema = { props: new Map([["tag", pickLatest]]), default: pickLatest, name: "Note" };
+  const noteDefinition = signClaims(
+    publishHyperSchemaClaims(NOTE, "hyperschema:Note", author, base),
+    seed,
+  );
+  let t = base + 1;
+  const reg = registrationDeltaClaims(
+    "hyperschema:Note",
+    "Note",
+    NOTE_SCHEMA,
+    [FERN],
+    author,
+    () => t++,
+    undefined,
+    undefined,
+    undefined,
+  );
+  const batch: Delta[] = [
+    noteDefinition,
+    ...[reg.living, reg.snapshot, reg.binding].map((c) => signClaims(c, seed)),
+    signClaims(
+      manifestExportClaims({ alias: "Note", targetEntity: "hyperschema:Note", kind: "schema" }, author, base + 20),
+      seed,
+    ),
+  ];
+  let renderer2: Delta | undefined;
+  if (opts.repointFeed) {
+    renderer2 = signClaims(
+      rendererBindingClaims(
+        {
+          route: "feed",
+          schemaName: "Post" as never,
+          consumes: ["height"],
+          bundle: "export default (n) => `<em>v2</em>`;",
+        },
+        undefined,
+        author,
+        base + 30,
+      ),
+      seed,
+    );
+    batch.push(
+      renderer2,
+      signClaims(
+        manifestExportClaims({ alias: "Feed", targetAddress: renderer2.id, kind: "renderer" }, author, base + 31),
+        seed,
+      ),
+    );
+  }
+  await wall.gateway!.federate(batch, { admit: () => true });
+  const version = wall.gateway!.freeze({
+    op: "select",
+    pred: { match: { field: "author", cmp: "eq", const: author } },
+    in: "input",
+  });
+  return { version, noteDefinition, ...(renderer2 === undefined ? {} : { renderer2 }) };
+}
+
+describe("T33 criteria 5 & 6 — bless-all is enumeration, and a bump is a delta", () => {
+  it("blessAll of the bumped version performs exactly the NEW bindings; unchanged rows witness", async () => {
+    const { gw, wall, version } = await moduleWorld();
+    await gw.blessAll(version); // social@1 wholesale: Post + Feed
+    const lawBefore = [...gw.reactor.snapshot()].filter((d) => d.claims.author === OP).length;
+
+    const bumped = await bumpModule(wall); // social@7 adds Note; Post and Feed unchanged
+    const report = await gw.blessAll(bumped.version);
+    expect(report.blessed).toContain("Note");
+    expect(report.blessed).not.toContain("Post");
+    expect(report.witnessed).toEqual(expect.arrayContaining(["Post", "Feed"]));
+    // The unchanged rows were RECORDED, never re-published: the only new operator law is Note's.
+    const lawAfter = [...gw.reactor.snapshot()].filter(
+      (d) => d.claims.author === OP && d.claims.timestamp >= 44_000 && d.claims.timestamp < 44_020,
+    );
+    expect(lawAfter.length).toBe(4); // Note's definition + living + snapshot + binding
+    expect(lawBefore).toBeGreaterThan(0);
+    await wall.drop();
+    await gw.close();
+  });
+
+  it("blessAll's ground is delta-identical to N sequential single adoptions", async () => {
+    // Timestamp inheritance makes this assertable by IDENTITY: the same source rows blessed by
+    // either gesture mint the very same operator-signed delta ids.
+    const one = await moduleWorld();
+    await one.gw.blessAll(one.version);
+    const bulk = [...one.gw.reactor.snapshot()]
+      .filter((d) => d.claims.author === OP && d.claims.timestamp >= 41_000 && d.claims.timestamp < 42_000)
+      .map((d) => d.id)
+      .sort();
+    await one.wall.drop();
+    await one.gw.close();
+
+    const two = await moduleWorld();
+    await two.gw.adoptLaw(two.version, "Post");
+    await two.gw.adoptLaw(two.version, "Feed");
+    const single = [...two.gw.reactor.snapshot()]
+      .filter((d) => d.claims.author === OP && d.claims.timestamp >= 41_000 && d.claims.timestamp < 42_000)
+      .map((d) => d.id)
+      .sort();
+    expect(bulk).toEqual(single);
+    await two.wall.drop();
+    await two.gw.close();
+  });
+});
+
+describe("T33 criteria 9, 15 & 24 — the pen is a different key", () => {
+  const PEN_SEED = "4d".repeat(32);
+  const PEN = authorForSeed(PEN_SEED);
+
+  async function penWorld(opts: { lyingKind?: boolean } = {}): Promise<ModuleWorld> {
+    const gw = await boot();
+    await gw.append([
+      signClaims(
+        containerClaims({ container: "container:penned", trust: "untrusted", posture: "wall" }, OP, 45_000),
+        OP_SEED,
+      ),
+    ]);
+    const wall = await gw.openContainer({ name: "container:penned", backend: new MemoryBackend() });
+    const definition = signClaims(publishHyperSchemaClaims(POST, "hyperschema:Post", STRANGER, 45_100), STRANGER_SEED);
+    let t = 45_101;
+    const reg = registrationDeltaClaims(
+      "hyperschema:Post", "Post", POST_SCHEMA, [FERN], STRANGER, () => t++, undefined, ["height"], undefined,
+    );
+    const registration = [reg.living, reg.snapshot, reg.binding].map((c) => signClaims(c, STRANGER_SEED));
+    const renderer = signClaims(
+      rendererBindingClaims(
+        {
+          route: "penfeed",
+          schemaName: "Post" as never,
+          consumes: ["height"],
+          bundle: "export default (n) => `<b>pen</b>`;",
+          writable: ["height"],
+          pen: PEN,
+        },
+        undefined,
+        STRANGER,
+        45_110,
+      ),
+      STRANGER_SEED,
+    );
+    const manifest = [
+      signClaims(manifestExportClaims({ alias: "Post", targetEntity: "hyperschema:Post", kind: "schema" }, STRANGER, 45_120), STRANGER_SEED),
+      signClaims(
+        manifestExportClaims(
+          // Criterion 15's lie: the pen-holding renderer declared as a harmless schema row.
+          { alias: "PenFeed", targetAddress: renderer.id, kind: opts.lyingKind ? "schema" : "renderer" },
+          STRANGER,
+          45_121,
+        ),
+        STRANGER_SEED,
+      ),
+    ];
+    await wall.gateway!.federate([definition, ...registration, renderer, ...manifest], { admit: () => true });
+    const version = wall.gateway!.freeze({
+      op: "select",
+      pred: { match: { field: "author", cmp: "eq", const: STRANGER } },
+      in: "input",
+    });
+    return { gw, wall, version, parts: { definition, registration, renderer, manifest } };
+  }
+
+  it("a pen never rides the sugar: refused without the flag, named; proceeds with it", async () => {
+    const { gw, wall, version } = await penWorld();
+    await expect(gw.blessAll(version)).rejects.toThrow(/PenFeed|pen/);
+    await gw.blessAll(version, { pen: true });
+    const served = await gw.serveRoute("penfeed", FERN, "full");
+    expect(served.status).toBe(200);
+    await wall.drop();
+    await gw.close();
+  });
+
+  it("a lying manifest cannot smuggle a pen — classification reads the bytes", async () => {
+    const { gw, wall, version } = await penWorld({ lyingKind: true });
+    await expect(gw.blessAll(version)).rejects.toThrow(/PenFeed|pen/); // the label said schema; the bytes say pen
+    await wall.drop();
+    await gw.close();
+  });
+
+  it("blessing the code never confers the pen: the first form-write refuses until a grant", async () => {
+    const { gw, wall, version } = await penWorld();
+    await gw.blessAll(version, { pen: true });
+    // The renderer SERVES from the root…
+    expect((await gw.serveRoute("penfeed", FERN, "full")).status).toBe(200);
+    // …and its write path refuses: the pen is not provisioned here and holds no grant. Blessing
+    // was one key; the pen is the other.
+    const refused = await gw.writeRoute("penfeed", FERN, { height: 41 }, "full");
+    expect(refused.status).toBeGreaterThanOrEqual(400);
+    await wall.drop();
+    await gw.close();
+  });
+});
+
+describe("T33 criteria 10, 19 & 13 — re-points, dangling rows, and skew get eyes", () => {
+  it("a re-pointed alias never rides silently; genuinely new rows in the same call proceed", async () => {
+    const { gw, wall, version } = await moduleWorld();
+    await gw.blessAll(version);
+    const bumped = await bumpModule(wall, { repointFeed: true }); // Feed → a NEW bundle address
+
+    const report = await gw.blessAll(bumped.version);
+    expect(report.blessed).toContain("Note"); // the new row proceeded
+    expect(report.refused.some((r: string) => /Feed/.test(r))).toBe(true); // the re-point did not
+    expect((await gw.serveRoute("feed", FERN, "full")).body).toContain("<b>"); // still the OLD bundle
+
+    await gw.blessAll(bumped.version, { repoints: { Feed: bumped.renderer2!.id } });
+    expect((await gw.serveRoute("feed", FERN, "full")).body).toContain("v2"); // confirmed, re-pointed
+    await wall.drop();
+    await gw.close();
+  });
+
+  it("a dangling manifest row refuses the whole call; no partial adoption lands", async () => {
+    const { gw, wall } = await moduleWorld();
+    const dangling = signClaims(
+      manifestExportClaims({ alias: "Ghost", targetAddress: "0".repeat(64), kind: "schema" }, STRANGER, 46_000),
+      STRANGER_SEED,
+    );
+    await wall.gateway!.federate([dangling], { admit: () => true });
+    const version = wall.gateway!.freeze({
+      op: "select",
+      pred: { match: { field: "author", cmp: "eq", const: STRANGER } },
+      in: "input",
+    });
+    const before = [...gw.reactor.snapshot()].length;
+    await expect(gw.blessAll(version)).rejects.toThrow(/Ghost/);
+    expect([...gw.reactor.snapshot()].length).toBe(before); // a stranger's manifest gets no silent skips
+    await wall.drop();
+    await gw.close();
+  });
+
+  it("adopting across versions reports the skew; matching siblings stay silent", async () => {
+    const { gw, wall, version } = await moduleWorld();
+    const first = await gw.adoptLaw(version, "Post");
+    expect(first.notes.filter((n: string) => /version/.test(n))).toEqual([]); // nothing to say yet
+
+    const bumped = await bumpModule(wall);
+    const second = await gw.adoptLaw(bumped.version, "Note");
+    expect(second.notes.some((n: string) => /version/.test(n))).toBe(true); // sibling bound from @1
+    await wall.drop();
+    await gw.close();
+  });
+});
+
+describe("T33 criteria 11, 17, 18 & 26 — the ledger tells origination from exposure", () => {
+  it("a witness is not an adoption, accumulates once, and the walk is positive", async () => {
+    const { gw, wall, version, parts } = await moduleWorld();
+    await gw.adoptLaw(version, "Post");
+
+    // A SECOND module lists the very same Post definition (shared law, different shipper).
+    const rivalSeed = "4e".repeat(32);
+    const rival = authorForSeed(rivalSeed);
+    await gw.append([
+      signClaims(containerClaims({ container: "container:rival", trust: "untrusted", posture: "wall" }, OP, 47_000), OP_SEED),
+    ]);
+    const rivalWall = await gw.openContainer({ name: "container:rival", backend: new MemoryBackend() });
+    await rivalWall.gateway!.federate(
+      [
+        parts.definition,
+        ...parts.registration,
+        signClaims(manifestExportClaims({ alias: "Post", targetEntity: "hyperschema:Post", kind: "schema" }, rival, 47_100), rivalSeed),
+      ],
+      { admit: () => true },
+    );
+    const rivalVersion = rivalWall.gateway!.freeze({
+      op: "select",
+      pred: {
+        or: [
+          { match: { field: "author", cmp: "eq", const: rival } },
+          { match: { field: "author", cmp: "eq", const: STRANGER } },
+        ],
+      },
+      in: "input",
+    });
+
+    await gw.adoptLaw(rivalVersion, "Post"); // already bound → witnessed, never adopted-from
+    const trail = gw.lawAdoptions();
+    const adopted = trail.filter((r) => r.kind === "adopted-from");
+    const witnessed = trail.filter((r) => r.kind === "witnessed");
+    expect(adopted.length).toBe(1);
+    expect(witnessed.length).toBe(1);
+    // Criterion 26: the walk is POSITIVE — fields present, and `from` joins the T32 table.
+    expect(adopted[0]!.from).toBe("container:social");
+    expect(witnessed[0]!.from).toBe("container:rival");
+    expect(typeof adopted[0]!.moduleVersion).toBe("string");
+    expect(typeof adopted[0]!.at).toBe("number");
+
+    // Criterion 18: the identical witness is minted ONCE — run it twice more, count the ground.
+    await gw.adoptLaw(rivalVersion, "Post");
+    const countAfterTwo = [...gw.reactor.snapshot()].length;
+    await gw.adoptLaw(rivalVersion, "Post");
+    expect([...gw.reactor.snapshot()].length).toBe(countAfterTwo);
+    expect(gw.lawAdoptions().filter((r) => r.kind === "witnessed").length).toBe(1);
+    await rivalWall.drop();
+    await wall.drop();
+    await gw.close();
+  });
+});
+
+describe("T33 criteria 12 & 21 — lawFrom is exposure arithmetic, unioned across versions", () => {
+  it("reports the surviving bound intersection: negated absent, directly-published present", async () => {
+    const { gw, wall, version, parts } = await moduleWorld();
+    await gw.blessAll(version); // Post + Feed bound
+
+    // Negate the Feed blessing (the operator withdraws that binding).
+    const blessedFeed = [...gw.reactor.snapshot()].find(
+      (d) => d.claims.author === OP && d.claims.timestamp === parts.renderer.claims.timestamp,
+    )!;
+    await gw.append([retraction(blessedFeed.id, OP, OP_SEED, 48_000)]);
+    gw.replayRegistrations();
+
+    // Directly publish a third row's identical content: the bumped Note, straight through the
+    // ordinary door — no adoption record exists for it, and lawFrom must still report it.
+    const bumped = await bumpModule(wall);
+    await gw.publishRegistration(
+      { name: "Note", alg: 1, body: PLANT_BODY },
+      { props: new Map([["tag", pickLatest]]), default: pickLatest, name: "Note" },
+      [FERN],
+    );
+
+    const exposed = gw.lawFrom([bumped.version]).map((r) => r.alias ?? r.address);
+    expect(exposed).toContain("Post");
+    expect(exposed).toContain("Note"); // exposure, not provenance
+    expect(exposed).not.toContain("Feed"); // negated binding is out of the intersection
+    await wall.drop();
+    await gw.close();
+  });
+
+  it("unions across manifest versions; the narrowing form does not", async () => {
+    const { gw, wall, version } = await moduleWorld(); // @1 manifests Post + Feed
+    await gw.adoptLaw(version, "Post");
+    // @7 keeps Note only — Post dropped from the newer manifest, still bound here.
+    const wall2 = await gw.openContainer({
+      name: "container:social-v7",
+      backend: new MemoryBackend(),
+    }).catch(async () => {
+      await gw.append([
+        signClaims(containerClaims({ container: "container:social-v7", trust: "untrusted", posture: "wall" }, OP, 49_000), OP_SEED),
+      ]);
+      return gw.openContainer({ name: "container:social-v7", backend: new MemoryBackend() });
+    });
+    const bumped = await bumpModule(wall2, { base: 49_100 });
+
+    const union = gw.lawFrom([version, bumped.version]).map((r) => r.alias ?? r.address);
+    expect(union).toContain("Post"); // adopted from @1, dropped by @7 — the union still reports it
+    const narrowed = gw.lawFrom([bumped.version]).map((r) => r.alias ?? r.address);
+    expect(narrowed).not.toContain("Post");
+    await wall2.drop();
+    await wall.drop();
+    await gw.close();
+  });
+});
+
+describe("T33 criteria 23 & 25 — one door, and survival at the source", () => {
+  it("promote() still refuses law, and its remedy names the door that exists", async () => {
+    const { gw, wall, parts } = await moduleWorld();
+    await expect(gw.promote(wall.gateway!, parts.definition.id)).rejects.toThrow(/promotion refused/);
+    await expect(gw.promote(wall.gateway!, parts.definition.id)).rejects.toThrow(/adoptLaw/);
+    await wall.drop();
+    await gw.close();
+  });
+
+  it("a row struck in its own container refuses adoption naming the strike", async () => {
+    const { gw, wall, parts } = await moduleWorld();
+    // The stranger withdraws their own definition INSIDE the module; the freeze carries the
+    // strike (the closure rides Gateway.freeze), so the version itself knows.
+    const strike = retraction(parts.definition.id, STRANGER, STRANGER_SEED, 50_000);
+    await wall.gateway!.federate([strike], { admit: () => true });
+    const version = wall.gateway!.freeze({
+      op: "select",
+      pred: { match: { field: "author", cmp: "eq", const: STRANGER } },
+      in: "input",
+    });
+    await expect(gw.adoptLaw(version, "Post")).rejects.toThrow(/struck|retract/i);
+    await wall.drop();
+    await gw.close();
+  });
+});
+
 describe("T33 vocabulary — the manifest mint collides with nothing", () => {
   it("loam.manifest is its own context, outside every reserved prefix", () => {
     expect(CTX_MANIFEST).toBe("loam.manifest");
