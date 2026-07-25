@@ -660,7 +660,12 @@ const EXPAND_READING: Migration = {
 // Shape-detected like every step, and here the shape is the VALUE itself (the §20 corollary, met
 // without a version stamp): a declaration in the `loam.container` context whose `posture` primitive
 // reads `wall` or `property` predates the rename, and one reading `separate` or `shared` does not.
-// After the step the value is a current word, so `applies` goes false and re-migrating is a no-op.
+//
+// `applies` DOES NOT go false after the step, and mistaking that is how the real guard gets deleted.
+// Migration is grow-only, so the retired bytes are retained forever — struck, but present — and
+// `retiredPostureWord` keeps matching them on every future run. Re-migrating is a no-op for two other
+// reasons: the `survives` gate below skips a declaration the supersession struck, and the driver
+// dedups by content address. The gate is load-bearing, not a safety belt.
 //
 // The rename is byte-for-byte the ONLY change: `toStorageWords` rewrites that one primitive and
 // copies everything else — trust, parent, membership, membershipAt, version, timestamp, author — so
@@ -714,10 +719,18 @@ const CONTAINER_POSTURE_STORAGE_WORDS: Migration = {
       // re-signing an unverified delta would make the migrator a signing oracle (the guard every
       // step shares). A stranger's declaration is inert law here anyway; its own operator migrates it.
       if (d.claims.author !== operator || verifyDelta(d) !== "verified") continue;
-      // ...and only what the operator has not WITHDRAWN (T41): re-expressing struck law
-      // resurrects it under a new id that its retraction never named. A struck declaration
-      // therefore KEEPS its retired word forever, which is exactly what the erasure guard in
-      // container.ts reads through `asPosture` — a lineage that once held its own bytes still says so.
+      // ...and only what the operator has not WITHDRAWN (T41): re-expressing struck law resurrects
+      // it under a new id that its retraction never named. Railed, and it needs its own rail —
+      // idempotence cannot stand in for this gate, because the struck delta is RETAINED and re-signs
+      // to the same address, so a second run dedups either way.
+      //
+      // The consequence to hold in mind: a struck declaration keeps its retired word permanently, and
+      // `unreachableStoreReport` reads a struck posture through `asPosture` for exactly that reason.
+      // What it reads is the NEGATED subset of an entity still alive in the table — not the lineage in
+      // general. So an entity left with no surviving declaration at all is out of that guard's reach,
+      // which is deliberate for an operator's whole-container forget (§27.7) and is a real exposure
+      // when this step's OUTPUT is split: forward negation closure guarantees the supersession travels
+      // with the old delta, and nothing carries the re-expression along with it.
       if (!survives(d.id)) continue;
       if (retiredPostureWord(d) === undefined) continue;
       const reExpressed = signClaims(toStorageWords(d.claims), seed);

@@ -200,6 +200,49 @@ describe("§20 × §27.1 — the posture rename is carried forward, not assumed"
     expect(second.report.applied).toEqual([]);
   });
 
+  it("a WITHDRAWN declaration is not re-expressed — the honest forget stays forgotten", async () => {
+    // The `survives` gate is the whole of T41 at this step, and idempotence CANNOT stand in for it:
+    // migration is grow-only, so on a second run the struck legacy delta is still present and
+    // re-signs to the identical content address, which dedups away — the idempotence rail passes with
+    // the gate deleted. This is the rail that does not.
+    //
+    // TWO-SIDED, because an assertion of pure absence would also pass if the step never ran at all:
+    // the forgotten container must NOT come back, and the live one beside it MUST still migrate.
+    const struck = retraction(legacySeparate.id, OP, OP_SEED, 8050);
+    const { deltas } = migrate([...legacyStore, struck], { seed: OP_SEED });
+
+    // TARGET: nothing in the output declares the forgotten container in the current vocabulary — a
+    // re-expression would be live, operator-signed law for an entity the operator deliberately ended,
+    // wearing an id its retraction never named.
+    const declares = (d: Delta, entity: string): boolean =>
+      d.claims.pointers.some(
+        (p) =>
+          p.role === "container" && p.target.kind === "entity" && p.target.entity.id === entity,
+      );
+    const revived = deltas.filter(
+      (d) => declares(d, "container:arena") && postureWordOf(d) === "separate",
+    );
+    expect(revived, "the withdrawn declaration was re-expressed").toEqual([]);
+
+    // BYSTANDER: the surviving declaration beside it still migrated, so the emptiness above is a
+    // refusal to resurrect and not a step that quietly did nothing.
+    const carried = deltas.filter(
+      (d) => declares(d, "container:view") && postureWordOf(d) === "shared",
+    );
+    expect(carried).toHaveLength(1);
+
+    // OBJECT LEVEL: what a READER resolves over the migrated ground, not what the delta set holds —
+    // the forgotten container is absent from the table, the live one is present, and no defect was
+    // manufactured. This is the level that would catch a revival wearing a shape the filter above
+    // did not anticipate.
+    const gw = await openWith(deltas);
+    const table = readContainerTable(gw.reactor, OP);
+    expect(table.containers.has("container:arena")).toBe(false);
+    expect(table.containers.get("container:view")?.posture).toBe("shared");
+    expect(table.defects).toEqual([]);
+    await gw.close();
+  });
+
   it("a store born on the current words is not touched by the step at all", () => {
     const current = signClaims(
       containerClaims(
