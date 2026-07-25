@@ -242,8 +242,10 @@ export async function loadResolvers(
 export type ResolverMemo = Map<string, View>;
 export const newResolverMemo = (): ResolverMemo => new Map();
 
+// The U+0000 field separator stays an ESCAPE, never the raw control character — identical byte,
+// and a raw one turns this file binary to git and to grep (`test/scripts/no-raw-nul`).
 const memoKey = (address: string, root: string, deltaIds: readonly string[]): string =>
-  `${address} ${root} ${[...deltaIds].sort().join(",")}`;
+  `${address}\u0000${root}\u0000${[...deltaIds].sort().join(",")}`;
 
 // Apply a lens's resolvers over a resolved view (SPEC §22): for each field a resolver names, replace
 // the Policy's value with `resolve(bucket)`. Synchronous — resolvers are pre-loaded. A resolver whose
