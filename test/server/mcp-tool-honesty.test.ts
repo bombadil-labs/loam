@@ -225,6 +225,7 @@ describe("MCP tool honesty: loam_query is a read, and says so on the wire", () =
 // wire and stays true whatever the client was told it may read.
 describe("MCP protocol negotiation: the revision must be able to carry the annotation", () => {
   const ANNOTATIONS_SINCE = "2025-03-26"; // ISO dates order lexicographically
+  const NEWEST_SPOKEN = "2025-06-18";
 
   const initialize = async (params: Record<string, unknown>): Promise<string> => {
     const res = await rpc({ method: "initialize", params });
@@ -245,7 +246,11 @@ describe("MCP protocol negotiation: the revision must be able to carry the annot
       { protocolVersion: 20250618 }, // not even a string
     ]) {
       const spoken = await initialize(params);
-      expect(spoken >= ANNOTATIONS_SINCE).toBe(true);
+      expect(spoken >= ANNOTATIONS_SINCE).toBe(true); // it can carry what we declare
+      // …and it is the NEWEST we speak, not merely a new-enough one: a fallback that negotiates down
+      // gives up every later revision's vocabulary for nothing. Bump this deliberately when the door
+      // learns a newer one.
+      expect(spoken).toBe(NEWEST_SPOKEN);
     }
   });
 
