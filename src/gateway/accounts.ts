@@ -12,6 +12,7 @@
 // chain — but `authorize` consults exactly one thing: standing at `loam:store`.
 
 import {
+  evalTerm,
   parseTerm,
   type Claims,
   type Delta,
@@ -162,6 +163,32 @@ export function governedGatherBody(operator: string): Term {
       in: { op: "mask", policy: { trust: lawfulStrikersJson(operator, false) }, in: "input" },
     },
   });
+}
+
+// Is `id` struck AS DATA — the question a governed READER answers, which is not the question
+// `lawfulNegated` answers. That one counts a negation only from the OPERATOR: right for LAW (a
+// grantee's strike must not retire the operator's schema) and wrong for data, where the governed
+// gather honors the wider community — the operator plus any author their surviving grants name. Any
+// operation that FILTERS data by survival wants this one; anything resolving the constitution wants
+// the other. Built on the same `lawfulStrikersJson` predicate the gather masks with, so what a
+// reader resolves and what a filter admits cannot drift. Ungoverned, `drop` is the honest mask:
+// no operator, no constitution, every negation binds.
+//
+// Absence is not suppression: an id the store does not hold answers FALSE — it is not something
+// this can say has been struck. Callers weighing a purged source (§11) must ask erasure, not this.
+// One term evaluation per call (H8): build it once per pass and reuse the closure.
+export function dataStruck(reactor: Reactor, operator?: string): (id: string) => boolean {
+  const masked = evalTerm(
+    parseTerm({
+      op: "mask",
+      policy: operator === undefined ? "drop" : { trust: lawfulStrikersJson(operator, false) },
+      in: "input",
+    }),
+    reactor.snapshot(),
+  );
+  if (masked.sort !== "dset") throw new Error("a mask always evaluates to a delta set");
+  const surviving = new Set([...masked.set].map((d) => d.id));
+  return (id) => !surviving.has(id) && reactor.get(id) !== undefined;
 }
 
 // The governed audit schema: like TENANT, but negations bind only from the operator and the
