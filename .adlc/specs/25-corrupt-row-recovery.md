@@ -68,10 +68,16 @@ must run, in this order:
    would silently stop the archive from replanting new facts.
 2. **Candidate selection, which does NOT depend on the optional member.** Heal asks the repairable
    primary for its pen (`quarantine()`, recomputed by heal's own opening `deltasSince`) and keeps the
-   mirror deltas whose id the pen names — matching a pen key to a delta id as `repair.ts` does
-   (`key === d.id || key.endsWith(d.id)`, which covers both a sqlite row id and a localStorage
-   `prefix + id` key). This is heal's own detection, so `restoreRefused` has a source in **every**
-   branch, including a driver that omits `restoreQuarantined` entirely.
+   mirror deltas whose id the pen names. This is heal's own detection, so `restoreRefused` has a source
+   in **every** branch, including a driver that omits `restoreQuarantined` entirely.
+   **One pass over the pen, then one over the candidates — never `replant × penned` (H8).** A pen key
+   is a row id (sqlite) or `prefix + id` (localStorage), and a delta id is fixed-width
+   (`DELTA_ID_LENGTH`), so a fixed-width suffix recovers the id from either key shape: build a `Set`
+   once, then one `has` per candidate. The nested form is not a theoretical cliff — both axes grow, and
+   they grow *together* in exactly this ticket's scenario (a pen accumulates corrupt rows until an
+   operator settles them; `replant` becomes the whole store when a lost primary is replanted from the
+   mirror), and the loop is on the ORDINARY path since any lagging catch-up has a non-empty `replant`.
+   This is the same inversion H8 already credits for `ArchiveBackend.purge`.
 3. **The attempt, then heal's OWN byte verdict — symmetric in both directions.** Heal calls
    `restoreQuarantined(candidates)`, then **re-reads** the primary (`deltasSince(new Set())`, which
    recomputes admission from the primary's own bytes) and derives both fields from that read, never
@@ -121,21 +127,47 @@ old bytes are not scrubbed from the WAL or a freed page. That is deliberate pari
 `discardRow` — a quarantined row is not a lawful fact in the ground (§25), so removing it is
 mechanical and carries no §11 completeness claim.
 
-### What heal reports — both directions
+### What heal reports — both directions, on a SIBLING surface
 
-`HealReport` gains two fields, because a change to the ground must be visible and a failure to make
-one must not read as "nothing was corrupt":
+The two signals do **not** go on `HealReport`. They ride a new `RestoreReport` behind
+`MirrorBackend.lastRestore`, beside `lagging`:
 
-- `restoredPrimary: readonly string[]` — the ids whose corrupt primary row was replaced by the
-  mirror's healthy copy.
-- `restoreRefused: readonly string[]` — one line per candidate that could NOT be restored: a
-  repairable primary that offers no `restoreQuarantined`, or a row **still set aside after the
-  attempt**. The second is heal's own byte verdict, the same doctrine its purge sweep already runs
-  (T70): the driver's return value is evidence, never proof, so heal re-reads and asks the pen.
+- `restored: readonly string[]` — the ids whose corrupt primary row was replaced by the mirror's
+  healthy copy.
+- `refused: readonly string[]` — one line per candidate that could NOT be restored: a repairable
+  primary that offers no `restoreQuarantined`, or a row **still set aside after the attempt**. The
+  second is heal's own byte verdict, the same doctrine its purge sweep already runs (T70): the
+  driver's return value is evidence, never proof, so heal re-reads and asks that read.
+- `lastRestore` is **`undefined` until a heal has run** — "nobody asked" must never read as "nothing
+  was corrupt" (H9). A field on `HealReport` cannot express that distinction; a sibling surface must,
+  because it can be read before the operation.
 
-`cmdServe` surfaces both — `restoredPrimary` on stdout beside the existing `healed —` line,
-`restoreRefused` on stderr beside the `purgeFailures` loop, since a refused restore means a strike
-may still be stranded while the store serves.
+**Why a sibling and not two more report fields.** Every existing `HealReport` member describes the two
+tiers CONVERGING — how many deltas moved which way, which sweeps refused. A squatter is not a
+convergence fact: it is one tier being INTERNALLY unreadable, which the mirror only *happens* to be
+able to repair because it holds a second copy. `lagging` already lives off the report for the same
+reason (an append-time condition that heal clears), so the class already draws this line.
+
+The secondary reason is that `HealReport`'s shape is a frozen rail (T67 asserts it with an exact
+`toEqual`), and growing it would put a **backstop ruling** in the path of a bugfix. Two candidate
+folds were considered and rejected:
+
+- **Fold `refused` into `purgeFailures`** — NO, and the test is precise: an honest fold requires the
+  existing field's READER to act on the new entry without distinguishing it. `purgeFailures`' only
+  reader prints *"bytes the operator ordered forgotten may still be at rest"*, which for a stranded
+  strike is simply **false** — nothing was ordered forgotten; a strike that WAS ordered is not being
+  honored. The remedy differs too. Making that reader string-match to tell them apart is not a report.
+  (T70's fold was honest by this same test: a surviving byte after a purge genuinely IS a sweep that
+  did not verifiably complete — same predicate, same reader, same operator action.)
+- **Fold `restored` into `toPrimary`** — NO. It is a success, not a failure, so there is no failure
+  field to join; `toPrimary` counts deltas *appended* and a restore is not an append; and folding
+  discards WHICH id was restored, which is the entire operator-facing value.
+
+`cmdServe` reads `mirror.lastRestore` — `restored` on stdout beside the existing `healed —` line,
+`refused` on stderr beside the `purgeFailures` loop, since a refused restore means a strike may still
+be stranded while the store serves. **That reader is the obligation the surface carries**: a signal
+nobody reads is a swallowed error with extra steps (H9), and it is railed
+(`test/cli/repair-recovery.test.ts`).
 
 `repair re-admit`'s still-quarantined message gains one line naming the recovery that now exists, so
 the operator following T57's warning is pointed at `loam serve --archive` rather than left with
@@ -221,7 +253,14 @@ it may now overwrite a corrupt row's bytes.
    (`toPrimary` counts it, and a gateway over the healed primary resolves it) while the squatted id is
    restored in the same call. This is the rail that fails if `restoreQuarantined` were wired in
    PLACE of `append(replant)` rather than beside it. — `test/store/corrupt-row-recovery.test.ts`
-10. **The existing row is judged from the TABLE, never from the pen — the stale-pen / TOCTOU rail.** A
+10. **Candidate selection is one pass per side, and the fixed-width id assumption it rests on is
+    pinned.** `DELTA_ID_LENGTH` equals a real delta's id length and `DELTA_ID` accepts it, for a bare
+    row id and an embedded `prefix + id` alike — so a substrate change that widened an id fails loudly
+    rather than silently matching nothing and stranding every squatter. And a FOREIGN pen key too short
+    to hold an id (a UI writer's key under the shared prefix) contributes no candidate and is left
+    untouched by a heal that repairs a real one. — `test/store/corrupt-row-recovery.test.ts`,
+    `test/store/local-storage-restore.test.ts`
+11. **The existing row is judged from the TABLE, never from the pen — the stale-pen / TOCTOU rail.** A
     handle fills its pen on a corrupt row, then the row is repaired out of band (a second handle's
     write, simulated with a raw `UPDATE`). `restoreQuarantined` on the first handle must REFUSE, even
     though its own pen still names the row as quarantined. An implementation that consulted
@@ -247,8 +286,23 @@ was (criterion 5b/5c, step 3); the check-then-write atomicity was claimed but no
 partially-corrupt-archive abort was presented as purely protective (now stated with its cost and
 scoped out).
 
-Two of these — orchestration and the `restoredPrimary` verdict — were the kind a rail written from
-the un-reviewed spec would have gotten wrong while passing.
+Two of these — orchestration and the `restored` verdict — were the kind a rail written from the
+un-reviewed spec would have gotten wrong while passing.
+
+## P5 review record
+
+**H8 (scan and scale), one confirmed finding, fixed:** candidate selection was
+`replant.filter(d => penned.some(...))` — `replant × penned` string comparisons on the ORDINARY path
+(any lagging catch-up has a non-empty `replant`), with both axes growing together in precisely this
+ticket's own scenario. Inverted to one `Set` build plus one `has` per candidate, and the fixed-width
+id assumption that inversion rests on is now pinned by a rail (criterion 10).
+
+The same lens checked two things and called them clean, worth recording because both were load-bearing
+claims rather than incidental: the third full-primary read is correctly gated behind
+`squatting.length === 0`, so a store with no quarantined rows still makes exactly the two passes heal
+made before this change; and `primary.quarantine()` is not a stale-index read — both drivers return the
+pen the `deltasSince` earlier in the *same* heal invocation just recomputed, and the `admitted` set is a
+live re-read that re-parses and re-verifies rather than trusting the driver's `claimed` return.
 
 ## Open questions for Myk
 

@@ -266,10 +266,23 @@ async function cmdServe(
         `loam: healed — ${healed.toPrimary} deltas replanted from the archive, ${healed.toMirror} newly archived`,
       );
     }
-    // A corrupt row the archive's healthy copy replaced (§25/T66). This CHANGED the ground the
-    // gateway is about to boot on, so it is named per id rather than counted: a restored negation
-    // un-strands a strike, and the operator should be able to see which fact came back under it.
-    for (const id of healed.restoredPrimary) {
+    // The squatter half of the same heal (§25), which rides `mirror.lastRestore` rather than the
+    // report. Reading it here is not optional bookkeeping: it is the obligation that surface carries,
+    // since a signal nobody reads is a swallowed error with extra steps (H9).
+    //
+    // `undefined` is NOT an empty report and must not print as one — it means no heal reached the pen,
+    // so nothing is known about it. Collapsing the two with `?? []` would put the exact conversion the
+    // sentinel exists to refuse in the one place the obligation lives.
+    const restore = mirror.lastRestore;
+    if (restore === undefined) {
+      io.err(
+        `loam: the heal did not reach the store's §25 pen, so nothing is known about corrupt rows — ` +
+          "a strike may be stranded and this boot cannot tell you. `loam repair list` can.",
+      );
+    }
+    // A restore CHANGED the ground the gateway is about to boot on, so it is named per id rather than
+    // counted — a restored negation un-strands a strike, and the operator should see what came back.
+    for (const id of restore?.restored ?? []) {
       io.out(
         `loam: restored ${id} from the archive — a corrupt row was squatting on that id; any strike ` +
           `it carries suppresses again`,
@@ -286,15 +299,17 @@ async function cmdServe(
           `the erasure (or restart) to finish the sweep.`,
       );
     }
-    // Same reasoning, the other repair: a squatter the archive could have replaced and did not means
-    // the store is about to serve with a strike stranded — a retracted value, a revoked grant, or a
-    // tombstone reading LIVE (§25/H1). Serving is still right (a legible store beats an outage), and
-    // saying nothing is not.
-    for (const failure of healed.restoreRefused) {
-      io.err(
-        `loam: a corrupt row could not be replaced from the archive — ${failure} Serving anyway; ` +
-          `\`loam repair list\` names what the pen holds.`,
-      );
+    // Same reasoning, the other repair: a row still set aside means the store is about to serve with a
+    // strike stranded — a retracted value, a revoked grant, or a tombstone reading LIVE (§25/H1).
+    // Serving is still right (a legible store beats an outage), and saying nothing is not.
+    for (const failure of restore?.stranded ?? []) {
+      io.err(`loam: ${failure} Serving anyway; \`loam repair list\` names what the pen holds.`);
+    }
+    // And what heal DECLINED to plant. This one is not a fault report but a refusal: the archive holds
+    // deltas this boot deliberately did not admit, because an unreadable row may be a tombstone nobody
+    // could see (§11) or a set-aside strike would have been left behind its target (H1).
+    for (const withheld of restore?.replantWithheld ?? []) {
+      io.err(`loam: ${withheld}`);
     }
     backend = mirror;
   }

@@ -78,6 +78,53 @@ describe("T66: the boot heal tells the operator what it restored", () => {
     const said = out.join("\n");
     expect(said).toContain(strike.id);
     expect(said).toMatch(/restor/i);
+    // A repaired boot has nothing left to warn about — so the stderr branch below is not merely
+    // unexercised here, it is correctly silent.
+    expect(err.join("\n")).not.toMatch(/could not|stranded|set aside/i);
+  });
+
+  it("a squatter the archive CANNOT fix reaches stderr — the store serves, and says so", async () => {
+    // The higher-stakes branch: this boot serves with a strike stranded. Delete the archive's copy of
+    // the negation before corrupting the primary's row, so no healthy copy exists anywhere and the
+    // recovery genuinely cannot run. Without this rail the whole stderr loop could be deleted and the
+    // suite would stay green (H9 — the reader exists and nothing proves it).
+    await run(["init", "--home", home], io());
+    const seed = readSeed(home);
+    const op = authorForSeed(seed);
+    const path = storePath(home);
+    const vault = join(home, "archive");
+
+    const height = observed(FERN, "height", 30, 1000, seed);
+    const strike = retraction(height.id, op, seed, 2000);
+    const store = new MirrorBackend(new SqliteBackend(path), new ArchiveBackend(vault));
+    const gw = await Gateway.boot(store, assembleGenesis({ operatorSeed: seed }));
+    await gw.append([height, strike]);
+    await gw.close();
+
+    // The archive's own file for the negation — inside this test's own mkdtemp home, nowhere else.
+    rmSync(join(vault, strike.id.slice(0, 2), `${strike.id}.json`));
+    const db = new Database(path);
+    db.prepare("UPDATE deltas SET sig = ? WHERE id = ?").run("ab".repeat(64), strike.id);
+    db.close();
+
+    out.length = 0;
+    err.length = 0;
+    const handle = await run(
+      ["serve", "--http", "--port", "0", "--token", "t", "--home", home, "--archive", vault],
+      io(),
+      { detach: true },
+    );
+    if (typeof handle === "number") throw new Error(`serve refused: exit ${handle}`);
+    await handle.close();
+
+    // It SERVED (a legible store beats an outage)...
+    expect(out.join("\n")).toMatch(/serving/);
+    // ...and the operator was told, by id, that a row is set aside and a strike may read live.
+    const warned = err.join("\n");
+    expect(warned).toContain(strike.id);
+    expect(warned).toMatch(/repair list/);
+    // ...and it did NOT claim a restore it never made.
+    expect(out.join("\n")).not.toMatch(/restored/);
   });
 });
 

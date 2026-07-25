@@ -83,11 +83,17 @@ describe("T66 (§15): a corrupt localStorage row is replaceable by an admitting 
     await vault.append([good, bystander]);
     corruptAt(origin, good);
 
-    const store = new MirrorBackend(primary, vault);
-    const report = await store.heal();
+    // A FOREIGN key sits in the pen alongside the corrupt row — a UI writer's key under the shared
+    // prefix, far too short to hold a delta id. heal recovers a candidate's id from a pen key by
+    // fixed-width suffix, so this is the key shape that would mis-attribute if that arithmetic were
+    // wrong: it must contribute no candidate and must come through untouched.
+    origin.setItem("loam:garden:ui:pins", '["a"]');
 
-    expect(report.restoredPrimary).toEqual([good.id]);
-    expect(report.restoreRefused).toEqual([]);
+    const store = new MirrorBackend(primary, vault);
+    await store.heal();
+
+    expect(store.lastRestore).toEqual({ restored: [good.id], stranded: [], replantWithheld: [] });
+    expect(origin.getItem("loam:garden:ui:pins")).toBe('["a"]');
     expect(origin.getItem(key(good.id))).toBe(wire(good));
     expect(origin.getItem(key(bystander.id))).toBe(wire(bystander));
     await store.close();

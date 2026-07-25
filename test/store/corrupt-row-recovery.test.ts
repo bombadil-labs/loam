@@ -32,7 +32,7 @@ import Database from "better-sqlite3";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { authorForSeed, claimsToJson, makeDelta, type Delta } from "@bombadil/rhizomatic";
 import type { StoreBackend } from "../../src/store/backend.js";
-import type { RepairableBackend } from "../../src/store/quarantine.js";
+import { DELTA_ID, DELTA_ID_LENGTH, type RepairableBackend } from "../../src/store/quarantine.js";
 import { ArchiveBackend } from "../../src/store/archive.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { MirrorBackend } from "../../src/store/mirror.js";
@@ -137,13 +137,24 @@ describe("T66: heal replaces a corrupt row from the mirror's healthy copy", () =
     // The premise: the corrupt row really does squat, and the strike really is stranded.
     expect(rowOf(path, strike.id)?.sig).not.toBe(strike.sig);
 
+    // THE PRE-REPAIR STATE, at the object level — the premise every other rail in this file rests on.
+    // A squatted strike means a READER resolves the retracted claim as LIVE; asserting only the bytes
+    // would leave "the corruption actually stranded the strike" unproven, and an implementation where
+    // it never did would pass the post-heal assertions too.
+    const before2 = await Gateway.boot(new SqliteBackend(path), GENESIS());
+    const sick = await before2.query(`{ plant(entity: "${FERN}") { height } }`);
+    expect((sick.data?.plant as { height: unknown }).height).toBe(30); // retracted, and serving
+    await before2.close();
+
     const store = new MirrorBackend(new SqliteBackend(path), new ArchiveBackend(vault));
-    const report = await store.heal();
+    // Before any heal, the surface is UNDEFINED, not an empty pair — "nobody asked" must not read as
+    // "nothing was corrupt" (H9), and here something demonstrably is.
+    expect(store.lastRestore).toBeUndefined();
+    await store.heal();
     await store.close();
 
     // (a) DELTA LEVEL — the primary's own bytes now ARE the healthy copy, and heal says which id.
-    expect(report.restoredPrimary).toEqual([strike.id]);
-    expect(report.restoreRefused).toEqual([]);
+    expect(store.lastRestore).toEqual({ restored: [strike.id], stranded: [], replantWithheld: [] });
     expect(rowOf(path, strike.id)?.sig).toBe(strike.sig);
     expect(rowOf(path, strike.id)?.claims).toBe(JSON.stringify(claimsToJson(strike.claims)));
     // TWO-SIDED: the live bystander's row is byte-identical to what it was before the heal.
@@ -180,10 +191,10 @@ describe("T66: heal replaces a corrupt row from the mirror's healthy copy", () =
     corruptClaims(path, strike.id);
 
     const store = new MirrorBackend(new SqliteBackend(path), new ArchiveBackend(vault));
-    const report = await store.heal();
+    await store.heal();
     await store.close();
 
-    expect(report.restoredPrimary).toEqual([strike.id]);
+    expect(store.lastRestore).toEqual({ restored: [strike.id], stranded: [], replantWithheld: [] });
     expect(rowOf(path, strike.id)?.claims).toBe(JSON.stringify(claimsToJson(strike.claims)));
     expect(rowOf(path, bystander.id)).toEqual(before);
 
@@ -217,7 +228,7 @@ describe("T66: heal replaces a corrupt row from the mirror's healthy copy", () =
     const report = await store.heal();
     await store.close();
 
-    expect(report.restoredPrimary).toEqual([strike.id]); // the squatter was replaced
+    expect(store.lastRestore).toEqual({ restored: [strike.id], stranded: [], replantWithheld: [] }); // squatter replaced
     expect(report.toPrimary).toBe(1); // ...and the new fact was PLANTED, not restored
     expect(rowOf(path, arrival.id)?.sig).toBe(arrival.sig);
 
@@ -232,14 +243,30 @@ describe("T66: heal replaces a corrupt row from the mirror's healthy copy", () =
   it("a healthy pair heals SILENTLY and stays idempotent — the mechanism never fires on its own", async () => {
     const { path, vault } = await plantedPair();
     const store = new MirrorBackend(new SqliteBackend(path), new ArchiveBackend(vault));
-    const first = await store.heal();
-    expect(first.restoredPrimary).toEqual([]);
-    expect(first.restoreRefused).toEqual([]);
+    await store.heal();
+    // A heal HAS run, so the pair is a claim and not a default: nothing was corrupt, and nothing was
+    // left corrupt. A rail asserting only `restored` could pass while the mechanism fired constantly.
+    expect(store.lastRestore).toEqual({ restored: [], stranded: [], replantWithheld: [] });
     const second = await store.heal();
-    expect(second.restoredPrimary).toEqual([]);
-    expect(second.restoreRefused).toEqual([]);
+    expect(store.lastRestore).toEqual({ restored: [], stranded: [], replantWithheld: [] });
     expect(second.toPrimary).toBe(0);
     await store.close();
+  });
+});
+
+describe("T66: the fixed-width id assumption heal's candidate match rests on", () => {
+  it("DELTA_ID_LENGTH is a real delta id's length, and DELTA_ID accepts it", () => {
+    // heal recovers an id from a pen key by taking a fixed-width suffix instead of asking every
+    // candidate whether some key ends with it (H8: never `replant × penned`). That arithmetic is only
+    // correct while ids really are that width, so the constant is pinned against actual deltas rather
+    // than trusted. If a substrate change ever widens an id, this fails before the match goes subtly
+    // wrong — a suffix one character short would match nothing and silently strand every squatter.
+    for (const d of [height, bystander, strike]) {
+      expect(d.id).toHaveLength(DELTA_ID_LENGTH);
+      expect(DELTA_ID.test(d.id)).toBe(true);
+      expect(d.id.slice(-DELTA_ID_LENGTH)).toBe(d.id); // a bare row id is its own suffix
+      expect(`loam:garden:${d.id}`.slice(-DELTA_ID_LENGTH)).toBe(d.id); // ...so is an embedded one
+    }
   });
 });
 
@@ -354,11 +381,11 @@ describe("T66: heal REPORTS a restore it could not make, rather than reporting s
     await inner.append([height, bystander]);
     const store = await withMirror(pennedPrimary(inner, strike.id));
 
-    const report = await store.heal();
+    await store.heal();
 
-    expect(report.restoredPrimary).toEqual([]);
-    expect(report.restoreRefused.length).toBe(1);
-    expect(report.restoreRefused[0]).toContain(strike.id);
+    expect(store.lastRestore?.restored).toEqual([]);
+    expect(store.lastRestore?.stranded.length).toBe(1);
+    expect(store.lastRestore?.stranded[0]).toContain(strike.id);
     await store.close();
   });
 
@@ -371,17 +398,17 @@ describe("T66: heal REPORTS a restore it could not make, rather than reporting s
       pennedPrimary(inner, strike.id, () => Promise.resolve([strike.id])),
     );
 
-    const report = await store.heal();
+    await store.heal();
 
-    expect(report.restoredPrimary).toEqual([]); // heal's own verdict, not the driver's word
-    expect(report.restoreRefused.length).toBe(1);
-    expect(report.restoreRefused[0]).toContain(strike.id);
+    expect(store.lastRestore?.restored).toEqual([]); // heal's verdict, not the driver's word
+    expect(store.lastRestore?.stranded.length).toBe(1);
+    expect(store.lastRestore?.stranded[0]).toContain(strike.id);
     await store.close();
   });
 
-  it("a driver that repairs ONE id and mis-reports another is SPLIT across the two fields", async () => {
-    // Neither field may be a pass-through of the return value. The double claims both ids; only one
-    // of them actually rejoins the admitted read, so exactly one lands in each field.
+  it("a driver that repairs ONE id and mis-reports another is SPLIT across the two lists", async () => {
+    // Neither list may be a pass-through of the return value. The double claims both ids; only one
+    // of them actually rejoins the admitted read, so exactly one lands in each list.
     const inner = new MemoryBackend();
     await inner.append([bystander]);
     const penned = new Set([height.id, strike.id]);
@@ -411,11 +438,11 @@ describe("T66: heal REPORTS a restore it could not make, rather than reporting s
     await vault.append([height, bystander, strike]);
     const store = new MirrorBackend(primary, vault);
 
-    const report = await store.heal();
+    await store.heal();
 
-    expect(report.restoredPrimary).toEqual([height.id]);
-    expect(report.restoreRefused.length).toBe(1);
-    expect(report.restoreRefused[0]).toContain(strike.id);
+    expect(store.lastRestore?.restored).toEqual([height.id]);
+    expect(store.lastRestore?.stranded.length).toBe(1);
+    expect(store.lastRestore?.stranded[0]).toContain(strike.id);
     await store.close();
   });
 });

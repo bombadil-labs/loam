@@ -102,8 +102,6 @@ describe("MirrorBackend", () => {
       purgedPrimary: 0,
       purgedMirror: 0,
       purgeFailures: [],
-      restoredPrimary: [],
-      restoreRefused: [],
     });
     expect(store.lagging).toBe(false);
     expect(ids(await inner.deltasSince(new Set()))).toEqual(ids([d1, d2]));
@@ -114,8 +112,6 @@ describe("MirrorBackend", () => {
       purgedPrimary: 0,
       purgedMirror: 0,
       purgeFailures: [],
-      restoredPrimary: [],
-      restoreRefused: [],
     });
   });
 
@@ -132,8 +128,6 @@ describe("MirrorBackend", () => {
       purgedPrimary: 0,
       purgedMirror: 0,
       purgeFailures: [],
-      restoredPrimary: [],
-      restoreRefused: [],
     });
     expect(ids(await store.deltasSince(new Set()))).toEqual(ids([d1, d2, d3]));
   });

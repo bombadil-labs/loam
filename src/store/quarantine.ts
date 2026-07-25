@@ -24,6 +24,12 @@ import type { StoreBackend } from "./backend.js";
 // needed (the §20 corollary — identity lives in the bytes — stays satisfied).
 export const DELTA_ID = /^1e20[0-9a-f]{64}$/;
 
+// A rendered delta id's LENGTH — the shape above is fixed-width (4 + 64 hex), and that is what lets
+// code recover an id from a key that merely EMBEDS it (`prefix + id`) by taking a fixed-width suffix,
+// rather than asking every candidate whether some key ends with it. Kept beside the regex it belongs
+// to so the two cannot drift; pinned by a rail against a real delta's id.
+export const DELTA_ID_LENGTH = 68;
+
 export function isDeltaId(s: string): boolean {
   return DELTA_ID.test(s);
 }
