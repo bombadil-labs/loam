@@ -29,11 +29,34 @@ admits?* The closure runs **forward only** — from an admitted delta to the neg
 transitively (a struck strike revives, so one link is not enough). Following it backward would drag
 in targets the filter deliberately excluded, turning a scope into a leak.
 
-**Cost so far.** Three sites. The quarantine's membership seeding edge and the offered lens (T38 —
-the second was federation-facing, so peers were receiving claims without their retractions);
-`Gateway.freeze`, latent (T38). A fourth of the same family but a different remedy: promotion checked
-PRESENCE rather than SURVIVAL, so a retracted pool output could be adopted into canonical history in
-the operator's own voice (T39).
+**Cost so far.** SEVEN sites, and the count is the argument: this hazard is not a bug that was fixed,
+it is a shape that recurs at every narrowing edge, so the question to ask of any new one is *where does
+this drop a strike?* — never *has this been handled?*
+
+The first three (T38): the quarantine's membership seeding edge; the offered lens, federation-facing,
+so peers were receiving claims without their retractions; and `Gateway.freeze`, latent until something
+shipped a version. A fourth of the family with a different remedy — promotion checked PRESENCE rather
+than SURVIVAL, so a retracted pool output could be adopted into canonical history in the operator's own
+voice (T39, refused at the door: survival is knowable before anything is signed).
+
+Then three more in one night, 2026-07-25, each at an edge nobody had asked the question of:
+
+- **The translates edge** (T58). A rendering is a COPY into a fresh id, so no negation of the source can
+  ever reach it — survival was checked once, at emit time, and a strike landing afterwards left the copy
+  live forever with no later pass able to repair it. The narrowing was a RE-ASSERTION rather than a
+  filter, which is this hazard's most durable form. Remedied by carrying, not refusing: the pass signs a
+  negation of its own rendering, because a peer runs none of Loam's reader rules and only deltas
+  federate. (Contrast T39: `promote` is a door, `translate` is a standing pass — that, not law-vs-fact,
+  is what decides refuse against carry.)
+- **The live membership watch** (T45). `watchImpl` was the only narrowing door with no closure at all,
+  and because a retraction carries only a `negates` pointer, an entity- or context-scoped Term
+  *structurally cannot* select it — so a retracted claim was served with no strike beside it.
+- **The two inbound doors** (T43). A wall seeded by an `admit` PREDICATE rather than a Term took the
+  caller's raw filter unwrapped; and a rostered pull admitted a post while rejecting its off-roster
+  retraction, leaving the claim live in the puller's store with the peer unable to tell.
+
+What the last three have in common is worth more than their count: none was found by a gate. Each was
+found by asking one question of one edge, and each edge had looked finished.
 
 **The helper.** `test/gateway/narrowing.ts` — `assertPreservesSuppression`. Any new narrowing
 operation should be run through it. Making the next one safe by construction is cheaper than
