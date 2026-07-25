@@ -294,6 +294,64 @@ describe("T58 — a retraction reaches the canonical rendering across the `trans
     expect(isPresent(gateway, foreign.id)).toBe(true);
     await gateway.close();
   });
+
+  it("the pass speaks only for its OWN renderings: a stranger's citation is untouched", async () => {
+    const gateway = await translatedWorld();
+    const foreign = cinelogEntry(5000);
+    await gateway.federate([foreign]);
+    await gateway.append([retraction(foreign.id, OPERATOR, OPERATOR_SEED, 6000)]);
+
+    // The cinelog app files its own rendering of the same (now struck) source. A negation is an
+    // ASSERTION: the pass may retract what it said, never what another author said — otherwise a
+    // delta decorated with `translates` could be struck in the translator's voice by anyone who
+    // pointed it at a retired claim.
+    const theirs = signClaims(
+      {
+        timestamp: 5001,
+        author: CINELOG,
+        pointers: [
+          {
+            role: "guest",
+            target: { kind: "entity", entity: { id: WREN, context: "events_attended" } },
+          },
+          { role: "translates", target: { kind: "delta", deltaRef: { delta: foreign.id } } },
+        ],
+      },
+      CINELOG_SEED,
+    );
+    await gateway.append([theirs]);
+    const report = await translate(gateway, { seed: TRANSLATOR_SEED });
+    expect(report.retracted ?? 0).toBe(0);
+    expect(isSuppressed(gateway, theirs.id)).toBe(false);
+    expect(isPresent(gateway, theirs.id)).toBe(true);
+    await gateway.close();
+  });
+
+  it("an operator's revival of a retracted rendering survives the next pass", async () => {
+    const gateway = await translatedWorld();
+    const foreign = cinelogEntry(5000);
+    await gateway.federate([foreign]);
+    await translate(gateway, { seed: TRANSLATOR_SEED });
+    const rendering = renderingOf(gateway, foreign.id)!;
+    await gateway.append([retraction(foreign.id, OPERATOR, OPERATOR_SEED, 6000)]);
+    expect((await translate(gateway, { seed: TRANSLATOR_SEED })).retracted).toBe(1);
+
+    // The operator strikes the pass's retraction — deliberately bringing the rendering back, the
+    // one escape hatch from a one-way edge. A retraction whose timestamp were not DERIVED would
+    // mint a fresh id on the next pass and silently re-kill it, undoing the operator's own act.
+    const theRetraction = gateway.reactor.negationsOf(rendering.id)[0]!;
+    await gateway.append([retraction(theRetraction, OPERATOR, OPERATOR_SEED, 7000)]);
+    // A struck strike revives, so the reading serves the rendering again. Asked at the OBJECT
+    // level on purpose: the shared `isSuppressed` helper asks only whether a negation is PRESENT,
+    // which cannot see a revival — only a resolving reader walks the chain.
+    expect(await serves(gateway, "attendance")).toContain(STALKER);
+
+    const after = await translate(gateway, { seed: TRANSLATOR_SEED });
+    expect(after.retracted ?? 0).toBe(0);
+    expect(gateway.reactor.negationsOf(rendering.id)).toHaveLength(1); // no second strike minted
+    expect(await serves(gateway, "attendance")).toContain(STALKER); // the reading still breathes
+    await gateway.close();
+  });
 });
 
 describe("T58 — the pass evaluates a source's survival as DATA, not as law", () => {
