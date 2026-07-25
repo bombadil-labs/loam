@@ -109,8 +109,16 @@ import {
   serveBytesImpl,
   serveRouteImpl,
   writeRouteImpl,
+  type ReadGesture,
   type RendererBinding,
 } from "./renderers.js";
+import {
+  declareArtifactImpl,
+  packArtifactImpl,
+  readArtifactRoutes,
+  type PackArtifactOptions,
+  type PackedArtifact,
+} from "./artifact.js";
 import {
   claimEntityImpl,
   clearEntityImpl,
@@ -577,8 +585,26 @@ export class Gateway {
     route: string,
     entity: string,
     door: "full" | "public",
+    gesture?: { readonly reads: readonly ReadGesture[]; readonly state: Record<string, string> },
   ): Promise<{ status: number; contentType: string; body: string }> {
-    return serveRouteImpl(this, route, entity, door);
+    return serveRouteImpl(this, route, entity, door, gesture);
+  }
+
+  // Declare routes publishable as artifacts (SPEC §30): `loam.public`'s twin — the body lives beside
+  // the artifact vocabulary in artifact.ts.
+  async declareArtifact(routes: readonly string[], context?: RequestContext): Promise<void> {
+    return declareArtifactImpl(this, routes, context);
+  }
+
+  // Every route the operator has declared artifact-publishable, read live under this store's law.
+  artifactRoutes(): ReadonlySet<string> {
+    return readArtifactRoutes(this.reactor, this.operatorAuthor);
+  }
+
+  // Emit a self-contained artifact page for a declared route (SPEC §30): the body lives in artifact.ts.
+  // Re-derived from surviving law on every call, exactly as serveRoute is, so withdrawal is live.
+  packArtifact(route: string, entity: string, opts: PackArtifactOptions): PackedArtifact {
+    return packArtifactImpl(this, route, entity, opts);
   }
 
   // Write through a rendered route (SPEC §23.3): the body lives in renderers.ts.

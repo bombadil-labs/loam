@@ -164,11 +164,35 @@ export {
   parseRendererInput,
   readRenderers,
   rendererBindingClaims,
+  parseReadGesture,
+  readKey,
+  type ReadCode,
+  type ReadGesture,
+  type ReadResult,
   type RenderNode,
   type RendererBinding,
   type RendererSpec,
   type RenderFn,
 } from "./gateway/renderers.js";
+export {
+  ARTIFACT_ENTITY,
+  ARTIFACT_TOOLS,
+  CTX_ARTIFACT,
+  artifactClaims,
+  artifactDefect,
+  capabilityStatement,
+  readArtifactRoutes,
+  type PackArtifactOptions,
+  type PackedArtifact,
+} from "./gateway/artifact.js";
+export {
+  MAX_CONNECTOR_NAME,
+  artifactPage,
+  bundleFromPage,
+  coordinatesFromPage,
+  type ArtifactCoordinates,
+} from "./gateway/artifact-page.js";
+export { HOST_GLOBALS, scanHostReferences, type HostReference } from "./gateway/artifact-scan.js";
 export {
   Runner,
   bindingDefinitionClaims,

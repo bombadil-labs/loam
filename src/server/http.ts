@@ -37,6 +37,7 @@ import {
   type RequestContext,
 } from "../gateway/gateway.js";
 import { parseRegistrationInput, schemaEntityFor, type LensName } from "../gateway/registration.js";
+import { parseReadGesture, type ReadGesture } from "../gateway/renderers.js";
 import { makeMountTable, type ResolvedMount } from "./mounts.js";
 
 export interface TokenIdentity {
@@ -176,6 +177,33 @@ const appRouteOf = (pathname: string): { route: string; entity: string } | undef
   } catch {
     return undefined;
   }
+};
+
+// The floor's read GESTURE as it rides the host route (SPEC §30): `?read=<lens>:<entity>`, repeatable,
+// plus every OTHER query parameter echoed verbatim into `node.state` — which is where UI state (a page
+// index) lives, because a per-render realm gives it nowhere else. An unenhanced link therefore works with
+// no JavaScript at all, and the floor is proven across two hosts rather than described for one.
+//
+// EACH `read=` COSTS A RESOLUTION. `maxPublicRenders` caps worker RENDERS, not resolutions, and a
+// repeatable parameter multiplies resolutions per request — H8's full-scan cost, N times, on one GET. So
+// the count is bounded here; a repeatable read parameter is precisely the shape that turns a cap into a
+// suggestion.
+const MAX_GESTURE_READS = 8;
+
+const gestureOf = (
+  params: URLSearchParams,
+): { reads: ReadGesture[]; state: Record<string, string> } => {
+  const reads: ReadGesture[] = [];
+  const state: Record<string, string> = {};
+  for (const [key, value] of params) {
+    if (key === "read") {
+      const g = parseReadGesture(value);
+      if (g !== undefined && reads.length < MAX_GESTURE_READS) reads.push(g);
+      continue;
+    }
+    state[key] = value;
+  }
+  return { reads, state };
 };
 
 // Parse a rendered route's write body (SPEC §23.3): a browser `<form>` POSTs
@@ -863,6 +891,53 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           json(res, 200, await gateway.health());
           return;
         }
+        // The pack door (SPEC §30): emit a self-contained artifact page for a declared route.
+        // OPERATOR-ONLY, and to every other identity it does not exist — `health`'s idiom, for a
+        // specific reason: the emitted page contains the renderer's BUNDLE SOURCE verbatim, which no
+        // existing door discloses (`serveRoute` discloses only the bundle's output). Deciding to
+        // publish your code is the operator's, and so is the emission that carries it.
+        //
+        // "Does not exist" has TWO uniform shapes and this is the token-bearing one: byte-identical to
+        // what an unknown verb returns, so this door looks like every door the server does not have. A
+        // token-less or bad-token caller never reaches this switch at all — it is refused before mount
+        // resolution matters, with the server's own uniform 401, so an anonymous prober learns nothing
+        // about which mounts exist. Two families, both deliberate, and the code is right.
+        case "artifact": {
+          if (req.method !== "GET" || identity.operator !== true) {
+            json(res, 404, { errors: ["no such surface"] });
+            return;
+          }
+          const parsed = appRouteOf(url.pathname);
+          if (parsed === undefined) {
+            json(res, 404, { errors: ["no such surface"] });
+            return;
+          }
+          const store = url.searchParams.get("store");
+          try {
+            const packed = gateway.packArtifact(parsed.route, parsed.entity, {
+              server: url.searchParams.get("connector") ?? "",
+              ...(store === null ? {} : { storeAddress: store }),
+              ...(url.searchParams.get("acknowledgePen") === "1" ? { acknowledgePen: true } : {}),
+              ...(url.searchParams.get("acknowledgeWritable") === "1"
+                ? { acknowledgeWritable: true }
+                : {}),
+            });
+            // The capability statement rides the RESPONSE too, for the operator's own review — the
+            // place where "look at this once" already happens for a pen or a narrowed writable.
+            res.writeHead(200, {
+              "content-type": "text/html; charset=utf-8",
+              "x-loam-capability": encodeURIComponent(packed.capability.join(" | ")),
+              "x-loam-manifest": packed.manifest.join(","),
+              ...CORS,
+            });
+            res.end(packed.page);
+          } catch (err) {
+            // A refusal reads identically from HTTP, the CLI, and a direct call — one shape for every
+            // door. It is the OPERATOR's own refusal: they already proved they may see this door.
+            json(res, 400, { errors: [err instanceof Error ? err.message : String(err)] });
+          }
+          return;
+        }
         // The other doors (SPEC §17): the same registrations, spoken in REST/OpenAPI. The
         // token carries the SAME identity discipline — an actor token writes as that actor,
         // an operator token as the operator; the hooks enforce standing, not the transport.
@@ -912,7 +987,15 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             return;
           }
           if (req.method === "GET") {
-            sendRendered(res, await gateway.serveRoute(parsed.route, parsed.entity, "full"));
+            sendRendered(
+              res,
+              await gateway.serveRoute(
+                parsed.route,
+                parsed.entity,
+                "full",
+                gestureOf(url.searchParams),
+              ),
+            );
             return;
           }
           // A write-enabled renderer's form POST (SPEC §23.3): the store signs as the renderer's pen, not

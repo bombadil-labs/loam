@@ -60,15 +60,54 @@ export interface RendererBinding extends RendererCore {
   readonly timestamp: number;
 }
 
+// The floor's refusal vocabulary (SPEC §30). HOST-NEUTRAL by construction: the artifact broker's own
+// codes (`needs_reauth`, `server_not_connected`, …) exist only where a broker does, and the
+// server-rendered host resolving a `?read=` in-process has none — so a bundle branching on one would
+// behave differently on the two hosts behind a single content address. Each host maps its own failures
+// onto these four at its own seam, and a renderer only ever sees these.
+export type ReadCode = "not_served" | "refused" | "unavailable" | "needs_connection";
+
+// One mediated read's answer: the same shape the root node has, or a refusal. Absence is NOT a refusal —
+// a read at an entity the store has nothing for is a success carrying an empty view, and only the app
+// knows what its own emptiness should look like.
+export type ReadResult =
+  | { readonly entity: string; readonly view: Record<string, unknown>; readonly hex: string }
+  | { readonly error: { readonly code: ReadCode; readonly message: string } };
+
 // What the host hands a renderer: the resolved node, and nothing else (§23.2 — a renderer speaks lens, the
-// host holds the keys). v1 is read-only, so it is exactly a `ResolvedNode`'s public face. A bytes leaf is
-// handed over as the §23.7 envelope { mime, ref, base64url? } — the same face gql/REST show — so a
-// renderer builds `<img src>` from `ref` (the byte-door) or the inline `base64url`, never juggling raw
-// Uint8Arrays; every non-bytes value passes through unchanged.
+// host holds the keys). A bytes leaf is handed over as the §23.7 envelope { mime, ref, base64url? } — the
+// same face gql/REST show — so a renderer builds `<img src>` from `ref` (the byte-door) or the inline
+// `base64url`, never juggling raw Uint8Arrays; every non-bytes value passes through unchanged.
+//
+// `reads` and `state` are the mediated request channel's two members (SPEC §30). Both are ALWAYS PRESENT
+// and ALWAYS OBJECTS — empty until a gesture is honored — because an optional member is a divergence
+// behind one content address: a bundle that draws it would throw on the host where it is absent. `reads`
+// is keyed `<lens>@<entity>`; `state` is the gesture's own `data-loam-*` attributes echoed verbatim, and
+// it exists because a per-render realm gives UI state (a page index) nowhere else to live.
 export interface RenderNode {
   readonly entity: string;
   readonly view: Record<string, unknown>;
   readonly hex: string;
+  readonly reads: Record<string, ReadResult>;
+  readonly state: Record<string, string>;
+}
+
+// A read gesture as a host receives it, before it is resolved: the lens and the entity, and nothing
+// else — which is all Loam's entity-addressed read root has to offer. The key it lands under.
+export interface ReadGesture {
+  readonly lens: string;
+  readonly entity: string;
+}
+
+export const readKey = (lens: string, entity: string): string => `${lens}@${entity}`;
+
+// A gesture as it rides a URL: `read=<lens>:<entity>`, split on the FIRST colon so an entity id may
+// carry its own. Undefined for a malformed pair — a gesture that names no lens or no entity is not a
+// narrower read, it is nothing, and it is dropped rather than resolved as a guess.
+export function parseReadGesture(raw: string): ReadGesture | undefined {
+  const i = raw.indexOf(":");
+  if (i <= 0 || i >= raw.length - 1) return undefined;
+  return { lens: raw.slice(0, i), entity: raw.slice(i + 1) };
 }
 
 // A v1 renderer: a resolved node in, HTML out. Pure and synchronous (server-rendered). A React renderer
@@ -421,6 +460,7 @@ export async function serveRouteImpl(
   route: string,
   entity: string,
   door: "full" | "public",
+  gesture?: { readonly reads: readonly ReadGesture[]; readonly state: Record<string, string> },
 ): Promise<{ status: number; contentType: string; body: string }> {
   // One refusal, everywhere — history is not anonymous, and neither is "which routes exist" (§17).
   const gone = { status: 404, contentType: "text/plain; charset=utf-8", body: "no such route" };
@@ -469,6 +509,18 @@ export async function serveRouteImpl(
   // the serve path). The read-discipline + resolve above stayed on THIS thread (authority never leaves
   // it); only the untrusted render runs in the bounded worker (SPEC §23.9).
   if (loadedRenderer(binding.bundle) === undefined) return gone;
+  // The floor's mediated reads (SPEC §30), resolved HERE, in the gateway, under this door's own
+  // discipline — the request never leaves the authority boundary. FULL DOOR ONLY: the anonymous door's
+  // whole posture is that every refusal is a uniform 404 leaking nothing about what exists (§17), so a
+  // per-lens `not_served` there would be exactly the lens-existence oracle that door closed. On the
+  // public door a `?read=` is ignored and the route renders as it always has.
+  const reads: Record<string, ReadResult> = {};
+  const state: Record<string, string> = door === "public" ? {} : (gesture?.state ?? {});
+  if (door === "full") {
+    for (const g of gesture?.reads ?? []) {
+      reads[readKey(g.lens, g.entity)] = resolveGesture(gw, g);
+    }
+  }
   // The anonymous render fan is CAPPED (SPEC §23.9, ticket T18): the slot is acquired only here —
   // after every refusal that costs nothing — and covers exactly the worker execution, released in
   // finally so a completed (or timed-out, or faulted) render always gives its slot back. Over the
@@ -486,11 +538,7 @@ export async function serveRouteImpl(
     try {
       return await renderInWorker(
         binding.bundle,
-        {
-          entity,
-          view: bytesEnvelope(node.view) as Record<string, unknown>,
-          hex: node.hex,
-        },
+        { entity, view: bytesEnvelope(node.view) as Record<string, unknown>, hex: node.hex, reads, state },
         gw.options.renderTimeoutMs,
       );
     } finally {
@@ -504,13 +552,38 @@ export async function serveRouteImpl(
   // to cross the thread boundary. renderInWorker never rejects; every fault folds to a clean refusal.
   return renderInWorker(
     binding.bundle,
-    {
-      entity,
-      view: bytesEnvelope(node.view) as Record<string, unknown>,
-      hex: node.hex,
-    },
+    { entity, view: bytesEnvelope(node.view) as Record<string, unknown>, hex: node.hex, reads, state },
     gw.options.renderTimeoutMs,
   );
+}
+
+// Resolve ONE mediated read on the server-rendered host, mapping every failure onto the floor's own
+// host-neutral enum (§30). The boundary asserted is exactly the pair the artifact host's boundary is:
+// the lens must be REGISTERED on this door's surface, and `hooks.resolve` carries no identity — a token
+// individuates WRITE standing, and §7's isolation unit for reads is the mount. There is no shadow
+// allow-list: the door adjudicates nothing the store would not.
+function resolveGesture(gw: Gateway, g: ReadGesture): ReadResult {
+  const surface = gw.surface("full");
+  const lens = g.lens as LensName;
+  if (surface === undefined || !surface.registered.some((r) => lensOf(r) === lens)) {
+    return {
+      error: { code: "not_served", message: `this store does not serve the lens "${g.lens}"` },
+    };
+  }
+  try {
+    const node = surface.hooks.resolve(lens, g.entity);
+    // Absence is an answer, not an error: an entity the store has nothing for resolves to an EMPTY
+    // view, and the renderer draws its own "nothing here". Only a fault is a refusal.
+    return {
+      entity: g.entity,
+      view: bytesEnvelope(node.view) as Record<string, unknown>,
+      hex: node.hex,
+    };
+  } catch (err) {
+    return {
+      error: { code: "refused", message: err instanceof Error ? err.message : String(err) },
+    };
+  }
 }
 
 // May THIS door serve THIS renderer's route (SPEC §23.5/§23.8)? The same read discipline serveRoute
