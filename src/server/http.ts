@@ -27,6 +27,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { type Delta, type Primitive } from "@bombadil/rhizomatic";
+import { Kind, OperationTypeNode, parse, type DocumentNode } from "graphql";
 import { fromWire, toWire, type WireDelta } from "../federation/wire.js";
 import { buildOpenApi, handleRest } from "../surface/rest.js";
 import {
@@ -422,16 +423,31 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     }
   };
 
-  // The MCP tools: the same two verbs the gateway speaks, in JSON-RPC clothes.
+  // The MCP revisions this door speaks — every one in which a Tool may CARRY the annotations below.
+  // `readOnlyHint` arrived in 2025-03-26; under 2024-11-05 a Tool is name/description/inputSchema and
+  // nothing else. So a client told "2024-11-05" while being handed a readOnlyHint has negotiated a
+  // protocol in which the field it is asked to honour does not exist — and that field is the second
+  // guard against a replayed write, the one the runtime holds rather than us. Newest first: an
+  // unrecognised or absent request is answered with the newest we speak, never with a revision that
+  // cannot express what we declare.
+  const MCP_PROTOCOLS: readonly string[] = ["2025-06-18", "2025-03-26"];
+
+  // The MCP tools: the same two verbs the gateway speaks, in JSON-RPC clothes. `annotations` are
+  // part of the authority, not decoration: a shell reads `readOnlyHint: true` as a licence to cache
+  // and REPLAY a call, and an explicit `false` is what makes its own machinery refuse to cache a
+  // write. Both halves must be true of the handler below — see notARead.
   const MCP_TOOLS = [
     {
       name: "loam_query",
-      description: "Run a GraphQL query against this Loam store; returns { data, errors }.",
+      description:
+        "Run a GraphQL query against this Loam store; returns { data, errors }. " +
+        "Reads only: a mutation or subscription document is refused.",
       inputSchema: {
         type: "object",
         properties: { query: { type: "string" }, variables: { type: "object" } },
         required: ["query"],
       },
+      annotations: { readOnlyHint: true },
     },
     {
       name: "loam_mutate",
@@ -443,6 +459,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         properties: { mutation: { type: "string" }, variables: { type: "object" } },
         required: ["mutation"],
       },
+      annotations: { readOnlyHint: false },
     },
     {
       name: "loam_register",
@@ -480,8 +497,38 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         },
         required: ["hyperschema", "schema", "roots"],
       },
+      annotations: { readOnlyHint: false },
     },
   ];
+
+  // `gateway.query` runs whatever document it is handed — graphql executes a `mutation` operation as
+  // readily as a query — so the read tool's read-only scope is a property of the DOCUMENT, checked
+  // here, and nowhere else. Refuse on the operation kind rather than the text: a name, a comment or a
+  // string literal can spell "mutation" in a document that only reads.
+  //
+  // ANY non-query operation refuses the WHOLE document, including one buried behind an operation that
+  // reads. Nothing carries an operation name into this door, so a second definition cannot be shown
+  // unreached — and today graphql refuses a multi-operation document for its own reasons, which is an
+  // accident of the parser, not a guard.
+  const notARead = (source: string): string | undefined => {
+    let document: DocumentNode;
+    try {
+      document = parse(source);
+    } catch {
+      // Unparseable is not our refusal to make: the gateway answers a syntax error in its own words.
+      return undefined;
+    }
+    for (const definition of document.definitions) {
+      if (definition.kind !== Kind.OPERATION_DEFINITION) continue;
+      if (definition.operation === OperationTypeNode.MUTATION) {
+        return "loam_query is the read door and this document writes: send a mutation to loam_mutate";
+      }
+      if (definition.operation === OperationTypeNode.SUBSCRIPTION) {
+        return "loam_query answers once: a subscription belongs at GET /:mount/subscribe?query=...";
+      }
+    }
+    return undefined;
+  };
 
   const handleMcp = async (
     gateway: Gateway,
@@ -527,13 +574,16 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       json(res, 200, { jsonrpc: "2.0", id: rpc.id ?? null, result });
 
     switch (rpc.method) {
-      case "initialize":
+      case "initialize": {
+        const asked = (rpc.params ?? {})["protocolVersion"];
         reply({
-          protocolVersion: "2024-11-05",
+          protocolVersion:
+            typeof asked === "string" && MCP_PROTOCOLS.includes(asked) ? asked : MCP_PROTOCOLS[0],
           capabilities: { tools: {} },
           serverInfo: { name: "loam", version: "0.1.0" },
         });
         return;
+      }
       case "notifications/initialized":
         res.writeHead(202, CORS).end();
         return;
@@ -581,6 +631,13 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             error: { code: -32602, message: "unknown tool or missing source" },
           });
           return;
+        }
+        if (name === "loam_query") {
+          const wrongDoor = notARead(source);
+          if (wrongDoor !== undefined) {
+            reply({ content: [{ type: "text", text: wrongDoor }], isError: true });
+            return;
+          }
         }
         let result: QueryResult;
         try {
