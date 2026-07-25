@@ -129,6 +129,15 @@ function claimList(claims) {
     if (c.door) chip("door", `${c.door}()`);
     chip("spec", c.spec);
     li.append(says, receipt);
+    // The gap is the whole point of allowing an unproven promise: a reader who is told a sentence
+    // has no test behind it deserves the reason in the same breath. Enforcing the field and then
+    // rendering it to nobody would be the admission going into a drawer.
+    if (c.gap) {
+      const why = document.createElement("p");
+      why.className = "gap";
+      inline(why, c.gap);
+      li.append(why);
+    }
     ul.append(li);
   }
   return ul;

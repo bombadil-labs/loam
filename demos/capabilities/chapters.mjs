@@ -228,13 +228,13 @@ export const CHAPTERS = [
       },
       {
         kind: "prose",
-        text: "The second decision is that no part of the system has ambient authority. There is no superuser flag, no `isAdmin` column, no code path that works because the caller happened to be local. A write is admitted when the writer's [[standing]] chains back to the store's [[operator]], and refused otherwise — and refused is the default, not the fallback.",
+        text: "The second decision is that no part of the system has ambient authority. There is no superuser flag, no `isAdmin` column, no code path that works because the caller happened to be local. In a store that has an [[operator]], a write is admitted when the writer's [[standing]] chains back to that operator and refused otherwise — and refused is the default, not the fallback. A store with no operator governs nothing and takes any verified claim, which is the right behavior for a scratch store and worth knowing before you assume a store is guarded.",
       },
       {
         kind: "claims",
         claims: [
           {
-            says: "Two stores that have seen the same facts hold the same set, whatever order the facts arrived in and however many times — merging is union, and nothing is lost or overwritten.",
+            says: "Facts merge as an order-blind, idempotent union: two piles combined in either order give the same set with the same digest, nothing lost and nothing overwritten. (That two whole STORES converge is the same law one level up, and chapter 9 is where it is proved of stores.)",
             spec: "spec/09-constraints-invariants.md",
             proof: "test/smoke.test.ts",
             door: "canonicalDelta",
@@ -588,7 +588,7 @@ export const CHAPTERS = [
           "Generating a typed client from a published reading is designed and not queued. You write your own client today.",
           "Only the REST door is versioned by path; asking GraphQL for a specific past generation is additive and queued, not silently present.",
           "A hosted, replicated storage driver is a one-file addition when a deployment needs one, and is not vendored here.",
-          "When two published definitions collide on a name, the winner is decided by a fixed rule rather than by a [[Policy]] you can configure — the one place in the system where resolution is not yours to choose. It has a design ticket and no design yet.",
+          "When two published definitions collide on a name, the winner is decided by a fixed rule rather than by a [[Policy]] you can configure — the one place in the system where resolution is not yours to choose. It has a ticket and no design yet (T89).",
         ],
       },
     ],
@@ -618,7 +618,7 @@ export const CHAPTERS = [
       },
       {
         kind: "prose",
-        text: "There is a subtler thing this buys, and it is the reason [[standing]] and reading are in the same chapter. A store admits facts from strangers all the time — that is what [[federation]] is — and a stranger's [[strike]] against your data is inert, because your readings only count claims from voices that hold standing. The trusted set is not a list somebody copied at startup. It is a live view, so the moment you revoke a contributor, their strikes stop shaping what you see.",
+        text: "There is a subtler thing available here, and it is the reason [[standing]] and reading are in the same chapter — but it is opt-in, and the default is the other way, so read this paragraph carefully. A store admits facts from strangers all the time; that is what [[federation]] is. An ordinary reading counts *every* [[strike]] it can see, which means a stranger can veto a value you rely on simply by contradicting it. A reading registered as GOVERNED counts strikes only from voices holding [[standing]], and then the trusted set is a live view rather than a list copied at startup: revoke a contributor and their strikes stop shaping what you see on the next read. If you want the heckler ignored, you have to say so.",
       },
       { kind: "heading", text: "The door with no permission at all" },
       {
@@ -645,10 +645,11 @@ export const CHAPTERS = [
             door: "holdsGrant",
           },
           {
-            says: "A stranger's [[strike]] cannot reshape a governed reading, while a grantee's does — and stops doing so the instant their [[grant]] is revoked, because the trusted set is resolved live.",
+            says: "A stranger's [[strike]] cannot reshape a governed reading, while the strike of somebody the [[operator]] granted directly does — and stops the instant the operator revokes that [[grant]], because the trusted set is resolved live rather than copied at startup.",
             spec: "spec/07-capabilities-accounts.md",
             proof: "test/gateway/lenses.test.ts",
             door: "governedGatherBody",
+            gap: "Scoped to the first link on purpose. Standing minted one link further down — an administrator granting somebody — binds the DOOR immediately and does not yet enter the trusted set a reading resolves through, so an administrator's revocation shuts the door while the revoked author's strikes still shape the reading. That divergence is §7's known residual, and `test/gateway/auth.test.ts` pins it rather than papering over it.",
           },
           {
             says: "Who currently holds permission is answerable by an ordinary query, so an audit needs no special tooling.",
@@ -828,12 +829,12 @@ export const CHAPTERS = [
       {
         kind: "notYet",
         items: [
-          "A resource envelope for a container — its own time, memory and outbound budget, so a child region cannot starve the doors that host it — is named as load-bearing rather than a nicety, has an open ticket, and is not built. Until it is, a quarantine bounds crashes and hangs but not appetite.",
-          "Confining a quarantined program from the filesystem and the network is the deeper half of the sandbox and is unbuilt; today the code is bounded but trusted not to reach.",
+          "A resource envelope for a container — its own time, memory and outbound budget, so a child region cannot starve the doors that host it — is named as load-bearing rather than a nicety, and is not built (T34). Until it is, a quarantine bounds crashes and hangs but not appetite.",
+          "Confining a quarantined program from the filesystem and the network is the deeper half of the sandbox and is unbuilt (T35); today the code is bounded but trusted not to reach.",
           "A quarantine sees all the facts it was seeded with — narrowing what it may read is a future design, not a knob.",
-          "Sharing only what a peer does not already hold, by chunking a frozen region into a verifiable tree, is designed and deferred; a frozen address today is a flat hash over the whole member set.",
+          "Sharing only what a peer does not already hold, by chunking a frozen region into a verifiable tree, is designed and deferred (T76); a frozen address today is a flat hash over the whole member set.",
           "Depending on modules that depend on modules — version ranges, a solver, a resolved graph — is named and deferred. A single minimum floor is what exists.",
-          "Narrowing what a host publishes does not yet immediately narrow what an attached container serves anonymously; it takes effect at its next reseed. There is an open ticket, found by a review.",
+          "Narrowing what a host publishes does not yet immediately narrow what an attached container serves anonymously; it takes effect at its next reseed. Found by a review, and open (T88).",
         ],
       },
     ],
@@ -1049,7 +1050,7 @@ export const CHAPTERS = [
           "Confining a bundle from the filesystem and the network — the real sandbox, rather than the timeout and memory bound that exist — is unbuilt and named as such.",
           "The live browser host for a [[renderer]] (client-side hydration and a subscription over the wire) is designed and deferred; today a route is server-rendered.",
           "Letting a visitor sign a page's write with their own key, rather than the page's [[pen]], waits on that browser host.",
-          "A function's lifetime budget is carried and honored in the design, but no test drives one to exhaustion and watches it stop — so treat it as unproven rather than as a guarantee.",
+          "A function's lifetime budget is parsed and carried onto the binding, and then read by nothing else in the source — carried, not yet consumed — and no test drives one to exhaustion and watches it stop. Treat it as designed rather than as a guarantee.",
         ],
       },
     ],
@@ -1120,7 +1121,7 @@ export const CHAPTERS = [
             door: "pullFrom",
           },
           {
-            says: "Every lesson in the tutorial is checked by a real read of the learner's own store, is false before the lesson runs, and can never be un-greened by a later one.",
+            says: "Every lesson in the tutorial is checked by a real read of the learner's own store rather than a quiz answer; every lesson after the first is false before that lesson runs; and no lesson can un-green an earlier one, since all of them are re-proved from the ground on every boot.",
             spec: "spec/19-tutorial-v2.md",
             proof: "test/site/arc.test.ts",
             door: null,
