@@ -90,6 +90,15 @@ function corruptSig(path: string, id: string): void {
   db.close();
 }
 
+// Corrupt a row's CLAIMS into bytes that are not JSON at all — the `unparseable` pen reason, the one
+// that cannot even name the strike it stranded. The row is still a squatter and a healthy copy must
+// still be able to take its place.
+function corruptClaims(path: string, id: string): void {
+  const db = new Database(path);
+  db.prepare("UPDATE deltas SET claims = ? WHERE id = ?").run("{not json at all", id);
+  db.close();
+}
+
 // A primary + on-disk archive holding the whole healthy world, then closed. Returns their paths.
 async function plantedPair(): Promise<{ path: string; vault: string }> {
   const dir = freshDir();
@@ -158,6 +167,37 @@ describe("T66: heal replaces a corrupt row from the mirror's healthy copy", () =
     const plant = view.data?.plant as { height: unknown; tag: unknown };
     expect(plant.height).toBeNull();
     expect(plant.tag).toEqual(["shade"]);
+    await dest.close();
+    await source.close();
+  });
+
+  it("an UNPARSEABLE row is a squatter too — the pen reason that cannot name its own strike", async () => {
+    // The `unparseable` case is the one T57's disclosure can only caution about, because there are no
+    // claims to read a `negates` ref out of. It is also the one an implementation that judged the
+    // existing row by "does it parse" rather than "does it ADMIT" would silently refuse to repair.
+    const { path, vault } = await plantedPair();
+    const before = rowOf(path, bystander.id);
+    corruptClaims(path, strike.id);
+
+    const store = new MirrorBackend(new SqliteBackend(path), new ArchiveBackend(vault));
+    const report = await store.heal();
+    await store.close();
+
+    expect(report.restoredPrimary).toEqual([strike.id]);
+    expect(rowOf(path, strike.id)?.claims).toBe(JSON.stringify(claimsToJson(strike.claims)));
+    expect(rowOf(path, bystander.id)).toEqual(before);
+
+    const source = await healthySource();
+    const dest = await Gateway.boot(new SqliteBackend(path), GENESIS());
+    assertPreservesSuppression({
+      what: "heal replacing an UNPARSEABLE row from the archive",
+      source,
+      destination: dest,
+      struckClaim: height.id,
+    });
+    const view = await dest.query(`{ plant(entity: "${FERN}") { height tag } }`);
+    expect((view.data?.plant as { height: unknown }).height).toBeNull();
+    expect((view.data?.plant as { tag: unknown }).tag).toEqual(["shade"]);
     await dest.close();
     await source.close();
   });

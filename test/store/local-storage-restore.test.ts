@@ -14,6 +14,8 @@
 import { describe, expect, it } from "vitest";
 import { makeDelta, type Delta } from "@bombadil/rhizomatic";
 import { LocalStorageBackend } from "../../src/store/local-storage.js";
+import { MemoryBackend } from "../../src/store/memory.js";
+import { MirrorBackend } from "../../src/store/mirror.js";
 import { toWire } from "../../src/federation/wire.js";
 import { canonicalDelta } from "../../src/store/canon.js";
 import { FERN, GARDENER_SEED, observed } from "../spike/garden.js";
@@ -52,6 +54,42 @@ describe("T66 (§15): a corrupt localStorage row is replaceable by an admitting 
     expect(await store.quarantine()).toEqual([]);
     // TWO-SIDED: the bystander key never moved.
     expect(origin.getItem(key(bystander.id))).toBe(bystanderBefore);
+    await store.close();
+  });
+
+  it("an UNPARSEABLE value is a squatter too — the check asks ADMITS, not merely PARSES", async () => {
+    const origin = new MemStorage();
+    const store = new LocalStorageBackend("garden", origin);
+    await store.append([good, bystander]);
+    const bystanderBefore = origin.getItem(key(bystander.id));
+    origin.setItem(key(good.id), "{not json at all");
+    await store.deltasSince(new Set());
+    expect((await store.quarantine())[0]?.reason).toBe("unparseable");
+
+    expect(await store.restoreQuarantined([good])).toEqual([good.id]);
+
+    expect(origin.getItem(key(good.id))).toBe(wire(good));
+    expect(origin.getItem(key(bystander.id))).toBe(bystanderBefore);
+    await store.close();
+  });
+
+  it("heal over a localStorage PRIMARY restores through the `prefix + id` pen key", async () => {
+    // The pen key shape differs per driver — a row id in sqlite, a full storage key here — and heal
+    // matches a candidate by that key. This is the rail that fails if the match only ever saw an id.
+    const origin = new MemStorage();
+    const primary = new LocalStorageBackend("garden", origin);
+    const vault = new MemoryBackend();
+    await primary.append([good, bystander]);
+    await vault.append([good, bystander]);
+    corruptAt(origin, good);
+
+    const store = new MirrorBackend(primary, vault);
+    const report = await store.heal();
+
+    expect(report.restoredPrimary).toEqual([good.id]);
+    expect(report.restoreRefused).toEqual([]);
+    expect(origin.getItem(key(good.id))).toBe(wire(good));
+    expect(origin.getItem(key(bystander.id))).toBe(wire(bystander));
     await store.close();
   });
 

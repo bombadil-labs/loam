@@ -283,9 +283,11 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
     const primary = this.primary;
     if (replant.length === 0 || !isRepairable(primary)) return none;
     const penned = await primary.quarantine();
-    const squatting = replant.filter((d) =>
-      penned.some((r) => r.key === d.id || r.key.endsWith(d.id)),
-    );
+    // A pen key is a row id (sqlite) or `prefix + id` (localStorage), and `endsWith` covers both —
+    // an id equals itself's own suffix. A key that merely ends with the id (a foreign key under the
+    // shared prefix) at worst offers a candidate the driver then refuses on its own bytes, so erring
+    // toward asking is free.
+    const squatting = replant.filter((d) => penned.some((r) => r.key.endsWith(d.id)));
     if (squatting.length === 0) return none;
     const claimed =
       primary.restoreQuarantined === undefined ? [] : await primary.restoreQuarantined(squatting);

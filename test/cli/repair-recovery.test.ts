@@ -100,7 +100,8 @@ describe("T66: re-admit names the recovery that now exists", () => {
     expect(code).toBe(0);
     const said = out.join("\n");
     expect(said).toMatch(/still fails admission/); // the existing promise, unbroken
-    // ...and the new one: the operator is NAMED a recovery, not left with discard as the only end.
-    expect(said).toMatch(/--archive/);
+    // ...and the new one: the operator is handed a RUNNABLE command, not merely a hint that one
+    // exists. The whole invocation is pinned, so a mangled flag or placeholder is a red bar.
+    expect(said).toContain("`loam serve --archive <dir>`");
   });
 });
