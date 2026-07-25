@@ -10,7 +10,8 @@
 // primitive fields do not.
 
 import { describe, expect, it } from "vitest";
-import { parseTerm, verifyDelta } from "@bombadil/rhizomatic";
+import { verifyDelta } from "@bombadil/rhizomatic";
+import { expandedGatherBody } from "../../src/gateway/gather.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
@@ -29,21 +30,8 @@ const MOSS = "plant:moss";
 
 // A Bed gathers everything pointing at it (byTargetContext), then EXPANDS the `plant` role into the
 // child's Plant view — so `plants` is an edge field, while `name` stays a plain primitive.
-const bedBody = parseTerm({
-  op: "expand",
-  role: { exact: "plant" },
-  schema: "Plant",
-  reading: "Plant", // issue #23: the child resolves through its own Plant reading
-  in: {
-    op: "group",
-    key: "byTargetContext",
-    in: {
-      op: "select",
-      pred: { hasPointer: { targetEntity: { var: "root" } } },
-      in: { op: "mask", policy: "drop", in: "input" },
-    },
-  },
-});
+// `reading` names the child's own Plant reading (issue #23), rather than resolving it here.
+const bedBody = expandedGatherBody({ role: "plant", schema: "Plant", reading: "Plant" });
 const BED_SCHEMA = { name: "Bed", alg: 1, body: bedBody } as const;
 const BED_POLICY = {
   props: new Map([

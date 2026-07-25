@@ -18,7 +18,7 @@
 // files together are the chain from `src/index.ts` to `npm install`.
 
 import { describe, expect, it } from "vitest";
-import { authorForSeed, parseSchema, parseTerm, signClaims } from "@bombadil/rhizomatic";
+import { authorForSeed, parseSchema, signClaims } from "@bombadil/rhizomatic";
 import * as loam from "../src/index.js";
 import {
   CONTAINER_CONTEXTS,
@@ -35,6 +35,7 @@ import {
   containerClaims,
   containerDefect,
   detachClaims,
+  entityGatherBody,
   exclusionClaims,
   freezeMembers,
   manifestExportClaims,
@@ -105,16 +106,9 @@ const MANIFEST_ROW: ManifestExport = { alias: "Plant", targetEntity: "hyperschem
 
 // --- the world, built from the barrel alone ------------------------------------------------------
 
-// The gather every plain entity wants: everything pointing at the root, bucketed by target context.
-const PLANT_BODY = parseTerm({
-  op: "group",
-  key: "byTargetContext",
-  in: {
-    op: "select",
-    pred: { hasPointer: { targetEntity: { var: "root" } } },
-    in: { op: "mask", policy: "drop", in: "input" },
-  },
-});
+// The gather every plain entity wants, from the barrel's own constructor (T83) — which is the whole
+// point of it being on the barrel: a consumer writes a schema without retyping the idiom.
+const PLANT_BODY = entityGatherBody();
 const PLANT_SCHEMA = parseSchema({
   props: { height: { pick: { order: { byTimestamp: "desc" } } } },
   default: { pick: { order: { byTimestamp: "desc" } } },

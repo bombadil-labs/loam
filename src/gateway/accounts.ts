@@ -22,6 +22,7 @@ import {
   type Term,
 } from "@bombadil/rhizomatic";
 import { STORE_ENTITY } from "./genesis.js";
+import { entityGatherBody } from "./gather.js";
 import { eraseDefect } from "./erase.js";
 import { publicDefect } from "./public.js";
 import { trustDefect } from "./trust.js";
@@ -85,19 +86,7 @@ export function revocationClaims(grantDeltaId: string, author: string, timestamp
 // A tenant, gathered: its grants, its members, anything filed at it. This UNGOVERNED form
 // masks with `drop` — every negation present binds. A governed store should audit through
 // `tenantSchemaFor(operator)` below, whose mask honors only lawful strikes.
-export const TENANT: HyperSchema = {
-  name: "Tenant",
-  alg: 1,
-  body: parseTerm({
-    op: "group",
-    key: "byTargetContext",
-    in: {
-      op: "select",
-      pred: { hasPointer: { targetEntity: { var: "root" } } },
-      in: { op: "mask", policy: "drop", in: "input" },
-    },
-  }),
-};
+export const TENANT: HyperSchema = { name: "Tenant", alg: 1, body: entityGatherBody() };
 
 // --- governed read lenses (rhizomatic 0.2.0: trust masks + inView) --------------------------------
 //
@@ -154,15 +143,7 @@ function lawfulStrikersJson(operator: string, adminsOnly: boolean): unknown {
 // operator and the operator's grantees. A federated stranger's strike is inert here — the
 // heckler's veto ends where this body begins.
 export function governedGatherBody(operator: string): Term {
-  return parseTerm({
-    op: "group",
-    key: "byTargetContext",
-    in: {
-      op: "select",
-      pred: { hasPointer: { targetEntity: { var: "root" } } },
-      in: { op: "mask", policy: { trust: lawfulStrikersJson(operator, false) }, in: "input" },
-    },
-  });
+  return entityGatherBody({ mask: { trust: lawfulStrikersJson(operator, false) } });
 }
 
 // Is `id` struck AS DATA — the question a governed READER answers, which is not the question
@@ -198,15 +179,7 @@ export function tenantSchemaFor(operator: string): HyperSchema {
   return {
     name: "Tenant",
     alg: 1,
-    body: parseTerm({
-      op: "group",
-      key: "byTargetContext",
-      in: {
-        op: "select",
-        pred: { hasPointer: { targetEntity: { var: "root" } } },
-        in: { op: "mask", policy: { trust: lawfulStrikersJson(operator, true) }, in: "input" },
-      },
-    }),
+    body: entityGatherBody({ mask: { trust: lawfulStrikersJson(operator, true) } }),
   };
 }
 

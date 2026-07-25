@@ -14,6 +14,18 @@ export {
   tenantSchemaFor,
   type Verb,
 } from "./gateway/accounts.js";
+// The gather, named: the hyperschema body every plain entity wants, and the edge-field shape over
+// it. Public because the alternative is what the tree did for a year — retype a five-level Term
+// literal per schema, in two dialects, and hope the copies stay the same program.
+export {
+  entityGatherBody,
+  entityGatherJson,
+  expandedGatherBody,
+  expandedGatherJson,
+  type ExpandedGatherSpec,
+  type GatherMask,
+  type GatherSpec,
+} from "./gateway/gather.js";
 export {
   Gateway,
   NothingPublic,
