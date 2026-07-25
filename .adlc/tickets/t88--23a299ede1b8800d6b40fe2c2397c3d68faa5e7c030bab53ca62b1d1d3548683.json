@@ -1,0 +1,15 @@
+{
+  "body": "Found by the T78 door-discipline review (2026-07-25) and stated in that PR rather than papered. T78 closed the severe half: a container mount's ANONYMOUS door now asks the HOST gateway's `hasPublicSurface()`, so striking `loam:public` at the primary closes the container's door too — revocation works, live, where the operator speaks.\n\nWHAT REMAINS: the host decides WHETHER a tokenless caller may read; the wall still decides WHAT. So an operator who NARROWS their public set (strike the declaration, republish a smaller one) leaves the attached wall serving its own snapshot of the wider set until a `reseed()`. The door's openness is live; its content is a point-in-time copy by construction (§24.2). The plain-retraction case has the same shape and the same cause.\n\nWHY IT WASN'T FIXED IN T78: closing it needs a Gateway-side seam, not a transport one — a cached public-lens-set reader to intersect the wall's answer against. `publicSurface()` is private, and `readPublicSchemas` is an O(store) walk the anonymous path deliberately avoids per-request (the timing-oracle note in gateway.ts). Inventing that seam inside a server-layer ticket would have been the wrong file and the wrong review.\n\nFIX SHAPE (decide, then build): either (a) expose a cached public-lens-set reader on Gateway (invalidated on write like `publicOpen` already is) and have the tier-3 anonymous gate intersect the wall's public set against the host's, or (b) re-pulse the seeding edge on accepted host `loam.public` deltas so a wall's copy cannot lag its host's declaration, or (c) require a per-container public declaration so a wall's anonymous exposure is never inherited at all. (c) is the smallest promise and the largest behavior change; (a) is the smallest behavior change.\n\nRAILS: `test/server/dynamic-mounts.test.ts` is FROZEN by T78 — new rails go in a new file (`test/server/mount-public-narrowing.test.ts`). Assert at the door, both directions: narrow the host's public set, then a tokenless read of the container mount serves only the intersection; and the positive leg — a lens still public at the host still serves, so the fix cannot be \"refuse everything\".\n\nCARE: this is a widened-door gap on an anonymous surface. Whichever shape is chosen changes what the system promises about container mounts, so it is Myk's merge (P6), and it should land BEFORE dynamic mounts are advertised as a feature.",
+  "edges": [],
+  "id": "T88",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "src/server/mounts.ts",
+    "src/server/http.ts",
+    "src/gateway/gateway.ts",
+    "test/server/"
+  ],
+  "status": "todo",
+  "title": "A narrowed public set still serves through an attached container's mount"
+}
