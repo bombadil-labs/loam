@@ -909,18 +909,27 @@ async function openWall(
   // surface serves) and re-evaluated on every pulse — the scope is LIVE, like the ground it cuts.
   if (spec.membership !== undefined) gw.select(spec.membership);
   const base = spec.admit;
-  const memberAdmit = (): ((d: Delta) => boolean) | undefined => {
-    if (spec.membership === undefined) return base === undefined ? undefined : base;
-    // The members are the Term's dset PLUS its negation closure (§28.4, T38). A scope may narrow
-    // what the wall sees; it may never resurrect what was struck — `negated` ranging over the
-    // operand set means a claim admitted without its retraction reads as live inside.
-    const members = new Set(withNegationClosure(gw, gw.select(spec.membership)).map((d) => d.id));
+  // The members are the scope's dset PLUS its negation closure (§28.4). A scope may narrow what the
+  // wall sees; it may never resurrect what was struck — `negated` ranging over the operand set means
+  // a claim admitted without its retraction reads as live inside.
+  //
+  // BOTH KNOBS OWE THIS, and the predicate is the one that looks exempt: it is applied per delta, so
+  // there seems to be nothing to close over. There is — a predicate selects DOMAIN facts, and a
+  // negation carries only a `negates` pointer (no entity, no context), so a hand-picked subset can
+  // never match one. The closure runs over the offer the predicate was about to filter, which keeps
+  // it forward-only and costs no extra pass over the ground.
+  const memberAdmit = (offer: readonly Delta[]): ((d: Delta) => boolean) | undefined => {
+    if (spec.membership === undefined && base === undefined) return undefined;
+    const selected =
+      spec.membership !== undefined ? gw.select(spec.membership) : offer.filter((d) => base!(d));
+    const members = new Set(withNegationClosure(gw, selected).map((d) => d.id));
     return (d) => members.has(d.id);
   };
   const reseed = (): Promise<FederationReport> => {
-    const admit = memberAdmit();
+    const offer = gw.offeredDeltas();
+    const admit = memberAdmit(offer);
     return pool.federate(
-      gw.offeredDeltas(),
+      offer,
       // A scope narrows what the wall SEES, never what it must FORGET (§24.8): the operator's
       // tombstones pass the seeding edge unconditionally, membership and predicate alike.
       admit === undefined ? {} : { admit: (d) => isTombstone(d.claims) || admit(d) },

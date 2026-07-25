@@ -14,6 +14,11 @@ export interface PullOptions {
   // What this puller admits from the peer beyond signature verification — a trust boundary
   // (e.g. only deltas from known authors). Default: the puller's OWN trust policy, resolved
   // live from its deltas at loam:trust (open when none declared) — see gateway.admitFor().
+  //
+  // A PREDICATE HERE OWNS THE NEGATION CLOSURE (H1). The door closes the offer over what the
+  // store's own policy admits, but it will not overrule a boundary you authored: refuse a
+  // retraction and the claim it struck reads LIVE here while the peer holds it withdrawn. Admit
+  // negations of what you admit, or accept that reading.
   readonly admit?: (d: Delta) => boolean;
   readonly maxBytes?: number; // cap on the offer body (default 64 MiB)
   readonly fetch?: typeof fetch; // injectable for tests

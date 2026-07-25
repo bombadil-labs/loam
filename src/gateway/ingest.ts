@@ -102,6 +102,11 @@ export async function appendImpl(gw: Gateway, deltas: Iterable<Delta>): Promise<
 // admits every verified delta, roster admits the operator and the named authors, closed admits
 // nothing. `federate` and `pullFrom` use this when no explicit admit is given; an explicit
 // predicate always wins.
+//
+// ROSTER IS AUTHORSHIP-SCOPED, and a negation's author is incidental to the claim it strikes: the
+// operator rosters an author to receive THEIR data, not to filter out corrections to it. So the door
+// closes the offered batch over what this predicate admits (see `federateImpl`) — otherwise a
+// rostered pull takes a post and refuses the off-roster retraction that withdrew it.
 export function admitForImpl(gw: Gateway): (d: Delta) => boolean {
   const policy = readTrustPolicy(gw.reactor, gw.operatorAuthor);
   if (policy.mode === "open") return () => true;
@@ -138,6 +143,39 @@ export function withNegationClosure(gw: Gateway, admitted: readonly Delta[]): De
       if (negation === undefined) continue; // purged (§11) — the hole is the point
       out.set(negationId, negation);
       pending.push(negationId);
+    }
+  }
+  return [...out.values()];
+}
+
+// The same closure over a BATCH that is not local yet — the inbound federation door's remedy. A
+// peer's offer carries its own negations, so the ground to close over is the offer itself: no store
+// scan, no index, cost bounded by the batch's pointers rather than by the store.
+//
+// Direction is identical and non-negotiable: from an admitted delta to the negations OF it,
+// transitively, never the reverse. Walking backward would admit a delta the door refused because
+// something in the batch happens to strike it — a trust boundary turned into a leak.
+export function withBatchNegationClosure(
+  batch: readonly Delta[],
+  admitted: readonly Delta[],
+): Delta[] {
+  const strikesOf = new Map<string, Delta[]>();
+  for (const d of batch) {
+    for (const p of d.claims.pointers) {
+      if (p.role !== "negates" || p.target.kind !== "delta") continue;
+      const bucket = strikesOf.get(p.target.deltaRef.delta);
+      if (bucket === undefined) strikesOf.set(p.target.deltaRef.delta, [d]);
+      else bucket.push(d);
+    }
+  }
+  const out = new Map(admitted.map((d) => [d.id, d]));
+  const pending = [...out.keys()];
+  while (pending.length > 0) {
+    const id = pending.pop() as string;
+    for (const strike of strikesOf.get(id) ?? []) {
+      if (out.has(strike.id)) continue;
+      out.set(strike.id, strike);
+      pending.push(strike.id);
     }
   }
   return [...out.values()];
@@ -287,6 +325,21 @@ export function watchImpl(gw: Gateway, term: unknown): AsyncGenerator<Delta[], v
 // unsigned delta is refused, and one bad delta does not spoil the rest), apply the admission
 // predicate, then ingest + write through. Idempotent — union dedups, so re-pulling accepts nothing
 // new.
+//
+// A DOOR THAT NARROWS BY AUTHORSHIP OWES THE NEGATION CLOSURE (H1), and here it must be drawn from
+// the OFFERED BATCH: the negations are not local yet, so `withNegationClosure`'s local index knows
+// nothing about them. Admission is decided in two passes for that reason — first what is LAWFUL at
+// this door, then what the predicate admits, then the closure over the batch, which widens ONLY by
+// the negations of already-admitted deltas and only among deltas that were lawful anyway. A forged,
+// tombstoned, or malformed negation is refused exactly as before; the widening is of the admission
+// PREDICATE, nothing else.
+//
+// AND ONLY WHERE ADMISSION WAS POLICY-DRIVEN. An explicit `admit` is the caller's own trust boundary
+// and may be filtering negations deliberately (refusing a stranger's strike is the interim answer to
+// the heckler's veto, pinned in test/federation/federate.test.ts) — the door must not overrule that
+// judgment by importing what the caller refused. Such a caller owns the closure, like every other
+// holder of a raw delta set; `PullOptions.admit` says so where a caller will read it. Closing that
+// asymmetry needs read-time authority-scoped suppression, which is substrate work (rhizomatic#2).
 export async function federateImpl(
   gw: Gateway,
   deltas: Iterable<Delta>,
@@ -296,12 +349,13 @@ export async function federateImpl(
     throw new Error(`this gateway can no longer persist: ${gw.writeFailure.message}`);
   }
   const all = [...deltas];
+  const byPolicy = opts.admit === undefined; // whose boundary this is, and so who owns the closure
   const admit = opts.admit ?? admitForImpl(gw); // the store's trust policy, unless overridden
   // The door remembers the hole (SPEC §11): a tombstoned id is refused re-entry even past an
   // explicit admit override — un-erasure is striking the tombstone, never a lucky re-send.
   const dead = readTombstones(gw.reactor, gw.operatorAuthor);
-  const admitted: Delta[] = [];
-  let rejected = 0;
+  const lawful: Delta[] = [];
+  let admitted: Delta[] = [];
   for (const d of all) {
     // A tombstone is a removal-order, not an inert claim — so it faces the same validator at
     // this door as at the append door (eraseDefect), and an unauthorized or malformed one is
@@ -314,14 +368,19 @@ export async function federateImpl(
       verifyDelta(d) !== "verified" ||
       dead.has(d.id) ||
       publicDefect(d.claims) !== undefined ||
-      (isTombstone(d.claims) && eraseDefect(d, gw.reactor, gw.operatorAuthor) !== undefined) ||
-      !admit(d)
+      (isTombstone(d.claims) && eraseDefect(d, gw.reactor, gw.operatorAuthor) !== undefined)
     ) {
-      rejected += 1;
-      continue;
+      continue; // unlawful at this door: no predicate and no closure can readmit it
     }
-    admitted.push(d);
+    lawful.push(d);
+    if (admit(d)) admitted.push(d);
   }
+  // The strikes of what crossed cross too, from within the offer. Skipped when the predicate
+  // admitted everything lawful (nothing left to close over) and when the caller brought their own.
+  if (byPolicy && admitted.length < lawful.length) {
+    admitted = withBatchNegationClosure(lawful, admitted);
+  }
+  const rejected = all.length - admitted.length;
   let accepted = 0;
   if (admitted.length > 0) {
     await gw.backend.append(admitted);
