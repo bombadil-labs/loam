@@ -16,6 +16,7 @@
 import {
   authorForSeed,
   evalPred,
+  makeNegationClaims,
   parsePred,
   signClaims,
   type Claims,
@@ -27,6 +28,7 @@ import {
 } from "@bombadil/rhizomatic";
 import type { AppendReceipt, Gateway } from "../gateway/gateway.js";
 import { lawfulNegated, lawfulSnapshot } from "../gateway/registration.js";
+import { dataStruck } from "../gateway/accounts.js";
 import { promotionRefusal } from "../gateway/adopt.js";
 
 export const CTX_TRANSLATION = "loam.translation";
@@ -245,6 +247,10 @@ export interface TranslateReport {
   // spec probed with a source aiming at reserved law — not a benign template miss, and an operator
   // reading the report should see when their door was tested.
   readonly refused: number;
+  // Renderings this pass RETRACTED — held emissions whose source has since been struck. Present
+  // only when the pass retracted something: the four counts above describe one pass's RENDERING,
+  // and a reconciliation with nothing to do has nothing to add to them.
+  readonly retracted?: number;
 }
 
 // One pass of the generic translator: apply every lawful spec to every surviving,
@@ -264,9 +270,14 @@ export async function translate(
 ): Promise<TranslateReport> {
   const specs = readTranslations(gateway.reactor, gateway.operator);
   const author = authorForSeed(opts.seed);
-  // Sources the OPERATOR has lawfully struck are not re-rendered: translating a retired fact
-  // would resurrect it in the canonical dialect, past every negation that retired it.
-  const struck = lawfulNegated(gateway.reactor, gateway.operator);
+  // Sources that are struck are not re-rendered: translating a retired fact would resurrect it in
+  // the canonical dialect, past every negation that retired it. The standing tested is `dataStruck`
+  // and not `lawfulNegated` — the pass filters DATA, and a data strike binds from the operator OR
+  // their grantees (the same masked ground the governed gather resolves through). Under
+  // operator-only standing an author's retraction of their OWN claim would be re-rendered here, in
+  // a THIRD author's voice, leaving them nothing to retract; the specs above stay on
+  // `lawfulNegated`, because a spec is law.
+  const struck = dataStruck(gateway.reactor, gateway.operator);
   const emissions: Delta[] = [];
   let matched = 0;
   let unbound = 0;
@@ -312,7 +323,47 @@ export async function translate(
       }
     }
   }
-  const receipt: AppendReceipt =
-    emissions.length > 0 ? await gateway.append(emissions) : { accepted: 0, duplicates: 0 };
-  return { emitted: receipt.accepted, matched, unbound, refused };
+  // RECONCILIATION — the half that makes a pass more than an append. An emission is a COPY of a
+  // claim into a fresh id (a different author mints a different delta), so no negation of the
+  // source can ever reach it: `translates` is provenance, and nothing resolves, masks, or negates
+  // through it. Survival is checked once, at emit time — so a strike that lands AFTER the pass
+  // would leave the rendering live forever, and no later pass could repair it (union swallows the
+  // identical re-emission, and the copy is never struck). Hazard H1, in its most durable form: the
+  // narrowing is a RE-ASSERTION rather than a filter. So each pass also signs a negation of every
+  // rendering it holds whose source is now struck. It must be a DELTA and not a reader rule: a peer
+  // pulling `offeredDeltas` runs none of Loam's rules, and only deltas federate.
+  //
+  // One direction, and only one: source struck → rendering struck, never the reverse (a reading the
+  // operator rejects says nothing about the foreign claim it was read from) and never revival — a
+  // source whose strike is later struck does not un-retract what was already retired; the operator
+  // strikes that retraction if they mean to bring a rendering back. Scoped to THIS translator's own
+  // renderings, because a negation is an assertion and the pass speaks only for what it said.
+  // Idempotent exactly as the emissions are: the retraction inherits its rendering's timestamp, so
+  // the same (rendering, translator) always mints the same negation and a re-run lands nothing.
+  //
+  // Runs whether or not any spec survives: a retired spec must not strand the renderings it made.
+  const retractions: Delta[] = [];
+  for (const held of gateway.reactor.snapshot()) {
+    if (held.claims.author !== author || struck(held.id)) continue;
+    const cite = held.claims.pointers.find(
+      (p) => p.role === "translates" && p.target.kind === "delta",
+    );
+    if (cite?.target.kind !== "delta" || !struck(cite.target.deltaRef.delta)) continue;
+    retractions.push(
+      signClaims(makeNegationClaims(author, held.claims.timestamp, held.id), opts.seed),
+    );
+  }
+  const nothing: AppendReceipt = { accepted: 0, duplicates: 0 };
+  // Two appends, two counts: the report says how many renderings LANDED and how many DIED, and one
+  // receipt cannot answer both. Grow-only either way, so a pass that lands the first and refuses
+  // the second leaves nothing to undo — the next pass finishes the work.
+  const emitReceipt = emissions.length > 0 ? await gateway.append(emissions) : nothing;
+  const retractReceipt = retractions.length > 0 ? await gateway.append(retractions) : nothing;
+  return {
+    emitted: emitReceipt.accepted,
+    matched,
+    unbound,
+    refused,
+    ...(retractReceipt.accepted > 0 ? { retracted: retractReceipt.accepted } : {}),
+  };
 }
