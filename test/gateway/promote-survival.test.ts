@@ -122,8 +122,12 @@ describe("§24.3 promotion asks SURVIVAL at the source (T39)", () => {
     const pool = await primary.openQuarantine();
     const fact = output("the reviewer said no to this", 2500);
     const reject = retraction(fact.id, OP, OP_SEED, 2600);
-    await pool.gateway.federate([fact]);
-    await pool.gateway.append([reject]); // the operator reviewing the pool's outputs, in their own store
+    // A bystander's strike that the operator has since struck: DEAD at the source, so the refusal must
+    // not name it. Two strikes on one output, one of them inert, is the state that separates "list the
+    // live strikes" from "list every negation present".
+    const heckle = retraction(fact.id, SURVEYOR, SURVEYOR_SEED, 2610);
+    await pool.gateway.federate([fact, heckle]);
+    await pool.gateway.append([reject, retraction(heckle.id, OP, OP_SEED, 2620)]);
     // Object level AT THE SOURCE: the pool's own door already serves nothing for it. A promotion that
     // succeeded here would disagree with the store it is reading from.
     expect(await messageOf(pool.gateway)).toBeNull();
@@ -131,6 +135,7 @@ describe("§24.3 promotion asks SURVIVAL at the source (T39)", () => {
     const refusal = await refusalOf(primary, pool.gateway, fact.id);
     expect(refusal).toContain("the source's own reading has it struck");
     expect(refusal).toContain(reject.id);
+    expect(refusal).not.toContain(heckle.id);
     expect(primary.reactor.get(wouldAdopt(fact))).toBeUndefined();
     expect(primary.adoptions()).toHaveLength(0);
     expect(await messageOf(primary)).toBeNull();
@@ -304,6 +309,9 @@ describe("§24.3 promotion asks SURVIVAL at the source (T39)", () => {
     await pool.gateway.federate([retraction(fact.id, GARDENER, GARDENER_SEED, 6100)]);
     expect(isSuppressed(pool.gateway, fact.id)).toBe(true);
 
+    // These four hold under any implementation — the pool is a separate store and its append runs no
+    // code against the primary — so they document the decision rather than bind it. The rail's teeth
+    // are the refusal below: a NEW act is judged against the pool as it stands.
     expect(primary.reactor.get(promoted)).toBeDefined();
     expect(isSuppressed(primary, promoted)).toBe(false);
     expect(primary.adoptions().map((a) => a.adoptedDelta)).toContain(promoted);

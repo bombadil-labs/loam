@@ -279,6 +279,12 @@ export async function promoteImpl(
   // un-adopt the value — the counterpart still stands in the primary and remains legitimately
   // citable, so a strike on the record must not sever the reference bridge (guarded per-counterpart
   // by the presence check below). The idempotence short-circuit, in contrast, reads the LIVE trail.
+  //
+  // Closure here is PRESENCE, deliberately, and it is the one rung that does not ask survival: a
+  // promoted claim may cite a delta the primary holds STRUCK. Nothing resurrects — the strike still
+  // binds for every reader of the cited delta, and a pointer is not an assertion about its target's
+  // standing — so this is an asymmetry rather than a leak. Tightening it would be a separate decision
+  // (a citation-survival rail belongs beside this bridge, not folded into the survival gate above).
   const bridge = new Map(
     readAdoptions(gw.reactor, gw.operatorAuthor, { includeStruck: true }).map((a) => [
       a.sourceDelta,
