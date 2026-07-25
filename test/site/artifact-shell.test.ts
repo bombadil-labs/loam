@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
-/* eslint-disable @typescript-eslint/no-implied-eval, @typescript-eslint/no-unsafe-call */
 //
-// A HARNESS THAT EVALUATES THE EMITTED PAGE. `new Function` is the instrument, not an oversight: the
-// whole point is to run the bytes the pack door produced rather than a re-implementation of them, and
-// a rail that paraphrased the shell would be a rail about the paraphrase. `src/` carries no eval of
-// any kind — criterion 4 asserts that over the emitted bytes.
+// A HARNESS THAT EVALUATES THE EMITTED PAGE. Running the bytes the pack door produced — rather than a
+// re-implementation of them — is the whole point: a rail that paraphrased the shell would be a rail
+// about the paraphrase. Every such execution goes through `eval-page.ts`, which owns the single narrow
+// lint suppression this needs; `src/` carries no eval of any kind, and criterion 4 asserts that over
+// the emitted bytes.
 //
 // SPEC §30 — the emitted page, DRIVEN. The shell is the client host adapter: it holds the coordinates,
 // talks to the viewer's own connector, mounts the bundle in a confined realm, and mediates every gesture.
@@ -34,6 +34,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { SEALED_CHANNELS, sealRealm } from "../../src/gateway/artifact-page.js";
 import { legalNameFor, queryFieldFor } from "../../src/gateway/gql.js";
+import { evalPageSource, evalPageValue } from "./eval-page.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
 import { FERN, observed } from "../spike/garden.js";
 
@@ -261,8 +262,7 @@ const load = (page: string, connector: Connector): Harness => {
           // module import in a real worker realm; here, a function whose free names resolve to the
           // sealed scope. `with` is the only construct that gives a plain object that role.
           const body = msg.bundle.replace(/^\s*export\s+default\s+/m, "return ");
-          const make = new Function("scope", `with (scope) { ${body} }`) as (s: object) => unknown;
-          const fn = make(scope);
+          const fn = evalPageSource<unknown>(`with (scope) { ${body} }`, ["scope"], [scope]);
           if (typeof fn !== "function") {
             this.emit("message", { data: { kind: "notHtml" } });
             return;
@@ -348,7 +348,7 @@ const load = (page: string, connector: Connector): Harness => {
   const shell = [...document.querySelectorAll("script")].find(
     (s) => s.getAttribute("type") === null,
   )!;
-  new Function("document", shell.textContent ?? "")(seen);
+  evalPageSource<void>(shell.textContent ?? "", ["document"], [seen]);
 
   const settle = async (): Promise<void> => {
     for (let i = 0; i < 8; i += 1) {
@@ -777,13 +777,19 @@ describe("§30 criterion 15: degraded states branch on code, exhaustively, and n
     const shell = [...document.querySelectorAll("script")].find(
       (s) => s.getAttribute("type") === null,
     )!;
-    new Function("document", shell.textContent ?? "")({
-      getElementById: (id: string) => document.getElementById(id),
-      addEventListener: (type: string, fn: EventListener) => {
-        attached.push([type, fn]);
-        document.addEventListener(type, fn);
-      },
-    });
+    evalPageSource<void>(
+      shell.textContent ?? "",
+      ["document"],
+      [
+        {
+          getElementById: (id: string) => document.getElementById(id),
+          addEventListener: (type: string, fn: EventListener) => {
+            attached.push([type, fn]);
+            document.addEventListener(type, fn);
+          },
+        },
+      ],
+    );
     expect(document.body.innerHTML.trim()).not.toBe("");
     expect(document.getElementById("loam-capability")!.textContent).toContain("reads the lens");
     expect(document.getElementById("loam-status")!.textContent).toContain("inert until it runs");
@@ -1167,10 +1173,9 @@ describe("§30 criterion 29: the bundle never asks — RenderFn is unchanged", (
   it("the default export is (node) => string, synchronous, called directly outside the shell", () => {
     // A design that gave the bundle an async `request()` would fail this. The signature is the whole
     // reason confinement is cheap here: one structured-cloneable value in, one string out.
-    const make = new Function(
-      `${FLOOR.replace(/^\s*export\s+default\s+/m, "return ")}`,
-    ) as () => unknown;
-    const fn = make() as (n: unknown) => unknown;
+    const fn = evalPageValue<(n: unknown) => unknown>(
+      FLOOR.replace(/^\s*export\s+default\s+/m, "return "),
+    );
     const out = fn({ entity: FERN, view: { height: 1 }, hex: "h", reads: {}, state: {} });
     expect(typeof out).toBe("string");
     expect((out as Promise<unknown>) instanceof Promise).toBe(false);

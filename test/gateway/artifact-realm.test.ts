@@ -26,11 +26,9 @@
 // survives. A seal that took `postMessage`, `URL`, or `Blob` with it would leave a compartment that
 // cannot answer, and "the bundle rendered nothing" reads identically to "the bundle was confined".
 
-/* eslint-disable @typescript-eslint/no-implied-eval, @typescript-eslint/no-unsafe-call */
-// The last suite RUNS the realm program. `new Function` is the instrument: a rail that only reads the
-// program as text cannot see the one thing the program has to get right.
 import { describe, expect, it } from "vitest";
 import { SEALED_CHANNELS, realmProgram, sealRealm } from "../../src/gateway/artifact-page.js";
+import { evalPageSource, evalPageValue } from "../site/eval-page.js";
 
 // The channels this criterion NAMES, written out here rather than read from `SEALED_CHANNELS`. Deriving
 // the expectation from the list under test makes the rail self-referential: narrowing the shipped list to
@@ -252,7 +250,10 @@ describe("§30: the realm program RUNS — capture-before-seal, and every fold",
     scope["URL"] = URLStub;
     scope["Blob"] = BlobStub;
     scope["__import"] = __import;
-    new Function("scope", `with (scope) { ${src} }`)(scope);
+    // The realm program RUNS — through the one door that may execute page-extracted source
+    // (test/site/eval-page.ts). A rail that only read this program as text could not see
+    // capture-before-seal, which is the one thing the program has to get right.
+    evalPageSource<void>(`with (scope) { ${src} }`, ["scope"], [scope]);
     return {
       posted,
       scope,
@@ -320,5 +321,24 @@ describe("§30: the realm program RUNS — capture-before-seal, and every fold",
     await r.deliver();
     expect(r.posted[1]).toEqual({ kind: "fault" });
     expect(JSON.stringify(r.posted)).not.toContain("would not load");
+  });
+});
+
+describe("the one door that may execute page-extracted source refuses a bad extraction", () => {
+  // `eval-page.ts` owns the single narrow lint suppression in this change, so its own guards are the
+  // last thing standing between a regex that matched nothing and a green rail over a failed extraction:
+  // `new Function("")` compiles cheerfully and returns a function that does nothing at all.
+  it("refuses an EMPTY body rather than compiling a silent no-op", () => {
+    expect(() => evalPageValue("")).toThrow(/the extracted source is empty/);
+    expect(() => evalPageValue("   \n\t ")).toThrow(/the extracted source is empty/);
+  });
+
+  it("refuses a parameter/argument mismatch, which would bind undefined silently", () => {
+    expect(() => evalPageSource("return a;", ["a", "b"], [1])).toThrow(/parameter/);
+  });
+
+  it("…and compiles and runs a real extraction — the two-sided half", () => {
+    expect(evalPageValue<number>("return 6 * 7;")).toBe(42);
+    expect(evalPageSource<number>("return a + b;", ["a", "b"], [40, 2])).toBe(42);
   });
 });

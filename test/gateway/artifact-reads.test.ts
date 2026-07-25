@@ -24,9 +24,6 @@
 // per-field gesture to refuse; asserting it would mean hand-composing a document — testing `/graphql`
 // rather than the mediated channel.
 
-/* eslint-disable @typescript-eslint/no-implied-eval, @typescript-eslint/no-unsafe-call */
-// The last suite here EVALUATES the page's own `legalName`, deliberately: comparing the emitted
-// function against `queryFieldFor` is the only way to see a drift that a stub would echo away.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
@@ -38,6 +35,7 @@ import { MemoryBackend } from "../../src/store/memory.js";
 import { readKey, parseReadGesture } from "../../src/gateway/renderers.js";
 import { queryFieldFor } from "../../src/gateway/gql.js";
 import { coordinatesFromPage } from "../../src/gateway/artifact-page.js";
+import { evalPageValue } from "../site/eval-page.js";
 import { FERN, GARDENER, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
 import { legalNameFor } from "../../src/gateway/gql.js";
@@ -294,10 +292,12 @@ describe("§30: the page's TWO manglings, both executed against the real schema"
         page,
       );
     expect(m, "the page carries BOTH manglings").not.toBeNull();
-    return new Function(`${m![0]}; return { legalName: legalName, rootField: rootField };`)() as {
-      legalName: (s: string) => string;
-      rootField: (s: string) => string;
-    };
+    // Through the ONE door that may execute page-extracted source (test/site/eval-page.ts), which also
+    // refuses an empty extraction — a regex that matched nothing would otherwise compile to a function
+    // that silently does nothing, and every comparison below would pass vacuously.
+    return evalPageValue<{ legalName: (s: string) => string; rootField: (s: string) => string }>(
+      `${m![0]}; return { legalName: legalName, rootField: rootField };`,
+    );
   };
 
   it("both agree with gql.ts, and they DIVERGE on a capital initial", async () => {
