@@ -199,7 +199,7 @@ half behind the glass. This is the primary-side guard that keeps the one-way tre
 the one door that crosses it — promotion adds nothing to canonical history that canonical history cannot
 resolve on its own.
 
-### 24.4 Promotion of law is registration (question 4, RECOMMENDATION)
+### 24.4 Promotion of law is registration (question 4, BUILT — T33)
 
 Promoting the LAW — blessing the schema, resolver, or renderer itself into the primary so it binds like
 anything operator-registered — should reuse the ORDINARY publish path, with no special quarantine
@@ -218,6 +218,39 @@ binding publish verbatim, and **the quarantine record survives as provenance on 
 operator's registration carries a `loam.adoption`-style pointer back to the quarantine run (the pool id,
 the trial, who promoted, when), so "this law was vetted in quarantine before it bound" is on the record,
 auditable like any provenance. The graduation is an ordinary publish that remembers its probation.
+
+**CLOSED (T33).** The recommendation held, and the built door is exactly the sentence above:
+`Gateway.adoptLaw(version, alias)` (`src/gateway/adopt-law.ts`) routes a module's law row to that kind's
+ORDINARY publish — `publishRegistration` for a §21 registration, `publishRenderer` for a §23 renderer
+binding — under the operator's own authorship, then mints a separate `loam.adoption` record naming where
+it came from. No quarantine machinery, no parallel trust path, no boolean in the dark. Four things the
+build settled that this subsection could only gesture at:
+
+- **The unit is one EXPORT, and it is named through the manifest** (§27.8), not by a delta id. §27.6's
+  question 3 is answered per-export with `blessAll` as sugar, and the whole guard set therefore sits on
+  ONE door: `promote()` still refuses a law delta and now names `adoptLaw` as the remedy, so no raw delta
+  id can walk past the guards on a second path. §27.8 carries the blessing's full semantics; this
+  subsection stays normative for the *graduation* — that blessing is a publish, not a flag.
+- **A blessed delta inherits its SOURCE's timestamp**, the #111 discipline (§24.3) pointed at law. Same
+  content + same author + same timestamp → same id, so re-blessing re-mints an id an erasure tombstone
+  already refuses, and idempotence rides identity rather than a bookkeeping flag. A fresh timestamp would
+  have minted an id no tombstone had heard of — a silent erasure bypass, and the reason the first draft's
+  "shape-identical to a direct publish" wording was mutually unsatisfiable with the §24.8 rail.
+- **§6's two keys held under test.** Blessing a pen-holding renderer's code binds and serves it and
+  confers NO write standing: the first form-write answers 403 until a separate, deliberate operator grant
+  lands, and only then does the pen sign. Blessing the code and granting its pen stayed two keys, asserted
+  at the write door rather than at a registry.
+- **`promotionRefusal` had a real hole, and law was crossing through it.** The §24.3 refusal that keeps
+  promote-outputs to FACTS read reserved CONTEXTS only — but a hyperschema or Schema DEFINITION wears the
+  reserved namespace only in its ROLES (`rhizomatic.hyperschema.*` / `rhizomatic.schema.*`), its pointers
+  sitting at a neutral `definition` context. So the gather program every read resolves through could cross
+  by promote-outputs, past every guard in this subsection. The refusal now reads roles as well as contexts
+  (`src/gateway/adopt.ts`) and names `adoptLaw` in the remedy.
+
+Two residuals, named rather than implied. The **`supersede`** shape is stated honestly in §27.8: it
+carries a negation of the incumbent, which the prose above did not anticipate. And **law resolution still
+has no Policy** — the root-name guard is a fail-fast DOOR, and federation has no door, so law arriving by
+federation meets no guard at all; that is ticket **T89** (§27.8 states the gap precisely).
 
 ### 24.5 Resource discipline — the wild end running for real (question 5, RECOMMENDATION)
 
@@ -528,3 +561,21 @@ failure against an honestly-failing backend, transitive P→Q→R byte-at-rest, 
 inheritance through a filtered seed, the narrowing knob unbroken) — the three finding rails each failed on
 the pre-fix code; slice 1's forged-tombstone rail survives with its byte assertion verbatim, extended to
 assert the refusal is loud. No migration (no delta changes shape). Erasure surface → Myk's merge (P6).
+
+**PROMOTE-LAW BUILT** [#210](https://github.com/bombadil-labs/loam/pull/210) (realizes ticket T33,
+2026-07-25) — the last unbuilt half of §24.3/§24.4, and the door promote-outputs' law refusal had been
+pointing at since #111. `src/gateway/adopt-law.ts` carries the whole concern: the `loam.manifest` row mint
+(§27.8), classification read from the export's own BYTES inside the frozen version's members,
+`adoptLaw` / `blessAll` over the ordinary publish paths under operator authorship with the SOURCE's
+timestamps inherited, the root-name guard over one per-gateway living-name lock that `publishRegistration`
+and `publishRenderer` now pass through too, `lawFrom` as content-address intersection unioned across
+manifest versions, and witnessed-vs-adopted-from records that answer origination where `lawFrom` answers
+exposure. §27.8's provenance carries the blessing's semantics in full; what belongs here is the
+graduation: promotion-of-law is an ordinary publish, per EXPORT, on the only path law can cross — and
+`promote()`'s refusal, now reading reserved ROLES as well as contexts, is what keeps it the only one.
+Designed under `.adlc/specs/27-trust-on-load.md` (T31, accepted at
+[#195](https://github.com/bombadil-labs/loam/pull/195)) — 26 criteria, each naming its rail; 36 rails in
+`test/gateway/adopt-law.test.ts`, the frozen `test/gateway/promotion.test.ts` unmoved. The file header
+names one gap rather than implying coverage: §28.1's effectiveness attenuation is unbuilt, so a wall shares
+the host's operator and a stranger's renderer is inert THERE too — criterion 7 asserts the 404 that is
+true. Additive vocabulary only → no §20 migration. Capability/federation surface → Myk's merge (P6).

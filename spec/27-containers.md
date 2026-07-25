@@ -272,9 +272,11 @@ The questions that DO remain open:
    address is BUILT at rung 2 of the §22.3/§23.10 ladder (a hash over the sorted member ids), which is what
    turns "a container" into a nameable, verifiable, pinnable module version. The Merkle rung remains the
    named next step, and the reason it is not yet needed is recorded there rather than here.
-3. **Trust on load, precisely.** A loaded module carries law (schemas, renderers, grants). Inert-by-default
-   says it binds nothing until blessed; "install a module" is load + a scoped promotion of its law. What is
-   the smallest safe blessing — the whole module's law, or a per-export grant?
+3. ~~**Trust on load, precisely.**~~ **CLOSED — see §27.8's blessing account, built T33.** A loaded module
+   carries law (schemas, renderers, grants), and inert-by-default says it binds nothing until blessed. The
+   answer is **per-export, with whole-module as sugar**, because *install is containment and blessing is
+   adoption*: a loaded module RUNS fully inside its container and the common gesture needs no blessing at
+   all. The smallest safe blessing is ONE MANIFEST ROW, and it costs one gesture.
 
 ### 27.7 What this means for the build
 
@@ -355,6 +357,105 @@ publish `Feed` at version 1 and a completely rebuilt `Feed` at version 7 while e
 same question. A consumer says `(module version, "Feed")`; aliases are module-local, so two modules may both
 export `Feed` with no collision and no registry to arbitrate. This is the shape §27.6 asked for when it asked
 what a consumer writes to say "give me this module's Feed schema."
+
+**The at-rest vocabulary (LANDED, T33).** One context, following the `loam.container*` precedent (§27.1) —
+manifest rows are member deltas, so a row is read out of the frozen version itself and never out of a
+side-channel:
+
+- **`loam.manifest`** — the export row: role `exports` → the declaration key (entity `loam:manifest` at this
+  context, which is what identifies a delta as a row at all), `alias` → the module-local name a consumer
+  writes, and then **exactly one** of `target-entity` → the export named by ENTITY (a §21 registration
+  entity, an exported plain entity) or `target-address` → the export named by CONTENT ADDRESS (a §23
+  renderer binding, a §23.7 byte-blob). Which of the two a kind uses is §27.8's own rule above — *that
+  kind's most stable identifier* — so a Schema travels as an entity and a bundle travels as an address.
+  Neither-nor and both-and refuse, at the mint and at the read alike.
+- **`kind` is a DISPLAY LABEL and nothing else.** A row may carry the shipper's own word for what it is
+  exported, and every guard ignores it: classification reads the BYTES at the target inside the version's
+  members. This is not politeness about naming — the manifest is a stranger's document, so a row that
+  declares a pen-holding renderer as a schema must change nothing, and it does not. The label is surfaced
+  for a human reading the interface; the store reads the export.
+- **Rows resolve latest-per-alias** (by claimed timestamp, delta id as tiebreak) — an alias is a living
+  name inside its own module, so a version may correct a row the ordinary way. A MALFORMED row (no alias, a
+  `NUL` in one, neither target role, both target roles) refuses LOUDLY rather than being skipped: a silent
+  skip is precisely how a crafted manifest hides a row from an operator reading the enumeration.
+
+**The blessing, decided and built (T33) — per-export is the primitive, "bless all" is sugar.** The manifest's
+law rows are the domain a blessing ranges over (the table above), and `Gateway.adoptLaw(version, alias)` is
+the whole gesture: resolve the alias through the manifest, classify from the export's bytes, publish through
+that kind's ORDINARY path under the operator's authorship (§24.4), record the provenance. `blessAll` is
+enumeration — N rows, N adoptions, N records, one call — never a distinct mechanism. What the build settled,
+and what a reader has to know:
+
+- **A blessed delta inherits its SOURCE's timestamps.** Same content, same author, same timestamp → same id
+  (the #111 discipline, §24.3), so re-blessing re-mints an id an erasure tombstone already refuses, and
+  idempotence rides IDENTITY rather than a flag. Adopting a row whose law is already bound publishes nothing
+  and records a **witness**.
+- **The root-name guard, because adoption is where a module-local alias meets the root's LIVING registry.**
+  A schema blessing lands on the schema's own semantic name, a renderer's on its §23.5 ROUTE — both
+  latest-wins, so an unguarded adoption would silently capture a name the operator already speaks under.
+  Adoption REFUSES when the currently-winning holder differs in content (structural identity, the same
+  address arithmetic as everything else) and proceeds with an explicit `supersede` or `as <name>`;
+  same-content is the idempotent no-op. The guard is **atomic over ONE per-gateway living-name lock, shared
+  by every door that publishes a living name** — `adoptLaw`, `publishRegistration`, and `publishRenderer`
+  all pass through it, so the cross-door race resolves too: an adoption whose observed winner moved by its
+  turn refuses naming the mover, and two different-content adoptions of one name yield exactly one publish.
+  A lock private to the adoption door would have left the direct publish free to win the race.
+- **`supersede` carries a NEGATION of the incumbent, on the blessing itself — and the earlier prose said it
+  never negates.** State the correction plainly: T31's spec promised `supersede` would be an ordinary
+  latest-wins publish that outranks without striking. It cannot be, because a blessing inherits the source's
+  older timestamp and therefore cannot win on recency. So the blessing negates the incumbent registration,
+  and the observable contract T31 actually asked for is met precisely: the act is REVERSIBLE (one strike of
+  the superseding registration resurfaces the original as winner), NON-DESTRUCTIVE (the incumbent's bytes
+  stay on the ground, negatable and readable), and prior law is still present. Two consequences follow from
+  a `negates` pointer riding a substantive delta, and they are the reader's to know: a narrowing edge that
+  admits the incumbent now ships the blessed registration with it, and §17's version door reads the retired
+  incumbent as WITHDRAWN — the operator's own previously-live hash answers 410 with no §14 act. The
+  alternative (the strike on its own delta) costs a two-act undo in which forgetting the second act leaves
+  your own law retired while you believe you restored it. Reversibility won.
+- **Adopting a renderer pulls the schema it reads, from the same manifest.** The ordinary §23 door refuses a
+  renderer over a lens the store does not serve, so a renderer row whose lens is unregistered blesses that
+  module's own schema row first — under its OWN name, never the renderer's `as` rename — and says so in the
+  call's notes. A module that exports the renderer but not its schema refuses.
+- **`lawFrom` is exposure arithmetic, not a provenance index.** It answers *law this root currently binds
+  that a manifest of this module also lists* by CONTENT-ADDRESS intersection, **unioned across the manifest
+  versions handed to it** — because intersecting only the latest manifest would report "no exposure" for a
+  row adopted at `@1` that `@7` later dropped, the exact miss the query exists to prevent. A narrowing
+  argument narrows from that union. Shared law reports under two modules' `lawFrom` calls and that is the
+  right answer to *am I exposed through M?*. It also reports a row its author has since WITHDRAWN upstream
+  as bound-and-withdrawn rather than dropping it — the honest answer at the one moment the safe-sounding one
+  would be wrong.
+- **Two record kinds, because exposure and origination are different questions.** `adopted-from` records an
+  origination; `witnessed` records that the address was already bound here, so a module exporting law you
+  already trust can never claim credit in your ledger. One record per `(module version, alias, law address)`
+  — a scheduled `blessAll` appends no narrative forever — and the dedup reads STRUCK records too, so
+  striking a provenance record is the operator's last word on it. The trail cites the source container's
+  ENTITY, joinable to §27.1's container table, never a free-text label.
+
+**Two guards the design stage did not see, found on the way.** Both are recorded here because both are
+authorization-shaped and neither is obvious from the manifest's shape:
+
+- **A blessing refuses to capture an ENTITY, not only a living name.** The root-name guard defends the lens
+  NAME; a manifest row names its target by an ENTITY the shipper chooses. Ship a definition under a fresh
+  program name (so the publish trial, which keys on the program, sees no conflict) at the operator's own
+  `hyperschema:Plant`, with a timestamp past any clock, and blessing an innocent-looking lens lands
+  OPERATOR-SIGNED bytes that win latest-wins at the operator's own definition entity — the operator's own
+  reads now gather through a stranger's term. The lower-timestamp mirror is the H7 face: the blessing
+  persists, the publish reports bound (it checks `(entity, lens)`, never the body), and the provenance
+  describes law the store did not bind. Both halves are shut. A blessing may not land a definition at an
+  entity this store's own lawful ground already defines with DIFFERENT content — with no `as`-style escape,
+  because renaming the lens does not move the entity — and every blessing now VERIFIES after the append that
+  the address the store BINDS is the address that was CLASSIFIED, minting no provenance otherwise.
+- **`promote()`'s law refusal had to learn ROLES.** It read reserved CONTEXTS, and a hyperschema or Schema
+  definition wears the reserved namespace only in its ROLES — so the gather program every read resolves
+  through could cross by promote-outputs, past every guard above (§24.4 records the fix).
+
+**The residual, named: law resolution has no Policy.** The root-name guard is a fail-fast DOOR, and it is
+the right shape for a door — but two hard-coded latest-wins picks decide which of a thousand overlapping
+`Post` programs binds, and neither is configurable the way DATA resolution's Policies are (§13/§14). Where
+data resolution runs through a Schema whose Policies are first-class, law resolution has no policy layer at
+all; and a door cannot help at all when law arrives by FEDERATION, where no door runs. That asymmetry is
+ticket **T89**, and until it lands the guard is a fail-fast patch over a missing layer rather than the
+general answer.
 
 **And now the honesty, which matters more than the mechanism.** §27.6 framed the manifest as public surface
 "versus internal deltas it needs but does not expose," and that phrasing promises something this design does
@@ -550,3 +651,35 @@ guard (an unreachable wall is a named fault before any work; a detach-covered on
 Designed under `.adlc/specs/27-container-lifting.md` — 23 criteria, an independent premortem and four
 adversarial-review rounds at design time, each criterion naming its rail; 43 rails across nine files
 carry them. Store-boundary/erasure/federation surface + a vocabulary mint → Myk's merge (P6).
+
+**§27.8 MANIFEST MINTED, TRUST-ON-LOAD BUILT** [#210](https://github.com/bombadil-labs/loam/pull/210)
+(realizes ticket T33, closing §27.6's question 3, 2026-07-25) — the manifest stops being a described shape
+and becomes at-rest vocabulary, and the blessing it exists to bound gets built on top of it in the same
+change. `src/gateway/adopt-law.ts` carries both: the `loam.manifest` row mint (`alias` + exactly one of
+`target-entity` / `target-address`, the `kind` label display-only, malformed rows loud), and
+`adoptLaw` / `blessAll` / `lawFrom` / `lawAdoptions` over it. §24.4 stays normative for the graduation —
+a blessing is that kind's ORDINARY publish under operator authorship — and this section is normative for
+what the gesture NAMES: one manifest row, per export, with whole-module as sugar that expands to N of them.
+Designed under `.adlc/specs/27-trust-on-load.md` (ticket T31, accepted by Myk's merge of
+[#195](https://github.com/bombadil-labs/loam/pull/195)): 26 criteria, an independent premortem of six
+narratives and four adversarial-review rounds at design time, each criterion naming its rail; 36 rails in
+`test/gateway/adopt-law.test.ts` carry them, and the frozen `test/gateway/promotion.test.ts` is unmoved —
+that immobility is criterion 23, which is what proves there is only ONE door law can cross.
+
+Three things the build settled against the working spec's letter, each recorded above rather than buried:
+**`supersede` carries a negation** (T31 wrote "never negates", which timestamp inheritance makes
+impossible — the observable contract, reversible and non-destructive, is met precisely, and the two
+consequences of a `negates` pointer on a substantive delta are named); **adopting a renderer pulls its
+schema** from the same manifest, because the ordinary door refuses a renderer over an unserved lens; and
+**the ENTITY-capture guard plus the post-append bind check** exist at all, neither of which the spec asked
+for. Two more guards came from the same reading: a strike binds a member only when the member's own AUTHOR
+signed it (`freeze` closes over negations author-blind on purpose, so "in the members" means only "somebody
+struck this" — a hostile co-tenant could otherwise refuse a lawful blessing and a foreign
+negation-of-a-retraction could revive law its author took back), and the scoping had to reach the OPERAND
+SET, because rhizomatic's bootstrap opens `mask policy: "drop"` author-blind one layer down.
+
+**Residual, and it should be read before this is called finished:** law resolution has no Policy. The
+root-name guard is a door, and federation has no door — ticket **T89** carries the resolution layer that
+makes the guard fail-fast rather than load-bearing. Additive vocabulary only, no delta any store holds
+changed shape or meaning → **no §20 migration** (`loam.manifest` sits outside every reserved prefix a
+migration detects, railed). Capability/federation surface + a vocabulary mint → Myk's merge (P6).
