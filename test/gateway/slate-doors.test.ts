@@ -416,6 +416,11 @@ describe("T64 criterion 8 — the lapse is computed AT THE DOOR, and the clock i
     expect(gw.resolvedNode("Plant", FERN, undefined, AFTER_DEADLINE).view["tag"]).toEqual([
       "shade",
     ]);
+    // The as-of door's CONFESSION, pinned at ONE. A threshold that read `> 1` would report nothing
+    // for a single-member slate — the count that matters most, and the one a two-member fixture
+    // cannot tell apart from silence.
+    expect(gw.resolvedNode("Plant", FERN, 40_000, AFTER_DEADLINE).suppressed).toBe(1);
+    expect(gw.resolvedNode("Plant", FERN, 40_000, BEFORE_DEADLINE).suppressed).toBeUndefined();
     await gw.close();
   });
 
