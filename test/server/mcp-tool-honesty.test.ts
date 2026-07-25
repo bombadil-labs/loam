@@ -147,6 +147,15 @@ describe("MCP tool honesty: loam_query is a read, and says so on the wire", () =
     expect(await deltas()).toBe(count);
   });
 
+  it("leaves an unparseable document to the gateway, in the gateway's own words", async () => {
+    // The read-door check cannot classify what it cannot parse, and must not invent a refusal for
+    // it: a syntax error belongs to the layer that knows the schema.
+    const broken = await call("loam_query", { query: `{ plant(entity: ` });
+    expect(broken.isError).toBe(true);
+    expect(broken.content[0]!.text).toMatch(/Syntax Error/);
+    expect(broken.content[0]!.text).not.toMatch(/loam_mutate|subscribe/);
+  });
+
   it("still answers an ordinary query — shorthand and named alike", async () => {
     const shorthand = await call("loam_query", {
       query: `{ plant(entity: "${FERN}") { height } }`,
