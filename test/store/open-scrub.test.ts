@@ -38,7 +38,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
+import { authorForSeed, claimsToJson, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { SqliteBackend } from "../../src/store/sqlite.js";
 
 const SEED = "0e".repeat(32);
@@ -46,11 +46,13 @@ const AUTHOR = authorForSeed(SEED);
 
 const MARKER = "OPEN-SCRUB-CANARY-7d20be"; // the erased row: its bytes must not survive the scrub
 const SURVIVOR = "OPEN-SCRUB-BYSTANDER-118a4c"; // a live row: its bytes must survive it
+const FILLER = "OPEN-SCRUB-FILLER-2c9d31"; // a row appended AFTER the erasure, consuming freed pages
 
 // PADDED so the row spills into overflow pages. SQLite frees a page only when it empties, and a
 // handful of short rows share one page that never frees — an unpadded fixture leaves
-// `freelist_count` at 0, so the constructor skips the scrub and the rail proves nothing.
-const canary = (mark: string, timestamp: number): Delta =>
+// `freelist_count` at 0, so the constructor skips the scrub and the rail proves nothing. `reps`
+// sizes the payload in pages, which is how the one-page fixture below hits its boundary.
+const canary = (mark: string, timestamp: number, reps = 400): Delta =>
   signClaims(
     {
       timestamp,
@@ -60,7 +62,7 @@ const canary = (mark: string, timestamp: number): Delta =>
           role: "observed",
           target: { kind: "entity", entity: { id: "plant:fern", context: "secret" } },
         },
-        { role: "value", target: { kind: "primitive", value: mark.repeat(400) } },
+        { role: "value", target: { kind: "primitive", value: mark.repeat(reps) } },
       ],
     },
     SEED,
@@ -95,6 +97,39 @@ async function inheritedFreelist(): Promise<{
   expect(freed).toBeGreaterThan(0); // the store really does owe a scrub...
   expect(hasBytes(file, MARKER)).toBe(true); // ...and the plaintext really is in the main file
   return { file, deleted, kept };
+}
+
+// The same store at the BOUNDARY: a freelist of EXACTLY ONE page. A legacy store does not sit at its
+// high-water mark — it erased once and kept appending, and each append takes freed pages back, so a
+// single leftover page is the ordinary end state of that history. The trigger for the scrub is
+// therefore `> 0` and never `> 1`: one page of plaintext is plaintext. The refill is written through
+// the LEGACY handle because appending through the current driver would scrub the fixture away before
+// it existed.
+async function freelistOfExactlyOnePage(): Promise<{
+  readonly file: string;
+  readonly kept: Delta;
+  readonly filler: Delta;
+}> {
+  const file = join(mkdtempSync(join(tmpdir(), "loam-open-scrub-one-")), "store.db");
+  const seed = new SqliteBackend(file);
+  const deleted = canary(MARKER, 1000, 200);
+  const kept = canary(SURVIVOR, 2000);
+  await seed.append([deleted, kept]);
+  await seed.close();
+
+  const legacy = new Database(file);
+  legacy.pragma("secure_delete = OFF");
+  legacy.prepare("DELETE FROM deltas WHERE id = ?").run(deleted.id);
+  const filler = canary(FILLER, 3000, 100);
+  legacy
+    .prepare("INSERT INTO deltas (id, claims, sig) VALUES (?, ?, ?)")
+    .run(filler.id, JSON.stringify(claimsToJson(filler.claims)), filler.sig ?? null);
+  const freed = legacy.pragma("freelist_count", { simple: true }) as number;
+  legacy.close();
+
+  expect(freed).toBe(1); // EXACTLY one — the boundary this fixture exists to sit on
+  expect(hasBytes(file, MARKER)).toBe(true); // and that one page is still legible
+  return { file, kept, filler };
 }
 
 describe("the open scrub is best-effort and reported (ticket T49)", () => {
@@ -167,6 +202,25 @@ describe("the open scrub is best-effort and reported (ticket T49)", () => {
     expect(reported).toEqual([]);
     expect(store.scrubDeferred).toBeUndefined();
     expect(await store.holds(deleted.id)).toBe(false);
+
+    await store.close();
+  });
+
+  it("a freelist of EXACTLY ONE page is scrubbed too — the boundary is zero, not one", async () => {
+    const { file, kept, filler } = await freelistOfExactlyOnePage();
+
+    const store = new SqliteBackend(file);
+    expect(store.scrubDeferred).toBeUndefined();
+
+    // BYTE LEVEL — one page of inherited plaintext is inherited plaintext. A trigger that waited for
+    // a second page would leave this store legible forever while reporting nothing at all.
+    expect(hasBytes(file, MARKER)).toBe(false);
+    expect(hasBytes(file, SURVIVOR)).toBe(true);
+    expect(hasBytes(file, FILLER)).toBe(true);
+
+    // OBJECT LEVEL — and the store still reads as itself: the two live rows, the erased one gone.
+    const read = (await store.deltasSince(new Set())).map((d) => d.id).sort();
+    expect(read).toEqual([kept.id, filler.id].sort());
 
     await store.close();
   });
