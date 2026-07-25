@@ -176,7 +176,6 @@ export {
 } from "./gateway/renderers.js";
 export {
   ARTIFACT_ENTITY,
-  ARTIFACT_TOOLS,
   CTX_ARTIFACT,
   artifactClaims,
   artifactDefect,

@@ -43,14 +43,7 @@ export interface RunOptions {
 const VERSION = "0.1.0";
 
 type CommandName =
-  | "init"
-  | "serve"
-  | "register"
-  | "pull"
-  | "migrate"
-  | "store"
-  | "repair"
-  | "artifact";
+  "init" | "serve" | "register" | "pull" | "migrate" | "store" | "repair" | "artifact";
 
 interface CommandSpec {
   readonly summary: string; // the line the top-level help shows
@@ -751,8 +744,11 @@ async function cmdArtifact(args: readonly string[], io: IO): Promise<number> {
   const query = new URLSearchParams({ connector });
   const storeAddress = parsed.flags.get("store-address");
   if (storeAddress !== undefined) query.set("store", storeAddress);
-  if (parsed.flags.get("acknowledge-pen") !== undefined) query.set("acknowledgePen", "1");
-  if (parsed.flags.get("acknowledge-writable") !== undefined) query.set("acknowledgeWritable", "1");
+  // A boolean flag lands in `parsed.booleans`, never in `flags` (args.ts) — reading it from the
+  // wrong map is silently always-false, which is a refusal the operator cannot acknowledge their way
+  // past however many times they type the flag.
+  if (parsed.booleans.has("acknowledge-pen")) query.set("acknowledgePen", "1");
+  if (parsed.booleans.has("acknowledge-writable")) query.set("acknowledgeWritable", "1");
   const [mount, route, entity] = parts as [string, string, string];
   const url =
     `${base}/${encodeURIComponent(mount)}/artifact/` +

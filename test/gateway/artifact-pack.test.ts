@@ -15,6 +15,8 @@
 // runtime half of that obligation — the host's writer-identity statement as the LAST claim in the DOM —
 // is `test/site/artifact-shell.test.ts`'s.
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
@@ -22,6 +24,7 @@ import { grantClaims } from "../../src/gateway/accounts.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { esmAddress } from "../../src/gateway/esm.js";
+import { RENDER_TIMEOUT_MS } from "../../src/gateway/render-worker.js";
 import { bundleFromPage, coordinatesFromPage } from "../../src/gateway/artifact-page.js";
 import { artifactClaims, artifactDefect } from "../../src/gateway/artifact.js";
 import { eraseClaims } from "../../src/gateway/erase.js";
@@ -138,9 +141,21 @@ describe("§30 criterion 2: publication is a declaration, and it fail-closes bot
     expect(artifactDefect(artifactClaims([], OP, 1))).toMatch(/at least one route/);
     expect(artifactDefect(artifactClaims(["plant"], OP, 1))).toBeUndefined();
     const gw = await boot();
-    await expect(
-      gw.append([signClaims(artifactClaims([], OP, gw.nextTimestamp()), OP_SEED)]),
-    ).rejects.toThrow(/malformed law/);
+    const malformed = signClaims(artifactClaims([], OP, gw.nextTimestamp()), OP_SEED);
+    await expect(gw.append([malformed])).rejects.toThrow(/malformed law/);
+    // …and the INGEST door refuses the very same bytes. A declaration OPENS something, so a
+    // malformed one must be refused wherever it arrives; the two doors disagreeing is how a store
+    // ends up holding law no reader will honour. Ingest counts rather than throws — a peer's bad
+    // delta is rejected, not an error thrown at the operator.
+    const receipt = await gw.federate([malformed], { admit: () => true });
+    expect(receipt.accepted).toBe(0);
+    expect(receipt.rejected).toBe(1);
+    // A WELL-FORMED one lands through the same door, so this is not a rail that passes by refusing
+    // everything.
+    const good = signClaims(artifactClaims(["plant"], OP, gw.nextTimestamp()), OP_SEED);
+    const ok = await gw.federate([good], { admit: () => true });
+    expect(ok.accepted).toBe(1);
+    expect(gw.artifactRoutes().has("plant")).toBe(true);
     await gw.close();
   });
 });
@@ -333,7 +348,10 @@ describe("§30 criterion 14: withdrawal darkens the emission and the route toget
     const gw = await ready();
     const binding = gw.renderers()[0]!;
     await gw.append([
-      signClaims(makeNegationClaims(OP, 9_000_000, binding.deltaId, "retire the renderer"), OP_SEED),
+      signClaims(
+        makeNegationClaims(OP, 9_000_000, binding.deltaId, "retire the renderer"),
+        OP_SEED,
+      ),
     ]);
     expect(() => pack(gw)).toThrow(/no renderer is bound at route "plant"/);
     expect((await gw.serveRoute("plant", FERN, "full")).status).toBe(404);
@@ -350,7 +368,9 @@ describe("§30 criterion 14: withdrawal darkens the emission and the route toget
     // Delta level, both directions: the target is gone AND the door remembers the hole — a re-send
     // of the very bytes is refused rather than quietly re-admitted.
     expect([...gw.reactor.snapshot()].some((d) => d.id === binding.deltaId)).toBe(false);
-    await expect(gw.append([delta])).rejects.toThrow(/a tombstone at loam:erasure refuses its return/);
+    await expect(gw.append([delta])).rejects.toThrow(
+      /a tombstone at loam:erasure refuses its return/,
+    );
     // …and a named live bystander survives: the fact the renderer read is untouched.
     expect(
       [...gw.reactor.snapshot()].some((d) =>
@@ -371,12 +391,20 @@ describe("§30 criterion 20: a reference scan, not a substring scan", () => {
     ["require", 'export default (n) => { require("fs"); return "a"; };'],
     ["node:", 'import { readFileSync } from "node:fs";\nexport default (n) => "a";'],
     ["Buffer", 'export default (n) => Buffer.from("x").toString();'],
-    ["process", 'export default (n) => process.cwd();'],
+    ["process", "export default (n) => process.cwd();"],
+    ["module", 'export default (n) => { module.exports = n; return "a"; };'],
+    ["__dirname", 'export default (n) => __dirname + "/x";'],
+    ["__filename", 'export default (n) => __filename + "/x";'],
+    // Not in §30's own three families, and refused anyway: code that evaluates a string it built has
+    // a signed-vs-executed gap of its own making, which is the exact property §23.1's attestation
+    // exists to close. Naming it here is the widening said out loud rather than assumed.
+    ["eval", 'export default (n) => eval("1 + 1") + "a";'],
+    ["Function", 'export default (n) => new Function("return 1")() + "a";'],
     ["indexedDB", 'export default (n) => { indexedDB.open("keep"); return "a"; };'],
     ["caches", 'export default (n) => { caches.open("keep"); return "a"; };'],
     ["BroadcastChannel", 'export default (n) => { new BroadcastChannel("k"); return "a"; };'],
     ["importScripts", 'export default (n) => { importScripts("x.js"); return "a"; };'],
-    ["self", 'export default (n) => String(self.name);'],
+    ["self", "export default (n) => String(self.name);"],
     ["globalThis", 'export default (n) => { globalThis.keep = n; return "a"; };'],
     ["fetch", 'export default (n) => { fetch("/x"); return "a"; };'],
   ];
@@ -480,16 +508,28 @@ describe("§30 criterion 34c: a store that OUTLIVES the realm is refused at pack
 
 describe("§30 criterion 37a: a host-only affordance cannot silently ride", () => {
   it.each([
-    ["window.claude.mcp", 'export default (n) => { window.claude.mcp.callTool("s", "t", {}); return "a"; };'],
-    ["a sendPrompt-class call", 'export default (n) => { window.claude.sendPrompt("hi"); return "a"; };'],
-    ["window.claude.downloads", 'export default (n) => { window.claude.downloads.save({}); return "a"; };'],
-  ])("refuses a bundle referencing %s, so an app cannot become artifact-only in silence", async (_n, bundle) => {
-    // The design decision this defends: a host affordance reaches an app by MEDIATION — a gesture the
-    // shell honors — never by ambient reach. T79 ships the seam without shipping a prompt verb.
-    const gw = await ready({ bundle });
-    expect(() => pack(gw)).toThrow(/host affordance reaches an app by MEDIATION/);
-    await gw.close();
-  });
+    [
+      "window.claude.mcp",
+      'export default (n) => { window.claude.mcp.callTool("s", "t", {}); return "a"; };',
+    ],
+    [
+      "a sendPrompt-class call",
+      'export default (n) => { window.claude.sendPrompt("hi"); return "a"; };',
+    ],
+    [
+      "window.claude.downloads",
+      'export default (n) => { window.claude.downloads.save({}); return "a"; };',
+    ],
+  ])(
+    "refuses a bundle referencing %s, so an app cannot become artifact-only in silence",
+    async (_n, bundle) => {
+      // The design decision this defends: a host affordance reaches an app by MEDIATION — a gesture the
+      // shell honors — never by ambient reach. T79 ships the seam without shipping a prompt verb.
+      const gw = await ready({ bundle });
+      expect(() => pack(gw)).toThrow(/host affordance reaches an app by MEDIATION/);
+      await gw.close();
+    },
+  );
 });
 
 describe("§30 criterion 23 (delta half) / 26 (delta half): erasure lands, and the door darkens", () => {
@@ -522,12 +562,39 @@ describe("§30 criterion 23 (delta half) / 26 (delta half): erasure lands, and t
     const { page } = pack(gw);
     const binding = gw.renderers()[0]!;
     await gw.append([
-      signClaims(makeNegationClaims(OP, 9_000_000, binding.deltaId, "retire the renderer"), OP_SEED),
+      signClaims(
+        makeNegationClaims(OP, 9_000_000, binding.deltaId, "retire the renderer"),
+        OP_SEED,
+      ),
     ]);
     expect(() => pack(gw)).toThrow();
     // The bytes in hand still carry the whole app. `test/site/artifact-shell.test.ts` drives them.
     expect(bundleFromPage(page)).toBe(FLOOR_BUNDLE);
     expect(page).toContain("loam-app");
+    await gw.close();
+  });
+});
+
+describe("§30 criterion 21 (the shared-clock half): both hosts carry the SAME number", () => {
+  it("the emitted page states the host's own render budget, and the browser peer mirrors it", () => {
+    // The artifact host adopts the server host's budget so the two are visibly the same clock — a
+    // renderer that fits on one fits on the other, and an operator cannot ship an app that only works
+    // where they happened to test it. The TERMINATION half (a spinning bundle killed within the
+    // budget) needs the shell harness and is named in the report as not yet built.
+    expect(RENDER_TIMEOUT_MS).toBe(500);
+    // The browser peer's stub re-declares the constant because the Node worker module cannot ride
+    // into a zero-`node:` bundle. Two clocks that disagreed would be a divergence behind one content
+    // address, which is the whole reason that export exists.
+    const stub = readFileSync(
+      join(process.cwd(), "scripts", "browser-render-worker-stub.mjs"),
+      "utf8",
+    );
+    expect(stub).toContain(`export const RENDER_TIMEOUT_MS = ${RENDER_TIMEOUT_MS};`);
+  });
+
+  it("a gateway that tightens its clock emits the tightened number, not the default", async () => {
+    const gw = await ready({}, { renderTimeoutMs: 250 });
+    expect(coordinatesFromPage(pack(gw).page)!.renderTimeoutMs).toBe(250);
     await gw.close();
   });
 });

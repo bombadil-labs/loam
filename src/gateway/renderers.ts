@@ -538,7 +538,13 @@ export async function serveRouteImpl(
     try {
       return await renderInWorker(
         binding.bundle,
-        { entity, view: bytesEnvelope(node.view) as Record<string, unknown>, hex: node.hex, reads, state },
+        {
+          entity,
+          view: bytesEnvelope(node.view) as Record<string, unknown>,
+          hex: node.hex,
+          reads,
+          state,
+        },
         gw.options.renderTimeoutMs,
       );
     } finally {
@@ -552,7 +558,13 @@ export async function serveRouteImpl(
   // to cross the thread boundary. renderInWorker never rejects; every fault folds to a clean refusal.
   return renderInWorker(
     binding.bundle,
-    { entity, view: bytesEnvelope(node.view) as Record<string, unknown>, hex: node.hex, reads, state },
+    {
+      entity,
+      view: bytesEnvelope(node.view) as Record<string, unknown>,
+      hex: node.hex,
+      reads,
+      state,
+    },
     gw.options.renderTimeoutMs,
   );
 }

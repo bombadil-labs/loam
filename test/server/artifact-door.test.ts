@@ -148,6 +148,8 @@ describe("§30 criterion 16: the pack door is the operator's, and to anyone else
       "op-token",
     );
     expect(res.status).toBe(400);
-    expect(((await res.json()) as { errors: string[] }).errors[0]).toMatch(/not declared publishable/);
+    expect(((await res.json()) as { errors: string[] }).errors[0]).toMatch(
+      /not declared publishable/,
+    );
   });
 });

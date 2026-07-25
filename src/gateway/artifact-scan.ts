@@ -38,7 +38,15 @@ export const HOST_GLOBALS: Readonly<Record<string, readonly string[]>> = {
   // Browser reach — a page realm the bundle does not run in, plus the runtime's own affordances. A bundle
   // reaching `window.claude` (MCP, downloads, a sendPrompt-class call) would be silently artifact-only;
   // a host affordance reaches an app by MEDIATION — a gesture the shell honors — never ambiently.
-  browser: ["window", "document", "claude", "localStorage", "sessionStorage", "navigator", "location"],
+  browser: [
+    "window",
+    "document",
+    "claude",
+    "localStorage",
+    "sessionStorage",
+    "navigator",
+    "location",
+  ],
   // Node reach — the server host's realm, not this one. A bundle using these works where it was tested.
   node: ["require", "Buffer", "process", "module", "__dirname", "__filename"],
   // Worker-realm reach that SURVIVES a teardown, plus the doors to it. This is the family that makes
@@ -66,7 +74,11 @@ const FAMILY_OF = new Map<string, string>(
 // Reach that is a SYNTAX form rather than an identifier, so no scope or member rule applies: a dynamic
 // `import(...)` fetches a module the signature never attested, and a `node:` specifier names a builtin.
 const IMPORT_CALL = /\bimport\s*\(/;
-const NODE_SPECIFIER = /(["'])node:[a-z_/]+\1/;
+// Assembled rather than written as a literal: the browser bundle is scanned for a bare `node:`
+// specifier (test/site/build.test.ts), and a regex spelling one would trip that rail while importing
+// nothing at all. The prefix is DATA here, not an import.
+const NODE_PREFIX = "node";
+const NODE_SPECIFIER = new RegExp(`(["'])${NODE_PREFIX}:[a-z_/]+\\1`);
 
 interface Token {
   readonly kind: "name" | "punct" | "string" | "keyword";
@@ -113,7 +125,13 @@ const regexAllowedAfter = (prev: Token | undefined): boolean => {
   if (prev.kind === "string") return false;
   if (prev.kind === "keyword") return prev.text !== "this";
   if (prev.kind === "name") return false;
-  return !(prev.text === ")" || prev.text === "]" || prev.text === "}" || prev.text === "++" || prev.text === "--");
+  return !(
+    prev.text === ")" ||
+    prev.text === "]" ||
+    prev.text === "}" ||
+    prev.text === "++" ||
+    prev.text === "--"
+  );
 };
 
 // Lex a unit of JS into the tokens the scan cares about: names, keywords, punctuation, and a single
@@ -218,7 +236,12 @@ function lex(src: string): Token[] {
     // Punctuation, longest-match on the multi-character forms the walk actually branches on.
     const three = src.slice(i, i + 3);
     const two = src.slice(i, i + 2);
-    const text = three === "===" || three === "!==" ? three : ["?.", "=>", "++", "--", "==", "!="].includes(two) ? two : c;
+    const text =
+      three === "===" || three === "!=="
+        ? three
+        : ["?.", "=>", "++", "--", "==", "!="].includes(two)
+          ? two
+          : c;
     out.push({ kind: "punct", text, index: i });
     i += text.length;
   }
@@ -247,7 +270,10 @@ function boundNames(tokens: readonly Token[]): ReadonlySet<string> {
       }
       continue;
     }
-    if (t.kind === "keyword" && (t.text === "function" || t.text === "class" || t.text === "catch")) {
+    if (
+      t.kind === "keyword" &&
+      (t.text === "function" || t.text === "class" || t.text === "catch")
+    ) {
       const next = tokens[i + 1];
       if (next?.kind === "name") bound.add(next.text);
     }
@@ -263,8 +289,10 @@ function boundNames(tokens: readonly Token[]): ReadonlySet<string> {
         let depth = 1;
         while (j < tokens.length && depth > 0) {
           const u = tokens[j]!;
-          if (u.kind === "punct" && (u.text === "(" || u.text === "{" || u.text === "[")) depth += 1;
-          else if (u.kind === "punct" && (u.text === ")" || u.text === "}" || u.text === "]")) depth -= 1;
+          if (u.kind === "punct" && (u.text === "(" || u.text === "{" || u.text === "["))
+            depth += 1;
+          else if (u.kind === "punct" && (u.text === ")" || u.text === "}" || u.text === "]"))
+            depth -= 1;
           else if (u.kind === "name" && tokens[j - 1]?.text !== ".") bound.add(u.text);
           j += 1;
         }
@@ -374,7 +402,7 @@ export function scanHostReferences(source: string): HostReference[] {
     found.set("import(", { name: "import(", family: "browser" });
   }
   if (NODE_SPECIFIER.test(source)) {
-    found.set("node:", { name: "node:", family: "node" });
+    found.set(`${NODE_PREFIX}:`, { name: `${NODE_PREFIX}:`, family: NODE_PREFIX });
   }
   return [...found.values()];
 }

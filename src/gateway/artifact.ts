@@ -40,10 +40,10 @@ import type { RendererBinding } from "./renderers.js";
 export const ARTIFACT_ENTITY = "loam:artifact";
 export const CTX_ARTIFACT = "loam.artifact";
 
-// The tool manifest: ENUMERATED against the door that exists, never invented. `MCP_TOOLS` is exactly
-// three, and `loam_register` is constitutional — a page declaring it would ask the viewer for
+// The tool manifest is ENUMERATED against the door that exists, never invented — `MCP_TOOLS` is exactly
+// three — and it is assembled per binding below rather than held as a constant, so there is no second
+// list to drift. `loam_register` is constitutional: a page declaring it would ask the viewer for
 // store-shaping authority in order to draw a view, so a pack that would emit it refuses.
-export const ARTIFACT_TOOLS = ["loam_query", "loam_mutate"] as const;
 const FORBIDDEN_TOOL = "loam_register";
 
 // The polling floor the runtime clamps a watch to (~30 s). Named rather than guessed, so the emitted
@@ -84,7 +84,11 @@ export function artifactDefect(claims: Claims): string | undefined {
   const routes = claims.pointers.filter((p) => p.role === "route");
   if (routes.length === 0) return "an artifact declaration names at least one route";
   for (const p of routes) {
-    if (p.target.kind !== "primitive" || typeof p.target.value !== "string" || p.target.value === "") {
+    if (
+      p.target.kind !== "primitive" ||
+      typeof p.target.value !== "string" ||
+      p.target.value === ""
+    ) {
       return "an artifact declaration's route entries are non-empty route names";
     }
   }
@@ -179,7 +183,9 @@ export function capabilityStatement(
       `content stays erased.`,
     writable.length === 0 && templates.length === 0
       ? `It may write nothing: the schema names no writable field and no claim template.`
-      : `It may write ${list(writable)}` +
+      : (writable.length === 0
+          ? `It may write no field directly`
+          : `It may write ${list(writable)}`) +
         (templates.length === 0
           ? `.`
           : `, and may file these claim templates: ${list(templates)}.`),

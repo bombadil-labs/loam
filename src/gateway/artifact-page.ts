@@ -101,11 +101,7 @@ export interface ArtifactCoordinates {
 }
 
 const escapeHtml = (s: string): string =>
-  s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 // JSON destined for a `<script type="application/json">` body. `<` is escaped to its JSON unicode form so
 // no payload can spell a closing tag, and the bytes still `JSON.parse` back byte-identical — which is what
@@ -506,7 +502,9 @@ export function bundleFromPage(page: string): string | undefined {
 // The coordinates a page carries — the same inverse, for a rail that reads them and for a harness that
 // drives the page against a different store.
 export function coordinatesFromPage(page: string): ArtifactCoordinates | undefined {
-  const m = /<script type="application\/json" id="loam-coordinates">([\s\S]*?)<\/script>/.exec(page);
+  const m = /<script type="application\/json" id="loam-coordinates">([\s\S]*?)<\/script>/.exec(
+    page,
+  );
   if (m === null) return undefined;
   try {
     return JSON.parse(m[1]!) as ArtifactCoordinates;
