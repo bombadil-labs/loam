@@ -10,9 +10,13 @@
 // short-circuit would report success over a delta no reader can see. Refusal leaves nothing behind:
 // forgive in the pool, promote again, and the value lands (the `revives` rail below is that claim).
 //
-// WHOSE STRIKE BINDS is T33's rule, not a second one: **only the struck delta's OWN AUTHOR retires
-// it**, scoped at every rung. Both failures of an unscoped algebra are railed — a third party must
-// not veto a lawful adoption, and a third party must not revive what the author withdrew.
+// WHOSE STRIKE BINDS — two grounds, both railed, and the rails distinguish this algebra from the
+// near-misses. (1) The SOURCE'S OWN GOVERNED READING, `dataStruck`: the operator's reject-this-output
+// strike inside their own pool binds, and so does a grantee's, while an ungranted stranger's does not
+// (no heckler's veto at the promotion door). (2) THE AUTHOR'S OWN WITHDRAWAL, author-scoped and scoped
+// at every rung: a stranger cannot revive what the app took back, and ground 2 has no operator
+// override by design — the remedy for wanting it anyway is to publish the claim as the operator's own
+// act, not to adopt it.
 //
 // WHY `assertPreservesSuppression` IS NOT USED HERE, and what replaces it. That helper asks whether
 // delta X reads as live at the destination, keyed BY ID. Promotion is a RE-ASSERTION, not a filter:
@@ -28,9 +32,10 @@
 
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, type Policy, type Schema } from "@bombadil/rhizomatic";
-import { assembleGenesis } from "../../src/gateway/genesis.js";
+import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
+import { grantClaims } from "../../src/gateway/accounts.js";
 import { PLANT } from "./fixtures.js";
 import { isSuppressed, retraction } from "./narrowing.js";
 import {
@@ -56,7 +61,8 @@ const bootPrimary = (): Promise<Gateway> =>
     }),
   );
 
-// What a reader resolves through the door — the object-level question. `null` means the primary
+// What a reader resolves through the door — the object-level question, asked of the POOL as well as of
+// the primary (the pool inherits the registration through the seeding edge). `null` means that store
 // serves nothing for FERN's message, whatever its deltas happen to hold.
 const messageOf = async (gw: Gateway): Promise<unknown> => {
   const res = await gw.query(`{ plant(entity: "${FERN}") { message } }`);
@@ -111,6 +117,70 @@ describe("§24.3 promotion asks SURVIVAL at the source (T39)", () => {
     await primary.close();
   });
 
+  it("refuses an output the OPERATOR struck inside their own pool — the §27 review gesture binds", async () => {
+    const primary = await bootPrimary();
+    const pool = await primary.openQuarantine();
+    const fact = output("the reviewer said no to this", 2500);
+    const reject = retraction(fact.id, OP, OP_SEED, 2600);
+    await pool.gateway.federate([fact]);
+    await pool.gateway.append([reject]); // the operator reviewing the pool's outputs, in their own store
+    // Object level AT THE SOURCE: the pool's own door already serves nothing for it. A promotion that
+    // succeeded here would disagree with the store it is reading from.
+    expect(await messageOf(pool.gateway)).toBeNull();
+
+    const refusal = await refusalOf(primary, pool.gateway, fact.id);
+    expect(refusal).toContain("the source's own reading has it struck");
+    expect(refusal).toContain(reject.id);
+    expect(primary.reactor.get(wouldAdopt(fact))).toBeUndefined();
+    expect(primary.adoptions()).toHaveLength(0);
+    expect(await messageOf(primary)).toBeNull();
+
+    await pool.drop();
+    await primary.close();
+  });
+
+  it("refuses an output a GRANTEE struck — the data mask's community, not the operator alone", async () => {
+    const primary = await bootPrimary();
+    // SURVEYOR holds write standing from the operator, so their strike binds as DATA (the same masked
+    // ground the governed gather resolves through). This is what makes the rule `dataStruck` rather
+    // than operator-only, and it is the difference the `stranger holds no veto` rail cannot see.
+    await primary.append([
+      signClaims(grantClaims(STORE_ENTITY, SURVEYOR, "write", OP, 2700), OP_SEED),
+    ]);
+    const pool = await primary.openQuarantine();
+    const fact = output("a granted reviewer said no", 2800);
+    const reject = retraction(fact.id, SURVEYOR, SURVEYOR_SEED, 2900);
+    await pool.gateway.federate([fact, reject]);
+
+    const refusal = await refusalOf(primary, pool.gateway, fact.id);
+    expect(refusal).toContain("the source's own reading has it struck");
+    expect(refusal).toContain(reject.id);
+    expect(primary.reactor.get(wouldAdopt(fact))).toBeUndefined();
+    expect(await messageOf(primary)).toBeNull();
+
+    await pool.drop();
+    await primary.close();
+  });
+
+  it("names the AUTHOR's strike, not a bystander's, when both struck the same output", async () => {
+    const primary = await bootPrimary();
+    const pool = await primary.openQuarantine();
+    const fact = output("withdrawn, and heckled too", 3200);
+    const own = retraction(fact.id, GARDENER, GARDENER_SEED, 3300);
+    const heckle = retraction(fact.id, SURVEYOR, SURVEYOR_SEED, 3400);
+    await pool.gateway.federate([fact, own, heckle]);
+
+    // The ordinary real configuration: two strikes, one binding. The refusal attributes the retraction
+    // to its author, so it must name that author's strike ALONE — a message naming the bystander's
+    // delta beside the sentence "its author retracted it" is a misattribution.
+    const refusal = await refusalOf(primary, pool.gateway, fact.id);
+    expect(refusal).toContain(own.id);
+    expect(refusal).not.toContain(heckle.id);
+
+    await pool.drop();
+    await primary.close();
+  });
+
   it("still promotes an output a THIRD PARTY struck — a stranger holds no veto", async () => {
     const primary = await bootPrimary();
     const pool = await primary.openQuarantine();
@@ -136,6 +206,9 @@ describe("§24.3 promotion asks SURVIVAL at the source (T39)", () => {
     const strike = retraction(fact.id, GARDENER, GARDENER_SEED, 4100);
     const foreignRevival = retraction(strike.id, SURVEYOR, SURVEYOR_SEED, 4200);
     await pool.gateway.federate([fact, strike, foreignRevival]);
+    // The fixture must really build the revival attempt, or this degrades into a copy of the rail
+    // above and keeps printing green over a direction it no longer tests.
+    expect(isSuppressed(pool.gateway, strike.id)).toBe(true);
 
     const refusal = await refusalOf(primary, pool.gateway, fact.id);
     expect(refusal).toContain(strike.id);
@@ -161,6 +234,58 @@ describe("§24.3 promotion asks SURVIVAL at the source (T39)", () => {
     expect(promoted).toBe(wouldAdopt(fact)); // the id a carried negation would have killed forever
     expect(primary.adoptions().map((a) => a.sourceDelta)).toContain(fact.id);
     expect(await messageOf(primary)).toBe("taken back, then stood behind again");
+
+    await pool.drop();
+    await primary.close();
+  });
+
+  it("asks survival BEFORE the kind — a struck law-shaped delta is refused as struck", async () => {
+    const primary = await bootPrimary();
+    const pool = await primary.openQuarantine();
+    const target = output("something the app later argued about", 5500);
+    // A NEGATION is the law-shaped delta closest to hand, and promotion refuses it on kind alone. Struck
+    // by its own author it is BOTH — so the message says which question was asked first. Reorder the
+    // gate and this rail reads the other refusal.
+    const lawShaped = retraction(target.id, GARDENER, GARDENER_SEED, 5600);
+    const struckLawShaped = retraction(lawShaped.id, GARDENER, GARDENER_SEED, 5700);
+    await pool.gateway.federate([target, lawShaped, struckLawShaped]);
+
+    const asStruck = await refusalOf(primary, pool.gateway, lawShaped.id);
+    expect(asStruck).toContain("retracted it where it was made");
+    expect(asStruck).toContain(struckLawShaped.id);
+    expect(asStruck).not.toContain("it is a negation");
+
+    // Its surviving twin still refuses on kind, with the kind's own words — so this rail pins the
+    // ordering rather than merely the existence of some refusal.
+    const asKind = await refusalOf(primary, pool.gateway, struckLawShaped.id);
+    expect(asKind).toContain("it is a negation");
+
+    await pool.drop();
+    await primary.close();
+  });
+
+  it("refuses to re-promote over an adoption the OPERATOR later struck here", async () => {
+    const primary = await bootPrimary();
+    const pool = await primary.openQuarantine();
+    const fact = output("adopted, then thought better of", 5800);
+    await pool.gateway.federate([fact]);
+    const { promoted } = await primary.promote(pool.gateway, fact.id);
+
+    // The operator's own §14 retraction of their own adopted claim. Re-promotion must neither undo it
+    // nor report success over a delta no reader resolves.
+    const lifted = retraction(promoted, OP, OP_SEED, 5900);
+    await primary.append([lifted]);
+    expect(await messageOf(primary)).toBeNull();
+
+    const refusal = await refusalOf(primary, pool.gateway, fact.id);
+    expect(refusal).toContain("already adopted");
+    expect(refusal).toContain(lifted.id);
+    expect(await messageOf(primary)).toBeNull(); // and the refusal changed nothing
+
+    // Lifting the strike restores it, and promotion is idempotent again — the same adopted id.
+    await primary.append([retraction(lifted.id, OP, OP_SEED, 6000)]);
+    expect((await primary.promote(pool.gateway, fact.id)).promoted).toBe(promoted);
+    expect(await messageOf(primary)).toBe("adopted, then thought better of");
 
     await pool.drop();
     await primary.close();
