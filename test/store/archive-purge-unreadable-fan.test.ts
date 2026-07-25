@@ -144,6 +144,25 @@ describe("T50: ArchiveBackend.purge over a fan it cannot read", () => {
     await store.close();
   });
 
+  denied("answers the same way in BATCH — heldAmong refuses over the walled fan", async () => {
+    // `heal` and a pool's settling sweep ask the verdict of the whole tombstone set at once, so the
+    // batch form is the one that actually runs on the boot path. An empty set from here is a clean
+    // bill of health for every id asked about; it must not be reachable over a fan nobody opened.
+    const { root, store, id } = await vault();
+    chmodSync(join(root, STRAY), 0o000);
+    try {
+      await store.purge([id]).catch(() => undefined);
+      const verdict = await store.heldAmong([id]).then(
+        (held) => (held.has(id) ? "held" : "clean"),
+        () => "unprovable",
+      );
+      expect(verdict).not.toBe("clean");
+    } finally {
+      chmodSync(join(root, STRAY), 0o755);
+    }
+    await store.close();
+  });
+
   denied("hands the refusal to the tier above, which sweeps its own half regardless", async () => {
     // The contract `erase` and `heal` are built on: a tier's purge refusal is a FAULT the caller
     // collects (`MirrorBackend.purge` rejects only after both sides were attempted), never a
