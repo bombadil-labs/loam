@@ -97,8 +97,12 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
     // whole file and this constructor is not async, so a second handle mid-append would turn
     // `new SqliteBackend(path)` into a synchronous SQLITE_BUSY — a throw the seam has no rejected
     // promise for, out of the one call that used to take no lock at all. A store that will not OPEN
-    // is a worse §11 story than a scrub that runs on the next open, which `freelist_count` still
-    // asks for: the freelist is its own durable to-do list, so nothing needs recording here.
+    // is a worse §11 story than a scrub deferred to a later open. `freelist_count` re-triggers that
+    // later scrub ONLY while the rebuild has not committed — a REFUSED VACUUM leaves the freelist
+    // positive and self-heals. A COMMITTED VACUUM whose fold was deferred does NOT: it reads 0
+    // through the WAL and this trigger goes blind to it (see the checkpoint branch below). Fully
+    // closing that second case wants a durable scrub watermark — a decision tracked on T49, not
+    // built here — so nothing is persisted yet.
     const freelist = this.db.pragma("freelist_count", { simple: true }) as number;
     if (freelist > 0) {
       try {
@@ -110,14 +114,25 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
         // does not throw on contention, it RETURNS `busy`, and a discarded result is H7 verbatim.
         const [status] = this.db.pragma("wal_checkpoint(TRUNCATE)") as Array<{ busy: number }>;
         if (status === undefined || status.busy !== 0) {
+          // The rebuild COMMITTED but its pages could not be folded in. This is NOT self-healing:
+          // a committed VACUUM leaves `freelist_count` reading 0 through the WAL, so the next open's
+          // `> 0` trigger skips the whole block — the rebuilt pages sit in the `-wal` sidecar until
+          // some incidental checkpoint folds them, and a crash before then leaves the plaintext at
+          // rest with nothing to re-detect it. Closing that needs a durable scrub watermark, which
+          // this ticket defers to a decision (tracked on T49), not a §11 promise broken here.
           this.deferScrub(
             "the rebuilt pages could not be folded into the main file — a concurrent reader held " +
-              "the write-ahead log past busy_timeout",
+              "the write-ahead log past busy_timeout. The rebuild COMMITTED, so `freelist_count` " +
+              "now reads 0 and a reopen will NOT retry this on its own; the pages remain in the " +
+              "`-wal` sidecar until a later checkpoint folds them.",
           );
         }
       } catch (err) {
+        // The rebuild never committed, so `freelist_count` stays positive and the next uncontended
+        // open re-runs this scrub — self-healing, and the message says so.
         this.deferScrub(
-          `the rebuild was refused — ${err instanceof Error ? err.message : String(err)}`,
+          `the rebuild was refused — ${err instanceof Error ? err.message : String(err)}. ` +
+            "`freelist_count` stays positive, so the next uncontended open retries this scrub.",
         );
       }
     }
@@ -171,7 +186,8 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
 
   // Why the one-time open scrub was deferred — undefined when there was nothing to scrub or the
   // scrub completed. Set means the store is open and correct while inherited freelist plaintext may
-  // still be legible in the file (§11), until an uncontended open finishes the job.
+  // still be legible in the file (§11). Whether an uncontended reopen re-triggers the scrub depends
+  // on the branch, and the message says which — see `deferScrub`.
   get scrubDeferred(): string | undefined {
     return this.deferredScrub;
   }
@@ -179,12 +195,13 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
   // The scrub could not finish. It is reported and not swallowed, on two surfaces because they have
   // different readers: the callback is the operator's line in the log, and `scrubDeferred` answers
   // an embedder that never wired one. A `catch {}` here would fix one silent outcome by introducing
-  // another.
+  // another. The recovery story differs by branch, so each caller states its own in `reason` — this
+  // frame carries only what is true of both.
   private deferScrub(reason: string): void {
     this.deferredScrub =
-      `sqlite: the one-time freelist scrub of ${this.filePath} is DEFERRED — ${reason}. The store ` +
-      `is open and correct; plaintext from erasures older than \`secure_delete\` may still be ` +
-      `legible in the file until an uncontended open scrubs it (§11).`;
+      `sqlite: the one-time freelist scrub of ${this.filePath} is DEFERRED — ${reason} The store ` +
+      `is open and correct, but plaintext from erasures older than \`secure_delete\` may still be ` +
+      `legible in the file (§11).`;
     try {
       this.opts.onScrubDeferred?.(this.deferredScrub);
     } catch {
