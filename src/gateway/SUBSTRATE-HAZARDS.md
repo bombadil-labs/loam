@@ -1,12 +1,18 @@
 # Substrate hazards — rhizomatic semantics that bite host code
 
-A distilled defense (ADLC P7). Every entry here is a property of **rhizomatic** that is correct in the
-substrate and dangerous in Loam if you forget it. Each one cost us a real bug; each is written as a
-question to ask, not a fact to admire.
+A distilled defense (ADLC P7). Most entries here are properties of **rhizomatic** that are correct in
+the substrate and dangerous in Loam if you forget them. Each one cost us a real bug; each is written
+as a question to ask, not a fact to admire.
 
 **Read this before writing code that FILTERS, NARROWS, SUBSETS, or COPIES a delta-set.** That is the
 operation these hazards live under. The list is short on purpose — it is a checklist, and a checklist
 nobody finishes is worse than none.
+
+One entry (**H10**) is not a substrate property at all: it is a way of writing a TEST that measures
+nothing while looking rigorous. It lives here rather than in the process doc because it is recognised
+the same way the others are — by reading a diff and asking a question — and because the hazards above
+it are what its victims were trying to guard against. A rail that cannot fail is how every one of them
+ships.
 
 Why this file exists rather than a section of the spec: SPEC.md records what Loam **is**, grown only
 by landings. This records what will **hurt you** while building it. Different genre, different
@@ -278,6 +284,74 @@ in its own comment that the operator is told; the CLI's boot sequence now reads 
 reports each failure to the operator on `stderr` (`cli.ts:146`), closing the T70 silence. And the
 pool fan-out aborted on its first refusal, so replicas ordered behind a broken one were never swept —
 an unexamined replica reported as a clean one.
+
+---
+
+## H10. A rail whose expected value comes from the code under test measures nothing
+
+**The property.** A test is a comparison between what the code does and what somebody decided it
+should do. The second half has to come from OUTSIDE the code — a literal, a golden file, a hand-written
+list, a second independent computation. The moment the expectation is *derived from the subject*, the
+comparison is between the code and itself, and it holds no matter what the code does.
+
+**The hazard, and it is SILENT.** This has three recognisable disguises, and all three read as diligence:
+
+- **The self-referential list.** `expect(SHIPPED.every(x => isSealed(x))).toBe(true)` passes when
+  `SHIPPED` has one element. So does `it.each(SHIPPED)`. Narrowing the shipped set narrows the test
+  with it, in lockstep, forever.
+- **The empty-set pass.** `expect(everythingWrong).toEqual([])` is green when the input was empty —
+  because the filter is wrong, because the regex never matched, or because the collection the book or
+  the config or the manifest was supposed to hold is simply absent. Mutual pairs are the worst case:
+  *every declared item is used* and *every used item is declared* are BOTH satisfied by declaring
+  nothing and using nothing.
+- **The echo fixture.** A stub that reflects a request back — pulling a field name out of the query
+  the code just composed and answering to it — confirms a wrongly-composed request exactly as
+  readily as a right one. The bug lives in the composition, and the fixture agrees with it.
+
+Each disguise survives review because the test *names* the right property. Only the expectation is
+counterfeit.
+
+**Ask.** *Where did the expected value come from, and could the code have changed it?* Then, the
+sharper form, which is mechanical enough to run on every assertion you write: **shrink the subject
+to nothing and re-read the test.** Set the list to one element. Set the collection to empty. Delete
+the feature whole. If the assertion is still green, it is not measuring the thing in its own title.
+For a fixture, ask instead: *can this fixture DISTINGUISH the right answer from the wrong one?* — a
+corpus in which two derivations coincide (all-lowercase names, a program name equal to a lens name,
+a two-member set that cannot tell `> 0` from `> 1`) cannot see a bug between them, however many cases
+it enumerates.
+
+**The fix is cheap and it is always the same shape:** write the expectation by hand, next to the
+assertion, and add a rail that the shipped set COVERS the hand-written one. Then a narrowing goes red
+and a widening asks you to update a list on purpose. Where the expectation is a whole corpus, add a
+FLOOR — a count the collection must exceed — so a vacuous pass becomes impossible rather than merely
+unlikely.
+
+**Cost so far.** Seven sites in one day (2026-07-25), found by three different lenses across three
+unrelated changes, which is what earned this its own entry rather than a line under H7:
+
+- The capabilities book's term rails were mutual in exactly the way described above — `TERMS = []`
+  with no markup satisfied both — and its figures likewise. Its receipts rail was worse: every
+  citation check was guarded on `claim.proof` being truthy, so setting all 82 proofs to `null` with a
+  one-character reason deleted the feature under a green bar. Closed with floors and a CAP on the
+  unproven count, which can only rise by editing the line.
+- Its coverage rail was satisfiable by appending one string to a chapter's `covers` — the spec
+  section counted as documented with nothing a reader could see. Closed by requiring a covered
+  section to be CITED by one of that chapter's own claims.
+- T79's sealed-channels rail iterated the very list it measured: narrowing the shipped set to one
+  entry still passed. Its sibling file had already solved this with a hand-written `MUST_SEAL` plus a
+  covers-check — so the discipline existed in the change and was applied to one of the two lists it
+  shipped. Seven of `HOST_GLOBALS`' twenty-four names were exercised by nothing at all.
+- T79's mutation rails ran against an ECHO fixture, and every writable prop in the corpus was
+  lowercase-initial — the one shape in which the store's two name manglings coincide. The page was
+  composing argument names with the root-field derivation, so every artifact-hosted write of a
+  capital-initial field would have failed against every real store. The read side had the same bug and
+  was caught, because there one rail POSTed the composed document to a live schema.
+- T64's receipt-field rail asserted a literal declared fourteen lines above it in the same file, and
+  its vocabulary rail was a dedupe check over a two-element literal.
+- And the tooling did it to me while I was writing this up: an `until` loop polling CI with
+  `jq 'all(.bucket != "pending")'` exited immediately, because `all` over an empty array is `true`.
+
+**Provenance.** 2026-07-25 — distilled at P7 from the P5 rounds on T64, T79 and T95.
 
 ---
 
