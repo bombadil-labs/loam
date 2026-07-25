@@ -34,6 +34,12 @@ export interface HealReport {
   readonly purgedPrimary: number; // dead ids the primary actually removed
   readonly purgedMirror: number; // dead ids the mirror actually removed
   readonly purgeFailures: readonly string[]; // sweeps that refused — reported, never swallowed
+  // Ids whose CORRUPT primary row was replaced by the mirror's healthy copy (T66/§25) — a change to
+  // the ground, so it is named rather than folded into `toPrimary`'s count.
+  readonly restoredPrimary: readonly string[];
+  // Squatters the mirror held a copy for and heal could NOT replace. Empty is a claim, not a
+  // default: a strike may still be stranded, so silence here must mean "nothing was corrupt".
+  readonly restoreRefused: readonly string[];
 }
 
 export class MirrorBackend implements StoreBackend, RepairableBackend {
@@ -133,6 +139,13 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
     return isRepairable(this.primary) ? this.primary.discardRow(key) : false;
   }
 
+  // `restoreQuarantined` is deliberately NOT delegated. `quarantine`/`discardRow` are, because
+  // `loam repair` reaches them through whatever the gateway holds; the restore is heal's own
+  // mechanism and heal reaches the primary directly. A delegate would make the member ALWAYS present
+  // on a mirror and vacuous whenever the inner primary lacks it — turning "this driver cannot
+  // restore", which heal reports, into a silent empty answer, which is the shape this whole ticket
+  // exists to remove.
+
   // Physical removal on BOTH sides — forgetting must be verified, so purge is loud where
   // append was forgiving: a failure on either side rejects (after both were attempted), and
   // a later heal(exclude) can finish what an unreachable side missed.
@@ -189,6 +202,13 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
     const replant = fromMirror.filter((d) => !dead.has(d.id));
     const purgedMirror = await sweep(this.mirror);
     const toPrimary = await this.primary.append(replant);
+    // `replant` is a MIXED set and the two halves need different tools, so BOTH run. `append` above
+    // plants the deltas the primary never held — that is ordinary catch-up and it must keep running.
+    // What it CANNOT do is move a delta whose id is already taken by a row the primary set aside:
+    // append is dedup-by-id, so a corrupt row SQUATS and the healthy copy is silently ignored. Since
+    // a quarantined row never joins `alive`, the mirror's copy of exactly that id is always here in
+    // `replant`, which is why heal is where this recovery belongs (T66/§25).
+    const { restoredPrimary, restoreRefused } = await this.restoreSquatters(replant);
     // The BYTE verdict (§11, hazard H7). A purge's count is EVIDENCE OF WORK, never proof: a tier
     // can report success while a freelist page, a `.tmp` straggler, or a WAL image still holds the
     // plaintext — the exact readability-vs-byte-presence conflation §11 forbids and T40 caught at the
@@ -227,7 +247,61 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
     await verify(this.primary, "primary");
     await verify(this.mirror, "mirror");
     if (this.#lagEpoch === epoch) this.#lagging = false;
-    return { toMirror, toPrimary, purgedPrimary, purgedMirror, purgeFailures };
+    return {
+      toMirror,
+      toPrimary,
+      purgedPrimary,
+      purgedMirror,
+      purgeFailures,
+      restoredPrimary,
+      restoreRefused,
+    };
+  }
+
+  // Of the deltas the mirror offered, which are SQUATTED by a corrupt primary row — and what came of
+  // asking the primary to replace them (T66/§25).
+  //
+  // Candidate selection is HEAL'S OWN, drawn from the primary's pen (recomputed by the read at the
+  // top of `heal`), so it does not depend on the optional `restoreQuarantined` existing. That matters:
+  // a driver that cannot restore must be REPORTED, and a report whose only source is the missing
+  // member would be empty exactly when it has something to say. A pen key is a row id (sqlite) or
+  // `prefix + id` (localStorage), matched as `repair.ts` matches it.
+  //
+  // And the outcome is heal's own BYTE VERDICT, in both directions — the same doctrine its purge
+  // sweep already runs. A driver's return value is EVIDENCE, never proof, so heal RE-READS the
+  // primary (which recomputes admission from the primary's own bytes) and asks that read:
+  //   - restored = claimed by the driver AND admitted by the re-read.
+  //   - refused  = a candidate the re-read still will not admit.
+  // So an over-reporting driver is dropped from `restoredPrimary` and named in `restoreRefused`, and
+  // a driver that repairs some while mis-reporting others is split correctly. A candidate some OTHER
+  // handle repaired between heal's two reads lands in neither: heal did not do it, and it is not
+  // broken.
+  private async restoreSquatters(
+    replant: readonly Delta[],
+  ): Promise<{ restoredPrimary: readonly string[]; restoreRefused: readonly string[] }> {
+    const none = { restoredPrimary: [], restoreRefused: [] };
+    const primary = this.primary;
+    if (replant.length === 0 || !isRepairable(primary)) return none;
+    const penned = await primary.quarantine();
+    const squatting = replant.filter((d) =>
+      penned.some((r) => r.key === d.id || r.key.endsWith(d.id)),
+    );
+    if (squatting.length === 0) return none;
+    const claimed =
+      primary.restoreQuarantined === undefined ? [] : await primary.restoreQuarantined(squatting);
+    const admitted = new Set((await primary.deltasSince(new Set())).map((d) => d.id));
+    const restoredPrimary = claimed.filter((id) => admitted.has(id));
+    const restoreRefused = squatting
+      .filter((d) => !admitted.has(d.id))
+      .map((d) =>
+        primary.restoreQuarantined === undefined
+          ? `the primary still sets aside ${d.id} and this driver cannot replace a corrupt row — ` +
+            `the mirror holds a healthy copy that nothing can plant over it, so any strike that row ` +
+            `carries stays stranded (§25/H1). Settle it with \`loam repair discard\`, then heal again.`
+          : `the primary still sets aside ${d.id} after the restore — the mirror's healthy copy did ` +
+            `not take, so any strike that row carries stays stranded (§25/H1).`,
+      );
+    return { restoredPrimary, restoreRefused };
   }
 
   async close(): Promise<void> {

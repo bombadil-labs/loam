@@ -117,6 +117,20 @@ export interface RepairableBackend extends StoreBackend {
   // failed admission), so its removal is not an erasure — there was no fact to forget. Forgetting
   // a GOOD ground delta on purpose stays the operator's erase (§11), never this.
   discardRow(key: string): Promise<boolean>;
+
+  // OPTIONAL: replace each corrupt row that SQUATS on one of these deltas' ids with the delta's own
+  // bytes, and resolve to the ids actually replaced. This is the fourth honest end for a set-aside
+  // row — discard, re-admit, leave, or REPLACE FROM A HEALTHY COPY — and the only one that needs a
+  // second copy to exist, which is why `MirrorBackend.heal` is its caller.
+  //
+  // A row is not there to replace unless it is there: this NEVER plants a missing delta (that is
+  // `append`'s job) and never replaces a row that already ADMITS. Both halves are decided by the
+  // DRIVER from its OWN bytes on every call — never from the pen a previous read left behind, which
+  // is a cache and not a permission. Optional for the same reason `heldAmong` is: a driver earns it
+  // when it can honour it, and `isRepairable`'s duck-type stays deliberately unchanged so no
+  // existing implementor loses `quarantine`/`discardRow` by omitting this. A caller must therefore
+  // check for it and REPORT its absence rather than reading the missing member as nothing-to-do.
+  restoreQuarantined?(deltas: Iterable<Delta>): Promise<readonly string[]>;
 }
 
 export function isRepairable(b: StoreBackend): b is RepairableBackend {

@@ -266,6 +266,15 @@ async function cmdServe(
         `loam: healed — ${healed.toPrimary} deltas replanted from the archive, ${healed.toMirror} newly archived`,
       );
     }
+    // A corrupt row the archive's healthy copy replaced (§25/T66). This CHANGED the ground the
+    // gateway is about to boot on, so it is named per id rather than counted: a restored negation
+    // un-strands a strike, and the operator should be able to see which fact came back under it.
+    for (const id of healed.restoredPrimary) {
+      io.out(
+        `loam: restored ${id} from the archive — a corrupt row was squatting on that id; any strike ` +
+          `it carries suppresses again`,
+      );
+    }
     // The sweep's refusals are load-bearing: a report nobody reads is a swallowed error with
     // extra steps (H9). A refused sweep means a tombstoned id's bytes may still be at rest on
     // some tier — serve continues (refusing to boot trades a leak for an outage), but the
@@ -275,6 +284,16 @@ async function cmdServe(
         `loam: the boot sweep could not finish an erasure — bytes the operator ordered forgotten ` +
           `may still be at rest: ${failure}. Serving anyway; resolve the store fault and re-run ` +
           `the erasure (or restart) to finish the sweep.`,
+      );
+    }
+    // Same reasoning, the other repair: a squatter the archive could have replaced and did not means
+    // the store is about to serve with a strike stranded — a retracted value, a revoked grant, or a
+    // tombstone reading LIVE (§25/H1). Serving is still right (a legible store beats an outage), and
+    // saying nothing is not.
+    for (const failure of healed.restoreRefused) {
+      io.err(
+        `loam: a corrupt row could not be replaced from the archive — ${failure} Serving anyway; ` +
+          `\`loam repair list\` names what the pen holds.`,
       );
     }
     backend = mirror;
@@ -643,7 +662,10 @@ async function cmdRepair(args: readonly string[], io: IO): Promise<number> {
         if (outcome === "still-quarantined") {
           io.out(
             `loam: ${key} still fails admission — it stays quarantined\n` +
-              "  (repair never edits bytes into validity; leave it, or discard it as garbage)",
+              "  (repair never edits bytes into validity; leave it, or discard it as garbage)\n" +
+              "  if a cold store holds a healthy copy of this delta, `loam serve --archive <dir>`\n" +
+              "  replaces the corrupt row with it on the next boot — the one recovery that needs no\n" +
+              "  re-federation, because the bytes are already yours",
           );
           return 0;
         }

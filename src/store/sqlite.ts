@@ -35,6 +35,11 @@ interface DeltaRow {
   readonly sig: string | null;
 }
 
+// The rhizomatic authorities `admit` runs on. One object, so the read path and the restore door
+// cannot drift on what "admissible" means — the whole value of the restore check is that it asks
+// exactly the question the next boot's read will ask.
+const ADMISSION = { parseClaims, computeId, makeDelta, verifyDelta };
+
 export interface SqliteOptions {
   // Called when the one-time open scrub (below) could not be completed. Wire this to a log: the
   // store is open and correct either way, but a deferral means plaintext from erasures older than
@@ -270,12 +275,7 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
         continue;
       }
       // The id column is the only id a table row carries, so it plays both filed and claimed id.
-      const verdict = admit(row.id, row.id, rawClaims, row.sig ?? undefined, {
-        parseClaims,
-        computeId,
-        makeDelta,
-        verifyDelta,
-      });
+      const verdict = admit(row.id, row.id, rawClaims, row.sig ?? undefined, ADMISSION);
       if (!verdict.ok) {
         quarantine.push({
           key: row.id,
@@ -310,6 +310,85 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
       return true;
     }
     return false;
+  }
+
+  // Would a row with these bytes ADMIT — the same question the read path asks, asked of one row's
+  // stored form. Unreadable bytes answer FALSE, which here means "do not treat this as healthy": on
+  // the incoming side that refuses a write, and on the existing side it permits one. Both are the
+  // direction that cannot launder damage.
+  private admissible(id: string, claimsJson: string, sig: string | null): boolean {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(claimsJson);
+    } catch {
+      return false;
+    }
+    return admit(id, id, raw, sig ?? undefined, ADMISSION).ok;
+  }
+
+  // Replace a corrupt row that SQUATS on its id with a healthy copy of that same delta (T66/§25).
+  // `id` is UNIQUE and `append` is INSERT OR IGNORE, so replanting the archive's good copy of a row
+  // this driver set aside inserts nothing and reports 0 — and the strike such a row carries stays
+  // stranded across every reboot. This is the door that moves it, and it decides from the TABLE on
+  // every call, never from `lastQuarantine`: that pen is what the last read saw, and a second handle
+  // may have repaired the row since.
+  //
+  //   (i)  the incoming delta must ADMIT — canonicalized (so its id recomputes and its strings are
+  //        well-formed), then run through the very `admit` the read path runs, over the exact bytes
+  //        about to be written. A delta that would not survive the next boot's read is never stored.
+  //   (ii) the row currently filed under that id must NOT admit. An admitted row is never replaced,
+  //        by any caller, for any reason — an UNSIGNED delta admits (`verifyDelta` answers
+  //        "unsigned", not "invalid"), so without this check a "repair" could strip a verified
+  //        signature off a good row.
+  //
+  // One IMMEDIATE transaction holds the (ii) read and the write together, so no concurrent handle
+  // can repair a row inside that window. An UPDATE rather than DELETE+INSERT: `seq` survives so read
+  // order does not churn, and no id leaves the table, leaving §11's `truncationOwed`/`holds`
+  // bookkeeping untouched. The displaced bytes are NOT scrubbed from the WAL or a freed page —
+  // deliberate parity with `discardRow`, since a quarantined row is not a lawful fact in the ground
+  // and its removal carries no §11 completeness claim.
+  //
+  // A delta this refuses is SKIPPED, not thrown: the return value names what was replaced, so a
+  // caller learns of every id that did not move (heal reports them as `restoreRefused`), and one
+  // unwritable delta must not block the recovery of the rest of a boot's batch.
+  async restoreQuarantined(deltas: Iterable<Delta>): Promise<readonly string[]> {
+    this.assertOpen();
+    const batch = [...deltas];
+    if (batch.length === 0) return [];
+    const read = this.db.prepare("SELECT claims, sig FROM deltas WHERE id = ?");
+    const replace = this.db.prepare("UPDATE deltas SET claims = ?, sig = ? WHERE id = ?");
+    const restored: string[] = [];
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const d of batch) {
+        let canon: Delta;
+        try {
+          canon = canonicalDelta(d);
+        } catch {
+          continue; // not storable as itself — refusing to write is the safe direction
+        }
+        const claims = JSON.stringify(claimsToJson(canon.claims));
+        const sig = canon.sig ?? null;
+        if (!this.admissible(canon.id, claims, sig)) continue; // (i)
+        const row = read.get(canon.id) as Pick<DeltaRow, "claims" | "sig"> | undefined;
+        if (row === undefined) continue; // nothing squatting — planting a delta is `append`'s job
+        if (this.admissible(canon.id, row.claims, row.sig)) continue; // (ii)
+        if (replace.run(claims, sig, canon.id).changes > 0) restored.push(canon.id);
+      }
+      this.db.exec("COMMIT");
+    } catch (err) {
+      try {
+        this.db.exec("ROLLBACK");
+      } catch {
+        /* already rolled back */
+      }
+      throw err;
+    }
+    // Durable only after the commit, exactly as `append` does it.
+    for (const id of restored) this.onDisk.add(id);
+    const done = new Set(restored);
+    this.lastQuarantine = this.lastQuarantine.filter((r) => !done.has(r.key));
+    return restored;
   }
 
   async purge(ids: Iterable<string>): Promise<number> {

@@ -150,12 +150,14 @@ describe("T66: heal replaces a corrupt row from the mirror's healthy copy", () =
       destination: dest,
       struckClaim: height.id,
     });
-    // ...and the TOP level, a Schema-resolved View: the retracted height is not served, and the
-    // bystander still is. A rail that only asked the negation index would stop one level short.
-    const view = await dest.query(`{ Plant(entity: "${FERN}") { height tag } }`);
-    const plant = view.data?.Plant as { height?: unknown; tag?: unknown } | undefined;
-    expect(plant?.height ?? null).not.toBe(30);
-    expect(JSON.stringify(plant?.tag ?? null)).toContain("shade");
+    // ...and the TOP level, a Schema-resolved View: the retracted height RESOLVES TO NULL (30 is
+    // what a stranded strike serves), and the bystander still resolves live. A rail that only asked
+    // the negation index would stop one level short.
+    const view = await dest.query(`{ plant(entity: "${FERN}") { height tag } }`);
+    expect(view.errors).toBeUndefined();
+    const plant = view.data?.plant as { height: unknown; tag: unknown };
+    expect(plant.height).toBeNull();
+    expect(plant.tag).toEqual(["shade"]);
     await dest.close();
     await source.close();
   });
@@ -180,8 +182,10 @@ describe("T66: heal replaces a corrupt row from the mirror's healthy copy", () =
     expect(rowOf(path, arrival.id)?.sig).toBe(arrival.sig);
 
     const dest = await Gateway.boot(new SqliteBackend(path), GENESIS());
-    const view = await dest.query(`{ Plant(entity: "${FERN}") { tag } }`);
-    expect(JSON.stringify((view.data?.Plant as { tag?: unknown }).tag)).toContain("fronds");
+    const view = await dest.query(`{ plant(entity: "${FERN}") { height tag } }`);
+    const plant = view.data?.plant as { height: unknown; tag: unknown };
+    expect(plant.tag).toEqual(["shade", "fronds"]); // the new fact joined the bystander
+    expect(plant.height).toBeNull(); // ...and the restored strike still suppresses
     await dest.close();
   });
 
