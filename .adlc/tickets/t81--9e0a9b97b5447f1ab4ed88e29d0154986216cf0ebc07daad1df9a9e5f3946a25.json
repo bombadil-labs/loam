@@ -2,13 +2,16 @@
   "body": "FINDING (verified). README.md:302-304, in the \"Writes are claims\" section: \"a registration may carry a **`writable`** list: when present, only those fields accept a surface write ...; omit it to leave every field writable.\" That is backwards. src/gateway/gql.ts:373-379 implements immutable-by-default per §21: `const writable = new Set(def.writable ?? [])`, and a prop's mutation arg is only added to `propArgs` (gql.ts:379) when `writable.has(prop)` — so an ABSENT `writable` array means `writable` is the empty set and NO prop is writable, not every prop. The comment at gql.ts:374-376 states this explicitly: \"Immutable-by-default (§21): absent `writable` → NO prop is writable.\"\n\nConcretely, the README's own hello-world (`gateway.register(...)` around README.md:118-150, and the `plant(entity:…, height: 4)` sugar-mutation shown later) never passes a `writable` array in its registration — so under the README's stated rule the mutation should work, but under the actual code the `height` prop mutation ARG is never built into the GraphQL schema at all, and calling it produces GraphQL's generic \"Unknown argument\" validation error. A reader following the README's quickstart to the letter hits an opaque GraphQL error with no mention of `writable` anywhere.\n\nFIX SHAPE: (1) correct README.md:302-304 to state the true rule — omitting `writable` leaves every field READ-ONLY; naming a field in `writable` is what makes it acceptable as a surface write. Also add/adjust the README's quickstart registration to actually pass a `writable` array so its own example runs. (2) Improve the refusal itself: today an excluded prop is simply absent from `propArgs`, so GraphQL's own schema-validation message names the field but never says why or mentions `writable`. Either add an explicit resolver-level check for a caller passing a known-but-non-writable prop name (distinguishing \"not writable\" from \"not a real field\"), or at minimum have the mutation field's `description` (gql.ts ~389) name which props are writable so the generated schema is self-documenting.\n\nRAILS: a test in test/gateway/*.test.ts (or wherever gql surface tests live) asserting that a schema registered WITHOUT `writable` exposes NO per-prop mutation args (already implicitly covered, confirm), and a new assertion that the mutation field's description or a targeted error path names `writable` for a caller who tries to write an excluded prop.\n\nCARE: doc correction + error-message clarity restoring stated (§21) behavior — self-mergeable once green + P5 clean.",
   "edges": [],
   "id": "T81",
-  "phase": "P1",
-  "rails": [],
+  "phase": "P4",
+  "rails": [
+    "test/gateway/writable-thread.test.ts"
+  ],
   "scope": [
     "README.md",
     "src/gateway/gql.ts",
-    "test/gateway/gql.test.ts"
+    "src/gateway/mutate.ts",
+    "test/gateway/writable-thread.test.ts"
   ],
-  "status": "todo",
+  "status": "in-progress",
   "title": "README inverts §21 immutable-by-default: says omitting `writable` leaves every field writable — the opposite is true, and the README's own example mutation fails"
 }

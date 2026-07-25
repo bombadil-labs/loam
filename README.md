@@ -145,6 +145,8 @@ gateway.register(
     default: { kind: "pick", order: { kind: "byTimestamp", dir: "desc" } },
   },
   ["plant:fern"],
+  undefined, // claim templates, if the schema declares write shapes
+  ["height"], // writable: fields are read-only until named here (§21)
 );
 
 // Query returns a content-addressed snapshot: same deltas, any order, any machine → same _hex.
@@ -212,11 +214,13 @@ the tool. It mirrors the parts: a **HyperSchema** (the gather) and a **Schema** 
     "props": { "height": { "pick": { "order": { "byTimestamp": "desc" } } } },
     "default": { "pick": { "order": { "byTimestamp": "desc" } } }
   },
-  "roots": ["plant:fern"]
+  "roots": ["plant:fern"],
+  "writable": ["height"]
 }
 ```
 
-**Anatomy of a registration.** Three parts, and the whole read pipeline lives in them:
+**Anatomy of a registration.** Four parts — the whole read pipeline lives in the first three, and
+the fourth is the only door out:
 
 - **`hyperschema`** — the gather program:
   - **`name`** — the GraphQL field it generates (`{ plant(entity: …) }`) and the default entity
@@ -231,6 +235,9 @@ the tool. It mirrors the parts: a **HyperSchema** (the gather) and a **Schema** 
   **Policy** (`pick` / `all` / `merge` / …); the map of them is the Schema.
 - **`roots`** — the entities held **live**: the gather runs for each, and its view stays current
   as deltas arrive.
+- **`writable`** — the fields that accept a **surface write**. Immutable by default (SPEC §21): a
+  field is read-only until named here, and omitting the list entirely leaves the whole schema
+  read-only — which is why the example names `height`, the field its mutation writes.
 
 The `hyperschema.body` reads inside-out, each stage feeding the next:
 
@@ -299,9 +306,11 @@ narrow the schema Policy, not the ground.
 
 To withdraw ONE value rather than a whole field there is `remove<Type>(entity, field, values: […])`
 (REST: a `DELETE` with an object body `{ field: [values] }`) — the one tag you added, a specific
-`merge` addend, the rest of the field left standing. And a registration may carry a **`writable`**
-list: when present, only those fields accept a surface write (assert, clear, and remove refuse the
-rest with a reason); omit it to leave every field writable. It disciplines the front door, never the
+`merge` addend, the rest of the field left standing. Which fields accept a write at all is the
+registration's **`writable`** list, and the posture is **immutable by default** (SPEC §21): only the
+fields it names accept a surface write, and the rest are read-only — assert, clear, and remove refuse
+them with a reason, and a read-only prop is offered as no mutation argument at all. Omit `writable`
+and NOTHING is writable; silence means "you may not". It disciplines the front door, never the
 ground — a reader who wants a hard guarantee still enforces it with a lens.
 
 Every view also carries two content addresses: **`_hex`** (the resolved view — the answer) and

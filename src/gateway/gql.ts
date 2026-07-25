@@ -386,11 +386,20 @@ export function buildGqlSchema(
         `schema ${lensOf(def)}: its mutation field "${fieldName}" collides with an existing mutation`,
       );
     }
+    // An unopened prop has no argument at all, so GraphQL refuses it with a bare "Unknown
+    // argument" — true, and no help to a reader who cannot see WHY the field is missing. The
+    // description is the only place left to hand them the thread: it names the knob (`writable`)
+    // and the props this registration left shut.
+    const shut = [...def.schema.props.keys()].filter((prop) => !writable.has(prop));
     mutationFields[fieldName] = {
       type: new GraphQLNonNull(viewType),
       description:
         `Claim properties of an entity under ${lensOf(def)}: every provided argument ` +
-        `becomes one signed delta. Returns the re-resolved view.`,
+        `becomes one signed delta. Returns the re-resolved view.` +
+        (shut.length === 0
+          ? "" // nothing is shut: no argument is missing, so there is nothing to explain
+          : ` Read-only here, absent from the registration's \`writable\` list and so offered as ` +
+            `no argument (immutable-by-default, §21): ${shut.join(", ")}.`),
       args: { ...entityArg, ...propArgs },
       resolve: (_src, args: Record<string, unknown>, ctx: unknown) => {
         const actor = (ctx as { actor?: string } | undefined)?.actor;
