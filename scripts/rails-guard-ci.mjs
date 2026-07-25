@@ -7,8 +7,17 @@
 // WHY A WRAPPER RATHER THAN `adlc rails-guard` DIRECTLY. The bare gate needs `--ticket` or `--rails`
 // and will not scan the store, so CI has nothing to point it at; and it counts an ADDED file as a
 // rail edit, which is correct for its purpose and fatal for ours — the PR that first writes a
-// ticket's rails would fail its own gate, every time, teaching everyone to reach for
-// ADLC_RAILS_BYPASS as routine. A bypass that fires on every ticket is not a bypass.
+// ticket's rails would fail its own gate, every time.
+//
+// AND THERE IS NO ESCAPE HATCH TO REACH FOR, which is why that mattered. This comment used to warn
+// against making `ADLC_RAILS_BYPASS` routine; the installed `@adlc/rails-guard` reads no environment
+// override at all (the name lives in `@adlc/build-gate`, a different gate, and its only exemption is
+// `version-only.mjs`, scoped to package manifests). So a first-authoring false positive here would
+// have had no way around it but softening the gate. Do not plan a change around a bypass: if a rail
+// a prior ticket froze genuinely must change — a retired vocabulary word inside frozen assertions is
+// the real case — the options are an honest red `rails` job with per-file byte-identity proof in the
+// PR, or a narrow tested exemption modelled on upstream's `version-only.mjs`. The second is a
+// decision about the backstop, and therefore a human's.
 //
 // So this narrows the question to the one CI can answer honestly: **of the rails the base already
 // FROZE, did this branch touch any?** First-authoring is invisible (nothing to protect yet); from
