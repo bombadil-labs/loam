@@ -28,7 +28,11 @@ import {
   type LessonCtx,
 } from "../../demos/tutorial/lessons.mjs";
 
-vi.setConfig({ testTimeout: 20000 });
+// A hang guard, not a performance bound: this suite walks the whole 16-lesson tutorial arc
+// and takes 21-35s wall-clock when the machine is CPU-contended (parallel suites, background
+// builds), so a 20s clock raced real work and lost only under load — the T73/T75 shape, a
+// guard below the work's own honest runtime. 120s still catches a genuine hang cold.
+vi.setConfig({ testTimeout: 120_000 });
 
 const packetFile = (name: string): unknown[] =>
   (
