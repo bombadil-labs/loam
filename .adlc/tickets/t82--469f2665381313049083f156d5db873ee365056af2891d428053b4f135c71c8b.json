@@ -1,0 +1,15 @@
+{
+  "body": "FINDING (verified). src/index.ts is the package's public barrel — every other gateway module (accounts, gateway, public, erase, trust, genesis, gql, surface, registration) is re-exported from it. `src/gateway/container.ts` exports, among others, `ContainerSpec`, `ContainerTrust`, `ContainerPosture`, `ContainerOptions`, `Container`, `ResolvedContainer`, `DetachRecord`, `ContainerTable`, `containerClaims`, `exclusionClaims`, `detachClaims`, `termClaims`, `containerDefect`, `readContainerTable`, `containerAdmission`, `containerScopeImpl`, `openContainerImpl`, `unreachableWallReport` — none appear in src/index.ts (grep confirms zero matches for \"container\" or \"Container\"). `src/gateway/container-identity.ts` exports `ModuleVersion` and `freezeMembers` — also absent. test/cli/pack.test.ts (the packaging-surface pin) never references Container either, so nothing currently guards this.\n\nCONSEQUENCE: a package consumer doing `import { openContainer, type Container, type ContainerOptions } from \"@bombadil/loam\"` (the natural way to use the T32 container feature per SPEC) gets a compile error — the only way to reach the T32 surface today is a deep import of `dist/gateway/container.js`, which is not a supported/typed entry point and can be restructured without a semver signal.\n\nFIX SHAPE: add a container export block to src/index.ts mirroring the existing pattern (types + the claim-builder functions + the door functions actually meant for external callers — likely `Container`, `ContainerOptions`, `ContainerSpec`, `ContainerTrust`, `ContainerPosture`, `ResolvedContainer`, `ContainerTable`, `containerClaims`, `exclusionClaims`, `detachClaims`, `openContainer` (the public name for `openContainerImpl`, check call convention), `ModuleVersion`, `freezeMembers`). Audit which of the `*Impl`-suffixed / lower-level names (`containerScopeImpl`, `unreachableWallReport`) are genuinely public API vs. internal wiring before exporting them wholesale — export the door, not the plumbing.\n\nRAILS: a test/cli/pack.test.ts-style or dedicated `test/index-surface.test.ts` assertion that `import(\"@bombadil/loam\")` (or the built dist/index.d.ts) exposes the container names; a smoke test that constructs a container end-to-end using ONLY the public import (no deep `src/gateway/container` path).\n\nSee sibling ticket (gather-constructor helpers) for a related but separately-scoped ergonomics gap in the same neighborhood.\n\nCARE: additive export fix restoring intended reachability of already-built T32 behavior — self-mergeable once green + P5 clean (adds no new capability, just makes an existing one importable).",
+  "edges": [],
+  "id": "T82",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "src/index.ts",
+    "src/gateway/container.ts",
+    "src/gateway/container-identity.ts",
+    "test/cli/pack.test.ts"
+  ],
+  "status": "todo",
+  "title": "T32's container surface is unreachable from the package: nothing in container.ts / container-identity.ts is re-exported from src/index.ts"
+}

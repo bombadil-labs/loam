@@ -188,10 +188,16 @@ its MECHANISM (ordinary publish + adoption provenance), and its IDEMPOTENCE rule
    resolves through it) AND the renderer still serves 404 from the root while serving 200 from the
    module's own container. — `test/gateway/adopt-law.test.ts` (object level: what the root's door
    answers, not what a registry lists).
-2. **The blessing is the ordinary publish path.** The deltas landed by an adoption are
-   shape-identical to a direct operator `publishRegistration` of the same schema, plus exactly one
-   `loam.adoption` record naming the source module version. — `test/gateway/adopt-law.test.ts`,
-   asserted by diffing the two grounds delta-for-delta.
+2. **The blessing is the ordinary publish path — with the source's timestamps.** The deltas landed
+   by an adoption are shape-identical to a direct operator `publishRegistration` of the same
+   schema EXCEPT that each blessed delta inherits its SOURCE delta's timestamp (the #111
+   discipline: same content + same author + same timestamp → same id, so a re-blessing re-mints
+   the same id and §11's tombstone refuses it by identity — a fresh timestamp would mint an id no
+   tombstone has heard of, silently bypassing erasure; premortem 2026-07-24, narrative 4, which
+   proved the original wording and the erasure rail were mutually unsatisfiable). Idempotence
+   (criterion 4) rides the same identity. Plus exactly one `loam.adoption`-shaped record naming
+   the source. — `test/gateway/adopt-law.test.ts`, asserted by diffing the two grounds
+   delta-for-delta modulo timestamps, AND by erase-then-re-bless refusing at the door.
 3. **Facts never need it.** Against a module exporting only entities/byte-blobs, with ZERO
    adoptions performed: the byte door serves the exported blob (200, correct bytes) and a read
    resolves the exported entity — while `adoptLaw` against the same module refuses with "exports
@@ -230,12 +236,17 @@ its MECHANISM (ordinary publish + adoption provenance), and its IDEMPOTENCE rule
     `social@1` returns a coherence note naming both versions; adopting when all siblings match is
     silent. — `test/gateway/adopt-law.test.ts`.
 
-14. **The guard is atomic, and the rail FORCES the race.** Using the adoption door's test seam
-    (a post-check hold — the same injected-barrier idiom the store suites already use for WAL
-    races), adoption A is held between its name-check and its append while adoption B of
-    different-content same-name law runs to completion; releasing A yields exactly one bound
-    registration and one refusal naming the mover. A sequential pass of the same pair proves
-    nothing and the rail must not be satisfiable that way. — `test/gateway/adopt-law.test.ts`.
+14. **The guard is atomic, the rail FORCES the race — and the critical section covers EVERY door
+    on a living name.** Using the adoption door's test seam (a post-check hold — the same
+    injected-barrier idiom the store suites already use for WAL races), adoption A is held
+    between its name-check and its append while adoption B of different-content same-name law
+    runs to completion; releasing A yields exactly one bound registration and one refusal naming
+    the mover. A sequential pass of the same pair proves nothing and the rail must not be
+    satisfiable that way. AND the cross-door leg (premortem 2026-07-24, narrative 5): the same
+    hold on adoption A while a DIRECT `publishRegistration` of different-content same-name law
+    completes — releasing A refuses naming the mover, because the name-guard's serialization is
+    one per-gateway seam shared by every living-name publish, never a queue private to the
+    adoption door. — `test/gateway/adopt-law.test.ts`, both legs.
 15. **A lying manifest cannot smuggle a pen.** Against a module whose manifest declares its
     pen-holding renderer as a schema row: `blessAll` without the pen flag STILL refuses, naming
     the renderer — classification read from the export bytes, not the manifest. —
@@ -267,8 +278,40 @@ its MECHANISM (ordinary publish + adoption provenance), and its IDEMPOTENCE rule
     row 4 singly with `as` then re-running blesses the rest with row-4's witness silent. —
     `test/gateway/adopt-law.test.ts`.
 
-## Open for Myk (the decision itself)
+23. **There is ONE door, and the old refusal still points at it.** No `promoteLaw(source,
+    deltaId)` sibling ships: `promote()` (promote-outputs) STILL refuses a law delta naming
+    §24.4 (the frozen `test/gateway/promotion.test.ts` rail, unmoved), and the refusal's remedy
+    is `adoptLaw` — so every guard in this list (root-name, pen flag, bytes-classification,
+    route) is on the only path law can cross. A second door would let a raw delta id walk past
+    all of them (premortem 2026-07-24, narrative 1). — `test/gateway/adopt-law.test.ts` (the
+    refusal + the remedy text) plus the untouched frozen rail.
+24. **Blessing the code never confers the pen (§6's two keys).** Adopt a pen-holding renderer's
+    law (with the pen flag): the renderer binds and SERVES from the root — and its first
+    form-write REFUSES for lack of write standing, until a separate, deliberate operator grant
+    lands; then it writes. Asserted at the door (the write path), never at a registry. The
+    ticket named this the trap; it now has a number (premortem, narrative 2). —
+    `test/gateway/adopt-law.test.ts`.
+25. **Survival, not presence, at the source.** A law row RETRACTED inside its own container (the
+    author's surviving strike) refuses adoption naming the strike — blessing must not re-speak
+    law its own author took back (H1's fifth site; the fact-side twin is T39's open
+    refuse-vs-revive, and law resolves it REFUSE because a blessed program re-points living
+    names). — `test/gateway/adopt-law.test.ts`.
+26. **The trail parses, positively, and joins the container table.** After one adoption and one
+    witness: the provenance reader returns BOTH records with their fields (kind, source module
+    version, alias, who, when) — a walk that returns nothing must fail this rail, so criterion
+    11's absence-assertion can never be satisfied vacuously (premortem, narrative 6) — and when
+    the source is a NAMED container the record cites the container ENTITY (joinable to the T32
+    table), never a free-text label. — `test/gateway/adopt-law.test.ts`.
 
-Accept per-export-as-primitive + bless-all-as-sugar? The 2026-07-24 conversation leaned yes after
-the install-vs-adopt reframe and the hub stories; recorded here as a RECOMMENDATION awaiting his
-word at this PR.
+**Classification reads the SOURCE's own ground, stated per posture** (premortem note (a)): a
+wall-posture source classifies and resolves rows against the container gateway's reactor; a
+curated/property source against the primary's — one rule, named here so a dangling address
+refuses identically on both postures (criterion 19's check is posture-blind by construction).
+
+## Decided (was: Open for Myk)
+
+Per-export-as-primitive + bless-all-as-sugar was ACCEPTED by Myk's merge of #195 (2026-07-24) —
+the PR carrying this spec was framed as that decision. T33 builds it; the landing PR states the
+reconciliation (the ticket's `promoteLaw(deltaId)` sketch folds into `adoptLaw`'s
+adopt-by-address, one door, criterion 23) and flags the criterion-2 timestamp decision for P6
+review rather than re-asking the granularity question.

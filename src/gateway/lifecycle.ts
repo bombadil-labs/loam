@@ -151,6 +151,19 @@ export interface PublishOutcome {
   readonly reason?: string;
 }
 
+/**
+ * The publish door's internal seam (ticket T33) — not a caller-facing option. `adoptLaw` reuses THIS
+ * door rather than minting law beside it, so every proof the ordinary path runs (the trial registry,
+ * the GraphQL build, the resolver loads) also guards a blessing; these two fields are the only
+ * things a blessing needs the door to do differently.
+ */
+export interface PublishInternals {
+  /** Timestamps, consumed in mint order: definition, living Schema, frozen snapshot, binding. */
+  readonly clock?: () => number;
+  /** Delta ids the binding RETIRES as it takes a living name (§27.8's reversible supersede). */
+  readonly negates?: readonly string[];
+}
+
 // Everything that shapes the surface, as one comparable key.
 export function boundKey(r: Bound): string {
   return [
@@ -569,6 +582,7 @@ export async function publishRegistrationImpl(
   mutations?: ClaimTemplates,
   writable?: readonly string[],
   resolvers?: ResolverSpecs,
+  internals?: PublishInternals,
 ): Promise<PublishOutcome> {
   const seed = context?.actor ?? gw.options.seed;
   if (seed === undefined) {
@@ -644,8 +658,12 @@ export async function publishRegistrationImpl(
 
   const author = authorForSeed(seed);
   const schemaEntity = schemaEntityFor(hyperschema, entity);
+  // The clock is a seam, not a decision: an ordinary publish stamps NOW, and a T33 blessing threads
+  // the SOURCE's timestamps through so its twins re-mint the source's ids (see adopt-law.ts's H4
+  // note — the tombstone refusal and idempotence both ride that identity).
+  const tick = internals?.clock ?? ((): number => gw.nextTimestamp());
   const definition = signClaims(
-    publishHyperSchemaClaims(hyperschema, schemaEntity, author, gw.nextTimestamp()),
+    publishHyperSchemaClaims(hyperschema, schemaEntity, author, tick()),
     seed,
   );
   await loadHyperSchemaImpl(gw, [definition], schemaEntity); // proves, then persists the definition
@@ -659,16 +677,29 @@ export async function publishRegistrationImpl(
     schema,
     roots,
     author,
-    () => gw.nextTimestamp(),
+    tick,
     templates,
     writable,
     resolvers,
   );
-  await gw.append([
-    signClaims(living, seed),
-    signClaims(snapshot, seed),
-    signClaims(binding, seed),
-  ]);
+  // A blessing that TAKES a living name retires the incumbent from the binding itself (§27.8's
+  // reversible supersede): its own timestamp is the source's, so it cannot win on recency, and a
+  // negation carried here stops counting the moment this binding is struck — which resurfaces the
+  // incumbent as the winner, rather than destroying it.
+  const filed =
+    internals?.negates === undefined || internals.negates.length === 0
+      ? binding
+      : {
+          ...binding,
+          pointers: [
+            ...internals.negates.map((id) => ({
+              role: "negates",
+              target: { kind: "delta" as const, deltaRef: { delta: id } },
+            })),
+            ...binding.pointers,
+          ],
+        };
+  await gw.append([signClaims(living, seed), signClaims(snapshot, seed), signClaims(filed, seed)]);
   replayRegistrationsImpl(gw);
   await preloadResolversImpl(gw);
   // Success must mean BOUND. The deltas are down either way (append-only ground), but a
