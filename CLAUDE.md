@@ -430,6 +430,29 @@ busy.
   `.adlc/specs/NN-slug.md` (gateable, criteria-bearing, P1's instrument), which becomes a `spec/`
   section only at landing. `spec/` is the archive, never the drafting table. Do not accumulate more
   root markdown; fold, don't add.
+- **ERASURE IS DELEGATED AS A DIRECTION, NEVER AS AN AUTHORITY TO WIDEN REACH** (Myk, 2026-07-25).
+  He settled the LEVEL — erasure keeps its full provable guarantee, and that decision is closed, so
+  no ticket needs to ask again — and in the same breath said "don't ask me about it again," which
+  taken literally would hand autonomous churn the most destructive subsystem in the stack. It does
+  not. The two halves separate cleanly, and the split is the rule:
+  - **A change that makes a REPORT more honest self-merges** on the ordinary bar: refusing where it
+    used to claim, failing closed where it used to assume, naming a gap it cannot close. This is
+    where nearly all erasure work lives, and it is safe by construction — you cannot overclaim by
+    claiming less.
+  - **A change that WIDENS WHAT GETS PURGED is Myk's merge, every time**: a new tier in the sweep, a
+    bigger condemned set, a more aggressive fan-out, anything that could remove a delta which would
+    previously have survived. The PR must state **in one line what can now be deleted that could not
+    before**. There is no "it's obviously fine" case here — this is the one direction whose bugs are
+    unrecoverable, and a wrong `>` costs a user their data with no way back.
+  - **Every erasure rail is TWO-SIDED.** The target is gone AND a named live bystander survives. A
+    rail that only proves removal cannot see over-purging, which is precisely the failure that
+    matters most.
+  - **No agent ever erases data it did not create in its own temp dir.** Never `demos/village/homes/`,
+    never a real `~/.loam`, never a path outside the test's own `mkdtempSync`. Verification happens
+    against fixtures, always — "I ran it to check" is how the footgun fires.
+  The diagnostic that keeps this tractable: judge an erasure change by *can this report be false?*
+  rather than *does it remove the bytes?* Purging is easy; every erasure bug this repo has paid for
+  is in the claiming (H7), not the forgetting.
 - **A flaky test is fixed NOW, not managed** (Myk, 2026-07-23). The gates' exit codes are VERDICTS,
   and the rails drive a state machine on top of them: P5 evidence binds a revision, rails freeze at
   landing, a self-merge hangs on a green bar, `hollow-test` refuses a non-green baseline outright. A
