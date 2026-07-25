@@ -59,11 +59,14 @@ export function groundAsOfImpl(gw: Gateway, asOf: number): DeltaSet {
 // narrowing is applied AFTER the reconstruction, and the temporal door confesses a slate-suppression
 // count in the same register `forgottenSince` already uses. Absent when nothing is suppressed, so a
 // read over a store with no slate is byte-identical to what §26 always answered.
+// The count is REQUIRED, with no default. A default of 0 would read "assume nothing was suppressed",
+// which is the fail-open direction on a confession — the same reason `now` is required on the read
+// seam it is computed from.
 export function annotateImpl(
   gw: Gateway,
   node: ResolvedNode,
   asOf: number | undefined,
-  suppressed = 0,
+  suppressed: number,
 ): ResolvedNode {
   if (asOf === undefined) return node;
   return {
