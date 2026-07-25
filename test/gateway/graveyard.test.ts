@@ -51,6 +51,10 @@ describe("T64 criterion 12 — the graveyard is durable, joinable, and its compl
     for (const m of members) {
       expect(await gw.backend.holds(m.id)).toBe(false);
       const verdicts = report.members.find((r) => r.member === m.id)!.tiers;
+      // The COUNT first: `.every()` is vacuously true on an empty list, so a report that probed no
+      // tier at all would pass the verdict assertion and prove nothing.
+      expect(verdicts.length).toBeGreaterThan(0);
+      expect(verdicts.map((v) => v.tier)).toContain("primary");
       expect(verdicts.every((v) => v.holds === false)).toBe(true);
     }
     // TWO-SIDED: the named live bystander survived, at the bytes and through a Schema.
@@ -92,7 +96,9 @@ describe("T64 criterion 12 — the graveyard is durable, joinable, and its compl
 
     // And it is re-derivable from the STORE rather than from this process: the frozen version's ids
     // come back out of the published Term the graveyard names, which survived the cut.
-    const frozen = readFrozenTerm(gw.reactor, grave.membershipAt)!;
+    const frozen = readFrozenTerm(gw.reactor, grave.membershipAt);
+    expect(frozen.ok).toBe(true);
+    if (!frozen.ok) throw new Error(frozen.why);
     expect([...frozen.ids].sort()).toEqual(members.map((m) => m.id).sort());
     await gw.close();
   });
@@ -100,15 +106,26 @@ describe("T64 criterion 12 — the graveyard is durable, joinable, and its compl
   it("a walk that finds no members is NOT a proof — `holds` is false on an empty set", async () => {
     const gw = await bootSlateStore();
     const member = observed(FERN, "height", 30, 1000, OP_SEED);
-    await gw.append([member]);
+    const bystander = observed(FERN, "tag", "shade", 1100, OP_SEED);
+    await gw.append([member, bystander]);
     const stood = await standSlate(gw, { members: [member], closes: ["egress"] });
     const report = await gw.cut(stood.container, { now: BEFORE_DEADLINE });
+    // Two-sided, both levels — no cut rail in this suite goes without a named live bystander.
+    expect(await gw.backend.holds(bystander.id)).toBe(true);
+    const tags = await gw.query(`{ plant(entity: "${FERN}") { tag } }`);
+    expect((tags.data as { plant: { tag: string[] } }).plant.tag).toEqual(["shade"]);
     // Ask about a graveyard nobody wrote: the arithmetic must answer FALSE rather than vacuously TRUE.
     const nothing = graveyardCompleteness(gw.reactor, OP, `${report.graveyard.slice(0, -2)}zz`);
     expect(nothing.members).toEqual([]);
     expect(nothing.holds).toBe(false);
+    expect(nothing.readable).toBe(false); // not-found is UNREADABLE, never a clean empty proof
     // And the real one still holds, so the negative rail is not just a broken lookup.
-    expect(graveyardCompleteness(gw.reactor, OP, report.graveyard).holds).toBe(true);
+    const real = graveyardCompleteness(gw.reactor, OP, report.graveyard);
+    expect(real.holds).toBe(true);
+    expect(real.readable).toBe(true);
+    expect(real.members).toEqual([member.id]);
+    // Two-sided, at the reader: the cut took the member and left the store answering.
+    expect(await gw.backend.holds(member.id)).toBe(false);
     await gw.close();
   });
 });

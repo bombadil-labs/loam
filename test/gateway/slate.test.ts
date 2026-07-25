@@ -29,6 +29,7 @@ import { FERN, observed } from "../spike/garden.js";
 import {
   AFTER_DEADLINE,
   BEFORE_DEADLINE,
+  groundIds,
   DEADLINE,
   OP,
   OP_SEED,
@@ -141,8 +142,8 @@ describe("T64 criterion 2 — membership is frozen by ENFORCEMENT, at both level
         wrongVersion: gw.freeze(frozenMembershipTerm([other.id])).id,
       }),
     ).rejects.toThrow(/does not freeze to the version it declares/);
-    // A declaration carrying no version at all is refused too: a live membership Term would keep
-    // admitting deltas as they arrive, so the impact list would drift and under-report silently.
+    // A CONTAINER that points somewhere else than the record PINS is refused: the record's pair is
+    // immutable, so a re-declaration cannot re-identify the set underneath a standing slate.
     await expect(
       standSlate(gw, {
         container: "container:slate:unfrozen",
@@ -150,7 +151,48 @@ describe("T64 criterion 2 — membership is frozen by ENFORCEMENT, at both level
         closes: ["cite"],
         omitVersion: true,
       }),
-    ).rejects.toThrow(/must be FROZEN by address/);
+    ).rejects.toThrow(/while the standing record PINS/);
+    // And a RECORD carrying no pins at all is refused, naming why pinning only on the container is
+    // not enough: a declaration is latest-wins on the pair, so the set could GROW after identification.
+    const loose = frozenMembershipTerm([condemned.id]);
+    const pub = signClaims(termClaims(loose, OP, 55_000), OP_SEED);
+    await gw.append([pub]);
+    await gw.append([
+      declareContainer(
+        {
+          container: "container:slate:nopins",
+          trust: "curated",
+          posture: "property",
+          membershipAt: pub.id,
+          version: gw.freeze(loose).id,
+        },
+        55_001,
+      ),
+    ]);
+    const pinned = slateClaims(
+      {
+        container: "container:slate:nopins",
+        membershipAt: pub.id,
+        version: gw.freeze(loose).id,
+        requestedBy: "subject:42",
+        requestedByForm: "plain",
+        requestedAt: REQUESTED_AT,
+        deadline: DEADLINE,
+        closes: ["cite"],
+      },
+      OP,
+      55_002,
+    );
+    for (const role of ["membershipAt", "version"]) {
+      await expect(
+        gw.append([
+          signClaims(
+            { ...pinned, pointers: pinned.pointers.filter((x) => x.role !== role) },
+            OP_SEED,
+          ),
+        ]),
+      ).rejects.toThrow(new RegExp(`PINS its condemned set: exactly one string \`${role}\``));
+    }
     // Two-sided: the agreeing declaration binds.
     const stood = await standSlate(gw, {
       container: "container:slate:agrees",
@@ -158,6 +200,94 @@ describe("T64 criterion 2 — membership is frozen by ENFORCEMENT, at both level
       closes: ["cite"],
     });
     expect(gw.slates(BEFORE_DEADLINE).map((s) => s.container)).toEqual([stood.container]);
+    await gw.close();
+  });
+
+  it("THE OVER-PURGE PROBE: a container re-declared WIDER mid-window cannot widen the cut", async () => {
+    // The whole point of §29.2, at the one level that matters: a container declaration is LATEST-WINS
+    // on membershipAt/version (only trust/posture are fixed to the earliest), so pinning the condemned
+    // set only there would let one further operator-signed declaration re-point it — every door
+    // passing, the cut destroying the widened set, and the graveyard recording the WIDENED address so
+    // every receipt would prove completeness over the set that was cut rather than the set identified.
+    const gw = await bootSlateStore();
+    const condemned = observed(FERN, "height", 30, 1000, OP_SEED);
+    const bystanders = [
+      observed(FERN, "height", 31, 1001, OP_SEED),
+      observed(FERN, "height", 32, 1002, OP_SEED),
+      observed(FERN, "tag", "shade", 1100, OP_SEED),
+    ];
+    await gw.append([condemned, ...bystanders]);
+    const stood = await standSlate(gw, { members: [condemned], closes: ["egress", "cite"] });
+
+    // The operator re-declares the SAME container over ALL FOUR deltas, with a self-consistent pair.
+    const wide = frozenMembershipTerm([condemned.id, ...bystanders.map((d) => d.id)]);
+    const widePub = signClaims(termClaims(wide, OP, 56_000), OP_SEED);
+    await gw.append([widePub]);
+    await gw.append([
+      declareContainer(
+        {
+          container: stood.container,
+          trust: "curated",
+          posture: "property",
+          membershipAt: widePub.id,
+          version: gw.freeze(wide).id,
+        },
+        56_001,
+      ),
+    ]);
+
+    // THE RECORD'S PINS GOVERN. The condemned set did not move, the doors still enforce over the
+    // ORIGINAL one, and the operator is told their re-declaration bound nothing.
+    const report = gw.slates(BEFORE_DEADLINE)[0]!;
+    expect(report.members).toEqual([condemned.id]);
+    expect(report.membershipAt).toBe(stood.membershipAt);
+    expect(report.disagreement).toMatch(/cannot be re-pointed underneath it/);
+    expect([...report.enforced].sort()).toEqual(["cite", "egress"]);
+    expect((await gw.health(BEFORE_DEADLINE)).slates.disagreeing).toEqual([stood.container]);
+
+    // And the CUT refuses outright rather than choosing a reading: a graveyard's frozen set is
+    // durable, so the two readings must not be allowed to differ in a permanent record.
+    const before = groundIds(gw);
+    await expect(gw.cut(stood.container, { now: BEFORE_DEADLINE })).rejects.toThrow(
+      /container and the record disagree/,
+    );
+    expect(groundIds(gw)).toEqual(before);
+    // TWO-SIDED, and this is the over-purge half: not one of the three bystanders lost a byte.
+    for (const d of bystanders) expect(await gw.backend.holds(d.id)).toBe(true);
+    expect(await gw.backend.holds(condemned.id)).toBe(true);
+    await gw.close();
+  });
+
+  it("a NON-EXTENSIONAL membership Term is refused — an empty id set is not a frozen one", async () => {
+    // `author eq OP` freezes to a perfectly honest address, so an agreement check alone certifies it
+    // while the id set reads EMPTY: all three closures would withhold nothing, the review would tell
+    // the operator "nothing", and no field would say anything was wrong. A removal order that closes
+    // nothing and reports nothing wrong is the worst possible shape for this surface.
+    const gw = await bootSlateStore();
+    const condemned = observed(FERN, "height", 30, 1000, OP_SEED);
+    await gw.append([condemned]);
+    await expect(
+      standSlate(gw, {
+        members: [condemned],
+        closes: ["egress", "cite"],
+        liveTerm: {
+          op: "select",
+          pred: { match: { field: "author", cmp: "eq", const: OP } },
+          in: "input",
+        },
+      }),
+    ).rejects.toThrow(/not an EXTENSIONAL id set/);
+    // Two-sided: no slate stands, so nothing reports itself enforcing, and every door still serves.
+    expect(gw.slates(BEFORE_DEADLINE)).toEqual([]);
+    expect(gw.offeredDeltas().map((d) => d.id)).toContain(condemned.id);
+    // And the extensional form over the same member is accepted — the refusal is about SHAPE.
+    const ok = await standSlate(gw, {
+      container: "container:slate:extensional",
+      members: [condemned],
+      closes: ["egress"],
+    });
+    expect(gw.slates(BEFORE_DEADLINE)[0]!.members).toEqual([condemned.id]);
+    expect(ok.version).not.toBe("");
     await gw.close();
   });
 
@@ -206,6 +336,8 @@ describe("T64 criterion 3 — `closes` and `deadline` are required, and `none` i
     ]);
     const base = {
       container,
+      membershipAt: published.id,
+      version: gw.freeze(term).id,
       requestedBy: "subject:42",
       requestedByForm: "plain" as const,
       requestedAt: REQUESTED_AT,
@@ -278,6 +410,8 @@ describe("T64 criterion 3 — `closes` and `deadline` are required, and `none` i
     const claims = slateClaims(
       {
         container,
+        membershipAt: published.id,
+        version: gw.freeze(term).id,
         requestedBy: "a".repeat(64),
         requestedByForm: "sealed",
         requestedAt: REQUESTED_AT,
@@ -316,6 +450,8 @@ describe("T64 criterion 3 — `closes` and `deadline` are required, and `none` i
       slateClaims(
         {
           container: stood.container,
+          membershipAt: stood.membershipAt,
+          version: stood.version,
           requestedBy: "subject:99",
           requestedByForm: "plain",
           requestedAt: REQUESTED_AT,

@@ -1090,10 +1090,17 @@ async function openWall(
 // posture — that is neither currently attached nor covered by a surviving detach record. An
 // unreachable wall is a named fault, never a silent gap; a covered one is listed as deliberately
 // kept. (The full locator machinery rides T78's mounts; this is the rule, shipped with the mint.)
-export function unreachableWallReport(gw: Gateway): { faults: string[]; kept: string[] } {
+export function unreachableWallReport(gw: Gateway): {
+  faults: string[];
+  kept: string[];
+  /** The FAULT walls by entity name. `faults` carries sentences; a reader that must name a TIER
+   *  needs the name, and deriving one by parsing a refusal message is how a report goes stale. */
+  faultEntities: string[];
+} {
   const table = readContainerTable(gw.reactor, gw.operatorAuthor);
   const faults: string[] = [];
   const kept: string[] = [];
+  const faultEntities: string[] = [];
   // §28.4's knobs must not flip through the survival algebra either (the erasure lens's
   // finding): strike the earliest declaration while a federated flip survives, and the binding
   // posture would change wall→property with the wall's bytes still on disk — dissolving this
@@ -1120,6 +1127,7 @@ export function unreachableWallReport(gw: Gateway): { faults: string[]; kept: st
       kept.push(entity);
       continue;
     }
+    faultEntities.push(entity);
     faults.push(
       rec.posture === "wall"
         ? `the declared wall container "${entity}" is neither attached nor covered by a detach ` +
@@ -1138,5 +1146,6 @@ export function unreachableWallReport(gw: Gateway): { faults: string[]; kept: st
   }
   faults.sort();
   kept.sort();
-  return { faults, kept };
+  faultEntities.sort();
+  return { faults, kept, faultEntities };
 }

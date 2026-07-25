@@ -65,6 +65,13 @@ class RefusingBackend implements StoreBackend {
   }
 }
 
+/** The bystander a cut must never touch, read THROUGH A SCHEMA — the object level, at the door. */
+const tagThrough = async (gw: Gateway): Promise<string[] | null> => {
+  const res = await gw.query(`{ plant(entity: "${FERN}") { tag } }`);
+  expect(res.errors, JSON.stringify(res.errors)).toBeUndefined();
+  return (res.data as { plant: { tag: string[] | null } }).plant.tag;
+};
+
 const heightThrough = async (gw: Gateway): Promise<number | null> => {
   const res = await gw.query(`{ plant(entity: "${FERN}") { height } }`);
   expect(res.errors, JSON.stringify(res.errors)).toBeUndefined();
@@ -78,9 +85,22 @@ describe("T64 criterion 9 — the pre-flight is all-or-refuse and leaves the gro
     const bystander = observed(FERN, "tag", "shade", 1100, OP_SEED);
     await gw.append([member, bystander]);
     const stood = await standSlate(gw, { members: [member], closes: ["egress", "cite"] });
-    // The published Term is erased out from under the declaration, so the container resolves and its
-    // membership address does not. If we cannot read WHICH IDS ARE CONDEMNED we cannot cut (H9).
-    await gw.erase(stood.membershipAt);
+    // ERASING the pinned Term is REFUSED, and that refusal is the primary defence: it is what keeps a
+    // slate from silently ceasing to enforce while still reporting itself standing.
+    await expect(gw.erase(stood.membershipAt)).rejects.toThrow(/PINNED membership Term/);
+    // So the state is reached the only way left — the row is LOST at the store (a restore gone wrong, a
+    // §25 quarantined row). If we cannot read WHICH IDS ARE CONDEMNED we cannot cut (H9).
+    await gw.backend.purge([stood.membershipAt]);
+    await gw.reseat();
+    // AND THE SLATE SAYS SO rather than reporting closures it is not delivering: `enforced` is empty
+    // while `closes` still records what was asked for, and health surfaces it. Every closure is seeded
+    // from the member set, so an unreadable set closes NOTHING — and claiming otherwise would be a
+    // report of protection never delivered, on the surface whose report is a legal claim.
+    const report = gw.slates(BEFORE_DEADLINE)[0]!;
+    expect(report.unresolved).toMatch(/resolves to nothing here/);
+    expect(report.enforced).toEqual([]);
+    expect([...report.closes].sort()).toEqual(["cite", "egress"]);
+    expect((await gw.health(BEFORE_DEADLINE)).slates.unresolved).toEqual([stood.container]);
     const before = groundIds(gw);
     await expect(gw.cut(stood.container, { now: BEFORE_DEADLINE })).rejects.toThrow(
       /resolves to nothing here/,
@@ -89,9 +109,12 @@ describe("T64 criterion 9 — the pre-flight is all-or-refuse and leaves the gro
     expect(survivingTombstones(gw.reactor, OP).map((t) => tombstoneTarget(t.claims))).not.toContain(
       member.id,
     );
-    // Two-sided: both the member and the bystander still hold their bytes.
+    // TWO-SIDED at BOTH levels: the bytes are there AND a reader still resolves the bystander through
+    // a Schema. Bytes-intact-reader-blind is the T15/T38 direction, and this file ships two set-valued
+    // narrowings where it lives.
     expect(await gw.backend.holds(member.id)).toBe(true);
     expect(await gw.backend.holds(bystander.id)).toBe(true);
+    expect(await tagThrough(gw)).toEqual(["shade"]);
     await gw.close();
   });
 
@@ -116,6 +139,7 @@ describe("T64 criterion 9 — the pre-flight is all-or-refuse and leaves the gro
     expect(groundIds(gw)).toEqual(before);
     expect(await gw.backend.holds(member.id)).toBe(true);
     expect(await gw.backend.holds(bystander.id)).toBe(true);
+    expect(await tagThrough(gw)).toEqual(["shade"]); // and a reader still sees the bystander
     // And the slate STANDS: its doors are still closed, so the refusal is not a quiet reopening.
     expect(gw.offeredDeltas().map((d) => d.id)).not.toContain(member.id);
     expect(gw.slates(BEFORE_DEADLINE)).toHaveLength(1);
@@ -195,9 +219,10 @@ describe("T64 criterion 11 — order and crash semantics: graveyard BEFORE strik
     expect(gw.graveyards()).toHaveLength(1);
     expect(report.graveyard).toBe(graveyards[0]!.id);
     expect(gw.containers().containers.get(stood.container)).toBeUndefined();
-    // Two-sided: the bystander survived both attempts.
+    // Two-sided, both levels: the bystander survived both attempts at the bytes AND through a Schema.
     expect(await gw.backend.holds(bystander.id)).toBe(true);
     expect(await gw.backend.holds(member.id)).toBe(false);
+    expect(await tagThrough(gw)).toEqual(["shade"]);
     await gw.close();
   });
 });
@@ -222,9 +247,11 @@ describe("T64 criterion 14 — resurrection is visible at review and REAL at the
     // OBJECT LEVEL, at the door: the target resolves LIVE again.
     expect(await heightThrough(gw)).toBe(30);
     expect(await gw.backend.holds(retraction.id)).toBe(false);
-    // Two-sided: the revived target's own bytes were never touched, and neither was the bystander's.
+    // Two-sided, both levels: the revived target's bytes were never touched, nor the bystander's, and a
+    // reader still resolves the bystander.
     expect(await gw.backend.holds(claim.id)).toBe(true);
     expect(await gw.backend.holds(bystander.id)).toBe(true);
+    expect(await tagThrough(gw)).toEqual(["shade"]);
     await gw.close();
   });
 });
@@ -270,8 +297,9 @@ describe("T64 criterion 19 — a member erased mid-window: the cut COMPLETES, th
       .map((t) => tombstoneTarget(t.claims))
       .sort();
     expect(joined).toEqual([members[0]!.id, members[2]!.id, members[3]!.id].sort());
-    // Two-sided: the bystander survived a four-member cut.
+    // Two-sided, both levels: the bystander survived a four-member cut, at the bytes and at the reader.
     expect(await gw.backend.holds(bystander.id)).toBe(true);
+    expect(await tagThrough(gw)).toEqual(["shade"]);
     await gw.close();
   });
 
@@ -291,9 +319,10 @@ describe("T64 criterion 19 — a member erased mid-window: the cut COMPLETES, th
       new RegExp(`${phantom.id}[\\s\\S]*NO surviving lawful tombstone`),
     );
     expect(groundIds(gw)).toEqual(before);
-    // Two-sided: nothing was erased on the way to the refusal.
+    // Two-sided, both levels: nothing was erased on the way to the refusal, and a reader agrees.
     expect(await gw.backend.holds(real.id)).toBe(true);
     expect(await gw.backend.holds(bystander.id)).toBe(true);
+    expect(await tagThrough(gw)).toEqual(["shade"]);
     await gw.close();
   });
 });

@@ -18,7 +18,15 @@ import { describe, expect, it } from "vitest";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { RECEIPT_FIELDS, graveyardCompleteness } from "../../src/gateway/slate.js";
 import { FERN, observed } from "../spike/garden.js";
-import { BEFORE_DEADLINE, OP, OP_SEED, bootSlateStore, standSlate, strike } from "./slating.js";
+import {
+  BEFORE_DEADLINE,
+  OP,
+  OP_SEED,
+  bootSlateStore,
+  declareContainer,
+  standSlate,
+  strike,
+} from "./slating.js";
 
 /** The §29.7 receipt's field list, enumerated HERE so the rail and the source must agree. */
 const HISTORY = [
@@ -54,6 +62,48 @@ describe("T64 criterion 16 — the CutReport carries every receipt HISTORY field
     // named on the observation side; nothing on the history side may be a byte verdict.
     expect(declared.get("tiers")).toBe("observation");
     expect((HISTORY as readonly string[]).includes("tiers")).toBe(false);
+  });
+
+  it("the partition is DECIDABLE from a real report, not a literal against itself", async () => {
+    // The assertion above compares two lists in this file, which cannot see a field the SOURCE
+    // classifies wrongly or forgets. This one reads a real CutReport and a real Receipt and requires
+    // every field carrying a per-tier byte verdict to be on the observation side — and every key of
+    // either object to be classified at all, so a NEW field cannot arrive unpartitioned.
+    const gw = await bootSlateStore();
+    const member = observed(FERN, "height", 30, 1000, OP_SEED);
+    await gw.append([member]);
+    const stood = await standSlate(gw, { members: [member], closes: ["egress"] });
+    const report = await gw.cut(stood.container, { now: BEFORE_DEADLINE });
+    const receipt = await gw.receipt(report.graveyard, { now: BEFORE_DEADLINE });
+    const side = new Map(RECEIPT_FIELDS.map((f) => [f.field, f.side]));
+
+    // Anything shaped like a per-tier verdict must be classified OBSERVATION, found by shape.
+    const verdictBearing = (row: Record<string, unknown>): string[] =>
+      Object.entries(row)
+        .filter(
+          ([, v]) =>
+            Array.isArray(v) &&
+            v.length > 0 &&
+            typeof v[0] === "object" &&
+            v[0] !== null &&
+            "tier" in (v[0] as object) &&
+            "holds" in (v[0] as object),
+        )
+        .map(([k]) => k);
+    const found = [
+      ...verdictBearing(report.members[0] as unknown as Record<string, unknown>),
+      ...verdictBearing(receipt.members[0] as unknown as Record<string, unknown>),
+    ];
+    expect(found.length).toBeGreaterThan(0); // a rail that found none would prove nothing
+    for (const field of found) expect(side.get(field)).toBe("observation");
+
+    // And the report NAMES its own observation side, so a formatter reads it rather than guessing.
+    expect([...report.observationOnly].sort()).toEqual(
+      RECEIPT_FIELDS.filter((f) => f.side === "observation")
+        .map((f) => f.field)
+        .sort(),
+    );
+    await gw.close();
   });
 
   it("every HISTORY field is present in the CutReport or derivable from DURABLE GROUND", async () => {
@@ -127,6 +177,74 @@ describe("T64 criterion 16 — the CutReport carries every receipt HISTORY field
   });
 });
 
+describe("T64 — the RE-ISSUE path must confess what the CUT was allowed to refuse", () => {
+  it("a wall that is neither attached nor covered reads `unproven`, and the non-claim names it", async () => {
+    // `cutImpl` refuses on `walls.faults`; a RE-ISSUE cannot refuse, so it must confess. The two sets
+    // are DISJOINT — `kept` is detach-covered, `faults` is neither attached nor covered — so a reader
+    // consulting only `kept` makes a faulted tier appear NOWHERE, which reads as "not a tier" rather
+    // than `unproven`. That is H9 in the artifact whose whole purpose is not overclaiming.
+    const gw = await bootSlateStore();
+    const member = observed(FERN, "height", 30, 1000, OP_SEED);
+    const bystander = observed(FERN, "tag", "shade", 1100, OP_SEED);
+    await gw.append([member, bystander]);
+    const stood = await standSlate(gw, { members: [member], closes: ["egress"] });
+    const report = await gw.cut(stood.container, { now: BEFORE_DEADLINE });
+    // Clean first: no wall, so nothing is unproven and nothing is disclaimed.
+    const clean = await gw.receipt(report.graveyard, { now: BEFORE_DEADLINE });
+    expect(clean.members[0]!.tiers.every((v) => v.holds === false)).toBe(true);
+    expect(clean.nonClaim.join("\n")).not.toMatch(/COULD NOT BE REACHED/);
+
+    // Then a declared wall appears in the table and is never attached — the post-restart state.
+    await gw.append([
+      declareContainer({ container: "container:cold", trust: "curated", posture: "wall" }, 60_000),
+    ]);
+    const reissued = await gw.receipt(report.graveyard, { now: BEFORE_DEADLINE + 1 });
+    const cold = reissued.members[0]!.tiers.find((v) => v.tier === "container:cold")!;
+    expect(cold).toBeDefined();
+    expect(cold.holds).not.toBe(false); // the inequality is the assertion — never collapse the tri-state
+    expect(cold.holds).toBe("unproven");
+    expect(reissued.nonClaim.join("\n")).toMatch(
+      /"container:cold"[\s\S]*COULD NOT BE REACHED|COULD NOT BE REACHED[\s\S]*container:cold/,
+    );
+    // Two-sided: the primary's verdict is still a real `false`, so the confession did not smear
+    // uncertainty over a tier that WAS examined.
+    expect(reissued.members[0]!.tiers.find((v) => v.tier === "primary")!.holds).toBe(false);
+    expect(await gw.backend.holds(bystander.id)).toBe(true);
+    await gw.close();
+  });
+
+  it("an UNREADABLE frozen set is not a clean one — the arithmetic fails closed", async () => {
+    // `members.length > 0` used to stand inside `holds`, which is the H7 shape wearing a guard clause:
+    // lose the membership Term and the walk finds no ids, so "every member is accounted for" would be
+    // vacuously true over a set the store can no longer read. Deleting that clause left the whole suite
+    // green, so the verdict is now its own field.
+    const gw = await bootSlateStore();
+    const member = observed(FERN, "height", 30, 1000, OP_SEED);
+    await gw.append([member]);
+    const stood = await standSlate(gw, { members: [member], closes: ["egress"] });
+    const report = await gw.cut(stood.container, { now: BEFORE_DEADLINE });
+    expect(graveyardCompleteness(gw.reactor, OP, report.graveyard).readable).toBe(true);
+
+    // The Term row is LOST at the store — the only route left, since `eraseImpl` refuses to erase a
+    // standing slate's pinned Term and the cut refuses it as a member. A restore gone wrong, a §25
+    // quarantined row: the states this check exists to be honest about.
+    await gw.backend.purge([stood.membershipAt]);
+    await gw.reseat();
+
+    const check = graveyardCompleteness(gw.reactor, OP, report.graveyard);
+    expect(check.readable).toBe(false);
+    expect(check.unreadable).toMatch(/resolves to nothing here/);
+    expect(check.holds).toBe(false);
+    expect(check.cutCompleted).toBe(false);
+    expect(check.members).toEqual([]);
+    // And the store's forgiveness instrument says the same rather than "nothing forgiven".
+    const health = await gw.health(BEFORE_DEADLINE);
+    expect(health.forgiven.unreadable).toEqual([report.graveyard]);
+    expect(health.forgiven.count).toBe(0);
+    await gw.close();
+  });
+});
+
 describe("T64 criterion 22 — the receipt's byte verdicts are RE-PROBED, never reprinted", () => {
   it("a resurfaced byte FLIPS the re-derived verdict while the CutReport's copy does not move", async () => {
     const backend = new MemoryBackend();
@@ -196,7 +314,12 @@ describe("T64 criterion 23 — forgiveness, re-federated: the store can still se
     expect(health.erasure.outstanding).toEqual([]);
     // AND THE SECTION THAT CLOSES IT — sourced from the graveyard's frozen `version` rather than from
     // `readTombstones`, which is the only durable list of ids the store ever promised to forget.
-    expect(health.forgiven).toEqual({ count: 1, present: 1, ids: [member.id] });
+    expect(health.forgiven).toEqual({
+      count: 1,
+      present: 1,
+      ids: [member.id],
+      unreadable: [],
+    });
     // Lawful, not debt: `status` is unmoved by a forgiveness, exactly as it is by a lapsed slate.
     expect(health.status).toBe("ok");
 
@@ -214,6 +337,13 @@ describe("T64 criterion 23 — forgiveness, re-federated: the store can still se
     const check = graveyardCompleteness(gw.reactor, OP, report.graveyard);
     expect(check.forgiven).toEqual([{ member: member.id, strike: forgiveness.id }]);
     expect(check.missing).toEqual([]);
+    // THE TWO VERDICTS COME APART HERE, and that is the point: §29.6's sentence read literally is now
+    // FALSE (no surviving tombstone covers this member), while the CUT still completed and nothing is
+    // unexplained. One boolean holding both would make the first lawful forgiveness indistinguishable
+    // from an abandoned cut — the same collapse this file refuses for a byte verdict, one layer up.
+    expect(check.holds).toBe(false);
+    expect(check.cutCompleted).toBe(true);
+    expect(check.readable).toBe(true);
     // Two-sided: the bystander was never in any of it.
     expect(receipt.members.map((m) => m.member)).toEqual([member.id]);
     expect(await gw.backend.holds(bystander.id)).toBe(true);

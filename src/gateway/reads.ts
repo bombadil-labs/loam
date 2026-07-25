@@ -136,6 +136,27 @@ const asOfGroundImpl = (gw: Gateway, asOf: number, closed: ReadonlySet<string>):
     ? groundAsOfImpl(gw, asOf)
     : DeltaSet.from([...groundAsOfImpl(gw, asOf)].filter((d) => !closed.has(d.id)));
 
+/**
+ * The gather a §14 RETRACTION reads, over the UNNARROWED ground (SPEC §29.3's invariant list).
+ *
+ * Read closure is a property of doors serving READINGS. A retraction is a WRITE that must see what it
+ * is retracting, and narrowing it turns a caller's own strike into a SILENT NO-OP: the member is
+ * absent from the hview, so it is never a target, no negation is ever signed, and the door answers 200
+ * with the field reading absent — which is exactly what read closure was already showing. Un-slate (or
+ * let the slate go unresolved) and the claim returns LIVE and UN-RETRACTED at every door, including the
+ * anonymous one. H1 crossed with H7, and reachable with no `read` ever declared, because a lapsed
+ * deadline adds it (§29.4).
+ *
+ * It discloses nothing: the negations only ever target the caller's OWN claims, which the caller wrote,
+ * and the node returned afterwards goes back through the ordinary narrowed read.
+ */
+export function gatherForRetractionImpl(gw: Gateway, name: string, entity: string): HView {
+  const def = gw.def(name);
+  const result = gw.reactor.eval(def.hyperschema.body, entity, gw.registry);
+  if (result.sort !== "hview") throw new Error(`schema ${name} does not evaluate to a hyperview`);
+  return result.hview;
+}
+
 // Resolve (schema, entity) to its node: gather, resolve through the Schema, decorate expanded children
 // through their OWN readings (§22.7), then apply THIS lens's §22 resolvers as the final step — the
 // Policy computes the value, the child decoration fills in nested views, and a resolver the lens

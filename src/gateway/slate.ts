@@ -105,6 +105,17 @@ const primPtr = (role: string, value: string | number): Claims["pointers"][numbe
 export interface SlateSpec {
   /** The property container carrying the frozen condemned membership. */
   readonly container: string;
+  /**
+   * THE CONDEMNED SET, PINNED ON THE RECORD. The container declaration carries the same pair, but a
+   * declaration is LATEST-WINS on `membershipAt`/`version` (only `trust`/`posture` are fixed to the
+   * earliest), so a container alone cannot make §29.2's central claim that the set CANNOT GROW after
+   * identification: one further operator-signed declaration mid-window would widen the address, every
+   * door would pass, and the cut would destroy the widened set while the graveyard recorded it as the
+   * set that had been identified. A record is content-addressed and immutable, so what it pins cannot
+   * move; re-identifying is a NEW record. The door then requires the container to AGREE.
+   */
+  readonly membershipAt: string;
+  readonly version: string;
   /** A plain identifier, or a §11 `sealCommitment(salt, subject)` — the FORM is named, never guessed. */
   readonly requestedBy: string;
   readonly requestedByForm: "plain" | "sealed";
@@ -126,6 +137,8 @@ export function slateClaims(spec: SlateSpec, author: string, timestamp: number):
     pointers: [
       entityPtr("declares", SLATE_ENTITY, CTX_SLATE),
       entityPtr("slate", spec.container, CTX_SLATE),
+      primPtr("membershipAt", spec.membershipAt),
+      primPtr("version", spec.version),
       primPtr("requested-by", spec.requestedBy),
       primPtr("requested-by-form", spec.requestedByForm),
       primPtr("requested-at", spec.requestedAt),
@@ -251,6 +264,17 @@ function slateShapeDefect(claims: Claims, operator: string | undefined): string 
       `(this record is signed by ${claims.author})`
     );
   }
+  for (const role of ["membershipAt", "version"] as const) {
+    const vals = primitives(claims, role);
+    if (vals.length !== 1 || typeof vals[0] !== "string" || vals[0].length === 0) {
+      return (
+        `a slate record PINS its condemned set: exactly one string \`${role}\`. A container ` +
+        `declaration is latest-wins on this pair, so pinning only there would let one further ` +
+        `declaration widen the set mid-window with every door still passing — the set could GROW ` +
+        `after identification, which is the one thing §29.2 exists to forbid.`
+      );
+    }
+  }
   const requestedBy = primitives(claims, "requested-by");
   if (requestedBy.length !== 1 || typeof requestedBy[0] !== "string") {
     return "a slate record carries exactly one string `requested-by` (an identifier, or a §11 seal)";
@@ -304,6 +328,15 @@ function slateShapeDefect(claims: Claims, operator: string | undefined): string 
 // only — see `slateShapeDefect` for why the reader must not.
 function slateStateDefect(claims: Claims, reactor: Reactor, operator: string): string | undefined {
   const container = at(claims, "slate", CTX_SLATE)!;
+  const pinned = pinsOf(claims)!; // the shape check proved both present
+  // The PINNED Term must be published, extensional, and freeze to the PINNED version. All three read
+  // the record's own pointers, never the container's, so nothing a later declaration does can move
+  // what this door certified.
+  const frozen = readFrozenTerm(reactor, pinned.membershipAt);
+  if (!frozen.ok) return `slate "${container}": ${frozen.why} (H9: the record fails closed)`;
+  const agreed = freezeAgreement(reactor, frozen.term, pinned.version);
+  if (agreed !== undefined) return `slate "${container}": ${agreed}`;
+
   const table = readContainerTable(reactor, operator);
   const rec = table.containers.get(container);
   if (rec === undefined) return undefined; // no container yet: inert data, and the cut fails closed
@@ -316,24 +349,34 @@ function slateStateDefect(claims: Claims, reactor: Reactor, operator: string): s
       `"property" at all (§28.3). Re-declare the slate's container curated/property.`
     );
   }
-  if (rec.membershipAt === undefined || rec.version === undefined) {
-    return (
-      `a slate's membership must be FROZEN by address: "${container}" needs both a membershipAt ` +
-      `(the published Term) and a version (the ModuleVersion address over its frozen members). A ` +
-      `live membership Term would keep admitting deltas as they arrive, so the impact list would ` +
-      `drift and under-report silently — the dry-run failure through the front door (H8).`
-    );
-  }
-  const frozen = readFrozenTerm(reactor, rec.membershipAt);
-  if (frozen === undefined) {
-    return (
-      `a slate's membership address ${rec.membershipAt} resolves to nothing here — the condemned ` +
-      `set cannot be read, so the record fails closed rather than binding over an unknown set (H9)`
-    );
-  }
-  const agreed = freezeAgreement(reactor, frozen.term, rec.version);
-  if (agreed !== undefined) return `slate "${container}": ${agreed}`;
+  const disagreement = containerDisagreement(rec, pinned);
+  if (disagreement !== undefined) return `slate "${container}": ${disagreement}`;
   return undefined;
+}
+
+/** The condemned set a record PINS. Undefined only for a record the shape check would have refused. */
+function pinsOf(claims: Claims): { membershipAt: string; version: string } | undefined {
+  const membershipAt = primitives(claims, "membershipAt")[0];
+  const version = primitives(claims, "version")[0];
+  if (typeof membershipAt !== "string" || typeof version !== "string") return undefined;
+  return { membershipAt, version };
+}
+
+// A container may not point somewhere else while a slate over it stands. The record's pins GOVERN —
+// they are immutable — so this disagreement never changes the condemned set; it is reported so the
+// operator learns their re-declaration bound nothing, rather than believing it re-identified the set.
+function containerDisagreement(
+  rec: { membershipAt?: string; version?: string },
+  pinned: { membershipAt: string; version: string },
+): string | undefined {
+  if (rec.membershipAt === pinned.membershipAt && rec.version === pinned.version) return undefined;
+  return (
+    `its container now declares membershipAt=${rec.membershipAt ?? "(absent)"} / ` +
+    `version=${rec.version ?? "(absent)"}, while the standing record PINS ` +
+    `membershipAt=${pinned.membershipAt} / version=${pinned.version}. A slate's condemned set is ` +
+    `fixed at identification and cannot be re-pointed underneath it — strike the record and file a ` +
+    `new one to condemn a different set (un-slating is free, §29.8).`
+  );
 }
 
 function graveyardDefect(claims: Claims, operator: string | undefined): string | undefined {
@@ -382,33 +425,62 @@ const parsePriorPair = (raw: string): { member: string; tombstone: string } | un
  * predicate needs NO SCAN: a frozen membership is `match{field: id, cmp: inSet}`, so the condemned
  * ids are literally the values in the published Term's JSON and a slated-id lookup is a `Set.has` —
  * the same cost class as the `readTombstones` check that already runs at both doors (H8, answered).
+ *
+ * A NON-EXTENSIONAL TERM IS A FAILURE, never an empty set. `author eq X` freezes to a perfectly
+ * honest address, so `freezeAgreement` alone certifies it — and if that certification stood while the
+ * id set read empty, every closure would withhold nothing, the review would tell the operator
+ * "nothing", and no field would say anything was wrong. So the shape is a first-class verdict and
+ * every caller must handle the failure leg.
  */
-export function readFrozenTerm(
-  reactor: Reactor,
-  membershipAt: string,
-): { term: unknown; ids: Set<string> } | undefined {
+export type FrozenTerm =
+  | { readonly ok: true; readonly term: unknown; readonly ids: ReadonlySet<string> }
+  | { readonly ok: false; readonly why: string };
+
+export function readFrozenTerm(reactor: Reactor, membershipAt: string): FrozenTerm {
   const published = reactor.get(membershipAt);
-  if (published === undefined) return undefined;
+  if (published === undefined) {
+    return {
+      ok: false,
+      why: `the membership address ${membershipAt} resolves to nothing here — partial federation, a missing publish, or an erased Term`,
+    };
+  }
   const raw = primitives(published.claims, "term")[0];
-  if (typeof raw !== "string") return undefined;
+  if (typeof raw !== "string") {
+    return { ok: false, why: `the delta at ${membershipAt} publishes no Term under role \`term\`` };
+  }
   let term: unknown;
   try {
     term = JSON.parse(raw);
   } catch {
-    return undefined;
+    return { ok: false, why: `the Term at ${membershipAt} is not parseable JSON` };
   }
-  return { term, ids: extensionalIds(term) };
+  const ids = extensionalIds(term);
+  if (ids === undefined) {
+    return {
+      ok: false,
+      why:
+        `the Term at ${membershipAt} is not an EXTENSIONAL id set — a slate's membership must be ` +
+        `\`match{field: "id", cmp: "inSet"}\` over the frozen ids (frozenMembershipTerm builds it). ` +
+        `A live predicate keeps admitting deltas as they arrive, so the condemned set would drift ` +
+        `and under-report silently, and a Term whose ids cannot be read out closes no door at all`,
+    };
+  }
+  return { ok: true, term, ids };
 }
 
-// The ids a frozen membership Term names, read out of its JSON rather than evaluated. Returns an
-// EMPTY set for any other shape — the caller treats that as "not extensionally frozen".
-function extensionalIds(term: unknown): Set<string> {
-  const out = new Set<string>();
+// The ids a frozen membership Term names, read out of its JSON rather than evaluated. UNDEFINED —
+// never an empty set — for any other shape, so "no ids" and "not extensionally frozen" can never be
+// the same answer.
+function extensionalIds(term: unknown): Set<string> | undefined {
   const t = term as { op?: unknown; pred?: { match?: Record<string, unknown> } };
   const m = t?.pred?.match;
-  if (t?.op !== "select" || m === undefined) return out;
-  if (m["field"] !== "id" || m["cmp"] !== "inSet" || !Array.isArray(m["const"])) return out;
-  for (const v of m["const"] as unknown[]) if (typeof v === "string") out.add(v);
+  if (t?.op !== "select" || m === undefined) return undefined;
+  if (m["field"] !== "id" || m["cmp"] !== "inSet" || !Array.isArray(m["const"])) return undefined;
+  const out = new Set<string>();
+  for (const v of m["const"] as unknown[]) {
+    if (typeof v !== "string") return undefined;
+    out.add(v);
+  }
   return out;
 }
 
@@ -475,11 +547,27 @@ export interface Slate {
   readonly closes: ReadonlySet<SlateClosure>;
   readonly lapsed: boolean;
   readonly members: ReadonlySet<string>;
+  /** The record's OWN pinned pair — immutable, and what every door and the cut evaluate over. */
   readonly version: string;
   readonly membershipAt: string;
-  /** Why the condemned set could not be read. Such a slate enforces nothing and the cut REFUSES. */
+  /** Why the condemned set could not be READ. Such a slate enforces NOTHING and the cut REFUSES. */
   readonly unresolved?: string;
+  /**
+   * The container was re-declared to point somewhere else. The record's pins still govern, so the
+   * condemned set has NOT moved and every door keeps enforcing — this says the re-declaration bound
+   * nothing, so an operator cannot mistake it for having re-identified the set.
+   */
+  readonly disagreement?: string;
 }
+
+/**
+ * What a slate ACTUALLY enforces at this moment, which is not always what it declares. A slate whose
+ * condemned set cannot be read closes nothing, because every closure is seeded FROM the member set —
+ * so reporting `closes` as though it were in force would be a claim of protection never delivered
+ * (H7 on the reporting side of a suppression mechanism).
+ */
+export const enforcedBy = (slate: Slate): SlateClosure[] =>
+  slate.unresolved !== undefined || slate.members.size === 0 ? [] : [...slate.closes].sort();
 
 /**
  * Every surviving lawful slate, with each one's closure set resolved AT THE MOMENT `now`.
@@ -518,6 +606,7 @@ export function readSlates(reactor: Reactor, operator: string | undefined, now: 
     if (slateShapeDefect(delta.claims, operator) !== undefined) continue;
     const claims = delta.claims;
     const container = at(claims, "slate", CTX_SLATE)!;
+    const pinned = pinsOf(claims)!; // the shape check above proved both present
     const rec = table.containers.get(container);
     const declaredRaw = primitives(claims, "closes").filter(
       (c): c is SlateClosure => typeof c === "string" && CLOSURES.has(c),
@@ -541,33 +630,37 @@ export function readSlates(reactor: Reactor, operator: string | undefined, now: 
       declared,
       closes,
       lapsed,
+      // The record's OWN pins, never the container's: a declaration is latest-wins on this pair, so
+      // reading the set from the container is what would let it move mid-window.
+      membershipAt: pinned.membershipAt,
+      version: pinned.version,
     };
     // A struck container declaration is UN-SLATING (§29.8), not an unresolved slate: the table is
     // re-resolved live, so every closed door reopens on the next read and there is nothing left to
     // report. The record itself stands — someone asked, and that is a fact §11 already holds — but a
-    // record with no container is not a slate. (A container that RESOLVES while its membership
-    // ADDRESS dangles is the different case below: a real slate whose cut must fail closed.)
+    // record with no container is not a slate.
     if (rec === undefined) continue;
-    const frozen =
-      rec.membershipAt === undefined ? undefined : readFrozenTerm(reactor, rec.membershipAt);
-    if (frozen === undefined || rec.version === undefined) {
-      out.push({
-        ...base,
-        members: new Set(),
-        version: rec.version ?? "",
-        membershipAt: rec.membershipAt ?? "",
-        unresolved:
-          `the membership address ${rec.membershipAt ?? "(absent)"} of container "${container}" ` +
-          `resolves to nothing here — the condemned set cannot be read (H9)`,
-      });
+    const frozen = readFrozenTerm(reactor, pinned.membershipAt);
+    // UNRESOLVED means the condemned set cannot be READ, so this slate enforces NOTHING and says so
+    // (`enforced` below is empty and `slateHealth` counts it). It is not silence: the doors cannot
+    // withhold an unknown set, and refusing every read instead would let one erased delta take the
+    // store down — a worse failure, triggerable by the one party who can un-slate for free. The two
+    // ways INTO this state are closed at their sources instead: `eraseImpl` refuses to erase a
+    // standing slate's pinned Term, and the cut refuses a member that is one. What remains is the
+    // honest case — a store that never received the Term at all, where there is genuinely nothing to
+    // enforce because this store never held the ids.
+    if (!frozen.ok) {
+      out.push({ ...base, members: new Set(), unresolved: frozen.why });
       continue;
     }
-    out.push({
-      ...base,
-      members: frozen.ids,
-      version: rec.version,
-      membershipAt: rec.membershipAt!,
-    });
+    const disagreement = containerDisagreement(rec, pinned);
+    if (disagreement !== undefined) {
+      // The record's pins still GOVERN — they are immutable, so the set has not moved and every door
+      // keeps enforcing over it. The disagreement is reported, not obeyed.
+      out.push({ ...base, members: frozen.ids, disagreement });
+      continue;
+    }
+    out.push({ ...base, members: frozen.ids });
   }
   out.sort((a, b) => (a.record < b.record ? -1 : a.record > b.record ? 1 : 0));
   return out;
@@ -601,6 +694,15 @@ export function requireMoment(now: number, what: string): void {
  * DIRECT only, deliberately: a Set lookup at admission, where transitive closure is the unbounded
  * scan H8 exists to warn about. But "direct" means NAMES A MEMBER — a delta-ref OR an enumerated
  * primitive role that is a delta reference by convention.
+ *
+ * AND A NEGATION IS NOT A CITATION (H1's T43 site, exactly). Cite closure exists so the DEPENDENT set
+ * cannot grow; a strike adds no dependent — it REMOVES a claim, which is the one direction a
+ * suppression window has no reason to refuse. Refusing one strands it: at the append door a caller's
+ * own `clear` over a field with one slated contribution would retract none of their others (the batch
+ * refuses whole), and at the federation door the refusal folds into the uniform `rejected += 1` while
+ * union's idempotence means the peer never resends — so after un-slating the claim reads LIVE here and
+ * RETRACTED at the peer, forever. The exemption is PER POINTER, so a delta that negates a member and
+ * also cites it under some other role is still refused on that other role.
  */
 export function slateRefusal(
   slates: readonly Slate[],
@@ -614,6 +716,7 @@ export function slateRefusal(
   for (const slate of slates) {
     if (!slate.closes.has("cite") || slate.members.size === 0) continue;
     for (const p of claims.pointers) {
+      if (p.role === "negates") continue; // a strike narrows; it never grows the dependent set
       if (p.target.kind === "delta" && slate.members.has(p.target.deltaRef.delta)) {
         return { container: slate.container, member: p.target.deltaRef.delta };
       }
@@ -697,6 +800,17 @@ export function readClosedIds(gw: Gateway, now: number): Set<string> {
  * tempting single choke point (`selectImpl`) is the one place this must never go — a read-closed
  * slate evaluating its own membership over a narrowed snapshot freezes to a different address than
  * `version`, self-invalidates, and jams its own cut forever at the exact moment the deadline passes.
+ *
+ * The unnarrowed list, so a reader can tell CONSIDERED from FORGOTTEN:
+ *   - `select`, `Gateway.freeze`, `containerScope`, `Container.members`, §29.2's re-freeze — the
+ *     membership machinery. Narrowing any of them is the deadlock above.
+ *   - `Gateway.watch` — CONSIDERED, and deliberately unnarrowed: it is live `select`, the same
+ *     primitive under a subscription, and it is what the membership machinery itself would watch.
+ *     It is not a door serving a READING; a reader who wants the narrowed live view watches an
+ *     ENTITY (`watchEntity`), which IS narrowed.
+ *   - the operator's review read (`slates()`) — the controller must see what they will destroy.
+ *   - the §14 RETRACTION gather (`gatherForRetraction`) — a write must see what it is retracting, or
+ *     a caller's own strike becomes a silent no-op over a read-closed member.
  */
 export function readGround(gw: Gateway, now: number): DeltaSet {
   return groundWithout(gw.reactor.snapshot(), readClosedIds(gw, now));
@@ -731,7 +845,14 @@ export interface Duplicate {
 }
 
 export interface SlateReport extends Omit<Slate, "members" | "closes"> {
+  /** What the record SAYS, plus a lapse. Not the same question as what is in force. */
   readonly closes: readonly SlateClosure[];
+  /**
+   * What is ACTUALLY being enforced. Every closure is seeded from the member set, so a slate whose
+   * condemned set cannot be read closes NOTHING — and reporting `closes` as though it were in force
+   * would be a claim of protection never delivered, on the one surface whose report is a legal claim.
+   */
+  readonly enforced: readonly SlateClosure[];
   readonly members: readonly string[];
   /** Targets of slated NEGATIONS — the claims that will come back to life at the cut (§29.3). */
   readonly resurfacing: readonly string[];
@@ -763,6 +884,7 @@ export function slateReportsImpl(gw: Gateway, now: number): SlateReport[] {
     return {
       ...s,
       closes: [...s.closes].sort(),
+      enforced: enforcedBy(s),
       members: [...s.members].sort(),
       resurfacing: resurfacingOf(gw.reactor, s.members),
       affected: reach.affected,
@@ -819,7 +941,13 @@ function affectedContainers(
 function duplicatesOf(gw: Gateway, members: ReadonlySet<string>): Duplicate[] {
   if (members.size === 0) return [];
   const out: Duplicate[] = [];
-  for (const d of lawfulSnapshot(gw.reactor, gw.operatorAuthor)) {
+  // THE WHOLE GROUND, not just the operator's own signature. A copy is a copy whoever signed it, and
+  // the copies that matter most here are minted by STANDING PASSES under a pen or a granted author —
+  // a rendering's `translates`, a promotion's `source-delta`. Scoping this to operator-authored
+  // deltas made exactly those invisible to the one review that could surface them, and a review that
+  // OVER-reports links costs an operator a second look while one that under-reports costs them the
+  // copy. (Wider than §29.3's wording, which says "operator-authored"; the direction is deliberate.)
+  for (const d of gw.reactor.snapshot()) {
     if (members.has(d.id) || isTombstone(d.claims) || isGraveyard(d.claims)) continue;
     for (const p of d.claims.pointers) {
       const named =
@@ -973,6 +1101,13 @@ export async function cutImpl(
       `${slate.unresolved}. If we cannot read which ids are condemned we cannot cut (H9: fail closed)`,
     );
   }
+  if (slate.disagreement !== undefined) {
+    refuse(
+      `${slate.disagreement} The cut will not run while the container and the record disagree about ` +
+        `which set is condemned — a graveyard records the set that was IDENTIFIED, and cutting here ` +
+        `would let the two readings differ in a durable record.`,
+    );
+  }
 
   // §27.7's guard: an unreachable wall could hold a member outside the sweep.
   const walls = unreachableWallReport(gw);
@@ -1023,13 +1158,33 @@ export async function cutImpl(
     }
   }
 
+  // A MEMBER THAT IS ANOTHER STANDING SLATE'S PINNED TERM would make that slate UNRESOLVED the moment
+  // this cut landed — one cut silently disarming another slate's closures, on a door, with nothing
+  // reporting it. Refused here rather than tolerated downstream, and `eraseImpl` refuses the same
+  // delta for the same reason, which together is what keeps `unresolved` unreachable through a door.
+  for (const other of readSlates(gw.reactor, operator, now)) {
+    if (other.record === slate.record) continue;
+    if (slate.members.has(other.membershipAt)) {
+      refuse(
+        `the frozen member ${other.membershipAt} is the PINNED membership Term of the standing slate ` +
+          `over "${other.container}". Erasing it would leave that slate unable to read its own ` +
+          `condemned set, so its closures would silently stop enforcing. Cut or strike that slate ` +
+          `first, or narrow this one to exclude that id (un-slating is free, §29.8).`,
+      );
+    }
+  }
+
   // RE-FREEZE AGREEMENT, proven again: §29.2's door check proves it at declaration time, and the
-  // window is exactly where the ground moves. The ONE lawful exception is named rather than
-  // discovered — an operator erasing a member BY HAND mid-window shrinks the evaluation while the
+  // window is exactly where the ground moves. Computed over the RECORD's pins, so nothing a later
+  // container declaration did can move what is checked here. The ONE lawful exception is named rather
+  // than discovered — an operator erasing a member BY HAND mid-window shrinks the evaluation while the
   // frozen id set survives, and refusing without an exception would only DETECT a jam nothing can
   // repair (nothing can un-erase, so the slate would stand with `read` closing forever).
-  const frozen = readFrozenTerm(gw.reactor, slate.membershipAt)!;
-  const present = new Set(evalMembership(gw.reactor, frozen.term).map((d) => d.id));
+  const frozen = readFrozenTerm(gw.reactor, slate.membershipAt);
+  if (!frozen.ok) refuse(frozen.why);
+  const pinnedTerm = (frozen as { term: unknown }).term;
+  const reFrozen = freezeAgreement(gw.reactor, pinnedTerm, slate.version);
+  const present = new Set(evalMembership(gw.reactor, pinnedTerm).map((d) => d.id));
   const priorTombstone: { member: string; tombstone: string }[] = [];
   const tombs = survivingTombstones(gw.reactor, operator);
   for (const id of [...slate.members].sort()) {
@@ -1038,12 +1193,16 @@ export async function cutImpl(
     if (already === undefined) {
       refuse(
         `the frozen member ${id} resolves to nothing and carries NO surviving lawful tombstone, so ` +
-          `the re-freeze disagreement is not accounted for. A cut must not stand over an ` +
-          `unreported gap.`,
+          `the re-freeze disagreement is not accounted for (${reFrozen ?? "the address still agrees"}). ` +
+          `A cut must not stand over an unreported gap.`,
       );
     }
     priorTombstone.push({ member: id, tombstone: already!.id });
   }
+  // The GROW leg. Content addressing makes it unreachable THROUGH THE TERM — the pinned address names
+  // immutable bytes, so `evalMembership` over it can only ever return a subset of the ids read out of
+  // it. The reachable widening vector was a container re-declaration, and that is refused above (at the
+  // door) and reported by the reader; this stays as the fail-closed backstop for any future shape.
   for (const id of present) {
     if (!slate.members.has(id)) {
       refuse(
@@ -1181,10 +1340,28 @@ export async function cutImpl(
   };
 }
 
+// A wall's at-rest membership Term, for the `kept`-wall intersection. A wall's scope is an ORDINARY
+// live Term, so the extensional requirement a slate's own membership carries does not apply — only
+// "did it resolve at all", and an unresolved one is refused by the caller (H9, never assumed empty).
 const readTermAt = (reactor: Reactor, membershipAt: string | undefined): unknown => {
   if (membershipAt === undefined) return undefined;
-  return readFrozenTerm(reactor, membershipAt)?.term;
+  const published = reactor.get(membershipAt);
+  if (published === undefined) return undefined;
+  const raw = primitives(published.claims, "term")[0];
+  if (typeof raw !== "string") return undefined;
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return undefined;
+  }
 };
+
+// Every tier a sweep did NOT examine — covered walls and unreachable ones alike. One reader, so the
+// cut's refusal and the receipt's confession can never disagree about which tiers were skipped.
+const unreachedTiers = (walls: {
+  kept: readonly string[];
+  faultEntities: readonly string[];
+}): { wall: string }[] => [...walls.kept, ...walls.faultEntities].map((wall) => ({ wall }));
 
 const spokenByOf = (claims: Claims): string | undefined => {
   const p = claims.pointers.find((x) => x.role === "spoken-by");
@@ -1281,7 +1458,23 @@ export function readGraveyards(reactor: Reactor, operator: string | undefined): 
 }
 
 export interface CompletenessCheck {
+  /**
+   * §29.6's sentence, UNQUALIFIED: every member has a SURVIVING covering tombstone. A later
+   * forgiveness makes this false, because a struck tombstone stops surviving — that is the sentence
+   * being read honestly, not a defect.
+   */
   readonly holds: boolean;
+  /**
+   * Did the CUT complete? Every member accounted for as either a surviving covering tombstone or an
+   * ENUMERATED forgiveness. This is the question a receipt asks, and it is a different one from
+   * `holds`: collapsing the two would make the first lawful forgiveness indistinguishable from an
+   * abandoned cut — the same boolean collapse this file refuses for `ByteVerdict`, one layer up.
+   */
+  readonly cutCompleted: boolean;
+  /** Could the frozen set be READ at all? False makes every other field vacuous rather than clean. */
+  readonly readable: boolean;
+  /** Why not, when `readable` is false — never silence (H9). */
+  readonly unreadable?: string;
   readonly members: readonly string[];
   /** Members whose tombstone neither cites this slate nor is named in `prior-tombstone`. */
   readonly missing: readonly string[];
@@ -1311,12 +1504,22 @@ export function graveyardCompleteness(
   operator: string | undefined,
   graveyardId: string,
 ): CompletenessCheck {
+  const blank = { holds: false, cutCompleted: false, members: [], missing: [], forgiven: [] };
   const grave = readGraveyards(reactor, operator).find((g) => g.id === graveyardId);
   if (grave === undefined || operator === undefined) {
-    return { holds: false, members: [], missing: [], forgiven: [] };
+    return {
+      ...blank,
+      readable: false,
+      unreadable: `no surviving lawful graveyard at ${graveyardId}`,
+    };
   }
+  // AN UNREADABLE FROZEN SET IS NOT A CLEAN ONE. `members.length > 0` inside `holds` used to stand in
+  // for this, which is the H7 shape wearing a guard clause: erase the membership Term after a cut and
+  // the walk finds no ids, so "every member is accounted for" would be vacuously true over a set the
+  // store can no longer read. The verdict is its own field, and it fails closed.
   const frozen = readFrozenTerm(reactor, grave.membershipAt);
-  const members = [...(frozen?.ids ?? new Set<string>())].sort();
+  if (!frozen.ok) return { ...blank, readable: false, unreadable: frozen.why };
+  const members = [...frozen.ids].sort();
   const prior = new Map(grave.priorTombstone.map((p) => [p.member, p.tombstone]));
   const surviving = new Map(
     survivingTombstones(reactor, operator).map((t) => [tombstoneTarget(t.claims)!, t]),
@@ -1338,7 +1541,12 @@ export function graveyardCompleteness(
     else missing.push(member);
   }
   return {
-    holds: members.length > 0 && missing.length === 0,
+    // Two verdicts, because one boolean cannot hold both facts. `holds` is §29.6's sentence read
+    // literally (a forgiveness makes it false); `cutCompleted` is what a receipt asks (nothing
+    // unexplained). An empty member set answers NEITHER affirmatively — `readable` decides that.
+    holds: missing.length === 0 && forgiven.length === 0,
+    cutCompleted: missing.length === 0,
+    readable: true,
     members,
     missing,
     forgiven,
@@ -1434,11 +1642,11 @@ export async function deriveReceiptImpl(
       ...(tomb === undefined ? {} : { tombstone: tomb.id }),
       ...(strike === undefined ? {} : { forgiven: strike }),
       presentAgain: gw.reactor.get(member) !== undefined,
-      tiers: await tierVerdicts(
-        gw,
-        member,
-        walls.kept.map((wall) => ({ wall })),
-      ),
+      // BOTH halves of the wall report, and the sets are DISJOINT: `kept` is covered by a detach
+      // record, `faults` is neither attached nor covered — a wall nobody re-attached after a restart.
+      // Reading only `kept` made a faulted tier appear NOWHERE, which reads as "not a tier" rather
+      // than `unproven` (H9). `cutImpl` refuses on faults; a RE-ISSUE cannot refuse, so it confesses.
+      tiers: await tierVerdicts(gw, member, unreachedTiers(walls)),
       citations: [...gw.reactor.snapshot()]
         .filter((d) =>
           d.claims.pointers.some(
@@ -1474,14 +1682,24 @@ export async function deriveReceiptImpl(
         "operator's replicas, and a peer refuses a foreign operator's removal-order at its own door.",
       "ALREADY-SERVED READS ARE NOT RECALLED: egress closure stopped further spread from this " +
         "store during the window; nothing recalls what a door already served.",
-      "A COPY RE-SPOKEN UNDER ANOTHER ID BEFORE THE SLATE STILL STANDS: erasure is by ID, and a " +
-        "content-addressed store cannot chase content. Such a copy must be slated by its own id.",
+      "A COPY RE-SPOKEN UNDER ANOTHER ID STILL STANDS: erasure is by ID, and a content-addressed " +
+        "store cannot chase content. That covers a copy made BEFORE identification and also one a " +
+        "standing pass (a rendering, a promotion) minted DURING the window under a slate that did " +
+        "not close `cite` — the frozen set names ids, so a fresh id was never in it. Such a copy " +
+        "must be slated by its own id; the slate report's `duplicates` lists the links this store " +
+        "can follow, and it finds LINKS, never content.",
       "POINTERS ARE NOT CONTENT: the surviving deltas listed per member cite an erased id and " +
         "dangle at the hole — that is §11's citations manifest, not retained content.",
       ...walls.kept.map(
         (wall) =>
           `A KEPT WALL WAS NOT SWEPT: "${wall}" is covered by a detach record, its per-member ` +
           `verdict reads \`unproven\` rather than \`false\`, and nobody looked inside it.`,
+      ),
+      ...walls.faultEntities.map(
+        (wall) =>
+          `A DECLARED WALL COULD NOT BE REACHED: "${wall}" is neither attached nor covered by a ` +
+          `detach record, so its store was not examined at all and its per-member verdict reads ` +
+          `\`unproven\`. Attach it (openContainer) and re-issue to replace this with a real verdict.`,
       ),
       "A RESTORED BACKUP CAN RESURFACE BYTES, and this document is RE-ISSUABLE to prove present " +
         "state — every per-tier verdict above was probed at the issue moment, never reprinted.",
@@ -1496,6 +1714,14 @@ export interface SlateHealth {
   readonly lapsed: number;
   /** The lapsed slates' container entities — operator-only, like `erasure.outstanding`. */
   readonly lapsedIds: readonly string[];
+  /**
+   * Slates ENFORCING NOTHING because their condemned set cannot be read. Surfaced because the
+   * alternative is a slate reporting `closes: [cite, egress]` while all three doors stand open — a
+   * claim of protection never delivered, and the one state an operator most needs to see.
+   */
+  readonly unresolved: readonly string[];
+  /** Slates whose container was re-declared elsewhere. The record's pins still govern; this says so. */
+  readonly disagreeing: readonly string[];
 }
 
 export interface ForgivenHealth {
@@ -1504,6 +1730,12 @@ export interface ForgivenHealth {
   /** Of those, how many are PRESENT in the ground again. */
   readonly present: number;
   readonly ids: readonly string[];
+  /**
+   * Graveyards whose frozen set could NOT be read. Without this, `count: 0` means both "nothing has
+   * been forgiven" and "the one durable list of ids this store promised to forget is unreadable" —
+   * H9 in the instrument that exists to make a forgiven-and-returned id visible at all.
+   */
+  readonly unreadable: readonly string[];
 }
 
 /**
@@ -1520,6 +1752,14 @@ export function slateHealth(gw: Gateway, now: number): SlateHealth {
     open: slates.length,
     lapsed: lapsed.length,
     lapsedIds: lapsed.map((s) => s.container).sort(),
+    unresolved: slates
+      .filter((s) => s.unresolved !== undefined)
+      .map((s) => s.container)
+      .sort(),
+    disagreeing: slates
+      .filter((s) => s.disagreement !== undefined)
+      .map((s) => s.container)
+      .sort(),
   };
 }
 
@@ -1531,21 +1771,28 @@ export function slateHealth(gw: Gateway, now: number): SlateHealth {
  */
 export function forgivenHealth(gw: Gateway): ForgivenHealth {
   const operator = gw.operatorAuthor;
-  if (operator === undefined) return { count: 0, present: 0, ids: [] };
+  const empty = { count: 0, present: 0, ids: [], unreadable: [] };
+  if (operator === undefined) return empty;
   const graves = readGraveyards(gw.reactor, operator);
-  if (graves.length === 0) return { count: 0, present: 0, ids: [] };
+  if (graves.length === 0) return empty;
   const surviving = new Set(
     survivingTombstones(gw.reactor, operator).map((t) => tombstoneTarget(t.claims)!),
   );
   const ids = new Set<string>();
+  const unreadable: string[] = [];
   for (const grave of graves) {
     const frozen = readFrozenTerm(gw.reactor, grave.membershipAt);
-    for (const id of frozen?.ids ?? []) if (!surviving.has(id)) ids.add(id);
+    if (!frozen.ok) {
+      unreadable.push(grave.id); // never folded into "nothing forgiven" (H9)
+      continue;
+    }
+    for (const id of frozen.ids) if (!surviving.has(id)) ids.add(id);
   }
   const sorted = [...ids].sort();
   return {
     count: sorted.length,
     present: sorted.filter((id) => gw.reactor.get(id) !== undefined).length,
     ids: sorted,
+    unreadable: unreadable.sort(),
   };
 }

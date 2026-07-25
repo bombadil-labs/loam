@@ -130,6 +130,7 @@ import {
   severEntityImpl,
 } from "./mutate.js";
 import {
+  gatherForRetractionImpl,
   gatherImpl,
   resolvedNodeImpl,
   resolvePinnedImpl,
@@ -990,6 +991,13 @@ export class Gateway {
   /** @internal — T19 seam (mutate.ts: retraction reads the hview to find the caller's own claims) */
   gather(name: string, entity: string, asOf?: number, now?: number): HView {
     return gatherImpl(this, name, entity, now ?? Date.now(), asOf);
+  }
+
+  // The gather a §14 RETRACTION reads — UNNARROWED, by the invariant in reads.ts. A narrowed one turns
+  // a caller's own strike into a silent no-op over a read-closed member.
+  /** @internal — T64 seam (mutate.ts: retraction must see what it is retracting) */
+  gatherForRetraction(name: string, entity: string): HView {
+    return gatherForRetractionImpl(this, name, entity);
   }
 
   /** @internal — T19 seam (mutate.ts: every write verb answers with the re-resolved node) */

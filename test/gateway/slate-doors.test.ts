@@ -223,6 +223,124 @@ describe("T64 criterion 5 — cite closure: ONE predicate, two doors, asymmetric
   });
 });
 
+describe("T64 criterion 5 — a NEGATION is not a citation: cite closure must never strand a strike", () => {
+  it("a strike of a member is ADMITTED at BOTH doors during a cite-closed window", async () => {
+    // H1's T43 site exactly. Cite closure exists so the DEPENDENT set cannot grow; a strike adds no
+    // dependent, it REMOVES a claim. Refusing one strands it — and at the federation door the refusal
+    // folds into the uniform `rejected += 1` while union's idempotence means the peer never resends, so
+    // after un-slating the claim reads LIVE here and RETRACTED at the peer, forever.
+    const gw = await bootSlateStore();
+    const member = observed(FERN, "height", 30, 1000, OP_SEED);
+    await gw.append([member]);
+    const stood = await standSlate(gw, { members: [member], closes: ["egress", "cite"] });
+
+    // THE APPEND DOOR: the operator's own strike of a member lands.
+    const own = strike(member.id, 60_000);
+    await expect(gw.append([own])).resolves.toBeDefined();
+    expect(gw.reactor.get(own.id)).toBeDefined();
+
+    // THE FEDERATION DOOR: a peer pushing a strike of the member is ADMITTED, not counted away.
+    const peerSeed = "e5".repeat(32);
+    const peerStrike = signClaims(
+      {
+        timestamp: 60_100,
+        author: authorForSeed(peerSeed),
+        pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: member.id } } }],
+      },
+      peerSeed,
+    );
+    expect(await gw.federate([peerStrike], { admit: () => true })).toEqual({
+      offered: 1,
+      accepted: 1,
+      rejected: 0,
+    });
+
+    // Two-sided, and this is the half that keeps the exemption honest: a delta that negates a member
+    // AND cites it under another role is STILL refused, because the exemption is per POINTER.
+    const both = signClaims(
+      {
+        timestamp: 60_200,
+        author: OP,
+        pointers: [
+          { role: "negates", target: { kind: "delta", deltaRef: { delta: member.id } } },
+          { role: "notes", target: { kind: "delta", deltaRef: { delta: member.id } } },
+        ],
+      },
+      OP_SEED,
+    );
+    await expect(gw.append([both])).rejects.toThrow(/SLATED FOR ERASURE/);
+    // And the strike SURVIVES un-slating: the whole point is that it is not lost.
+    await gw.append([strike(stood.declaration, 60_300)]);
+    expect(gw.reactor.get(own.id)).toBeDefined();
+    expect(await heightAt(gw)).toBeNull(); // struck, as the caller asked, and it stuck
+    await gw.close();
+  });
+
+  it("a `clear` over a field with one slated contribution still retracts the caller's others", async () => {
+    // The sibling: `slateRefusal` throws for the WHOLE batch, so a per-pointer exemption is what keeps
+    // a caller's unrelated retractions from being collateral.
+    const gw = await bootSlateStore();
+    const slated = observed(FERN, "tag", "shade", 1000, OP_SEED);
+    const other = observed(FERN, "tag", "fronds", 1100, OP_SEED);
+    await gw.append([slated, other]);
+    await standSlate(gw, { members: [slated], closes: ["cite"] });
+    const res = await gw.query(
+      `mutation { clearPlant(entity: "${FERN}", fields: ["tag"]) { tag } }`,
+    );
+    expect(res.errors, JSON.stringify(res.errors)).toBeUndefined();
+    // BOTH of the caller's contributions are retracted — the slated one included, because a strike is
+    // not a citation and a slate is not a write-lock. Nothing is left standing for the field, so the
+    // `all` policy resolves it fully ABSENT rather than to an empty list.
+    expect((res.data as { clearPlant: { tag: string[] | null } }).clearPlant.tag).toBeNull();
+    for (const d of [slated, other]) {
+      expect(gw.reactor.negationsOf(d.id).length).toBeGreaterThan(0);
+    }
+    // Two-sided: not one byte moved — a retraction is suppression, never erasure.
+    expect(await gw.backend.holds(slated.id)).toBe(true);
+    await gw.close();
+  });
+});
+
+describe("T64 criterion 7 — a read-closed member's OWN retraction is not a silent no-op", () => {
+  it("the strike is really minted, and it holds after the slate is gone", async () => {
+    // H1 crossed with H7, and the worst shape in the read closure: the retraction gather used to run
+    // over `readGround`, so a read-closed member was absent from the hview, never a target, and no
+    // negation was ever signed — while the door answered 200 and the field read absent, which is
+    // exactly what read closure was already showing. Un-slate and the claim returns LIVE and
+    // UN-RETRACTED at every door. Reachable with no `read` ever declared, since a lapse adds it.
+    const gw = await bootSlateStore();
+    const member = observed(FERN, "height", 30, 1000, OP_SEED);
+    await gw.append([member]);
+    const stood = await standSlate(gw, { members: [member], closes: ["read"] });
+    expect(await heightAt(gw)).toBeNull(); // read closure is already hiding it
+
+    const res = await gw.query(
+      `mutation { clearPlant(entity: "${FERN}", fields: ["height"]) { height } }`,
+    );
+    expect(res.errors, JSON.stringify(res.errors)).toBeUndefined();
+
+    // THE NEGATION EXISTS. This is the assertion the narrowed gather could not satisfy, and no read
+    // through the door can distinguish the two states while the slate stands.
+    expect(gw.reactor.negationsOf(member.id).length).toBeGreaterThan(0);
+    // And it HOLDS once the slate is gone — the proof that the write was real rather than hidden.
+    await gw.append([strike(stood.declaration, 70_000)]);
+    expect(gw.slates(BEFORE_DEADLINE)).toEqual([]);
+    expect(await heightAt(gw)).toBeNull();
+    const pub = await gw
+      .queryPublic(`{ plant(entity: "${FERN}") { height } }`)
+      .catch(() => undefined);
+    if (pub !== undefined) {
+      expect(
+        (pub.data as { plant: { height: number | null } } | undefined)?.plant.height ?? null,
+      ).toBeNull();
+    }
+    // Two-sided: no byte moved, and the member is still on the ground under its strike.
+    expect(await gw.backend.holds(member.id)).toBe(true);
+    expect(gw.reactor.get(member.id)).toBeDefined();
+    await gw.close();
+  });
+});
+
 describe("T64 criterion 6 — cite is DIRECT only, and the post-cut resubmission is INTENDED", () => {
   it("a delta citing a delta that cites a member is ADMITTED", async () => {
     const gw = await bootSlateStore();
@@ -395,6 +513,45 @@ describe("T64 criterion 7 — read closure at EVERY door, and the operator's rev
   });
 });
 
+describe("T64 — READ closure preserves suppression (H1, the same question the egress rail asks)", () => {
+  it("a slated STRIKE withholds its target too, so no door serves a retracted claim as live", async () => {
+    // `assertPreservesSuppression` (test/gateway/narrowing.ts) is written for a narrowing that lands in
+    // ANOTHER store, and read closure narrows in place — so the invariant is asserted here directly,
+    // in the same shape: a claim struck at the source must never read LIVE through the narrowed door.
+    // The egress rail asks it cross-store; this one asks it of this store's own reading doors.
+    const gw = await bootSlateStore();
+    const claim = observed(FERN, "height", 30, 1000, OP_SEED);
+    const bystander = observed(FERN, "tag", "shade", 1100, OP_SEED);
+    await gw.append([claim, bystander]);
+    const strike1 = strike(claim.id, 2000);
+    await gw.append([strike1]);
+    const strike2 = strike(strike1.id, 3000);
+    await gw.append([strike2]);
+    expect(await heightAt(gw)).toBe(30); // revived: a struck strike really does revive its target
+
+    // The slate names ONLY the outermost strike. Withholding it alone would leave `strike1` and
+    // `claim` in the narrowed ground — and the door would serve 30 while the reader is not entitled
+    // to that revived reading during the window.
+    await standSlate(gw, { members: [strike2], closes: ["read"] });
+
+    // Every reading door, and the whole chain is withheld together.
+    expect(await heightAt(gw)).toBeNull();
+    expect(
+      gw.resolvedNode("Plant", FERN, undefined, BEFORE_DEADLINE).view["height"],
+    ).toBeUndefined();
+    expect(gw.resolvedNode("Plant", FERN, 30_000, BEFORE_DEADLINE).view["height"]).toBeUndefined();
+    // TWO-SIDED, the over-withholding half: the bystander still resolves, so this is a narrowing and
+    // not a blackout. And nothing moved at the delta level — read closure suppresses, never erases.
+    const tags = await gw.query(`{ plant(entity: "${FERN}") { tag } }`);
+    expect((tags.data as { plant: { tag: string[] } }).plant.tag).toEqual(["shade"]);
+    for (const d of [claim, strike1, strike2]) {
+      expect(gw.reactor.get(d.id)).toBeDefined();
+      expect(await gw.backend.holds(d.id)).toBe(true);
+    }
+    await gw.close();
+  });
+});
+
 describe("T64 criterion 8 — the lapse is computed AT THE DOOR, and the clock is NAMED", () => {
   it("`read` is NOT declared, yet a lapsed deadline closes it — with no delta appended between", async () => {
     const gw = await bootSlateStore();
@@ -446,41 +603,31 @@ describe("T64 criterion 8 — the lapse is computed AT THE DOOR, and the clock i
     const gw = await bootSlateStore();
     const member = observed(FERN, "height", 30, 1000, OP_SEED);
     await gw.append([member]);
-    // `nextTimestamp()` is `max(Date.now(), last + 1)`, so a tight append loop drives DELTA-TIME far
-    // ahead of wall-clock. A deadline minted in one clock and compared against the other is a bug
-    // that only appears on a busy store.
-    for (let i = 0; i < 40; i += 1) {
-      await gw.append([
-        signClaims(
-          {
-            timestamp: gw.nextTimestamp(),
-            author: OP,
-            pointers: [
-              {
-                role: "subject",
-                target: { kind: "entity", entity: { id: FERN, context: "churn" } },
-              },
-              { role: "value", target: { kind: "primitive", value: i } },
-            ],
-          },
-          OP_SEED,
-        ),
-      ]);
-    }
-    const deltaTime = gw.nextTimestamp();
-    const deadline = Date.now() + 10 * 60_000; // live in WALL-CLOCK, long past in delta-time
-    expect(deltaTime).toBeGreaterThan(0);
+    // `nextTimestamp()` is `max(Date.now(), last + 1)`, so calling it drives DELTA-TIME forward one ms
+    // at a time regardless of the wall clock. THE FIXTURE MUST BE FORCEFUL: a deadline ten minutes out
+    // with delta-time only ~40ms ahead cannot go red for the bug in this rail's own title, so the clock
+    // is driven PAST the deadline and that is asserted first — before anything else, because the
+    // forcefulness IS the rail here.
+    const deadline = Date.now() + 5_000; // live in WALL-CLOCK...
+    let deltaTime = 0;
+    for (let i = 0; i < 20_000; i += 1) deltaTime = gw.nextTimestamp();
+    expect(deltaTime).toBeGreaterThan(deadline); // ...and LONG PAST in delta-time.
     await standSlate(gw, {
       members: [member],
       closes: ["cite"],
       deadline,
       requestedAt: Date.now(),
+      ts: deltaTime + 1, // the slate's own deltas ride DELTA-TIME, as a busy store's would
     });
-    // The slate is NOT lapsed — the door compares `now` against `deadline`, both wall-clock, and a
-    // delta's own timestamp is never compared against a deadline at all.
+    // The slate's own deltas are stamped in DELTA-TIME, so they sit past the deadline too: a door that
+    // compared any delta's timestamp against a deadline would lapse this slate on either reading.
     const report = gw.slates(Date.now())[0]!;
+    expect(gw.reactor.get(report.record)!.claims.timestamp).toBeGreaterThan(deadline);
+    // And it is NOT lapsed — the door compares `now` against `deadline`, both wall-clock, and a delta's
+    // own timestamp is never compared against a deadline at all.
     expect(report.lapsed).toBe(false);
     expect(report.closes).toEqual(["cite"]);
+    expect(report.enforced).toEqual(["cite"]);
     expect(await heightAt(gw)).toBe(30);
     await gw.close();
   });
@@ -496,7 +643,13 @@ describe("T64 criterion 8 — the lapse is computed AT THE DOOR, and the clock i
       requestedAt: LAPSED_DEADLINE - 60_000,
     });
     const health = await gw.health(LAPSED_DEADLINE + 60_000);
-    expect(health.slates).toEqual({ open: 1, lapsed: 1, lapsedIds: [stood.container] });
+    expect(health.slates).toEqual({
+      open: 1,
+      lapsed: 1,
+      lapsedIds: [stood.container],
+      unresolved: [],
+      disagreeing: [],
+    });
     // A lapsed compliance clock is NOT byte debt: `settling` means a promise already MADE has not
     // reached the bytes, and routing a compliance window through that field is how `settling` earns
     // the right to be ignored. A rail that accepted "settling" here would encode the conflation.
@@ -508,10 +661,16 @@ describe("T64 criterion 8 — the lapse is computed AT THE DOOR, and the clock i
       outstanding: [],
       unproven: false,
     });
-    expect(health.forgiven).toEqual({ count: 0, present: 0, ids: [] });
+    expect(health.forgiven).toEqual({ count: 0, present: 0, ids: [], unreadable: [] });
     // Two-sided: BEFORE the deadline the same store reports the slate open and NOT lapsed.
     const early = await gw.health(LAPSED_DEADLINE - 30_000);
-    expect(early.slates).toEqual({ open: 1, lapsed: 0, lapsedIds: [] });
+    expect(early.slates).toEqual({
+      open: 1,
+      lapsed: 0,
+      lapsedIds: [],
+      unresolved: [],
+      disagreeing: [],
+    });
     expect(early.status).toBe("ok");
     await gw.close();
   });

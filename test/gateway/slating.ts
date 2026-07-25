@@ -78,6 +78,10 @@ export interface SlateFixture {
   readonly wrongVersion?: string;
   /** Cite a `membershipAt` address nothing publishes — the dangling-dependency refusal. */
   readonly danglingMembership?: boolean;
+  /** Pin a DIFFERENT pair on the record than the container declares — the disagreement refusal. */
+  readonly recordPins?: { membershipAt: string; version: string };
+  /** Publish a NON-EXTENSIONAL Term (a live predicate) as the membership — the H8 probe. */
+  readonly liveTerm?: unknown;
 }
 
 /**
@@ -88,13 +92,16 @@ export interface SlateFixture {
 export async function standSlate(gw: Gateway, spec: SlateFixture): Promise<StoodSlate> {
   const container = spec.container ?? "container:slate:subject-42";
   const ts = spec.ts ?? 50_000;
-  const term = frozenMembershipTerm(spec.members.map((d) => d.id));
+  const term = spec.liveTerm ?? frozenMembershipTerm(spec.members.map((d) => d.id));
   const published = signClaims(termClaims(term, OP, ts), OP_SEED);
   await gw.append([published]);
   // The version is `Gateway.freeze` over the same Term — the ONE address the door's agreement check,
   // the cut's pre-flight, and the graveyard's frozen set all mean.
   const version = spec.wrongVersion ?? gw.freeze(term).id;
   const membershipAt = spec.danglingMembership ? `${published.id.slice(0, -4)}dead` : published.id;
+  // The RECORD pins the pair too, and by default it pins the SAME pair the container declares — the
+  // door requires them to agree. `recordPins` drives them apart, which is the over-purge probe.
+  const recordPins = spec.recordPins ?? { membershipAt, version };
   const declaration = declareContainer(
     {
       container,
@@ -110,6 +117,8 @@ export async function standSlate(gw: Gateway, spec: SlateFixture): Promise<Stood
     slateClaims(
       {
         container,
+        membershipAt: recordPins.membershipAt,
+        version: recordPins.version,
         requestedBy: spec.requestedBy ?? "subject:42",
         requestedByForm: spec.requestedByForm ?? "plain",
         requestedAt: spec.requestedAt ?? REQUESTED_AT,
@@ -130,8 +139,17 @@ export async function standSlate(gw: Gateway, spec: SlateFixture): Promise<Stood
 }
 
 /** The ground, delta id by delta id — the comparison a "left byte-identical" rail makes. */
-export const groundIds = (gw: Gateway): string[] =>
-  [...gw.reactor.snapshot()].map((d) => d.id).sort();
+/**
+ * The ground, delta id by delta id — the whole content of every "left byte-identical" assertion, so it
+ * REFUSES on an empty answer rather than returning one. A governed store always holds its genesis, so
+ * empty here means the helper broke, and four refusal rails would have gone vacuously green.
+ */
+export const groundIds = (gw: Gateway): string[] => {
+  const ids = [...gw.reactor.snapshot()].map((d) => d.id).sort();
+  if (ids.length === 0)
+    throw new Error("groundIds: a governed store is never empty — the probe broke");
+  return ids;
+};
 
 /** Strike a delta in the operator's own voice (un-slating, forgiveness, an ordinary retraction). */
 export const strike = (targetId: string, ts: number): Delta =>
