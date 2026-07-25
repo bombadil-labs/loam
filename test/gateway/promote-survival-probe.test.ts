@@ -1,27 +1,16 @@
-// PROBE (2026-07-21, T38 fallout sweep) — does promotion check that its source SURVIVES, or only
-// that it is PRESENT?
+// THE REPRODUCTION (T39) — does promotion check that its source SURVIVES, or only that it is
+// PRESENT? One output, retracted by its own author inside the pool, offered to `promote`.
 //
-// RESULT: CONFIRMED. Run 2026-07-21 — promotion SUCCEEDED. A pool output that was retracted inside
-// the pool was adopted into the primary, re-signed into the operator's own voice. Ticket **T39**
-// fixes it; this file is its rail, committed SKIPPED so the suite keeps telling the truth about what
-// is green. Un-skipping it is step one. Do not "fix" this file; fix the promotion gate.
+// `reactor.get` is PRESENCE: it says nothing about whether the delta still survives in the pool.
+// Meanwhile `promotionRefusal` refuses to promote a NEGATION ("a retraction is the operator's own §14
+// act, never an adopted output"). Each rule is right alone and they combine badly — the retraction
+// cannot cross, but its target can, so promoting a retracted output RESURRECTS it in the OPERATOR'S
+// OWN VOICE, with full force, asserting something withdrawn where it was made.
 //
-// THE SUSPICION. `promoteImpl` does:
-//
-//     const src = source.reactor.get(deltaId);
-//     if (src === undefined) throw new Error(`nothing to promote: ...`);
-//
-// `reactor.get` is PRESENCE. It says nothing about whether the delta still survives in the pool —
-// whether something in there struck it. Meanwhile `promotionRefusal` correctly refuses to promote a
-// NEGATION ("a retraction is the operator's own §14 act, never an adopted output").
-//
-// Those two rules are individually right and may combine badly: the retraction cannot cross, but its
-// target can. If so, promoting a retracted pool output RESURRECTS it — and worse than the seeding-edge
-// bug of T38, because promotion RE-SIGNS: the claim enters the primary in the OPERATOR'S OWN VOICE,
-// with full force, asserting something that had been withdrawn where it was made.
-//
-// This is the §28.4 rule pointed at a different edge: a filter that narrows a delta-set must carry
-// what struck it. Promotion narrows to exactly one delta.
+// This is §28.4's rule pointed at a different edge (a filter that narrows a delta-set must carry what
+// struck it; promotion narrows to exactly one delta) — with a door's remedy rather than a filter's:
+// promotion REFUSES. The decision and its scoping are railed in `promote-survival.test.ts`; this file
+// holds only the single crossing that failed, in the smallest shape that shows it.
 
 import { describe, expect, it } from "vitest";
 import { signClaims, type Delta, type Policy, type Schema } from "@bombadil/rhizomatic";
@@ -59,7 +48,7 @@ const strike = (targetId: string, timestamp: number): Delta =>
     GARDENER_SEED,
   );
 
-describe.skip("T39 — promotion respects a retraction made inside the pool (FAILS — see T39)", () => {
+describe("T39 — promotion respects a retraction made inside the pool", () => {
   it("a pool output retracted in the pool is not adopted into the primary", async () => {
     const gw = await boot();
     const pool = await gw.openQuarantine();
@@ -83,15 +72,9 @@ describe.skip("T39 — promotion respects a retraction made inside the pool (FAI
       refusal = (e as Error).message;
     }
 
-    console.log(
-      `PROBE — promotion of a struck pool output: ${
-        refusal === undefined ? `ADOPTED as ${adopted}` : `refused (${refusal})`
-      }`,
-    );
-
-    // The expected-correct behavior: promotion refuses, naming the retraction. If this fails, the
-    // resurrection is real and wants a ticket.
-    expect(refusal).toBeDefined();
+    // Promotion refuses. A failure here reads `adopted` back so the message names the resurrected
+    // delta rather than only the absent refusal.
+    expect(refusal, `a struck pool output was ADOPTED as ${adopted}`).toBeDefined();
 
     await pool.drop();
     await gw.close();

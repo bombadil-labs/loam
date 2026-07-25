@@ -194,6 +194,34 @@ export async function promoteImpl(
   if (src === undefined) {
     throw new Error(`nothing to promote: ${deltaId} is not held in the source`);
   }
+  // SURVIVAL, NOT PRESENCE (§24.3; the fact-side twin of §27.8's law rule). `reactor.get` says the
+  // output EXISTS in the pool, never that it still STANDS there — and promotion re-signs, so adopting
+  // a withdrawn output would put the operator's name on a claim its own author had already taken
+  // back, in canonical history, where §11 erasure is the only way back out.
+  //
+  // REFUSE rather than carry the strike across. Promotion is content-addressed on the source, so a
+  // copy landed already-struck would kill that id forever: forgiveness in the pool could never
+  // re-land it — the idempotence short-circuit below would report success over a delta no reader can
+  // see (H7). Refusal leaves nothing behind. The translate door carries instead because its rendering
+  // has already LANDED and its audience runs none of Loam's reader rules; a door that can still say
+  // no holds the better instrument.
+  //
+  // WHOSE strike binds is the law side's rule, not a second one: only the struck delta's OWN AUTHOR
+  // retires it, scoped at every rung. So a stranger federated into the pool can neither veto a lawful
+  // adoption nor revive what the author genuinely withdrew, and the app's own counter-strike does
+  // revive. Asked BEFORE the law/data classification below — a struck delta is refused as struck,
+  // never by its kind.
+  const withdrawn = lawfulNegated(source.reactor, src.claims.author);
+  if (withdrawn(src.id)) {
+    const strikes = source.reactor
+      .negationsOf(src.id)
+      .filter((n) => source.reactor.get(n)?.claims.author === src.claims.author && !withdrawn(n));
+    throw new Error(
+      `promotion refused: ${deltaId} — its author ${src.claims.author} retracted it where it was ` +
+        `made (${strikes.join(", ")}), and an output taken back at the source must not re-enter in ` +
+        `the operator's voice. Strike the retraction there and promote again.`,
+    );
+  }
   // Promote-OUTPUTS adopts domain facts only. Law-shaped deltas — grants, trust, registrations,
   // tombstones, schema definitions, adoption records, negations — are refused here; operator
   // authorship is force, and law crosses only by §24.4's own ceremony.
@@ -254,8 +282,9 @@ export async function promoteImpl(
   // Idempotence: an adoption that already stands is returned, never re-landed — one output, one
   // adopted delta, one trail record, however many times the operator says yes. This reads the LIVE
   // trail (struck records filtered), so once the operator withdraws a record, re-promotion re-lands
-  // it. (The adopted VALUE's own survival — a §14 negation on it, distinct from erase — is checked
-  // by presence here, not survival; closing that is T39, a deliberate refuse-vs-revive decision.)
+  // it. Presence of the adopted delta is the right question at THIS rung: the source's survival is
+  // already settled above, and the adopted value is the operator's own claim — a §14 strike the
+  // operator later lays on it is theirs to lift, not something re-promotion should quietly undo.
   const live = new Map(gw.adoptions().map((a) => [a.sourceDelta, a.adoptedDelta]));
   if (live.get(deltaId) === adopted.id && gw.reactor.get(adopted.id) !== undefined) {
     return { promoted: adopted.id };
