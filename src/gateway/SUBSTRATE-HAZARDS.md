@@ -351,6 +351,16 @@ unrelated changes, which is what earned this its own entry rather than a line un
 - And the tooling did it to me while I was writing this up: an `until` loop polling CI with
   `jq 'all(.bucket != "pending")'` exited immediately, because `all` over an empty array is `true`.
 
+**And the cost is not one missed bug — it is every bug downstream staying invisible.** Measured the
+same day, on T79: repairing two vacuous rails immediately turned up defects nothing else had seen.
+Recording `invalidate` into the harness's call log made the de-vacuumed retry rail go red, which
+revealed there was no per-code retry exclusion *at all*; and the first rail to actually EXECUTE the
+realm program found that a throw inside a then-success callback never reaches that same then's
+rejection handler, so a faulting bundle posted nothing and the page recovered only on its clock. Both
+had been sitting under a green bar. So a rail that cannot fail is not merely worthless — it is load-
+bearing in the wrong direction, holding a whole region of the code out of reach of every later review.
+Fix the rail first, then read what it says.
+
 **Provenance.** 2026-07-25 — distilled at P7 from the P5 rounds on T64, T79 and T95.
 
 ---
