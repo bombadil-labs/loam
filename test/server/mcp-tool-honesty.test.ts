@@ -8,6 +8,12 @@
 // cannot see a delta that landed unresolved. The positive legs are load-bearing too — a door that
 // refused everything would satisfy the refusals and serve nobody.
 //
+// The MUTATION legs are the ones that pin a real write path — they were watched red, and the ground
+// moved. The subscription leg asserts both levels for symmetry rather than because a write could slip
+// through it: graphql's `execute` never invokes a subscription field's `subscribe` resolver, so that
+// document cannot write even with the guard gone. What it pins there is honesty — the read tool is
+// not a stream door — and that assertion holds whatever the substrate does later.
+//
 // Deliberately NOT asserted: `operationName` selecting one operation out of several. The MCP tool
 // takes `{ query, variables }` and no operation name, so there is nothing to select with; the rail
 // instead pins that a mutation ANYWHERE in the document refuses the whole document, which is what
@@ -138,13 +144,18 @@ describe("MCP tool honesty: loam_query is a read, and says so on the wire", () =
   });
 
   it("refuses a subscription document — the same class, a different door", async () => {
+    // The door this refusal points at is itself a read: graphql's `subscribe` throws
+    // `Expected subscription operation.` for a query or mutation document, so ?query=mutation{…}
+    // on /subscribe is not a way around this one.
+    const before = await heightViaDoor();
     const count = await deltas();
     const refused = await call("loam_query", {
       query: `subscription { plant(entity: "${FERN}") { height } }`,
     });
+    expect(await deltas()).toBe(count);
+    expect(await heightViaDoor()).toBe(before);
     expect(refused.isError).toBe(true);
     expect(refused.content[0]!.text).toMatch(/subscribe/);
-    expect(await deltas()).toBe(count);
   });
 
   it("leaves an unparseable document to the gateway, in the gateway's own words", async () => {
@@ -203,5 +214,51 @@ describe("MCP tool honesty: loam_query is a read, and says so on the wire", () =
     // cache/replay machinery refuse the call, which is a second guard we do not hold ourselves.
     expect(byName.get("loam_mutate")?.annotations?.readOnlyHint).toBe(false);
     expect(byName.get("loam_register")?.annotations?.readOnlyHint).toBe(false);
+  });
+});
+
+// An annotation is only an authority if the NEGOTIATED revision can carry it. `readOnlyHint` arrived
+// in MCP 2025-03-26; a client told "2024-11-05" that validates against, or gates policy on, the
+// revision it negotiated never sees the field at all — so the declaration above would be legible to
+// us and invisible to the shell whose cache we are trying to restrain. These rails assert the
+// negotiated string, which nothing pinned before: the annotation half is asserted on OUR side of the
+// wire and stays true whatever the client was told it may read.
+describe("MCP protocol negotiation: the revision must be able to carry the annotation", () => {
+  const ANNOTATIONS_SINCE = "2025-03-26"; // ISO dates order lexicographically
+
+  const initialize = async (params: Record<string, unknown>): Promise<string> => {
+    const res = await rpc({ method: "initialize", params });
+    expect(res.status).toBe(200);
+    return ((await res.json()) as { result: { protocolVersion: string } }).result.protocolVersion;
+  };
+
+  it("echoes a supported revision the client asks for", async () => {
+    expect(await initialize({ protocolVersion: "2025-06-18" })).toBe("2025-06-18");
+    expect(await initialize({ protocolVersion: "2025-03-26" })).toBe("2025-03-26");
+  });
+
+  it("answers an absent, unknown, or annotation-less request with a revision it can speak", async () => {
+    for (const params of [
+      {},
+      { protocolVersion: "2024-11-05" }, // predates ToolAnnotations entirely
+      { protocolVersion: "1999-01-01" },
+      { protocolVersion: 20250618 }, // not even a string
+    ]) {
+      const spoken = await initialize(params);
+      expect(spoken >= ANNOTATIONS_SINCE).toBe(true);
+    }
+  });
+
+  it("binds the two halves: the same session's annotations are legible under what it negotiated", async () => {
+    const spoken = await initialize({ protocolVersion: "2025-06-18" });
+    expect(spoken >= ANNOTATIONS_SINCE).toBe(true);
+
+    const res = await rpc({ method: "tools/list", params: {} });
+    const tools = (
+      (await res.json()) as {
+        result: { tools: Array<{ name: string; annotations?: { readOnlyHint?: boolean } }> };
+      }
+    ).result.tools;
+    expect(tools.find((t) => t.name === "loam_query")?.annotations?.readOnlyHint).toBe(true);
   });
 });

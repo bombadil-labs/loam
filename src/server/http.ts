@@ -423,6 +423,15 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     }
   };
 
+  // The MCP revisions this door speaks — every one in which a Tool may CARRY the annotations below.
+  // `readOnlyHint` arrived in 2025-03-26; under 2024-11-05 a Tool is name/description/inputSchema and
+  // nothing else. So a client told "2024-11-05" while being handed a readOnlyHint has negotiated a
+  // protocol in which the field it is asked to honour does not exist — and that field is the second
+  // guard against a replayed write, the one the runtime holds rather than us. Newest first: an
+  // unrecognised or absent request is answered with the newest we speak, never with a revision that
+  // cannot express what we declare.
+  const MCP_PROTOCOLS: readonly string[] = ["2025-06-18", "2025-03-26"];
+
   // The MCP tools: the same two verbs the gateway speaks, in JSON-RPC clothes. `annotations` are
   // part of the authority, not decoration: a shell reads `readOnlyHint: true` as a licence to cache
   // and REPLAY a call, and an explicit `false` is what makes its own machinery refuse to cache a
@@ -565,13 +574,16 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       json(res, 200, { jsonrpc: "2.0", id: rpc.id ?? null, result });
 
     switch (rpc.method) {
-      case "initialize":
+      case "initialize": {
+        const asked = (rpc.params ?? {})["protocolVersion"];
         reply({
-          protocolVersion: "2024-11-05",
+          protocolVersion:
+            typeof asked === "string" && MCP_PROTOCOLS.includes(asked) ? asked : MCP_PROTOCOLS[0],
           capabilities: { tools: {} },
           serverInfo: { name: "loam", version: "0.1.0" },
         });
         return;
+      }
       case "notifications/initialized":
         res.writeHead(202, CORS).end();
         return;
