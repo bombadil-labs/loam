@@ -1141,7 +1141,15 @@ describe("§30 criterion 21 (the fold half): a failing bundle refuses cleanly, n
     try {
       const h = load(PAGE, answering({ height: 1, tag: "t" }));
       h.deliver(answerFor(h.calls[0]!.input.query!, { height: 1, tag: "t" }));
-      await new Promise((r) => setTimeout(r, 2400));
+      // POLL to a generous deadline rather than sleeping a fixed 2400ms against a 2s clock. A fixed
+      // sleep only just clears the timer, so on a loaded runner the timer fires LATE and the rail goes
+      // red for scheduling rather than for behaviour — a flake, and the assertion would be about the
+      // runner's mood. Waiting longer than necessary costs nothing here because the loop exits the
+      // moment the fold lands; only a clock that never fires reaches the deadline.
+      const deadline = Date.now() + 15_000;
+      while (!h.html("loam-app").includes("the renderer timed out") && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
       expect(h.html("loam-app")).toContain("the renderer timed out");
     } finally {
       silentRealm = false;
