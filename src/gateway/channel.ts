@@ -92,7 +92,10 @@ export class Channel<T> implements AsyncGenerator<T, void, unknown> {
     // may since have been erased (SPEC §11) — a re-seat closes every channel precisely because the
     // purge happened — and `next()` consults the queue BEFORE this flag, so keeping it would let a
     // slow reader drain purged bytes from a closed stream. Dropping it is what makes a close a
-    // teardown rather than a pause.
+    // teardown rather than a pause. `fail()` funnels through here too, so a dying stream discards
+    // its undrained value as well and the reader gets the error in its place — acceptable because
+    // the error IS the instruction to resubscribe, and a resubscribe re-reads current state; a
+    // stale value delivered first would be the one thing it could not correct for.
     this.queue.length = 0;
     for (const waiter of this.waiters.splice(0)) waiter.resolve({ value: undefined, done: true });
     this.onClose?.();

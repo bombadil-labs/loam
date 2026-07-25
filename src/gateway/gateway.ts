@@ -721,6 +721,15 @@ export class Gateway {
     this.ingestVia = (d) => this.reactor.ingest(d);
     this.attachPersistence(reactor);
     if (this.registered.length > 0) rebindImpl(this, this.registered);
+    // The registered set is a PARSED COPY of definition content — hyperschema bodies, schemas,
+    // resolver source — so it is a tier like any other (§11), and rebinding it alone would keep
+    // serving law whose bytes this cut just removed: `surface()`, the GraphQL schema and every
+    // door built from them would outlive the ground until a restart. Re-derive instead. The
+    // rebind above still has to happen first — it is what puts materializations on the FRESH
+    // reactor — and the replay is a no-op when nothing was forgotten (it compares sets and
+    // returns), so the second bind is paid only when the cut actually took law away. Manual
+    // registrations are this process's own, not the ground's: the replay keeps them by origin.
+    this.replayRegistrations();
   }
 
   // --- federation ------------------------------------------------------------------------------
