@@ -272,7 +272,10 @@ async function cmdServe(
     //
     // `undefined` is NOT an empty report and must not print as one — it means no heal reached the pen,
     // so nothing is known about it. Collapsing the two with `?? []` would put the exact conversion the
-    // sentinel exists to refuse in the one place the obligation lives.
+    // sentinel exists to refuse in the one place the obligation lives. UNREACHABLE from here today: a
+    // rejected heal rethrows above, so this boot never reads a cleared surface. It is written for the
+    // caller that catches — and it is untested for exactly that reason, which is worth more said than
+    // dressed up in a rail that would have to fake a reachability this file does not have.
     const restore = mirror.lastRestore;
     if (restore === undefined) {
       io.err(

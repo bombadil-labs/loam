@@ -293,8 +293,13 @@ describe("T66/H9: a heal that cannot finish never speaks for the pen", () => {
 
     // The §11 refusal survived...
     expect(report.purgeFailures.some((m) => m.includes("INCOMPLETE"))).toBe(true);
-    // ...and the restore's own failure is reported rather than swallowed or thrown.
-    expect(store.lastRestore?.stranded.some((m) => m.includes("database is locked"))).toBe(true);
+    // ...and the restore's own failure is reported rather than swallowed or thrown, citing the section
+    // an operator would go read (a message that sends them to the wrong one has told them nothing).
+    expect(
+      store.lastRestore?.stranded.some(
+        (m) => m.includes("database is locked") && m.includes("§25"),
+      ),
+    ).toBe(true);
     // Nothing was proven about the pen, so nothing was planted on that uncertainty either.
     expect(report.toPrimary).toBe(0);
     await store.close();
