@@ -6,15 +6,12 @@
 // leaves that whole suite green. These rails assert the OUTPUT instead: three fixed member sets,
 // three literal addresses.
 //
-// This is a CHARACTERIZATION rail. It PASSED the first time it ran, which is correct and is the
-// entire point: it was written against the source while the separator was still two raw 0x00
-// bytes, so that rewriting them as escapes could be PROVEN byte-identical rather than assumed.
-// The proof that it is not vacuous runs in the other direction — swap the separator in the source
-// for a space and four of the five rails below go red (the door rail does not, and should not: it
-// asserts a linkage, not a value). That the pre-escape source really held the raw byte (and not, say,
-// a space, which would make these goldens the record of a break rather than of continuity) is
-// re-checkable from history, and the check is one command:
-//   git show <rev>:src/gateway/container-identity.ts | perl -0777 -ne '$c=()=/\x00/g; print "$c\n"'
+// This is a CHARACTERIZATION rail: the values below are the addresses the implementation ALREADY
+// produced, so it is green by construction rather than by having driven a change. That is why it
+// cannot be read as evidence the way a normal rail can — a green run says only "unmoved". What
+// makes it a rail at all is the other direction: swap the separator in the source for a space and
+// four of the five below go red (the door rail does not, and should not — it asserts a linkage, not
+// a value).
 //
 // The member ids are synthetic on purpose. `addressOf` sees nothing but `d.id`, so freezing real
 // signed deltas would bolt a second moving part (rhizomatic's id format) onto a rail whose only
