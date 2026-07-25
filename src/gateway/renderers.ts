@@ -311,10 +311,21 @@ export function loadedRenderer(bundle: string): RenderFn | undefined {
 // bundle must LOAD to a function. Only then does the binding persist and the route go live.
 const DEFAULT_MAX_PUBLIC_RENDERS = 16;
 
+/**
+ * The renderer door's internal seam (ticket T33), mirroring `PublishInternals`: a blessing reuses
+ * THIS door — schema-must-be-registered, field coverage, the bundle must load — and needs only the
+ * source's timestamp (so the blessed binding re-mints the source's id) and the incumbent it retires.
+ */
+export interface RendererInternals {
+  readonly timestamp?: number;
+  readonly negates?: readonly string[];
+}
+
 export async function publishRendererImpl(
   gw: Gateway,
   input: unknown,
   context?: RequestContext,
+  internals?: RendererInternals,
 ): Promise<void> {
   const seed = context?.actor ?? gw.options.seed;
   if (seed === undefined) {
@@ -364,9 +375,29 @@ export async function publishRendererImpl(
   // the content-addressed cache so the synchronous serve path finds it.
   await loadRenderers([spec.bundle]);
   const author = authorForSeed(seed);
-  await gw.append([
-    signClaims(rendererBindingClaims(spec, versionId, author, gw.nextTimestamp()), seed),
-  ]);
+  const binding = rendererBindingClaims(
+    spec,
+    versionId,
+    author,
+    internals?.timestamp ?? gw.nextTimestamp(),
+  );
+  // Taking a ROUTE the same way a blessing takes a schema name (§23.5 is latest-per-route, so the
+  // route is a living name too): the negation rides the binding, so striking the binding resurfaces
+  // whoever held the route before it.
+  const filed =
+    internals?.negates === undefined || internals.negates.length === 0
+      ? binding
+      : {
+          ...binding,
+          pointers: [
+            ...internals.negates.map((id) => ({
+              role: "negates",
+              target: { kind: "delta" as const, deltaRef: { delta: id } },
+            })),
+            ...binding.pointers,
+          ],
+        };
+  await gw.append([signClaims(filed, seed)]);
 }
 
 // Ensure a route's bundle is loaded (the body of `Gateway.prepareRoute`, SPEC §23) — async, so a renderer

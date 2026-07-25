@@ -28,6 +28,19 @@ import { graphql, type GraphQLSchema } from "graphql";
 import type { StoreBackend } from "../store/backend.js";
 import { isRepairable } from "../store/quarantine.js";
 import { promoteImpl, readAdoptions, type Adoption } from "./adopt.js";
+import {
+  adoptLawImpl,
+  blessAllImpl,
+  lawFromImpl,
+  readLawAdoptions,
+  withLivingNames,
+  type AdoptLawOptions,
+  type AdoptionOutcome,
+  type BlessAllOptions,
+  type BlessAllReport,
+  type LawAdoption,
+  type LawFromRow,
+} from "./adopt-law.js";
 import { eraseImpl, eraseReplicaImpl, healthImpl, type StoreHealth } from "./erase.js";
 import { Channel } from "./channel.js";
 import { STORE_ENTITY, operatorMarkerClaims, type Genesis } from "./genesis.js";
@@ -511,16 +524,21 @@ export class Gateway {
     writable?: readonly string[],
     resolvers?: ResolverSpecs,
   ): Promise<PublishOutcome> {
-    return publishRegistrationImpl(
-      this,
-      hyperschema,
-      schema,
-      roots,
-      context,
-      entity,
-      mutations,
-      writable,
-      resolvers,
+    // Through the living-name critical section (T33, criterion 14): a direct publish takes the
+    // same latest-wins name a blessing does, so it must not be able to move a winner underneath a
+    // blessing that has already checked it.
+    return withLivingNames(this, () =>
+      publishRegistrationImpl(
+        this,
+        hyperschema,
+        schema,
+        roots,
+        context,
+        entity,
+        mutations,
+        writable,
+        resolvers,
+      ),
     );
   }
 
@@ -537,9 +555,11 @@ export class Gateway {
     return declarePublicImpl(this, entries, context);
   }
 
-  // Publish a renderer as data (SPEC §23): the body lives beside the binding vocabulary in renderers.ts.
+  // Publish a renderer as data (SPEC §23): the body lives beside the binding vocabulary in
+  // renderers.ts. A ROUTE is a living name too (§23.5 is latest-per-route), so this door shares the
+  // living-name critical section with `publishRegistration` and `adoptLaw` (T33, criterion 14).
   async publishRenderer(input: unknown, context?: RequestContext): Promise<void> {
-    return publishRendererImpl(this, input, context);
+    return withLivingNames(this, () => publishRendererImpl(this, input, context));
   }
 
   // Ensure a route's bundle is loaded (SPEC §23): the body lives in renderers.ts.
@@ -659,6 +679,54 @@ export class Gateway {
     if (this.operatorAuthor === undefined) return [];
     return readAdoptions(this.reactor, this.operatorAuthor);
   }
+
+  // --- promote-law (SPEC §24.4 × §27.8, ticket T33) ------------------------------------------------
+
+  // Bless ONE manifest row of a module version into this root's own law: the body — and the
+  // root-name guard, the pen flag, the bytes-classification, and the timestamp inheritance that
+  // makes it idempotent — lives beside the manifest vocabulary in adopt-law.ts.
+  async adoptLaw(
+    version: ModuleVersion,
+    alias: string,
+    opts: AdoptLawOptions = {},
+  ): Promise<AdoptionOutcome> {
+    return adoptLawImpl(this, version, alias, opts);
+  }
+
+  // Bless every LAW row of a module version — sugar that expands to N ordinary adoptions (§27.8).
+  async blessAll(version: ModuleVersion, opts: BlessAllOptions = {}): Promise<BlessAllReport> {
+    return blessAllImpl(this, version, opts);
+  }
+
+  // "What law of these module versions does my root currently bind?" — content-address
+  // intersection over the UNION of their manifests. Arithmetic, never the adoption records.
+  lawFrom(versions: readonly ModuleVersion[]): LawFromRow[] {
+    return lawFromImpl(this, versions);
+  }
+
+  // The law-adoption trail (§27.8's ledger): origination (`adopted-from`) told apart from mere
+  // exposure (`witnessed`). Shares `loam.adoption` with promote-outputs and answers a different
+  // question over it — `adoptions()` reads the FACT trail, this one the LAW trail.
+  lawAdoptions(): LawAdoption[] {
+    if (this.operatorAuthor === undefined) return [];
+    return readLawAdoptions(this.reactor, this.operatorAuthor);
+  }
+
+  /**
+   * @internal — T33 seam (adopt-law.ts): the injected post-check hold the atomicity rail drives.
+   * Awaited between a blessing's name-check and its append, OUTSIDE the critical section, so a
+   * test can hold one adoption open while another door genuinely moves the winner. Undefined in
+   * production; nothing in the door's logic depends on it being set.
+   */
+  adoptionHold: (() => Promise<void>) | undefined = undefined;
+
+  /**
+   * @internal — T33 seam (adopt-law.ts): the ONE per-gateway living-name critical section. Every
+   * door that takes a latest-wins NAME chains through it — `adoptLaw`, `publishRegistration`,
+   * `publishRenderer` — because the guard defends a name and not a door. The mechanism is the
+   * single-writer gateway the store doctrine already holds; the substrate needs nothing.
+   */
+  livingNames: Promise<void> = Promise.resolve();
 
   // Honor an erasure DECIDED by the primary operator (SPEC §24.8), called on a pool by the primary's
   // fan-out: the body — and the fan-out's re-derive-its-own-reach doctrine — lives in erase.ts.

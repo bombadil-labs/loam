@@ -69,6 +69,14 @@ export function promotionRefusal(claims: Claims): string | undefined {
     if (p.role === "negates" && p.target.kind === "delta") {
       return "it is a negation — a retraction is the operator's own §14 act, never an adopted output";
     }
+    // The reserved namespaces are worn by ROLES as well as by contexts, and a hyperschema/Schema
+    // DEFINITION wears them only there: its pointers sit at the neutral `definition` context under
+    // `rhizomatic.hyperschema.*` / `rhizomatic.schema.*` roles. Reading contexts alone let the most
+    // load-bearing law in the store — the gather program every read resolves through — cross by
+    // promote-outputs, past every §24.4 guard (T33 criterion 23: there is ONE door).
+    if (p.role.startsWith("loam.") || p.role.startsWith("rhizomatic.")) {
+      return `it speaks the reserved role ${p.role} — law crosses by adoptLaw (§24.4), not adoption`;
+    }
     const ctx =
       p.target.kind === "entity"
         ? p.target.entity.context
@@ -187,7 +195,15 @@ export async function promoteImpl(
   // authorship is force, and law crosses only by §24.4's own ceremony.
   const refusal = promotionRefusal(src.claims);
   if (refusal !== undefined) {
-    throw new Error(`promotion refused: ${deltaId} — ${refusal}`);
+    // The prefix is byte-stable (rails and callers match on it); the REMEDY is a tail, because a
+    // refusal that names no door is how a second door gets invented. §24.4's door is `adoptLaw`,
+    // and every guard law must pass — root-name, pen flag, bytes-classification, route — lives on
+    // it, so a raw delta id must never find another way in.
+    throw new Error(
+      `promotion refused: ${deltaId} — ${refusal}. Law is blessed per EXPORT, through the ` +
+        `manifest: adoptLaw(version, alias) (or blessAll for the whole manifest), which runs the ` +
+        `root-name guard and classifies from the export's own bytes.`,
+    );
   }
   // Reference closure (§24.3/§27): a promoted delta must resolve in its new home. A cited delta the
   // primary holds passes as-is; one the primary knows only THROUGH AN ADOPTION is REWRITTEN to cite its

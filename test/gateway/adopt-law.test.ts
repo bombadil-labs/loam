@@ -42,7 +42,11 @@ const STRANGER = authorForSeed(STRANGER_SEED);
 // The stranger's law: their own Post shape (reusing the Plant body so views resolve without a
 // bespoke hyperschema fixture — the NAME is what collides or doesn't, per criterion 8).
 const POST: HyperSchema = { name: "Post", alg: 1, body: PLANT_BODY };
-const POST_SCHEMA: Schema = { props: new Map([["height", pickLatest]]), default: pickLatest, name: "Post" };
+const POST_SCHEMA: Schema = {
+  props: new Map([["height", pickLatest]]),
+  default: pickLatest,
+  name: "Post",
+};
 
 const boot = (): Promise<Gateway> =>
   Gateway.boot(
@@ -166,17 +170,21 @@ async function moduleWorldInto(
   return { wall, version, parts: { definition, registration, renderer, manifest } };
 }
 
-async function moduleWorld(
-  opts: Parameters<typeof moduleWorldInto>[1] = {},
-): Promise<ModuleWorld> {
+async function moduleWorld(opts: Parameters<typeof moduleWorldInto>[1] = {}): Promise<ModuleWorld> {
   const gw = await boot();
   const built = await moduleWorldInto(gw, opts);
   return { gw, ...built };
 }
 
+// The GraphQL door spells a lens's query field lower-camel (gql.ts): the store BINDS the lens
+// "Post", the door answers at `post`. Every rail here names the lens and asks the door by this —
+// spelling the lens straight into the query would make "the read fails" pass for the wrong reason
+// (an unknown field), which is a hollow rail wearing an object-level assertion.
+const field = (lens: string): string => lens.replace(/^[A-Z]/, (c) => c.toLowerCase());
+
 const rootResolvesPost = async (gw: Gateway): Promise<boolean> => {
   try {
-    const view = await gw.query(`{ Post(entity: "${FERN}") { height } }`);
+    const view = await gw.query(`{ ${field("Post")}(entity: "${FERN}") { height } }`);
     return view.errors === undefined;
   } catch {
     return false;
@@ -188,7 +196,11 @@ describe("T33 criterion 3 — facts never need it", () => {
     const gw = await boot();
     await gw.append([
       signClaims(
-        containerClaims({ container: "container:facts", trust: "untrusted", posture: "wall" }, OP, 42_000),
+        containerClaims(
+          { container: "container:facts", trust: "untrusted", posture: "wall" },
+          OP,
+          42_000,
+        ),
         OP_SEED,
       ),
     ]);
@@ -207,8 +219,8 @@ describe("T33 criterion 3 — facts never need it", () => {
 
     // The exported entity resolves with ZERO adoptions performed — through the operator's own
     // seeded lens in the module's container (facts bind nothing; nothing needs blessing).
-    const view = await wall.gateway!.query(`{ Plant(entity: "${FERN}") { height } }`);
-    expect((view.data?.Plant as { height?: unknown } | undefined)?.height).toBe(30);
+    const view = await wall.gateway!.query(`{ ${field("Plant")}(entity: "${FERN}") { height } }`);
+    expect((view.data?.[field("Plant")] as { height?: unknown } | undefined)?.height).toBe(30);
 
     await expect(gw.adoptLaw(version, "Fern")).rejects.toThrow(/exports no law/);
     await wall.drop();
@@ -224,7 +236,7 @@ describe("T33 criterion 1 — one export blesses that export and nothing else", 
     await gw.adoptLaw(version, "Post");
 
     // Object level, the root's own door: a read RESOLVES through the blessed schema.
-    const view = await gw.query(`{ Post(entity: "${FERN}") { height } }`);
+    const view = await gw.query(`{ ${field("Post")}(entity: "${FERN}") { height } }`);
     expect(view.errors).toBeUndefined();
     // The sibling export did not ride: the root serves no /feed route...
     const root = await gw.serveRoute("feed", FERN, "full");
@@ -249,7 +261,9 @@ describe("T33 criterion 2 — the ordinary publish path, with the source's times
     );
     // definition + living + snapshot + binding = four law deltas, timestamps inherited exactly.
     expect(blessed.length).toBe(4);
-    const sourceTs = [parts.definition, ...parts.registration].map((d) => d.claims.timestamp).sort();
+    const sourceTs = [parts.definition, ...parts.registration]
+      .map((d) => d.claims.timestamp)
+      .sort();
     expect(blessed.map((d) => d.claims.timestamp).sort()).toEqual(sourceTs);
 
     // Erasure holds by identity: erase one blessed law delta, re-bless — the door refuses the
@@ -316,8 +330,8 @@ const plantRootPost = async (gw: Gateway): Promise<void> => {
 };
 
 const heights = async (gw: Gateway, lens = "Post"): Promise<unknown> => {
-  const view = await gw.query(`{ ${lens}(entity: "${FERN}") { height } }`);
-  return (view.data?.[lens] as { height?: unknown } | undefined)?.height;
+  const view = await gw.query(`{ ${field(lens)}(entity: "${FERN}") { height } }`);
+  return (view.data?.[field(lens)] as { height?: unknown } | undefined)?.height;
 };
 
 describe("T33 criteria 8 & 16 — the root-name guard, and supersede's reversibility", () => {
@@ -478,7 +492,11 @@ async function bumpModule(
   const author = authorForSeed(seed);
   const base = opts.base ?? 44_000;
   const NOTE: HyperSchema = { name: "Note", alg: 1, body: PLANT_BODY };
-  const NOTE_SCHEMA: Schema = { props: new Map([["tag", pickLatest]]), default: pickLatest, name: "Note" };
+  const NOTE_SCHEMA: Schema = {
+    props: new Map([["tag", pickLatest]]),
+    default: pickLatest,
+    name: "Note",
+  };
   const noteDefinition = signClaims(
     publishHyperSchemaClaims(NOTE, "hyperschema:Note", author, base),
     seed,
@@ -499,7 +517,11 @@ async function bumpModule(
     noteDefinition,
     ...[reg.living, reg.snapshot, reg.binding].map((c) => signClaims(c, seed)),
     signClaims(
-      manifestExportClaims({ alias: "Note", targetEntity: "hyperschema:Note", kind: "schema" }, author, base + 20),
+      manifestExportClaims(
+        { alias: "Note", targetEntity: "hyperschema:Note", kind: "schema" },
+        author,
+        base + 20,
+      ),
       seed,
     ),
   ];
@@ -522,7 +544,11 @@ async function bumpModule(
     batch.push(
       renderer2,
       signClaims(
-        manifestExportClaims({ alias: "Feed", targetAddress: renderer2.id, kind: "renderer" }, author, base + 31),
+        manifestExportClaims(
+          { alias: "Feed", targetAddress: renderer2.id, kind: "renderer" },
+          author,
+          base + 31,
+        ),
         seed,
       ),
     );
@@ -563,7 +589,10 @@ describe("T33 criteria 5 & 6 — bless-all is enumeration, and a bump is a delta
     const one = await moduleWorld();
     await one.gw.blessAll(one.version);
     const bulk = [...one.gw.reactor.snapshot()]
-      .filter((d) => d.claims.author === OP && d.claims.timestamp >= 41_000 && d.claims.timestamp < 42_000)
+      .filter(
+        (d) =>
+          d.claims.author === OP && d.claims.timestamp >= 41_000 && d.claims.timestamp < 42_000,
+      )
       .map((d) => d.id)
       .sort();
     await one.wall.drop();
@@ -573,7 +602,10 @@ describe("T33 criteria 5 & 6 — bless-all is enumeration, and a bump is a delta
     await two.gw.adoptLaw(two.version, "Post");
     await two.gw.adoptLaw(two.version, "Feed");
     const single = [...two.gw.reactor.snapshot()]
-      .filter((d) => d.claims.author === OP && d.claims.timestamp >= 41_000 && d.claims.timestamp < 42_000)
+      .filter(
+        (d) =>
+          d.claims.author === OP && d.claims.timestamp >= 41_000 && d.claims.timestamp < 42_000,
+      )
       .map((d) => d.id)
       .sort();
     expect(bulk).toEqual(single);
@@ -590,17 +622,34 @@ describe("T33 criteria 9, 15 & 24 — the pen is a different key", () => {
     const gw = await boot();
     await gw.append([
       signClaims(
-        containerClaims({ container: "container:penned", trust: "untrusted", posture: "wall" }, OP, 45_000),
+        containerClaims(
+          { container: "container:penned", trust: "untrusted", posture: "wall" },
+          OP,
+          45_000,
+        ),
         OP_SEED,
       ),
     ]);
     const wall = await gw.openContainer({ name: "container:penned", backend: new MemoryBackend() });
-    const definition = signClaims(publishHyperSchemaClaims(POST, "hyperschema:Post", STRANGER, 45_100), STRANGER_SEED);
+    const definition = signClaims(
+      publishHyperSchemaClaims(POST, "hyperschema:Post", STRANGER, 45_100),
+      STRANGER_SEED,
+    );
     let t = 45_101;
     const reg = registrationDeltaClaims(
-      "hyperschema:Post", "Post", POST_SCHEMA, [FERN], STRANGER, () => t++, undefined, ["height"], undefined,
+      "hyperschema:Post",
+      "Post",
+      POST_SCHEMA,
+      [FERN],
+      STRANGER,
+      () => t++,
+      undefined,
+      ["height"],
+      undefined,
     );
-    const registration = [reg.living, reg.snapshot, reg.binding].map((c) => signClaims(c, STRANGER_SEED));
+    const registration = [reg.living, reg.snapshot, reg.binding].map((c) =>
+      signClaims(c, STRANGER_SEED),
+    );
     const renderer = signClaims(
       rendererBindingClaims(
         {
@@ -618,18 +667,31 @@ describe("T33 criteria 9, 15 & 24 — the pen is a different key", () => {
       STRANGER_SEED,
     );
     const manifest = [
-      signClaims(manifestExportClaims({ alias: "Post", targetEntity: "hyperschema:Post", kind: "schema" }, STRANGER, 45_120), STRANGER_SEED),
+      signClaims(
+        manifestExportClaims(
+          { alias: "Post", targetEntity: "hyperschema:Post", kind: "schema" },
+          STRANGER,
+          45_120,
+        ),
+        STRANGER_SEED,
+      ),
       signClaims(
         manifestExportClaims(
           // Criterion 15's lie: the pen-holding renderer declared as a harmless schema row.
-          { alias: "PenFeed", targetAddress: renderer.id, kind: opts.lyingKind ? "schema" : "renderer" },
+          {
+            alias: "PenFeed",
+            targetAddress: renderer.id,
+            kind: opts.lyingKind ? "schema" : "renderer",
+          },
           STRANGER,
           45_121,
         ),
         STRANGER_SEED,
       ),
     ];
-    await wall.gateway!.federate([definition, ...registration, renderer, ...manifest], { admit: () => true });
+    await wall.gateway!.federate([definition, ...registration, renderer, ...manifest], {
+      admit: () => true,
+    });
     const version = wall.gateway!.freeze({
       op: "select",
       pred: { match: { field: "author", cmp: "eq", const: STRANGER } },
@@ -689,7 +751,11 @@ describe("T33 criteria 10, 19 & 13 — re-points, dangling rows, and skew get ey
   it("a dangling manifest row refuses the whole call; no partial adoption lands", async () => {
     const { gw, wall } = await moduleWorld();
     const dangling = signClaims(
-      manifestExportClaims({ alias: "Ghost", targetAddress: "0".repeat(64), kind: "schema" }, STRANGER, 46_000),
+      manifestExportClaims(
+        { alias: "Ghost", targetAddress: "0".repeat(64), kind: "schema" },
+        STRANGER,
+        46_000,
+      ),
       STRANGER_SEED,
     );
     await wall.gateway!.federate([dangling], { admit: () => true });
@@ -727,14 +793,31 @@ describe("T33 criteria 11, 17, 18 & 26 — the ledger tells origination from exp
     const rivalSeed = "4e".repeat(32);
     const rival = authorForSeed(rivalSeed);
     await gw.append([
-      signClaims(containerClaims({ container: "container:rival", trust: "untrusted", posture: "wall" }, OP, 47_000), OP_SEED),
+      signClaims(
+        containerClaims(
+          { container: "container:rival", trust: "untrusted", posture: "wall" },
+          OP,
+          47_000,
+        ),
+        OP_SEED,
+      ),
     ]);
-    const rivalWall = await gw.openContainer({ name: "container:rival", backend: new MemoryBackend() });
+    const rivalWall = await gw.openContainer({
+      name: "container:rival",
+      backend: new MemoryBackend(),
+    });
     await rivalWall.gateway!.federate(
       [
         parts.definition,
         ...parts.registration,
-        signClaims(manifestExportClaims({ alias: "Post", targetEntity: "hyperschema:Post", kind: "schema" }, rival, 47_100), rivalSeed),
+        signClaims(
+          manifestExportClaims(
+            { alias: "Post", targetEntity: "hyperschema:Post", kind: "schema" },
+            rival,
+            47_100,
+          ),
+          rivalSeed,
+        ),
       ],
       { admit: () => true },
     );
@@ -806,15 +889,24 @@ describe("T33 criteria 12 & 21 — lawFrom is exposure arithmetic, unioned acros
     const { gw, wall, version } = await moduleWorld(); // @1 manifests Post + Feed
     await gw.adoptLaw(version, "Post");
     // @7 keeps Note only — Post dropped from the newer manifest, still bound here.
-    const wall2 = await gw.openContainer({
-      name: "container:social-v7",
-      backend: new MemoryBackend(),
-    }).catch(async () => {
-      await gw.append([
-        signClaims(containerClaims({ container: "container:social-v7", trust: "untrusted", posture: "wall" }, OP, 49_000), OP_SEED),
-      ]);
-      return gw.openContainer({ name: "container:social-v7", backend: new MemoryBackend() });
-    });
+    const wall2 = await gw
+      .openContainer({
+        name: "container:social-v7",
+        backend: new MemoryBackend(),
+      })
+      .catch(async () => {
+        await gw.append([
+          signClaims(
+            containerClaims(
+              { container: "container:social-v7", trust: "untrusted", posture: "wall" },
+              OP,
+              49_000,
+            ),
+            OP_SEED,
+          ),
+        ]);
+        return gw.openContainer({ name: "container:social-v7", backend: new MemoryBackend() });
+      });
     const bumped = await bumpModule(wall2, { base: 49_100 });
 
     const union = gw.lawFrom([version, bumped.version]).map((r) => r.alias ?? r.address);
@@ -830,7 +922,9 @@ describe("T33 criteria 12 & 21 — lawFrom is exposure arithmetic, unioned acros
 describe("T33 criteria 23 & 25 — one door, and survival at the source", () => {
   it("promote() still refuses law, and its remedy names the door that exists", async () => {
     const { gw, wall, parts } = await moduleWorld();
-    await expect(gw.promote(wall.gateway!, parts.definition.id)).rejects.toThrow(/promotion refused/);
+    await expect(gw.promote(wall.gateway!, parts.definition.id)).rejects.toThrow(
+      /promotion refused/,
+    );
     await expect(gw.promote(wall.gateway!, parts.definition.id)).rejects.toThrow(/adoptLaw/);
     await wall.drop();
     await gw.close();
