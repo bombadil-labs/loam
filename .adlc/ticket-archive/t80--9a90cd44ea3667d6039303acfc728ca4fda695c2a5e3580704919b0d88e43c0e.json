@@ -1,4 +1,12 @@
 {
+  "_adlcArchive": {
+    "archivedAt": "2026-07-25T06:58:59.697Z",
+    "reason": "completed",
+    "sourceRevision": null,
+    "sourceStoreHash": "68779a0f9d4e76fe342ac627e71ea305b0adbc01ade07be78f5f0ba341b9ffa6",
+    "ticketHash": "9411cea270b453672adf315b8d5b4db3c75da83edcf4a7bad92c710fa33989a3",
+    "version": 1
+  },
   "body": "FINDING (verified live against dist/cli/bin.js). Top-level help promises per-command help: src/cli/cli.ts:58 says `run \\`loam <command> --help\\` for a command's options`, and cli.ts:572-574 special-cases `--help`/`help` ONLY at the top level (no `command` argument). No subcommand ever intercepts `--help` before handing its `rest` args to `parseArgs` (src/cli/args.ts:14-31): any `--name` not registered in that command's `booleanFlags` set falls into the else-branch at args.ts:24-28, which reads the NEXT token as the flag's value and throws `flag --${body} needs a value` when there isn't one. `help` is never a boolean flag anywhere in cli.ts (grep confirms), so `--help` always takes this path.\n\nVerified for all seven subcommands (`init serve register pull migrate store repair`): each prints `loam: flag --help needs a value` and exits **1** — not 0 as first suspected. Exit 1 comes from the generic `catch` in `run()` (cli.ts ~597-599), the same path any unexpected throw takes; it is not a deliberate usage-error code. Other refusals in this file (e.g. register's missing-file message) return 2. So today `--help` is indistinguishable from an internal error, both in message and in exit code, on every subcommand except the two that already special-case it top-level.\n\nFIX SHAPE: each `cmd*` function should recognize `--help`/`-h` before calling `parseArgs` (or a shared `wantsHelp(args)` helper used by all seven), print that command's usage/flags, and return 0. Pick one convention for genuine flag errors and apply it uniformly — recommend exit 2 (usage error), matching register's existing pattern, rather than the current accidental 1.\n\nRAILS: extend `describe(\"loam help and version\", …)` in test/cli/cli.test.ts with one case per subcommand asserting `--help` prints usage text (not \"needs a value\") and exits 0; keep/extend the existing bad-flag case to pin a nonzero exit for a genuine flag error.\n\nCARE: repair restoring behavior the top-level help already promises — self-mergeable once green + P5 clean.",
   "edges": [],
   "id": "T80",
