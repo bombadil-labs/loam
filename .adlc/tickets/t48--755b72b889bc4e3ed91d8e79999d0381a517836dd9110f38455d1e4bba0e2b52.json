@@ -3,10 +3,15 @@
   "edges": [],
   "id": "T48",
   "phase": "P1",
-  "rails": [],
+  "rails": [
+    "test/gateway/container-address-golden.test.ts",
+    "test/scripts/no-raw-nul.test.ts"
+  ],
   "scope": [
     "src/gateway/container-identity.ts",
-    "test/gateway/container-identity.test.ts"
+    "src/gateway/resolvers.ts",
+    "test/gateway/container-address-golden.test.ts",
+    "test/scripts/no-raw-nul.test.ts"
   ],
   "status": "todo",
   "title": "container-identity.ts holds raw NUL bytes — its PR merged as a zero-line binary diff"

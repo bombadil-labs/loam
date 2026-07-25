@@ -242,8 +242,15 @@ export async function loadResolvers(
 export type ResolverMemo = Map<string, View>;
 export const newResolverMemo = (): ResolverMemo => new Map();
 
+// Two separators, and the key is unambiguous because of where each one sits. The U+0000 between the
+// three FIELDS cannot appear inside any of them; the `,` joining the id list is safe only because
+// that list is LAST and made of content addresses (hex, optionally `!`-suffixed), an alphabet
+// containing neither character. Move the id list out of final position and that argument dies.
+//
+// The U+0000 stays an ESCAPE, never the raw control character — identical byte, and a raw one turns
+// this file binary to git and to grep (`test/scripts/no-raw-nul`).
 const memoKey = (address: string, root: string, deltaIds: readonly string[]): string =>
-  `${address} ${root} ${[...deltaIds].sort().join(",")}`;
+  `${address}\u0000${root}\u0000${[...deltaIds].sort().join(",")}`;
 
 // Apply a lens's resolvers over a resolved view (SPEC §22): for each field a resolver names, replace
 // the Policy's value with `resolve(bucket)`. Synchronous — resolvers are pre-loaded. A resolver whose
