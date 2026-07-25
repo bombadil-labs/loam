@@ -4,6 +4,12 @@
 // (query + mutate), /:mount/subscribe (SSE — one data: frame per subscription payload), and
 // /:mount/mcp (a minimal MCP JSON-RPC surface: initialize, tools/list, tools/call).
 //
+// WHICH worlds is a live question, not a boot-time one (T78): the handle's addMount/removeMount and
+// every attached container answer at their own mount while the server runs — mounts.ts holds that
+// table and its precedence. The door discipline below is unchanged by it, deliberately: a tokenless
+// caller cannot tell a mount that exists from one that never did, so a mount arriving or leaving is
+// not an oracle either.
+//
 // Bind 127.0.0.1 and terminate TLS in front; token comparison is timing-safe; a token maps to
 // an explicit identity ({ actor } or { operator: true }) — never a default. The one tokenless
 // path is the OPEN DOOR (SPEC §12): query + subscribe against a mount's restricted public
@@ -30,6 +36,7 @@ import {
   type RequestContext,
 } from "../gateway/gateway.js";
 import { parseRegistrationInput, schemaEntityFor, type LensName } from "../gateway/registration.js";
+import { makeMountTable, type ResolvedMount } from "./mounts.js";
 
 export interface TokenIdentity {
   readonly actor?: string; // a signing seed: requests act as this identity
@@ -54,7 +61,43 @@ export interface ServerHandle {
   readonly server: Server;
   readonly port: number;
   readonly url: string; // http://host:port
+  /**
+   * Mount a gateway at `name` on the RUNNING server (T78) — the whole door set, under the same token
+   * table. Refuses a malformed name, or one that already answers (a static mount, another dynamic
+   * one, or an attached container's): re-pointing a live name would silently move every consumer of
+   * it. An attached container needs no call here; it mounts itself (mounts.ts).
+   */
+  addMount(name: string, gateway: Gateway): void;
+  /**
+   * Take a dynamic mount down; `true` if one was there. Live SSE streams on that mount are ENDED
+   * rather than left hanging, and the door goes back to answering exactly as a name that never
+   * existed. Refuses a static mount and a container's own mount — the container's door lives and
+   * dies with the container, so drop()/detach() is the way to close it.
+   */
+  removeMount(name: string): Promise<boolean>;
+  /** Attached containers whose declared name no URL can reach — skipped, and said out loud. */
+  unroutableMounts(): string[];
   close(): Promise<void>;
+}
+
+// What a handler needs to know about the mount it is answering for, past its first await. A mount can
+// VANISH mid-request — every body read is client-paced, and drop()/removeMount() may land in that
+// window — so the gateway captured at routing time is a claim about the past, not a licence.
+interface MountGuard {
+  /** The stream tag: which world's consumers a teardown must find. */
+  readonly name: string;
+  /** Does this name still resolve to the SAME gateway instance? */
+  live(): boolean;
+  /** Answer as an unresolvable mount would for this caller — the uniform refusal, unchanged. */
+  gone(): void;
+}
+
+// A live SSE stream, tagged with the mount that opened it: close() ends them all, removeMount ends
+// exactly the ones whose world just went away.
+interface LiveStream {
+  readonly events: AsyncGenerator<Record<string, unknown>>;
+  readonly res: ServerResponse;
+  readonly mount: string;
 }
 
 const sha = (s: string): Buffer => createHash("sha256").update(s).digest();
@@ -227,9 +270,9 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
   const host = options.host ?? "127.0.0.1";
   const maxBody = options.maxBodyBytes ?? DEFAULT_MAX_BODY;
   const maxStreams = options.maxStreams ?? DEFAULT_MAX_STREAMS;
-  // Own-property lookup only: an attacker-supplied mount name can never resolve a prototype
-  // member (`__proto__`, `constructor`) into a phantom gateway.
-  const mounts = new Map(Object.entries(options.mounts));
+  // The live table: static mounts, runtime mounts, and every attached container (mounts.ts owns the
+  // precedence and the name discipline — the static names are validated here, at boot).
+  const mounts = makeMountTable(options.mounts);
   const tokenEntries = Object.entries(options.tokens).map(
     ([token, identity]) => [sha(token), identity] as const,
   );
@@ -251,16 +294,21 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
   const contextFor = (identity: TokenIdentity): RequestContext | undefined =>
     identity.actor === undefined ? undefined : { actor: identity.actor };
 
-  // Live SSE streams, so close() can end them instead of leaving clients hanging.
-  const streams = new Set<{
-    events: AsyncGenerator<Record<string, unknown>>;
-    res: ServerResponse;
-  }>();
+  // Live SSE streams, so close() — and removeMount — can end them instead of leaving clients
+  // hanging. Ending the generator makes the handler's own `finally` run: it deletes and res.end()s.
+  const streams = new Set<LiveStream>();
+  const endStreams = async (doomed: readonly LiveStream[]): Promise<void> => {
+    for (const s of doomed) {
+      await s.events.return(undefined);
+      s.res.end();
+    }
+  };
 
   // Both doors share these handlers; WHICH surface answers — the full one as the token's
   // identity, or the restricted public one as no identity at all — is the caller's `run`/`open`.
   const handleGraphql = async (
     run: (source: string, variables?: Record<string, unknown>) => Promise<QueryResult>,
+    guard: MountGuard,
     req: IncomingMessage,
     res: ServerResponse,
   ): Promise<void> => {
@@ -279,6 +327,12 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     }
     if (typeof parsed?.query !== "string") {
       json(res, 400, { errors: ["the body must carry a query string"] });
+      return;
+    }
+    // The body arrived on the client's clock: re-ask before reading a world that may have been
+    // dropped while we waited. Answering from it would serve bytes a drop() just proved gone (H7).
+    if (!guard.live()) {
+      guard.gone();
       return;
     }
     // A gateway failure (nothing registered, an internal throw) is the caller's structured
@@ -307,6 +361,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
   const handleSubscribe = async (
     open: (source: string) => Promise<AsyncGenerator<Record<string, unknown>>>,
     door: "token" | "public",
+    guard: MountGuard,
     req: IncomingMessage,
     res: ServerResponse,
     search: URLSearchParams,
@@ -331,13 +386,22 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       json(res, 400, { errors: [err instanceof Error ? err.message : "not a subscription"] });
       return;
     }
+    // Opening the subscription was an await, and a teardown sweep only finds REGISTERED streams — so
+    // a mount removed in that window would otherwise leave this one live on a door that is gone.
+    // From here to `streams.add` there is no await, which is the other half of the argument: the
+    // sweep's remove-and-snapshot is synchronous too, so it cannot interleave between them.
+    if (!guard.live()) {
+      await events.return(undefined);
+      guard.gone();
+      return;
+    }
     res.writeHead(200, {
       "content-type": "text/event-stream",
       "cache-control": "no-cache",
       connection: "keep-alive",
       ...CORS,
     });
-    const stream = { events, res };
+    const stream: LiveStream = { events, res, mount: guard.name };
     streams.add(stream);
     if (door === "public") publicStreams += 1;
     req.on("close", () => {
@@ -422,6 +486,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
   const handleMcp = async (
     gateway: Gateway,
     identity: TokenIdentity,
+    guard: MountGuard,
     req: IncomingMessage,
     res: ServerResponse,
   ): Promise<void> => {
@@ -449,6 +514,11 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             ? { code: -32600, message: "request body too large" }
             : { code: -32700, message: "parse error" },
       });
+      return;
+    }
+    // The body was client-paced: the world may have gone while it arrived (see handleGraphql).
+    if (!guard.live()) {
+      guard.gone();
       return;
     }
     // A notification (a request with no id) demands silence, not a reply.
@@ -554,22 +624,40 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       const [, mountName, verb] = url.pathname.split("/");
       // A malformed percent-escape resolves no mount — it must fall into the same uniform
       // refusal as any other unresolvable name, never a 500 that marks the input special.
-      let gateway: Gateway | undefined;
+      let mountKey = "";
+      let resolved: ResolvedMount | undefined;
       try {
-        gateway = mountName === undefined ? undefined : mounts.get(decodeURIComponent(mountName));
+        mountKey = mountName === undefined ? "" : decodeURIComponent(mountName);
+        resolved = mountName === undefined ? undefined : mounts.resolve(mountKey);
       } catch {
-        gateway = undefined;
+        resolved = undefined;
       }
+      const gateway = resolved?.gateway;
       const identity = identify(req);
+      // The guard every handler carries past its first await (see MountGuard): same name, same
+      // gateway instance, or the answer an absent mount gives — which is identity-shaped, so it
+      // cannot become an oracle the initial refusal was not.
+      const guard: MountGuard = {
+        name: mountKey,
+        live: () => gateway !== undefined && mounts.resolve(mountKey)?.gateway === gateway,
+        gone: () =>
+          identity === undefined ? refused(res) : json(res, 404, { errors: ["no such mount"] }),
+      };
       if (identity === undefined) {
         // A presented-but-wrong token is refused outright — bad credentials never downgrade
         // to anonymous. A caller with NO token reaches exactly one thing: the restricted read
         // surface of a mount whose operator opened one (SPEC §12). Every other combination —
         // absent mount, nothing public, a write-shaped verb — gets the SAME refusal, so an
         // anonymous prober learns nothing about which mounts exist (no 404-vs-401 oracle).
+        // On a CONTAINER mount the door's openness is the HOST's live word, not the wall's seeded
+        // copy of it: a wall holds its own snapshot of `loam:public` and moves only on reseed
+        // (§24.2), so asking the pool alone would leave a struck declaration open here forever.
+        // Both must be open — the host decides WHETHER, the wall still decides WHAT.
         if (
           req.headers.authorization !== undefined ||
+          resolved === undefined ||
           gateway === undefined ||
+          (resolved.host !== undefined && !resolved.host.hasPublicSurface()) ||
           !gateway.hasPublicSurface()
         ) {
           refused(res);
@@ -577,12 +665,13 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         }
         switch (verb) {
           case "graphql":
-            await handleGraphql((s, v) => gateway.queryPublic(s, v), req, res);
+            await handleGraphql((s, v) => gateway.queryPublic(s, v), guard, req, res);
             return;
           case "subscribe":
             await handleSubscribe(
               (s) => gateway.subscribePublic(s),
               "public",
+              guard,
               req,
               res,
               url.searchParams,
@@ -603,6 +692,10 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
               json(res, err instanceof BodyTooLarge ? 413 : 400, {
                 errors: [err instanceof Error ? err.message : String(err)],
               });
+              return;
+            }
+            if (!guard.live()) {
+              guard.gone();
               return;
             }
             const result = await handleRest(
@@ -626,6 +719,10 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
               return;
             }
             await gateway.prepareRoute(parsed.route); // load the bundle before the render (worker, §23.9)
+            if (!guard.live()) {
+              guard.gone();
+              return;
+            }
             if (req.method === "GET") {
               sendRendered(res, await gateway.serveRoute(parsed.route, parsed.entity, "public"));
               return;
@@ -680,13 +777,20 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       }
       switch (verb) {
         case "graphql":
-          await handleGraphql((s, v) => gateway.query(s, v, contextFor(identity)), req, res);
+          await handleGraphql((s, v) => gateway.query(s, v, contextFor(identity)), guard, req, res);
           return;
         case "subscribe":
-          await handleSubscribe((s) => gateway.subscribe(s), "token", req, res, url.searchParams);
+          await handleSubscribe(
+            (s) => gateway.subscribe(s),
+            "token",
+            guard,
+            req,
+            res,
+            url.searchParams,
+          );
           return;
         case "mcp":
-          await handleMcp(gateway, identity, req, res);
+          await handleMcp(gateway, identity, guard, req, res);
           return;
         // The settling report (T70): has every erasure this store promised settled to bytes?
         // Operator-token GET only. To ANY other identity or method the door does not exist —
@@ -721,6 +825,10 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             });
             return;
           }
+          if (!guard.live()) {
+            guard.gone();
+            return;
+          }
           const result = await handleRest(
             gateway,
             "full",
@@ -742,6 +850,10 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             return;
           }
           await gateway.prepareRoute(parsed.route); // load the bundle before the render (worker, §23.9)
+          if (!guard.live()) {
+            guard.gone();
+            return;
+          }
           if (req.method === "GET") {
             sendRendered(res, await gateway.serveRoute(parsed.route, parsed.entity, "full"));
             return;
@@ -807,6 +919,10 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             json(res, 400, { errors: ["append wants { deltas: [...] }, at least one"] });
             return;
           }
+          if (!guard.live()) {
+            guard.gone();
+            return;
+          }
           const batch: Delta[] = [];
           for (const wire of parsed.deltas) {
             try {
@@ -858,6 +974,10 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             });
             return;
           }
+          if (!guard.live()) {
+            guard.gone();
+            return;
+          }
           try {
             json(res, 200, await performRegistration(gateway, raw));
           } catch (err) {
@@ -896,11 +1016,23 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     server,
     port,
     url: `http://${host}:${port}`,
+    addMount(name: string, gateway: Gateway): void {
+      mounts.add(name, gateway);
+    },
+    async removeMount(name: string): Promise<boolean> {
+      // The door closes FIRST (a refusal throws before anything moves), and the sweep's snapshot is
+      // taken in the SAME synchronous turn: a handler that has already passed its own live() check
+      // is registered before this can run, and one that has not will fail that check. Splitting
+      // these two statements with an await would open exactly the window they close.
+      const removed = mounts.remove(name);
+      await endStreams([...streams].filter((s) => s.mount === name));
+      return removed;
+    },
+    unroutableMounts(): string[] {
+      return mounts.unroutable();
+    },
     async close(): Promise<void> {
-      for (const s of [...streams]) {
-        await s.events.return(undefined);
-        s.res.end();
-      }
+      await endStreams([...streams]);
       await new Promise<void>((resolve, reject) =>
         server.close((err) => (err ? reject(err) : resolve())),
       );
