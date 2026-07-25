@@ -133,9 +133,9 @@ function claimList(claims) {
     // has no test behind it deserves the reason in the same breath. Enforcing the field and then
     // rendering it to nobody would be the admission going into a drawer.
     if (c.gap) {
-      const why = document.createElement("p");
+      // Through `prose`, not `inline`: a gap is a paragraph like any other and marks up terms.
+      const why = prose(c.gap);
       why.className = "gap";
-      inline(why, c.gap);
       li.append(why);
     }
     ul.append(li);
