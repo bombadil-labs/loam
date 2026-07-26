@@ -106,3 +106,4 @@ entry is a NEW FILE and two concurrent landings never touch the same one (the sa
 | 2026-07-25 | [T62 re-verified after T50 and T45 — the archival holds](journal/2026-07-25-t62-reverified-after-t50-and-t45.md) |
 | 2026-07-26 | [The capabilities book — prose that goes red when it goes stale (T95)](journal/2026-07-26-the-capabilities-book.md) |
 | 2026-07-26 | [The posture rename, and the one exemption the freeze will ever learn](journal/2026-07-26-the-posture-rename-and-the-one-exemption.md) |
+| 2026-07-26 | [heal can replace a corrupt row — and refuses to plant past one it cannot read (T66)](journal/2026-07-26-t66-heal-replaces-the-squatter.md) |
