@@ -76,6 +76,12 @@ cannot be reliably parsed — so a rail edited through a shell command is caught
 by nothing. The wrapper exists because the bare gate will not scan the store and treats an ADDED file
 as an edit, which would fail the very PR that first writes a ticket's rails; it therefore guards only
 rails that already exist on the base. First-authoring is invisible, everything after it is frozen.
+**The ONE exemption is an authorized vocabulary rename** (Myk, 2026-07-26): declared in
+`scripts/rail-renames.json`, read from the BASE tree only — a branch cannot self-authorize — and
+exempting a frozen-rail edit iff base + the declared substitution is byte-identical to the branch's
+file (directly or after the repo's own prettier). Two PRs, mechanically enforced: land the
+declaration, then land the rename. A red gate always means stop; no future context window needs
+lore about which red was blessed.
 
 **TWO adlc CLIs are broken on Windows and both run via LOCAL PATCHES — re-apply after any adlc
 upgrade with `npm run adlc:patch`.** They patch a GLOBAL package, so `npm i -g @adlc/cli` wipes

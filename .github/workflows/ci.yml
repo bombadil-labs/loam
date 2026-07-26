@@ -44,6 +44,11 @@ jobs:
         with:
           node-version: 24
       - run: npm i -g @adlc/cli
+      # The wrapper's rename exemption compares base+substitution to the branch AFTER the repo's
+      # own prettier (a longer word rewraps lines) — so the gate needs the repo's exact prettier,
+      # which lives in node_modules. Without it the raw compare still runs and a rewrapped rename
+      # simply stays a violation; installing keeps the exemption whole.
+      - run: npm ci
       - name: no frozen rail was edited
         run: |
           BASE="origin/${{ github.base_ref || github.event.repository.default_branch }}"

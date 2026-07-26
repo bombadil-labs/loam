@@ -9,15 +9,21 @@
 // rail edit, which is correct for its purpose and fatal for ours — the PR that first writes a
 // ticket's rails would fail its own gate, every time.
 //
-// AND THERE IS NO ESCAPE HATCH TO REACH FOR, which is why that mattered. This comment used to warn
-// against making `ADLC_RAILS_BYPASS` routine; the installed `@adlc/rails-guard` reads no environment
-// override at all (the name lives in `@adlc/build-gate`, a different gate, and its only exemption is
-// `version-only.mjs`, scoped to package manifests). So a first-authoring false positive here would
-// have had no way around it but softening the gate. Do not plan a change around a bypass: if a rail
-// a prior ticket froze genuinely must change — a retired vocabulary word inside frozen assertions is
-// the real case — the options are an honest red `rails` job with per-file byte-identity proof in the
-// PR, or a narrow tested exemption modelled on upstream's `version-only.mjs`. The second is a
-// decision about the backstop, and therefore a human's.
+// AND THERE IS NO GENERAL ESCAPE HATCH. The installed `@adlc/rails-guard` reads no environment
+// override at all (`ADLC_RAILS_BYPASS` lives in `@adlc/build-gate`, a different gate), and this
+// wrapper adds none. What it adds instead is ONE narrow, mechanical exemption (Myk, 2026-07-26):
+// an AUTHORIZED VOCABULARY RENAME. When the language retires a word that frozen rails quote — the
+// posture rename was the motivating case — the substitution is declared in
+// `scripts/rail-renames.json`, and a frozen-rail edit is exempt iff base + the declared
+// substitutions is byte-identical to the branch's file (directly, or after the repo's own
+// prettier). Everything else about the edit remains a violation.
+//
+// THE DECLARATION IS READ FROM THE BASE TREE, NEVER FROM THE BRANCH — the same rule the frozen set
+// itself lives by, for the same reason: only the base can say what a branch may touch. A branch
+// that declares its own exemption changes nothing; the authorization must already have merged
+// through a PR a human read. So the discipline is two PRs: land the rename declaration, then land
+// the rename. A red gate always means stop, in every future context window, with no lore required
+// about which red was blessed.
 //
 // So this narrows the question to the one CI can answer honestly: **of the rails the base already
 // FROZE, did this branch touch any?** First-authoring is invisible (nothing to protect yet); from
@@ -168,7 +174,139 @@ if (live.length === 0) {
   process.exit(0);
 }
 
-const args = ["rails-guard", "--base", base];
+// ── Authorized renames: the one exemption, applied by SYNTHESIZING a base ─────────────────────
+//
+// Rather than teaching the downstream gate to skip files (it has no such flag, and a skip is a
+// hole), exempt files are folded into a synthetic base commit whose tree already carries the
+// branch's bytes for them. The diff the gate then sees is empty exactly where the exemption
+// held and unchanged everywhere else — suppression scanning and every other check keep running.
+const liveRes = live.map(({ glob }) => toRegExp(glob));
+const changed = git(["diff", "--name-only", base])
+  .split("\n")
+  .filter(Boolean)
+  .filter((f) => liveRes.some((re) => re.test(f)));
+
+let effectiveBase = base;
+if (changed.length > 0) {
+  // The declarations, FROM THE BASE TREE. A missing file means no renames are authorized.
+  let renames = [];
+  try {
+    // stderr piped, not inherited: a repo with no declarations file is the normal state, and
+    // git's `fatal:` for it would read as an error in every CI log.
+    renames =
+      JSON.parse(
+        execFileSync("git", ["show", `${base}:scripts/rail-renames.json`], {
+          encoding: "utf8",
+          stdio: ["pipe", "pipe", "pipe"],
+        }),
+      ).renames ?? [];
+  } catch {
+    /* not on base: nothing is authorized, every frozen edit is a plain violation */
+  }
+  // Shape guards. An UNSCOPED pair touches every frozen rail, so it must be word-shaped — an
+  // identifier or a quoted literal. A SCOPED pair names its files and the reviewer reads it
+  // against exactly those, so it may carry wider literals (a regex fragment, a title phrase).
+  // Malformed entries are an OPERATIONAL failure: an authorization the gate cannot read must
+  // stop the build, not silently authorize nothing.
+  const TIGHT = /^"?[A-Za-z][A-Za-z0-9_.:-]{0,62}"?$/;
+  const WIDE = /^[\x20-\x7E]{3,120}$/;
+  for (const r of renames) {
+    const scoped = Array.isArray(r.files) && r.files.length > 0;
+    const shape = scoped ? WIDE : TIGHT;
+    const quoteParity = (t) => (t.startsWith('"') ? 1 : 0) + (t.endsWith('"') ? 1 : 0) !== 1;
+    const ok =
+      typeof r.from === "string" &&
+      typeof r.to === "string" &&
+      r.from !== r.to &&
+      shape.test(r.from) &&
+      shape.test(r.to) &&
+      (scoped || (quoteParity(r.from) && quoteParity(r.to))) &&
+      typeof r.authorized === "string" &&
+      r.authorized.trim() !== "";
+    if (!ok) {
+      console.error(
+        `rails-guard-ci: malformed entry in scripts/rail-renames.json on ${base} ` +
+          `(from=${JSON.stringify(r.from)}) — refusing to guess what is authorized`,
+      );
+      process.exit(1);
+    }
+  }
+
+  const { readFileSync, existsSync } = await import("node:fs");
+  let prettier = null;
+  try {
+    prettier = (await import("prettier")).default ?? (await import("prettier"));
+  } catch {
+    /* no node_modules here: the raw compare still runs; a rewrapped rename just stays a violation */
+  }
+
+  const exempt = [];
+  for (const file of changed) {
+    const pairs = renames.filter((r) => !Array.isArray(r.files) || r.files.includes(file));
+    if (pairs.length === 0 || !existsSync(file)) continue; // deleted or undeclared: not a rename
+    let baseContent;
+    try {
+      baseContent = git(["show", `${base}:${file}`]);
+    } catch {
+      continue; // added under a frozen glob — first-authoring, the gate downstream decides
+    }
+    const branchContent = readFileSync(file, "utf8");
+    let substituted = baseContent;
+    for (const { from, to } of pairs) substituted = substituted.split(from).join(to);
+    let how = substituted === branchContent ? "byte-identical" : null;
+    if (how === null && prettier !== null) {
+      try {
+        const cfg = await prettier.resolveConfig(file);
+        if ((await prettier.format(substituted, { ...cfg, filepath: file })) === branchContent)
+          how = "byte-identical after the repo's own prettier";
+      } catch {
+        /* unformattable: stays a violation */
+      }
+    }
+    if (how === null) {
+      console.log(
+        `rails-guard-ci: ${file} is a frozen rail and its edit is NOT a declared rename — ` +
+          `the gate below will refuse it`,
+      );
+      continue;
+    }
+    exempt.push(file);
+    console.log(`rails-guard-ci: EXEMPT (authorized rename) ${file}`);
+    console.log(`  base + { ${pairs.map((p) => `${p.from} → ${p.to}`).join(", ")} } is ${how}`);
+    for (const a of new Set(pairs.map((p) => p.authorized))) console.log(`  authorized: ${a}`);
+  }
+
+  if (exempt.length > 0) {
+    const { mkdtempSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const baseSha = git(["rev-parse", base]).trim();
+    const indexFile = join(mkdtempSync(join(tmpdir(), "rails-guard-ci-")), "index");
+    const env = { ...process.env, GIT_INDEX_FILE: indexFile };
+    const gitEnv = (args, input) =>
+      execFileSync("git", args, { encoding: "utf8", env, ...(input !== undefined && { input }) });
+    gitEnv(["read-tree", baseSha]);
+    for (const file of exempt) {
+      const blob = gitEnv(["hash-object", "-w", "--stdin"], readFileSync(file, "utf8")).trim();
+      gitEnv(["update-index", "--add", "--cacheinfo", `100644,${blob},${file}`]);
+    }
+    const tree = gitEnv(["write-tree"]).trim();
+    effectiveBase = gitEnv([
+      "commit-tree",
+      tree,
+      "-p",
+      baseSha,
+      "-m",
+      "rails-guard-ci: synthetic base carrying authorized renames",
+    ]).trim();
+    console.log(
+      `rails-guard-ci: gating against a synthetic base (${effectiveBase.slice(0, 12)}) that ` +
+        `carries the ${exempt.length} authorized rename(s); every other check is unchanged`,
+    );
+  }
+}
+
+const args = ["rails-guard", "--base", effectiveBase];
 for (const { glob } of live) args.push("--rails", glob);
 console.log(
   `rails-guard-ci: guarding ${live.length} frozen rail(s) from ${new Set(live.map((d) => d.id)).size} ticket(s) against ${base}`,
