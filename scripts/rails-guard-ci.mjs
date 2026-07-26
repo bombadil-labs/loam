@@ -282,7 +282,17 @@ if (changed.length > 0) {
     const { tmpdir } = await import("node:os");
     const baseSha = git(["rev-parse", base]).trim();
     const indexFile = join(mkdtempSync(join(tmpdir(), "rails-guard-ci-")), "index");
-    const env = { ...process.env, GIT_INDEX_FILE: indexFile };
+    // The synthetic commit is throwaway plumbing and must not depend on the runner's git identity —
+    // CI runners have none, and `commit-tree` refuses with "empty ident name" (found the honest way:
+    // the fixtures configured identities for their own setup commits, which masked exactly this).
+    const env = {
+      ...process.env,
+      GIT_INDEX_FILE: indexFile,
+      GIT_AUTHOR_NAME: "rails-guard-ci",
+      GIT_AUTHOR_EMAIL: "rails-guard-ci@loam.invalid",
+      GIT_COMMITTER_NAME: "rails-guard-ci",
+      GIT_COMMITTER_EMAIL: "rails-guard-ci@loam.invalid",
+    };
     const gitEnv = (args, input) =>
       execFileSync("git", args, { encoding: "utf8", env, ...(input !== undefined && { input }) });
     gitEnv(["read-tree", baseSha]);

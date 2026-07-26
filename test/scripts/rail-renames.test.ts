@@ -113,8 +113,15 @@ function fixture(opts: {
 }
 
 function gate(root: string): { status: number; out: string } {
+  // The gate runs with NO git identity — no global config, no local user.* — because that is what
+  // a CI runner is. The fixtures configure identities for their own setup commits above, and that
+  // once masked a `commit-tree` refusal that only fired in CI; stripping identity here keeps the
+  // synthetic-base path honest about the environment it actually runs in.
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" };
+  execFileSync("git", ["config", "--unset-all", "user.email"], { cwd: root, env });
+  execFileSync("git", ["config", "--unset-all", "user.name"], { cwd: root, env });
   try {
-    const out = execFileSync("node", [WRAPPER, "main"], { cwd: root, encoding: "utf8" });
+    const out = execFileSync("node", [WRAPPER, "main"], { cwd: root, encoding: "utf8", env });
     return { status: 0, out };
   } catch (err) {
     const e = err as { status?: number; stdout?: string; stderr?: string };
