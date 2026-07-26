@@ -480,6 +480,14 @@ busy.
   a visible hole; a flake is a hidden one.
 - **Strict in PRs, creative and aggressive in execution.** Ship real vertical slices; don't
   gold-plate; don't reward-hack a green bar.
+- **A PR THAT NEEDS MYK'S MERGE MUST BE READABLE BY MYK** (Myk, 2026-07-26: "A 6k line PR is not
+  something I am going to be able to meaningfully read"). Budget a few hundred lines of substantive
+  diff for a P6 read; bigger work lands as a STACK of small PRs with the decisions isolated from the
+  mechanics — trivial parts first, judgment calls each in their own small PR carrying a REVIEW GUIDE
+  (the seam in one sentence, the decisions as bullets, what to skim vs skip), and the mechanical bulk
+  last, merged on its evidence once every decision above it is already in. PR bodies stay short —
+  the dense-prose failure is the same failure at the paragraph scale. A giant branch is fine to
+  BUILD; it is not fine to ASK ABOUT in one piece.
 - **Match rhizomatic's vocabulary** — the concepts are HyperSchema / HyperView / View / Schema /
   Policy / derived function / binding; the exported type names are `HyperSchema`, `HView`, `View`,
   `Schema`, `Policy`, `DerivedFn`, `BindingSpec`. Since rhizomatic 0.3.0 (the L5 realignment):
