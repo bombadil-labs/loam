@@ -90,7 +90,11 @@ describe("the capabilities book covers the spec", () => {
     const uncovered = specFiles.filter((f) => !covered.has(f));
     expect(
       uncovered,
-      `no chapter claims these spec sections — the book is behind the spec:\n  ${uncovered.join("\n  ")}`,
+      `the book is behind the spec. To fix: add each section below to the \`covers\` of the chapter ` +
+        `that owns its area in demos/capabilities/chapters.mjs, and write one claim about it — ` +
+        `{says, spec, proof} — where \`says\` is the promise in a reader's words and \`proof\` is a ` +
+        `test path. Your working spec's acceptance criteria already name the tests; this is ` +
+        `transcription, not invention:\n  ${uncovered.join("\n  ")}`,
     ).toEqual([]);
   });
 
@@ -105,7 +109,11 @@ describe("the capabilities book covers the spec", () => {
         ch.body.flatMap((b) => (b.kind === "claims" ? b.claims.map((c) => c.spec) : [])),
       );
       for (const f of ch.covers) {
-        if (!cited.has(f)) silent.push(`chapter ${ch.n} covers ${f} and makes no claim about it`);
+        if (!cited.has(f))
+          silent.push(
+            `chapter ${ch.n} covers ${f} and makes no claim about it — a covers entry alone is ` +
+              `not a write-up; add one {says, spec, proof} claim citing that section`,
+          );
       }
     }
     expect(silent, silent.join("\n  ")).toEqual([]);
