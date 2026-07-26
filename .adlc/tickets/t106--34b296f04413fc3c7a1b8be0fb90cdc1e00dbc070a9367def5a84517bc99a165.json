@@ -1,0 +1,15 @@
+{
+  "body": "MYK'S DIRECTIVE, VERBATIM (2026-07-26): \"the tutorial needs a rewrite not just a refresh. It bundles too many things together in its steps. Every step should be outlined in plain english - what do we have, what do we want, how do we get there. It should allow the user to introspect the GQL and the store state before and after each transition.\" That paragraph IS the pedagogical spec; everything below serves it.\n\nTHE SHAPE: every step is ONE transition, framed three ways before anything runs — WHAT WE HAVE (the store's state, in a sentence a stranger can check), WHAT WE WANT (the state after, same register), HOW WE GET THERE (the single action). And the learner can VERIFY both ends: an introspection surface showing (1) the GraphQL side — the SDL the gateway currently derives, and the query the step will run, runnable by hand; (2) the store side — the deltas as they actually are (count, the new ones highlighted after the transition, expandable to wire form). Before/after is the load-bearing part: a transition the learner cannot inspect on both ends is a magic trick, and the current tutorial's bundled steps are exactly that failure.\n\nWHAT SURVIVES FROM V2, NON-NEGOTIABLE: the anti-rot identity — `test/site/arc.test.ts` drives the EXACT functions the page calls, and every check stays EARNED (false before its step), DURABLE (monotone in the ground), SIDE-EFFECT-FREE (re-verified on every boot). §19's bars are unchanged; this rewrite changes the GRAIN of steps and adds the introspection panes, not the discipline. The finale (export → init --seed → pull → _hex for _hex) stays.\n\nSCOPE DECISION FOR P1 (recommend, don't decide): the v2 arc predates containers, write-renderers, and slates. Recommend the rewrite covers the CORE arc at the new grain first (deltas → objects → lenses → writes → accounts → federation → erasure → finale) and reserves a second arc for the container/renderer material, so the rewrite ships before it grows a second mission. The lesson OUTLINE (every step's three sentences, listed) is the design deliverable — DESIGN-STAGE: Myk signs off on the outline in the PR before any page code, because the sentences are the product.\n\nCARE: the tutorial page moved to /tutorial.html (#258); the landing links it. And the introspection pane must read the REAL store (the same gateway the lessons drive), never a narration of it — a pane that describes what should have happened is the tutorial lying with extra steps.",
+  "edges": [],
+  "id": "T106",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "demos/tutorial/",
+    "test/site/arc.test.ts",
+    "test/site/",
+    ".adlc/specs/"
+  ],
+  "status": "todo",
+  "title": "Tutorial v3 — a REWRITE: one thing per step, plain-English framing, and the store made introspectable at every transition"
+}
