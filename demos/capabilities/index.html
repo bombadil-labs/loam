@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="What Loam can do, chapter by chapter — every promise naming the test that proves it."
+    />
+    <title>Loam, chapter by chapter — what it can actually do</title>
+    <style>
+      /* The book's palette. Page chrome is themed both ways, because this is a long read and a
+         long read gets read in daylight. The FIGURE hues are semantic and shared with the concept
+         deck (demos/tutorial/intro.html): alice amber, bob blue, entity green, value parchment,
+         struck vermilion. Same picture, same meaning, either ground. */
+      :root {
+        color-scheme: light dark;
+
+        --page: #fbf9f4;
+        --page-edge: #f2eee4;
+        --rule: #e0d9c9;
+        --ink: #221e18;
+        --ink-soft: #4b4437;
+        --muted: #7d7462;
+        --faint: #a9a091;
+        --accent: #8a5a1c;
+        --accent-soft: #f0e3cd;
+        --proof: #2f6a46;
+        --proof-soft: #e3efe6;
+        --absent: #9a4a30;
+        --absent-soft: #f6e5de;
+
+        /* figure tokens — read by figures.mjs through getComputedStyle */
+        --ground: #fbf9f4;
+        --panel: #f4eee2;
+        --alice: #a8681a;
+        --alice-fill: #f6e8d1;
+        --bob: #3c6d99;
+        --bob-fill: #e2ecf5;
+        --entity: #4a7538;
+        --entity-fill: #e6efdf;
+        --prim: #7a6a45;
+        --prim-fill: #f1ebdc;
+        --dead: #9a4128;
+        --dead-fill: #f7e3dc;
+
+        --serif: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+        --mono: "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+        --measure: 34rem;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --page: #141009;
+          --page-edge: #1a150e;
+          --rule: #2f2819;
+          --ink: #ece3d1;
+          --ink-soft: #cabfa8;
+          --muted: #9c8f7a;
+          --faint: #57503f;
+          --accent: #e2a63c;
+          --accent-soft: #382b12;
+          --proof: #86b98d;
+          --proof-soft: #1c2a1d;
+          --absent: #d98263;
+          --absent-soft: #331a12;
+
+          --ground: #141009;
+          --panel: #1d1710;
+          --alice: #e2a63c;
+          --alice-fill: #382b12;
+          --bob: #82aedc;
+          --bob-fill: #1d2836;
+          --entity: #93bd73;
+          --entity-fill: #242f1b;
+          --prim: #d8c79b;
+          --prim-fill: #2e2919;
+          --dead: #c05a3f;
+          --dead-fill: #331a12;
+        }
+      }
+
+      /* The viewer's own toggle wins over the OS preference, in both directions. */
+      :root[data-theme="light"] {
+        --page: #fbf9f4;
+        --page-edge: #f2eee4;
+        --rule: #e0d9c9;
+        --ink: #221e18;
+        --ink-soft: #4b4437;
+        --muted: #7d7462;
+        --faint: #a9a091;
+        --accent: #8a5a1c;
+        --accent-soft: #f0e3cd;
+        --proof: #2f6a46;
+        --proof-soft: #e3efe6;
+        --absent: #9a4a30;
+        --absent-soft: #f6e5de;
+        --ground: #fbf9f4;
+        --panel: #f4eee2;
+        --alice: #a8681a;
+        --alice-fill: #f6e8d1;
+        --bob: #3c6d99;
+        --bob-fill: #e2ecf5;
+        --entity: #4a7538;
+        --entity-fill: #e6efdf;
+        --prim: #7a6a45;
+        --prim-fill: #f1ebdc;
+        --dead: #9a4128;
+        --dead-fill: #f7e3dc;
+      }
+      :root[data-theme="dark"] {
+        --page: #141009;
+        --page-edge: #1a150e;
+        --rule: #2f2819;
+        --ink: #ece3d1;
+        --ink-soft: #cabfa8;
+        --muted: #9c8f7a;
+        --faint: #57503f;
+        --accent: #e2a63c;
+        --accent-soft: #382b12;
+        --proof: #86b98d;
+        --proof-soft: #1c2a1d;
+        --absent: #d98263;
+        --absent-soft: #331a12;
+        --ground: #141009;
+        --panel: #1d1710;
+        --alice: #e2a63c;
+        --alice-fill: #382b12;
+        --bob: #82aedc;
+        --bob-fill: #1d2836;
+        --entity: #93bd73;
+        --entity-fill: #242f1b;
+        --prim: #d8c79b;
+        --prim-fill: #2e2919;
+        --dead: #c05a3f;
+        --dead-fill: #331a12;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        margin: 0;
+        background: var(--page);
+        color: var(--ink);
+        font-family: var(--serif);
+        font-size: 1.0625rem;
+        line-height: 1.62;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+      }
+
+      /* ── shell ───────────────────────────────────────────────────────── */
+      .shell {
+        display: grid;
+        grid-template-columns: 16rem minmax(0, 1fr);
+        gap: 0;
+        align-items: start;
+      }
+      nav.contents {
+        position: sticky;
+        top: 0;
+        /* Both bounds, so the band runs the full window on a short list and scrolls on a long one —
+           `max-height` alone leaves a beige rectangle ending in the middle of the page. */
+        height: 100vh;
+        overflow-y: auto;
+        padding: 2.5rem 1.25rem 3rem 1.75rem;
+        border-right: 1px solid var(--rule);
+        background: var(--page-edge);
+        font-family: var(--mono);
+        font-size: 0.78rem;
+        line-height: 1.5;
+      }
+      nav.contents .heading {
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: var(--faint);
+        font-size: 0.62rem;
+        margin-bottom: 1.1rem;
+      }
+      nav.contents ol {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.55rem;
+      }
+      nav.contents a {
+        color: var(--ink-soft);
+        text-decoration: none;
+        display: grid;
+        grid-template-columns: 1.6rem 1fr;
+        gap: 0.4rem;
+      }
+      nav.contents a:hover,
+      nav.contents a:focus-visible {
+        color: var(--accent);
+      }
+      nav.contents a .num {
+        color: var(--faint);
+        font-variant-numeric: tabular-nums;
+      }
+      nav.contents a[aria-current="true"] {
+        color: var(--accent);
+      }
+      nav.contents a[aria-current="true"] .num {
+        color: var(--accent);
+      }
+
+      main {
+        padding: 3.5rem 2rem 8rem;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+      .column {
+        width: 100%;
+        max-width: var(--measure);
+        display: flex;
+        flex-direction: column;
+        gap: 1.15rem;
+      }
+
+      /* ── front matter ────────────────────────────────────────────────── */
+      header.front {
+        width: 100%;
+        max-width: var(--measure);
+        display: flex;
+        flex-direction: column;
+        gap: 1.1rem;
+        padding-bottom: 2.5rem;
+        border-bottom: 1px solid var(--rule);
+      }
+      .kicker {
+        font-family: var(--mono);
+        font-size: 0.66rem;
+        letter-spacing: 0.24em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      h1 {
+        font-size: clamp(2rem, 4.5vw, 2.9rem);
+        font-weight: 500;
+        line-height: 1.14;
+        margin: 0;
+        text-wrap: balance;
+      }
+      .standfirst {
+        font-size: 1.2rem;
+        color: var(--ink-soft);
+        margin: 0;
+        text-wrap: pretty;
+      }
+
+      /* ── chapters ────────────────────────────────────────────────────── */
+      section.chapter {
+        width: 100%;
+        max-width: var(--measure);
+        padding-top: 3.5rem;
+        scroll-margin-top: 1.5rem;
+      }
+      section.chapter + section.chapter {
+        border-top: 1px solid var(--rule);
+      }
+      .chapter-num {
+        font-family: var(--mono);
+        font-size: 0.66rem;
+        letter-spacing: 0.24em;
+        text-transform: uppercase;
+        color: var(--faint);
+        display: block;
+        margin-bottom: 0.6rem;
+      }
+      h2 {
+        font-size: clamp(1.5rem, 3vw, 2rem);
+        font-weight: 500;
+        line-height: 1.2;
+        margin: 0 0 0.9rem;
+        text-wrap: balance;
+      }
+      .thesis {
+        font-size: 1.14rem;
+        font-style: italic;
+        color: var(--ink-soft);
+        margin: 0 0 2rem;
+        text-wrap: pretty;
+      }
+      h3 {
+        font-size: 1.08rem;
+        font-weight: 600;
+        margin: 2.4rem 0 0.7rem;
+        letter-spacing: 0.005em;
+      }
+      p {
+        margin: 0 0 1.05rem;
+        text-wrap: pretty;
+      }
+      p:last-child {
+        margin-bottom: 0;
+      }
+
+      /* ── terms ───────────────────────────────────────────────────────── */
+      .term {
+        font-weight: inherit;
+        border-bottom: 1px dotted var(--accent);
+        color: inherit;
+        cursor: help;
+        background: none;
+        border-left: 0;
+        border-right: 0;
+        border-top: 0;
+        padding: 0;
+        font-family: inherit;
+        font-size: inherit;
+      }
+      .term:hover,
+      .term:focus-visible {
+        background: var(--accent-soft);
+      }
+      #term-card {
+        position: fixed;
+        z-index: 20;
+        max-width: 21rem;
+        padding: 0.8rem 0.95rem;
+        border: 1px solid var(--rule);
+        border-left: 3px solid var(--accent);
+        background: var(--page-edge);
+        box-shadow: 0 10px 30px rgb(0 0 0 / 22%);
+        font-size: 0.92rem;
+        line-height: 1.5;
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(4px);
+        transition:
+          opacity 0.14s ease,
+          transform 0.14s ease;
+      }
+      #term-card.on {
+        opacity: 1;
+        transform: none;
+      }
+      #term-card .word {
+        font-family: var(--mono);
+        font-size: 0.8rem;
+        letter-spacing: 0.06em;
+        color: var(--accent);
+        display: block;
+        margin-bottom: 0.35rem;
+      }
+      #term-card .where {
+        display: block;
+        margin-top: 0.55rem;
+        font-family: var(--mono);
+        font-size: 0.68rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #term-card {
+          transition: none;
+        }
+      }
+
+      /* ── claims: the book showing its work ───────────────────────────── */
+      ul.claims {
+        list-style: none;
+        margin: 1.4rem 0 1.6rem;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.9rem;
+      }
+      ul.claims li {
+        padding-left: 0.95rem;
+        border-left: 2px solid var(--proof);
+      }
+      ul.claims li.unproven {
+        border-left-color: var(--absent);
+      }
+      .says {
+        display: block;
+      }
+      .receipt {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.35rem 0.5rem;
+        margin-top: 0.4rem;
+        font-family: var(--mono);
+        font-size: 0.7rem;
+        line-height: 1.35;
+      }
+      .receipt span {
+        padding: 0.16rem 0.42rem;
+        border-radius: 2px;
+        white-space: nowrap;
+      }
+      .receipt .proves {
+        background: var(--proof-soft);
+        color: var(--proof);
+      }
+      .receipt .door {
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+      .receipt .nothing {
+        background: var(--absent-soft);
+        color: var(--absent);
+      }
+      .receipt .spec {
+        color: var(--muted);
+      }
+      .claims .gap {
+        margin: 0.5rem 0 0;
+        font-size: 0.95rem;
+        color: var(--muted);
+        font-style: italic;
+      }
+
+      /* ── the not-yet register ────────────────────────────────────────── */
+      .not-yet {
+        margin: 1.8rem 0 0;
+        padding: 1rem 1.15rem;
+        background: var(--absent-soft);
+        border-left: 3px solid var(--absent);
+      }
+      .not-yet .heading {
+        font-family: var(--mono);
+        font-size: 0.66rem;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: var(--absent);
+        margin-bottom: 0.6rem;
+      }
+      .not-yet ul {
+        margin: 0;
+        padding-left: 1.1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.45rem;
+      }
+      .not-yet li {
+        font-size: 0.98rem;
+        color: var(--ink-soft);
+      }
+
+      /* ── figures ─────────────────────────────────────────────────────── */
+      figure {
+        margin: 2.2rem 0;
+        width: 100%;
+      }
+      figure .frame {
+        overflow-x: auto;
+        padding: 1.4rem 0.5rem;
+        background: var(--page-edge);
+        border: 1px solid var(--rule);
+      }
+      figure svg {
+        display: block;
+        margin: 0 auto;
+        max-width: 100%;
+        height: auto;
+      }
+      figure svg text {
+        font-family: var(--mono);
+      }
+      figcaption {
+        margin-top: 0.7rem;
+        font-size: 0.94rem;
+        color: var(--muted);
+        text-wrap: pretty;
+      }
+      #fig-tip {
+        position: fixed;
+        pointer-events: none;
+        z-index: 30;
+        font-family: var(--mono);
+        font-size: 0.86rem;
+        letter-spacing: 0.05em;
+        padding: 0.42rem 0.7rem;
+        border-radius: 7px;
+        background: var(--page-edge);
+        border: 1.6px solid var(--ink);
+        color: var(--ink);
+        opacity: 0;
+        transform: translate(-50%, -140%) scale(0.96);
+        transition:
+          opacity 0.14s ease,
+          transform 0.14s ease;
+        white-space: nowrap;
+        box-shadow: 0 6px 20px rgb(0 0 0 / 28%);
+      }
+      #fig-tip.on {
+        opacity: 1;
+        transform: translate(-50%, -140%) scale(1);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #fig-tip {
+          transition: none;
+        }
+      }
+
+      code {
+        font-family: var(--mono);
+        font-size: 0.88em;
+        background: var(--page-edge);
+        padding: 0.1em 0.32em;
+        border-radius: 2px;
+      }
+      a {
+        color: var(--accent);
+      }
+      :focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+
+      /* ── small screens: the rail becomes front matter ─────────────────── */
+      @media (max-width: 55rem) {
+        .shell {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        nav.contents {
+          position: static;
+          max-height: none;
+          border-right: 0;
+          border-bottom: 1px solid var(--rule);
+          padding: 1.75rem 1.5rem;
+        }
+        main {
+          padding: 2rem 1.25rem 5rem;
+        }
+        #term-card {
+          left: 1rem !important;
+          right: 1rem;
+          max-width: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <nav class="contents" aria-label="chapters">
+        <div class="heading">contents</div>
+        <ol id="toc"></ol>
+      </nav>
+      <main>
+        <header class="front">
+          <div class="kicker">bombadil labs · loam</div>
+          <h1>What Loam can actually do</h1>
+          <p class="standfirst">
+            A chapter for each part of the system, in a reader's language rather than the
+            implementation's. Every promise here names the test that proves it — and a chapter that
+            falls behind the code turns a build red, which is the only reason you should believe any
+            of it.
+          </p>
+          <p class="kicker" id="stamp"></p>
+        </header>
+        <div id="book"></div>
+      </main>
+    </div>
+    <div id="term-card" role="tooltip" aria-hidden="true"></div>
+    <div id="fig-tip" role="tooltip" aria-hidden="true"></div>
+    <script type="module" src="./capabilities.js"></script>
+  </body>
+</html>

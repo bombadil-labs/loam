@@ -37,7 +37,7 @@ export default tseslint.config(
   { files: ["**/*.js", "**/*.mjs"], ...tseslint.configs.disableTypeChecked },
   // The page itself runs in a browser; say so instead of silencing no-undef.
   {
-    files: ["demos/tutorial/**/*.mjs"],
+    files: ["demos/tutorial/**/*.mjs", "demos/capabilities/**/*.mjs"],
     languageOptions: {
       globals: {
         window: "readonly",
@@ -48,6 +48,8 @@ export default tseslint.config(
         Blob: "readonly",
         URL: "readonly",
         console: "readonly",
+        getComputedStyle: "readonly",
+        IntersectionObserver: "readonly",
       },
     },
   },

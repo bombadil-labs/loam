@@ -345,7 +345,11 @@ It is written FROM the settled working spec, re-cast as narrative —
 builder. Different genres, different lifetimes; do not paste one into the other. The spec grows only
 here, never speculatively; a new file is the default, editing an existing section the rare
 exception. Append a record to the journal — a **new `journal/<date>-<slug>.md` file** (what was done
-+ any novel learning) plus its row in the `JOURNAL.md` index.
++ any novel learning) plus its row in the `JOURNAL.md` index. **And the landing owes the
+capabilities book one claim** (Myk, 2026-07-26): `test/site/capabilities.test.ts` is red until the
+new spec section is covered by a chapter and cited by a `{says, spec, proof}` claim in
+`demos/capabilities/chapters.mjs` — transcription from the working spec's criteria, not invention,
+and the failure message carries the recipe.
 
 **P7 — a local `findings.jsonl` is where lessons START, not where they live.** It is per-worktree and
 uncommitted, so a lesson becomes durable only by landing in `SUBSTRATE-HAZARDS.md`, this file, or

@@ -28,9 +28,28 @@ describe("the tutorial site build", () => {
       "app.js",
       join("packets", "circle.json"),
       join("packets", "adversary.json"),
+      // The two pages the landing links to. Without these lines, deleting either `cpSync` ships a
+      // landing whose links 404 and a green bar — the whole suite is about the artifact holding
+      // together, and a link to nothing is the artifact not holding together.
+      "intro.html",
+      "capabilities.html",
+      "capabilities.js",
     ]) {
       expect(existsSync(join(OUT, f)), `${f} missing from site-dist`).toBe(true);
     }
+  });
+
+  it("the landing's links resolve to emitted files, so a reader never hits a 404", () => {
+    const html = readFileSync(join(OUT, "index.html"), "utf8");
+    for (const href of ["intro.html", "capabilities.html"]) {
+      expect(html, `the landing does not link ${href}`).toContain(`href="${href}"`);
+      expect(existsSync(join(OUT, href)), `${href} linked but not emitted`).toBe(true);
+    }
+  });
+
+  it("the book's page loads the bundle the build emitted", () => {
+    const html = readFileSync(join(OUT, "capabilities.html"), "utf8");
+    expect(html).toContain(`src="./capabilities.js"`);
   });
 
   it("the app bundle is self-contained: nothing left for a browser to resolve", () => {

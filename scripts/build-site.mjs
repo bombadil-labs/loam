@@ -30,10 +30,25 @@ await build({
   logLevel: "silent",
 });
 
+// The capabilities book (T95). Bundled rather than copied, because the page renders from the same
+// `chapters.mjs` the anti-rot rail imports — the identity is the guarantee, so the page must not get
+// a hand-maintained second copy of the text.
+await build({
+  entryPoints: [join(root, "demos", "capabilities", "page.mjs")],
+  outfile: join(out, "capabilities.js"),
+  bundle: true,
+  format: "esm",
+  platform: "browser",
+  target: "es2022",
+  legalComments: "none",
+  logLevel: "silent",
+});
+
 cpSync(join(root, "demos", "tutorial", "index.html"), join(out, "index.html"));
 cpSync(join(root, "demos", "tutorial", "style.css"), join(out, "style.css"));
 cpSync(join(root, "demos", "tutorial", "packets"), join(out, "packets"), { recursive: true });
 // The concept deck: a self-contained standalone page the landing links to, no bundling needed.
 cpSync(join(root, "demos", "tutorial", "intro.html"), join(out, "intro.html"));
+cpSync(join(root, "demos", "capabilities", "index.html"), join(out, "capabilities.html"));
 
-console.log("loam: built site-dist/ (the tutorial, self-contained)");
+console.log("loam: built site-dist/ (the tutorial, the deck, the book — self-contained)");
