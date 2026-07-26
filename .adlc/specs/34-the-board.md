@@ -92,15 +92,18 @@ rot.
   in one run — schema, template, grant, renderer, public declaration — and is itself the
   documented operator path — `test/board/board-boot.test.ts` executing it against a temp home.
 
-## Design questions — (Myk), each with a recommendation
+## Design decisions — answered by Myk, 2026-07-26
 
-1. **Where does the store run?** Recommendation: a `loam serve` process on your box (tmux or a
-   user service), home at a path you name; sessions reach it at `127.0.0.1:<port>` with the token
-   in the session environment. T103's `--host` later makes the same store the phone's board.
-2. **One Fable author, or per-lane grants?** Recommendation: one, v1 — attribution-per-lane is a
-   grant away whenever you want the finer grain, and the history stays honest either way.
-3. **Retention: does `shipped` ever get pruned?** Recommendation: never — the board is the
-   operational record, storage is trivial, and retention is what makes as-of real.
-4. **Does this replace the session task list and the hand-edited artifact on day one?**
-   Recommendation: artifact yes (it becomes the mirror), task list no (harness plumbing, different
-   animal) — revisit after a week of operating it.
+1. **Where does the store run?** DECIDED: locally, persistent — "our first long-term use case."
+   Fable picked the home: `~/bombadil-labs/loam-board`, with a `start.sh` beside the seed so
+   restarting is one command; a user service can adopt it later. T103's `--host` later puts the
+   same store on the phone.
+2. **Who writes?** DECIDED: not one fixed author — "deltas can be submitted by whatever model (or
+   even me via the UI)." So: a small set of GRANTED authors, one per persistent identity, minted as
+   needed (the boot script mints `fable` first and makes the next grant a one-liner); Myk writes as
+   the operator through the door. Attribution per identity is the product either way.
+3. **Retention?** DECIDED: never prune. The history is the point.
+4. **What does it replace?** DECIDED, with Myk's correction of the framing: ADLC remains the SOURCE
+   OF TRUTH and the board is always a PROJECTION over it — "replace" is the wrong word. What
+   retires is the hand-edited claude.ai artifact: once the store runs, the artifact is generated
+   from it and never hand-touched again. Dogfood all the way.
