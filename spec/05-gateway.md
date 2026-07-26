@@ -48,12 +48,14 @@ roots; one delta serves many views).
   same signing, same standing, no schema sugar.
 - **Raw append** (`POST /:mount/append`): pre-signed wire deltas, verified and admitted under
   the author-standing rule — the non-custodial path, where the server never holds the key.
-- **Both hashes on the surface**: `_hex` (the resolved view's canonical bytes — the answer) and
-  `_hviewHex` (the gathered hyperview's — the evidence). Two lenses over the same ground share
+- **Both hashes on the surface**: `_hex` (the digest of the resolved view's canonical bytes — the
+  answer) and `_hviewHex` (of the gathered hyperview's — the evidence): `contentAddress` over the
+  canonical CBOR, fixed-width, the same multihash form as a delta id — never the bytes themselves,
+  which grew with the answer and re-disclosed its values. Two lenses over the same ground share
   `_hviewHex` while their `_hex` diverges exactly when their schemas adjudicate differently.
 - **Foreign dialects are transformed, not rejected**: deltas expressing the same ideas in other
   shapes merge as always; a runner binding reads them and emits canonical-shape deltas citing
   their sources (the §9 provenance discipline). Standard shape by guarantee for your own
   writers; translation for everyone else's.
 
-**Provenance.** Landed — [#4](https://github.com/bombadil-labs/loam/pull/4) (the read gateway: `query`/`loadSchema`), [#5](https://github.com/bombadil-labs/loam/pull/5) (`mutate`/`subscribe`), [#13](https://github.com/bombadil-labs/loam/pull/13) (registrations-as-deltas: evolution is append, deprecation is negation), and [#15](https://github.com/bombadil-labs/loam/pull/15) (writes become claims: templates, the generic `_claim`, raw append, `_hviewHex`). Lives in `src/gateway/gateway.ts` (`Gateway`) and `src/gateway/registration.ts` (`readRegistrations`, `schemaEntityFor`, `registrationClaims`). Key decision: the schema's identity is the **entity**, not the name, so a republish at the same entity rebinds the running gateway with no restart.
+**Provenance.** Landed — [#4](https://github.com/bombadil-labs/loam/pull/4) (the read gateway: `query`/`loadSchema`), [#5](https://github.com/bombadil-labs/loam/pull/5) (`mutate`/`subscribe`), [#13](https://github.com/bombadil-labs/loam/pull/13) (registrations-as-deltas: evolution is append, deprecation is negation), and [#15](https://github.com/bombadil-labs/loam/pull/15) (writes become claims: templates, the generic `_claim`, raw append, `_hviewHex`). Lives in `src/gateway/gateway.ts` (`Gateway`) and `src/gateway/registration.ts` (`readRegistrations`, `schemaEntityFor`, `registrationClaims`). Key decision: the schema's identity is the **entity**, not the name, so a republish at the same entity rebinds the running gateway with no restart. Amended by [#263](https://github.com/bombadil-labs/loam/pull/263) (T107): `_hex`/`_hviewHex` became fixed-width digests of the canonical bytes (`src/gateway/reads.ts`), closing the growth and the value re-disclosure while preserving every equality.
