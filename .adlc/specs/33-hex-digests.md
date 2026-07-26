@@ -56,3 +56,12 @@ apply: `_hex`/`_hviewHex` are computed at read time and never at rest).
   surface hex into derivation provenance. Verified by
   `grep -rn "derivedClaims\|newHex" src/ --include=*.ts` answering no sites, and the runner
   suite green under `npm run check`.
+- (h) The PINNED producer is railed in its own right: `resolvePinned` and the REST door's
+  pinned branch (the one that serves a declared pin anonymously) answer fixed-width digests
+  with the leak-marker absent, and reverting only the pinned lines goes red. Verified by
+  `test/gateway/hex-digest.test.ts` (added after the P5 lens round found the partial revert
+  survived every suite).
+- (i) The digest VALUES are pinned across releases by a golden vector — hardcoded literals
+  over a fully-fixed fixture, with an independent recomputation route (Node's hex decoder +
+  `contentAddress`, no reads.ts code) landing on the same literals. Verified by
+  `test/gateway/hex-digest.test.ts`.
