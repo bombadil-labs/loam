@@ -11,6 +11,7 @@ import { signClaims } from "@bombadil/rhizomatic";
 import type { Claims, Delta, Reactor } from "@bombadil/rhizomatic";
 import type { Gateway } from "./gateway.js";
 import { lawfulNegated } from "./registration.js";
+import { dataStruck } from "./accounts.js";
 
 export const ADOPTION_ENTITY = "loam:adoption";
 export const CTX_ADOPTION = "loam.adoption";
@@ -194,6 +195,66 @@ export async function promoteImpl(
   if (src === undefined) {
     throw new Error(`nothing to promote: ${deltaId} is not held in the source`);
   }
+  // SURVIVAL, NOT PRESENCE (§24.3; the fact-side twin of §27.8's law rule). `reactor.get` says the
+  // output EXISTS in the pool, never that it still STANDS there — and promotion re-signs, so adopting
+  // a withdrawn output would put the operator's name on a claim its own author had already taken
+  // back, in canonical history, where §11 erasure is the only way back out.
+  //
+  // REFUSE rather than carry the strike across. Promotion is content-addressed on the source, so a
+  // copy landed already-struck would kill that id forever: forgiveness in the pool could never
+  // re-land it — the idempotence short-circuit below would report success over a delta no reader can
+  // see (H7). Refusal leaves nothing behind. The translate door carries instead because its rendering
+  // has already LANDED and its audience runs none of Loam's reader rules; a door that can still say
+  // no holds the better instrument.
+  //
+  // WHOSE strike binds — TWO grounds, because two different things can be wrong, and only one of them
+  // is about the source store's reading:
+  //
+  //  1. THE SOURCE'S OWN GOVERNED READING has it struck — `dataStruck` over the source's operator, the
+  //     same masked ground a reader there resolves through (a pool shares the primary's operator seed,
+  //     §24.1, so the operator's REJECT-THIS-OUTPUT strike is a first-class §27 review gesture and must
+  //     bind at this door; `lawfulNegated` alone would let promotion override the operator's own
+  //     rejection). It is the DATA question, so the data mask answers it — operator plus the authors
+  //     their surviving grants name — and an ungranted stranger who federates in still holds no veto.
+  //  2. THE AUTHOR TOOK THEIR OWN WORD BACK — `lawfulNegated` scoped to the output's author, which is
+  //     §27.8's rule transposed: a shipper takes back their own word, nobody takes it back for them,
+  //     scoped at every rung so a foreign negation-of-the-retraction cannot revive it. Invisible to (1)
+  //     precisely in the case that matters most — a quarantined app holds no grant — and it is not a
+  //     claim about the source's reading but about whose words the operator is about to speak.
+  //
+  // Ground 2 has no operator override BY DESIGN: the operator cannot un-retract someone else's
+  // sentence, so an output its author withdrew is unpromotable for good. The escape hatch is to say
+  // the thing YOURSELF — an ordinary publish, the operator's own act — rather than an adoption whose
+  // trail would vouch for a withdrawn output. Both refusals name that, because a refusal that names no
+  // remedy is how a second door gets invented.
+  //
+  // Asked BEFORE the law/data classification below — a struck delta is refused as struck, never by its
+  // kind (§27.8 orders it the same way).
+  const struckAtSource = dataStruck(source.reactor, source.operator);
+  const withdrawn = lawfulNegated(source.reactor, src.claims.author);
+  // Derived, never asserted separately: the strikes named ARE the ones that carry the verdict, so the
+  // message cannot drift from the algebra.
+  const ownStrikes = source.reactor
+    .negationsOf(src.id)
+    .filter((n) => source.reactor.get(n)?.claims.author === src.claims.author && !withdrawn(n));
+  if (ownStrikes.length > 0) {
+    throw new Error(
+      `promotion refused: ${deltaId} — its author ${src.claims.author} retracted it where it was ` +
+        `made (${ownStrikes.join(", ")}), and an output taken back at the source must not re-enter ` +
+        `in the operator's voice. Only its author can stand behind it again; to assert it anyway, ` +
+        `publish the claim as your own act rather than adopt it.`,
+    );
+  }
+  if (struckAtSource(src.id)) {
+    const standing = source.reactor
+      .negationsOf(src.id)
+      .filter((n) => source.reactor.get(n) !== undefined && !struckAtSource(n) && !withdrawn(n));
+    throw new Error(
+      `promotion refused: ${deltaId} — the source's own reading has it struck (${standing.join(", ")}), ` +
+        `and promotion must not re-speak what that store already retired. Strike the retraction ` +
+        `there to restore it, or publish the claim as your own act.`,
+    );
+  }
   // Promote-OUTPUTS adopts domain facts only. Law-shaped deltas — grants, trust, registrations,
   // tombstones, schema definitions, adoption records, negations — are refused here; operator
   // authorship is force, and law crosses only by §24.4's own ceremony.
@@ -218,6 +279,12 @@ export async function promoteImpl(
   // un-adopt the value — the counterpart still stands in the primary and remains legitimately
   // citable, so a strike on the record must not sever the reference bridge (guarded per-counterpart
   // by the presence check below). The idempotence short-circuit, in contrast, reads the LIVE trail.
+  //
+  // Closure here is PRESENCE, deliberately, and it is the one rung that does not ask survival: a
+  // promoted claim may cite a delta the primary holds STRUCK. Nothing resurrects — the strike still
+  // binds for every reader of the cited delta, and a pointer is not an assertion about its target's
+  // standing — so this is an asymmetry rather than a leak. Tightening it would be a separate decision
+  // (a citation-survival rail belongs beside this bridge, not folded into the survival gate above).
   const bridge = new Map(
     readAdoptions(gw.reactor, gw.operatorAuthor, { includeStruck: true }).map((a) => [
       a.sourceDelta,
@@ -253,11 +320,27 @@ export async function promoteImpl(
   );
   // Idempotence: an adoption that already stands is returned, never re-landed — one output, one
   // adopted delta, one trail record, however many times the operator says yes. This reads the LIVE
-  // trail (struck records filtered), so once the operator withdraws a record, re-promotion re-lands
-  // it. (The adopted VALUE's own survival — a §14 negation on it, distinct from erase — is checked
-  // by presence here, not survival; closing that is T39, a deliberate refuse-vs-revive decision.)
+  // trail (struck records filtered), so once the operator withdraws a record, re-promotion re-lands it.
+  //
+  // Survival is asked HERE too, of the adopted delta and in the PRIMARY's own reading. A §14 strike the
+  // operator later laid on their adopted claim is theirs to lift, and re-promotion must not quietly
+  // undo it — but it must not report `promoted` over a delta no reader can resolve either (H7: the
+  // caller cannot tell success from a dead id). So it refuses and names the strike. An ERASED adoption
+  // is a different rung and needs no branch: the delta is absent, so the append below meets its own
+  // tombstone and the promise "an erased adoption stays dead" is unchanged.
   const live = new Map(gw.adoptions().map((a) => [a.sourceDelta, a.adoptedDelta]));
   if (live.get(deltaId) === adopted.id && gw.reactor.get(adopted.id) !== undefined) {
+    const struckHere = dataStruck(gw.reactor, gw.operatorAuthor);
+    if (struckHere(adopted.id)) {
+      const standing = gw.reactor
+        .negationsOf(adopted.id)
+        .filter((n) => gw.reactor.get(n) !== undefined && !struckHere(n));
+      throw new Error(
+        `promotion refused: ${deltaId} was already adopted as ${adopted.id}, and that claim is ` +
+          `struck here (${standing.join(", ")}) — re-promoting would report a success no reader can ` +
+          `see. Lift the retraction to stand behind it again; promotion will not undo it for you.`,
+      );
+    }
     return { promoted: adopted.id };
   }
   const record = signClaims(
