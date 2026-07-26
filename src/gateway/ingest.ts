@@ -25,6 +25,7 @@ import { ERASE_ENTITY, eraseDefect, isTombstone, readTombstones } from "./erase.
 import { Channel } from "./channel.js";
 import type { AppendReceipt, FederationReport, Gateway } from "./gateway.js";
 import { publicDefect } from "./public.js";
+import { artifactDefect } from "./artifact.js";
 import { readTrustPolicy } from "./trust.js";
 
 // Persist a batch, THEN serve it (the body of `Gateway.append`). The batch is validated whole (one
@@ -370,7 +371,8 @@ export async function federateImpl(
     // A tombstone is a removal-order, not an inert claim — so it faces the same validator at
     // this door as at the append door (eraseDefect), and an unauthorized or malformed one is
     // refused rather than stored. Likewise a public-read declaration: it OPENS a door, so a
-    // malformed one is refused here exactly as at append (publicDefect) — the two doors must
+    // malformed one is refused here exactly as at append (publicDefect), and an artifact
+    // declaration alongside it (artifactDefect) — the two doors must
     // not disagree about what lawful loam:public data is. Everything the readers trust
     // downstream passed a door here.
     if (
@@ -378,6 +380,7 @@ export async function federateImpl(
       verifyDelta(d) !== "verified" ||
       dead.has(d.id) ||
       publicDefect(d.claims) !== undefined ||
+      artifactDefect(d.claims) !== undefined ||
       (isTombstone(d.claims) && eraseDefect(d, gw.reactor, gw.operatorAuthor) !== undefined)
     ) {
       continue; // unlawful at this door: no predicate and no closure can readmit it

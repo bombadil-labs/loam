@@ -103,6 +103,13 @@ import {
   type ContainerTable,
 } from "./container.js";
 import {
+  declareArtifactImpl,
+  packArtifactImpl,
+  readArtifactRoutes,
+  type PackArtifactOptions,
+  type PackedArtifact,
+} from "./artifact.js";
+import {
   prepareRouteImpl,
   publishRendererImpl,
   readRenderers,
@@ -558,6 +565,24 @@ export class Gateway {
   // version's content address — lives beside the loam.public vocabulary in public.ts.
   async declarePublic(entries: readonly string[], context?: RequestContext): Promise<void> {
     return declarePublicImpl(this, entries, context);
+  }
+
+  // Declare routes publishable as artifacts (SPEC §30): `loam.public`'s twin — the body lives beside
+  // the artifact vocabulary in artifact.ts.
+  async declareArtifact(routes: readonly string[], context?: RequestContext): Promise<void> {
+    return declareArtifactImpl(this, routes, context);
+  }
+
+  // Every route the operator has declared artifact-publishable, read live under this store's law.
+  artifactRoutes(): ReadonlySet<string> {
+    return readArtifactRoutes(this.reactor, this.operatorAuthor);
+  }
+
+  // Assess a route for artifact publication (SPEC §30): every refusal, the derived capability
+  // statement, and the coordinates a page would carry. Re-derived from surviving law on every call,
+  // exactly as serveRoute is, so withdrawal is live. The body lives in artifact.ts.
+  packArtifact(route: string, entity: string, opts: PackArtifactOptions): PackedArtifact {
+    return packArtifactImpl(this, route, entity, opts);
   }
 
   // Publish a renderer as data (SPEC §23): the body lives beside the binding vocabulary in
