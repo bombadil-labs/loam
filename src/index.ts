@@ -160,6 +160,18 @@ export {
   type ResolverSpecs,
 } from "./gateway/registration.js";
 export {
+  ARTIFACT_ENTITY,
+  CTX_ARTIFACT,
+  MAX_CONNECTOR_NAME,
+  artifactClaims,
+  artifactDefect,
+  capabilityStatement,
+  readArtifactRoutes,
+  type ArtifactCoordinates,
+  type PackArtifactOptions,
+  type PackedArtifact,
+} from "./gateway/artifact.js";
+export {
   CTX_RENDERER,
   parseRendererInput,
   readRenderers,

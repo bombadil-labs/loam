@@ -25,6 +25,7 @@ import { STORE_ENTITY } from "./genesis.js";
 import { entityGatherBody } from "./gather.js";
 import { eraseDefect } from "./erase.js";
 import { publicDefect } from "./public.js";
+import { artifactDefect } from "./artifact.js";
 import { trustDefect } from "./trust.js";
 import { budgetDefect } from "./budget.js";
 import { containerDefect } from "./container.js";
@@ -393,6 +394,7 @@ export function authorize(
     constitutionalDefect(delta) ??
     trustDefect(delta.claims) ??
     publicDefect(delta.claims) ??
+    artifactDefect(delta.claims) ??
     budgetDefect(delta.claims) ??
     containerDefect(delta, reactor, operator) ??
     eraseDefect(delta, reactor, operator);
