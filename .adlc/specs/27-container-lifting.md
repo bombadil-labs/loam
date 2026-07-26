@@ -1,5 +1,11 @@
 # T32 — The Container lifting: quarantine becomes one preset, and the vector gets its at-rest name
 
+> **SPENT — and its posture words have since been renamed.** T32 landed and is archived; this file is
+> the instrument that gated it, kept as written. The posture values it specifies as `"wall"` and
+> `"property"` are now **`"separate"`** and **`"shared"`** (Myk, 2026-07-25) — see `spec/27-containers.md`
+> §27.1 for the argument and the §20 step that carries an older store forward. Read the words below as
+> historical; the criteria they gate are unchanged.
+
 **Ticket.** T32. **Amends** `spec/27-containers.md` (§27.1 gains the minted vocabulary; §27.7 closes).
 Build ticket on a store-boundary/erasure/federation surface, so the PR is **Myk's merge (P6)**. It
 must ship **no behavior change to the quarantine** — a change is a finding, not a feature — and

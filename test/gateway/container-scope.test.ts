@@ -62,18 +62,18 @@ describe("T32 criterion 18 — the union side of the formula is pinned", () => {
     await gw.append([h, m]);
     await gw.append([
       declare(
-        { container: "container:a", trust: "curated", posture: "property", membership: HEIGHTS },
+        { container: "container:a", trust: "curated", posture: "shared", membership: HEIGHTS },
         10_000,
       ),
       declare(
-        { container: "container:b", trust: "curated", posture: "property", membership: MESSAGES },
+        { container: "container:b", trust: "curated", posture: "shared", membership: MESSAGES },
         10_001,
       ),
       declare(
         {
           container: "container:child",
           trust: "curated",
-          posture: "property",
+          posture: "shared",
           membership: MESSAGES,
           parent: "container:a",
         },
@@ -124,7 +124,7 @@ describe("T32 criterion 7 — nested exclusion composes on the set algebra", () 
         {
           container: "container:nested",
           trust: "curated",
-          posture: "property",
+          posture: "shared",
           membership: nested,
         },
         11_000,
@@ -133,7 +133,7 @@ describe("T32 criterion 7 — nested exclusion composes on the set algebra", () 
         {
           container: "container:msgs",
           trust: "curated",
-          posture: "property",
+          posture: "shared",
           membership: MESSAGES,
         },
         11_001,
@@ -170,14 +170,14 @@ describe("T32 criterion 13 — exclusion never revives a strike (H1, fourth site
     // times before it was named.
     await gw.append([
       declare(
-        { container: "container:live", trust: "curated", posture: "property", membership: HEIGHTS },
+        { container: "container:live", trust: "curated", posture: "shared", membership: HEIGHTS },
         12_000,
       ),
       declare(
         {
           container: "container:struck",
           trust: "curated",
-          posture: "property",
+          posture: "shared",
           membership: { op: "difference", of: OPERATOR_CLAIMS, without: HEIGHTS },
         },
         12_001,
@@ -217,7 +217,7 @@ describe("T32 criterion 13 — exclusion never revives a strike (H1, fourth site
         {
           container: "container:only-heights",
           trust: "curated",
-          posture: "property",
+          posture: "shared",
           membership: HEIGHTS,
         },
         13_000,
@@ -247,11 +247,11 @@ describe("T32 — the wall side of the union (P5 fold: the positive leg, and the
     await gw.append([h, m]);
     await gw.append([
       declare(
-        { container: "container:aw", trust: "untrusted", posture: "wall", membership: HEIGHTS },
+        { container: "container:aw", trust: "untrusted", posture: "separate", membership: HEIGHTS },
         30_000,
       ),
       declare(
-        { container: "container:pp", trust: "curated", posture: "property", membership: MESSAGES },
+        { container: "container:pp", trust: "curated", posture: "shared", membership: MESSAGES },
         30_001,
       ),
     ]);
@@ -281,7 +281,7 @@ describe("T32 — the wall side of the union (P5 fold: the positive leg, and the
         {
           container: "container:aa-wall",
           trust: "untrusted",
-          posture: "wall",
+          posture: "separate",
           membership: HEIGHTS,
         },
         31_000,
@@ -290,7 +290,7 @@ describe("T32 — the wall side of the union (P5 fold: the positive leg, and the
         {
           container: "container:zz-prop",
           trust: "curated",
-          posture: "property",
+          posture: "shared",
           membership: HEIGHTS,
         },
         31_001,
@@ -329,7 +329,7 @@ describe("T32 — the wall side of the union (P5 fold: the positive leg, and the
         {
           container: "container:reading",
           trust: "curated",
-          posture: "property",
+          posture: "shared",
           membership: HEIGHTS,
         },
         32_100,
@@ -352,7 +352,7 @@ describe("T32 criterion 19 — an unresolvable dependency refuses, never shrinks
         {
           container: "container:remote",
           trust: "curated",
-          posture: "property",
+          posture: "shared",
           membershipAt: dangling,
         },
         14_000,
@@ -376,7 +376,7 @@ describe("T32 criterion 19 — an unresolvable dependency refuses, never shrinks
         {
           container: "container:by-address",
           trust: "curated",
-          posture: "property",
+          posture: "shared",
           membershipAt: published.id,
         },
         14_200,
@@ -394,7 +394,7 @@ describe("T32 criterion 19 — an unresolvable dependency refuses, never shrinks
     // empty-set fallback would be partial data with no error, indistinguishable from a
     // legitimately empty container.
     await gw.append([
-      declare({ container: "container:away", trust: "curated", posture: "wall" }, 15_000),
+      declare({ container: "container:away", trust: "curated", posture: "separate" }, 15_000),
     ]);
     expect(() => gw.containerScope({ containers: ["container:away"] })).toThrow(/container:away/);
     await gw.close();

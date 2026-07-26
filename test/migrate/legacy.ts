@@ -7,6 +7,11 @@
 // or snapshot references. The §21 slice-1 store (a `hyperschema:`-prefixed entity, an explicit
 // `writable`) and the pre-slice-1 store (`schema:`-prefixed, no `writable`) are both this shape,
 // differing only in the arguments passed.
+//
+// `legacyContainerClaims` is what `containerClaims` emitted before §27.1's posture words said
+// STORAGE: the same declaration, with `posture` reading `wall` or `property`. The current builder's
+// type will not accept either word, which is the point — the retired vocabulary can only be minted
+// here, so no production path can re-mint it by accident.
 
 import {
   cborToJson,
@@ -20,6 +25,7 @@ import {
   type Delta,
   type Schema,
 } from "@bombadil/rhizomatic";
+import { CTX_CONTAINER } from "../../src/gateway/container.js";
 import { CTX_REGISTRATION } from "../../src/gateway/registration.js";
 
 const HS_TERM = "rhizomatic.hyperschema.term";
@@ -114,6 +120,52 @@ export function legacyInlineRegistrationClaims(
         target: { kind: "primitive" as const, value: JSON.stringify(schemaToJson(schema)) },
       },
       { role: "roots", target: { kind: "primitive" as const, value: JSON.stringify(roots) } },
+    ],
+  };
+}
+
+/** The retired posture words, spelled out here so nothing else in the tree can. */
+export type LegacyPosture = "wall" | "property";
+
+/**
+ * A pre-§27.1 container declaration: `containerClaims`' exact pointer layout and order, with
+ * `posture` carrying a retired word. Order matters — the migration re-signs by mapping pointers in
+ * place, so a fixture that reordered them would prove the wrong thing about the re-expression.
+ */
+export function legacyContainerClaims(
+  spec: {
+    readonly container: string;
+    readonly trust: "curated" | "untrusted";
+    readonly posture: LegacyPosture;
+    readonly parent?: string;
+    readonly membership?: unknown;
+    readonly membershipAt?: string;
+    readonly version?: string;
+  },
+  author: string,
+  timestamp: number,
+): Claims {
+  const entityPtr = (role: string, id: string) => ({
+    role,
+    target: { kind: "entity" as const, entity: { id, context: CTX_CONTAINER } },
+  });
+  const primPtr = (role: string, value: string) => ({
+    role,
+    target: { kind: "primitive" as const, value },
+  });
+  return {
+    timestamp,
+    author,
+    pointers: [
+      entityPtr("container", spec.container),
+      primPtr("trust", spec.trust),
+      primPtr("posture", spec.posture),
+      ...(spec.parent === undefined ? [] : [entityPtr("parent", spec.parent)]),
+      ...(spec.membership === undefined
+        ? []
+        : [primPtr("membership", JSON.stringify(spec.membership))]),
+      ...(spec.membershipAt === undefined ? [] : [primPtr("membershipAt", spec.membershipAt)]),
+      ...(spec.version === undefined ? [] : [primPtr("version", spec.version)]),
     ],
   };
 }

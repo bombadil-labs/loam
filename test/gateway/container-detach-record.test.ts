@@ -33,7 +33,7 @@ const boot = (backend?: MemoryBackend): Promise<Gateway> =>
 
 const declareWall = (name: string, ts: number) =>
   signClaims(
-    containerClaims({ container: name, trust: "untrusted", posture: "wall" }, OP, ts),
+    containerClaims({ container: name, trust: "untrusted", posture: "separate" }, OP, ts),
     OP_SEED,
   );
 

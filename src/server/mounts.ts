@@ -7,7 +7,8 @@
 //
 //   1. STATIC — `serve({ mounts })`, the operator's boot-time word. Nothing displaces it.
 //   2. DYNAMIC — `addMount(name, gateway)`, an explicit runtime mount, removable by name.
-//   3. CONTAINERS — the ATTACHED wall of any currently-mounted gateway, at its declared entity name.
+//   3. CONTAINERS — the ATTACHED container of any currently-mounted gateway, at its declared entity
+//      name.
 //
 // Tier 3 is derived, never registered: it reads the host gateway's own attachment registry live, so
 // `openContainer` mounting and `drop()`/`detach()` unmounting need no callback into the server — the
@@ -19,23 +20,24 @@
 //
 // A container is reachable only while its gateway is ALSO in the host's `quarantinePools` — the same
 // two-question liveness check the erasure guard uses, so a half-removed attachment serves nothing.
-// A PROPERTY container has no gateway of its own and never appears here (T32 criterion 6). And a
+// A SHARED container has no gateway of its own and never appears here (T32 criterion 6). And a
 // container whose declared name is not ROUTABLE is skipped rather than half-served: the name rule
 // below is the same for all three tiers, and `unroutable()` lists what it skipped so an operator can
 // see why their module went nowhere — a silent drop would be the same lie as a phantom mount.
 //
-// A container mount carries the HOST as well as the wall, because two questions have two owners: the
-// wall answers WHAT a caller reads, the host answers WHETHER a tokenless caller may read at all. The
-// operator's `loam:public` declaration lives at the host and is revocable there; the wall holds only
-// a seeded COPY of it, frozen until the next reseed (§24.2), so gating the anonymous door on the
-// pool's own answer would make a §12 revocation unrevocable at every container mount.
+// A container mount carries the HOST as well as the container, because two questions have two
+// owners: the container answers WHAT a caller reads, the host answers WHETHER a tokenless caller may
+// read at all. The operator's `loam:public` declaration lives at the host and is revocable there;
+// the container holds only a seeded COPY of it, frozen until the next reseed (§24.2), so gating the
+// anonymous door on the pool's own answer would make a §12 revocation unrevocable at every container
+// mount.
 //
 // The write doors are OPEN on a container mount, and that is a deliberate consequence rather than an
 // oversight: an operator or actor token may POST /<container>/append or /register straight into the
-// walled arena, bypassing the wall's `admit`/`membership` (which govern the SEEDING edge, not the
-// door). Nothing there exceeds what the same token can already do to the host — a wall shares the
-// host's operator by §24.1 — so this widens no authority; a container that needs its own identities
-// is a later design, and until then the token table is the host's, whole.
+// container's own store, bypassing its `admit`/`membership` (which govern the SEEDING edge, not the
+// door). Nothing there exceeds what the same token can already do to the host — a container shares
+// the host's operator by §24.1 — so this widens no authority; a container that needs its own
+// identities is a later design, and until then the token table is the host's, whole.
 
 import type { Gateway } from "../gateway/gateway.js";
 
@@ -70,12 +72,12 @@ export function mountNameDefect(name: string): string | undefined {
 }
 
 export interface ResolvedMount {
-  /** The gateway that answers — a static/dynamic mount, or a container's own wall. */
+  /** The gateway that answers — a static/dynamic mount, or a container's own store. */
   readonly gateway: Gateway;
   /**
    * For a CONTAINER mount, the host whose operator governs it: the anonymous door is the host's live
-   * decision (`loam:public` is revocable there), never the wall's frozen copy. Absent for a mount the
-   * operator named directly, where the gateway IS its own authority.
+   * decision (`loam:public` is revocable there), never the container's frozen copy. Absent for a
+   * mount the operator named directly, where the gateway IS its own authority.
    */
   readonly host?: Gateway;
 }
@@ -118,8 +120,10 @@ export function makeMountTable(statics: Record<string, Gateway>): MountTable {
     // have been given. (Checked here rather than at attach — the server does not own openContainer.)
     if (mountNameDefect(name) !== undefined) return undefined;
     for (const host of hosts()) {
-      const wall = host.attachedContainers.get(name);
-      if (wall !== undefined && host.quarantinePools.has(wall)) return { gateway: wall, host };
+      const attached = host.attachedContainers.get(name);
+      if (attached !== undefined && host.quarantinePools.has(attached)) {
+        return { gateway: attached, host };
+      }
     }
     return undefined;
   };
@@ -161,8 +165,8 @@ export function makeMountTable(statics: Record<string, Gateway>): MountTable {
     unroutable() {
       const names = new Set<string>();
       for (const host of hosts()) {
-        for (const [name, wall] of host.attachedContainers) {
-          if (mountNameDefect(name) !== undefined && host.quarantinePools.has(wall)) {
+        for (const [name, attached] of host.attachedContainers) {
+          if (mountNameDefect(name) !== undefined && host.quarantinePools.has(attached)) {
             names.add(name);
           }
         }

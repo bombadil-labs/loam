@@ -64,11 +64,16 @@ drop is what a container's parent may always do.
 
 ### 28.3 The trust knob determines the boundary knob
 
-§27.1 said exclusion is "a SPECTRUM keyed on trust" — a property for your own containers, a wall for
-untrusted foreign law. Under §28.1 that stops being a judgement call and becomes a **derivation**:
+§27.1 said exclusion is "a SPECTRUM keyed on trust" — shared ground for your own containers, a store of its
+own for untrusted foreign law. Under §28.1 that stops being a judgement call and becomes a **derivation**:
 
-> **A container that admits what its parent does not trust MUST be a WALL (a separate store).
-> A container that only narrows its parent's trust MAY be a PROPERTY (a flag over shared ground).**
+> **A container that admits what its parent does not trust MUST be SEPARATE (its own store).
+> A container that only narrows its parent's trust MAY be SHARED (a flag over ground already held).**
+
+(The at-rest posture values are `"separate"` and `"shared"`; §27.1 records the rename and its argument. This
+section goes on saying **wall** where it means §28's law boundary — what writes, law-reach, and
+trust-crossing may not pass — because that is a boundary and not a storage fact. Where it named the posture
+VALUE, it now says separate or shared.)
 
 The argument is an escalation that would otherwise arrive by the back door. Suppose Bob's container were
 merely a **scope** — a membership query over Alice's shared ground, with exclusion as a claim. Bob admits
@@ -85,15 +90,15 @@ usually a sign the rule is real.
 
 ### 28.4 The ratchet — you cannot retroactively isolate grow-only ground
 
-The posture is a **per-container choice** (tenant A a wall, tenant B a property, in one instance — they
+The posture is a **per-container choice** (tenant A separate, tenant B shared, in one instance — they
 compose fine on read). But the choice is not symmetric, and the asymmetry inverts the usual
 start-cheap-and-harden-later instinct. This subsection exists so nobody discovers that at 2am.
 
-**Wall → property is cheap, in-place, and deliberate.** Federate the wall's deltas into the root, where
+**Separate → shared is cheap, in-place, and deliberate.** Federate the separate store's deltas into the root, where
 the root's admission applies — so the operator must actually admit those authors. That cost is *correct*:
 dissolving a wall IS the escalation case of §28.3, and it should require a decision rather than a flag.
 
-**Property → wall is not achievable in place at all.** The ground is grow-only and the deltas are already
+**Shared → separate is not achievable in place at all.** The ground is grow-only and the deltas are already
 commingled. There are exactly three routes, and two of them are dishonest:
 
 1. **Copy out, then erase from the root.** The tombstone would assert the byte was forgotten while it is
@@ -112,9 +117,9 @@ reappear.** Extraction is `fork(A, p) = { d ∈ A : p(d) }` (SPEC-1 §8) into a 
 `negated(d, D)` ranges over the **operand set** (SPEC-2 §4.3): suppression is a property of the set being
 evaluated, not of the delta. So a negation left behind by the fork predicate stops suppressing its target,
 and a claim that was masked in the commingled store comes back **live** in the extracted one. The substrate
-pins this as a conformance vector (`select-then-mask-scopes-to-operand`). Any property→wall migration must
+pins this as a conformance vector (`select-then-mask-scopes-to-operand`). Any shared→separate migration must
 therefore carry the **negation closure** along with its targets, or the extraction silently resurrects
-retracted claims — a data-integrity failure, not a performance one. This is an argument for walls-by-default
+retracted claims — a data-integrity failure, not a performance one. This is an argument for separate-by-default
 that is independent of cost, and it is the stronger of the two.
 
 The same operand-set rule bites any filter of a delta-set, not only a migration — Loam shipped one such
@@ -127,7 +132,7 @@ The general statement, because it reaches past tenancy:
 > **You cannot retroactively achieve isolation over grow-only shared ground.** A wall's value comes from
 > the bytes never having been commingled. Once they have been, no in-place act recovers it.
 
-**Therefore walls are the DEFAULT, and property is opt-in** (DECIDED — Myk, 2026-07-21) for tenants known
+**Therefore SEPARATE is the DEFAULT, and SHARED is opt-in** (DECIDED — Myk, 2026-07-21) for tenants known
 to share a trust domain: same org, same team, internal partitioning. Not because isolation is always
 needed, but because of the direction of travel. *"We thought we didn't need isolation, then a customer
 asked for it"* is the overwhelmingly likely transition, and it is the one that costs a re-provision; its
@@ -135,7 +140,7 @@ reverse costs an afternoon. **Default to the reversible choice.**
 
 This also settles a drift between two of Loam's own documents, and settles it in the right direction:
 CLAUDE.md's standing decision that *"tenant isolation is first-class"* becomes the **default** and
-therefore a true statement, while §7's read-lens machinery becomes the opt-in **property** posture. Both
+therefore a true statement, while §7's read-lens machinery becomes the opt-in **shared** posture. Both
 are true of different deployments; neither document was wrong; and the stronger promise is the one that
 holds unless someone deliberately opts out.
 
@@ -219,17 +224,17 @@ demands one, that is a design change requiring its own invalidation story, not a
 **REUSED, not shimmed (RECOMMENDATION).** `loam.tenant` / `loam.members` / `loam.grants` already express
 exactly what a tenant-as-container needs for membership and standing; §7 built them and they are correct.
 What §28 adds is orthogonal: a **trust declaration** filed at the tenant's entity (§28.6) and a **posture**
-(wall or property, §28.4). Neither replaces the existing vocabulary — they sit beside it.
+(separate or shared, §28.4). Neither replaces the existing vocabulary — they sit beside it.
 
 So §7's own summary — that tenant machinery survives as *"vocabulary for author-communities and read
 lenses, not as write fences"* — remains true and is now completed rather than corrected. The read lenses
-are the property posture. The write fence, where one is wanted, is the wall, and it is a store boundary
+are the SHARED posture. The write fence, where one is wanted, is the wall, and it is a store boundary
 rather than a check inside one store: **the isolation was never going to come from a predicate.**
 
 **Migration: none for existing deltas.** No delta already on disk changes shape or meaning. The posture
 declaration is new vocabulary, minted with the rest of the container vocabulary (T32) and subject to the
 same shape-distinguishability discipline; a store with no posture declaration reads as the default, which
-by §28.4 is a wall — and a single-tenant store has nothing to isolate, so the default is inert there. No
+by §28.4 is SEPARATE — and a single-tenant store has nothing to isolate, so the default is inert there. No
 §20 step is required by this section.
 
 ### 28.8 Depth, shape, and the one thing this section depends on
@@ -261,8 +266,8 @@ store as the root container and tenants as containers within it; (2) **admission
 freely while effectiveness attenuates** (§28.1) — the correction that saved the design, arrived at when
 Myk broke an earlier intersection-only rule with the case of a tenant federating a remote source, showing
 that narrowing-only would manufacture exactly the blanket-trust pressure it meant to prevent; (3) **the
-trust knob determines the boundary knob** (§28.3), so wall-vs-property is derived rather than chosen; (4)
-**per-tenant configurable posture with WALLS AS THE DEFAULT** (§28.4), on the ratchet argument — and with
+trust knob determines the boundary knob** (§28.3), so separate-vs-shared is derived rather than chosen; (4)
+**per-tenant configurable posture with SEPARATE AS THE DEFAULT** (§28.4), on the ratchet argument — and with
 it, the resolution of the CLAUDE.md/§7 drift in favor of the stronger promise holding by default.
 
 RECOMMENDATIONS → **DECIDED (Myk, 2026-07-24, in chat), all six**: the declaration lives as a knob-claim
@@ -287,7 +292,7 @@ derive-and-`inView` for provenance. Loam takes both, keyed on the question being
 substrate side also flagged that `expand.reading` lives in the gather body (SPEC-2 §4.5), so sibling
 lenses over one HyperSchema necessarily share a child's reading — which would make "tenant A and tenant B
 read embedded posts differently" inexpressible by lens choice alone. A first draft of this paragraph
-claimed walls-by-default defused it, reasoning that a wall tenant has its own store and therefore its own
+claimed separate-by-default defused it, reasoning that a separate tenant has its own store and therefore its own
 bodies. **That middle step is wrong, and the correction matters more than the conclusion: the §4.5
 constraint is PER-BODY, not per-store.** A HyperSchema body is content-addressed data and publishable as
 deltas (SPEC-3 §5) — portable by design — so two tenants in two *different* stores that both adopt the

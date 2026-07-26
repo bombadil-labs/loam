@@ -274,7 +274,7 @@ describe("T78 — the door discipline holds while the mount set moves", () => {
 const declare = async (name: string, ts: number): Promise<void> => {
   await garden.append([
     signClaims(
-      containerClaims({ container: name, trust: "curated", posture: "wall" }, OP, ts),
+      containerClaims({ container: name, trust: "curated", posture: "separate" }, OP, ts),
       OP_SEED,
     ),
   ]);
@@ -332,7 +332,7 @@ describe("T78 — a container's own gateway, mounted", () => {
     handle.addMount("annex", orchard);
     await orchard.append([
       signClaims(
-        containerClaims({ container: "wing", trust: "curated", posture: "wall" }, OP, 30_220),
+        containerClaims({ container: "wing", trust: "curated", posture: "separate" }, OP, 30_220),
         OP_SEED,
       ),
     ]);

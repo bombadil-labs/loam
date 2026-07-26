@@ -706,10 +706,10 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         // surface of a mount whose operator opened one (SPEC §12). Every other combination —
         // absent mount, nothing public, a write-shaped verb — gets the SAME refusal, so an
         // anonymous prober learns nothing about which mounts exist (no 404-vs-401 oracle).
-        // On a CONTAINER mount the door's openness is the HOST's live word, not the wall's seeded
-        // copy of it: a wall holds its own snapshot of `loam:public` and moves only on reseed
-        // (§24.2), so asking the pool alone would leave a struck declaration open here forever.
-        // Both must be open — the host decides WHETHER, the wall still decides WHAT.
+        // On a CONTAINER mount the door's openness is the HOST's live word, not the container's
+        // seeded copy of it: a separate store holds its own snapshot of `loam:public` and moves only
+        // on reseed (§24.2), so asking the pool alone would leave a struck declaration open here
+        // forever. Both must be open — the host decides WHETHER, the container still decides WHAT.
         if (
           req.headers.authorization !== undefined ||
           resolved === undefined ||

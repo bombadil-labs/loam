@@ -56,7 +56,7 @@ describe("T32 criterion 3 — a knob change is a delta, not a restart", () => {
     await gw.append([h, m]);
     await gw.append([
       declare(
-        { container: "container:live", trust: "curated", posture: "property", membership: HEIGHTS },
+        { container: "container:live", trust: "curated", posture: "shared", membership: HEIGHTS },
         7000,
       ),
     ]);
@@ -69,7 +69,7 @@ describe("T32 criterion 3 — a knob change is a delta, not a restart", () => {
         {
           container: "container:live",
           trust: "curated",
-          posture: "property",
+          posture: "shared",
           membership: MESSAGES,
         },
         7100,
@@ -83,7 +83,7 @@ describe("T32 criterion 3 — a knob change is a delta, not a restart", () => {
     const reopened = await Gateway.open(backend, { seed: OP_SEED });
     const table = reopened.containers();
     expect(table.containers.get("container:live")?.trust).toBe("curated");
-    expect(table.containers.get("container:live")?.posture).toBe("property");
+    expect(table.containers.get("container:live")?.posture).toBe("shared");
     expect(reopened.containerScope({ containers: ["container:live"] }).map((d) => d.id)).toContain(
       m.id,
     );
@@ -97,7 +97,7 @@ describe("T32 criterion 3 — a knob change is a delta, not a restart", () => {
         {
           container: "container:fixed",
           trust: "curated",
-          posture: "property",
+          posture: "shared",
           membership: HEIGHTS,
         },
         7200,
@@ -109,7 +109,7 @@ describe("T32 criterion 3 — a knob change is a delta, not a restart", () => {
           {
             container: "container:fixed",
             trust: "untrusted",
-            posture: "wall",
+            posture: "separate",
             membership: HEIGHTS,
           },
           7300,
@@ -122,7 +122,7 @@ describe("T32 criterion 3 — a knob change is a delta, not a restart", () => {
   it("a re-declaration changing posture refuses at the door naming §28.4", async () => {
     const gw = await boot();
     await gw.append([
-      declare({ container: "container:arena", trust: "curated", posture: "wall" }, 7400),
+      declare({ container: "container:arena", trust: "curated", posture: "separate" }, 7400),
     ]);
     await expect(
       gw.append([
@@ -130,7 +130,7 @@ describe("T32 criterion 3 — a knob change is a delta, not a restart", () => {
           {
             container: "container:arena",
             trust: "curated",
-            posture: "property",
+            posture: "shared",
             membership: HEIGHTS,
           },
           7500,
@@ -143,21 +143,26 @@ describe("T32 criterion 3 — a knob change is a delta, not a restart", () => {
   it("a parent re-declaration crossing trust refuses — the same transition wearing a tree edit", async () => {
     const gw = await boot();
     await gw.append([
-      declare({ container: "container:p1", trust: "curated", posture: "wall" }, 7600),
+      declare({ container: "container:p1", trust: "curated", posture: "separate" }, 7600),
     ]);
     await gw.append([
-      declare({ container: "container:p2", trust: "untrusted", posture: "wall" }, 7700),
+      declare({ container: "container:p2", trust: "untrusted", posture: "separate" }, 7700),
     ]);
     await gw.append([
       declare(
-        { container: "container:c", trust: "curated", posture: "wall", parent: "container:p1" },
+        { container: "container:c", trust: "curated", posture: "separate", parent: "container:p1" },
         7800,
       ),
     ]);
     await expect(
       gw.append([
         declare(
-          { container: "container:c", trust: "curated", posture: "wall", parent: "container:p2" },
+          {
+            container: "container:c",
+            trust: "curated",
+            posture: "separate",
+            parent: "container:p2",
+          },
           7900,
         ),
       ]),

@@ -53,7 +53,7 @@ describe("T32 criteria 4 & 6 — property is flippable exclusion at zero churn",
     await gw.append([
       signClaims(
         containerClaims(
-          { container: "container:h", trust: "curated", posture: "property", membership: HEIGHTS },
+          { container: "container:h", trust: "curated", posture: "shared", membership: HEIGHTS },
           OP,
           8000,
         ),
@@ -61,7 +61,7 @@ describe("T32 criteria 4 & 6 — property is flippable exclusion at zero churn",
       ),
       signClaims(
         containerClaims(
-          { container: "container:m", trust: "curated", posture: "property", membership: MESSAGES },
+          { container: "container:m", trust: "curated", posture: "shared", membership: MESSAGES },
           OP,
           8001,
         ),
@@ -123,7 +123,7 @@ describe("T32 criteria 4 & 6 — property is flippable exclusion at zero churn",
     await gw.append([
       signClaims(
         containerClaims(
-          { container: "container:h", trust: "curated", posture: "property", membership: HEIGHTS },
+          { container: "container:h", trust: "curated", posture: "shared", membership: HEIGHTS },
           OP,
           8300,
         ),
@@ -134,7 +134,7 @@ describe("T32 criteria 4 & 6 — property is flippable exclusion at zero churn",
     const groundBefore = (await backend.deltasSince(new Set())).map((d) => d.id).sort();
 
     const c = await gw.openContainer({ name: "container:h" });
-    expect(c.posture).toBe("property");
+    expect(c.posture).toBe("shared");
     expect(c.trust).toBe("curated");
     expect(c.gateway).toBeUndefined(); // no second backend EXISTS for it
     expect(c.members().map((d) => d.id)).toContain(h1.id);

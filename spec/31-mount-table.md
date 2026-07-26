@@ -42,11 +42,11 @@ Tier 3 holds no table of its own. It reads the host gateway's own attachment ind
 leaves no zombie gateway behind still serving from a world its own operator has proven gone.
 
 Liveness asks BOTH the questions §24.8's erasure guard asks: the container is named in the attachment index
-**and** its gateway is in the host's `quarantinePools`. Those are two records of one fact, and a wall present
-in one but not the other is exactly a wall outside §11's erasure fan-out — so it serves nothing. One question
-would have been enough to route; two are what keep the served set inside the set erasure can reach. A
-PROPERTY container (§27.1) has no gateway of its own and never appears here at all: it is a query over shared
-ground, and the ground's own mount already serves it.
+**and** its gateway is in the host's `quarantinePools`. Those are two records of one fact, and a container
+present in one but not the other is exactly a store outside §11's erasure fan-out — so it serves nothing. One
+question would have been enough to route; two are what keep the served set inside the set erasure can reach. A
+SHARED container (§27.1) has no gateway of its own and never appears here at all: it is a query over ground
+the host already holds, and the host's own mount already serves it.
 
 ### 31.3 A mount can vanish mid-request, and a captured gateway is not a licence
 
@@ -89,9 +89,10 @@ exists, a mount that was removed, and a mount that never existed must be byte-id
 moving mount set is precisely how a 404-vs-401 oracle gets reintroduced — existence becomes observable
 through timing or wording — so the refusal is the uniform one on every verb, live or gone or never-there.
 
-**The anonymous door on a container mount is the HOST's live decision, never the wall's copy of it.** Two
-questions have two owners: the host answers WHETHER a tokenless caller may read at all, the wall answers
-WHAT it reads. The operator's `loam:public` declaration lives at the host and is revocable there; a wall holds
+**The anonymous door on a container mount is the HOST's live decision, never the container's copy of it.** Two
+questions have two owners: the host answers WHETHER a tokenless caller may read at all, the container answers
+WHAT it reads. The operator's `loam:public` declaration lives at the host and is revocable there; a separate
+container holds
 only a seeded snapshot of it, which moves on `reseed()` (§24.2). Gating on the pool's own answer would make a
 §12 revocation **unrevocable at every container mount** — strike the declaration, the host's door closes, and
 every module's door stays open forever. Both must be open for a tokenless read to be served.
@@ -100,9 +101,9 @@ every module's door stays open forever. Both must be open for a tokenless read t
 container that needs its own identities is a later design.
 
 **The write doors are open on a container mount, and that is a consequence rather than an oversight.** An
-operator or actor token may `POST /<container>/append` or `/register` straight into the walled arena, bypassing
+operator or actor token may `POST /<container>/append` or `/register` straight into the container's own store, bypassing
 the container's `admit` / `membership` — because those govern the SEEDING EDGE, not the door. Nothing there
-exceeds what the same token can already do to the host, since a wall shares the host's operator (§24.1), so
+exceeds what the same token can already do to the host, since a container shares the host's operator (§24.1), so
 this widens no authority under one operator. It is written down because §28's wall governs writes, law-reach,
 and trust-crossing — never visibility — and a reader who took "the wall governs writes" literally would expect
 the door to be shut.
@@ -123,7 +124,7 @@ to `0x20`, and dropping dynamic hosts from the host list.
 
 An independent door-discipline review found **two confirmed defects in the first version, both
 authorization-shaped**, and both rails were watched red before the fix. **Revocation was defeated (§12):** the
-anonymous gate asked the CONTAINER's `hasPublicSurface()`, and a wall holds its own seeded copy of
+anonymous gate asked the CONTAINER's `hasPublicSurface()`, and a separate container holds its own seeded copy of
 `loam:public` that moves only on `reseed()` — so striking the declaration closed the host's door and left
 every container mount's open permanently (probe: `/commons` 200, strike, `/garden` 401, `/commons` still 200).
 The gate is now the host's live word, carried on the resolved mount. **And a mount could vanish mid-request:**
@@ -135,9 +136,9 @@ than stated (§31.5's last paragraph is the sentence the header owed a reader).
 
 **Residual, and it should land before dynamic mounts are advertised: ticket T88.** T78 closed the severe half
 of the anonymous-door problem — the host now decides WHETHER — but the host still only decides whether, and
-the wall still decides what. So an operator who NARROWS their public set (strike the declaration, publish a
-smaller one) leaves the attached wall serving its own snapshot of the wider set until a `reseed()`. The door's
+the container still decides what. So an operator who NARROWS their public set (strike the declaration, publish
+a smaller one) leaves the attached container serving its own snapshot of the wider set until a `reseed()`. The door's
 openness is live; its content is a point-in-time copy by construction (§24.2). Closing that needs a
-Gateway-side seam — a cached public-lens-set reader to intersect the wall's answer against — not a transport
+Gateway-side seam — a cached public-lens-set reader to intersect the container's answer against — not a transport
 one, which is why it is its own ticket and not a fold here. No delta changes shape; this is transport only →
 **no §20 migration**. New serving surface on an anonymous door → Myk's merge (P6).

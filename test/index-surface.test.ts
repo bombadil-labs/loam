@@ -98,7 +98,7 @@ const lawTrailDoor: (gw: Gateway) => LawAdoption[] = (gw) => gw.lawAdoptions();
 const SPEC: ContainerSpec = {
   container: "container:archive",
   trust: "curated" satisfies ContainerTrust,
-  posture: "property" satisfies ContainerPosture,
+  posture: "shared" satisfies ContainerPosture,
   // A property container IS its membership — the door refuses a scope Term nobody wrote.
   membership: { op: "select", pred: { hasPointer: { context: { exact: "height" } } }, in: "input" },
 };
@@ -210,7 +210,7 @@ describe("T82 — the container and law surfaces are reachable from the package 
     const opts: ContainerOptions = { name: SPEC.container };
     const container: Container = await openDoor(gw, opts);
     expect(container.entity).toBe(SPEC.container);
-    expect(container.posture).toBe("property");
+    expect(container.posture).toBe("shared");
     expect(container.gateway).toBeUndefined(); // a property container is a query, not an arena
     expect(container.members().length).toBeGreaterThan(0);
 
@@ -220,7 +220,7 @@ describe("T82 — the container and law surfaces are reachable from the package 
     const resolved: ResolvedContainer | undefined = table.containers.get(SPEC.container);
     expect(resolved?.trust).toBe("curated");
     expect(readContainerTable(gw.reactor, OP).containers.get(SPEC.container)?.posture).toBe(
-      "property",
+      "shared",
     );
 
     // A frozen module version over what the container holds, named from the barrel — and the same
@@ -268,7 +268,7 @@ describe("T82 — the container and law surfaces are reachable from the package 
       target: { kind: "primitive", value: '{"op":"input"}' },
     });
     const wallFlip = signClaims(
-      containerClaims({ ...SPEC, trust: "untrusted", posture: "wall" }, OP, 8000),
+      containerClaims({ ...SPEC, trust: "untrusted", posture: "separate" }, OP, 8000),
       OP_SEED,
     );
     expect(containerDefect(wallFlip, gw.reactor, OP)).toMatch(/§28\.4/);

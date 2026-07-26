@@ -59,7 +59,7 @@ describe("T32 criterion 10 — admission and effectiveness are independent axes"
   it("a subject trust declaration resolves at the container without disturbing the root's", async () => {
     const gw = await boot();
     await gw.append([
-      declare({ container: "container:w", trust: "curated", posture: "wall" }, 25_000),
+      declare({ container: "container:w", trust: "curated", posture: "separate" }, 25_000),
     ]);
     await gw.append([signClaims(trustAt("container:w", "roster", [GARDENER], 25_100), OP_SEED)]);
 
@@ -75,7 +75,7 @@ describe("T32 criterion 10 — admission and effectiveness are independent axes"
   it("tightening the roster changes ADMISSION only — the knob and the copy rule are unmoved", async () => {
     const gw = await boot();
     await gw.append([
-      declare({ container: "container:w", trust: "curated", posture: "wall" }, 26_000),
+      declare({ container: "container:w", trust: "curated", posture: "separate" }, 26_000),
     ]);
     await gw.append([signClaims(trustAt("container:w", "roster", [GARDENER], 26_100), OP_SEED)]);
     const before = gw.containers().containers.get("container:w");
@@ -87,7 +87,7 @@ describe("T32 criterion 10 — admission and effectiveness are independent axes"
     expect(after?.trust).toBe(before?.trust);
     expect(after?.posture).toBe(before?.posture);
     expect(after?.trust).toBe("curated");
-    expect(after?.posture).toBe("wall");
+    expect(after?.posture).toBe("separate");
     await gw.close();
   });
 
@@ -104,7 +104,7 @@ describe("T32 criterion 10 — admission and effectiveness are independent axes"
         {
           container: "container:shut",
           trust: "curated",
-          posture: "wall",
+          posture: "separate",
           membership: {
             op: "select",
             pred: { hasPointer: { context: { exact: "height" } } },
@@ -117,7 +117,7 @@ describe("T32 criterion 10 — admission and effectiveness are independent axes"
     await gw.append([signClaims(trustAt("container:shut", "closed", [], 28_100), OP_SEED)]);
     const wallStore = new MemoryBackend();
     const c = await gw.openContainer({ name: "container:shut", backend: wallStore });
-    expect(c.posture).toBe("wall");
+    expect(c.posture).toBe("separate");
     expect(await wallStore.holds(h.id)).toBe(true); // copies paid — the roster never read
     await c.drop();
     await gw.close();
@@ -126,8 +126,8 @@ describe("T32 criterion 10 — admission and effectiveness are independent axes"
   it("different knobs, same roster: admission does not read the knob at all", async () => {
     const gw = await boot();
     await gw.append([
-      declare({ container: "container:c1", trust: "curated", posture: "wall" }, 27_000),
-      declare({ container: "container:c2", trust: "untrusted", posture: "wall" }, 27_001),
+      declare({ container: "container:c1", trust: "curated", posture: "separate" }, 27_000),
+      declare({ container: "container:c2", trust: "untrusted", posture: "separate" }, 27_001),
     ]);
     await gw.append([
       signClaims(trustAt("container:c1", "roster", [GARDENER], 27_100), OP_SEED),

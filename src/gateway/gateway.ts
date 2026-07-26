@@ -609,8 +609,8 @@ export class Gateway {
   // --- erasure (SPEC §11) ------------------------------------------------------------------------
 
   // Erase one delta (SPEC §11): the body lives beside the tombstone vocabulary in erase.ts.
-  // `kept` lists the declared walls a surviving detach record deliberately holds outside this
-  // sweep (SPEC §27.7's completeness guard) — on the record, never silent.
+  // `kept` lists the declared container stores a surviving detach record deliberately holds outside
+  // this sweep (SPEC §27.7's completeness guard) — on the record, never silent.
   async erase(
     id: string,
     opts: { reason?: string } = {},
@@ -626,7 +626,7 @@ export class Gateway {
     return healthImpl(this);
   }
 
-  // The wall gateways attached to this store (SPEC §24.8/§27): the operator's own one-way
+  // The separate-store gateways attached to this store (SPEC §24.8/§27): the operator's own one-way
   // replicas that an erasure here must fan out to. This Set is the CANONICAL runtime registry of
   // erasure reach — every attach inserts here, every drop/detach removes here, and the fan-out,
   // the health probe, and the scope reads all walk it. It stays a real mutable Set (rails reach
@@ -634,14 +634,14 @@ export class Gateway {
   /** @internal — T19 seam (erase.ts, container.ts) */
   readonly quarantinePools = new Set<Gateway>();
 
-  // The NAMED attachments (SPEC §27, T32): declared container entity → its attached wall
-  // gateway. An entry here is meaningful only while its gateway is also in quarantinePools —
+  // The NAMED attachments (SPEC §27, T32): declared container entity → the gateway over its own
+  // store. An entry here is meaningful only while its gateway is also in quarantinePools —
   // readers ask both, so the two can never silently diverge on erasure reach.
   /** @internal — T19 seam (container.ts) */
   readonly attachedContainers = new Map<string, Gateway>();
 
   // Open a QUARANTINE POOL over this store (SPEC §24): the body lives in quarantine-pool.ts,
-  // which re-expresses it as the untrusted-wall PRESET of the container primitive below.
+  // which re-expresses it as the untrusted-and-separate PRESET of the container primitive below.
   async openQuarantine(opts: QuarantineOptions = {}): Promise<QuarantinePool> {
     return openQuarantineImpl(this, opts);
   }

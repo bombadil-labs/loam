@@ -38,13 +38,13 @@ describe("T32 criteria 8 & 20 — the door refuses a closing edge", () => {
     // A's parent names a container that does not exist yet — no cycle, lawfully dangling.
     await gw.append([
       declare(
-        { container: "container:a", trust: "curated", posture: "wall", parent: "container:c" },
+        { container: "container:a", trust: "curated", posture: "separate", parent: "container:c" },
         16_000,
       ),
     ]);
     await gw.append([
       declare(
-        { container: "container:b", trust: "curated", posture: "wall", parent: "container:a" },
+        { container: "container:b", trust: "curated", posture: "separate", parent: "container:a" },
         16_001,
       ),
     ]);
@@ -52,7 +52,12 @@ describe("T32 criteria 8 & 20 — the door refuses a closing edge", () => {
     await expect(
       gw.append([
         declare(
-          { container: "container:c", trust: "curated", posture: "wall", parent: "container:b" },
+          {
+            container: "container:c",
+            trust: "curated",
+            posture: "separate",
+            parent: "container:b",
+          },
           16_002,
         ),
       ]),
@@ -67,17 +72,17 @@ describe("T32 criteria 8 & 20 — the door refuses a closing edge", () => {
   it("a re-declared parent cannot close a cycle — the latest-wins path (criterion 20)", async () => {
     const gw = await boot();
     await gw.append([
-      declare({ container: "container:a", trust: "curated", posture: "wall" }, 17_000),
+      declare({ container: "container:a", trust: "curated", posture: "separate" }, 17_000),
     ]);
     await gw.append([
       declare(
-        { container: "container:b", trust: "curated", posture: "wall", parent: "container:a" },
+        { container: "container:b", trust: "curated", posture: "separate", parent: "container:a" },
         17_001,
       ),
     ]);
     await gw.append([
       declare(
-        { container: "container:c", trust: "curated", posture: "wall", parent: "container:b" },
+        { container: "container:c", trust: "curated", posture: "separate", parent: "container:b" },
         17_002,
       ),
     ]);
@@ -85,7 +90,12 @@ describe("T32 criteria 8 & 20 — the door refuses a closing edge", () => {
     await expect(
       gw.append([
         declare(
-          { container: "container:a", trust: "curated", posture: "wall", parent: "container:c" },
+          {
+            container: "container:a",
+            trust: "curated",
+            posture: "separate",
+            parent: "container:c",
+          },
           17_003,
         ),
       ]),
@@ -102,19 +112,19 @@ describe("T32 criterion 16 — federated cycles, PLURAL, cannot hang a read", ()
     // No door sees either closing — they land by federation, as data.
     const edges = [
       declare(
-        { container: "container:x", trust: "curated", posture: "wall", parent: "container:y" },
+        { container: "container:x", trust: "curated", posture: "separate", parent: "container:y" },
         18_000,
       ),
       declare(
-        { container: "container:y", trust: "curated", posture: "wall", parent: "container:x" },
+        { container: "container:y", trust: "curated", posture: "separate", parent: "container:x" },
         18_001,
       ),
       declare(
-        { container: "container:u", trust: "curated", posture: "wall", parent: "container:v" },
+        { container: "container:u", trust: "curated", posture: "separate", parent: "container:v" },
         18_002,
       ),
       declare(
-        { container: "container:v", trust: "curated", posture: "wall", parent: "container:u" },
+        { container: "container:v", trust: "curated", posture: "separate", parent: "container:u" },
         18_003,
       ),
     ];
@@ -147,12 +157,12 @@ describe("T32 criterion 21 — a federated trust flip is not-binding", () => {
     const h = observed(FERN, "height", 30, 1000, OP_SEED);
     await gw.append([h]);
     await gw.append([
-      declare({ container: "container:fixed", trust: "curated", posture: "wall" }, 19_000),
+      declare({ container: "container:fixed", trust: "curated", posture: "separate" }, 19_000),
     ]);
     // The flip arrives with no door involved — a replayed ground, the operator's own other
     // device — as a LATER declaration differing in the immutable knob.
     const flip = declare(
-      { container: "container:fixed", trust: "untrusted", posture: "wall" },
+      { container: "container:fixed", trust: "untrusted", posture: "separate" },
       19_100,
     );
     await gw.federate([flip], { admit: () => true });

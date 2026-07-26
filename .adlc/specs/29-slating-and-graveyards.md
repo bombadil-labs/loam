@@ -14,8 +14,8 @@ Built on T32, which landed the container primitive (`spec/27` §27.1/§27.7, `sr
 The ticket's premise is that a slate IS a container and T32 gives two-phase erasure almost for free. It
 is nearly right, and the two places it is not are the whole engineering content of this section.
 
-**What T32 already gives, at no cost.** A property container is a query over shared ground with zero
-copies (`posture: "property"`); its membership is a `Term → dset` carried inline or by content address;
+**What T32 already gives, at no cost.** A shared container is a query over shared ground with zero
+copies (`posture: "shared"`); its membership is a `Term → dset` carried inline or by content address;
 `containerScope({containers:[c]})` and `Container.members()` review it with the forward negation closure
 applied (H1) and FAIL CLOSED on any unresolvable dependency (H9); `Gateway.freeze(term)` mints an
 order-free content address over a member set (`ModuleVersion`); the container table is re-resolved live
@@ -25,22 +25,23 @@ design would otherwise have had to invent.
 
 **Correction 1 — the slogan needs one word of precision: `drop()` is the LAST ACT of the cut, never the
 cut.** The ticket body already says this ("the container's destruction is the commit point"); the title
-compresses it in a way an implementer could get badly wrong. A property container holds no bytes of its
+compresses it in a way an implementer could get badly wrong. A shared container holds no bytes of its
 own, so T32's `drop()` on one is *striking its declaration* — deliberately non-destructive, because
 purging shared ground when a scope is dissolved would be catastrophic. So the cut is its own verb
 (`cut(slate)`), and dropping the container is its final step.
 
 **Correction 2 — and this one must be refused by construction: a slate is a PROPERTY container, and a
-wall-posture slate is refused at the door.** A wall pays real byte copies. A wall-posture slate would
-therefore hold a *second copy* of every condemned delta, and T32's `drop()` on a wall does purge +
+separate-posture slate is refused at the door.** A separate container pays real byte copies. A
+separate-posture slate would
+therefore hold a *second copy* of every condemned delta, and T32's `drop()` on a separate container does purge +
 byte-verify — so dropping it would report a byte-verified clean discard while every canonical original
 still sat in the primary. That is hazard **H7** wearing a container: an operation reporting a success it
-did not achieve, on the one surface where the report is a legal claim. A wall-posture slate is also
-self-blocking (§27.7's guard refuses every `erase` while a declared wall is unattached, and the slate
-would be that wall) and it is exactly the "slate becomes the hiding place" recursion §24.8 warns about —
+did not achieve, on the one surface where the report is a legal claim. A separate-posture slate is also
+self-blocking (§27.7's guard refuses every `erase` while a declared separate container is unattached, and the
+slate would be that container) and it is exactly the "slate becomes the hiding place" recursion §24.8 warns about —
 a byte inside the operator's own walls that the fan-out does not reach. All three problems vanish at
-`posture: "property"`, where the slate holds no bytes, cannot hide any, and is invisible to the
-wall guard by construction. So the posture is not a preference; it is load-bearing, and the door says so.
+`posture: "shared"`, where the slate holds no bytes, cannot hide any, and is invisible to the
+store guard by construction. So the posture is not a preference; it is load-bearing, and the door says so.
 
 **Correction 3 — "a closure is a set subtraction" is true of the SET and false of the machinery, and every
 door pays a different price for it.** The tidy version of this design says each closure narrows an operand
@@ -61,12 +62,12 @@ cannot express — which sites must be left UNNARROWED on purpose.
 
 ## 29.1 A slate is two deltas, and neither is a new primitive
 
-**A slate is a property container declaration PLUS one record that says it is a slate.** The container
+**A slate is a shared container declaration PLUS one record that says it is a slate.** The container
 carries the membership; the record carries everything erasure needs and containment does not — who
 asked, when, the deadline, and which doors honour it.
 
 - **`loam.container`** (unchanged, T32's mint): `container` → the slate entity, `trust: "curated"`,
-  `posture: "property"`, `membershipAt` → the content address of a published Term, `version` → the
+  `posture: "shared"`, `membershipAt` → the content address of a published Term, `version` → the
   ModuleVersion address over the frozen members. No new roles, no widened knob vector.
 - **`loam.erasure.slate`** (NEW — one context): `slate` → the container entity (`loam.container`), plus
   `requested-by`, `requested-at`, `deadline`, repeated `closes`, and an optional `reason`.
@@ -85,7 +86,7 @@ nothing reads. When a second consumer arrives, the generalization is a lift with
 already proven (T32 lifted the quarantine the same way). Recorded as the named next step, not built.
 
 **The trust knob is `curated`, and the door enforces it with the posture.** The condemned deltas are the
-operator's own ground; `untrusted` is refused with `property` anyway (§28.3). A slate record pointing at
+operator's own ground; `untrusted` is refused with `shared` anyway (§28.3). A slate record pointing at
 a container that is not curated/property is refused, naming both.
 
 ## 29.2 Frozen by ENFORCEMENT, not by promise
@@ -204,11 +205,11 @@ loosening cannot un-disclose. A revocable act must not have an irrevocable effec
 UNDER-represents the post-cut world for exactly the resurfacing set, the slate report says so beside
 that set, and the peer converges at the cut rather than during the window.
 
-**One subtraction, in `offeredDeltasImpl`, and the second caller inherits it.** `openWall`'s reseed
-seeds a container from `gw.offeredDeltas()`, so a wall attached DURING the window would otherwise be
+**One subtraction, in `offeredDeltasImpl`, and the second caller inherits it.** `openSeparate`'s reseed
+seeds a container from `gw.offeredDeltas()`, so a separate container attached DURING the window would otherwise be
 born holding a condemned delta — and, under a naive subtraction, holding a target without its strike
 inside the operator's own replica. Putting the subtraction in `offeredDeltasImpl` closes both doors from
-one site and is the right place on the merits: a wall that never receives a condemned delta is one
+one site and is the right place on the merits: a container that never receives a condemned delta is one
 fewer copy for the cut to sweep, which is §24.8's recursion warning answered rather than restated. The
 subtraction is deliberately NOT in `selectImpl` — see the read-closure discipline below for why that
 matters.
@@ -350,8 +351,8 @@ transactional across tiers, and a mirror going down mid-cut is a physical state,
 1. **Pre-flight, before any tombstone — and the refusals are ENUMERATED, because an unenumerated one is
    what a cut discovers halfway through.** Refuse if the slate's membership does not resolve (a dangling
    `membershipAt` — H9, fail closed: if we cannot read which ids are condemned we cannot cut); if the
-   slate record does not resolve lawfully; if the §27.7 wall guard reports a fault (an unreachable wall
-   could hold a member outside the sweep); if a **`kept` wall may hold a member** (below); or if the
+   slate record does not resolve lawfully; if the §27.7 store guard reports a fault (an unreachable store
+   could hold a member outside the sweep); if a **`kept` container may hold a member** (below); or if the
    **membership no longer re-freezes to `version`** and the disagreement is not fully accounted for
    (below). Nothing half-done, no tombstone standing over an unreported gap — the discipline `eraseImpl`
    already keeps.
@@ -374,37 +375,38 @@ transactional across tiers, and a mirror going down mid-cut is a physical state,
    A member missing with NO tombstone is a fault: refuse and name the id. That is the fail-closed leg, and
    it should be unreachable today — which is exactly why it is written down.
 
-   **A `kept` wall that may hold a member is a refusal, not a footnote — this is Correction 2's hole
-   closed.** `unreachableWallReport` returns a wall as a FAULT only while it is neither attached nor
-   covered; a wall with a surviving detach record lands in `kept` with `faults` empty. And the documented
+   **A `kept` container that may hold a member is a refusal, not a footnote — this is Correction 2's hole
+   closed.** `unreachableStoreReport` returns a container as a FAULT only while it is neither attached nor
+   covered; one with a surviving detach record lands in `kept` with `faults` empty. And the documented
    remedy for a blocked ordinary erase is `eraseImpl`'s own refusal text — "Attach the container(s), or
    detach() them onto the record, then re-run" — so **the sanctioned unblocking move converts a fault into
    a footnote**, and the cut then runs, reaches the attached pools only, and produces a per-member table
    of `holds: false` verdicts beside a `kept` list while two members sit legible on a shelf. That is H7 in
-   the one artifact whose entire purpose is not being H7, and Correction 2 refuses wall-posture slates for
-   precisely this reason before leaving the identical hole open for every other wall.
+   the one artifact whose entire purpose is not being H7, and Correction 2 refuses separate-posture slates for
+   precisely this reason before leaving the identical hole open for every other container.
 
-   The intersection is COMPUTABLE without attaching anything: the frozen id set is in hand, and the wall's
+   The intersection is COMPUTABLE without attaching anything: the frozen id set is in hand, and the container's
    at-rest membership Term is in the container table, so `select` over the primary's ground gives what the
-   wall was seeded to admit. So: **a `kept` wall whose admit-set intersects the condemned set refuses the
-   cut, naming the wall and the intersecting ids.** A `kept` wall with NO at-rest membership Term refuses
+   container was seeded to admit. So: **a `kept` container whose admit-set intersects the condemned set
+   refuses the cut, naming the container and the intersecting ids.** A `kept` container with NO at-rest
+   membership Term refuses
    too — an uncomputable intersection cannot be excluded, and H9's direction is to fail closed rather than
-   to assume empty. Both refusals are repairable, which is the test N3 taught: attach the wall
+   to assume empty. Both refusals are repairable, which is the test N3 taught: attach the container
    (`openContainer`) and re-run, or narrow the slate to exclude those ids (un-slating is free, §29.8).
 
-   **And when the wall genuinely cannot be reached, incompleteness becomes a SIGNED DECLARATION rather
-   than a discovered footnote.** A wall whose store is gone would otherwise jam a legitimate cut forever,
-   so the slate record may carry repeated **`accepts-incomplete`** pointers naming the kept walls the
+   **And when the store genuinely cannot be reached, incompleteness becomes a SIGNED DECLARATION rather
+   than a discovered footnote.** A container whose store is gone would otherwise jam a legitimate cut forever,
+   so the slate record may carry repeated **`accepts-incomplete`** pointers naming the kept containers the
    operator knowingly cuts around. With one in force the cut proceeds, and everything downstream tells the
-   truth: those members' per-tier verdicts read **UNPROVEN**, never `holds: false`; the wall is in `kept`;
+   truth: those members' per-tier verdicts read **UNPROVEN**, never `holds: false`; the container is in `kept`;
    and the receipt's non-claim section names it. The operator can always cut. The operator cannot cut
-   SILENTLY over a wall that may hold members — the difference between an incomplete erasure and a false
+   SILENTLY over a store that may hold members — the difference between an incomplete erasure and a false
    claim of a complete one is a signature, and now it is one.
 2. **The affected set and the resurfacing set are computed HERE, immediately before any purge.** After
    the purge the members are gone and every intersection reads empty — the ticket's frozen-membership
    lesson applying a second time, one layer up.
 3. **Per member, the ordinary erase.** The cut mints no new fan-out: it calls §11's, so tombstone +
-   purge + attached-pool/wall fan-out + the byte verdict (`holds`, never a purge count) all come from
+   purge + attached-container fan-out + the byte verdict (`holds`, never a purge count) all come from
    `eraseImpl` unchanged. Each tombstone carries one new optional `slate` pointer (§29.6).
 4. **Any fault: throw, and the slate STANDS.** No graveyard lands, the declaration survives, and every
    closed door stays closed — so a partially-cut slate is still slated, still reviewable, and RESUMABLE.
@@ -419,12 +421,12 @@ transactional across tiers, and a mirror going down mid-cut is a physical state,
 `cut()` returns a **CutReport**: per member the id, its tombstone id, `spoken-by`, the byte verdict per
 tier and pool, and §11's **citations manifest** for that member (`eraseImpl` already computes and returns
 it, so this is collection rather than machinery — and it is what tells a later reader which surviving
-deltas dangle at the hole); plus `prior-tombstone`, the tiers deliberately NOT reached (a `kept` wall, and
+deltas dangle at the hole); plus `prior-tombstone`, the tiers deliberately NOT reached (a `kept` container, and
 the `accepts-incomplete` declaration that permitted it), the affected set, the resurfacing set, the
 `duplicates` set, the window, and the graveyard's id.
 
 **The per-tier byte verdict is a TRI-STATE, and `unproven` is not a synonym for `false`.** A tier that
-refused, a tier that threw, and a `kept` wall are all "we did not prove these bytes are gone" — which is
+refused, a tier that threw, and a `kept` container are all "we did not prove these bytes are gone" — which is
 the opposite of "we proved they are gone," and a boolean cannot hold the difference. `health()` already
 carries `unproven` for exactly this reason (a backend whose probe throws makes the whole set unproven
 rather than settled); the CutReport uses the same word for the same fact. Collapsing the third state into
@@ -498,7 +500,7 @@ live per-tier byte verdict, `prior-tombstone`, the tiers deliberately not swept,
 explicit **non-claim** section — peers are not reached, pre-request copies are not recalled, a copy
 promoted or translated under a DIFFERENT id before the slate was never in the frozen set and still stands
 (§29.3's `duplicates`), the surviving deltas that cite each erased id (§11's citations manifest — pointers
-are not content), a `kept` wall the operator declared `accepts-incomplete` over, and the standing fact that
+are not content), a `kept` container the operator declared `accepts-incomplete` over, and the standing fact that
 a restored backup can resurface bytes and this document is re-issuable to prove present state.
 
 **Two kinds of field, and the receipt must not mix them.** A history field — the window, the frozen
@@ -564,14 +566,14 @@ DOCUMENT can wait.**
   fact per member.
 
 **Slates inside the operator's OWN replicas: the declaration crosses the edge, the enforcement does not,
-and that is a decision.** Walls and pools share the operator's seed, so a slate's declaration, its record,
+and that is a decision.** Separate containers and pools share the operator's seed, so a slate's declaration, its record,
 and its membership Term all cross the seeding edge as ordinary data and resolve inside a pool as lawful
 operator-signed deltas. Nothing inside the pool enforces them, and nothing should: a pool is the operator's
 dry-run surface, not a door served to anyone, so read closure inside it would suppress the very content the
 operator opened the pool to examine — the same reasoning that keeps the operator's review read unnarrowed
 (§29.3). What DOES cross is the byte question, and that is handled where it belongs: egress closure keeps
-condemned deltas from being seeded into a wall in the first place (§29.3), the §27.7 guard and §29.5's
-`kept`-wall refusal keep an unreachable one from being cut around silently, and §11's fan-out reaches every
+condemned deltas from being seeded into a separate store in the first place (§29.3), the §27.7 guard and §29.5's
+`kept`-container refusal keep an unreachable one from being cut around silently, and §11's fan-out reaches every
 attached pool. The rails test the primary's doors deliberately; a pool has none.
 
 ## 29.9 What we cannot do, said plainly
@@ -610,7 +612,7 @@ address); the store-level window maximum (Q1, Myk's number); lifting the closure
 `loam.container`'s knob vector (waits for a second consumer); transitive citation closure (refused on
 purpose, §29.3); the adoption record's primitive `source-delta` encoding (closed at the predicate, not at
 the bytes — re-shaping it is a §20 migration for one role and is not attempted here); read closure INSIDE a
-pool or wall (decided against, §29.8, with the reasoning rather than a gap); recovering a copy promoted or
+pool or separate container (decided against, §29.8, with the reasoning rather than a gap); recovering a copy promoted or
 translated before the slate (outside the frozen set by construction — surfaced at review, slated by its own
 id, never chased by content); cascade policy (already a §11 caller's choice); whether a slate takes a
 `parent` edge (allowed, unconstrained here); an outbound notification transport (Loam has none, §29.9); and
@@ -619,11 +621,11 @@ refusal voice, and a slate is the staged form beside it, never a replacement.
 
 ## Acceptance criteria (each names its verification)
 
-1. **A slate is a curated property container plus a record, and a wall-posture slate is REFUSED.** A
-   slate record naming a `wall` (or `untrusted`) container refuses at the door, naming both knobs; the
+1. **A slate is a curated shared container plus a record, and a separate-posture slate is REFUSED.** A
+   slate record naming a `separate` (or `untrusted`) container refuses at the door, naming both knobs; the
    valid property slate resolves. Object level, the load-bearing half: with a slate standing, an ordinary
-   `erase(unrelated)` still COMPLETES — a slate never trips §27.7's unreachable-wall guard, which a
-   wall-posture slate would. — `test/gateway/slate.test.ts`
+   `erase(unrelated)` still COMPLETES — a slate never trips §27.7's unreachable-store guard, which a
+   separate-posture slate would. — `test/gateway/slate.test.ts`
 2. **Membership is frozen by enforcement, at both levels.** Delta level: a declaration whose
    `membershipAt` Term does not freeze to its `version` is refused. Object level: append a delta that
    satisfies the ORIGINAL identifying predicate after slating, and `containerScope({containers:[slate]})`
@@ -639,7 +641,7 @@ refusal voice, and a slate is the staged form beside it, never a replacement.
    live. Both the negation and its target are absent from what the peer holds (the transitive leg too: a
    struck strike's chain is withheld whole), and every non-member is present — a rail that withheld
    everything would pass the first half and must fail this one. The same assertion runs on the
-   **wall-reseed path**: `openWall` during the window seeds from `offeredDeltas()`, so the fresh
+   **separate-reseed path**: `openSeparate` during the window seeds from `offeredDeltas()`, so the fresh
    container's store is read through a Schema and must not resolve the retracted claim either. Striking
    the slate returns members and withheld targets to the offer on the next pull. —
    `test/gateway/slate-doors.test.ts`
@@ -668,7 +670,7 @@ refusal voice, and a slate is the staged form beside it, never a replacement.
    so a rail that accepted `settling` here would encode the conflation. —
    `test/gateway/slate-doors.test.ts`
 9. **The pre-flight is all-or-refuse and leaves the ground byte-identical.** A cut over a slate with a
-   dangling `membershipAt`, and a cut while the table names an unreachable wall, each refuse before ANY
+   dangling `membershipAt`, and a cut while the table names an unreachable store, each refuse before ANY
    tombstone lands — asserted by comparing the ground delta-for-delta before and after the refusal. —
    `test/gateway/slate-cut.test.ts`
 10. **The cut is per-member, faults are collected, and the slate STANDS on any fault — then resumes.**
@@ -735,17 +737,17 @@ refusal voice, and a slate is the staged form beside it, never a replacement.
     same rail's second half: a frozen id that resolves to nothing and has NO surviving tombstone refuses
     the cut, naming that id, before any tombstone lands (ground compared delta-for-delta across the
     refusal). — `test/gateway/slate-cut.test.ts`
-20. **A detached wall that demonstrably holds a member is a REFUSAL, and cutting around it is signed.** A
-    wall container is opened, seeded so its store provably holds one member (asserted by reading the
-    wall's own store, not by trusting the seed), then `detach()`ed onto the record — so
-    `unreachableWallReport` puts it in `kept` with `faults` empty, the state the documented remedy for a
-    blocked `erase` produces. `cut()` REFUSES, naming the wall and the intersecting ids. A `kept` wall with
+20. **A detached container that demonstrably holds a member is a REFUSAL, and cutting around it is signed.** A
+    separate container is opened, seeded so its store provably holds one member (asserted by reading
+    the container's own store, not by trusting the seed), then `detach()`ed onto the record — so
+    `unreachableStoreReport` puts it in `kept` with `faults` empty, the state the documented remedy for a
+    blocked `erase` produces. `cut()` REFUSES, naming the container and the intersecting ids. A `kept` container with
     no at-rest membership Term refuses too (uncomputable intersection, fail closed). With an
-    `accepts-incomplete` pointer naming that wall on the slate record, the cut completes and every
+    `accepts-incomplete` pointer naming that container on the slate record, the cut completes and every
     downstream artifact tells the truth: that member's per-tier verdict is **`unproven`**, not `holds:
     false` (asserted as an inequality against `false`, since collapsing the tri-state is the actual bug),
-    the wall is in `kept` with the declaration that permitted it, the receipt's non-claim section names it,
-    and the member's bytes are still readable in the wall's store — so the rail proves the report is honest
+    the container is in `kept` with the declaration that permitted it, the receipt's non-claim section names it,
+    and the member's bytes are still readable in the container's store — so the rail proves the report is honest
     about a copy that really is still there. — `test/gateway/slate-cut.test.ts`
 21. **Content re-spoken under another id: the window is closed, the past is not, and the receipt says so.**
     With a slate standing over a member, `promote` of that member into canon is REFUSED — the leg that

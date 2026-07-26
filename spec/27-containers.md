@@ -40,12 +40,12 @@ vector:
   explicit import of a shipped module, or hand-authored deltas.
 - **Trust posture** — foreign law inside binds nothing until blessed (inert-by-default, §8/§12). The
   container is the safe staging area for untrusted law; "installing" a trusted module is load + a promotion
-  of its law (§27.3). This knob also decides whether "excluded/sandboxed" can be a PROPERTY or must be a
-  WALL (below). **This knob is being re-founded** (ticket T36, drafting as §28): trust turns out to be a
+  of its law (§27.3). This knob also decides whether "excluded/sandboxed" can be SHARED or must be
+  SEPARATE (below). **This knob is being re-founded** (ticket T36, drafting as §28): trust turns out to be a
   property of a CONTAINER rather than of the operator — a store is the root container, tenants are
   containers within it, and containers nest — with ADMISSION delegating freely downward while
   EFFECTIVENESS attenuates. Under that reading the "keyed on trust" spectrum below stops being a judgement
-  call and becomes a derivation: a container admitting what its parent does not trust MUST be a wall,
+  call and becomes a derivation: a container admitting what its parent does not trust MUST be SEPARATE,
   because otherwise a child's admission would place a stranger's bytes in the parent's store. Read this
   bullet as provisional until §28 lands.
 - **Boundary** — reference or merge (§27.3): does the container stay a distinct unit you point at, or
@@ -61,11 +61,11 @@ negating that claim (§27.3's scope-merge — flip the flag, no re-sign).
 precedent — declarations re-resolved from live deltas, so a knob change is a delta and never a restart:
 
 - **`loam.container`** — the declaration: role `container` → the entity (named by convention
-  `container:<name>`), `trust` → `"curated" | "untrusted"`, `posture` → `"wall" | "property"` (both
-  REQUIRED; a missing posture refuses naming §28.4's recommendation, wall — the default lives in the
+  `container:<name>`), `trust` → `"curated" | "untrusted"`, `posture` → `"separate" | "shared"` (both
+  REQUIRED; a missing posture refuses naming §28.4's recommendation, separate — the default lives in the
   message, never in silent semantics), `parent` → the containing container, `membership` (a Term's
   canonical JSON inline) OR `membershipAt` (the content address of a published Term) — never both, and a
-  property container must carry one — and `version` → a ModuleVersion citation (§27.2). **Trust and
+  shared container must carry one — and `version` → a ModuleVersion citation (§27.2). **Trust and
   posture are IMMUTABLE per container entity**, enforced at the door (a flip refuses naming §28.4, as does
   a parent re-point across trust domains or an edge that would close a containment cycle) AND at the
   reader (earliest surviving declaration wins; a federated flip resolves as a named defect; a federated
@@ -76,27 +76,55 @@ precedent — declarations re-resolved from live deltas, so a knob change is a d
   negation. The scoped read is `union(active containers) MINUS excluded` on the §27.4 set algebra, carried
   through the forward negation closure (exclusion may narrow what a scope sees, never revive what was
   struck), and it FAILS CLOSED on any unresolvable dependency — a dangling `membershipAt`, an unreachable
-  wall — rather than resolving as if the container were empty. ACTIVE means: declaration survives and no
-  surviving detach record covers it; a parent edge never auto-includes a child.
-- **`loam.container.detached`** — the operator's record that a wall's store is deliberately held outside
-  the erasure fan-out (a bounded note says where); reattaching negates every surviving record for the
-  entity. `erase` refuses up front while the table names a wall neither attached nor covered, and reports
-  covered walls in its `kept` — an unreachable wall is a named fault, never a silent gap (§24.8).
+  separate store — rather than resolving as if the container were empty. ACTIVE means: declaration survives
+  and no surviving detach record covers it; a parent edge never auto-includes a child.
+- **`loam.container.detached`** — the operator's record that a separate container's store is deliberately
+  held outside the erasure fan-out (a bounded note says where); reattaching negates every surviving record
+  for the entity. `erase` refuses up front while the table names a separate container neither attached nor
+  covered, and reports covered ones in its `kept` — an unreachable store is a named fault, never a silent
+  gap (§24.8).
 
 Only lawful claims bind at all three contexts — a federated stranger's declaration, exclusion, or detach
 record lands as data and moves nothing.
 
-**When exclusion is a property, and when it must be a wall.** §24.1 proved *you cannot discard a mark* — a
-"sandboxed" flag on canonical deltas that every reader must honor forever, discarded only by negating each
+**The posture words say STORAGE (renamed — Myk, 2026-07-25).** The two postures were first called `"wall"`
+and `"property"`. They are now **`"separate"`** and **`"shared"`**, because the axis they name is storage and
+nothing else: *does this container hold its own bytes, or is it a reading over ground the store already has?*
+
+The tell that the first words were wrong is on this very page. Both had to be GLOSSED to be understood, and
+the gloss was more legible than the term — §27.7 below explains them as *"a query over **shared ground**"*
+versus *"a **separate** arena."* When the explanation reads better than the word, the word is wrong; so the
+gloss became the vocabulary. `"property"` carried a second injury: this section uses "property" a dozen times
+in its ordinary English sense — a flippable attribute, a claim about an entity — so the posture value and the
+prose were one word doing two jobs, and the sentence *"exclusion is a property"* said nothing about storage
+at all.
+
+`physical | virtual` was considered first and rejected. "Virtual" imports a simulation, and a shared
+container is not an imitation of a separate one — it is a different, equally real arrangement. And "physical"
+is simply false: a separate container's sqlite file is no more physical than the primary's. What is true of
+it is that it is its **own**.
+
+The rename is a breaking on-wire change and ships its §20 migration (`container-posture-storage-words`): a
+declaration carrying a retired word is re-signed into the storage vocabulary and the original NEGATED with a
+`supersededBy` link at the re-expression and a reason — grow-only, nothing rewritten. The VALUE is the
+shape-distinguishing byte, which is what satisfies the §20 corollary without a version stamp. The DOOR speaks
+only the current words and names `loam migrate` when it sees a retired one; every READER still resolves both,
+because a migration is something a person runs, and a store whose containers vanished until they ran it would
+empty every scope and blind the erasure guard with no error anywhere. A struck declaration keeps its retired
+word forever — the migration re-signs only surviving law — so §27.7's completeness guard reads the retired
+word too: a lineage that once had a store of its own still says so.
+
+**When a container can be SHARED, and when it must be SEPARATE.** §24.1 proved *you cannot discard a mark* —
+a "sandboxed" flag on canonical deltas that every reader must honor forever, discarded only by negating each
 delta with residue. That argument is about UNTRUSTED foreign law, and there it stands: a stranger's law needs
-a separate store (structural isolation) for discard-with-zero-trace and erasure-evasion resistance. But for
-YOUR OWN containers — deltas you or your grantees authored, organized into semi-permanent scopes — a property
-is exactly right: you never need to discard-with-zero-trace (you re-include or exclude), the deltas were
-always yours, and exclusion is a scope choice the read query honors, not a security boundary a stranger might
-evade. So "excluded" is a SPECTRUM keyed on trust: a flippable property for your own containers; a separate
-store for untrusted ones. The grow-only union still has no *canonical* boundary — only a distinct container
-gives isolation of foreign law — but among your own deltas, a container is a named region of the scope
-algebra, and exclusion is a claim.
+its own store (structural isolation) for discard-with-zero-trace and erasure-evasion resistance. But for
+YOUR OWN containers — deltas you or your grantees authored, organized into semi-permanent scopes — sharing the
+ground is exactly right: you never need to discard-with-zero-trace (you re-include or exclude), the deltas
+were always yours, and exclusion is a scope choice the read query honors, not a security boundary a stranger
+might evade. So "excluded" is a SPECTRUM keyed on trust: a flippable claim over shared ground for your own
+containers; a store of its own for untrusted ones. The grow-only union still has no *canonical* boundary —
+only a distinct container gives isolation of foreign law — but among your own deltas, a container is a named
+region of the scope algebra, and exclusion is a claim.
 
 ### 27.2 The living → frozen ladder (DECIDED — Myk, 2026-07-15)
 
@@ -158,10 +186,10 @@ story ("do we re-sign to merge, or not?"). The answer is: it depends on whose de
 So **re-signing is not the merge mechanism — it is the trust-boundary-crossing mechanism.** Within a trust
 domain, merge is scope inclusion (flip the flag, no re-sign); across one, merge is adoption (re-sign, with
 provenance). The two are the same §27 reference→merge lever, keyed on whether the deltas are already yours —
-and "excluded/sandboxed" is therefore a spectrum: for your own containers a PROPERTY (a flippable claim, see
-§27.1); for untrusted foreign law a separate store (only structural isolation gives discard-with-zero-trace
-and erasure-evasion resistance, §24.1). The trust posture picks whether exclusion can be a flag or must be a
-wall.
+and "excluded/sandboxed" is therefore a spectrum: for your own containers SHARED (a flippable claim over
+ground you already hold, see §27.1); for untrusted foreign law SEPARATE (only structural isolation gives
+discard-with-zero-trace and erasure-evasion resistance, §24.1). The trust posture picks whether exclusion can
+be a flag or must be a store of its own.
 
 ### 27.4 What a "branch" is, once containers and resolvers are separate
 
@@ -282,11 +310,11 @@ The questions that DO remain open:
 
 **CLOSED (T32).** The lifting this section forecast has landed: `src/gateway/container.ts` carries the
 named `Container` with the `{membership, seeding, trust, boundary, identity}` vector, and the quarantine
-is ONE PRESET of it (untrusted · wall · one-way-seeded · droppable) — `openQuarantine` keeps its exact
+is ONE PRESET of it (untrusted · separate · one-way-seeded · droppable) — `openQuarantine` keeps its exact
 signature, behavior, and refusal voice, its body now `openContainerImpl` with the knobs preset. Bytes
-follow the POSTURE (a property container is a query over shared ground, zero copies; a wall pays real
+follow the POSTURE (a SHARED container is a query over shared ground, zero copies; a SEPARATE one pays real
 byte copies — the one thing sharing cannot provide is discard-with-zero-trace); law follows the TRUST
-(untrusted must be a wall, §28.3, refused at door and opener alike). Two knobs stayed off the at-rest
+(untrusted must be separate, §28.3, refused at door and opener alike). Two knobs stayed off the at-rest
 mint deliberately: `seeding` remains an open-time behavior of the preset (its at-rest descriptor arrives
 with T33's import work) and `boundary` names operations, not state — neither gets a role until a consumer
 fixes its shape. The mint is new vocabulary only — no delta any store held changed bytes or meaning, so
@@ -683,3 +711,20 @@ root-name guard is a door, and federation has no door — ticket **T89** carries
 makes the guard fail-fast rather than load-bearing. Additive vocabulary only, no delta any store holds
 changed shape or meaning → **no §20 migration** (`loam.manifest` sits outside every reserved prefix a
 migration detects, railed). Capability/federation surface + a vocabulary mint → Myk's merge (P6).
+
+**§27.1 THE POSTURE WORDS SAY STORAGE** (Myk's rename in chat, 2026-07-25) — `"wall"`/`"property"` become
+`"separate"`/`"shared"`, recorded with the argument at §27.1 above because a reader in a year needs the
+reasoning and not only the words. The axis was always storage; the gloss on this page was more legible than
+the terms it explained, and `"property"` additionally collided with a dozen ordinary-English uses of the word
+in this very section. `physical | virtual` was Myk's first instinct and is rejected in §27.1 for cause.
+A breaking on-wire change, so it ships its §20 step — `container-posture-storage-words` in
+`src/migrate/migrate.ts`: the retired declaration is re-signed into the storage vocabulary at its own
+timestamp and NEGATED with `supersededBy` at the re-expression plus a reason, grow-only. The posture VALUE is
+the shape-distinguishing byte (§20's corollary, no version stamp). Asymmetric by design, and this is the part
+worth remembering: the DOOR refuses a retired word and names `loam migrate`, while every READER still
+resolves both — a migration is something a person runs, and a container that vanished until they ran it would
+empty every scope and blind §27.7's completeness guard with no error anywhere (H9). Because the step re-signs
+only SURVIVING law, a struck declaration keeps its retired word permanently, so that guard reads the retired
+word too; matching only the current one would have quietly retired the guard for every pre-rename store (H7).
+Railed both directions plus two-sided on erasure in `test/migrate/container-posture.test.ts`; the retired
+shape is mintable only from `test/migrate/legacy.ts`, so no production path can re-mint it.

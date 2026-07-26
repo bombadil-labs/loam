@@ -57,7 +57,7 @@ Then three more in one night, 2026-07-25, each at an edge nobody had asked the q
 - **The live membership watch** (T45). `watchImpl` was the only narrowing door with no closure at all,
   and because a retraction carries only a `negates` pointer, an entity- or context-scoped Term
   *structurally cannot* select it — so a retracted claim was served with no strike beside it.
-- **The two inbound doors** (T43). A wall seeded by an `admit` PREDICATE rather than a Term took the
+- **The two inbound doors** (T43). A separate container seeded by an `admit` PREDICATE rather than a Term took the
   caller's raw filter unwrapped; and a rostered pull admitted a post while rejecting its off-roster
   retraction, leaving the claim live in the puller's store with the peer unable to tell.
 

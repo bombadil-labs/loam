@@ -132,7 +132,11 @@ async function moduleWorldInto(
   const base = opts.baseTs ?? 41_000;
   await gw.append([
     signClaims(
-      containerClaims({ container: name, trust: "untrusted", posture: "wall" }, OP, base - 1000),
+      containerClaims(
+        { container: name, trust: "untrusted", posture: "separate" },
+        OP,
+        base - 1000,
+      ),
       OP_SEED,
     ),
   ]);
@@ -260,7 +264,7 @@ describe("T33 criterion 3 — facts never need it", () => {
     await gw.append([
       signClaims(
         containerClaims(
-          { container: "container:facts", trust: "untrusted", posture: "wall" },
+          { container: "container:facts", trust: "untrusted", posture: "separate" },
           OP,
           42_000,
         ),
@@ -873,7 +877,7 @@ describe("T33 criteria 9, 15 & 24 — the pen is a different key", () => {
     await gw.append([
       signClaims(
         containerClaims(
-          { container: "container:penned", trust: "untrusted", posture: "wall" },
+          { container: "container:penned", trust: "untrusted", posture: "separate" },
           OP,
           45_000,
         ),
@@ -1062,7 +1066,7 @@ describe("T33 criteria 11, 17, 18 & 26 — the ledger tells origination from exp
     await gw.append([
       signClaims(
         containerClaims(
-          { container: "container:rival", trust: "untrusted", posture: "wall" },
+          { container: "container:rival", trust: "untrusted", posture: "separate" },
           OP,
           47_000,
         ),
@@ -1177,7 +1181,7 @@ describe("T33 criteria 12 & 21 — lawFrom is exposure arithmetic, unioned acros
         await gw.append([
           signClaims(
             containerClaims(
-              { container: "container:social-v7", trust: "untrusted", posture: "wall" },
+              { container: "container:social-v7", trust: "untrusted", posture: "separate" },
               OP,
               49_000,
             ),
@@ -1240,7 +1244,7 @@ async function resolverTrapWorld(): Promise<{
   await gw.append([
     signClaims(
       containerClaims(
-        { container: "container:trap", trust: "untrusted", posture: "wall" },
+        { container: "container:trap", trust: "untrusted", posture: "separate" },
         OP,
         50_500,
       ),
@@ -1352,7 +1356,7 @@ async function captureWorld(
   await gw.append([
     signClaims(
       containerClaims(
-        { container: "container:capture", trust: "untrusted", posture: "wall" },
+        { container: "container:capture", trust: "untrusted", posture: "separate" },
         OP,
         50_000,
       ),

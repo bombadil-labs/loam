@@ -635,8 +635,8 @@ const latestAt = (src: Source, role: string, entity: string): Delta | undefined 
 
 // --- the source: a version plus the container it came from ---------------------------------------
 
-// Which DECLARED container do these members live in? Asked of the attached walls by CONTAINMENT of
-// the frozen set — a wall that holds every member is the ground the version was frozen over. The
+// Which DECLARED container do these members live in? Asked of the attached container stores by
+// CONTAINMENT of the frozen set — a store holding every member is the ground it was frozen over. The
 // answer is the container ENTITY, so the record joins the T32 table rather than carrying free
 // text; a version frozen over ground no attached container holds records the nameless label.
 function containerOf(gw: Gateway, version: ModuleVersion): string | undefined {
