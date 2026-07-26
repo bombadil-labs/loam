@@ -37,6 +37,7 @@ import {
   type RequestContext,
 } from "../gateway/gateway.js";
 import { parseRegistrationInput, schemaEntityFor, type LensName } from "../gateway/registration.js";
+import { parseReadGesture, type ReadGesture } from "../gateway/renderers.js";
 import { makeMountTable, type ResolvedMount } from "./mounts.js";
 
 export interface TokenIdentity {
@@ -176,6 +177,33 @@ const appRouteOf = (pathname: string): { route: string; entity: string } | undef
   } catch {
     return undefined;
   }
+};
+
+// The floor's read GESTURE as it rides the host route (SPEC §30): `?read=<lens>:<entity>`, repeatable,
+// plus every OTHER query parameter echoed verbatim into `node.state` — which is where UI state (a page
+// index) lives, because a per-render realm gives it nowhere else. An unenhanced link therefore works with
+// no JavaScript at all, and the floor is proven across two hosts rather than described for one.
+//
+// EACH `read=` COSTS A RESOLUTION. `maxPublicRenders` caps worker RENDERS, not resolutions, and a
+// repeatable parameter multiplies resolutions per request — H8's full-scan cost, N times, on one GET. So
+// the count is bounded here; a repeatable read parameter is precisely the shape that turns a cap into a
+// suggestion.
+const MAX_GESTURE_READS = 8;
+
+const gestureOf = (
+  params: URLSearchParams,
+): { reads: ReadGesture[]; state: Record<string, string> } => {
+  const reads: ReadGesture[] = [];
+  const state: Record<string, string> = {};
+  for (const [key, value] of params) {
+    if (key === "read") {
+      const g = parseReadGesture(value);
+      if (g !== undefined && reads.length < MAX_GESTURE_READS) reads.push(g);
+      continue;
+    }
+    state[key] = value;
+  }
+  return { reads, state };
 };
 
 // Parse a rendered route's write body (SPEC §23.3): a browser `<form>` POSTs
@@ -912,7 +940,15 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             return;
           }
           if (req.method === "GET") {
-            sendRendered(res, await gateway.serveRoute(parsed.route, parsed.entity, "full"));
+            sendRendered(
+              res,
+              await gateway.serveRoute(
+                parsed.route,
+                parsed.entity,
+                "full",
+                gestureOf(url.searchParams),
+              ),
+            );
             return;
           }
           // A write-enabled renderer's form POST (SPEC §23.3): the store signs as the renderer's pen, not
