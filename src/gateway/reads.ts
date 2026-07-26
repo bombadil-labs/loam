@@ -12,6 +12,7 @@
 
 import { parse, subscribe, type ExecutionResult, type GraphQLSchema } from "graphql";
 import {
+  contentAddress,
   DeltaSet,
   evalTerm,
   hviewCanonicalHex,
@@ -31,6 +32,21 @@ import { lensOf, type ResolverSpecs } from "./registration.js";
 import { applyResolvers, decorateChildren } from "./resolvers.js";
 
 const toError = (err: unknown): Error => (err instanceof Error ? err : new Error(String(err)));
+
+// `hex`/`hviewHex` are DIGESTS of the canonical bytes (SPEC §17, T107): `contentAddress` over the
+// CBOR canonical form — the same fixed-width multihash form as a delta id. Digest equality ⇔ byte
+// equality, so every equality consumer keeps its semantics, while the field stops growing with the
+// answer (`_hviewHex` used to serialize the whole gathered bucket into the response) and stops
+// re-disclosing the view's values legibly. These three helpers are the ONLY producers; every door
+// (`_hex`, `_hviewHex`, `_fromHex`, REST, the renderer floor) carries them downstream. The hex
+// round-trip is because rhizomatic (frozen) exposes the canonical form only hex-encoded.
+const bytesOf = (hex: string): Uint8Array => {
+  const out = new Uint8Array(hex.length >> 1);
+  for (let i = 0; i < out.length; i += 1) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  return out;
+};
+const viewDigest = (v: View): string => contentAddress(bytesOf(viewCanonicalHex(v)));
+const hviewDigest = (h: HView): string => contentAddress(bytesOf(hviewCanonicalHex(h)));
 
 // The resolvers a named READING carries (SPEC §22.7, ticket T26) — for decorating expanded children
 // through their own reading's resolvers. A reading's name IS its lens name, so this is the live
@@ -188,8 +204,8 @@ export function resolvedNodeImpl(
     {
       entity,
       view,
-      hex: viewCanonicalHex(view),
-      hviewHex: hviewCanonicalHex(hview),
+      hex: viewDigest(view),
+      hviewHex: hviewDigest(hview),
     },
     asOf,
     readClosedIds(gw, now).size,
@@ -246,8 +262,8 @@ export function resolvePinnedImpl(
     {
       entity,
       view,
-      hex: viewCanonicalHex(view),
-      hviewHex: hviewCanonicalHex(result.hview),
+      hex: viewDigest(view),
+      hviewHex: hviewDigest(result.hview),
     },
     asOf,
     closed.size,
@@ -321,8 +337,8 @@ export function watchEntityImpl(
     return {
       entity,
       view,
-      hex: viewCanonicalHex(view),
-      hviewHex: hviewCanonicalHex(hview),
+      hex: viewDigest(view),
+      hviewHex: hviewDigest(hview),
     };
   };
   let sinks = gw.sinks.get(matName);
