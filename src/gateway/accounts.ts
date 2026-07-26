@@ -29,6 +29,7 @@ import { artifactDefect } from "./artifact.js";
 import { trustDefect } from "./trust.js";
 import { budgetDefect } from "./budget.js";
 import { containerDefect } from "./container.js";
+import { slateDefect } from "./slate.js";
 
 export const CTX_TENANT = "loam.tenant";
 export const CTX_MEMBERS = "loam.members";
@@ -397,7 +398,8 @@ export function authorize(
     artifactDefect(delta.claims) ??
     budgetDefect(delta.claims) ??
     containerDefect(delta, reactor, operator) ??
-    eraseDefect(delta, reactor, operator);
+    eraseDefect(delta, reactor, operator) ??
+    slateDefect(delta, reactor, operator);
   if (defect !== undefined) {
     return { ok: false, refusal: `delta ${delta.id} is malformed law: ${defect}` };
   }

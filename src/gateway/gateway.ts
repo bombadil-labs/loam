@@ -76,6 +76,7 @@ import {
   type ResolvedNode,
 } from "./gql.js";
 import { declarePublicImpl, readPublicSchemas } from "./public.js";
+import { slateReportsImpl, type SlateReport } from "./slate.js";
 import {
   lensOf,
   programOf,
@@ -649,8 +650,23 @@ export class Gateway {
   // NOW? Live — the reactor's surviving tombstones against the backend's own byte probe — because
   // this store is eventually consistent about forgetting, and the gap between a tombstone landing
   // and the bytes leaving every tier is a health state to watch, not a fault to boot past.
-  async health(): Promise<StoreHealth> {
-    return healthImpl(this);
+  async health(now?: number): Promise<StoreHealth> {
+    return healthImpl(this, now ?? Date.now());
+  }
+
+  // --- slating (SPEC §29, ticket T64) -------------------------------------------------------------
+
+  /**
+   * The operator's REVIEW read over every standing slate (SPEC §29.3): the frozen members, the
+   * closures in force at `now`, the RESURFACING set (claims a cut will bring back to life — the
+   * genuine new value of the two-phase shape), the AFFECTED containers, and the `duplicates` links.
+   *
+   * Read closure never closes this. The operator is the controller and must be able to examine what
+   * they are about to destroy, so this evaluates over the UNNARROWED ground even for a slate that
+   * closes `read` — a read-closed slate that could not be reviewed would defeat itself.
+   */
+  slates(now?: number): SlateReport[] {
+    return slateReportsImpl(this, now ?? Date.now());
   }
 
   // The separate-store gateways attached to this store (SPEC §24.8/§27): the operator's own one-way

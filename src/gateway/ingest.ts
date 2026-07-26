@@ -18,7 +18,14 @@
 // — thin delegating methods on the class, bodies here. They reach the gateway only through its
 // declared internals seam (the `@internal` members on the class — see the seam note in gateway.ts).
 
-import { computeId, evalTerm, parseTerm, verifyDelta, type Delta } from "@bombadil/rhizomatic";
+import {
+  computeId,
+  evalTerm,
+  parseTerm,
+  verifyDelta,
+  type Delta,
+  type Reactor,
+} from "@bombadil/rhizomatic";
 import { authorize } from "./accounts.js";
 import { budgetRefusal } from "./budget.js";
 import { ERASE_ENTITY, eraseDefect, isTombstone, readTombstones } from "./erase.js";
@@ -26,6 +33,7 @@ import { Channel } from "./channel.js";
 import type { AppendReceipt, FederationReport, Gateway } from "./gateway.js";
 import { publicDefect } from "./public.js";
 import { artifactDefect } from "./artifact.js";
+import { slateDefect } from "./slate.js";
 import { readTrustPolicy } from "./trust.js";
 
 // Persist a batch, THEN serve it (the body of `Gateway.append`). The batch is validated whole (one
@@ -143,7 +151,14 @@ export function admitForImpl(gw: Gateway): (d: Delta) => boolean {
 // THE CLOSURE IS DRAWN FROM THE LOCAL GROUND. A caller handing it deltas that are not in this store
 // would silently under-close — the negations it needs are not local yet. That is the inbound
 // federation case, and it has its own batch-scoped closure below.
-export function withNegationClosure(gw: Gateway, admitted: readonly Delta[]): Delta[] {
+// Typed on the REACTOR rather than the Gateway (structurally satisfied by one) so the readers that
+// must compute a §27.2 freeze WITHOUT a gateway — and therefore without any chance of a read-door
+// narrowing reaching the membership machinery (SPEC §29.3) — share this one closure instead of
+// growing a second copy of it.
+export function withNegationClosure(
+  gw: { readonly reactor: Reactor },
+  admitted: readonly Delta[],
+): Delta[] {
   const out = new Map(admitted.map((d) => [d.id, d]));
   const pending = [...out.keys()];
   while (pending.length > 0) {
@@ -381,7 +396,8 @@ export async function federateImpl(
       dead.has(d.id) ||
       publicDefect(d.claims) !== undefined ||
       artifactDefect(d.claims) !== undefined ||
-      (isTombstone(d.claims) && eraseDefect(d, gw.reactor, gw.operatorAuthor) !== undefined)
+      (isTombstone(d.claims) && eraseDefect(d, gw.reactor, gw.operatorAuthor) !== undefined) ||
+      slateDefect(d, gw.reactor, gw.operatorAuthor) !== undefined
     ) {
       continue; // unlawful at this door: no predicate and no closure can readmit it
     }
