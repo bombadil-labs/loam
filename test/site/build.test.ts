@@ -24,6 +24,7 @@ describe("the tutorial site build", () => {
   it("emits the whole page: html, css, app bundle, and both packets", () => {
     for (const f of [
       "index.html",
+      "tutorial.html",
       "style.css",
       "app.js",
       join("packets", "circle.json"),
@@ -41,7 +42,7 @@ describe("the tutorial site build", () => {
 
   it("the landing's links resolve to emitted files, so a reader never hits a 404", () => {
     const html = readFileSync(join(OUT, "index.html"), "utf8");
-    for (const href of ["intro.html", "capabilities.html"]) {
+    for (const href of ["tutorial.html", "intro.html", "capabilities.html"]) {
       expect(html, `the landing does not link ${href}`).toContain(`href="${href}"`);
       expect(existsSync(join(OUT, href)), `${href} linked but not emitted`).toBe(true);
     }
@@ -67,8 +68,8 @@ describe("the tutorial site build", () => {
     }
   });
 
-  it("the html loads exactly the artifacts the build emitted", () => {
-    const html = readFileSync(join(OUT, "index.html"), "utf8");
+  it("the tutorial page loads exactly the artifacts the build emitted", () => {
+    const html = readFileSync(join(OUT, "tutorial.html"), "utf8");
     expect(html).toContain(`src="./app.js"`);
     expect(html).toContain(`href="./style.css"`);
   });

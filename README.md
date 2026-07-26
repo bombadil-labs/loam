@@ -16,7 +16,7 @@ The design is in [SPEC.md](SPEC.md), the working record in [JOURNAL.md](JOURNAL.
 of unbuilt work as ADLC tickets in `.adlc/tickets.json`. This page is the manual;
 [how the repo is organized](#how-the-repo-is-organized) is spelled out below.
 
-**New here? Take [the interactive tutorial](https://bombadil-labs.github.io/loam/)** — it hands
+**New here? Take [the interactive tutorial](https://bombadil-labs.github.io/loam/tutorial.html)** — it hands
 you a real store running in your browser (no signup, no server, nothing to install until the
 last step) and teaches Loam by growing one: sixteen lessons from "you are the operator" to
 carrying your store out of the tab and serving it from your own machine, the same store proven
@@ -510,7 +510,7 @@ materializations — the GraphQL and REST/OpenAPI doors from one generator seam)
 (offer / pull / wire / translate), `runner/` (derived functions), `migrate/` (format migrations —
 old deltas in, new deltas out), `cli/`, and `browser/` + `client/` (the full in-page store and the
 read-only public client). `test/` mirrors that tree;
-[`demos/`](demos/README.md) holds the [tutorial](https://bombadil-labs.github.io/loam/) and the
+[`demos/`](demos/README.md) holds the [tutorial](https://bombadil-labs.github.io/loam/tutorial.html) and the
 village.
 
 **The docs, by role — they don't overlap:**

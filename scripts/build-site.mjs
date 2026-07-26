@@ -44,11 +44,16 @@ await build({
   logLevel: "silent",
 });
 
-cpSync(join(root, "demos", "tutorial", "index.html"), join(out, "index.html"));
+// The ROOT is a landing page (Myk, 2026-07-26), and the tutorial is one of its three doors. The
+// landing is deliberately claim-free — the thesis and the doors, nothing that can rot — because the
+// last front door aged badly by carrying content the code outgrew. Anything checkable lives in the
+// book, which goes red when stale.
+cpSync(join(root, "demos", "site", "index.html"), join(out, "index.html"));
+cpSync(join(root, "demos", "tutorial", "index.html"), join(out, "tutorial.html"));
 cpSync(join(root, "demos", "tutorial", "style.css"), join(out, "style.css"));
 cpSync(join(root, "demos", "tutorial", "packets"), join(out, "packets"), { recursive: true });
 // The concept deck: a self-contained standalone page the landing links to, no bundling needed.
 cpSync(join(root, "demos", "tutorial", "intro.html"), join(out, "intro.html"));
 cpSync(join(root, "demos", "capabilities", "index.html"), join(out, "capabilities.html"));
 
-console.log("loam: built site-dist/ (the tutorial, the deck, the book — self-contained)");
+console.log("loam: built site-dist/ (the landing, the tutorial, the deck, the book)");
