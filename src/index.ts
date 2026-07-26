@@ -159,6 +159,7 @@ export {
   type ResolverSpec,
   type ResolverSpecs,
 } from "./gateway/registration.js";
+export { SEALED_CHANNELS, realmProgram, sealRealm } from "./gateway/artifact-realm.js";
 export {
   CTX_RENDERER,
   parseRendererInput,
