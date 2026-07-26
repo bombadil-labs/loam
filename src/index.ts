@@ -178,6 +178,7 @@ export {
 export { migrate, MIGRATIONS, type Migration, type MigrationReport } from "./migrate/migrate.js";
 export { run, main, type IO, type RunOptions } from "./cli/cli.js";
 export { archivePath, initHome, readConfig, storePath, type LoamConfig } from "./cli/config.js";
+export { legalNameFor, queryFieldFor } from "./gateway/gql.js";
 export { serve, type ServeOptions, type ServerHandle, type TokenIdentity } from "./server/http.js";
 export type { StoreBackend } from "./store/backend.js";
 export { canonicalDelta } from "./store/canon.js";

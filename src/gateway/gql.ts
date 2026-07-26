@@ -101,11 +101,29 @@ const PrimitiveValue = new GraphQLScalarType({
   },
 });
 
-// A GraphQL-legal name from a store-native one; the original stays in the resolver closure.
-const legal = (s: string): string => {
+// THERE ARE TWO MANGLINGS AND THEY DIFFER BY ONE CHARACTER. Both are exported, because a caller
+// composing a document from store-native names needs BOTH and needs to know which goes where — and a
+// caller carrying only one of them will spell one of the two sites wrong for exactly the names whose
+// initial is an uppercase ASCII letter. Nothing else about them diverges.
+//
+//   `legalNameFor`  — a GraphQL-legal name. Used for the VIEW TYPE, every PROP FIELD, and every
+//                     per-prop MUTATION ARGUMENT. `Height` stays `Height`.
+//   `queryFieldFor` — the same, then initial-lowercased. Used for the QUERY-ROOT and MUTATION-ROOT
+//                     field of a lens. Lens `Plant` is served at field `plant`.
+//
+// The original store-native name stays in the resolver closure either way.
+export const legalNameFor = (s: string): string => {
   const cleaned = s.replace(/[^_A-Za-z0-9]/g, "_");
   return /^[A-Za-z_]/.test(cleaned) ? cleaned : `_${cleaned}`;
 };
+const legal = legalNameFor;
+
+// The QUERY-ROOT and MUTATION-ROOT field name for a lens: legal, then initial-lowercased. Exported
+// because it is not derivable by eye — a caller composing a document from a lens NAME needs exactly
+// this, and `Plant` (the VIEW TYPE's name) is not it. Anything that composes a document against a lens
+// must route through here or it will name a field the schema never built.
+export const queryFieldFor = (lens: string): string =>
+  legalNameFor(lens).replace(/^[A-Z]/, (c) => c.toLowerCase());
 
 function fieldTypeOf(pp: Policy): GraphQLOutputType {
   switch (pp.kind) {
@@ -329,7 +347,7 @@ export function buildGqlSchema(
       }),
     });
 
-    const fieldName = typeName.replace(/^[A-Z]/, (c) => c.toLowerCase());
+    const fieldName = queryFieldFor(lensOf(def));
     // Own properties only: a schema named "toString" collides with nothing but itself.
     if (Object.hasOwn(queryFields, fieldName)) {
       throw new Error(
