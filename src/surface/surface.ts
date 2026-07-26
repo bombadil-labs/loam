@@ -52,6 +52,11 @@ export interface ResolvedNode {
   // content: a tombstone remembers THAT it forgot and WHEN, not what; the count is their length).
   // Absent on a present read (the present already reflects every erasure as ordinary absence).
   readonly forgotten?: number[];
+  // The SLATE-SUPPRESSION confession (SPEC §29.3): how many ids a standing slate withheld from the
+  // ground this view was resolved over. In the same register as `forgotten` and for the same reason —
+  // an as-of read at a moment before a slate would otherwise serve the condemned delta, and the
+  // narrowing that stops it is worth confessing rather than hiding. Absent when nothing is suppressed.
+  readonly suppressed?: number;
 }
 
 // A subscription event: the re-resolved node plus where it came from and what moved.

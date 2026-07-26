@@ -7,12 +7,11 @@
 // condemned delta and report a byte-verified clean discard over the legible originals — H7 wearing a
 // container), and a membership that could still move is refused rather than trusted.
 //
-// WHAT THIS FILE DELIBERATELY DOES NOT ASSERT — and cannot yet, because this is the FIRST layer of a
-// four-piece stack and nothing downstream of the readers exists: the three closures at their doors,
-// the cut, the graveyard's arithmetic, and the receipt. Each lands with its own rails, and each ADDS
-// to this file where a criterion spans layers (criterion 15's forgiveness needs a cut to forgive).
-// Two-sidedness is kept per rail regardless: every rail that proves something is refused also names
-// something that still answers.
+// WHAT THIS FILE DELIBERATELY DOES NOT ASSERT: the three closures in depth (slate-doors.test.ts), the
+// cut (slate-cut.test.ts), the graveyard arithmetic (graveyard.test.ts), and the receipt
+// (slate-receipt.test.ts). It DOES assert per rail that a door which should not close has not —
+// that half needs the closures to exist, so it arrives with them. Two-sidedness is kept throughout:
+// every rail that proves something is refused also names something that still answers.
 
 import { describe, expect, it } from "vitest";
 import { signClaims } from "@bombadil/rhizomatic";
@@ -121,8 +120,9 @@ describe("T64 criterion 1 — a slate is a curated SHARED container plus a recor
       ),
     ]);
     // A conventional name is a COMMENT: nothing can verify it, and a prefix code parses becomes law
-    // by accident (the H6 register). No record, no slate — so nothing here is one.
+    // by accident (the H6 register). No record, no slate — so no door closes.
     expect(gw.slates(BEFORE_DEADLINE)).toEqual([]);
+    expect(gw.offeredDeltas().map((d) => d.id)).toContain(condemned.id);
     await gw.close();
   });
 });
@@ -269,8 +269,9 @@ describe("T64 criterion 2 — membership is frozen by ENFORCEMENT, at both level
         },
       }),
     ).rejects.toThrow(/not an EXTENSIONAL id set/);
-    // Two-sided: no slate stands, so nothing reports itself enforcing.
+    // Two-sided: no slate stands, so nothing reports itself enforcing, and every door still serves.
     expect(gw.slates(BEFORE_DEADLINE)).toEqual([]);
+    expect(gw.offeredDeltas().map((d) => d.id)).toContain(condemned.id);
     // And the extensional form over the same member is accepted — the refusal is about SHAPE.
     const ok = await standSlate(gw, {
       container: "container:slate:extensional",
@@ -297,9 +298,10 @@ describe("T64 criterion 2 — membership is frozen by ENFORCEMENT, at both level
       first.id,
     ]);
     expect(gw.slates(BEFORE_DEADLINE)[0]!.members).toEqual([first.id]);
-    // Two-sided: the later delta is a live bystander. (What the DOORS do with a member is the next
-    // layer's question — this one asks only whether the frozen set grew.)
+    // Two-sided: the later delta is a live bystander — the egress door still offers it.
     expect(gw.slates(BEFORE_DEADLINE)[0]!.members).not.toContain(later.id);
+    expect(gw.offeredDeltas().map((d) => d.id)).toContain(later.id);
+    expect(gw.offeredDeltas().map((d) => d.id)).not.toContain(first.id);
     await gw.close();
   });
 });
@@ -358,9 +360,24 @@ describe("T64 criterion 3 — `closes` and `deadline` are required, and `none` i
     expect(report).toHaveLength(1);
     expect(report[0]!.closes).toEqual([]);
     expect(report[0]!.declared).toEqual([]);
-    // `enforced` is EMPTY, and that is the whole content of "closes nothing" at this layer — what the
-    // three doors then do with an empty set is asserted where the doors are, in slate-doors.test.ts.
+    // `enforced` is EMPTY, and every door proves it: egress still offers the member, the append door
+    // still admits a citation of it, and the read door still serves it.
     expect(report[0]!.enforced).toEqual([]);
+    expect(gw.offeredDeltas().map((d) => d.id)).toContain(condemned.id);
+    const citation = signClaims(
+      {
+        timestamp: 60_000,
+        author: OP,
+        pointers: [
+          { role: "notes", target: { kind: "delta", deltaRef: { delta: condemned.id } } },
+          { role: "declares", target: { kind: "entity", entity: { id: FERN, context: "note" } } },
+        ],
+      },
+      OP_SEED,
+    );
+    await expect(gw.append([citation])).resolves.toBeDefined();
+    const res = await gw.query(`{ plant(entity: "${FERN}") { height } }`);
+    expect((res.data as { plant: { height: number } }).plant.height).toBe(30);
     expect(stood.version).not.toBe("");
     await gw.close();
   });
@@ -444,10 +461,12 @@ describe("T64 criterion 3 — `closes` and `deadline` are required, and `none` i
     const report = await gw.federate([stranger], { admit: () => true });
     expect(report.accepted).toBe(0);
     expect(report.rejected).toBe(1);
-    // Two-sided: the operator's own slate still stands, unchanged — the stranger's record tightened
-    // nothing, because it binds nothing.
+    // Two-sided: the operator's own slate still stands, and READ is still open (the stranger's
+    // record did not tighten it).
     expect(gw.slates(BEFORE_DEADLINE).map((s) => s.closes)).toEqual([["cite"]]);
     expect(gw.slates(BEFORE_DEADLINE)[0]!.enforced).toEqual(["cite"]);
+    const res = await gw.query(`{ plant(entity: "${FERN}") { height } }`);
+    expect((res.data as { plant: { height: number } }).plant.height).toBe(30);
     await gw.close();
   });
 });

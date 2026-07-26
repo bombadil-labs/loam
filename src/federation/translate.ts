@@ -378,10 +378,17 @@ export async function translate(
   }
   const nothing: AppendReceipt = { accepted: 0, duplicates: 0 };
   // Two appends, two counts: the report says how many renderings LANDED and how many DIED, and one
-  // receipt cannot answer both. Grow-only either way, so a pass that lands the first and refuses
-  // the second leaves nothing to undo — the next pass finishes the work.
-  const emitReceipt = emissions.length > 0 ? await gateway.append(emissions) : nothing;
+  // receipt cannot answer both. Grow-only either way, so a partial pass leaves nothing to undo — the
+  // next pass finishes the work.
+  //
+  // RETRACTIONS FIRST, and the order is load-bearing rather than tidy. Either append can now REFUSE
+  // for a reason that has nothing to do with the other: an admission door may decline an EMISSION
+  // whose `translates` names a delta staged for erasure (SPEC §29.3's cite closure). Emitting first
+  // meant that refusal aborted the pass before the retraction batch ran, leaving every rendering
+  // whose source had been struck LIVE and still federating — the exact bug T58 exists to close,
+  // reintroduced from the outside. Retracting first cannot strand a strike whatever refuses next.
   const retractReceipt = retractions.length > 0 ? await gateway.append(retractions) : nothing;
+  const emitReceipt = emissions.length > 0 ? await gateway.append(emissions) : nothing;
   return {
     emitted: emitReceipt.accepted,
     matched,
