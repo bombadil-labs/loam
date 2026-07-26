@@ -1,6 +1,6 @@
 # The tutorial — learn Loam by growing one (SPEC §16)
 
-Deployed at <https://bombadil-labs.github.io/loam/> by `.github/workflows/pages.yml` on every
+Deployed at <https://bombadil-labs.github.io/loam/tutorial.html> (the site root is the landing page, `demos/site/`) by `.github/workflows/pages.yml` on every
 push to main. No signup, no server, nothing installed until the last step: the page boots a
 real governed store in the visitor's browser and teaches by doing.
 
