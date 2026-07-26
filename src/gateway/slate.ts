@@ -39,13 +39,26 @@ import {
   DeltaSet,
   evalTerm,
   parseTerm,
+  signClaims,
   type Claims,
   type Delta,
   type Reactor,
 } from "@bombadil/rhizomatic";
 import { freezeMembers } from "./container-identity.js";
-import { CTX_CONTAINER, readContainerTable, containerScopeImpl } from "./container.js";
-import { isTombstone } from "./erase.js";
+import {
+  CTX_CONTAINER,
+  readContainerTable,
+  containerScopeImpl,
+  survivingDeclarationIds,
+  unreachableStoreReport,
+} from "./container.js";
+import {
+  eraseImpl,
+  erasureOutstanding,
+  isTombstone,
+  survivingTombstones,
+  tombstoneTarget,
+} from "./erase.js";
 import { withNegationClosure } from "./ingest.js";
 import { lawfulNegated, lawfulSnapshot } from "./registration.js";
 import type { Gateway } from "./gateway.js";
@@ -1008,4 +1021,601 @@ const groundWithout = (ground: DeltaSet, closed: ReadonlySet<string>): DeltaSet 
 export function landsReadClosure(gw: Gateway, batch: readonly Delta[], now: number): boolean {
   if (!batch.some((d) => isSlateRecord(d.claims))) return false;
   return readClosedIds(gw, now).size > 0;
+}
+
+// --- the cut -------------------------------------------------------------------------------------
+
+/**
+ * A per-tier byte verdict, TRI-STATE. A tier that refused, a tier that threw, and a `kept` wall are
+ * all "we did not prove these bytes are gone" — the opposite of "we proved they are gone", and a
+ * boolean cannot hold the difference. `health()` already carries `unproven` for exactly this fact.
+ * Collapsing the third state into `false` is how a report of work NOT DONE reads as work completed.
+ */
+export type ByteVerdict = false | true | "unproven";
+
+export interface TierVerdict {
+  readonly tier: string;
+  readonly holds: ByteVerdict;
+}
+
+export interface CutMemberReport {
+  readonly member: string;
+  readonly tombstone: string;
+  readonly spokenBy: string;
+  /** OBSERVATION, at `window.cutAt`. Non-authoritative for a re-issue — see RECEIPT_FIELDS. */
+  readonly tiers: readonly TierVerdict[];
+  /** §11's citations manifest: the surviving deltas that dangle at this hole. */
+  readonly citations: readonly string[];
+}
+
+export interface CutReport {
+  readonly slate: string;
+  readonly record: string;
+  readonly graveyard: string;
+  readonly version: string;
+  readonly memberCount: number;
+  readonly requestedBy: string;
+  readonly requestedByForm: "plain" | "sealed";
+  readonly requestedAt: number;
+  readonly deadline: number;
+  readonly reason?: string;
+  readonly closes: readonly SlateClosure[];
+  readonly window: { readonly opened: number; readonly cutAt: number };
+  readonly members: readonly CutMemberReport[];
+  /** Members a surviving lawful tombstone ALREADY covered (§29.5's one lawful exception). */
+  readonly priorTombstone: readonly { readonly member: string; readonly tombstone: string }[];
+  /** Tiers deliberately NOT reached, each with the declaration that permitted it. */
+  readonly notReached: readonly { readonly wall: string; readonly acceptsIncomplete: string }[];
+  readonly affected: readonly string[];
+  readonly resurfacing: readonly string[];
+  readonly duplicates: readonly Duplicate[];
+  /** The report's OWN partition, carried so a formatter cannot mistake one side for the other. */
+  readonly observationOnly: readonly string[];
+}
+
+/**
+ * The §29.7 receipt's fields, PARTITIONED. A history field is a fact about what HAPPENED and the
+ * CutReport is a good source for it forever. A per-tier byte verdict is an OBSERVATION OF THE TIERS
+ * at a moment and may never be read from a CutReport later: a formatter that reprints last month's
+ * snapshot as today's receipt is the whole dry-run mistake this design rejects, wearing letterhead.
+ */
+export const RECEIPT_FIELDS: readonly {
+  readonly field: string;
+  readonly side: "history" | "observation";
+}[] = [
+  { field: "window", side: "history" },
+  { field: "version", side: "history" },
+  { field: "memberCount", side: "history" },
+  { field: "requestedBy", side: "history" },
+  { field: "requestedByForm", side: "history" },
+  { field: "requestedAt", side: "history" },
+  { field: "deadline", side: "history" },
+  { field: "closes", side: "history" },
+  { field: "tombstone", side: "history" },
+  { field: "spokenBy", side: "history" },
+  { field: "priorTombstone", side: "history" },
+  { field: "citations", side: "history" },
+  { field: "duplicates", side: "history" },
+  { field: "affected", side: "history" },
+  { field: "resurfacing", side: "history" },
+  { field: "graveyard", side: "history" },
+  { field: "notReached", side: "history" },
+  { field: "tiers", side: "observation" },
+  { field: "presentAgain", side: "observation" },
+  { field: "forgiven", side: "observation" },
+];
+
+const OBSERVATION_FIELDS = RECEIPT_FIELDS.filter((f) => f.side === "observation").map(
+  (f) => f.field,
+);
+
+const retractionOf = (targetId: string, author: string, timestamp: number): Claims => ({
+  timestamp,
+  author,
+  pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: targetId } } }],
+});
+
+/**
+ * THE CUT (§29.5). Pre-flight is ALL-OR-REFUSE; the per-member work is per-member with a fault
+ * report — atomicity is claimed only where it is real, because erasure is not transactional across
+ * tiers and a mirror going down mid-cut is a physical state, not a bug.
+ *
+ * Order is load-bearing: the graveyard lands and only THEN is the declaration struck. Strike first
+ * and a crash loses the record, because the struck declaration no longer resolves the set. A crash
+ * between the two leaves a graveyard beside a standing slate whose members are all tombstoned, so
+ * the re-run finds nothing outstanding and simply strikes — idempotent by construction.
+ */
+export async function cutImpl(
+  gw: Gateway,
+  container: string,
+  opts: { now?: number } = {},
+): Promise<CutReport> {
+  const seed = gw.options.seed;
+  const operator = gw.operatorAuthor;
+  if (seed === undefined || operator === undefined) {
+    throw new Error("a cut is the instance operator's alone, and this store has no operator");
+  }
+  const now = opts.now ?? Date.now();
+  requireMoment(now, "cut");
+  const refuse = (why: string): never => {
+    throw new Error(
+      `cut ${container} refused before any tombstone landed: ${why}\n` +
+        `The slate STANDS — every closed door stays closed, the declaration still resolves, and ` +
+        `the cut is resumable once this is repaired.`,
+    );
+  };
+
+  const slate = readSlates(gw.reactor, operator, now).find((s) => s.container === container);
+  if (slate === undefined) {
+    throw new Error(
+      `cut ${container} refused: no surviving lawful slate record names that container — a slate ` +
+        `is a record POINTING at a container, never a naming convention`,
+    );
+  }
+  if (slate.unresolved !== undefined) {
+    refuse(
+      `${slate.unresolved}. If we cannot read which ids are condemned we cannot cut (H9: fail closed)`,
+    );
+  }
+  if (slate.disagreement !== undefined) {
+    refuse(
+      `${slate.disagreement} The cut will not run while the container and the record disagree about ` +
+        `which set is condemned — a graveyard records the set that was IDENTIFIED, and cutting here ` +
+        `would let the two readings differ in a durable record.`,
+    );
+  }
+
+  // §27.7's guard: an unreachable wall could hold a member outside the sweep.
+  const walls = unreachableStoreReport(gw);
+  if (walls.faults.length > 0) {
+    refuse(
+      `the resolved container table names a wall this sweep cannot reach. ` +
+        `${walls.faults.length} fault(s):\n  ${walls.faults.join("\n  ")}\n  ` +
+        `Attach the container(s) (openContainer), or detach() them onto the record, then re-run.`,
+    );
+  }
+
+  // A `kept` wall whose admit-set INTERSECTS the condemned set refuses the cut. This is the hole
+  // Correction 2 closes for every other wall: `unreachableStoreReport` returns a wall as a FAULT only
+  // while it is neither attached nor covered, and the documented remedy for a blocked erase —
+  // detach() it onto the record — converts that fault into a footnote. The cut would then run,
+  // reach the attached pools only, and report `holds: false` beside a `kept` list while members sat
+  // legible on a shelf: H7 in the one artifact whose entire purpose is not being H7. The
+  // intersection is COMPUTABLE without attaching anything (the wall's at-rest membership Term is in
+  // the container table), so it is computed.
+  const table = readContainerTable(gw.reactor, operator);
+  const accepted = new Set(slate.acceptsIncomplete);
+  const notReached: { wall: string; acceptsIncomplete: string }[] = [];
+  for (const wall of walls.kept) {
+    if (accepted.has(wall)) {
+      notReached.push({ wall, acceptsIncomplete: slate.record });
+      continue;
+    }
+    const rec = table.containers.get(wall);
+    const term = rec?.membership ?? readTermAt(gw.reactor, rec?.membershipAt);
+    if (term === undefined) {
+      refuse(
+        `the kept wall "${wall}" declares no at-rest membership Term, so what it was seeded to ` +
+          `admit cannot be computed — an uncomputable intersection with the condemned set cannot ` +
+          `be excluded, and H9's direction is to fail closed rather than assume empty. Attach it ` +
+          `(openContainer) and re-run, declare its membership, or name it in the slate's ` +
+          `\`accepts-incomplete\` to cut around it on the record.`,
+      );
+    }
+    const admits = gw.select(term).filter((d) => slate.members.has(d.id));
+    if (admits.length > 0) {
+      refuse(
+        `the kept wall "${wall}" was seeded to admit ${admits.length} condemned delta(s) — ` +
+          `${admits.map((d) => d.id).join(", ")} — and a detach record takes it out of this sweep. ` +
+          `A per-member \`holds: false\` beside a \`kept\` list would report a completeness this ` +
+          `cut cannot prove. Attach the wall (openContainer) and re-run, narrow the slate to ` +
+          `exclude those ids (un-slating is free), or sign \`accepts-incomplete\` for this wall.`,
+      );
+    }
+  }
+
+  // A MEMBER THAT IS ANOTHER STANDING SLATE'S PINNED TERM would make that slate UNRESOLVED the moment
+  // this cut landed — one cut silently disarming another slate's closures, on a door, with nothing
+  // reporting it. Refused here rather than tolerated downstream, and `eraseImpl` refuses the same
+  // delta for the same reason, which together is what keeps `unresolved` unreachable through a door.
+  for (const other of readSlates(gw.reactor, operator, now)) {
+    if (other.record === slate.record) continue;
+    if (slate.members.has(other.membershipAt)) {
+      refuse(
+        `the frozen member ${other.membershipAt} is the PINNED membership Term of the standing slate ` +
+          `over "${other.container}". Erasing it would leave that slate unable to read its own ` +
+          `condemned set, so its closures would silently stop enforcing. Cut or strike that slate ` +
+          `first, or narrow this one to exclude that id (un-slating is free, §29.8).`,
+      );
+    }
+  }
+
+  // RE-FREEZE AGREEMENT, proven again: §29.2's door check proves it at declaration time, and the
+  // window is exactly where the ground moves. Computed over the RECORD's pins, so nothing a later
+  // container declaration did can move what is checked here. The ONE lawful exception is named rather
+  // than discovered — an operator erasing a member BY HAND mid-window shrinks the evaluation while the
+  // frozen id set survives, and refusing without an exception would only DETECT a jam nothing can
+  // repair (nothing can un-erase, so the slate would stand with `read` closing forever).
+  const frozen = readFrozenTerm(gw.reactor, slate.membershipAt);
+  if (!frozen.ok) refuse(frozen.why);
+  const pinnedTerm = (frozen as { term: unknown }).term;
+  const reFrozen = freezeAgreement(gw.reactor, pinnedTerm, slate.version);
+  const present = new Set(evalMembership(gw.reactor, pinnedTerm).map((d) => d.id));
+  const priorTombstone: { member: string; tombstone: string }[] = [];
+  const tombs = survivingTombstones(gw.reactor, operator);
+  for (const id of [...slate.members].sort()) {
+    if (present.has(id)) continue;
+    const already = tombs.find((t) => tombstoneTarget(t.claims) === id);
+    if (already === undefined) {
+      refuse(
+        `the frozen member ${id} resolves to nothing and carries NO surviving lawful tombstone, so ` +
+          `the re-freeze disagreement is not accounted for (${reFrozen ?? "the address still agrees"}). ` +
+          `A cut must not stand over an unreported gap.`,
+      );
+    }
+    priorTombstone.push({ member: id, tombstone: already!.id });
+  }
+  // The GROW leg. Content addressing makes it unreachable THROUGH THE TERM — the pinned address names
+  // immutable bytes, so `evalMembership` over it can only ever return a subset of the ids read out of
+  // it. The reachable widening vector was a container re-declaration, and that is refused above (at the
+  // door) and reported by the reader; this stays as the fail-closed backstop for any future shape.
+  for (const id of present) {
+    if (!slate.members.has(id)) {
+      refuse(
+        `the membership Term now admits ${id}, which is not in the frozen version ${slate.version} ` +
+          `— a slate's condemned set cannot GROW after identification`,
+      );
+    }
+  }
+
+  // The affected, resurfacing and duplicates sets are computed HERE, immediately before any purge:
+  // afterwards the members are gone and every intersection reads empty. The frozen-membership
+  // lesson applying a second time, one layer up.
+  const reach = affectedContainers(gw, slate.members, slate.container);
+  if (reach.unknown.length > 0) {
+    refuse(
+      `the scope of ${reach.unknown.length} container(s) could not be read, so their intersection ` +
+        `with the condemned set cannot be excluded: ${reach.unknown.join(", ")}. A graveyard's ` +
+        `affected set is DURABLE, and an undetermined entry would make it a guess.`,
+    );
+  }
+  const affected = reach.affected;
+  const resurfacing = resurfacingOf(gw.reactor, slate.members);
+  const duplicates = duplicatesOf(gw, slate.members);
+
+  // Per member, the ORDINARY erase — the cut mints no new fan-out. Tombstone, purge, attached
+  // pool/wall fan-out and the byte verdict all come from §11 unchanged; the only addition is one
+  // optional `slate` pointer on each newly-minted tombstone.
+  const priorIds = new Set(priorTombstone.map((p) => p.member));
+  const members: CutMemberReport[] = [];
+  const faults: string[] = [];
+  for (const id of [...slate.members].sort()) {
+    try {
+      const outstanding = priorIds.has(id) ? await erasureOutstanding(gw, id) : true;
+      if (outstanding) {
+        const result = await eraseImpl(gw, id, {
+          ...(slate.reason === undefined ? {} : { reason: slate.reason }),
+          slate: container,
+        });
+        members.push({
+          member: id,
+          tombstone: result.tombstone,
+          spokenBy: result.spokenBy,
+          tiers: await tierVerdicts(gw, id, notReached),
+          citations: result.citations,
+        });
+      } else {
+        const tomb = tombs.find((t) => tombstoneTarget(t.claims) === id)!;
+        members.push({
+          member: id,
+          tombstone: tomb.id,
+          spokenBy: spokenByOf(tomb.claims) ?? "",
+          tiers: await tierVerdicts(gw, id, notReached),
+          citations: [],
+        });
+      }
+    } catch (err) {
+      faults.push(`${id}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  if (faults.length > 0) {
+    // ANY fault: throw, and the slate STANDS. No graveyard lands, the declaration survives, every
+    // closed door stays closed — so a partially-cut slate is still slated, still reviewable, and
+    // RESUMABLE. T32's `drop refused: … the pool remains ATTACHED` discipline. A re-run mints no
+    // second tombstone (§11's anchor).
+    throw new Error(
+      `cut ${container} did not complete: ${faults.length} member(s) could not be erased, so the ` +
+        `slate STANDS — its doors stay closed, its declaration still resolves, and the cut is ` +
+        `RESUMABLE. No graveyard was recorded.\n  ${faults.join("\n  ")}\n` +
+        `Resolve them and re-run; the re-run mints no second tombstone.`,
+    );
+  }
+
+  const cutAt = now;
+  const closes = [...slate.closes].sort();
+  // The graveyard lands FIRST. A re-run after a crash between the two steps finds the graveyard
+  // already standing and simply strikes — exactly one graveyard, idempotent by construction.
+  const existing = findGraveyard(gw.reactor, operator, slate.record);
+  const graveyard =
+    existing ??
+    signClaims(
+      graveyardClaims(
+        {
+          container,
+          record: slate.record,
+          version: slate.version,
+          membershipAt: slate.membershipAt,
+          memberCount: slate.members.size,
+          opened: slate.requestedAt,
+          cutAt,
+          closes,
+          affected,
+          priorTombstone,
+        },
+        operator,
+        gw.nextTimestamp(),
+      ),
+      seed,
+    );
+  if (existing === undefined) {
+    await gw.append([graveyard]);
+    await gw.flush();
+  }
+  // The injected hold the order rail drives (T33's `adoptionHold` idiom): a test holds the cut open
+  // between the graveyard and the strike to prove the crash window lands exactly one graveyard.
+  if (gw.cutHold !== undefined) await gw.cutHold();
+  // The LAST ACT: drop the container by striking its declaration. A property container holds no
+  // bytes of its own, so this purges nothing — dropping it is not the cut, it ends it.
+  const declarations = survivingDeclarationIds(gw.reactor, operator, container);
+  if (declarations.length > 0) {
+    await gw.append(
+      declarations.map((id) => signClaims(retractionOf(id, operator, gw.nextTimestamp()), seed)),
+    );
+  }
+
+  return {
+    slate: container,
+    record: slate.record,
+    graveyard: graveyard.id,
+    version: slate.version,
+    memberCount: slate.members.size,
+    requestedBy: slate.requestedBy,
+    requestedByForm: slate.requestedByForm,
+    requestedAt: slate.requestedAt,
+    deadline: slate.deadline,
+    ...(slate.reason === undefined ? {} : { reason: slate.reason }),
+    closes,
+    window: { opened: slate.requestedAt, cutAt },
+    members,
+    priorTombstone,
+    notReached,
+    affected,
+    resurfacing,
+    duplicates,
+    observationOnly: OBSERVATION_FIELDS,
+  };
+}
+
+// A wall's at-rest membership Term, for the `kept`-wall intersection. A wall's scope is an ORDINARY
+// live Term, so the extensional requirement a slate's own membership carries does not apply — only
+// "did it resolve at all", and an unresolved one is refused by the caller (H9, never assumed empty).
+const readTermAt = (reactor: Reactor, membershipAt: string | undefined): unknown => {
+  if (membershipAt === undefined) return undefined;
+  const published = reactor.get(membershipAt);
+  if (published === undefined) return undefined;
+  const raw = primitives(published.claims, "term")[0];
+  if (typeof raw !== "string") return undefined;
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return undefined;
+  }
+};
+
+const spokenByOf = (claims: Claims): string | undefined => {
+  const p = claims.pointers.find((x) => x.role === "spoken-by");
+  return p?.target.kind === "primitive" && typeof p.target.value === "string"
+    ? p.target.value
+    : undefined;
+};
+
+// The per-tier byte verdict, asked of the BYTES and tri-state. A tier that cannot answer is
+// `unproven`, never `false` — and a `kept` wall the operator signed `accepts-incomplete` over is
+// `unproven` too, because nobody looked.
+async function tierVerdicts(
+  gw: Gateway,
+  id: string,
+  notReached: readonly { readonly wall: string }[],
+): Promise<TierVerdict[]> {
+  const out: TierVerdict[] = [];
+  const probe = async (label: string, g: Gateway): Promise<void> => {
+    try {
+      out.push({ tier: label, holds: await g.backend.holds(id) });
+    } catch {
+      out.push({ tier: label, holds: "unproven" }); // proven nothing (H9), never proven clean
+    }
+  };
+  await probe("primary", gw);
+  const named = new Map([...gw.attachedContainers].map(([name, pool]) => [pool, name]));
+  let anon = 0;
+  for (const pool of gw.quarantinePools) {
+    const label = named.get(pool) ?? `pool:${(anon += 1)}`;
+    await probe(label, pool);
+  }
+  for (const wall of notReached) out.push({ tier: wall.wall, holds: "unproven" });
+  return out;
+}
+
+function findGraveyard(reactor: Reactor, operator: string, record: string): Delta | undefined {
+  const negated = lawfulNegated(reactor, operator);
+  for (const d of lawfulSnapshot(reactor, operator)) {
+    if (negated(d.id) || !isGraveyard(d.claims)) continue;
+    const cited = d.claims.pointers.find(
+      (p) => p.role === "slate-record" && p.target.kind === "delta",
+    );
+    if (cited?.target.kind === "delta" && cited.target.deltaRef.delta === record) return d;
+  }
+  return undefined;
+}
+
+// --- the graveyard: durable, joinable, arithmetic ------------------------------------------------
+
+export interface GraveyardRecord {
+  readonly id: string;
+  readonly container: string;
+  readonly record: string;
+  readonly version: string;
+  readonly membershipAt: string;
+  readonly memberCount: number;
+  readonly opened: number;
+  readonly cutAt: number;
+  readonly closes: readonly SlateClosure[];
+  readonly affected: readonly string[];
+  readonly priorTombstone: readonly { readonly member: string; readonly tombstone: string }[];
+}
+
+export function readGraveyards(reactor: Reactor, operator: string | undefined): GraveyardRecord[] {
+  if (operator === undefined) return [];
+  const negated = lawfulNegated(reactor, operator);
+  const out: GraveyardRecord[] = [];
+  for (const d of lawfulSnapshot(reactor, operator)) {
+    if (negated(d.id) || !isGraveyard(d.claims)) continue;
+    if (graveyardDefect(d.claims, operator) !== undefined) continue;
+    const cited = d.claims.pointers.find(
+      (p) => p.role === "slate-record" && p.target.kind === "delta",
+    );
+    out.push({
+      id: d.id,
+      container: at(d.claims, "graveyard", CTX_GRAVEYARD)!,
+      record: cited?.target.kind === "delta" ? cited.target.deltaRef.delta : "",
+      version: primitives(d.claims, "version")[0] as string,
+      membershipAt: primitives(d.claims, "membershipAt")[0] as string,
+      memberCount: primitives(d.claims, "member-count")[0] as number,
+      opened: primitives(d.claims, "opened")[0] as number,
+      cutAt: primitives(d.claims, "cut-at")[0] as number,
+      closes: primitives(d.claims, "closes").filter(
+        (c): c is SlateClosure => typeof c === "string" && CLOSURES.has(c),
+      ),
+      affected: entitiesAt(d.claims, "affected", CTX_CONTAINER),
+      priorTombstone: primitives(d.claims, "prior-tombstone")
+        .map((p) => (typeof p === "string" ? parsePriorPair(p) : undefined))
+        .filter((p): p is { member: string; tombstone: string } => p !== undefined),
+    });
+  }
+  out.sort((a, b) => a.cutAt - b.cutAt || (a.id < b.id ? -1 : 1));
+  return out;
+}
+
+export interface CompletenessCheck {
+  /**
+   * §29.6's sentence, UNQUALIFIED: every member has a SURVIVING covering tombstone. A later
+   * forgiveness makes this false, because a struck tombstone stops surviving — that is the sentence
+   * being read honestly, not a defect.
+   */
+  readonly holds: boolean;
+  /**
+   * Did the CUT complete? Every member accounted for as either a surviving covering tombstone or an
+   * ENUMERATED forgiveness. This is the question a receipt asks, and it is a different one from
+   * `holds`: collapsing the two would make the first lawful forgiveness indistinguishable from an
+   * abandoned cut — the same boolean collapse this file refuses for `ByteVerdict`, one layer up.
+   */
+  readonly cutCompleted: boolean;
+  /** Could the frozen set be READ at all? False makes every other field vacuous rather than clean. */
+  readonly readable: boolean;
+  /** Why not, when `readable` is false — never silence (H9). */
+  readonly unreadable?: string;
+  readonly members: readonly string[];
+  /** Members whose tombstone neither cites this slate nor is named in `prior-tombstone`. */
+  readonly missing: readonly string[];
+  /** Members whose tombstone has since been lawfully STRUCK — reported, never subtracted. */
+  readonly forgiven: readonly { readonly member: string; readonly strike: string }[];
+}
+
+/**
+ * §29.6's arithmetic, read AT A NAMED MOMENT from DURABLE GROUND ALONE — no probe, no CutReport:
+ *
+ * > Every member of the frozen `version` has a surviving tombstone, and that tombstone either cites
+ * > this slate or is named for that member in the graveyard's `prior-tombstone` list.
+ *
+ * The clause after the comma is not a weakening: without it the proof is FALSE on cuts that
+ * SUCCEEDED (a member erased by hand mid-window; a re-run anchoring on a tombstone minted before
+ * the `slate` pointer had a value to carry, which content addressing forbids adding later — H4).
+ * A proof that cannot tell success from abandonment proves nothing, so the exception is ENUMERATED
+ * in the graveyard rather than inferred at check time.
+ *
+ * And a FORGIVEN member does not falsify it either: §29.8 makes forgiveness a tombstone strike, so
+ * the first lawful forgiveness would flip a naive reading to FALSE. A member whose tombstone has
+ * been struck is reported as forgiven WITH its strike id. The graveyard records an event that
+ * happened; forgiveness is a later event, and the check reports both rather than subtracting one.
+ */
+export function graveyardCompleteness(
+  reactor: Reactor,
+  operator: string | undefined,
+  graveyardId: string,
+): CompletenessCheck {
+  const blank = { holds: false, cutCompleted: false, members: [], missing: [], forgiven: [] };
+  const grave = readGraveyards(reactor, operator).find((g) => g.id === graveyardId);
+  if (grave === undefined || operator === undefined) {
+    return {
+      ...blank,
+      readable: false,
+      unreadable: `no surviving lawful graveyard at ${graveyardId}`,
+    };
+  }
+  // AN UNREADABLE FROZEN SET IS NOT A CLEAN ONE. `members.length > 0` inside `holds` used to stand in
+  // for this, which is the H7 shape wearing a guard clause: erase the membership Term after a cut and
+  // the walk finds no ids, so "every member is accounted for" would be vacuously true over a set the
+  // store can no longer read. The verdict is its own field, and it fails closed.
+  const frozen = readFrozenTerm(reactor, grave.membershipAt);
+  if (!frozen.ok) return { ...blank, readable: false, unreadable: frozen.why };
+  const members = [...frozen.ids].sort();
+  const prior = new Map(grave.priorTombstone.map((p) => [p.member, p.tombstone]));
+  const surviving = new Map(
+    survivingTombstones(reactor, operator).map((t) => [tombstoneTarget(t.claims)!, t]),
+  );
+  const negated = lawfulNegated(reactor, operator);
+  const missing: string[] = [];
+  const forgiven: { member: string; strike: string }[] = [];
+  for (const member of members) {
+    const tomb = surviving.get(member);
+    if (tomb !== undefined) {
+      const cites = at(tomb.claims, "slate", CTX_SLATE) === grave.container;
+      if (cites || prior.get(member) === tomb.id) continue;
+      missing.push(member);
+      continue;
+    }
+    // No SURVIVING tombstone. Struck (forgiven) is reported as itself; absent is a real hole.
+    const strike = strikeOf(reactor, operator, negated, member);
+    if (strike !== undefined) forgiven.push({ member, strike });
+    else missing.push(member);
+  }
+  return {
+    // Two verdicts, because one boolean cannot hold both facts. `holds` is §29.6's sentence read
+    // literally (a forgiveness makes it false); `cutCompleted` is what a receipt asks (nothing
+    // unexplained). An empty member set answers NEITHER affirmatively — `readable` decides that.
+    holds: missing.length === 0 && forgiven.length === 0,
+    cutCompleted: missing.length === 0,
+    readable: true,
+    members,
+    missing,
+    forgiven,
+  };
+}
+
+// The lawful strike that forgave a member's tombstone — the id a receipt reports beside FORGIVEN.
+function strikeOf(
+  reactor: Reactor,
+  operator: string,
+  negated: (id: string) => boolean,
+  member: string,
+): string | undefined {
+  for (const d of lawfulSnapshot(reactor, operator)) {
+    if (!isTombstone(d.claims) || tombstoneTarget(d.claims) !== member) continue;
+    if (!negated(d.id)) continue;
+    for (const strike of reactor.negationsOf(d.id)) {
+      const s = reactor.get(strike);
+      if (s !== undefined && s.claims.author === operator) return strike;
+    }
+  }
+  return undefined;
 }

@@ -76,7 +76,14 @@ import {
   type ResolvedNode,
 } from "./gql.js";
 import { declarePublicImpl, readPublicSchemas } from "./public.js";
-import { slateReportsImpl, type SlateReport } from "./slate.js";
+import {
+  cutImpl,
+  readGraveyards,
+  slateReportsImpl,
+  type CutReport,
+  type GraveyardRecord,
+  type SlateReport,
+} from "./slate.js";
 import {
   lensOf,
   programOf,
@@ -642,10 +649,19 @@ export class Gateway {
   // Erase one delta (SPEC §11): the body lives beside the tombstone vocabulary in erase.ts.
   // `kept` lists the declared container stores a surviving detach record deliberately holds outside
   // this sweep (SPEC §27.7's completeness guard) — on the record, never silent.
+  // `slate` is the §29.6 JOIN a cut stamps on each tombstone it mints; an ordinary erase leaves it
+  // absent, forever, and `tombstone`/`spokenBy` ride out so a cut can collect them per member rather
+  // than re-derive them from a ground the purge just moved.
   async erase(
     id: string,
-    opts: { reason?: string } = {},
-  ): Promise<{ erased: string; citations: string[]; kept: string[] }> {
+    opts: { reason?: string; slate?: string } = {},
+  ): Promise<{
+    erased: string;
+    citations: string[];
+    kept: string[];
+    tombstone: string;
+    spokenBy: string;
+  }> {
     return eraseImpl(this, id, opts);
   }
 
@@ -671,6 +687,28 @@ export class Gateway {
   slates(now?: number): SlateReport[] {
     return slateReportsImpl(this, now ?? Date.now());
   }
+
+  /** Every surviving lawful graveyard — the durable record of each erasure EVENT (SPEC §29.6). */
+  graveyards(): GraveyardRecord[] {
+    return readGraveyards(this.reactor, this.operatorAuthor);
+  }
+
+  /**
+   * THE CUT (SPEC §29.5): pre-flight all-or-refuse, then §11's ordinary erase per member, then the
+   * graveyard, then — the LAST act — the slate's container is dropped by striking its declaration.
+   * On ANY fault the slate STANDS: doors closed, declaration resolving, cut RESUMABLE.
+   */
+  async cut(slate: string, opts: { now?: number } = {}): Promise<CutReport> {
+    return cutImpl(this, slate, opts);
+  }
+
+  /**
+   * @internal — T64 seam (slate.ts): the injected hold the cut-order rail drives. Awaited between
+   * the graveyard's landing and the declaration's strike, so a test can interrupt exactly that
+   * window and prove the re-run lands exactly one graveyard. Undefined in production; nothing in the
+   * cut's logic depends on it being set.
+   */
+  cutHold: (() => Promise<void>) | undefined = undefined;
 
   // The separate-store gateways attached to this store (SPEC §24.8/§27): the operator's own one-way
   // replicas that an erasure here must fan out to. This Set is the CANONICAL runtime registry of
