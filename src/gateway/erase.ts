@@ -24,7 +24,7 @@ import { Reactor, signClaims } from "@bombadil/rhizomatic";
 import type { Claims, Delta } from "@bombadil/rhizomatic";
 import { lawfulNegated } from "./registration.js";
 import { unreachableStoreReport } from "./container.js";
-import { CTX_SLATE, slateHealth, slatePointer, type SlateHealth } from "./slate.js";
+import { CTX_SLATE, readSlates, slateHealth, slatePointer, type SlateHealth } from "./slate.js";
 import type { Gateway } from "./gateway.js";
 
 export const ERASE_ENTITY = "loam:erasure";
@@ -292,6 +292,22 @@ export async function eraseImpl(
     // The erasure log is the record of what was forgotten; it stays append-only. Un-erasure
     // is striking the tombstone (forgiveness), never erasing it.
     throw new Error("the erasure log is append-only: a tombstone cannot itself be erased");
+  }
+  // A STANDING SLATE'S PINNED MEMBERSHIP TERM is not an ordinary delta (SPEC §29.2): erasing it leaves
+  // that slate unable to read its own condemned set, so every door it closed silently stops enforcing
+  // while the slate still reports itself standing. Refused here rather than tolerated, which is what
+  // keeps that state unreachable through a door at all — the cut refuses the same delta as a member.
+  const pinning = readSlates(gw.reactor, gw.operatorAuthor, Date.now()).find(
+    (s) => s.membershipAt === id,
+  );
+  if (pinning !== undefined) {
+    throw new Error(
+      `erase ${id} refused: it is the PINNED membership Term of the standing slate over ` +
+        `"${pinning.container}", and the slate's closures are all seeded from the ids it names. ` +
+        `Erasing it would reopen every door that slate closed while it still read as standing. ` +
+        `Cut the slate (which removes its members and drops the container), or strike its record and ` +
+        `its declaration first — un-slating is free (§29.8).`,
+    );
   }
   const tombstone =
     already ??

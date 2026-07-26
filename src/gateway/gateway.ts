@@ -129,6 +129,7 @@ import {
   severEntityImpl,
 } from "./mutate.js";
 import {
+  gatherForRetractionImpl,
   gatherImpl,
   resolvedNodeImpl,
   resolvePinnedImpl,
@@ -467,8 +468,10 @@ export class Gateway {
   }
 
   // Pinned resolution (SPEC §17 versioning × §26 as-of): the body lives in reads.ts.
-  resolvePinned(reg: Registered, entity: string, asOf?: number): ResolvedNode {
-    return resolvePinnedImpl(this, reg, entity, asOf);
+  // The optional `now` is the caller's WALL-CLOCK moment for a slate's lapse (SPEC §29.4); absent,
+  // the door reads its own clock. The INTERNAL seam below requires it — see `requireMoment`.
+  resolvePinned(reg: Registered, entity: string, asOf?: number, now?: number): ResolvedNode {
+    return resolvePinnedImpl(this, reg, entity, now ?? Date.now(), asOf);
   }
 
   // Re-derive the store's slice of the surface and follow it. The desired set is the manual
@@ -961,13 +964,17 @@ export class Gateway {
 
   // Gather the HView for (schema, entity): the body lives in reads.ts.
   /** @internal — T19 seam (mutate.ts: retraction reads the hview to find the caller's own claims) */
-  gather(name: string, entity: string, asOf?: number): HView {
-    return gatherImpl(this, name, entity, asOf);
+  gather(name: string, entity: string, asOf?: number, now?: number): HView {
+    return gatherImpl(this, name, entity, now ?? Date.now(), asOf);
+  }
+
+  gatherForRetraction(name: string, entity: string): HView {
+    return gatherForRetractionImpl(this, name, entity);
   }
 
   /** @internal — T19 seam (mutate.ts: every write verb answers with the re-resolved node) */
-  resolvedNode(name: string, entity: string, asOf?: number): ResolvedNode {
-    return resolvedNodeImpl(this, name, entity, asOf);
+  resolvedNode(name: string, entity: string, asOf?: number, now?: number): ResolvedNode {
+    return resolvedNodeImpl(this, name, entity, now ?? Date.now(), asOf);
   }
 
   // --- the write seam --------------------------------------------------------------------------
@@ -1043,8 +1050,12 @@ export class Gateway {
     name: string,
     entity: string,
     door: "full" | "public" = "full",
+    now?: number,
   ): AsyncGenerator<PatchNode, void, unknown> {
-    return watchEntityImpl(this, name, entity, door);
+    // A stream outlives any single moment, so an unpinned watch re-reads the clock PER FRAME — the
+    // lapse of a deadline that passes mid-stream must take effect without a resubscribe. A pinned
+    // `now` is the rails' deterministic seam (the flaky-test rule).
+    return watchEntityImpl(this, name, entity, door, now === undefined ? undefined : () => now);
   }
 
   // --- the GraphQL surface ---------------------------------------------------------------------

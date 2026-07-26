@@ -35,7 +35,14 @@
 // milliseconds; a delta's own `timestamp` is DELTA-TIME (`max(Date.now(), last + 1)`) and may run
 // ahead under load. They are never compared against each other.
 
-import { evalTerm, parseTerm, type Claims, type Delta, type Reactor } from "@bombadil/rhizomatic";
+import {
+  DeltaSet,
+  evalTerm,
+  parseTerm,
+  type Claims,
+  type Delta,
+  type Reactor,
+} from "@bombadil/rhizomatic";
 import { freezeMembers } from "./container-identity.js";
 import { CTX_CONTAINER, readContainerTable, containerScopeImpl } from "./container.js";
 import { isTombstone } from "./erase.js";
@@ -847,4 +854,158 @@ export function slateHealth(gw: Gateway, now: number): SlateHealth {
       .map((s) => s.container)
       .sort(),
   };
+}
+
+// --- the cite closure ----------------------------------------------------------------------------
+
+/**
+ * ONE predicate, both admission doors (§29.3). Returns the container and the member a delta cites,
+ * or undefined. The doors differ only in DISCLOSURE: `appendImpl` names the container (the only
+ * parties who can trigger it are parties who could already read the target, so telling them IS the
+ * notice), while `federateImpl` takes the uniform-refusal discipline (a peer pushing a citation may
+ * have no read access, and a distinguishable refusal would announce that something exists and is
+ * leaving).
+ *
+ * DIRECT only, deliberately: a Set lookup at admission, where transitive closure is the unbounded
+ * scan H8 exists to warn about. But "direct" means NAMES A MEMBER — a delta-ref OR an enumerated
+ * primitive role that is a delta reference by convention.
+ *
+ * AND A NEGATION IS NOT A CITATION (H1's T43 site, exactly). Cite closure exists so the DEPENDENT set
+ * cannot grow; a strike adds no dependent — it REMOVES a claim, which is the one direction a
+ * suppression window has no reason to refuse. Refusing one strands it: at the append door a caller's
+ * own `clear` over a field with one slated contribution would retract none of their others (the batch
+ * refuses whole), and at the federation door the refusal folds into the uniform `rejected += 1` while
+ * union's idempotence means the peer never resends — so after un-slating the claim reads LIVE here and
+ * RETRACTED at the peer, forever. The exemption is PER POINTER, so a delta that negates a member and
+ * also cites it under some other role is still refused on that other role.
+ */
+export function slateRefusal(
+  slates: readonly Slate[],
+  delta: Delta,
+): { container: string; member: string } | undefined {
+  const claims = delta.claims;
+  // The erasure vocabulary itself is not a citation that grows the dependent set — it IS the
+  // removal. A tombstone names its target under `erases`, and the cut mints one per member; a
+  // graveyard names the slate it closed. Refusing those would make a slate refuse its own cut.
+  if (isTombstone(claims) || isGraveyard(claims)) return undefined;
+  for (const slate of slates) {
+    if (!slate.closes.has("cite") || slate.members.size === 0) continue;
+    for (const p of claims.pointers) {
+      if (p.role === "negates") continue; // a strike narrows; it never grows the dependent set
+      if (p.target.kind === "delta" && slate.members.has(p.target.deltaRef.delta)) {
+        return { container: slate.container, member: p.target.deltaRef.delta };
+      }
+      if (
+        p.target.kind === "primitive" &&
+        typeof p.target.value === "string" &&
+        (PRIMITIVE_DELTA_REF_ROLES as readonly string[]).includes(p.role) &&
+        slate.members.has(p.target.value)
+      ) {
+        return { container: slate.container, member: p.target.value };
+      }
+    }
+  }
+  return undefined;
+}
+
+// --- the withheld set (egress and read share ONE closure) ---------------------------------------
+
+/**
+ * The condemned set CLOSED UNDER NEGATION TARGETS, transitively — H1 read from the other side.
+ *
+ * `withNegationClosure` maintains *if I offer `d`, I offer everything that negates `d`*. Its
+ * contrapositive is *if I withhold `n`, and `n` negates `d`, I withhold `d`*. Those are one rule,
+ * so a naive subtraction of a slated NEGATION would leave its target offered and hand the peer a
+ * live reading of a retracted claim. Transitive for the same reason the forward closure is (a
+ * struck strike revives, so one link would leave a revived claim wrongly offered), and terminating
+ * for the same reason (the set only grows, bounded by the snapshot, and content addressing forbids
+ * a cycle).
+ *
+ * This UNDER-represents the post-cut world for exactly the resurfacing set, and that is the correct
+ * direction: over-withholding cannot disclose, un-slating is FREE (§29.8), and a revocable act must
+ * not have an irrevocable effect.
+ */
+export function condemnedClosure(reactor: Reactor, seed: Iterable<string>): Set<string> {
+  const out = new Set(seed);
+  const pending = [...out];
+  while (pending.length > 0) {
+    const id = pending.pop() as string;
+    const d = reactor.get(id);
+    if (d === undefined) continue;
+    for (const p of d.claims.pointers) {
+      if (p.role !== "negates" || p.target.kind !== "delta") continue;
+      const target = p.target.deltaRef.delta;
+      if (out.has(target)) continue;
+      out.add(target);
+      pending.push(target);
+    }
+  }
+  return out;
+}
+
+const closureIds = (
+  reactor: Reactor,
+  slates: readonly Slate[],
+  door: SlateClosure,
+): Set<string> => {
+  const seed = new Set<string>();
+  for (const s of slates) {
+    if (!s.closes.has(door)) continue;
+    for (const id of s.members) seed.add(id);
+  }
+  return seed.size === 0 ? seed : condemnedClosure(reactor, seed);
+};
+
+/** What EGRESS closure withholds from `offeredDeltas` — the one site, and `openWall` inherits it. */
+export function egressWithheld(gw: Gateway, now: number): Set<string> {
+  return closureIds(gw.reactor, readSlates(gw.reactor, gw.operatorAuthor, now), "egress");
+}
+
+/** What READ closure withholds from every gather that answers a read DOOR. */
+export function readClosedIds(gw: Gateway, now: number): Set<string> {
+  requireMoment(now, "a read door");
+  return closureIds(gw.reactor, readSlates(gw.reactor, gw.operatorAuthor, now), "read");
+}
+
+/**
+ * `snapshot ∖ readClosed` — the ONE helper every gather that answers a READ door evaluates over.
+ * Read closure is a property of DOORS: `select`, `containerScope`, `Container.members`,
+ * `Gateway.freeze`, §29.2's re-freeze and the operator's review read all evaluate over the
+ * UNNARROWED ground, stated as an invariant rather than left to where the code happens to sit. The
+ * tempting single choke point (`selectImpl`) is the one place this must never go — a read-closed
+ * slate evaluating its own membership over a narrowed snapshot freezes to a different address than
+ * `version`, self-invalidates, and jams its own cut forever at the exact moment the deadline passes.
+ *
+ * The unnarrowed list, so a reader can tell CONSIDERED from FORGOTTEN:
+ *   - `select`, `Gateway.freeze`, `containerScope`, `Container.members`, §29.2's re-freeze — the
+ *     membership machinery. Narrowing any of them is the deadlock above.
+ *   - `Gateway.watch` — CONSIDERED, and deliberately unnarrowed: it is live `select`, the same
+ *     primitive under a subscription, and it is what the membership machinery itself would watch.
+ *     It is not a door serving a READING; a reader who wants the narrowed live view watches an
+ *     ENTITY (`watchEntity`), which IS narrowed.
+ *   - the operator's review read (`slates()`) — the controller must see what they will destroy.
+ *   - the §14 RETRACTION gather (`gatherForRetraction`) — a write must see what it is retracting, or
+ *     a caller's own strike becomes a silent no-op over a read-closed member.
+ */
+export function readGround(gw: Gateway, now: number): DeltaSet {
+  return groundWithout(gw.reactor.snapshot(), readClosedIds(gw, now));
+}
+
+/** The same narrowing applied AFTER an as-of reconstruction (§26 × §29.3). */
+export function readGroundAsOf(gw: Gateway, asOfGround: DeltaSet, now: number): DeltaSet {
+  return groundWithout(asOfGround, readClosedIds(gw, now));
+}
+
+const groundWithout = (ground: DeltaSet, closed: ReadonlySet<string>): DeltaSet =>
+  closed.size === 0 ? ground : DeltaSet.from([...ground].filter((d) => !closed.has(d.id)));
+
+/**
+ * Did this batch just close `read` over something? A STREAM OPEN BEFORE THE SLATE re-resolves, or it
+ * serves the member forever (§29.3): nothing in a slate's own deltas touches the watched entity's
+ * materialization, so the sink never fires and the narrowing never takes effect. Asked cheaply —
+ * a batch with no slate record in it pays nothing.
+ */
+export function landsReadClosure(gw: Gateway, batch: readonly Delta[], now: number): boolean {
+  if (!batch.some((d) => isSlateRecord(d.claims))) return false;
+  return readClosedIds(gw, now).size > 0;
 }

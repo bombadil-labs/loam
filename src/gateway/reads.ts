@@ -23,6 +23,7 @@ import {
 } from "@bombadil/rhizomatic";
 import { Channel } from "./channel.js";
 import { forgottenSince } from "./erase.js";
+import { readClosedIds, readGround, requireMoment } from "./slate.js";
 import type { Gateway } from "./gateway.js";
 import type { PatchNode, ResolvedNode } from "./gql.js";
 import type { Registered } from "./gql.js";
@@ -52,13 +53,28 @@ export function groundAsOfImpl(gw: Gateway, asOf: number): DeltaSet {
 
 // Ride the erasure annotation on an as-of node, beside the view (like `_hex`), never inside the
 // resolved data. A present read (no `asOf`) carries neither pin nor mark.
+//
+// AS-OF IS THE SITE THAT WOULD HAVE BEEN MISSED (SPEC §29.3): §26 reconstructs the surviving ground
+// at a moment T, and a moment BEFORE a slate would happily serve the condemned delta — so the
+// narrowing is applied AFTER the reconstruction, and the temporal door confesses a slate-suppression
+// count in the same register `forgottenSince` already uses. Absent when nothing is suppressed, so a
+// read over a store with no slate is byte-identical to what §26 always answered.
+// The count is REQUIRED, with no default. A default of 0 would read "assume nothing was suppressed",
+// which is the fail-open direction on a confession — the same reason `now` is required on the read
+// seam it is computed from.
 export function annotateImpl(
   gw: Gateway,
   node: ResolvedNode,
   asOf: number | undefined,
+  suppressed: number,
 ): ResolvedNode {
   if (asOf === undefined) return node;
-  return { ...node, asOf, forgotten: forgottenSince(gw.reactor, gw.operatorAuthor, asOf) };
+  return {
+    ...node,
+    asOf,
+    forgotten: forgottenSince(gw.reactor, gw.operatorAuthor, asOf),
+    ...(suppressed > 0 ? { suppressed } : {}),
+  };
 }
 
 // Gather the HView for (schema, entity): the live materialization when one is watching —
@@ -66,22 +82,75 @@ export function annotateImpl(
 // An `asOf` read (SPEC §26) can use NEITHER warm path — the materialization IS the present by
 // construction — so it takes the one honest path: evaluate the same body over the ground as it
 // stood at T (groundAsOf). Same gather, a narrower ground; nothing about resolution is time-cased.
-export function gatherImpl(gw: Gateway, name: string, entity: string, asOf?: number): HView {
+// READ CLOSURE IS A GATHER-LEVEL NARROWING, and this is one of its five named sites (SPEC §29.3).
+// The `now` is REQUIRED here, not optional: a lapse computed at the door means every door that
+// honours `read` needs the moment, and an optional one defaulting to anything at all would serve a
+// condemned member past a lapsed deadline and look healthy doing it.
+export function gatherImpl(
+  gw: Gateway,
+  name: string,
+  entity: string,
+  now: number,
+  asOf?: number,
+): HView {
+  requireMoment(now, `gather ${name}`);
+  const closed = readClosedIds(gw, now);
   if (asOf !== undefined) {
     const def = gw.def(name);
-    const result = evalTerm(def.hyperschema.body, groundAsOfImpl(gw, asOf), entity, gw.registry);
+    const ground = asOfGroundImpl(gw, asOf, closed);
+    const result = evalTerm(def.hyperschema.body, ground, entity, gw.registry);
     if (result.sort !== "hview") {
       throw new Error(`schema ${name} does not evaluate to a hyperview`);
     }
     return result.hview;
   }
-  // Sibling lenses share ONE materialization per PROGRAM (§21.7): the mat is keyed by the
-  // hyperschema's name, while `name` here is the LENS the door asked for.
-  const program = gw.def(name).hyperschema.name;
-  const live =
-    gw.reactor.materializedView(gw.matName(program), entity) ??
-    gw.reactor.materializedView(gw.lazyMatName(program, entity), entity);
-  if (live !== undefined) return live;
+  // THE WARM BRANCH IS DEMOTED while a read-closing slate stands, and this is the site that defeats
+  // the naive "resolve against `snapshot ∖ readClosed`" reading outright: a materialization is
+  // maintained INCREMENTALLY from ingest events, so it is not an operand set anything can subtract
+  // from, and a read-closed member would keep being served through the default path for every
+  // registered root. So while `readGround` differs from the snapshot the gather ignores the
+  // materialization and takes the cold branch over the narrowed ground. The cost is that reads lose
+  // their warm path for the life of the slate — a bounded, visible price a compliance window can
+  // pay. A RE-SEAT IS NOT THE FIX and must not be mistaken for one: `reseat()` replays the backend
+  // into a fresh reactor, so the rebuilt materialization holds the members again.
+  if (closed.size === 0) {
+    // Sibling lenses share ONE materialization per PROGRAM (§21.7): the mat is keyed by the
+    // hyperschema's name, while `name` here is the LENS the door asked for.
+    const program = gw.def(name).hyperschema.name;
+    const live =
+      gw.reactor.materializedView(gw.matName(program), entity) ??
+      gw.reactor.materializedView(gw.lazyMatName(program, entity), entity);
+    if (live !== undefined) return live;
+  }
+  const def = gw.def(name);
+  const result =
+    closed.size === 0
+      ? gw.reactor.eval(def.hyperschema.body, entity, gw.registry)
+      : evalTerm(def.hyperschema.body, readGround(gw, now), entity, gw.registry);
+  if (result.sort !== "hview") throw new Error(`schema ${name} does not evaluate to a hyperview`);
+  return result.hview;
+}
+
+const asOfGroundImpl = (gw: Gateway, asOf: number, closed: ReadonlySet<string>): DeltaSet =>
+  closed.size === 0
+    ? groundAsOfImpl(gw, asOf)
+    : DeltaSet.from([...groundAsOfImpl(gw, asOf)].filter((d) => !closed.has(d.id)));
+
+/**
+ * The gather a §14 RETRACTION reads, over the UNNARROWED ground (SPEC §29.3's invariant list).
+ *
+ * Read closure is a property of doors serving READINGS. A retraction is a WRITE that must see what it
+ * is retracting, and narrowing it turns a caller's own strike into a SILENT NO-OP: the member is
+ * absent from the hview, so it is never a target, no negation is ever signed, and the door answers 200
+ * with the field reading absent — which is exactly what read closure was already showing. Un-slate (or
+ * let the slate go unresolved) and the claim returns LIVE and UN-RETRACTED at every door, including the
+ * anonymous one. H1 crossed with H7, and reachable with no `read` ever declared, because a lapsed
+ * deadline adds it (§29.4).
+ *
+ * It discloses nothing: the negations only ever target the caller's OWN claims, which the caller wrote,
+ * and the node returned afterwards goes back through the ordinary narrowed read.
+ */
+export function gatherForRetractionImpl(gw: Gateway, name: string, entity: string): HView {
   const def = gw.def(name);
   const result = gw.reactor.eval(def.hyperschema.body, entity, gw.registry);
   if (result.sort !== "hview") throw new Error(`schema ${name} does not evaluate to a hyperview`);
@@ -96,10 +165,11 @@ export function resolvedNodeImpl(
   gw: Gateway,
   name: string,
   entity: string,
+  now: number,
   asOf?: number,
 ): ResolvedNode {
   const def = gw.def(name);
-  const hview = gatherImpl(gw, name, entity, asOf);
+  const hview = gatherImpl(gw, name, entity, now, asOf);
   const view = applyResolvers(
     def.resolvers,
     decorateChildren(
@@ -122,6 +192,7 @@ export function resolvedNodeImpl(
       hviewHex: hviewCanonicalHex(hview),
     },
     asOf,
+    readClosedIds(gw, now).size,
   );
 }
 
@@ -138,12 +209,20 @@ export function resolvePinnedImpl(
   gw: Gateway,
   reg: Registered,
   entity: string,
+  now: number,
   asOf?: number,
 ): ResolvedNode {
+  requireMoment(now, `resolvePinned ${reg.hyperschema.name}`);
+  // An OLD LENS OVER TODAY'S GROUND IS STILL A READ DOOR (SPEC §29.3): the live branch takes the
+  // same `readGround` substitution the cold gather takes, and the as-of branch narrows after the
+  // reconstruction. A pinned version freezes the lens, never the store's obligations.
+  const closed = readClosedIds(gw, now);
   const result =
     asOf === undefined
-      ? gw.reactor.eval(reg.hyperschema.body, entity, gw.registry)
-      : evalTerm(reg.hyperschema.body, groundAsOfImpl(gw, asOf), entity, gw.registry);
+      ? closed.size === 0
+        ? gw.reactor.eval(reg.hyperschema.body, entity, gw.registry)
+        : evalTerm(reg.hyperschema.body, readGround(gw, now), entity, gw.registry)
+      : evalTerm(reg.hyperschema.body, asOfGroundImpl(gw, asOf, closed), entity, gw.registry);
   if (result.sort !== "hview") {
     throw new Error(`schema ${reg.hyperschema.name} does not evaluate to a hyperview`);
   }
@@ -171,6 +250,7 @@ export function resolvePinnedImpl(
       hviewHex: hviewCanonicalHex(result.hview),
     },
     asOf,
+    closed.size,
   );
 }
 
@@ -193,11 +273,33 @@ export function watchEntityImpl(
   name: string,
   entity: string,
   door: "full" | "public" = "full",
+  nowAt: () => number = () => Date.now(),
 ): AsyncGenerator<PatchNode, void, unknown> {
   const bound = gw.def(name);
   const matName = gw.matFor(name, entity, door);
   const resolveCaptured = (): ResolvedNode => {
-    const hview = gw.reactor.materializedView(matName, entity);
+    // A LIVE SUBSCRIPTION IS A READ DOOR (SPEC §29.3), and here the materialization keeps its real
+    // job and loses the other one: THE MAT IS THE TRIGGER; `readGround` IS THE RESOLUTION. A stream
+    // resolves off its captured materialization, so without this every already-open subscription
+    // keeps pushing patches computed from a set nothing narrowed. A SUPERSET trigger is safe — a
+    // change to a read-closed member fires, the narrowed re-resolve yields the same hex, and the
+    // `node.hex === lastHex` check below swallows it as silence rather than a no-op patch. A subset
+    // trigger would not be, which is what this file's "trigger and resolution must agree" note is
+    // about: it warns against a NARROWER trigger, not a wider one.
+    const now = nowAt();
+    const closed = readClosedIds(gw, now);
+    const hview =
+      closed.size === 0
+        ? gw.reactor.materializedView(matName, entity)
+        : (() => {
+            const result = evalTerm(
+              bound.hyperschema.body,
+              readGround(gw, now),
+              entity,
+              gw.registry,
+            );
+            return result.sort === "hview" ? result.hview : undefined;
+          })();
     if (hview === undefined) {
       throw new Error(`the materialization backing this stream is gone — resubscribe`);
     }
