@@ -49,6 +49,10 @@ export interface StorageLike {
 // The one key under the delta prefix that is never a delta.
 const SEED_SUFFIX = "seed";
 
+// The rhizomatic authorities `admit` runs on — one object, so the read path and the restore door
+// cannot drift on what "admissible" means.
+const ADMISSION = { parseClaims, computeId, makeDelta, verifyDelta };
+
 interface WireRow {
   readonly id: string;
   readonly claims: unknown;
@@ -169,12 +173,7 @@ export class LocalStorageBackend implements StoreBackend, RepairableBackend {
       // The suffix is the id the row is FILED under; row.id is the id the row's own bytes CLAIM.
       // Admission recomputes from the claims and requires both to agree — a row relocated to a
       // key that lies about its id is id-mismatch, quarantined, never laundered by relocation.
-      const verdict = admit(suffix, row.id, row.claims, row.sig, {
-        parseClaims,
-        computeId,
-        makeDelta,
-        verifyDelta,
-      });
+      const verdict = admit(suffix, row.id, row.claims, row.sig, ADMISSION);
       if (!verdict.ok) {
         quarantine.push({
           key,
@@ -207,6 +206,60 @@ export class LocalStorageBackend implements StoreBackend, RepairableBackend {
     this.storage.removeItem(key);
     this.lastQuarantine = this.lastQuarantine.filter((r) => r.key !== key);
     return true;
+  }
+
+  // Would the value at a key ADMIT as the delta `id` — the read path's own question, asked of one
+  // stored row. Unreadable bytes answer FALSE, the direction that cannot launder damage.
+  private admissible(id: string, raw: string): boolean {
+    let row: WireRow;
+    try {
+      row = JSON.parse(raw) as WireRow;
+    } catch {
+      return false;
+    }
+    return admit(id, row.id, row.claims, row.sig, ADMISSION).ok;
+  }
+
+  // Replace a corrupt row that SQUATS on its key with a healthy copy of that same delta (T66/§25).
+  // `append` skips any id whose key already exists, so replanting a good copy over a row this driver
+  // set aside writes nothing — and the strike such a row carried stays stranded. The invariant is the
+  // durable driver's, decided from the ORIGIN's own bytes on every call rather than from the pen a
+  // previous read left behind: the incoming delta must ADMIT, and the value currently at that key
+  // must NOT. An admitted row is never replaced, so an unsigned twin can never strip a signature.
+  //
+  // TWO LIMITS, both real and both narrower than sqlite's. The reach is one key — a row MISFILED
+  // under some other key is retained content this cannot see, exactly as `holds` and `purge` cannot.
+  // And there are no transactions here, so two tabs racing a restore on the same key can interleave
+  // between the check and the `setItem`; `append`'s own read-then-write has always had that window,
+  // and an origin is single-threaded per tab, but it is a weaker guarantee than the sqlite driver's
+  // one IMMEDIATE transaction and it is not worth pretending otherwise.
+  async restoreQuarantined(deltas: Iterable<Delta>): Promise<readonly string[]> {
+    this.assertOpen();
+    const restored: string[] = [];
+    for (const d of deltas) {
+      let canon: Delta;
+      try {
+        canon = canonicalDelta(d);
+      } catch {
+        continue; // not storable as itself — refusing to write is the safe direction
+      }
+      const row: WireRow = {
+        id: canon.id,
+        claims: claimsToJson(canon.claims),
+        ...(canon.sig === undefined ? {} : { sig: canon.sig }),
+      };
+      const value = JSON.stringify(row);
+      if (!this.admissible(canon.id, value)) continue; // (i) the incoming bytes must admit
+      const key = this.keyFor(canon.id);
+      const raw = this.storage.getItem(key);
+      if (raw === null) continue; // nothing squatting — planting a delta is `append`'s job
+      if (this.admissible(canon.id, raw)) continue; // (ii) an admitted row is never replaced
+      this.storage.setItem(key, value);
+      restored.push(canon.id);
+    }
+    const done = new Set(restored.map((id) => this.keyFor(id)));
+    this.lastQuarantine = this.lastQuarantine.filter((r) => !done.has(r.key));
+    return restored;
   }
 
   async holds(id: string): Promise<boolean> {

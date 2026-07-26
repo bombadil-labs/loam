@@ -266,6 +266,31 @@ async function cmdServe(
         `loam: healed — ${healed.toPrimary} deltas replanted from the archive, ${healed.toMirror} newly archived`,
       );
     }
+    // The squatter half of the same heal (§25), which rides `mirror.lastRestore` rather than the
+    // report. Reading it here is not optional bookkeeping: it is the obligation that surface carries,
+    // since a signal nobody reads is a swallowed error with extra steps (H9).
+    //
+    // `undefined` is NOT an empty report and must not print as one — it means no heal reached the pen,
+    // so nothing is known about it. Collapsing the two with `?? []` would put the exact conversion the
+    // sentinel exists to refuse in the one place the obligation lives. UNREACHABLE from here today: a
+    // rejected heal rethrows above, so this boot never reads a cleared surface. It is written for the
+    // caller that catches — and it is untested for exactly that reason, which is worth more said than
+    // dressed up in a rail that would have to fake a reachability this file does not have.
+    const restore = mirror.lastRestore;
+    if (restore === undefined) {
+      io.err(
+        `loam: the heal did not reach the store's §25 pen, so nothing is known about corrupt rows — ` +
+          "a strike may be stranded and this boot cannot tell you. `loam repair list` can.",
+      );
+    }
+    // A restore CHANGED the ground the gateway is about to boot on, so it is named per id rather than
+    // counted — a restored negation un-strands a strike, and the operator should see what came back.
+    for (const id of restore?.restored ?? []) {
+      io.out(
+        `loam: restored ${id} from the archive — a corrupt row was squatting on that id; any strike ` +
+          `it carries suppresses again`,
+      );
+    }
     // The sweep's refusals are load-bearing: a report nobody reads is a swallowed error with
     // extra steps (H9). A refused sweep means a tombstoned id's bytes may still be at rest on
     // some tier — serve continues (refusing to boot trades a leak for an outage), but the
@@ -276,6 +301,18 @@ async function cmdServe(
           `may still be at rest: ${failure}. Serving anyway; resolve the store fault and re-run ` +
           `the erasure (or restart) to finish the sweep.`,
       );
+    }
+    // Same reasoning, the other repair: a row still set aside means the store is about to serve with a
+    // strike stranded — a retracted value, a revoked grant, or a tombstone reading LIVE (§25/H1).
+    // Serving is still right (a legible store beats an outage), and saying nothing is not.
+    for (const failure of restore?.stranded ?? []) {
+      io.err(`loam: ${failure} Serving anyway; \`loam repair list\` names what the pen holds.`);
+    }
+    // And what heal DECLINED to plant. This one is not a fault report but a refusal: the archive holds
+    // deltas this boot deliberately did not admit, because an unreadable row may be a tombstone nobody
+    // could see (§11) or a set-aside strike would have been left behind its target (H1).
+    for (const withheld of restore?.replantWithheld ?? []) {
+      io.err(`loam: ${withheld}`);
     }
     backend = mirror;
   }
@@ -643,7 +680,10 @@ async function cmdRepair(args: readonly string[], io: IO): Promise<number> {
         if (outcome === "still-quarantined") {
           io.out(
             `loam: ${key} still fails admission — it stays quarantined\n` +
-              "  (repair never edits bytes into validity; leave it, or discard it as garbage)",
+              "  (repair never edits bytes into validity; leave it, or discard it as garbage)\n" +
+              "  if a cold store holds a healthy copy of this delta, `loam serve --archive <dir>`\n" +
+              "  replaces the corrupt row with it on the next boot — the one recovery that needs no\n" +
+              "  re-federation, because the bytes are already yours",
           );
           return 0;
         }
