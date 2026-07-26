@@ -13,12 +13,6 @@
 //     mistake would be pushing it down into `select` — where a read-closed slate would self-invalidate
 //     and jam its own cut forever. Both halves are asserted here, as explicitly as each other.
 //
-// STACK NOTE: this is piece 2 of four, and two legs are ABSENT rather than skipped, because both call
-// a `cut` that does not exist yet and an `it.skip` body still has to typecheck. Named here so the hole
-// is visible, which is the same honesty a skip buys: criterion 6's post-cut RESUBMISSION (a citation
-// refused during the window lands afterwards, as a dangling reference) and criterion 18's UNJAMMED
-// half (the cut actually runs under a read-closed slate). Piece 3 adds both.
-//
 // NAMED GAP: the PUBLIC door is exercised through `queryPublic` over a declared-public lens, and the
 // BYTE door through `serveBytes`; neither is driven over a real HTTP mount here. The closing rail for
 // the transport layer would be an integration test in `test/surface/`, which no T64 criterion asks
@@ -382,6 +376,33 @@ describe("T64 criterion 6 — cite is DIRECT only, and the post-cut resubmission
     expect(gw.reactor.get(hop2.id)).toBeDefined();
     await gw.close();
   });
+  it("a citation refused during the window is ADMITTED after the cut, as a dangling reference", async () => {
+    const gw = await bootSlateStore();
+    const member = observed(FERN, "height", 30, 1000, OP_SEED);
+    await gw.append([member]);
+    const stood = await standSlate(gw, { members: [member], closes: ["cite"] });
+    const cite = signClaims(
+      {
+        timestamp: 60_000,
+        author: OP,
+        pointers: [
+          { role: "notes", target: { kind: "delta", deltaRef: { delta: member.id } } },
+          { role: "subject", target: { kind: "entity", entity: { id: FERN, context: "note" } } },
+        ],
+      },
+      OP_SEED,
+    );
+    await expect(gw.append([cite])).rejects.toThrow(/SLATED FOR ERASURE/);
+    await gw.cut(stood.container, { now: BEFORE_DEADLINE });
+    // Cite-closure is a WINDOW property about the orphan set at cut time, never a promise of
+    // referential integrity a grow-only union cannot make: admission refuses a delta whose OWN id is
+    // dead and does not inspect pointers, so this lands and DANGLES — which is correct, and which
+    // §11's citations manifest exists precisely because of.
+    await expect(gw.append([cite])).resolves.toBeDefined();
+    expect(gw.reactor.get(cite.id)).toBeDefined();
+    expect(gw.reactor.get(member.id)).toBeUndefined();
+    await gw.close();
+  });
 });
 
 // --- read closure -------------------------------------------------------------------------------
@@ -722,8 +743,8 @@ describe("T64 criterion 18 — read closure survives the WARM paths, and leaves 
     expect(handle.members().map((d) => d.id)).toEqual([member.id]);
     expect(gw.freeze(stood.term).id).toBe(stood.version);
     expect(gw.slates(BEFORE_DEADLINE)[0]!.members).toEqual([member.id]);
-    // The other half of this invariant — that it is what keeps the store UNJAMMED, proven by the cut
-    // actually running under a read-closed slate — arrives with the cut (slate-cut.test.ts).
+    // And the proof that the invariant is what keeps the store unjammed: the cut RUNS.
+    await expect(gw.cut(stood.container, { now: BEFORE_DEADLINE })).resolves.toBeDefined();
     await gw.close();
   });
 });

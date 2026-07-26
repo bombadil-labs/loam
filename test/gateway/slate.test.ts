@@ -23,12 +23,14 @@ import {
   CTX_SLATE,
   SLATE_CONTEXTS,
   frozenMembershipTerm,
+  graveyardCompleteness,
   readSlates,
   slateClaims,
 } from "../../src/gateway/slate.js";
 import { FERN, observed } from "../spike/garden.js";
 import {
   BEFORE_DEADLINE,
+  groundIds,
   DEADLINE,
   OP,
   OP_SEED,
@@ -36,6 +38,7 @@ import {
   bootSlateStore,
   declareContainer,
   standSlate,
+  strike,
 } from "./slating.js";
 
 describe("T64 criterion 1 — a slate is a curated SHARED container plus a record", () => {
@@ -243,8 +246,14 @@ describe("T64 criterion 2 — membership is frozen by ENFORCEMENT, at both level
     expect([...report.enforced].sort()).toEqual(["cite", "egress"]);
     expect((await gw.health(BEFORE_DEADLINE)).slates.disagreeing).toEqual([stood.container]);
 
-    // TWO-SIDED, and this is the over-purge half: not one of the three bystanders lost a byte. (The
-    // CUT's own refusal over this state arrives with the cut, in slate-cut.test.ts.)
+    // And the CUT refuses outright rather than choosing a reading: a graveyard's frozen set is
+    // durable, so the two readings must not be allowed to differ in a permanent record.
+    const before = groundIds(gw);
+    await expect(gw.cut(stood.container, { now: BEFORE_DEADLINE })).rejects.toThrow(
+      /container and the record disagree/,
+    );
+    expect(groundIds(gw)).toEqual(before);
+    // TWO-SIDED, and this is the over-purge half: not one of the three bystanders lost a byte.
     for (const d of bystanders) expect(await gw.backend.holds(d.id)).toBe(true);
     expect(await gw.backend.holds(condemned.id)).toBe(true);
     await gw.close();
@@ -467,6 +476,69 @@ describe("T64 criterion 3 — `closes` and `deadline` are required, and `none` i
     expect(gw.slates(BEFORE_DEADLINE)[0]!.enforced).toEqual(["cite"]);
     const res = await gw.query(`{ plant(entity: "${FERN}") { height } }`);
     expect((res.data as { plant: { height: number } }).plant.height).toBe(30);
+    await gw.close();
+  });
+});
+
+describe("T64 criterion 15 — forgiveness, both sides of the cut", () => {
+  it("BEFORE the cut: striking the declaration reopens every door, and no byte moved", async () => {
+    const gw = await bootSlateStore();
+    const condemned = observed(FERN, "height", 30, 1000, OP_SEED);
+    const bystander = observed(FERN, "tag", "shade", 1100, OP_SEED);
+    await gw.append([condemned, bystander]);
+    const stood = await standSlate(gw, {
+      members: [condemned],
+      closes: ["egress", "cite", "read"],
+    });
+    expect(gw.offeredDeltas().map((d) => d.id)).not.toContain(condemned.id);
+    const beforeRead = await gw.query(`{ plant(entity: "${FERN}") { height tag } }`);
+    expect((beforeRead.data as { plant: { height: number | null } }).plant.height).toBeNull();
+
+    await gw.append([strike(stood.declaration, 60_000)]);
+
+    // Every closed door reopens on the NEXT read — the table is re-resolved live, so un-slating is
+    // a delta and never a restart.
+    expect(gw.slates(BEFORE_DEADLINE)).toEqual([]);
+    expect(gw.offeredDeltas().map((d) => d.id)).toContain(condemned.id);
+    const after = await gw.query(`{ plant(entity: "${FERN}") { height tag } }`);
+    expect((after.data as { plant: { height: number } }).plant.height).toBe(30);
+    // NOT ONE BYTE MOVED, and the request record still resolves: someone asked, and that is a fact
+    // §11 already holds. Withdrawing the slate and withdrawing the request are two acts.
+    expect(await gw.backend.holds(condemned.id)).toBe(true);
+    expect(gw.reactor.get(stood.record)).toBeDefined();
+    await gw.close();
+  });
+
+  it("AFTER the cut: striking a tombstone permits the id's return but restores no bytes", async () => {
+    const gw = await bootSlateStore();
+    const condemned = observed(FERN, "height", 30, 1000, OP_SEED);
+    const bystander = observed(FERN, "tag", "shade", 1100, OP_SEED);
+    await gw.append([condemned, bystander]);
+    const stood = await standSlate(gw, { members: [condemned], closes: ["egress", "cite"] });
+    const report = await gw.cut(stood.container, { now: BEFORE_DEADLINE });
+    const tombstone = report.members[0]!.tombstone;
+    expect(await gw.backend.holds(condemned.id)).toBe(false);
+
+    await gw.append([strike(tombstone, 70_000)]);
+
+    // The graveyard is UNTOUCHED — it records an event that happened, not a standing assertion
+    // about the present — and the bytes are still gone: forgiveness cannot restore what nobody holds.
+    expect(gw.graveyards().map((g) => g.id)).toEqual([report.graveyard]);
+    expect(await gw.backend.holds(condemned.id)).toBe(false);
+    // The DURABLE arithmetic reports it as forgiven WITH its strike id rather than as a missing
+    // tombstone: the graveyard records an event that happened, and forgiveness is a later event.
+    // (What a re-derived RECEIPT says about the same member — forgiven AND present again — arrives
+    // with the receipt, in slate-receipt.test.ts.)
+    const check = graveyardCompleteness(gw.reactor, OP, report.graveyard);
+    expect(check.forgiven).toEqual([
+      { member: condemned.id, strike: strike(tombstone, 70_000).id },
+    ]);
+    expect(check.missing).toEqual([]);
+    expect(check.holds).toBe(false);
+    expect(check.cutCompleted).toBe(true);
+    // Two-sided: the bystander was never touched, on any tier or in any report.
+    expect(await gw.backend.holds(bystander.id)).toBe(true);
+    expect(check.members).toEqual([condemned.id]);
     await gw.close();
   });
 });

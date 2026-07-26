@@ -176,7 +176,7 @@ export function readTombstones(reactor: Reactor, operator: string | undefined): 
 // forgotten (that it forgot, never what). One place computes the set both readTombstones (the
 // dead ids) and forgottenSince (the as-of annotation) draw from, so the author-confirmation and
 // forgiveness rules cannot drift between them.
-function survivingTombstones(reactor: Reactor, operator: string | undefined): Delta[] {
+export function survivingTombstones(reactor: Reactor, operator: string | undefined): Delta[] {
   if (operator === undefined) return []; // an ungoverned store honors no erasure at all
   const negated = lawfulNegated(reactor, operator);
   const out: Delta[] = [];
@@ -245,8 +245,14 @@ export function sealCommitment(salt: string, author: string): string {
 export async function eraseImpl(
   gw: Gateway,
   id: string,
-  opts: { reason?: string } = {},
-): Promise<{ erased: string; citations: string[]; kept: string[] }> {
+  opts: { reason?: string; slate?: string } = {},
+): Promise<{
+  erased: string;
+  citations: string[];
+  kept: string[];
+  tombstone: string;
+  spokenBy: string;
+}> {
   // Erasure is the operator's alone (SPEC §11): destructive, so the only signer is the store's
   // own operator. A data subject's request is honored BY the operator, never by the subject
   // directly — there is no actor override here on purpose.
@@ -312,7 +318,14 @@ export async function eraseImpl(
   const tombstone =
     already ??
     signClaims(
-      eraseClaims(id, target!.claims.author, gw.operatorAuthor, gw.nextTimestamp(), opts.reason),
+      eraseClaims(
+        id,
+        target!.claims.author,
+        gw.operatorAuthor,
+        gw.nextTimestamp(),
+        opts.reason,
+        opts.slate,
+      ),
       seed,
     );
   // The manifest: every delta citing the id (negations, provenance links) — the holes the
@@ -384,15 +397,23 @@ export async function eraseImpl(
     );
   }
   // `kept` is the guard's entry-time reading — the container stores a surviving detach record
-  // deliberately holds outside this sweep, reported rather than silent.
-  return { erased: id, citations, kept: stores.kept };
+  // deliberately holds outside this sweep, reported rather than silent. The tombstone's id and the
+  // target's author ride out too: a cut collects them per member (§29.5) rather than re-deriving them
+  // from a ground the purge just moved.
+  return {
+    erased: id,
+    citations,
+    kept: stores.kept,
+    tombstone: tombstone.id,
+    spokenBy: tombstoneParts(tombstone.claims).spokenBy!,
+  };
 }
 
 // Is this erasure still OUTSTANDING anywhere in reach — this ground or any replica of it? Its
 // fault model must be the verdict's, or the two drift: outstanding means bytes held (or
 // unprovable — a tier that cannot answer has proven nothing; H9), OR a reachable replica that
 // does not yet carry the operator's tombstone for the id.
-async function erasureOutstanding(
+export async function erasureOutstanding(
   gw: Gateway,
   id: string,
   seen = new Set<Gateway>(),
