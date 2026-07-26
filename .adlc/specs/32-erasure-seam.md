@@ -70,6 +70,12 @@ Walked 2026-07-26 against HEAD (post posture-rename, post-T66). Every site below
 recalled. A carve-out that fit no rule would be a bug or a missing rule; the walk found **one**
 such entry, promoted to the finding in §32.3.1.
 
+Line ranges below are for THIS working spec's review — they let a reviewer jump straight to each
+site while the census is fresh. **The landed section cites file + symbol/rule, never line
+numbers**: a line-anchored census rots with the next edit while its "read, not recalled" framing
+keeps earning trust it no longer deserves, and the manifest (§32.4) is what keeps the module set
+honest over time.
+
 | # | rule | where | the carve-out |
 |---|------|-------|---------------|
 | 1 | R1 | `src/store/backend.ts:50-63` | The driver contract: the completeness verdict is `holds(id)` — byte-presence, defined to see at least everything `purge` reaches, including bytes reads skip. `heldAmong` is the batch form and keeps the same reach and the same fail-closed. |
@@ -163,7 +169,20 @@ cannot silently disarm the lens.
 `scripts/erasure-seam-guard.mjs` scans `src/**/*.ts` for a hand-written token list — today:
 `rmSync`, `rm(`, `rmdir`, `unlink`, `removeItem`, `DELETE FROM`, `truncate`, `.purge(`,
 `discardRow(` — and exits 2 on any hit outside the manifest's modules. Wired into
-`.github/workflows/ci.yml` beside the rails backstop.
+`.github/workflows/ci.yml` beside the rails backstop, as a step whose failure fails the job — no
+`continue-on-error`, no `|| true` — and that wiring is itself railed (criterion 9), because a
+tripwire someone can disarm with a comment character is string-presence theater.
+
+**The scan boundary is `src/` — deliberately, and the hole is named.** `src/` is the shipped
+store: a destructive call there reaches a user's delta bytes through the published package, which
+is what the seam governs. `scripts/` and `demos/` hold fifteen-plus legitimate deletions today
+(build-output resets, demo temp homes, tutorial key cleanup), so fencing them with this guard
+would mean a day-one allowlist longer than the manifest — a fence nobody reads. What backstops
+them instead: the standing erasure rule (no agent erases data it did not create in its own temp
+dir — never `demos/village/homes/`, never a real `~/.loam`) and ordinary review. Stated plainly:
+a script deleting a real store path would NOT trip this guard; that class is out of the fence's
+sight, held by rule rather than mechanism, and widening the fence there is a decision this
+section leaves open rather than pretends to have made.
 
 **What the detector can and cannot catch — stated per H10, because a lexical scan is a list that
 only knows the names it knows.** It CATCHES the ordinary regression: a convenience deletion added
@@ -234,16 +253,25 @@ before review.
    `test/scripts/p5-triage-seam.test.ts`
 8. **Editing the manifest routes the lens.** A diff whose only change is `scripts/erasure-seam.json`
    routes `loam-erasure` — joining the seam is a reviewed act. — `test/scripts/p5-triage-seam.test.ts`
-9. **The guard runs in CI** beside the rails backstop. —
-   `grep -n "erasure-seam-guard" .github/workflows/ci.yml`
-10. **The cross-links land both ways:** H7 and H9 each carry a one-line citation of §32 as the
-    principle they are instances of, and the landed section cites them back. —
-    `grep -c "§32" src/gateway/SUBSTRATE-HAZARDS.md` (at least 2) and
-    `grep -n "H7\|H9" spec/32-erasure-seam.md`
-11. **The finding is tracked, not absorbed:** the ESM residency violation (§32.3.1) has its own
-    ticket before this section lands, cited by id in the landed census row. —
-    `grep -rl "esm.ts" .adlc/tickets/` (names the new ticket's shard — T100's own body never says
-    `esm.ts`, so this cannot be satisfied by the ticket that asked for it) and `adlc ticket list`
-12. **No erasure behavior moved:** the landing's diff touches no store driver and no gateway
-    erasure path — the census describes the tree, it does not edit it. —
-    `git diff --stat main -- src/gateway/erase.ts src/store/` (empty)
+9. **The guard is wired in CI as a step that can actually fail the job.** A rail parses
+   `.github/workflows/ci.yml` and asserts the guard invocation exists, is not commented out,
+   carries no `|| true`, and sits in no step marked `continue-on-error` — string presence alone is
+   not wiring, and a tripwire disarmable with a comment character has proven nothing. —
+   `test/scripts/erasure-seam-guard.test.ts`
+10. **The cross-links land both ways, in the right places:** a rail asserts the §32 citation
+    appears INSIDE the H7 entry (between the `## H7` and `## H8` headings) and INSIDE the H9 entry
+    (between `## H9` and `## H10`) of `src/gateway/SUBSTRATE-HAZARDS.md` — a mention elsewhere in
+    the file satisfies nothing — and the landed section cites H7 and H9 back. —
+    `test/scripts/erasure-seam.test.ts` and `grep -n "H7\|H9" spec/32-erasure-seam.md`
+11. **The finding is tracked, not absorbed:** before this section lands, the ESM residency
+    violation (§32.3.1) has its own ticket — a shard whose TITLE names the ESM/health residual —
+    and the landed §32.3.1 text cites that ticket by id, so the one disclosed live over-claim
+    cannot ship without a tracked owner. Verified directly on the property, never by keyword:
+    read the id out of the landed row with `grep -oE "T[0-9]+" spec/32-erasure-seam.md`, then
+    `adlc ticket show <that-id>` names the residual in its title.
+12. **The landing diff is process-layer ONLY.** Not a narrowed denylist but an allowlist: every
+    changed path is under `spec/`, `SPEC.md`, `scripts/`, `test/scripts/`, `.github/`, `.adlc/`,
+    `journal/`, `JOURNAL.md`, or is the cross-link edit to `src/gateway/SUBSTRATE-HAZARDS.md` —
+    so no store driver and no gateway erasure path (ingest, reads, gateway, resolvers, container,
+    repair, erase) can move under this ticket at all. —
+    `git diff --name-only main | grep -vE '^(spec/|SPEC\.md|scripts/|test/scripts/|\.github/|\.adlc/|journal/|JOURNAL\.md|src/gateway/SUBSTRATE-HAZARDS\.md)'` (empty)
