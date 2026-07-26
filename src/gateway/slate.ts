@@ -1619,3 +1619,182 @@ function strikeOf(
   }
   return undefined;
 }
+
+// Every tier a sweep did NOT examine — covered walls and unreachable ones alike. One reader, so the
+// cut's refusal and the receipt's confession can never disagree about which tiers were skipped.
+const unreachedTiers = (walls: {
+  kept: readonly string[];
+  faultEntities: readonly string[];
+}): { wall: string }[] => [...walls.kept, ...walls.faultEntities].map((wall) => ({ wall }));
+
+// --- the receipt (the structured half; the signed DOCUMENT is §29.7's deferred half) -------------
+
+export interface ReceiptMember {
+  readonly member: string;
+  /** The SURVIVING tombstone, when one stands. */
+  readonly tombstone?: string;
+  /** The strike that forgave it (§29.8) — present instead of `tombstone` after a forgiveness. */
+  readonly forgiven?: string;
+  /**
+   * Is the id PRESENT in the ground again? One `get(id)` answers it, and it is the fact the obvious
+   * design loses: striking a tombstone permits the id's return and `federateImpl` then admits it,
+   * so a receipt saying only FORGIVEN is technically true and communicates the opposite.
+   */
+  readonly presentAgain: boolean;
+  /** RE-PROBED at `issuedAt`, never reprinted from the CutReport. */
+  readonly tiers: readonly TierVerdict[];
+  readonly citations: readonly string[];
+}
+
+export interface Receipt {
+  readonly issuedAt: number;
+  readonly graveyard: string;
+  readonly slate: string;
+  readonly record: string;
+  readonly version: string;
+  readonly memberCount: number;
+  readonly requestedBy: string;
+  readonly requestedByForm: "plain" | "sealed";
+  readonly window: { readonly opened: number; readonly cutAt: number };
+  readonly closes: readonly SlateClosure[];
+  readonly members: readonly ReceiptMember[];
+  readonly priorTombstone: readonly { readonly member: string; readonly tombstone: string }[];
+  readonly completeness: CompletenessCheck;
+  /** What this document does NOT claim. Printed beside the verdicts, never as a footnote. */
+  readonly nonClaim: readonly string[];
+}
+
+/**
+ * Re-derive a receipt from the graveyard + the tombstones + the frozen version, plus a LIVE PROBE
+ * at the moment of issue. Re-issuable at any time, which is exactly §11's testable-compliance
+ * promise. The byte verdicts are RE-PROBED here every time: reading them from a CutReport would be
+ * the dry-run mistake this whole design rejects, wearing a letterhead.
+ */
+export async function deriveReceiptImpl(
+  gw: Gateway,
+  graveyardId: string,
+  opts: { now?: number } = {},
+): Promise<Receipt> {
+  const operator = gw.operatorAuthor;
+  const grave = readGraveyards(gw.reactor, operator).find((g) => g.id === graveyardId);
+  if (grave === undefined) {
+    throw new Error(`no surviving lawful graveyard is held here at ${graveyardId}`);
+  }
+  const issuedAt = opts.now ?? Date.now();
+  const request = gw.reactor.get(grave.record);
+  const completeness = graveyardCompleteness(gw.reactor, operator, graveyardId);
+  const negated = lawfulNegated(gw.reactor, operator);
+  const surviving = new Map(
+    survivingTombstones(gw.reactor, operator).map((t) => [tombstoneTarget(t.claims)!, t]),
+  );
+  const walls = unreachableStoreReport(gw);
+  const members: ReceiptMember[] = [];
+  for (const member of completeness.members) {
+    const tomb = surviving.get(member);
+    const strike =
+      tomb === undefined ? strikeOf(gw.reactor, operator!, negated, member) : undefined;
+    members.push({
+      member,
+      ...(tomb === undefined ? {} : { tombstone: tomb.id }),
+      ...(strike === undefined ? {} : { forgiven: strike }),
+      presentAgain: gw.reactor.get(member) !== undefined,
+      // BOTH halves of the wall report, and the sets are DISJOINT: `kept` is covered by a detach
+      // record, `faults` is neither attached nor covered — a wall nobody re-attached after a restart.
+      // Reading only `kept` made a faulted tier appear NOWHERE, which reads as "not a tier" rather
+      // than `unproven` (H9). `cutImpl` refuses on faults; a RE-ISSUE cannot refuse, so it confesses.
+      tiers: await tierVerdicts(gw, member, unreachedTiers(walls)),
+      citations: [...gw.reactor.snapshot()]
+        .filter((d) =>
+          d.claims.pointers.some(
+            (p) => p.target.kind === "delta" && p.target.deltaRef.delta === member,
+          ),
+        )
+        .map((d) => d.id)
+        .sort(),
+    });
+  }
+  return {
+    issuedAt,
+    graveyard: grave.id,
+    slate: grave.container,
+    record: grave.record,
+    version: grave.version,
+    memberCount: grave.memberCount,
+    requestedBy:
+      request === undefined
+        ? ""
+        : ((primitives(request.claims, "requested-by")[0] as string) ?? ""),
+    requestedByForm:
+      request === undefined
+        ? "plain"
+        : ((primitives(request.claims, "requested-by-form")[0] as "plain" | "sealed") ?? "plain"),
+    window: { opened: grave.opened, cutAt: grave.cutAt },
+    closes: grave.closes,
+    members,
+    priorTombstone: grave.priorTombstone,
+    completeness,
+    nonClaim: [
+      "PEERS ARE NOT REACHED: erasure does not reach federation peers — they are not the " +
+        "operator's replicas, and a peer refuses a foreign operator's removal-order at its own door.",
+      "ALREADY-SERVED READS ARE NOT RECALLED: egress closure stopped further spread from this " +
+        "store during the window; nothing recalls what a door already served.",
+      "A COPY RE-SPOKEN UNDER ANOTHER ID STILL STANDS: erasure is by ID, and a content-addressed " +
+        "store cannot chase content. That covers a copy made BEFORE identification and also one a " +
+        "standing pass (a rendering, a promotion) minted DURING the window under a slate that did " +
+        "not close `cite` — the frozen set names ids, so a fresh id was never in it. Such a copy " +
+        "must be slated by its own id; the slate report's `duplicates` lists the links this store " +
+        "can follow, and it finds LINKS, never content.",
+      "POINTERS ARE NOT CONTENT: the surviving deltas listed per member cite an erased id and " +
+        "dangle at the hole — that is §11's citations manifest, not retained content.",
+      ...walls.kept.map(
+        (wall) =>
+          `A KEPT WALL WAS NOT SWEPT: "${wall}" is covered by a detach record, its per-member ` +
+          `verdict reads \`unproven\` rather than \`false\`, and nobody looked inside it.`,
+      ),
+      ...walls.faultEntities.map(
+        (wall) =>
+          `A DECLARED WALL COULD NOT BE REACHED: "${wall}" is neither attached nor covered by a ` +
+          `detach record, so its store was not examined at all and its per-member verdict reads ` +
+          `\`unproven\`. Attach it (openContainer) and re-issue to replace this with a real verdict.`,
+      ),
+      "A RESTORED BACKUP CAN RESURFACE BYTES, and this document is RE-ISSUABLE to prove present " +
+        "state — every per-tier verdict above was probed at the issue moment, never reprinted.",
+    ],
+  };
+}
+
+// --- forgiveness reporting (§29.8): what a graveyard's frozen set says about the present -----
+
+/**
+ * Forgiveness is LAWFUL, not debt — so this moves `status` no more than a slate does. But without it
+ * a forgiven-and-returned id is invisible to every instrument the store has: striking a tombstone
+ * removes the id from `readTombstones` and therefore from `promised` entirely, and the one durable
+ * list of ids the store ever promised to forget is a graveyard's frozen `version`.
+ */
+export function forgivenHealth(gw: Gateway): ForgivenHealth {
+  const operator = gw.operatorAuthor;
+  const empty = { count: 0, present: 0, ids: [], unreadable: [] };
+  if (operator === undefined) return empty;
+  const graves = readGraveyards(gw.reactor, operator);
+  if (graves.length === 0) return empty;
+  const surviving = new Set(
+    survivingTombstones(gw.reactor, operator).map((t) => tombstoneTarget(t.claims)!),
+  );
+  const ids = new Set<string>();
+  const unreadable: string[] = [];
+  for (const grave of graves) {
+    const frozen = readFrozenTerm(gw.reactor, grave.membershipAt);
+    if (!frozen.ok) {
+      unreadable.push(grave.id); // never folded into "nothing forgiven" (H9)
+      continue;
+    }
+    for (const id of frozen.ids) if (!surviving.has(id)) ids.add(id);
+  }
+  const sorted = [...ids].sort();
+  return {
+    count: sorted.length,
+    present: sorted.filter((id) => gw.reactor.get(id) !== undefined).length,
+    ids: sorted,
+    unreadable: unreadable.sort(),
+  };
+}

@@ -24,7 +24,15 @@ import { Reactor, signClaims } from "@bombadil/rhizomatic";
 import type { Claims, Delta } from "@bombadil/rhizomatic";
 import { lawfulNegated } from "./registration.js";
 import { unreachableStoreReport } from "./container.js";
-import { CTX_SLATE, readSlates, slateHealth, slatePointer, type SlateHealth } from "./slate.js";
+import {
+  CTX_SLATE,
+  forgivenHealth,
+  readSlates,
+  slateHealth,
+  slatePointer,
+  type ForgivenHealth,
+  type SlateHealth,
+} from "./slate.js";
 import type { Gateway } from "./gateway.js";
 
 export const ERASE_ENTITY = "loam:erasure";
@@ -579,6 +587,7 @@ export interface StoreHealth {
   readonly status: "ok" | "settling" | "unproven";
   readonly erasure: ErasureHealth;
   readonly slates: SlateHealth;
+  readonly forgiven: ForgivenHealth;
   readonly lagging?: boolean; // present when the backend exposes mirror lag (MirrorBackend)
 }
 
@@ -641,9 +650,11 @@ export async function healthImpl(gw: Gateway, now = Date.now()): Promise<StoreHe
   return {
     status,
     erasure,
-    // A LAWFUL fact rather than debt, so it moves `status` no more than a mirror's lag does — but
-    // without it a lapsed compliance window is invisible to every instrument the store has.
+    // Both sections are LAWFUL facts rather than debt, so neither moves `status` — but without them
+    // a lapsed compliance window and a forgiven-and-returned id are invisible to every instrument
+    // the store has (a struck tombstone leaves `readTombstones`, and therefore `promised`, entirely).
     slates: slateHealth(gw, now),
+    forgiven: forgivenHealth(gw),
     ...(typeof lagging === "boolean" && { lagging }),
   };
 }

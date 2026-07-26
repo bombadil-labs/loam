@@ -78,10 +78,12 @@ import {
 import { declarePublicImpl, readPublicSchemas } from "./public.js";
 import {
   cutImpl,
+  deriveReceiptImpl,
   readGraveyards,
   slateReportsImpl,
   type CutReport,
   type GraveyardRecord,
+  type Receipt,
   type SlateReport,
 } from "./slate.js";
 import {
@@ -700,6 +702,17 @@ export class Gateway {
    */
   async cut(slate: string, opts: { now?: number } = {}): Promise<CutReport> {
     return cutImpl(this, slate, opts);
+  }
+  /**
+   * Re-derive a compliance receipt from the graveyard + the tombstones + the frozen version, plus a
+   * LIVE probe at the moment of issue (SPEC §29.7). Re-issuable at any time — which IS §11's
+   * testable-compliance promise. Every per-tier byte verdict is RE-PROBED here, never reprinted from
+   * a CutReport: a formatter that reprinted last month's snapshot would be the dry-run mistake this
+   * design rejects, wearing a letterhead. (The SIGNED DOCUMENT and its surface are §29.7's deferred
+   * half; this is the structured object it formats.)
+   */
+  async receipt(graveyard: string, opts: { now?: number } = {}): Promise<Receipt> {
+    return deriveReceiptImpl(this, graveyard, opts);
   }
 
   /**
