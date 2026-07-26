@@ -87,7 +87,9 @@ async function retract(
   }
   gw.def(name); // refuses an unknown schema
   const author = authorForSeed(seed);
-  const hview = gw.gather(name, entity);
+  // UNNARROWED (SPEC §29.3): a read-closing slate must not turn this strike into a silent no-op —
+  // the member would be absent from a narrowed hview, so nothing would be targeted and nothing signed.
+  const hview = gw.gatherForRetraction(name, entity);
   const targets = new Set<string>();
   for (const [field, entries] of hview.props) {
     for (const entry of entries) {

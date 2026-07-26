@@ -24,19 +24,33 @@ import { Reactor, signClaims } from "@bombadil/rhizomatic";
 import type { Claims, Delta } from "@bombadil/rhizomatic";
 import { lawfulNegated } from "./registration.js";
 import { unreachableStoreReport } from "./container.js";
+import {
+  CTX_SLATE,
+  forgivenHealth,
+  readSlates,
+  slateHealth,
+  slatePointer,
+  type ForgivenHealth,
+  type SlateHealth,
+} from "./slate.js";
 import type { Gateway } from "./gateway.js";
 
 export const ERASE_ENTITY = "loam:erasure";
 export const CTX_ERASE = "loam.erasure";
 
 // One tombstone: the erased id (a delta-kind ref), the target's author recorded while it
-// could still be verified, and an optional human reason (the compliance log reads itself).
+// could still be verified, an optional human reason (the compliance log reads itself), and — when
+// the erasure was one member of a CUT (SPEC §29.6) — one optional `slate` pointer. That pointer is
+// the JOIN a graveyard reads: the graveyard does not list its tombstones at all, so "which
+// tombstones belong to this erasure event" stays one small delta whether the cut had four members
+// or forty thousand, and `readTombstones` remains the single per-id law.
 export function eraseClaims(
   targetId: string,
   targetAuthor: string,
   author: string,
   timestamp: number,
   reason?: string,
+  slate?: string,
 ): Claims {
   return {
     timestamp,
@@ -51,6 +65,7 @@ export function eraseClaims(
       ...(reason === undefined
         ? []
         : [{ role: "reason", target: { kind: "primitive" as const, value: reason } }]),
+      ...(slate === undefined ? [] : [slatePointer(slate)]),
     ],
   };
 }
@@ -60,11 +75,13 @@ const tombstoneParts = (
 ): {
   targetId: string | undefined;
   spokenBy: string | undefined;
-  count: { erases: number; spokenBy: number };
+  slate: string | undefined;
+  count: { erases: number; spokenBy: number; slate: number };
 } => {
   let targetId: string | undefined;
   let spokenBy: string | undefined;
-  const count = { erases: 0, spokenBy: 0 };
+  let slate: string | undefined;
+  const count = { erases: 0, spokenBy: 0, slate: 0 };
   for (const p of claims.pointers) {
     if (p.role === "erases" && p.target.kind === "delta") {
       count.erases += 1;
@@ -76,9 +93,25 @@ const tombstoneParts = (
         spokenBy = p.target.value;
       }
     }
+    if (p.role === "slate") {
+      count.slate += 1;
+      if (p.target.kind === "entity" && p.target.entity.context === CTX_SLATE) {
+        slate = p.target.entity.id;
+      }
+    }
   }
-  return { targetId, spokenBy, count };
+  return { targetId, spokenBy, slate, count };
 };
+
+/** The id a tombstone erases, for readers that join on it (SPEC §29.6's arithmetic). */
+export function tombstoneTarget(claims: Claims): string | undefined {
+  return tombstoneParts(claims).targetId;
+}
+
+/** The slate a tombstone was minted BY, when it was one member of a cut (SPEC §29.6's join). */
+export function tombstoneSlate(claims: Claims): string | undefined {
+  return tombstoneParts(claims).slate;
+}
 
 export function isTombstone(claims: Claims): boolean {
   return claims.pointers.some(
@@ -105,12 +138,18 @@ export function eraseDefect(
   operator: string | undefined,
 ): string | undefined {
   if (!isTombstone(delta.claims)) return undefined;
-  const { targetId, spokenBy, count } = tombstoneParts(delta.claims);
+  const { targetId, spokenBy, slate, count } = tombstoneParts(delta.claims);
   if (count.erases !== 1 || targetId === undefined) {
     return "a tombstone erases exactly one delta (one delta-kind `erases` pointer)";
   }
   if (count.spokenBy !== 1 || spokenBy === undefined) {
     return "a tombstone carries exactly one string `spoken-by` (the erased delta's author)";
+  }
+  // The §29.6 join is OPTIONAL forever — every tombstone any store already holds carries none, so
+  // no §20 step is engaged — but a PRESENT one is validated: a malformed join would make the
+  // graveyard's arithmetic unreadable while looking like law.
+  if (count.slate > 1 || (count.slate === 1 && slate === undefined)) {
+    return `a tombstone carries at most one \`slate\` pointer, an entity reference at ${CTX_SLATE}`;
   }
   if (operator === undefined || delta.claims.author !== operator) {
     return "erasure is the instance operator's alone: only the operator may order a record removed";
@@ -145,7 +184,7 @@ export function readTombstones(reactor: Reactor, operator: string | undefined): 
 // forgotten (that it forgot, never what). One place computes the set both readTombstones (the
 // dead ids) and forgottenSince (the as-of annotation) draw from, so the author-confirmation and
 // forgiveness rules cannot drift between them.
-function survivingTombstones(reactor: Reactor, operator: string | undefined): Delta[] {
+export function survivingTombstones(reactor: Reactor, operator: string | undefined): Delta[] {
   if (operator === undefined) return []; // an ungoverned store honors no erasure at all
   const negated = lawfulNegated(reactor, operator);
   const out: Delta[] = [];
@@ -214,8 +253,14 @@ export function sealCommitment(salt: string, author: string): string {
 export async function eraseImpl(
   gw: Gateway,
   id: string,
-  opts: { reason?: string } = {},
-): Promise<{ erased: string; citations: string[]; kept: string[] }> {
+  opts: { reason?: string; slate?: string } = {},
+): Promise<{
+  erased: string;
+  citations: string[];
+  kept: string[];
+  tombstone: string;
+  spokenBy: string;
+}> {
   // Erasure is the operator's alone (SPEC §11): destructive, so the only signer is the store's
   // own operator. A data subject's request is honored BY the operator, never by the subject
   // directly — there is no actor override here on purpose.
@@ -262,10 +307,33 @@ export async function eraseImpl(
     // is striking the tombstone (forgiveness), never erasing it.
     throw new Error("the erasure log is append-only: a tombstone cannot itself be erased");
   }
+  // A STANDING SLATE'S PINNED MEMBERSHIP TERM is not an ordinary delta (SPEC §29.2): erasing it leaves
+  // that slate unable to read its own condemned set, so every door it closed silently stops enforcing
+  // while the slate still reports itself standing. Refused here rather than tolerated, which is what
+  // keeps that state unreachable through a door at all — the cut refuses the same delta as a member.
+  const pinning = readSlates(gw.reactor, gw.operatorAuthor, Date.now()).find(
+    (s) => s.membershipAt === id,
+  );
+  if (pinning !== undefined) {
+    throw new Error(
+      `erase ${id} refused: it is the PINNED membership Term of the standing slate over ` +
+        `"${pinning.container}", and the slate's closures are all seeded from the ids it names. ` +
+        `Erasing it would reopen every door that slate closed while it still read as standing. ` +
+        `Cut the slate (which removes its members and drops the container), or strike its record and ` +
+        `its declaration first — un-slating is free (§29.8).`,
+    );
+  }
   const tombstone =
     already ??
     signClaims(
-      eraseClaims(id, target!.claims.author, gw.operatorAuthor, gw.nextTimestamp(), opts.reason),
+      eraseClaims(
+        id,
+        target!.claims.author,
+        gw.operatorAuthor,
+        gw.nextTimestamp(),
+        opts.reason,
+        opts.slate,
+      ),
       seed,
     );
   // The manifest: every delta citing the id (negations, provenance links) — the holes the
@@ -337,15 +405,23 @@ export async function eraseImpl(
     );
   }
   // `kept` is the guard's entry-time reading — the container stores a surviving detach record
-  // deliberately holds outside this sweep, reported rather than silent.
-  return { erased: id, citations, kept: stores.kept };
+  // deliberately holds outside this sweep, reported rather than silent. The tombstone's id and the
+  // target's author ride out too: a cut collects them per member (§29.5) rather than re-deriving them
+  // from a ground the purge just moved.
+  return {
+    erased: id,
+    citations,
+    kept: stores.kept,
+    tombstone: tombstone.id,
+    spokenBy: tombstoneParts(tombstone.claims).spokenBy!,
+  };
 }
 
 // Is this erasure still OUTSTANDING anywhere in reach — this ground or any replica of it? Its
 // fault model must be the verdict's, or the two drift: outstanding means bytes held (or
 // unprovable — a tier that cannot answer has proven nothing; H9), OR a reachable replica that
 // does not yet carry the operator's tombstone for the id.
-async function erasureOutstanding(
+export async function erasureOutstanding(
   gw: Gateway,
   id: string,
   seen = new Set<Gateway>(),
@@ -502,8 +578,16 @@ export interface StoreHealth {
   //              behind on DURABILITY (lag is missing copies, not retained bytes — a different debt
   //              folded into the same "not yet ok").
   // "unproven" — a tier could not answer; treat as settling at best, never as ok (H9).
+  //
+  // A LAPSED SLATE MOVES NONE OF THESE (SPEC §29.4). `settling` means a promise already MADE has not
+  // reached the bytes; a lapsed slate means a promise has not been KEPT, and the remedies differ —
+  // wait or repair a tier, versus CUT. Conflating them teaches whoever watches `status` that
+  // `settling` sometimes just means someone filed a slate, which is how a field earns the right to
+  // be ignored. So the compliance clock lives in `slates`, and `status` keeps its meaning exactly.
   readonly status: "ok" | "settling" | "unproven";
   readonly erasure: ErasureHealth;
+  readonly slates: SlateHealth;
+  readonly forgiven: ForgivenHealth;
   readonly lagging?: boolean; // present when the backend exposes mirror lag (MirrorBackend)
 }
 
@@ -541,7 +625,7 @@ async function outstandingAmong(
   return { outstanding, unproven };
 }
 
-export async function healthImpl(gw: Gateway): Promise<StoreHealth> {
+export async function healthImpl(gw: Gateway, now = Date.now()): Promise<StoreHealth> {
   const dead = readTombstones(gw.reactor, gw.operatorAuthor);
   const ids = [...dead];
   let erasure: ErasureHealth;
@@ -566,6 +650,11 @@ export async function healthImpl(gw: Gateway): Promise<StoreHealth> {
   return {
     status,
     erasure,
+    // Both sections are LAWFUL facts rather than debt, so neither moves `status` — but without them
+    // a lapsed compliance window and a forgiven-and-returned id are invisible to every instrument
+    // the store has (a struck tombstone leaves `readTombstones`, and therefore `promised`, entirely).
+    slates: slateHealth(gw, now),
+    forgiven: forgivenHealth(gw),
     ...(typeof lagging === "boolean" && { lagging }),
   };
 }

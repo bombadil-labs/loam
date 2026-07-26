@@ -18,13 +18,27 @@
 // — thin delegating methods on the class, bodies here. They reach the gateway only through its
 // declared internals seam (the `@internal` members on the class — see the seam note in gateway.ts).
 
-import { computeId, evalTerm, parseTerm, verifyDelta, type Delta } from "@bombadil/rhizomatic";
+import {
+  computeId,
+  evalTerm,
+  parseTerm,
+  verifyDelta,
+  type Delta,
+  type Reactor,
+} from "@bombadil/rhizomatic";
 import { authorize } from "./accounts.js";
 import { budgetRefusal } from "./budget.js";
 import { ERASE_ENTITY, eraseDefect, isTombstone, readTombstones } from "./erase.js";
 import { Channel } from "./channel.js";
 import type { AppendReceipt, FederationReport, Gateway } from "./gateway.js";
 import { publicDefect } from "./public.js";
+import {
+  egressWithheld,
+  landsReadClosure,
+  readSlates,
+  slateDefect,
+  slateRefusal,
+} from "./slate.js";
 import { readTrustPolicy } from "./trust.js";
 
 // Persist a batch, THEN serve it (the body of `Gateway.append`). The batch is validated whole (one
@@ -44,6 +58,13 @@ export async function appendImpl(gw: Gateway, deltas: Iterable<Delta>): Promise<
   // The door remembers the hole (SPEC §11): an erased id is refused re-entry — through
   // append as through federation — until its tombstone is lawfully struck (forgiveness).
   const dead = readTombstones(gw.reactor, gw.operatorAuthor);
+  // And the door remembers what is being STAGED for removal (SPEC §29.3): a slate closing `cite`
+  // refuses a delta that names one of its frozen members, so the DEPENDENT set cannot grow and no
+  // new orphans exist at cut time. Here the refusal is INFORMATIVE and names the container — the
+  // only parties who can trigger it are parties who could already read the target, so telling them
+  // IS the notice; the mechanism and the warning turn out to be the same thing. The federation door
+  // shares this ONE predicate and differs only in disclosure (see federateImpl).
+  const slates = readSlates(gw.reactor, gw.operatorAuthor, Date.now());
   for (const d of batch) {
     if (computeId(d.claims) !== d.id || verifyDelta(d) !== "verified") {
       throw new Error(
@@ -55,6 +76,16 @@ export async function appendImpl(gw: Gateway, deltas: Iterable<Delta>): Promise<
       throw new Error(
         `append rejected: delta ${d.id} was erased — a tombstone at ${ERASE_ENTITY} refuses ` +
           `its return (strike the tombstone to forgive it)`,
+      );
+    }
+    const cited = slateRefusal(slates, d);
+    if (cited !== undefined) {
+      throw new Error(
+        `append rejected: delta ${d.id} names ${cited.member}, which is SLATED FOR ERASURE by the ` +
+          `container "${cited.container}" — that slate closes \`cite\`, so the set of deltas ` +
+          `depending on it cannot grow before the cut. This refusal is the notice. The citation may ` +
+          `be resubmitted after the cut, where it will land as a dangling reference (§11's ` +
+          `citations manifest exists because surviving deltas legitimately cite erased ids).`,
       );
     }
     // Governance begins with the operator: a gateway holding no operator identity is an
@@ -93,6 +124,15 @@ export async function appendImpl(gw: Gateway, deltas: Iterable<Delta>): Promise<
     // Always cleared — duplicates never hit the raw stream, and a mid-ingest throw must not
     // leave stale ids silently exempting future raw-stream writes.
     for (const d of batch) gw.justPersisted.delete(d.id);
+  }
+  // A landing slate that closes `read` ends live subscriptions the way an erase does (SPEC §29.3).
+  // `reseat()` already solves precisely this one phase later — "a parked reader must not keep serving
+  // a view built on the pre-erase ground" — and the reason is identical here: nothing in the slate's
+  // own deltas moves the watched entity's materialization, so no sink fires and no open stream would
+  // ever narrow. Readers wake with `done` and resubscribe into the narrowed gather. Already-delivered
+  // frames are not recalled; nothing can recall them, and §29.3's asymmetry already says so.
+  if (landsReadClosure(gw, batch, Date.now())) {
+    for (const channel of [...gw.channels]) await channel.return();
   }
   return { accepted, duplicates };
 }
@@ -142,7 +182,15 @@ export function admitForImpl(gw: Gateway): (d: Delta) => boolean {
 // THE CLOSURE IS DRAWN FROM THE LOCAL GROUND. A caller handing it deltas that are not in this store
 // would silently under-close — the negations it needs are not local yet. That is the inbound
 // federation case, and it has its own batch-scoped closure below.
-export function withNegationClosure(gw: Gateway, admitted: readonly Delta[]): Delta[] {
+//
+// Typed on the REACTOR rather than the Gateway (structurally satisfied by one) so the readers that
+// must compute a §27.2 freeze WITHOUT a gateway — and therefore without any chance of a read-door
+// narrowing reaching the membership machinery (SPEC §29.3) — share this one closure instead of
+// growing a second copy of it.
+export function withNegationClosure(
+  gw: { readonly reactor: Reactor },
+  admitted: readonly Delta[],
+): Delta[] {
   const out = new Map(admitted.map((d) => [d.id, d]));
   const pending = [...out.keys()];
   while (pending.length > 0) {
@@ -211,12 +259,34 @@ function deadSet(gw: Gateway): ReadonlySet<string> {
 // The surviving deltas this store offers a peer — everything, or what the offered lens selects,
 // plus whatever struck it (above): offering a claim while withholding its retraction would
 // republish something the operator had struck.
+//
+// THEN the EGRESS closure's subtraction (SPEC §29.3), and this is the ONE site — `openWall`'s
+// reseed seeds a container from `gw.offeredDeltas()`, so a wall attached DURING the window would
+// otherwise be born holding a condemned delta. One site closes both doors, and it is the right
+// place on the merits: a wall that never receives a condemned delta is one fewer copy for the cut
+// to sweep, which is §24.8's recursion warning answered rather than restated. Deliberately NOT in
+// `selectImpl` — see `readGround` for why that choke point is a deadlock rather than a refactor.
+//
+// The withheld set is NEGATION-CLOSED TRANSITIVELY, and the order is the inverse of the closure
+// above it: `withNegationClosure` deliberately ENLARGED this set so a peer never receives a claim
+// without its retraction, so a naive subtraction of a slated NEGATION would re-open the exact leak
+// that closure exists to seal. Withholding a strike therefore withholds its target too. That
+// UNDER-represents the post-cut world for exactly the resurfacing set — after the cut the target
+// REVIVES and the peer would see it — and that is the correct direction: the operative promise is
+// "the holder set cannot grow", un-slating is FREE (§29.8), and a revocable act must not have an
+// irrevocable effect. The peer converges at the cut rather than during the window.
 export function offeredDeltasImpl(gw: Gateway): Delta[] {
   const lens = gw.options.offeredLens;
-  if (lens === undefined) return [...gw.reactor.snapshot()];
-  const result = evalTerm(lens, gw.reactor.snapshot());
-  if (result.sort !== "dset") throw new Error("an offered lens must select a delta set");
-  return withNegationClosure(gw, [...result.set]);
+  const offered =
+    lens === undefined
+      ? [...gw.reactor.snapshot()]
+      : (() => {
+          const result = evalTerm(lens, gw.reactor.snapshot());
+          if (result.sort !== "dset") throw new Error("an offered lens must select a delta set");
+          return withNegationClosure(gw, [...result.set]);
+        })();
+  const withheld = egressWithheld(gw, Date.now());
+  return withheld.size === 0 ? offered : offered.filter((d) => !withheld.has(d.id));
 }
 
 // Membership is a query, first-class (SPEC §27.6, the body of `Gateway.select`): evaluate a
@@ -364,6 +434,13 @@ export async function federateImpl(
   // The door remembers the hole (SPEC §11): a tombstoned id is refused re-entry even past an
   // explicit admit override — un-erasure is striking the tombstone, never a lucky re-send.
   const dead = readTombstones(gw.reactor, gw.operatorAuthor);
+  // The SAME cite predicate the append door runs (SPEC §29.3) — one rule, two sites, because all
+  // seven findings of 2026-07-21 were one-rule-N-sites-one-drifts with the federation site as the
+  // one that drifted. Here the disclosure discipline INVERTS: a peer pushing a citation may have no
+  // read access to the target, so a distinguishable refusal would announce that something exists and
+  // is on its way out. It costs nothing to be uniform — this door already returns counts and no
+  // message, so a slate refusal is indistinguishable from any other rejection.
+  const slates = readSlates(gw.reactor, gw.operatorAuthor, Date.now());
   const lawful: Delta[] = [];
   let admitted: Delta[] = [];
   for (const d of all) {
@@ -378,7 +455,14 @@ export async function federateImpl(
       verifyDelta(d) !== "verified" ||
       dead.has(d.id) ||
       publicDefect(d.claims) !== undefined ||
-      (isTombstone(d.claims) && eraseDefect(d, gw.reactor, gw.operatorAuthor) !== undefined)
+      (isTombstone(d.claims) && eraseDefect(d, gw.reactor, gw.operatorAuthor) !== undefined) ||
+      slateDefect(d, gw.reactor, gw.operatorAuthor) !== undefined ||
+      // A cite refusal belongs with the UNLAWFUL group and not with the un-admitted one: the
+      // batch-scoped closure below deliberately readmits negations of what crossed, and a delta this
+      // store is staging a removal over must never come back through it. Safe by construction with
+      // the per-pointer `negates` exemption — a strike of a member is never refused here in the first
+      // place, so nothing that closure needs is ever in this bucket.
+      slateRefusal(slates, d) !== undefined
     ) {
       continue; // unlawful at this door: no predicate and no closure can readmit it
     }
