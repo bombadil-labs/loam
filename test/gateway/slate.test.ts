@@ -29,6 +29,7 @@ import {
 } from "../../src/gateway/slate.js";
 import { FERN, observed } from "../spike/garden.js";
 import {
+  AFTER_DEADLINE,
   BEFORE_DEADLINE,
   groundIds,
   DEADLINE,
@@ -527,8 +528,6 @@ describe("T64 criterion 15 — forgiveness, both sides of the cut", () => {
     expect(await gw.backend.holds(condemned.id)).toBe(false);
     // The DURABLE arithmetic reports it as forgiven WITH its strike id rather than as a missing
     // tombstone: the graveyard records an event that happened, and forgiveness is a later event.
-    // (What a re-derived RECEIPT says about the same member — forgiven AND present again — arrives
-    // with the receipt, in slate-receipt.test.ts.)
     const check = graveyardCompleteness(gw.reactor, OP, report.graveyard);
     expect(check.forgiven).toEqual([
       { member: condemned.id, strike: strike(tombstone, 70_000).id },
@@ -536,9 +535,15 @@ describe("T64 criterion 15 — forgiveness, both sides of the cut", () => {
     expect(check.missing).toEqual([]);
     expect(check.holds).toBe(false);
     expect(check.cutCompleted).toBe(true);
+    // And the re-derived receipt reports FORGIVEN with its strike id, not still-forgotten.
+    const receipt = await gw.receipt(report.graveyard, { now: AFTER_DEADLINE });
+    const member = receipt.members.find((m) => m.member === condemned.id)!;
+    expect(member.forgiven).toBe(strike(tombstone, 70_000).id);
+    expect(member.tombstone).toBeUndefined();
+    expect(member.presentAgain).toBe(false);
     // Two-sided: the bystander was never touched, on any tier or in any report.
     expect(await gw.backend.holds(bystander.id)).toBe(true);
-    expect(check.members).toEqual([condemned.id]);
+    expect(receipt.members.map((m) => m.member)).toEqual([condemned.id]);
     await gw.close();
   });
 });
@@ -589,6 +594,7 @@ describe("T64 criterion 17 — the mint is new vocabulary only, so no §20 step 
       unresolved: [],
       disagreeing: [],
     });
+    expect(health.forgiven).toEqual({ count: 0, present: 0, ids: [], unreadable: [] });
     // Two-sided: a MALFORMED slate pointer is refused, so the optionality is not a hole.
     const bad = signClaims(
       {

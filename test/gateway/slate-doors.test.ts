@@ -668,6 +668,7 @@ describe("T64 criterion 8 — the lapse is computed AT THE DOOR, and the clock i
       outstanding: [],
       unproven: false,
     });
+    expect(health.forgiven).toEqual({ count: 0, present: 0, ids: [], unreadable: [] });
     // Two-sided: BEFORE the deadline the same store reports the slate open and NOT lapsed.
     const early = await gw.health(LAPSED_DEADLINE - 30_000);
     expect(early.slates).toEqual({

@@ -432,8 +432,9 @@ describe("T64 criterion 20 — a detached wall that demonstrably holds a member 
         { wall: "container:opaque", acceptsIncomplete: signed.record },
       ]),
     );
-    // (The receipt's NON-CLAIM naming this same container arrives with the receipt, in
-    // slate-receipt.test.ts — what this rail owns is that the CUT reported the tier as unproven.)
+    // The receipt's NON-CLAIM section names it.
+    const receipt = await gw.receipt(report.graveyard, { now: BEFORE_DEADLINE });
+    expect(receipt.nonClaim.join("\n")).toMatch(/container:shelf/);
     // AND THE MEMBER'S BYTES ARE STILL READABLE IN THE WALL'S STORE — so the rail proves the report is
     // honest about a copy that really is still there, rather than honest about nothing.
     expect(await shelfBytes.holds(member.id)).toBe(true);
