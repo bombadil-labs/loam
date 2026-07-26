@@ -101,6 +101,18 @@ export const TERMS = [
     where: { kind: "export", name: "eraseClaims" },
   },
   {
+    word: "slate",
+    gloss:
+      "A named, frozen set of facts marked for removal, with the store's doors closed over them while it stands. It is what makes an impact list true: the set cannot grow after it is named, so what you were told is what gets destroyed.",
+    where: { kind: "spec", section: "spec/29-slating-and-graveyards.md" },
+  },
+  {
+    word: "graveyard",
+    gloss:
+      "The permanent record that one batch of forgetting happened — who asked, when, over which set — holding addresses rather than content, so it proves the event without retaining any of it.",
+    where: { kind: "spec", section: "spec/29-slating-and-graveyards.md" },
+  },
+  {
     word: "operator",
     gloss:
       "The key that governs one store. Not an administrator account inside the system — the identity the store is defined by, whose signature is the root of every permission in it.",
@@ -846,8 +858,8 @@ export const CHAPTERS = [
     slug: "forgetting",
     title: "Forgetting, and proving it",
     thesis:
-      "An [[operator]] can have a fact genuinely removed — the bytes gone from every tier that held them — while the store keeps a permanent signed record that it forgot, and never a record of what.",
-    covers: ["spec/11-erasure.md"],
+      "An [[operator]] can have a fact genuinely removed — the bytes gone from every tier that held them — while the store keeps a permanent signed record that it forgot, and never a record of what. And because removing something can break what other people were relying on, it happens in two steps, with the impact list true before anything goes.",
+    covers: ["spec/11-erasure.md", "spec/29-slating-and-graveyards.md"],
     body: [
       {
         kind: "prose",
@@ -874,6 +886,30 @@ export const CHAPTERS = [
       {
         kind: "prose",
         text: "A [[tombstone]] cannot itself be erased: a store that could forget its own forgetting would be unauditable. It can, however, be struck — which is forgiveness, and lets an id return. And erasing here never compels anyone else: a peer's [[operator]] decides for themselves whether to honor a foreign order, so a forged tombstone cannot cascade a deletion across a network.",
+      },
+      {
+        kind: "heading",
+        text: "Two steps, because deleting affects other people",
+      },
+      {
+        kind: "prose",
+        text: "One store serves many tenants and many views, so removing a fact can invalidate something somebody else was relying on — and the obvious courtesy, a dry run that reports the impact before you commit, does not work. A dry run is a *look* at a world that keeps moving: between the look and the act, someone appends, and the list you were shown quietly under-reports. Caching it makes that worse rather than better.",
+      },
+      {
+        kind: "prose",
+        text: "So forgetting is one operation in two steps. First you IDENTIFY, which creates a [[slate]]: a frozen set of ids, named and addressable, with some of the store's doors CLOSED over them. Then you CUT. The list is not true because somebody looked carefully — it is true because while the [[slate]] stands the set cannot grow, and the doors that could have grown it are shut. Which doors is your choice, and it is a legal choice rather than a technical one: closing only the outward ones is a grace period, closing reads too is very nearly the deletion already, and closing none is an honest announcement.",
+      },
+      {
+        kind: "prose",
+        text: "The window is where the two-step shape earns its keep, because it can show you things a single act never could. If forgetting one fact would bring another back to life — because the fact you are removing was the retraction of something else — you are told which ones, before you destroy anything. If a copy was made under a different id before you started, you are told where the links are, and told plainly that links are all a content-addressed store can find. And a deadline is part of the [[slate]], because a compliance clock starts when somebody asks: let it lapse and reads close on their own, which is the safe direction rather than the convenient one.",
+      },
+      {
+        kind: "prose",
+        text: "What survives the cut is a [[graveyard]]: one small record that this batch of forgetting happened, holding addresses rather than content. It is deliberately not a second copy of the per-fact law — the [[tombstone]]s stay the single answer to *is this id refused* — so what the [[graveyard]] buys is arithmetic. Every id in the frozen set has a surviving [[tombstone]] that points back at this event, and that sentence is checkable years later from the store alone, with no memory of the cut and nothing to probe. That is the difference between a narrative and a proof.",
+      },
+      {
+        kind: "prose",
+        text: "A receipt is then DERIVED rather than stored, and re-issuable at any time — which matters more than it sounds. A byte verdict is a claim about the world at a moment, not a fact about the store, so a document that reprinted last month's verdict as today's would be the dry run all over again, wearing a letterhead. Every re-issue asks the tiers again. And it reports three things per fact rather than one, because \"forgiven\" alone is the wrong sentence: whether the order still stands, whether the bytes are gone now, and whether the id has come BACK — which it can, lawfully, once forgiveness lets it.",
       },
       {
         kind: "claims",
@@ -907,6 +943,30 @@ export const CHAPTERS = [
             spec: "spec/11-erasure.md",
             proof: "test/gateway/erase.test.ts",
             door: "readTombstones",
+          },
+          {
+            says: "What was identified is what gets destroyed: a [[slate]]'s set is fixed by content address the moment it is named, and re-pointing it afterwards binds nothing — so the impact list cannot quietly widen between the warning and the deletion.",
+            spec: "spec/29-slating-and-graveyards.md",
+            proof: "test/gateway/slate.test.ts",
+            door: "Gateway",
+          },
+          {
+            says: "While a [[slate]] stands the set cannot grow: the store declines to hand those facts to a peer, declines new claims that depend on them, and — if you asked for it — declines to serve them at all.",
+            spec: "spec/29-slating-and-graveyards.md",
+            proof: "test/gateway/slate-doors.test.ts",
+            door: "Gateway",
+          },
+          {
+            says: "If forgetting one fact would bring another back to life, you are shown which ones BEFORE the deletion — and a cut that cannot finish leaves the [[slate]] standing rather than half-done, so it can be repaired and resumed.",
+            spec: "spec/29-slating-and-graveyards.md",
+            proof: "test/gateway/slate-cut.test.ts",
+            door: "Gateway",
+          },
+          {
+            says: "A compliance receipt re-asks every tier each time it is issued, so it reports what is true now rather than reprinting an old answer — and it says whether a forgiven fact has come back.",
+            spec: "spec/29-slating-and-graveyards.md",
+            proof: "test/gateway/slate-receipt.test.ts",
+            door: "Gateway",
           },
         ],
       },

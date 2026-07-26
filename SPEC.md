@@ -58,6 +58,7 @@ name begins with that number.
 | §26 | [As-of reads — the temporal promise, kept](spec/26-as-of-reads.md) |
 | §27 | [Containers — the primitive under sandboxes, modules, and federation (Loam as git for signed claims)](spec/27-containers.md) *(design-stage draft)* |
 | §28 | [Trust is a property of a container — admission delegates, effectiveness attenuates](spec/28-container-trust.md) *(design-stage draft)* |
+| §29 | [Two-phase erasure — slating, the cut, and the graveyard](spec/29-slating-and-graveyards.md) |
 | §31 | [The mount table — which world answers at a name, asked per request](spec/31-mount-table.md) |
 
 _**§21**, **§22**, **§25**, and **§26** are **landed** — design accepted and implemented (see each
@@ -75,8 +76,8 @@ step 13 and generalizes §8's trust from a store-wide scalar to a property of ev
 before §27's trust knob, which it re-founds. A reserved number lands here as its own `spec/NN-*.md`
 file when its work merges._
 
-_**The gap at §29–§30 is deliberate, not a slip.** Reserved section numbers are load-bearing — tickets and
+_**The gap at §30 is deliberate, not a slip.** Reserved section numbers are load-bearing — tickets and
 sections cite each other by them and nothing is ever renumbered — so a number is claimed the moment its
-working spec claims it and stays empty until that work's landing PR writes the file. **§29** is reserved
-for two-phase erasure (slating and graveyards); **§30** for the renderer dual target. **§31** was therefore
-the next free number when the mount table landed._
+working spec claims it and stays empty until that work's landing PR writes the file. **§30** is reserved
+for the renderer dual target. **§29** was such a gap until two-phase erasure landed; **§31** was the next
+free number when the mount table landed._

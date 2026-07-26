@@ -73,4 +73,11 @@ its content.
   property of the content itself (timestamps correlate, style fingerprints). Rung 4 is the
   tool for content-side scrubbing; no substrate can do it for you.
 
+**AMENDED BY §29 — erasure is TWO PHASES now, not one act.** Everything above still describes what
+`erase(id)` does to a single delta, unchanged, refusal voice and all. What changed is that it is no longer
+the only shape: a removal that would invalidate data someone else relies on can be IDENTIFIED first, which
+closes propagation over a frozen set of ids so the impact list is true by enforcement rather than by
+observation, and CUT second. The promise §11 makes is therefore a promise about the cut, and the visible
+intermediate state between the two is deliberate — see §29.
+
 **Provenance.** Landed — [#34](https://github.com/bombadil-labs/loam/pull/34) (the erase seam), [#36](https://github.com/bombadil-labs/loam/pull/36) (the law slice: authority → manifest → tombstone → purge), [#38](https://github.com/bombadil-labs/loam/pull/38) (operator-only gating + hardening). Lives in `src/gateway/erase.ts` (`Gateway.erase`, `eraseDefect`) and the tombstone readers (`readTombstones`, honored at both the append and federation doors). Amended by [#183](https://github.com/bombadil-labs/loam/pull/183) (T67): the completeness verdict is `StoreBackend.holds` — byte-presence on every tier and every pool, with the id-scoped durable WAL-truncation debt in the sqlite driver. Key decision (Myk, 2026-07-10): erasure is the instance operator's alone — a data subject asks, the operator executes — and the signed tombstone refuses the exact bytes' return by id, so the store remembers THAT it forgot without keeping what.
