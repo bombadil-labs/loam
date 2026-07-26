@@ -5,8 +5,9 @@ design is in **[SPEC.md](SPEC.md)** and the usage in **[README.md](README.md)** 
 writing code. **Get up to speed on what Loam is and how it works from SPEC.md.** This file is the
 **process**. The backlog of unbuilt/partial design now lives as **ADLC tickets** in
 `.adlc/tickets/` — one shard per ticket, the contract every gate reads (it replaced the old `TODO.md` +
-`CURRENT_WORK.md` hand-tracked pair). **[JOURNAL.md](JOURNAL.md)** remains the append-only record —
-an index over **[`journal/`](journal/)**, one file per entry; keep it current as you make decisions.
+`CURRENT_WORK.md` hand-tracked pair). **[JOURNAL.md](JOURNAL.md)** fronts the append-only record —
+a preamble over **[`journal/`](journal/)**, one file per entry, THE DIRECTORY ITSELF BEING THE
+INDEX; write an entry when a decision or learning would otherwise live only in chat.
 
 **SPEC.md is the record of what IS.** It is only ever grown by a **landing PR**, and every section
 carries a `**Provenance.**` footer linking the PR(s) that landed it and naming the implementation —
@@ -350,8 +351,10 @@ It is written FROM the settled working spec, re-cast as narrative —
 `spec/` records what IS, in prose, for a reader; the working spec was a gateable instrument for a
 builder. Different genres, different lifetimes; do not paste one into the other. The spec grows only
 here, never speculatively; a new file is the default, editing an existing section the rare
-exception. Append a record to the journal — a **new `journal/<date>-<slug>.md` file** (what was done
-+ any novel learning) plus its row in the `JOURNAL.md` index. **And the landing owes the
+exception. Write a journal entry — a **new `journal/<date>-<slug>.md` file**, no index row (the
+directory is the index) — **only when the landing carries what its PR cannot**: a chat ruling, a
+cross-PR synthesis, a learning not already distilled into a durable home (Myk, 2026-07-26). A
+routine landing's history is its PR and commit message, and the Provenance footer links those. **And the landing owes the
 capabilities book one claim** (Myk, 2026-07-26): `test/site/capabilities.test.ts` is red until the
 new spec section is covered by a chapter and cited by a `{says, spec, proof}` claim in
 `demos/capabilities/chapters.mjs` — transcription from the working spec's criteria, not invention,
@@ -429,12 +432,13 @@ busy.
 ## Standing rules
 
 - **Root holds exactly four markdown docs** — `README.md` (the vision), `CLAUDE.md` (the process),
-  `SPEC.md` (the spec **index**: preamble + the section table), `JOURNAL.md` (the journal **index**:
-  preamble + the entry table). Both indexes front a folder, for the same reason: **`spec/`** is one
-  `NN-slug.md` file per section (what IS, grown only by landings, each footered with its provenance),
-  and **`journal/`** is one `<date>-<slug>.md` file per entry (append-only, newest last). A new
-  section is a new file in `spec/`; a new entry is a new file in `journal/` plus its index row —
-  never a new root doc. The backlog is not a doc anymore: it is `.adlc/tickets/`, one shard per
+  `SPEC.md` (the spec **index**: preamble + the section table), `JOURNAL.md` (the journal
+  **preamble** — the `journal/` directory is its own index, since date-slug filenames sort
+  chronologically and a hand-maintained row table was one shared tail every concurrent landing
+  collided on). **`spec/`** is one `NN-slug.md` file per section (what IS, grown only by landings,
+  each footered with its provenance), and **`journal/`** is one `<date>-<slug>.md` file per entry
+  (append-only, newest last, written for decisions and learnings rather than per landing). A new
+  section is a new file in `spec/`; a new entry is a new file in `journal/` — never a new root doc. The backlog is not a doc anymore: it is `.adlc/tickets/`, one shard per
   ticket (a committed contract — don't hand-edit it; go through `adlc ticket update`, which is
   hash-guarded and refuses to narrow a rail set without `--authorize`). Neither is the DESIGN surface: a work-in-progress spec is a **working spec** at
   `.adlc/specs/NN-slug.md` (gateable, criteria-bearing, P1's instrument), which becomes a `spec/`
