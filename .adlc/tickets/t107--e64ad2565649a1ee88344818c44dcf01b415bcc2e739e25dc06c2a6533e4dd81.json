@@ -1,0 +1,16 @@
+{
+  "body": "MYK'S QUESTION (2026-07-26): does the hex string grow with the complexity of the hyperview? MEASURED ANSWER, from the code: yes, linearly, because neither field is a hash. `viewCanonicalHex(v)` and `hviewCanonicalHex(h)` (rhizomatic) hex-encode the CBOR CANONICAL FORM — the comment says it plainly, \"same (schema, DSet) => byte-identical form\": the FORM is the address. So `_hex` is 2 hex chars per CBOR byte of the VIEW — a pick-latest view over a million-delta bucket stays tiny, but an `all`/`conflicts` policy or a wide props map makes `_hex` as large as the answer itself, tripling every response that requests it (data + its re-serialization, hexed). And `_hviewHex` serializes THE ENTIRE GATHERED BUCKET — on a million-delta hyperview that is the million deltas, in hex, per request. The operator-review postcard (3 props) already produced a ~230-char `_hex` with the field values legible inside it — which is also a quiet INFORMATION LEAK: `_hex` on a public door re-discloses every resolved value even if a client displays only one field (minor today since the door serves the fields anyway, but it forecloses ever serving a projection).\n\nNOTE the substrate is not confused: delta ids ARE digests (`computeId = contentAddress(canonicalBytes)`, fixed 68 chars). The view/hview fields just never got the same treatment, and rhizomatic is FROZEN — but no substrate change is needed: Loam's surface can hash the canonical bytes itself (`contentAddress(bytes)` is already exported) and keep every equality property, since digest equality ⇔ byte equality for the comparisons every consumer actually makes (the tutorial finale's _hex-for-_hex, SSE's _fromHex→_hex frames, claims.test's shared-_hviewHex, the operator review's convergence check).\n\nTHE DECISION (Myk's — this changes what the API promises): (a) make `_hex`/`_hviewHex` fixed-size digests of the canonical bytes (64 hex chars), breaking any consumer that PARSES the hex (audit says: none in-tree — every use is equality); (b) add `_digest`/`_hviewDigest` beside the old fields and deprecate growth; or (c) keep bytes and document the cost. Recommend (a): fixed-size, same semantics, closes the leak, shrinks SSE frames — with a §17 spec correction and the tutorial finale re-verified. No §20 migration: these fields are computed at read time, never at rest.\n\nRAILS when built: digest stability across arrival orders (the existing read tests re-aimed); the SSE frame carries fixed-width hashes; a probe that the old legible-values property is GONE (the leak closed is an assertable absence: the hex no longer contains the view's strings).",
+  "edges": [],
+  "id": "T107",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "src/gateway/reads.ts",
+    "src/gateway/gql.ts",
+    "src/surface/rest.ts",
+    "test/gateway/",
+    "spec/17-surfaces.md"
+  ],
+  "status": "todo",
+  "title": "`_hex` and `_hviewHex` are canonical BYTES, not digests — the identity fields grow with the answer, and the hyperview one grows with the bucket"
+}
