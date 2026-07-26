@@ -1,0 +1,15 @@
+{
+  "body": "FOUND BY THE OPERATOR REVIEW, 2026-07-26. `loam pull` opens its own handle on the sqlite file, so pulling into a store that `loam serve` is CURRENTLY SERVING lands deltas the running gateway's in-memory reactor never ingests — the server keeps answering from boot-time state until someone bounces it. The review had to kill/restart B around every anti-entropy step. Worse than inconvenience: it is a silent staleness trap — the pull PRINTS success (\"20 accepted\"), the server keeps serving, and nothing anywhere says the two disagree. H7-adjacent at the ops layer: an operation reporting success whose visible effect has not happened.\n\nTHREE CANDIDATE SHAPES for P1 (not exclusive): (1) a PULL DOOR — `POST /:mount/pull {url}` (operator token only), so the running process does the pulling and ingests live; pairs naturally with a `--pull <url> --every <s>` serve flag for the aggregator posture. (2) a WATCHER — the sqlite driver notices foreign appends (data_version pragma is cheap to poll) and replays the delta since-set; closes the two-process hole generally, including `loam register` against a served home (same trap, confirmed in the same run: A's /register worked only because the review used the HTTP door, not the CLI, for schema registration on a live store). (3) at MINIMUM, honesty: `loam pull` detects a lock-holder/serving pid on the home and SAYS \"a server is running; it will not see these until restart\" — the cheap fix that kills the silent half, shippable same-day while 1/2 are designed.\n\nAlso surfaced, fold in or split: `loam serve` exposes no `--host` (ServeOptions.host exists; the CLI hardcodes the default), so a LAN-reachable store — the phone-demo case, and any real deployment not behind a local proxy — cannot be served by the CLI at all.\n\nRAILS when built: pull-then-query-through-the-RUNNING-server answers the pulled fact (the review's exact failure, as a test); the staleness warning fires when a server holds the home; `--host` reaches a non-loopback bind in a test that actually connects to it. Recommendation (3) is repair-tier; (1)/(2) change what serve promises and are Myk's.",
+  "edges": [],
+  "id": "T103",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "src/cli/cli.ts",
+    "src/server/http.ts",
+    "test/cli/",
+    "test/server/"
+  ],
+  "status": "todo",
+  "title": "A served store cannot pull — federation needs a pulse (or a door) on `loam serve`"
+}
