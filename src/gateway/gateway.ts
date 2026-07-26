@@ -109,6 +109,7 @@ import {
   serveBytesImpl,
   serveRouteImpl,
   writeRouteImpl,
+  type ReadGesture,
   type RendererBinding,
 } from "./renderers.js";
 import {
@@ -577,8 +578,9 @@ export class Gateway {
     route: string,
     entity: string,
     door: "full" | "public",
+    gesture?: { readonly reads: readonly ReadGesture[]; readonly state: Record<string, string> },
   ): Promise<{ status: number; contentType: string; body: string }> {
-    return serveRouteImpl(this, route, entity, door);
+    return serveRouteImpl(this, route, entity, door, gesture);
   }
 
   // Write through a rendered route (SPEC §23.3): the body lives in renderers.ts.

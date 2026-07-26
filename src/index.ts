@@ -161,11 +161,16 @@ export {
 } from "./gateway/registration.js";
 export {
   CTX_RENDERER,
+  parseReadGesture,
   parseRendererInput,
   readRenderers,
   rendererBindingClaims,
   type RenderNode,
   type RendererBinding,
+  readKey,
+  type ReadCode,
+  type ReadGesture,
+  type ReadResult,
   type RendererSpec,
   type RenderFn,
 } from "./gateway/renderers.js";
