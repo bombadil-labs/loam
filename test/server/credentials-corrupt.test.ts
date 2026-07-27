@@ -10,9 +10,14 @@
 // (t) A half-written credential file would lock the operator out of their own store, so the write is
 // temp-then-rename and lands at 0600 whatever the old file's mode was.
 //
-// NAMED GAP: no rail here stages a real power cut, so atomicity is asserted through its observable
-// consequences — no residue, a stale temp file cannot poison the result, and the target is never
-// observed as anything but whole. A test that could pull the plug mid-rename would close it.
+// NAMED GAPS, both of them, because an honest-looking comment over a weaker test is how this class
+// survives review:
+//   - ATOMICITY is asserted through its observable consequences — the inode changes across a write (so
+//     it went through a rename, not an in-place truncate), no residue is left, and a stale temp cannot
+//     poison the result. A test that could pull the plug mid-rename would close it properly.
+//   - FSYNC is asserted by NOTHING. Criterion (t) names it; both fsync calls in writeCredentials are
+//     deletable with every rail here still green. Closing it wants a spy on the node:fs binding, which
+//     an ESM named import does not offer, so the honest move today is to say so.
 
 import { chmodSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

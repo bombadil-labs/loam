@@ -80,6 +80,31 @@ const filedValue = (
   return value?.target.kind === "primitive" ? String(value.target.value) : undefined;
 };
 
+// Every form a secret could take on the way into the ground or the store file. The hex STRING is the
+// form the credential file holds, so its ASCII is the likely leak; the decoded bytes are the form a
+// `bytes` target would carry. Both, for each secret, at both levels.
+const secretNeedles = (entry: {
+  salt: string;
+  hash: string;
+}): readonly (readonly [string, Buffer])[] => [
+  ["salt (as text)", Buffer.from(entry.salt, "utf8")],
+  ["salt (decoded)", Buffer.from(entry.salt, "hex")],
+  ["hash (as text)", Buffer.from(entry.hash, "utf8")],
+  ["hash (decoded)", Buffer.from(entry.hash, "hex")],
+  ["the password", Buffer.from(PASSWORD, "utf8")],
+];
+
+// Which secrets this delta's canonical bytes carry, by name. Empty is the answer every delta must give.
+const leaks = (
+  delta: { claims: { author: string; timestamp: number; pointers: readonly unknown[] } },
+  entry: { salt: string; hash: string },
+): string[] => {
+  const canonical = Buffer.from(canonicalHex(delta.claims as never), "hex");
+  return secretNeedles(entry)
+    .filter(([, needle]) => canonical.includes(needle))
+    .map(([what]) => what);
+};
+
 describe("loam user create — the bootstrap door", () => {
   it("(a) writes a 0600 credential entry and appends exactly two operator-signed deltas", async () => {
     const before = await storeDeltas(home);
@@ -159,6 +184,50 @@ describe("loam user create — the bootstrap door", () => {
     }
   });
 
+  it("(b) a record with no readable role refuses too, and still appends nothing", async () => {
+    // The guard asks whether the RECORD is there, not what role reads from it. Asking `roleOf` instead
+    // would answer undefined here — the record stands, the role does not read — and append a second
+    // record, which is the duplicate the guard exists to prevent.
+    expect((await createUser(home, "myk", PASSWORD)).code).toBe(0);
+    const seed = readSeed(home);
+    const operator = authorForSeed(seed);
+    const gateway = await Gateway.boot(
+      new SqliteBackend(storePath(home)),
+      assembleGenesis({ operatorSeed: seed }),
+    );
+    try {
+      const roleDelta = (await storeDeltas(home)).find(
+        (d) => filedValue(d, userEntity("myk"), CTX_ROLE) === "operator",
+      );
+      // the operator retires their own role binding, leaving the record standing and no role readable
+      await gateway.append([
+        signClaims(
+          {
+            timestamp: Date.now(),
+            author: operator,
+            pointers: [
+              { role: "negates", target: { kind: "delta", deltaRef: { delta: roleDelta!.id } } },
+            ],
+          },
+          seed,
+        ),
+      ]);
+      expect(resolveUserView(gateway.reactor, operator, "myk")).toBeDefined();
+      expect(roleOf(gateway.reactor, operator, "myk")).toBeUndefined();
+    } finally {
+      await gateway.close();
+    }
+
+    const before = await storeDeltas(home);
+    writeFileSync(join(home, "credentials.json"), JSON.stringify({ version: 1, users: {} }));
+    const again = await createUser(home, "myk", PASSWORD);
+    expect(again.code).toBe(2);
+    expect(again.io.err.join("\n")).toMatch(/no readable role binding/);
+    expect((await storeDeltas(home)).length).toBe(before.length);
+    expect(existsSync(join(home, "credentials.json"))).toBe(true);
+    expect(readCredentials(home).users["myk"]).toBeUndefined();
+  });
+
   it("(b) a create that asks for a different role than the ground holds refuses", async () => {
     expect((await createUser(home, "wren", PASSWORD, { operator: false })).code).toBe(0);
     const before = await storeDeltas(home);
@@ -189,20 +258,57 @@ describe("loam user create — the bootstrap door", () => {
       await served.close();
     }
 
-    // delta level: the canonical bytes of every delta the store holds
+    // ENCODINGS ARE THE WHOLE DIFFICULTY HERE. `salt` and `hash` are hex STRINGS in the file, so a
+    // delta that leaked one would carry the ASCII of that string — and a search for the DECODED bytes
+    // would never find it. So every secret is looked for in both forms, at both levels, and `leaks`
+    // below is exercised against a deliberate leak so it cannot go quietly blind.
     const deltas = await storeDeltas(home);
     expect(deltas.length).toBeGreaterThan(2);
-    for (const delta of deltas) {
-      const hex = canonicalHex(delta.claims as never);
-      expect(hex).not.toContain(entry.salt);
-      expect(hex).not.toContain(entry.hash);
-    }
-    // object level, the other direction: the store FILE itself, in bytes. A delta scan alone
-    // cannot see a store that holds the secret somewhere a reader does not look.
+    for (const delta of deltas) expect(leaks(delta, entry), delta.id).toEqual([]);
+
+    // object level, the other direction: the store FILE itself, in bytes. A delta scan alone cannot see
+    // a store that holds the secret somewhere a reader does not look.
     const bytes = readFileSync(storePath(home));
-    expect(bytes.includes(Buffer.from(entry.salt, "hex"))).toBe(false);
-    expect(bytes.includes(Buffer.from(entry.hash, "hex"))).toBe(false);
-    expect(bytes.includes(Buffer.from(PASSWORD, "utf8"))).toBe(false);
+    for (const [what, needle] of secretNeedles(entry)) {
+      expect(bytes.includes(needle), `${what} in the store file`).toBe(false);
+    }
+  });
+
+  it("(c) and the scan that says so can SEE a leak — the same check, over a planted one", async () => {
+    // Without this, criterion (c) rests on a search whose encoding nobody has ever verified. A rail
+    // that has never gone red has proven nothing.
+    await createUser(home, "myk", PASSWORD);
+    const entry = readCredentials(home).users["myk"]!;
+    const seed = readSeed(home);
+    const gateway = await Gateway.boot(
+      new SqliteBackend(storePath(home)),
+      assembleGenesis({ operatorSeed: seed }),
+    );
+    try {
+      // the exact mistake §36 exists to prevent: the credential entry, appended into the ground
+      await gateway.append([
+        signClaims(
+          {
+            timestamp: Date.now(),
+            author: authorForSeed(seed),
+            pointers: [
+              {
+                role: "user",
+                target: { kind: "entity", entity: { id: userEntity("myk"), context: CTX_USER } },
+              },
+              { role: "hash", target: { kind: "primitive", value: entry.hash } },
+            ],
+          },
+          seed,
+        ),
+      ]);
+    } finally {
+      await gateway.close();
+    }
+    const planted = (await storeDeltas(home)).flatMap((d) => leaks(d, entry));
+    expect(planted).toContain("hash (as text)");
+    const bytes = readFileSync(storePath(home));
+    expect(bytes.includes(Buffer.from(entry.hash, "utf8"))).toBe(true);
   });
 
   it("(v) the user record and role binding resolve through the reading into a View", async () => {
@@ -263,6 +369,61 @@ describe("who may say what role a user holds", () => {
       const view = resolveUserView(gateway.reactor, operator, "wren") as Record<string, unknown>;
       expect(view[CTX_USER]).toBe("wren");
       expect(view[CTX_ROLE]).toBe("actor");
+    } finally {
+      await gateway.close();
+    }
+  });
+
+  it("counts only the operator's STRIKES too — a write-grantee cannot delete a role binding", async () => {
+    // The other axis, and it needs its own rail: narrowing whose CLAIMS count leaves whose STRIKES bind
+    // wide open. The wider data posture honours every operator-grantee's negation, so the party who
+    // could no longer forge a role could still retract one — a lockout rather than an escalation, and
+    // no better. Two-sided: the stranger's strike is inert AND the operator's own strike binds.
+    await createUser(home, "myk", PASSWORD);
+    const seed = readSeed(home);
+    const operator = authorForSeed(seed);
+    const gateway = await Gateway.boot(
+      new SqliteBackend(storePath(home)),
+      assembleGenesis({ operatorSeed: seed }),
+    );
+    try {
+      await gateway.append([
+        signClaims(grantClaims(STORE_ENTITY, STRANGER, "write", operator, 9201), seed),
+      ]);
+      const roleDelta = (await storeDeltas(home)).find(
+        (d) => filedValue(d, userEntity("myk"), CTX_ROLE) === "operator",
+      );
+      expect(roleDelta).toBeDefined();
+
+      // the stranger strikes the operator's own role binding
+      await gateway.append([
+        signClaims(
+          {
+            timestamp: Date.now(),
+            author: STRANGER,
+            pointers: [
+              { role: "negates", target: { kind: "delta", deltaRef: { delta: roleDelta!.id } } },
+            ],
+          },
+          STRANGER_SEED,
+        ),
+      ]);
+      expect(roleOf(gateway.reactor, operator, "myk")).toBe("operator"); // inert
+
+      // the operator's own strike is not
+      await gateway.append([
+        signClaims(
+          {
+            timestamp: Date.now() + 1,
+            author: operator,
+            pointers: [
+              { role: "negates", target: { kind: "delta", deltaRef: { delta: roleDelta!.id } } },
+            ],
+          },
+          seed,
+        ),
+      ]);
+      expect(roleOf(gateway.reactor, operator, "myk")).toBeUndefined();
     } finally {
       await gateway.close();
     }

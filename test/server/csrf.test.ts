@@ -8,6 +8,8 @@
 // "Refused" is not enough on its own, so every rail here also asserts that the SESSION DID NOT
 // MOVE: a refusal that logged the caller out, or minted a token anyway, would be the bug.
 
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   PASSWORD,
@@ -78,8 +80,36 @@ describe("POST /login refuses a cross-site shape", () => {
     });
     expect(res.status).toBe(403);
     expect(cookieFrom(res)).toBeUndefined();
-    // no session state moved: the pre-session is still a pre-session
+    // NOTHING MOVED, read from the state that can actually move. `stillOpen` on a pre-session is false
+    // in every world, so it says little on its own; the pre-session's own form token proves it was not
+    // dropped, and the lock file proves the attempt was not counted against a victim.
+    expect(await formTokenFor(served.base, begun.cookie)).toBe(begun.formToken);
+    expect(existsSync(join(home, "login-locks.json"))).toBe(false);
     expect(await stillOpen(begun.cookie)).toBe(false);
+  });
+
+  it("(h) a cross-site POST cannot fill a victim's failure counter", async () => {
+    // The refusal happens before `noteFailure`, and this is what says so: a page on another origin
+    // hammering the door must not be able to lock the operator out of their own store.
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const begun = await beginLogin(served.base);
+      const res = await postLogin(served.base, "myk", `wrong ${attempt}`, {
+        secFetchSite: "cross-site",
+        cookie: begun.cookie,
+        formToken: begun.formToken,
+      });
+      expect(res.status).toBe(403);
+    }
+    expect(existsSync(join(home, "login-locks.json"))).toBe(false);
+    // and the operator's own login still works, which is the outcome that matters
+    const begun = await beginLogin(served.base);
+    const ok = await postLogin(served.base, "myk", PASSWORD, {
+      origin: PUBLIC_URL,
+      secFetchSite: null,
+      cookie: begun.cookie,
+      formToken: begun.formToken,
+    });
+    expect(ok.status).toBe(200);
   });
 
   it("(h) the configured public URL as Origin is accepted with no Sec-Fetch-Site at all", async () => {

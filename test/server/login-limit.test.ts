@@ -164,6 +164,32 @@ describe("the cap on unauthenticated hashing", () => {
     expect((await tryPassword("myk", PASSWORD)).status).toBe(200);
   });
 
+  it("(q) the busy refusal is BYTE-IDENTICAL for a name that exists and one that does not", async () => {
+    // A budget that reserves a smaller share for unknown names is a USERNAME ORACLE: the two shares run
+    // out at different times, so an existing name answers 401 while an absent one answers 503, and the
+    // caller learns which names exist. That is precisely what the decoy hash prevents (criterion j), so
+    // the budget must be ONE counter that both branches draw on.
+    //
+    // FOUR slots, TWO held by slow decoy hashes. That is under the global cap and exactly AT a reserved
+    // decoy share of half — so a split budget turns the absent name away with 503 while the known name
+    // goes through to its 401. One counter answers both the same. The known password is WRONG on
+    // purpose: two refusals are comparable, a success and a refusal are not.
+    served = await serveHome(home, {
+      maxConcurrentHashes: 4,
+      scrypt: { N: 131072, r: 8, p: 1, keylen: 64 },
+    });
+    const holding = [tryPassword("nobody-at-all", PASSWORD), tryPassword("nor-this-one", PASSWORD)];
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const known = await tryPassword("myk", "the wrong password");
+    const absent = await tryPassword("also-nobody", "the wrong password");
+    expect(known.status).toBe(401);
+    expect(absent.status).toBe(401);
+    expect(await known.text()).toBe(await absent.text());
+
+    await Promise.all(holding);
+  });
+
   it("(q) an attempt arriving while one is in flight is refused, and the first still succeeds", async () => {
     // NOT a race between equals: this test makes ONE hash slow on purpose (N = 2^17, about a second)
     // and issues the second attempt well inside that window. Six requests fired at once would need two

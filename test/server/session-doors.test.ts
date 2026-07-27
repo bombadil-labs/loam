@@ -169,31 +169,34 @@ describe("POST /session/token", () => {
     expect(wrote.status).toBe(401);
   });
 
-  it("(f) a session may not mint tokens without limit", async () => {
-    const session = await signIn(served.base);
+  it("(f) a session may not mint tokens without limit, and a LAPSED one frees its slot", async () => {
+    // The cap counts LIVE tokens. Counting every token ever minted would make it permanent: a session
+    // that reached the cap could never mint again however long it waited, while its own sliding idle
+    // window kept it alive — and the 429 body's advice ("wait for one to lapse") would be a lie.
+    let ticks = 0;
     await served.close();
     served = await serveHome(
       home,
-      { maxTokensPerSession: 2 },
+      { maxTokensPerSession: 2, tokenTtlMs: 1000, idleMs: 600_000, monotonicNow: () => ticks },
       { "op-token": { operator: true } },
       (gateway) => {
         gateway.register(PLANT, PLANT_POLICY, [MOSS], undefined, PLANT_WRITABLE);
       },
     );
     const live = await signIn(served.base);
-    void session;
-    for (let i = 0; i < 2; i += 1) {
-      const ok = await postDoor(served.base, "/session/token", {
-        cookie: live.cookie,
-        formToken: live.formToken,
-      });
-      expect(ok.status, `mint ${i}`).toBe(200);
-    }
-    const refused = await postDoor(served.base, "/session/token", {
-      cookie: live.cookie,
-      formToken: live.formToken,
-    });
+    const mint = (): Promise<Response> =>
+      postDoor(served.base, "/session/token", { cookie: live.cookie, formToken: live.formToken });
+
+    for (let i = 0; i < 2; i += 1) expect((await mint()).status, `mint ${i}`).toBe(200);
+    const refused = await mint();
     expect(refused.status).toBe(429);
+    expect((await refused.json()) as { errors: string[] }).toEqual({
+      errors: [expect.stringMatching(/lapse/i) as unknown as string],
+    });
+
+    // waiting is the remedy the refusal names, so waiting has to work
+    ticks += 1001;
+    expect((await mint()).status).toBe(200);
   });
 
   it("(f) a user with no operator role is refused a token, and told why", async () => {

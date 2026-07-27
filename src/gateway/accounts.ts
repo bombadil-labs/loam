@@ -148,17 +148,21 @@ export function governedGatherBody(operator: string): Term {
   return entityGatherBody({ mask: { trust: lawfulStrikersJson(operator, false) } });
 }
 
-// The same governed gather, narrowed to the OPERATOR'S OWN ASSERTIONS — for a fact that is only true
-// because the operator said it. The mask above answers "whose strikes bind"; this answers the other
-// question, "whose claims count", and the two are independent. Leave one open and a resolution that
-// picks the latest claim hands the field to any author with write standing: the operator says a user
-// holds `actor`, a stranger says `operator` a second later, and the later claim wins.
+// The OPERATOR'S OWN WORD, and nobody else's, on both axes — for a fact that is only true because the
+// operator said it.
 //
-// Use it for a constitutional fact filed at an ordinary entity — one that has no `grant` or
-// `membership` shape for `constitutionalDefect` to recognise, so nothing refuses it at the door.
+// Two independent questions, and a constitutional fact filed at an ordinary entity has to answer both
+// the same way. WHOSE CLAIMS COUNT: `authoredBy`, or a resolution that picks the latest claim hands the
+// field to any author with write standing — the operator says a user holds `actor`, a stranger says
+// `operator` a second later, and the later claim wins. WHOSE STRIKES BIND: the operator alone, the mask
+// `lawfulNegated` uses for law. The wider DATA posture would admit every operator-grantee's negation,
+// so the party who could not forge the fact could still delete it — a lockout instead of an escalation,
+// and no better.
+//
+// Use it where `constitutionalDefect` cannot recognise the shape, so nothing refuses it at the door.
 export function operatorGatherBody(operator: string): Term {
   return entityGatherBody({
-    mask: { trust: lawfulStrikersJson(operator, false) },
+    mask: { trust: { match: { field: "author", cmp: "eq", const: operator } } },
     authoredBy: operator,
   });
 }

@@ -31,7 +31,14 @@ import {
   type ScryptParams,
 } from "../server/credentials.js";
 import { clearLock } from "../server/login-locks.js";
-import { roleClaims, roleOf, userClaims, userNameDefect, type UserRole } from "../server/users.js";
+import {
+  resolveUserView,
+  roleClaims,
+  roleOf,
+  userClaims,
+  userNameDefect,
+  type UserRole,
+} from "../server/users.js";
 import { promptSecret } from "./prompt.js";
 import type { StoreBackend } from "../store/backend.js";
 import { ArchiveBackend } from "../store/archive.js";
@@ -140,9 +147,13 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "the ground replicates. The user record and its role binding ARE deltas: facts, erasable,",
       "provenance-carrying.",
       "",
-      "Erasing a user record shuts the login door and stops new session tokens. A token already",
-      "minted keeps working until its short window ends. Erasure leaves credentials.json and",
-      "login-locks.json alone; the health report names both as surfaces it does not sweep.",
+      "A user is TWO deltas, and erasure is per delta. Erasing the user record shuts the login door",
+      "and stops new session tokens; the ROLE BINDING is a second delta and needs its own erasure, or",
+      "it stays in the store with the user name inside its entity id.",
+      "",
+      "A token already minted keeps working until its short window ends. Erasure leaves",
+      "credentials.json and login-locks.json alone. The health report names every one of these as a",
+      "surface it does not sweep.",
     ],
   },
   artifact: {
@@ -980,6 +991,7 @@ async function cmdUserCreate(
   const path = storePath(home, parsed.flags.get("store"));
   const seed = readSeed(home);
   const gateway = await Gateway.boot(openStore(path, io), assembleGenesis({ operatorSeed: seed }));
+  let known: boolean;
   let already: UserRole | undefined;
   try {
     // ASK THE GROUND, not only the credential file. The two halves of a user can come apart — a
@@ -988,8 +1000,12 @@ async function cmdUserCreate(
     // one record, `pickLatest` resolves the other, and the door stays open on a user they forgot.
     // (The append is not idempotent by content address either: these claims carry a fresh timestamp,
     // so a re-run hashes to a new delta rather than the one already there.)
-    already = roleOf(gateway.reactor, gateway.operator, name);
-    if (already === undefined) {
+    //
+    // The RECORD is the question, not the role. `roleOf` also answers undefined when the record stands
+    // and only the role is unreadable, and appending on that answer is the duplicate all over again.
+    known = resolveUserView(gateway.reactor, gateway.operator, name) !== undefined;
+    already = known ? roleOf(gateway.reactor, gateway.operator, name) : undefined;
+    if (!known) {
       // THE DELTAS LAND FIRST, and the order is the recovery story. A credential written over a failed
       // append would open a door onto a user the ground never heard of, and a re-run would refuse
       // because the credential exists. This way round, a failed credential write leaves two harmless
@@ -1007,6 +1023,15 @@ async function cmdUserCreate(
   }
   await gateway.close();
 
+  if (known && already === undefined) {
+    // The record stands and no role reads from it. Repairing that means appending a role binding, which
+    // is a role decision — this command does not make one on the way to writing a password.
+    io.err(
+      `user create: the ground holds a record for ${name} but no readable role binding, and this ` +
+        `command will not add one. Nothing was written. \`loam store\` shows what is there.`,
+    );
+    return 2;
+  }
   if (already !== undefined && already !== role) {
     // Changing a role is not this command's business, and doing it quietly on the way to writing a
     // password would be the widest possible side effect of the narrowest possible flag.
@@ -1017,7 +1042,24 @@ async function cmdUserCreate(
     return 2;
   }
 
-  writeCredentials(home, { version: 1, users: { ...existing.users, [name]: entry } });
+  // Re-read the file HERE rather than trusting the snapshot from before the prompts, the hash and the
+  // boot. Another `user create` may have added an entry in that window, and writing the whole file from
+  // a stale copy would drop it.
+  let current;
+  try {
+    current = readCredentials(home);
+  } catch (err) {
+    io.err(
+      `user create: ${credentialsPath(home)} became unreadable while this ran, so nothing was ` +
+        `written: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return 1;
+  }
+  if (entryFor(current, name) !== undefined) {
+    io.err(`user create: ${name} gained a credential while this ran — nothing was overwritten`);
+    return 2;
+  }
+  writeCredentials(home, { version: 1, users: { ...current.users, [name]: entry } });
   io.out(
     already === undefined
       ? `loam: created ${name} with the ${role} role\n` +

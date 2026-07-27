@@ -246,13 +246,23 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
 
   const sessions = new Map<string, Session>();
   /** Tokens minted per session, so signing out revokes what signing in bought. */
-  const minted = new Map<string, string[]>();
-  let hashesInFlight = 0;
-  let decoyInFlight = 0;
-  // Decoy hashing — the unknown-username path — gets half the budget, and at least one slot so the
-  // no-timing-oracle property survives a cap of one. A cap of zero stays zero: no hashing at all.
+  const minted = new Map<string, { token: string; expiresAt: number }[]>();
+
+  // ONE COUNTER FOR EVERY ATTEMPT, and the reason is worth the paragraph.
+  //
+  // scrypt is expensive on purpose, so an unauthenticated caller must not be able to spend the box's
+  // CPU by asking. That much is a budget. The temptation is to reserve headroom by giving the
+  // unknown-username path a SMALLER share, so a caller rotating names cannot starve a real login — and
+  // that is a USERNAME ORACLE, because the two shares run out at different times. Fill the smaller one
+  // and an existing name answers 401 while an absent name answers 503. The caller learns which names
+  // exist, which is exactly what the decoy hash is here to prevent (criterion j).
+  //
+  // So both branches draw on one counter and answer identically past it. The cost is admitted rather
+  // than hidden: LOGIN IS DELIBERATELY DEGRADABLE. A sustained flood makes this door answer 503, and
+  // the operator's own bearer token does not pass through here at all, so the API stays reachable while
+  // it happens. An availability dent is the cheaper failure; a confidentiality leak does not heal.
   const maxHashes = options.maxConcurrentHashes ?? DEFAULTS.maxConcurrentHashes;
-  const decoyHashes = maxHashes === 0 ? 0 : Math.max(1, Math.floor(maxHashes / 2));
+  let hashesInFlight = 0;
 
   const sweep = (): void => {
     const moment = now();
@@ -263,11 +273,24 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
   // revoked nothing it issued, and the token keeps writing for the rest of its window.
   const drop = (id: string): void => {
     sessions.delete(id);
-    const tokens = minted.get(id);
-    if (tokens !== undefined) {
+    const held = minted.get(id);
+    if (held !== undefined) {
       minted.delete(id);
-      deps.revoke(tokens);
+      deps.revoke(held.map((m) => m.token));
     }
+  };
+
+  /**
+   * The tokens this session holds that are still WITHIN THEIR WINDOW. Counting the ones it ever minted
+   * would make the per-session cap permanent: a session that reached the cap could never mint again,
+   * however long it waited, while its own idle window kept it alive indefinitely.
+   */
+  const liveTokens = (id: string): { token: string; expiresAt: number }[] => {
+    const moment = now();
+    const held = (minted.get(id) ?? []).filter((m) => m.expiresAt > moment);
+    if (held.length === 0) minted.delete(id);
+    else minted.set(id, held);
+    return held;
   };
 
   // The presented session, if it is live. Touching it slides the idle window forward — which is the
@@ -463,16 +486,22 @@ data doors on its own.</p>`,
       // still hold it — and dropping the session revokes the tokens it minted. Cheap here: this is a
       // page load, not a request path.
       const ground = deps.ground();
-      const role =
-        ground === undefined
-          ? undefined
-          : roleOf(ground.reactor, ground.operator, held.session.user);
+      if (ground === undefined) {
+        // CANNOT DECIDE IS NOT "FORGOTTEN". Dropping the session here would destroy an authenticated
+        // caller's state — and revoke their tokens — over a local condition this door could not
+        // evaluate. Refuse, and leave the session exactly as it was.
+        json(res, 503, {
+          errors: ["this store's ground is not reachable, so this page cannot load"],
+        });
+        return;
+      }
+      const role = roleOf(ground.reactor, ground.operator, held.session.user);
       if (role !== undefined) {
         held.session.role = role;
         html(res, 200, signedInPage(held.session.user, role, held.session.formToken));
         return;
       }
-      drop(held.id);
+      drop(held.id); // the ground answered, and it no longer holds this user
       held = undefined; // fall through to the form, on a new pre-session
     }
     if (held !== undefined) {
@@ -532,22 +561,11 @@ data doors on its own.</p>`,
       return;
     }
     const entry = entryFor(credentials, user);
-    // A NAME NOBODY HOLDS still costs a hash, so a miss and an unknown user take the same time. That
-    // makes the decoy path a lever an unauthenticated caller can pull with an endless supply of fresh
-    // names, which the username-keyed limiter cannot slow. So decoy hashing gets its OWN, smaller share
-    // of the budget: a name-rotating flood can occupy at most that share, and a real login keeps
-    // headroom. Login stays deliberately degradable under load; the operator's own bearer token does not
-    // pass through here at all.
-    if (entry === undefined && decoyInFlight >= decoyHashes) {
-      json(res, 503, {
-        errors: ["the login door is busy: too much unauthenticated work is already in flight"],
-      });
-      return;
-    }
     let matched: boolean;
     hashesInFlight += 1;
-    if (entry === undefined) decoyInFlight += 1;
     try {
+      // A NAME NOBODY HOLDS still costs a hash, so a miss and an unknown user take the same time. No
+      // branch above this point answered differently for the two, and none below does either.
       matched =
         entry === undefined
           ? await spendDecoyHash(password, scryptParams)
@@ -563,7 +581,6 @@ data doors on its own.</p>`,
       return;
     } finally {
       hashesInFlight -= 1;
-      if (entry === undefined) decoyInFlight -= 1;
     }
     if (!matched) {
       noteFailure(options.home, user, Date.now(), limit);
@@ -630,9 +647,9 @@ data doors on its own.</p>`,
       });
       return;
     }
-    // One session may not mint without limit: every live token is one more entry the token table holds
-    // and one more comparison every request pays for.
-    const held = minted.get(guard.id) ?? [];
+    // One session may not mint without limit: every live token is one more entry the token table holds.
+    // LIVE, counted now — a lapsed token frees its slot, or the advice below would be a lie.
+    const held = liveTokens(guard.id);
     if (held.length >= maxTokensPerSession) {
       json(res, 429, {
         errors: [
@@ -649,7 +666,7 @@ data doors on its own.</p>`,
     // out retires it early (see `drop`); nothing else does. So revoking the user's role closes the door
     // to NEW tokens at once, and an already-minted one lives out its window.
     const token = deps.mint({ operator: true }, tokenTtlMs);
-    minted.set(guard.id, [...held, token]);
+    minted.set(guard.id, [...held, { token, expiresAt: now() + tokenTtlMs }]);
     json(res, 200, { token, expiresIn: Math.floor(tokenTtlMs / 1000), user, role });
   };
 

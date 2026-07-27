@@ -575,10 +575,18 @@ export async function eraseReplicaImpl(
 export const UNSWEPT_SURFACES: readonly string[] = [
   "credentials.json in the loam home (SPEC §36) — per-user login credentials. They are never " +
     "deltas, so no tombstone reaches them and this report promises nothing about them. Removing a " +
-    "user's credential entry is a separate operator action.",
+    "user's credential entry is a separate operator action. A crashed write can also leave a " +
+    "credentials.json.<pid>-<hex>.tmp holding the same bytes; that copy is unswept too.",
   "login-locks.json in the loam home (SPEC §36) — per-user failed-login counts, keyed by user " +
     "name. Also never deltas, so also unreachable from here. `loam user unlock <name>` clears one " +
-    "entry; nothing in an erasure does.",
+    "entry; nothing in an erasure does. Its .tmp siblings are unswept on the same terms.",
+  // Not data at rest, and named anyway: this list is what a reader consults to ask "is anything left?",
+  // and the answer they most need is the one thing that still carries AUTHORITY. A token minted before
+  // an erasure keeps working until its own short window ends.
+  "session state in the serving process's memory (SPEC §36) — sessions, and the bearer tokens " +
+    "POST /session/token minted. No erasure reaches memory. A token minted before an erasure keeps " +
+    "the authority it was granted until its window ends; signing out retires one early, and a " +
+    "restart retires them all. Nothing here is at rest, and nothing here is swept.",
 ];
 
 export interface ErasureHealth {

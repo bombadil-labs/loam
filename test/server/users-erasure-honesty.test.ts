@@ -19,12 +19,17 @@ import {
   cookieFrom,
   createUser,
   dropHome,
+  formTokenFor,
   makeHome,
+  postDoor,
   postLogin,
   serveHome,
+  signIn,
   storeDeltas,
+  testIo,
   type Served,
 } from "./user-fixture.js";
+import { run } from "../../src/cli/cli.js";
 import { CTX_USER, userEntity } from "../../src/server/users.js";
 import { readCredentials } from "../../src/server/credentials.js";
 
@@ -97,10 +102,77 @@ describe("the erasure report and the login door agree about what is swept", () =
     // §36 creates in the home, and require each to appear. A future file that skips the report fails here.
     await attempt("myk", "wrong, so login-locks.json exists");
     const said = (await served.gateway.health()).unswept.join(" ");
-    for (const name of readdirSync(home).filter((f) => f.endsWith(".json"))) {
-      if (name === "config.json" || name === "serving.json") continue; // older sections, not §36's
-      expect(said, name).toContain(name);
-    }
+    const owned = readdirSync(home).filter(
+      (f) => f.endsWith(".json") && f !== "config.json" && f !== "serving.json",
+    );
+    // A FLOOR, so the loop cannot pass by checking nothing: both of §36's files must be there to check.
+    expect(owned.sort()).toEqual(["credentials.json", "login-locks.json"]);
+    for (const name of owned) expect(said, name).toContain(name);
+    // and the temp siblings a crashed write leaves behind hold the same bytes, so they are named too
+    expect(said).toContain(".tmp");
+  });
+
+  it("(u) the ROLE BINDING survives an erase of the user record, and the help says so", async () => {
+    // A user is two deltas and erasure is per delta. This is the leftover a "forget me" request is
+    // actually about: the role binding carries the user name inside its entity id. The door is shut
+    // either way — `roleOf` needs the user record — so the honest move is to name the second delta
+    // rather than let the operator believe one erasure finished the job.
+    const record = await userRecordId("myk");
+    await served.gateway.erase(record);
+    expect((await attempt("myk", PASSWORD)).status).toBe(401);
+
+    const surviving = (await storeDeltas(home)).filter((d) =>
+      JSON.stringify(d.claims.pointers).includes(`"${userEntity("myk")}"`),
+    );
+    expect(surviving.length).toBeGreaterThan(0); // the role binding is still there, by name
+    expect(surviving.map((d) => d.id)).not.toContain(record);
+
+    // the CLI help tells the operator there is a second delta, rather than implying one erase is all
+    const io = testIo();
+    await run(["user", "--help"], io.io);
+    expect(io.out.join("\n")).toMatch(/TWO deltas/);
+    expect(io.out.join("\n")).toMatch(/own erasure/);
+
+    // and erasing that one too leaves nothing carrying the name
+    for (const d of surviving) await served.gateway.erase(d.id);
+    const left = (await storeDeltas(home)).filter((d) =>
+      JSON.stringify(d.claims.pointers).includes(`"${userEntity("myk")}"`),
+    );
+    expect(left).toEqual([]);
+    // the bystander is untouched throughout
+    expect((await attempt("wren", WREN)).status).toBe(200);
+  });
+
+  it("(u) an already-open session closes when the ground forgets its user", async () => {
+    // The fresh-login rails cannot see this: they sign in AFTER the erase. A session already open, and a
+    // token already minted, are the state that outlives an erasure — so the doors re-read the ground
+    // rather than trusting the session's own copy of the role.
+    const session = await signIn(served.base, "myk", PASSWORD);
+    const minted = await postDoor(served.base, "/session/token", {
+      cookie: session.cookie,
+      formToken: session.formToken,
+    });
+    expect(minted.status).toBe(200);
+    const { token } = (await minted.json()) as { token: string };
+
+    const bystander = await signIn(served.base, "wren", WREN);
+    await served.gateway.erase(await userRecordId("myk"));
+
+    // the open session mints nothing more, and the token it already had is dead
+    const refused = await postDoor(served.base, "/session/token", {
+      cookie: session.cookie,
+      formToken: session.formToken,
+    });
+    expect(refused.status).toBe(401);
+    const dead = await fetch(`${served.base}/default/graphql`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({ query: "{ __typename }" }),
+    });
+    expect(dead.status).toBe(401);
+
+    // and the bystander's live session is untouched — the erase reached one user, not the door
+    expect(await formTokenFor(served.base, bystander.cookie)).not.toBe("");
   });
 
   it("(u) a forgotten user record refuses the login, while the credential entry is still on disk", async () => {
