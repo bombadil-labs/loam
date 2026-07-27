@@ -172,15 +172,22 @@ export const MAX_CLIENT_NAME = 200;
  * is worth refusing at the reader rather than escaping at the printer.
  *
  * `actor` needs no check — it is re-derived from its own seed — and `registeredAt` is a number.
+ *
+ * Written as a CODE-POINT test rather than a regex character class, which is `mountNameDefect`'s idiom
+ * for the same question: a literal control character inside a regex is unreadable in a source file, and
+ * the rule that forbids one is worth obeying rather than suppressing.
  */
-// eslint-disable-next-line no-control-regex
-const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+const CONTROL = (text: string): boolean =>
+  [...text].some((ch) => {
+    const code = ch.codePointAt(0)!;
+    return code < 0x20 || (code >= 0x7f && code <= 0x9f) || code === 0x2028 || code === 0x2029;
+  });
 
 export const clientNameDefect = (name: string): string | undefined => {
   if (name.length === 0 || name.length > MAX_CLIENT_NAME) {
     return `a client_name is 1..${MAX_CLIENT_NAME} characters`;
   }
-  if (CONTROL.test(name)) {
+  if (CONTROL(name)) {
     return "a client_name carries no control character, escape, or line separator";
   }
   return undefined;
@@ -188,15 +195,13 @@ export const clientNameDefect = (name: string): string | undefined => {
 
 /** The same rule for a redirect uri, which reaches the same listing. */
 export const uriTextDefect = (uri: string): string | undefined =>
-  CONTROL.test(uri)
+  CONTROL(uri)
     ? "a redirect_uri carries no control character, escape, or line separator"
     : undefined;
 
 /** And for the client id, which is the third field on that row. */
 export const idTextDefect = (id: string): string | undefined =>
-  CONTROL.test(id)
-    ? "a client_id carries no control character, escape, or line separator"
-    : undefined;
+  CONTROL(id) ? "a client_id carries no control character, escape, or line separator" : undefined;
 
 function checkClient(raw: unknown, where: string): OAuthClient {
   object(raw, where);
