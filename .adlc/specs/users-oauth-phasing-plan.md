@@ -104,7 +104,7 @@ Each row states the deliverable and the rail files it owns. No file appears twic
 |---|---|---|---|---|
 | 1 | Credentials at rest | `test/server/credentials.test.ts` | `credentials.ts` | ~450 |
 | 2 | A user is a fact | `test/server/users-ground.test.ts` | `users.ts` | ~400 |
-| 3 | The bootstrap command | `test/cli/user-create.test.ts` | `cli.ts`, `prompt.ts` | ~350 |
+| 3 | The bootstrap and role commands | `test/cli/user-roles.test.ts` | `cli.ts`, `prompt.ts` | ~500 |
 | 4 | The session table | `test/server/session-table.test.ts` | `session.ts` | ~400 |
 | 5 | The login door | `test/server/login-door.test.ts` | `session.ts`, `http.ts` | ~500 |
 | 6 | Cross-site defence | `test/server/login-csrf.test.ts` | `session.ts` | ~350 |
@@ -175,11 +175,22 @@ counts the operator's assertions only. A Schema that resolves latest-wins. `reso
 4. A store with no operator yields no user and no role. The door stays shut.
 5. A struck role binding leaves the user readable and the role absent. Assert both levels.
 6. A user name is safe in an entity id, a JSON key and an HTML page. One expression, stated once.
+7. **MANY USERS MAY HOLD THE OPERATOR ROLE.** Each user is its own entity, and its role binding is a
+   claim at that entity. So the shape carries no limit of one. Rail it: assign the role to two users,
+   and `roleOf` answers `operator` for both. Rail the other side too: revoking one leaves the other.
+8. **STATE THE PROVENANCE LIMIT, because the code cannot fix it here.** The read admits only deltas
+   authored by the STORE'S operator key, and a session signs with the home's operator seed. So every
+   operator-role user writes as the same author. Authorization separates them. Provenance does not.
+   Two operators are indistinguishable in the ground. Say that in the module header. A reader must not
+   infer a per-operator audit trail that does not exist.
+9. A role a user does not hold answers `undefined`, never a default. An unknown role name is refused
+   rather than guessed at.
 
-### Phase 3 — The bootstrap command
+### Phase 3 — The bootstrap and role commands
 
-**Delivers.** `loam user create <name> --operator --home <dir>`. It prompts twice with echo off. It
-writes the credential. It appends the two deltas.
+**Delivers.** `loam user create <name> --operator --home <dir>`, plus `loam user assign-role` and
+`loam user remove-role`. `create` prompts twice with echo off, writes the credential, and appends the
+two deltas. The role commands change a role binding and nothing else.
 
 **Merges alone.** An operator can provision a user. Nothing serves it yet.
 
@@ -201,6 +212,32 @@ writes the credential. It appends the two deltas.
    sealed directory. Use `stat` and `isDirectory` and a traversal check. `lstat` alone misses a
    dangling home. `lstat` plus `isDirectory` condemns a healthy symlinked home. State the cure per
    fault, never one pair of cures for all faults.
+
+**Two more commands, and they are the reason a role is data rather than a flag.**
+
+    loam user assign-role <name> --role=operator --home <dir>
+    loam user remove-role <name> --role=operator --home <dir>
+
+8. `assign-role` appends ONE operator-signed role claim. It appends nothing else. Count deltas before
+   and after.
+9. `assign-role` refuses a user the ground does not know. It must not create a user as a side effect.
+10. `assign-role` refuses an unknown role by name. `--role=admin` is a refusal, not a guess. The
+    shipped roles are `operator` and `actor`. State that a third role is a future ticket.
+11. `assign-role` on a user who already holds that role appends nothing and says so. It must not
+    report a write it did not make.
+12. `remove-role` appends an operator-signed NEGATION of the role claim. It does not delete a delta.
+    Only the operator's negation binds, so a stranger cannot revoke a role.
+13. **`remove-role` STRIKES ONE BINDING; it does not set a user roleless.** The property resolves
+    latest-wins over the surviving claims, so striking `operator` on a user who was earlier an `actor`
+    leaves them an `actor`. That is correct and it is surprising. Rail both outcomes: a user with one
+    binding becomes roleless, and a user with two becomes the earlier one.
+14. After `remove-role operator`, that user's session opens no operator door. Assert at both levels —
+    the negation is in the ground, and the door refuses.
+15. **THE LAST OPERATOR MAY REMOVE THEIR OWN ROLE, AND THE STORE STAYS RECOVERABLE.** These commands
+    prove operatorship by HOME ACCESS and sign with the home's seed, exactly as `create` does. They
+    need no session. So a store with no operator-role user is still repairable on the box. Rail it:
+    remove the only operator, then assign it again, and the door opens. State this in the help text,
+    because an operator who thinks they can lock themselves out will not use the command.
 
 ### Phase 4 — The session table
 
