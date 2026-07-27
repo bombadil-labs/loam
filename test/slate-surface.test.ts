@@ -47,6 +47,7 @@ import {
   termClaims,
   type ByteVerdict,
   type CompletenessCheck,
+  type CutMemberReport,
   type CutReport,
   type Duplicate,
   type GraveyardRecord,
@@ -311,7 +312,8 @@ describe("T109 — the slate surface is reachable from the package barrel", () =
     expect(cut.version).toBe(version);
     expect(cut.memberCount).toBe(2);
     expect(cut.members.map((m) => m.member).sort()).toEqual(condemned);
-    for (const m of cut.members) {
+    const perMember: readonly CutMemberReport[] = cut.members;
+    for (const m of perMember) {
       // The minted tombstone RESOLVES in the ground and is one — not just a plausible-looking id.
       expect(loam.isTombstone(gw.reactor.get(m.tombstone)!.claims)).toBe(true);
       const tiers: readonly TierVerdict[] = m.tiers;
