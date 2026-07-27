@@ -1,0 +1,20 @@
+{
+  "body": "Myk ruled the model in chat (2026-07-26): a 'user' authenticates at a login door; a ROLE binding says what that user may do on this store; a SEED signs deltas. The operator's door token stops being a login credential — it never enters a browser.\n\nDecisions already made (do not re-ask): (1) the first user is created by CLI on the box — `loam user create <name> --operator --home <dir>` — home access is the proof of operatorship; (2) credential = password hashed with node:crypto scrypt for v1, passkeys later as their own ticket; (3) the user record and its role binding are DELTAS in the ground (facts, erasable, provenance-carrying), while credential material lives in a FILE in the home (local secret, never replicates).\n\nThe working spec is .adlc/specs/36-users.md; its acceptance criteria are the rail list. Sessions are server-memory, cookie-carried, dead on restart. Rate-limit failed logins. A session with the operator-role user opens the same doors as the operator bearer token.\n\nDesign approved in chat; implementation delegated ('go ahead and implement... ping me when they're live'). Section 36 reserved.\n\nP1 PREMORTEM (independent, 2026-07-27) rewrote the criteria — 7 of 10 findings hit 'NO CRITERION CATCHES THIS'. The three that changed the DESIGN, not just the rails: (1) CSRF — a session cookie must NOT open the JSON doors; cookie authority is confined to /login, /logout, /session/token and 37's consent page, and a browser writes by fetching a bearer token from /session/token. This preserves http.ts's stated invariant that authority is an explicit header, never ambient. (2) The public URL is a CONFIGURED --public-url; Host and X-Forwarded-* are caller-controlled and must change nothing. (3) The login limiter keys on the USERNAME with a local 'loam user unlock', not on a caller-supplied source — behind a funnel every request looks like 127.0.0.1, so a per-source limiter is a remote off-switch for the operator's own login. Erasure of credentials.json is NOT in scope: criterion (u) makes the report name the unswept surface instead (honest-report direction, self-mergeable), and the sweep itself is Myk's merge.",
+  "edges": [
+    {
+      "contract": "T114's consent page authenticates through T113's session door. No session, no consent.",
+      "to": "T114"
+    }
+  ],
+  "id": "T113",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "src/server/",
+    "src/cli/",
+    "test/server/",
+    ".adlc/specs/36-users.md"
+  ],
+  "status": "todo",
+  "title": "Users: authenticate a person, authorize a role, sign with a seed — three jobs, three things"
+}
