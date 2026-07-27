@@ -24,8 +24,11 @@ import {
   postLogin,
   serveHome,
   signIn,
+  testIo,
   type Served,
 } from "./user-fixture.js";
+import { run } from "../../src/cli/cli.js";
+import { type ServerHandle } from "../../src/server/http.js";
 
 vi.setConfig({ testTimeout: 20000 });
 
@@ -215,5 +218,81 @@ describe("a session's lifetime", () => {
     expect(await stillOpen(served.base, session.cookie)).toBe(false);
     // the door still works — the cookie died, not the login
     expect(await stillOpen(served.base, (await signIn(served.base)).cookie)).toBe(true);
+  });
+});
+
+// Everything above serves through `serve()` directly. This one goes through `loam serve`, because
+// the wiring between them is its own promise: a home that HAS users opens the login doors, and
+// --public-url is the address the Origin check reads. A mutation probe found nothing else pinning
+// either — the flag could be deleted from serve's allowlist and every rail above stayed green.
+describe("loam serve wires the login doors", () => {
+  it("opens /login for a home with users, and reads --public-url for the Origin check", async () => {
+    const io = testIo();
+    const handle = (await run(
+      [
+        "serve",
+        "--http",
+        "--port",
+        "0",
+        "--token",
+        "op-token",
+        "--home",
+        home,
+        "--public-url",
+        "https://loam.example",
+      ],
+      io.io,
+      { detach: true },
+    )) as ServerHandle;
+    try {
+      expect(io.out.join("\n")).toMatch(/login at https:\/\/loam\.example\/login/);
+      const begun = await beginLogin(handle.url);
+      expect(begun.res.status).toBe(200);
+      expect(begun.formToken).not.toBe("");
+
+      // the configured origin opens the door
+      const good = await postLogin(handle.url, "myk", PASSWORD, {
+        secFetchSite: null,
+        origin: "https://loam.example",
+        cookie: begun.cookie,
+        formToken: begun.formToken,
+      });
+      expect(good.status).toBe(200);
+
+      // a foreign one does not, however the Host header is dressed
+      const again = await beginLogin(handle.url);
+      const bad = await postLogin(handle.url, "myk", PASSWORD, {
+        secFetchSite: null,
+        origin: "https://attacker.example",
+        headers: { host: "loam.example" },
+        cookie: again.cookie,
+        formToken: again.formToken,
+      });
+      expect(bad.status).toBe(403);
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it("leaves the doors shut for a home with no users at all", async () => {
+    const bare = makeHome();
+    const io = testIo();
+    const handle = (await run(
+      ["serve", "--http", "--port", "0", "--token", "op-token", "--home", bare],
+      io.io,
+      { detach: true },
+    )) as ServerHandle;
+    try {
+      expect(io.out.join("\n")).not.toMatch(/login/);
+      // /login is just an unresolvable mount name again, with the refusal one always gave
+      const res = await fetch(`${handle.url}/login`);
+      expect(res.status).toBe(401);
+      expect(await res.text()).toBe(
+        JSON.stringify({ errors: ["a bearer token is required, and this one opens nothing"] }),
+      );
+    } finally {
+      await handle.close();
+      dropHome(bare);
+    }
   });
 });

@@ -29,7 +29,13 @@ import {
   serveHome,
   type Served,
 } from "./user-fixture.js";
-import { readCredentials, writeCredentials } from "../../src/server/credentials.js";
+import {
+  DEFAULT_SCRYPT,
+  hashPassword,
+  readCredentials,
+  verifyPassword,
+  writeCredentials,
+} from "../../src/server/credentials.js";
 
 vi.setConfig({ testTimeout: 20000 });
 
@@ -157,5 +163,21 @@ describe("writing credentials.json", () => {
     }
     const original = JSON.parse(good) as { users: Record<string, unknown> };
     expect(Object.keys(readCredentials(home).users)).toEqual(Object.keys(original.users));
+  });
+});
+
+// The rails above all run at a reduced scrypt cost, which leaves the SHIPPED parameters unexercised —
+// and a bad default is a login door that throws on every attempt rather than one that runs slowly. So
+// this pays for one real hash at the production cost, once.
+describe("the shipped scrypt parameters", () => {
+  it("hash and verify each other, and reject a wrong password", async () => {
+    expect(DEFAULT_SCRYPT.N & (DEFAULT_SCRYPT.N - 1)).toBe(0); // a power of two, as scrypt demands
+    expect(DEFAULT_SCRYPT.N).toBeGreaterThanOrEqual(16384);
+    expect(DEFAULT_SCRYPT.keylen).toBeGreaterThanOrEqual(32);
+    const entry = await hashPassword(PASSWORD);
+    expect(entry.params).toEqual(DEFAULT_SCRYPT);
+    expect(entry.hash.length).toBe(DEFAULT_SCRYPT.keylen * 2);
+    expect(await verifyPassword(entry, PASSWORD)).toBe(true);
+    expect(await verifyPassword(entry, `${PASSWORD} `)).toBe(false);
   });
 });

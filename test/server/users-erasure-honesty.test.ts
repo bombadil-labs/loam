@@ -74,7 +74,10 @@ const userRecordId = async (name: string): Promise<string> => {
 describe("the erasure report and the login door agree about what is swept", () => {
   it("(u) the report names credentials.json as a surface it does not sweep", async () => {
     const health = await served.gateway.health();
+    // the file BY NAME, and the section that owns it — a report that cites the wrong section sends
+    // whoever reads it to the wrong page
     expect(health.unswept.join(" ")).toMatch(/credentials\.json/);
+    expect(health.unswept.join(" ")).toContain("§36");
     // and the operator reads the same words over HTTP, not a prettier summary
     const res = await fetch(`${served.base}/default/health`, {
       headers: { authorization: "Bearer op-token" },

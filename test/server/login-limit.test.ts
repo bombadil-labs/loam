@@ -9,6 +9,8 @@
 // unauthenticated login a lever on the server's CPU. So the door caps concurrent hashing globally,
 // and refuses past the cap WITHOUT hashing.
 
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   PASSWORD,
@@ -110,6 +112,25 @@ describe("the failed-login limiter", () => {
     const io = testIo();
     expect(await run(["user", "unlock", "stranger", "--home", home], io.io)).toBe(2);
     expect((await tryPassword("myk", PASSWORD)).status).toBe(429); // myk is still locked
+  });
+
+  it("(o) a damaged lock file is discarded, not adopted: the count still reaches a lock", async () => {
+    // login-locks.json fails OPEN by design — it is a work budget, not an authorization surface, and a
+    // local disk fault must not be a total login outage. Failing open is not the same as adopting
+    // garbage, though: an entry that is not a record must be dropped, or the counter it feeds becomes
+    // NaN and the door never locks at all.
+    writeFileSync(
+      join(home, "login-locks.json"),
+      JSON.stringify({ users: { myk: "locked forever", wren: { failures: "many" } } }),
+    );
+    served = await serveHome(home);
+    // fail-open: the garbage did not lock anyone out
+    expect((await tryPassword("wren", WREN)).status).toBe(200);
+    // and the real count still works, from zero
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      expect((await missOnce("myk", attempt)).status, `miss ${attempt}`).toBe(401);
+    }
+    expect((await missOnce("myk", 6)).status).toBe(429);
   });
 
   it("(o) the lock lifts when its own window passes, and the count starts over", async () => {

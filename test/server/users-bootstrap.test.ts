@@ -15,7 +15,13 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authorForSeed, canonicalHex } from "@bombadil/rhizomatic";
 import { readSeed, storePath } from "../../src/cli/config.js";
-import { CTX_ROLE, CTX_USER, resolveUserView, userEntity } from "../../src/server/users.js";
+import {
+  CTX_ROLE,
+  CTX_USER,
+  resolveUserView,
+  userEntity,
+  userNameDefect,
+} from "../../src/server/users.js";
 import { readCredentials } from "../../src/server/credentials.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
@@ -167,5 +173,27 @@ describe("loam user create — the bootstrap door", () => {
     } finally {
       await gateway.close();
     }
+  });
+});
+
+// A user name reaches three places that each have their own idea of a dangerous character: an entity
+// id in the ground, a key in a JSON object, and text on an HTML page. The policy is one regular
+// expression, so it earns a rail of its own — a mutation probe found nothing else pinning it.
+describe("what may be a user name", () => {
+  it("accepts the shapes the ground and the page can both carry", () => {
+    for (const name of ["myk", "wren", "7of9", "a", "a.b", "a-b", "a_b", "x".repeat(64)]) {
+      expect(userNameDefect(name), name).toBeUndefined();
+    }
+  });
+
+  it("refuses everything else, and the bootstrap door refuses with it", async () => {
+    const bad = ["", "Myk", "a b", "a/b", "../etc", "__proto__", "user:myk", "x".repeat(65), "-a"];
+    for (const name of bad) {
+      expect(userNameDefect(name), name).toBeDefined();
+    }
+    const refused = await createUser(home, "Myk", PASSWORD);
+    expect(refused.code).toBe(2);
+    expect(refused.io.err.join("\n")).toMatch(/user name/i);
+    expect(existsSync(join(home, "credentials.json"))).toBe(false);
   });
 });
