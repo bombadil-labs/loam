@@ -53,10 +53,11 @@ export default tseslint.config(
       },
     },
   },
-  // Top-level demo scripts (e.g. demos/renderers-demo.mjs) run under Node — a runnable `node <file>`
-  // like the village phases (which are ignored), so give them the Node globals rather than silencing.
+  // Top-level demo scripts (e.g. demos/renderers-demo.mjs) and the board app run under Node — a
+  // runnable `node <file>` like the village phases (which are ignored), so give them the Node
+  // globals rather than silencing.
   {
-    files: ["demos/*.mjs"],
+    files: ["demos/*.mjs", "demos/board/*.mjs"],
     languageOptions: {
       globals: {
         console: "readonly",
