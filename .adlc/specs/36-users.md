@@ -31,21 +31,28 @@ to a cap, and the door always admits a correct password. Criteria (o) and (p) be
    weakest, and a caller who squats `maxTracked` rows keeps a chosen name out of the table. Two shapes,
    both measured against the module at `maxTracked` 4 and 8, both charging the target 0ms every round:
 
-   - Raise every squatted row ABOVE the target's count, then flood one fresh name per round.
-   - Flood `maxTracked` or more fresh names per round and cycle the whole table. This needs no setup
-     and works under either eviction tie-break order.
+   The operative quantity is SEATINGS per round — rows added for a name not currently in the table — and
+   not fresh names: a name the flood evicted last round is absent now, so recycling one seats a row just
+   as a never-seen name does.
 
-   The boundary is exact: at `maxTracked − 1` fresh names per round the tie-break holds and the target
-   is charged 0, 200, 400, 800, 1600ms. At `maxTracked` it is charged nothing.
+   - NARROW: raise every squatted row to at least the target's count, then one seating per round.
+   - WIDE: `maxTracked` seatings per round, cycling the whole table. No setup, and it works under either
+     eviction tie-break order.
 
-   **What each shape costs to sustain.** The wide shape costs `maxTracked` requests per guess — 512 at
-   the shipped policy — and nothing else, because every row it writes is new. The narrow shape costs one
-   request per guess plus 511 refreshes per 15 minutes, since an untouched row is pruned; and its setup
-   scales with the target's standing count, so junk rows at two failures do not flush a target at five.
+   The boundary is exact: at `maxTracked − 1` seatings per round the tie-break holds and the target is
+   charged 0, 200, 400, 800, 1600ms. At `maxTracked` it is charged nothing.
 
-   **Either way the squat DECAYS.** Stop, and one `forgetMs` prunes the junk and the target is charged
-   again. Measured: 0, 0, 0 while squatted, then 0, 200, 400, 800, 1600 after one idle window. This is a
-   cost an attacker pays continuously, not a state they reach and keep.
+   **What each shape costs, and ONLY ONE OF THEM DECAYS.** The wide shape costs `maxTracked` requests per
+   guess — 512 at the shipped policy — and nothing standing, because every row it writes is seated in the
+   round it is used, so `forgetMs` has nothing to prune between guesses. Measured with a full `forgetMs`
+   of silence before EVERY guess: still 0ms charged. A caller guessing once a day pays 513 requests a day
+   and is charged nothing. The narrow shape costs one request per guess plus 511 refreshes per 15 minutes
+   whatever the guess rate, and its setup scales with the target's standing count — junk rows at two
+   failures do not flush a target at five. That shape does decay: measured 0, 0, 0 squatted, then 0, 200,
+   400, 800, 1600 after one idle window.
+
+   So the cheap shape is the one with no standing cost and no decay. Waiting is not on the defender's
+   side here, and any future claim that it is has to name which shape it means.
 
    So the delay taxes a serial guesser against an UNSQUATTED table, and a caller willing to sustain a
    squat can guess one chosen name at the concurrent-hash cap's rate — which is where the pre-T116 lock
@@ -204,14 +211,6 @@ may do.
   records nobody could read. Readability and replaceability are independent: a directory at the path is
   unreplaceable on a writable home (EISDIR), and damaged bytes on a home this process cannot write are
   unreplaceable with nothing wrong with the path (EACCES). Neither self-repairs —
-  `test/server/login-limit.test.ts`
-- (o8) `loam user unlock` never reports an empty answer as a clean one. An ABSENT record file on a usable
-  home reports an empty table and exits 0. An UNREADABLE file names the fault, says the door is charging
-  nobody, and warns the bytes are perishable rather than promising a repair the CLI cannot predict. A home
-  whose resolved target is not a traversable directory names THAT instead, says nothing about bytes it
-  does not have, and carries the cure for the fault it actually diagnosed — a missing path, a dangling
-  link, a non-directory, a symlink loop, a non-directory component, or unreachable permissions are six
-  faults with six cures, and no branch claims a diagnosis it did not make. Each fault exits non-zero —
   `test/server/login-limit.test.ts`
 - (p) `loam user unlock <name>` clears that name's accumulated wait from the box, `--all` clears every
   record whatever name it holds, and the report names the COUNT rather than a wait the CLI's process

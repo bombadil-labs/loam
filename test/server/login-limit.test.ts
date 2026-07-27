@@ -1,4 +1,4 @@
-// §36 (T113/T116), criteria (o) (o1)–(o8) (p) (q): the failed-login DELAY, and the cap on unpaid work.
+// §36 (T113/T116), criteria (o) (o1)–(o7) (p) (q): the failed-login DELAY, and the cap on unpaid work.
 //
 // THE LOGIN DOOR DELAYS; IT NEVER LOCKS. A correct password is admitted however many failures came
 // before it. A wrong one makes the next attempt for that name wait longer, up to a cap. A lock is an
@@ -68,7 +68,7 @@
 // unauthenticated login a lever on the server's CPU. So the door caps concurrent hashing globally,
 // and refuses past the cap WITHOUT hashing.
 
-import { chmodSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -92,7 +92,6 @@ import {
   delayMs,
   locksPath,
   noteFailure,
-  unreadableRecordFile,
   readLocks,
   type LimitPolicy,
 } from "../../src/server/login-locks.js";
@@ -884,216 +883,6 @@ describe("the failed-login delay", () => {
     },
   );
 
-  it("(o8) unlock tells an ABSENT record file apart from one it cannot read", async () => {
-    // An unreadable file and an empty one read the same way to the door — no records — but they mean
-    // opposite things to an operator. Absent is the ordinary state of a home where nobody has failed a
-    // login. Unreadable means the door is charging NOBODY, and this is the only command that looks at
-    // the file, so silence here is the fault going unreported anywhere.
-    served = await serveHome(home, { limit: COUNTING });
-
-    // ABSENT: no file at all, so nothing to explain. Exit 0, and no fault named.
-    expect(readLocks(home).size).toBe(0);
-    const absent = testIo();
-    expect(await run(["user", "unlock", "--all", "--home", home], absent.io)).toBe(0);
-    expect(absent.out.join("\n")).toMatch(/no login records/);
-    expect(absent.err.join("\n")).toBe("");
-
-    // UNREADABLE: a directory where the file belongs. Same empty read, opposite report.
-    mkdirSync(locksPath(home));
-    const broken = testIo();
-    expect(await run(["user", "unlock", "--all", "--home", home], broken.io)).toBe(1);
-    expect(broken.err.join("\n")).toMatch(/login-locks\.json/);
-    expect(broken.err.join("\n")).toMatch(/charging no name any delay/);
-    expect(broken.out.join("\n")).not.toMatch(/nothing to clear/);
-
-    // and the per-name path says it too, rather than "already waits for nothing"
-    const named = testIo();
-    expect(await run(["user", "unlock", "myk", "--home", home], named.io)).toBe(1);
-    expect(named.err.join("\n")).toMatch(/charging no name any delay/);
-    expect(named.out.join("\n")).not.toMatch(/waits for nothing/);
-  });
-
-  it("(o8) DAMAGED BYTES report the same way an unreadable file does", async () => {
-    // The other shape of the same fault, and the one an operator is likelier to cause: the file is
-    // readable and its contents are not a record table. Both leave the door charging nobody.
-    served = await serveHome(home, { limit: COUNTING });
-    writeFileSync(locksPath(home), "this is not json at all");
-    const io = testIo();
-    expect(await run(["user", "unlock", "--all", "--home", home], io.io)).toBe(1);
-    expect(io.err.join("\n")).toMatch(/not JSON/);
-
-    // and a `users` table whose entries are not records: read as none, reported as damage. ONE entry
-    // reads "1 entry that is", not "1 entry that are" — a report an operator reads has to parse.
-    writeFileSync(locksPath(home), JSON.stringify({ users: { myk: "locked forever" } }));
-    expect(readLocks(home).size).toBe(0);
-    const entries = testIo();
-    expect(await run(["user", "unlock", "--all", "--home", home], entries.io)).toBe(1);
-    expect(entries.err.join("\n")).toMatch(/1 entry that is not a login record/);
-    // and the advice WARNS rather than promising: whether the file is replaced turns on the door's
-    // policy and on the path, neither of which this process was told.
-    expect(entries.err.join("\n")).toMatch(/may replace this file/);
-    expect(entries.err.join("\n")).toMatch(/copy it now/);
-
-    // TWO-SIDED: a legitimately EMPTY users table is not damage, and must not be reported as any
-    writeFileSync(locksPath(home), JSON.stringify({ users: {} }));
-    const empty = testIo();
-    expect(await run(["user", "unlock", "--all", "--home", home], empty.io)).toBe(0);
-    expect(empty.err.join("\n")).toBe("");
-  });
-
-  it("(o8) a MISTYPED --home is named, not answered with an empty table", async () => {
-    // The likeliest way anybody reaches this code, and the worst one to answer with silence. A home that
-    // does not exist holds no record file, which reads exactly like "nobody has failed a login yet" — so
-    // the command used to print "nothing to clear" and exit 0 over a typo. And that state is the one
-    // (o8) exists for: the door charges nobody there and cannot even self-repair, because the temp file
-    // cannot be created either.
-    const missing = join(home, "no-such-home");
-    const io = testIo();
-    expect(await run(["user", "unlock", "--all", "--home", missing], io.io)).toBe(1);
-    expect(io.err.join("\n")).toMatch(/no-such-home/);
-    expect(io.err.join("\n")).toMatch(/Check the --home path if you passed one/);
-    expect(io.err.join("\n")).toMatch(/loam init/); // the first-run reader has a cure too
-    expect(io.out.join("\n")).not.toMatch(/nothing to clear/);
-
-    // and the per-name path says it too rather than "already waits for nothing"
-    const named = testIo();
-    expect(await run(["user", "unlock", "myk", "--home", missing], named.io)).toBe(1);
-    expect(named.err.join("\n")).toMatch(/do not read an empty answer as a clean one/);
-    expect(named.out.join("\n")).not.toMatch(/waits for nothing/);
-  });
-
-  // POSIX only for the symlink shapes; Windows needs a privilege to make one. The subject is the home
-  // classifier — `stat`, `isDirectory`, an `X_OK` check, and an errno split — all platform-agnostic.
-  it.skipIf(process.platform === "win32")(
-    "(o8) an UNUSABLE HOME is named, and EVERY branch of the classifier is reached",
-    () => {
-      // A TABLE RATHER THAN ONE CASE, because this check has been wrong three times, each time on a shape
-      // the previous version did not consider. `lstat` alone misses a DANGLING home — it succeeds on the
-      // link. `lstat().isDirectory()` would condemn a HEALTHY symlinked home, the trap in the one-token
-      // fix. And `isDirectory` alone says yes to a mode-0000 home, because `stat` needs only a traversable
-      // parent.
-      //
-      // SO IT COVERS EVERY BRANCH, not every shape it could imagine. Two branches were once deletable
-      // with this suite green — ELOOP and the fallback cure — which is the same hollowness a shape-shaped
-      // rail always risks: shapes are infinite and branches are not. The list below is the branch list.
-      //
-      // FUNCTION LEVEL ONLY, and named per the both-levels rule: this calls `unreadableRecordFile`
-      // directly, while criterion (o8) is a claim about what `loam user unlock` PRINTS and EXITS. The
-      // sibling `(o8) a MISTYPED --home` rail carries the CLI level for one shape — exit code, stdout and
-      // stderr through `run` — and the shapes here share that one code path, so the levels meet there
-      // rather than being asserted per shape twice.
-      const root = makeHome();
-      try {
-        const real = join(root, "real");
-        mkdirSync(real);
-        const target = join(root, "target");
-        mkdirSync(target);
-        const link = join(root, "link");
-        symlinkSync(target, link);
-        const dangling = join(root, "dangling");
-        symlinkSync(join(root, "gone"), dangling);
-        const asFile = join(root, "as-file");
-        writeFileSync(asFile, "not a home");
-        const missing = join(root, "missing");
-
-        // USABLE: silent. A healthy symlinked home is the one this must not condemn.
-        expect(unreadableRecordFile(real)).toBeUndefined();
-        expect(unreadableRecordFile(link)).toBeUndefined();
-
-        // UNUSABLE: each named, and each says it is the HOME rather than the record file.
-        // EACH SHAPE GETS THE CURE THAT APPLIES TO IT. One unconditional pair of cures was wrong for
-        // most of these: a dangling home was typed correctly and `loam init` is not its fix, and an
-        // unreachable home is neither a typo nor a missing init. So the cure is asserted per shape.
-        // ELOOP needs a CYCLE, which no other shape here produces.
-        const loopA = join(root, "loop-a");
-        const loopB = join(root, "loop-b");
-        symlinkSync(loopB, loopA);
-        symlinkSync(loopA, loopB);
-        // ENOTDIR needs a path whose PARENT is a file — reached by neither the type test nor ELOOP.
-        const throughFile = join(asFile, "under-a-file");
-
-        for (const [label, path, cure] of [
-          ["missing", missing, /Check the --home path if you passed one, or run `loam init`/],
-          ["dangling", dangling, /Repair or remove the link/],
-          ["file", asFile, /a loam home is a directory/],
-          ["loop", loopA, /Repair or remove the symlink at that path/],
-          ["through a file", throughFile, /a component of it is not a directory/],
-        ] as const) {
-          const said = unreadableRecordFile(path);
-          expect(said, label).toMatch(/is not a usable loam home/);
-          expect(said, label).toMatch(cure);
-          // and NOT the record-file advice: there are no bytes here to be perishable
-          expect(said, label).not.toMatch(/copy it now/);
-        }
-        // ELOOP and ENOTDIR each name their OWN errno rather than a shared fallback, so neither branch
-        // can be deleted into the generic one while this stays green. Probed by deleting each: both red.
-        expect(unreadableRecordFile(loopA)).toMatch(/ELOOP/);
-        expect(unreadableRecordFile(throughFile)).toMatch(/ENOTDIR/);
-        expect(unreadableRecordFile(loopA)).not.toMatch(/Check the --home path\./);
-
-        // NAMED GAP — one branch of the classifier is not reachable from here. The errno split inside the
-        // `accessSync` failure needs `access` to fail with something OTHER than EACCES, which means the
-        // directory vanishing between the `stat` and the `access` — a race no fixture can force. Probed
-        // by collapsing that split to always blame permissions: this rail stays GREEN, so it does not
-        // cover it. The branch exists anyway, because the alternative is a message that prescribes chmod
-        // for a path that disappeared. A rail would need an injectable clock-of-the-filesystem.
-        // the two shapes `stat` reports identically are told apart, and only ONE is offered `loam init`
-        expect(unreadableRecordFile(dangling)).toMatch(/symlink whose target is gone/);
-        expect(unreadableRecordFile(dangling)).not.toMatch(/loam init/);
-        // the file-valued home names WHY, rather than only that something went wrong
-        expect(unreadableRecordFile(asFile)).toMatch(/it is not a directory/);
-
-        // AN UNTRAVERSABLE DIRECTORY IS A SIXTH SHAPE, and `isDirectory` alone says yes to it: `stat`
-        // needs only a traversable PARENT, so a mode-0000 home passes the type test and the record-file
-        // branch then offers perishable-bytes advice for a file that can never exist there.
-        const sealed = join(root, "sealed");
-        mkdirSync(sealed);
-        chmodSync(sealed, 0o000);
-        try {
-          const said = unreadableRecordFile(sealed);
-          expect(said).toMatch(/is not a usable loam home/);
-          expect(said).not.toMatch(/copy it now/); // never the record-file advice
-          expect(said).toMatch(/cannot traverse into it/); // and its own cure, not a typo hunt
-          expect(said).not.toMatch(/loam init/);
-        } finally {
-          chmodSync(sealed, 0o700);
-        }
-
-        // TWO-SIDED, and this is the trap in the fix: a READ-ONLY home is a SUPPORTED state — criterion
-        // (o7) covers it, with a row frozen at its accumulated wait — so asking for write here would
-        // condemn a home the door works with. It must stay silent.
-        const readOnly = join(root, "read-only");
-        mkdirSync(readOnly);
-        writeFileSync(
-          locksPath(readOnly),
-          JSON.stringify({ users: { myk: { failures: 4, lastFailureAt: Date.now() } } }),
-        );
-        chmodSync(readOnly, 0o500);
-        try {
-          expect(unreadableRecordFile(readOnly)).toBeUndefined();
-          expect(readLocks(readOnly).get("myk")?.failures).toBe(4); // and the row is still charged
-        } finally {
-          chmodSync(readOnly, 0o700);
-        }
-      } finally {
-        dropHome(root);
-      }
-    },
-  );
-
-  it("(o8) a DANGLING SYMLINK is something at the path, not an absent file", async () => {
-    // `readFileSync` follows the link and raises ENOENT, which reads exactly like "no file yet" — so an
-    // existence test built on the read's errno calls this healthy and stays silent. It is not healthy:
-    // the door is charging nobody. Presence is asked with `lstat`, which sees the link itself.
-    served = await serveHome(home, { limit: COUNTING });
-    symlinkSync(join(home, "nothing-is-here.json"), locksPath(home));
-    expect(readLocks(home).size).toBe(0);
-    const io = testIo();
-    expect(await run(["user", "unlock", "--all", "--home", home], io.io)).toBe(1);
-    expect(io.err.join("\n")).toMatch(/cannot be read/);
-    expect(io.err.join("\n")).toMatch(/charging no name any delay/);
-  });
-
   it("(o7) a read fault SELF-REPAIRS on the next failed login, discarding what it could not read", async () => {
     // The correction that matters most about fail-open: it is not a standing outage. `readLocks` returns
     // nothing, then `noteFailure` writes a whole new table over the damage — so one unauthenticated
@@ -1111,9 +900,9 @@ describe("the failed-login delay", () => {
     expect(after.size).toBe(1);
     expect(after.has("attacker")).toBe(true);
     // AT THE BYTES, because the claim is about bytes. `readLocks` returned nothing BEFORE the write
-    // too, so `has("victim") === false` is satisfied by a table that never had it and by one that
-    // salvaged those bytes under a key `isRecord` rejects — and `unreadableRecordFile` goes silent
-    // either way once one valid row exists. Only reading the file distinguishes discarded from hidden.
+    // too, so `has("victim") === false` is satisfied by a table that never had it AND by one that
+    // salvaged those bytes under a key `isRecord` rejects. Only reading the file tells discarded from
+    // hidden.
     expect(readFileSync(locksPath(home), "utf8")).not.toContain("victim");
     expect(after.has("victim")).toBe(false); // and the reader agrees with the bytes
 

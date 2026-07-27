@@ -45,7 +45,8 @@
 //     when `forgetMs` of silence makes the row spent on read.
 //
 // No case refuses a login, which is the promise that matters. All three are an operator's disk to fix,
-// and `loam user unlock` names the fault it can see rather than reporting an empty table as tidy.
+// and NOTHING HERE TELLS THEM SO: a read fault is silent everywhere, and `loam user unlock` reports an
+// empty table for a home whose records it could not read. That gap is T120's, with the evidence.
 //
 // THE NO-AWAIT DISCIPLINE IN `noteFailure` SETTLES ONE PROCESS, NOT TWO. Every write replaces the
 // file whole through a rename, so two servers over one home are last-writer-wins and each silently
@@ -59,16 +60,12 @@
 // not add work here without asking who can pay for it.
 
 import {
-  accessSync,
   chmodSync,
   closeSync,
-  constants,
-  lstatSync,
   openSync,
   readFileSync,
   renameSync,
   rmSync,
-  statSync,
   writeSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -152,183 +149,6 @@ export function readLocks(home: string): Map<string, FailureRecord> {
     if (isRecord(record)) locks.set(name, record);
   }
   return locks;
-}
-
-/**
- * Why this home's record file yielded nothing, in one sentence for an operator — or undefined when
- * there is nothing to report.
- *
- * IT EXISTS FOR `loam user unlock`, which is the only reader that owes an explanation. The door's own
- * path must stay silent and cheap: it fails open by design, and a diagnostic per unauthenticated
- * attempt is a log a stranger can fill. So this is a SECOND read, paid only when a human asks.
- *
- * NOTHING AT THE PATH is not a fault — a home where nobody has failed a login yet holds no record file
- * at all. Anything else that yields no records is: it cannot be read, or its bytes are not a record
- * table, and both mean the door is charging nobody.
- *
- * TWO SUBJECTS, ASKED DIFFERENTLY, and the difference is which question each one answers:
- *
- *   - THE HOME needs its RESOLVED target to be a directory it can traverse, so `stat().isDirectory()`
- *     plus an `X_OK` check decides, and `lstat` is asked only to separate a dangling link from nothing
- *     at all. See the body for why `lstat` cannot decide it alone and why the mask is not `W_OK`.
- *   - THE RECORD FILE needs the LINK ITSELF, so `lstat` decides and the read's errno never does:
- *     `readFileSync` follows a link and answers `ENOENT`, indistinguishable from no file at all, so a
- *     read-errno test would call a dangling record file healthy and stay silent while the door charges
- *     nobody. `lstat` buys nothing on the other errnos, so the wording never claims the file EXISTS.
- *
- * NOTHING HERE IS ATOMIC, and the honest account of that runs in both directions. A home removed between
- * two calls can return undefined and print the silent-clean answer this function exists to prevent; it
- * can also make `stat` and `lstat` disagree, which is why the ENOENT branch below asks
- * `isSymbolicLink()` rather than inferring a link from `lstat` merely succeeding. The window is
- * microseconds and no caller can steer it, so the misclassification is prevented and the silent answer
- * is recorded rather than closed — it costs one CLI line and never any door behaviour.
- */
-export function unreadableRecordFile(home: string): string | undefined {
-  const path = locksPath(home);
-  // WHAT IT WILL NOT PROMISE. A read fault usually clears itself: `readLocks` fails open, the next
-  // failed login writes a whole new table over the damage, and the records nobody could read are gone
-  // with it. But WHETHER that happens turns on the door's own policy — `maxTracked` below 1 writes no
-  // row at all — and on whether the path can be replaced, and this process was told neither. So it
-  // reports the fault, warns that the bytes are perishable, and names the one thing an operator can act
-  // on. Same discipline as the count-versus-wait split below: state a fact, refuse a guess.
-  const soWhat =
-    `The login door reads it the same way, so it is charging no name any delay. A later failed login ` +
-    `may replace this file and discard whatever could not be read: copy it now if those counts matter.`;
-  // THE HOME COMES FIRST, because a MISTYPED `--home` is the likeliest way to reach this function and
-  // the worst one to answer with silence. No usable home means no record file, which reads as "nobody
-  // has failed a login yet" — a tidy exit 0 over a path that holds nothing and never will. The door
-  // charges nobody there and cannot self-repair either, since even the temp file cannot be created.
-  //
-  // `stat` RESOLVES, WHICH IS WHAT A HOME NEEDS: a symlinked home on a removed volume must read as
-  // broken and a healthy symlinked one must read as fine. `lstat` cannot decide that on its own — it
-  // SUCCEEDS on a dangling link and answers `isDirectory=false` for a healthy one — so `lstat` alone
-  // misses the dangling home and `lstat().isDirectory()` would condemn a working one. It is still asked,
-  // for one narrow job: `stat` reports a dangling link and nothing-at-all with the same ENOENT, and
-  // those two want opposite cures, so `lstat().isSymbolicLink()` separates them.
-  //
-  // `isDirectory` ALONE IS NECESSARY AND NOT SUFFICIENT. A mode-0000 directory answers it happily —
-  // `stat` needs only a traversable PARENT — so the home would pass and the record-file branch below
-  // would offer perishable-bytes advice for a file that can never exist there. Traversal is asked too.
-  // X_OK, NOT W_OK: a read-only home is a SUPPORTED state with its own criterion, where a row stays
-  // frozen at its accumulated wait, and demanding write here would condemn a home the door reads.
-  //
-  // EVERY BRANCH NAMES A FAULT IT ACTUALLY DIAGNOSED. One pair of cures for all of them was wrong for
-  // most: "check --home or run `loam init`" fits a path that does not exist and misdirects an EACCES
-  // home, which was typed correctly and may hold a real record file. The same discipline applies to the
-  // evidence — a branch may not say "symlink" without asking, or "permissions" without reading the
-  // errno, because a confident wrong diagnosis costs more than a vague right one.
-  const defect = ((): { why: string; cure: string } | undefined => {
-    let stats;
-    try {
-      stats = statSync(home);
-    } catch (err) {
-      const why = err instanceof Error ? err.message : String(err);
-      const code = (err as { code?: string }).code;
-      if (code === "ENOENT") {
-        // ASKED, NOT ASSUMED. `lstat` succeeding proves only that SOMETHING is here; the symlink cure
-        // needs `isSymbolicLink`. Without it a plain directory removed between the two calls is named a
-        // broken link and handed a link-repair cure — a fault the code never diagnosed.
-        let link: boolean | undefined;
-        try {
-          link = lstatSync(home).isSymbolicLink();
-        } catch {
-          /* nothing at the path at all, not even a link */
-        }
-        if (link === true) {
-          return {
-            why: `it is a symlink whose target is gone (${why})`,
-            cure: "Repair or remove the link.",
-          };
-        }
-        if (link === false) {
-          // Something is there and it is not a link, yet `stat` said ENOENT: the path changed under us.
-          return {
-            why: `${why} — the path changed while this command looked at it`,
-            cure: "Try again.",
-          };
-        }
-        return {
-          why,
-          cure: "Check the --home path if you passed one, or run `loam init` if this home was never made.",
-        };
-      }
-      if (code === "ELOOP") return { why, cure: "Repair or remove the symlink at that path." };
-      if (code === "ENOTDIR") {
-        return { why, cure: "Check the --home path: a component of it is not a directory." };
-      }
-      if (code === "EACCES" || code === "EPERM") {
-        return {
-          why,
-          cure: "Fix the permissions on that path, or run this as a user that can reach it.",
-        };
-      }
-      return { why, cure: "Check the --home path." };
-    }
-    if (!stats.isDirectory()) {
-      return {
-        why: "it is not a directory",
-        cure: "Check the --home path: a loam home is a directory.",
-      };
-    }
-    try {
-      accessSync(home, constants.X_OK);
-    } catch (err) {
-      const why = err instanceof Error ? err.message : String(err);
-      const code = (err as { code?: string }).code;
-      // The errno is READ before permissions are blamed. `access` answers ENOENT too, when the path goes
-      // away between the two calls, and prescribing chmod for that is a diagnosis nobody made.
-      return code === "EACCES" || code === "EPERM"
-        ? { why, cure: "This command cannot traverse into it: fix the directory's permissions." }
-        : { why, cure: "Check the --home path." };
-    }
-    return undefined;
-  })();
-  if (defect !== undefined) {
-    // NOTHING ABOUT PERISHABLE BYTES: there is no reachable record file here, so the advice below would
-    // describe a replacement that cannot happen. The path shows as `(empty)` when it is the empty
-    // string, or the sentence opens on nothing at all — `--home ""` reaches this, since `??` only
-    // defaults away null and undefined.
-    return (
-      `${home === "" ? "(empty)" : home} is not a usable loam home: ${defect.why}. No login records ` +
-      `can live there, so do not read an empty answer as a clean one. ${defect.cure}`
-    );
-  }
-  try {
-    lstatSync(path);
-  } catch (err) {
-    const code = (err as { code?: string }).code;
-    if (code === "ENOENT") return undefined; // nothing at the path: no failures recorded yet
-    return `${path} cannot be examined: ${err instanceof Error ? err.message : String(err)}. ${soWhat}`;
-  }
-  let raw: string;
-  try {
-    raw = readFileSync(path, "utf8");
-  } catch (err) {
-    // Something IS at the path — `lstat` said so — so this reports a read failure without claiming
-    // more than that. A dangling symlink lands here with `ENOENT`, which the guard above would have
-    // read as "no file at all".
-    return `${path} cannot be read: ${err instanceof Error ? err.message : String(err)}. ${soWhat}`;
-  }
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    const users =
-      parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
-        ? (parsed as Record<string, unknown>)["users"]
-        : undefined;
-    if (users === null || typeof users !== "object" || Array.isArray(users)) {
-      return `${path} holds no \`users\` table, so nothing in it is a login record. ${soWhat}`;
-    }
-    // ENTRIES THAT ALL FAIL `isRecord` are damage; an EMPTY table is not; and a table where SOME parse
-    // is not a fault this function reports — `readLocks` returns those, so the door is charging them,
-    // and a name simply missing from a healthy file is an answer rather than an error.
-    const entries = Object.entries(users as Record<string, unknown>);
-    const valid = entries.filter(([, record]) => isRecord(record)).length;
-    if (entries.length === 0 || valid > 0) return undefined;
-    const count = entries.length === 1 ? `1 entry that is` : `${entries.length} entries that are`;
-    return `${path} holds ${count} not a login record. ${soWhat}`;
-  } catch {
-    return `${path} is not JSON this command can parse. ${soWhat}`;
-  }
 }
 
 /**
