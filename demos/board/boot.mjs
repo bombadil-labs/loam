@@ -21,7 +21,12 @@
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
+import {
+  authorForSeed,
+  schemaCanonicalHex,
+  signClaims,
+  termCanonicalHex,
+} from "@bombadil/rhizomatic";
 import {
   Gateway,
   SqliteBackend,
@@ -87,13 +92,28 @@ say(`the board — ${home}`);
 say(`  operator  ${operator}${init.created ? "  (minted)" : ""}`);
 say(`  fable     ${fable}  (seed: fable.seed — hand it to sessions)`);
 
+// What a registration IS, as one comparable line — body and schema by canonical content
+// address, the rest canonicalized JSON. Same fingerprint, same law.
+const lawPrint = (r) =>
+  [
+    termCanonicalHex(r.hyperschema.body),
+    schemaCanonicalHex({ props: r.schema.props, default: r.schema.default }),
+    JSON.stringify([...r.roots].sort()),
+    JSON.stringify([...(r.writable ?? [])].sort()),
+    JSON.stringify(Object.fromEntries(Object.entries(r.mutations ?? {}).sort())),
+  ].join("|");
+
 try {
-  // The vocabulary, BoardItem first (Board's gather names its reading). A bound lens is kept:
-  // evolving the vocabulary is a deliberate `loam register`, not a side effect of a re-boot.
-  const bound = new Set(gw.registered.map((r) => r.lensName ?? r.hyperschema.name));
+  // The vocabulary, BoardItem first (Board's gather names its reading). A lens bound with the
+  // SAME law is kept; one bound with DIFFERENT law is re-published — republishing at the same
+  // entity is evolution, and this is the path that carries the blessed vocabulary onto a store
+  // whose law was improvised over the wire.
   for (const raw of [BOARD_ITEM_REGISTRATION, BOARD_REGISTRATION]) {
     const input = parseRegistrationInput(raw);
-    if (bound.has(input.hyperschema.name)) {
+    const held = gw.registered.find(
+      (r) => (r.lensName ?? r.hyperschema.name) === input.hyperschema.name,
+    );
+    if (held !== undefined && lawPrint(held) === lawPrint(input)) {
       say(`  law       ${input.hyperschema.name} already bound — kept`);
       continue;
     }
@@ -107,7 +127,9 @@ try {
       input.writable,
       input.resolvers,
     );
-    say(`  law       ${input.hyperschema.name} registered`);
+    say(
+      `  law       ${input.hyperschema.name} ${held === undefined ? "registered" : "re-expressed — the blessed form supersedes what was bound"}`,
+    );
   }
 
   // The grant and the open door — content-addressed, so a re-run appends nothing new.

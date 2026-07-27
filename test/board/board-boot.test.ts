@@ -14,8 +14,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { authorForSeed } from "@bombadil/rhizomatic";
-import { storePath } from "../../src/cli/config.js";
+import { authorForSeed, parseSchema, parseTerm } from "@bombadil/rhizomatic";
+import { initHome, storePath } from "../../src/cli/config.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { lensOf } from "../../src/gateway/registration.js";
@@ -147,6 +147,57 @@ describe("(h) one run over an empty home stands the whole app up", () => {
       expect(second.deltas).toBe(first.deltas + 1); // the renderer re-push, and nothing else
     } finally {
       rmSync(home2, { recursive: true, force: true });
+    }
+  });
+
+  it("boot over an IMPROVISED store re-expresses the blessed law — the live-home migration", async () => {
+    // The scenario the live instance created: a home whose `Board` was stood up over the wire
+    // with a different shape (banner only, no items, no templates). The blessed script must
+    // supersede it — republishing at the same entity is evolution — not keep it.
+    const home3 = mkdtempSync(join(tmpdir(), "loam-board-improvised-"));
+    try {
+      initHome(home3);
+      const seed3 = readFileSync(join(home3, "operator.seed"), "utf8").trim();
+      const pick = { pick: { order: { byTimestamp: "desc" } } };
+      const improvised = await Gateway.boot(
+        new SqliteBackend(storePath(home3)),
+        assembleGenesis({ operatorSeed: seed3 }),
+      );
+      await improvised.publishRegistration(
+        {
+          name: "Board",
+          alg: 1,
+          body: parseTerm({
+            op: "group",
+            key: "byTargetContext",
+            in: {
+              op: "select",
+              pred: { hasPointer: { targetEntity: { var: "root" } } },
+              in: { op: "mask", policy: "drop", in: "input" },
+            },
+          }),
+        },
+        parseSchema({ props: { banner: pick }, default: pick }),
+        [],
+      );
+      await improvised.close();
+
+      await run(process.execPath, [BOOT, "--home", home3]);
+      const g = await Gateway.boot(
+        new SqliteBackend(storePath(home3)),
+        assembleGenesis({ operatorSeed: seed3 }),
+      );
+      try {
+        const board = g.registered.find((r) => (lensOf(r) as string) === "Board");
+        expect(board).toBeDefined();
+        expect([...board!.schema.props.keys()].sort()).toEqual(["banner", "items"]);
+        expect(Object.keys(board!.mutations ?? {})).toContain("boardAdd");
+        expect(g.registered.some((r) => (lensOf(r) as string) === "BoardItem")).toBe(true);
+      } finally {
+        await g.close();
+      }
+    } finally {
+      rmSync(home3, { recursive: true, force: true });
     }
   });
 });
