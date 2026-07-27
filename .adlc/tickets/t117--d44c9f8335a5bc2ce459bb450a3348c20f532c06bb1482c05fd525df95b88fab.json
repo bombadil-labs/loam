@@ -1,0 +1,13 @@
+{
+  "body": "FOUND BY T113's round-8 review. `parseArgs` (src/cli/args.ts:24-27) sends any `--name=value` to `parsed.flags`, never to `parsed.booleans`. A declared boolean is read from `booleans`, so writing it with a value passes the allowlist and is then invisible.\n\nThe harmless case: `loam user unlock --all=1` refuses with 'wants a name' — the wrong reason, but it refuses.\n\nTHE FOOTGUN: `loam user create myk --operator=true` succeeds and creates a PLAIN ACTOR. The operator asked for the operator role, the command reported success, and the role is not there. That is H7's shape at the CLI — an operation reporting a success it did not achieve — and it is silent, so nobody learns until a door refuses them later.\n\nThe fix is in the parser, once, for every boolean: `parseArgs` must REFUSE `--name=value` when `name` is a declared boolean, with a message naming the flag and that it takes no value. A boolean written with a value is always a mistake, never an intent worth guessing.\n\nRails: (a) every declared boolean, refused with a value, for at least two commands; (b) `loam user create <name> --operator=true` exits non-zero and appends NOTHING (delta count before and after) — the two-sided form, because the danger here is a partial success; (c) the bare boolean still works, so the fix did not break the ordinary path.\n\nRepair tier: this restores what the flag already promises. Self-mergeable on a clean bar.",
+  "edges": [],
+  "id": "T117",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "src/cli/args.ts",
+    "test/cli/"
+  ],
+  "status": "todo",
+  "title": "A declared boolean flag written as --flag=value is silently ignored — `loam user create myk --operator=true` makes a plain actor"
+}

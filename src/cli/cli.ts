@@ -134,7 +134,7 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
   },
   user: {
     summary: "create a login user, or clear a locked login",
-    usage: "loam user <create|unlock> <name> [options]",
+    usage: "loam user create|unlock <name> [options] | loam user unlock --all [options]",
     flags: new Set(["home", "store", "operator", "all"]),
     booleans: new Set(["operator", "all"]),
     notes: [
@@ -143,10 +143,11 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "  unlock <name>    clear a locked login — the lock is the box's to lift, never a caller's",
       "  unlock --all     clear every login record, whatever name it holds",
       "",
-      "`unlock --all` is the cure for a saturated table. A flood fills the lock file with names of",
-      "the caller's own choosing, so no per-name command reaches them — and a restart does not help,",
-      "because the file is on disk and nothing prunes it at boot. Waiting out the lock window is the",
-      "other cure.",
+      "`unlock --all` is the cure sized to a saturated table. A flood fills the lock file with names",
+      "of the caller's own choosing — readable in the file, so a per-name unlock CAN clear one, but",
+      "one at a time is the wrong shape for a table somebody else filled. A restart does not help:",
+      "the file is on disk and nothing prunes it at boot. Waiting out the lock window is the other",
+      "cure.",
       "",
       "Home access IS the proof of operatorship: this command needs the home's seed, like erasure.",
       "The password hash lives in credentials.json (mode 0600) and never enters the ground, because",
@@ -220,6 +221,7 @@ const FLAG_HELP: Readonly<Record<string, { readonly arg: string; readonly note: 
   archive: { arg: "<dir>", note: "mirror every delta into a cold store, relative to the home" },
   out: { arg: "<file>", note: "write the output here (default stdout)" },
   operator: { arg: "", note: "give the new user the operator role (default: a plain actor)" },
+  all: { arg: "", note: "unlock: clear EVERY login record, whatever name it holds" },
   "public-url": {
     arg: "<url>",
     note: "the store's address as the outside world sees it (default: the bound URL)",
@@ -1100,9 +1102,14 @@ async function cmdUserCreate(
 }
 
 // `loam user unlock --all` — the cure sized to a saturated table. A flood fills the lock file with
-// names of the attacker's choosing, so no per-name command can reach them, and a restart does not
-// help: the file is on disk and nothing prunes it at boot.
+// names of the attacker's choosing; a per-name unlock clears one of them, which is the wrong shape
+// for a table of hundreds. A restart does not help: the file is on disk and nothing prunes it at boot.
 function cmdUserUnlockAll(home: string, io: IO): number {
+  // A RUNNING SERVER CAN RESURRECT WHAT THIS CLEARS. `noteFailure` reads and writes the file in one
+  // synchronous block, which settles interleaving inside one process — but this is a separate process,
+  // so a rename landing between that read and its write restores the old table after this has printed.
+  // The window is microseconds and every other writer here shares the shape; under an ongoing flood
+  // the cure is a losing race in any case. Said here because the line below sounds final.
   const cleared = clearAllLocks(home);
   io.out(
     cleared === 0
