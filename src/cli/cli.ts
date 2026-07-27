@@ -31,7 +31,7 @@ import {
   writeCredentials,
   type ScryptParams,
 } from "../server/credentials.js";
-import { clearAllLocks, clearLock } from "../server/login-locks.js";
+import { clearAllRecords, clearRecord } from "../server/login-locks.js";
 import { oauthPath, readOAuthFile, withOAuthFile } from "../server/oauth-file.js";
 import {
   resolveUserView,
@@ -160,21 +160,23 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
     flags: new Set(["home", "store"]),
   },
   user: {
-    summary: "create a login user, or clear a locked login",
+    summary: "create a login user, or clear a login delay",
     usage: "loam user create|unlock <name> [options] | loam user unlock --all [options]",
     flags: new Set(["home", "store", "operator", "all"]),
     booleans: new Set(["operator", "all"]),
     notes: [
       "subcommands:",
       "  create <name>    ask for a password twice, write the credential, plant the user deltas",
-      "  unlock <name>    clear a locked login — the lock is the box's to lift, never a caller's",
+      "  unlock <name>    clear this name's failed-login record, so its next attempt waits for nothing",
       "  unlock --all     clear every login record, whatever name it holds",
       "",
-      "`unlock --all` is the cure sized to a saturated table. A flood fills the lock file with names",
-      "of the caller's own choosing — readable in the file, so a per-name unlock CAN clear one, but",
-      "one at a time is the wrong shape for a table somebody else filled. A restart does not help:",
-      "the file is on disk and nothing prunes it at boot. Waiting out the lock window is the other",
-      "cure.",
+      "THE LOGIN DOOR DELAYS. IT NEVER LOCKS. Each failed attempt for a name makes the next attempt",
+      "for that name wait longer, up to a cap. The door always admits a correct password. So no",
+      "caller can shut you out of your own store, and `unlock` is a convenience rather than a rescue.",
+      "Silence for the forget window clears a record too.",
+      "",
+      "Use `unlock --all` when a caller filled the file with names you cannot list. It names no user.",
+      "It clears every count, including a caller's own, so it hands their whole budget back.",
       "",
       "Home access IS the proof of operatorship: this command needs the home's seed, like erasure.",
       "The password hash lives in credentials.json (mode 0600) and never enters the ground, because",
@@ -1001,7 +1003,7 @@ async function cmdRepair(args: readonly string[], io: IO): Promise<number> {
 // of operatorship — the same authority erasure and repair need — so there is no remote way in.
 //
 //   loam user create <name> [--operator]   ask twice, hash, plant the two deltas, write the credential
-//   loam user unlock <name>                clear a locked login
+//   loam user unlock <name>                clear a name's failed-login record, and its delay with it
 async function cmdUser(args: readonly string[], io: IO, options: RunOptions): Promise<number> {
   const parsed = parseFor("user", args);
   const sub = parsed.positionals[0];
@@ -1184,61 +1186,99 @@ async function cmdUserCreate(
   return 0;
 }
 
-// `loam user unlock --all` — the cure sized to a saturated table. A flood fills the lock file with
-// names of the attacker's choosing; a per-name unlock clears one of them, which is the wrong shape
-// for a table of hundreds. A restart does not help: the file is on disk and nothing prunes it at boot.
+// `loam user unlock --all` — the one cure sized to a file somebody else filled. A caller who walks
+// names writes a record per name, and those names are theirs to choose, so clearing them one at a time
+// is the wrong shape. Nothing here is a lockout: the door delays, and it always admits a correct
+// password. This only gives back time.
 function cmdUserUnlockAll(home: string, io: IO): number {
   // A RUNNING SERVER CAN RESURRECT WHAT THIS CLEARS. `noteFailure` reads and writes the file in one
   // synchronous block, which settles interleaving inside one process — but this is a separate process,
   // so a rename landing between that read and its write restores the old table after this has printed.
   // The window is microseconds and every other writer here shares the shape; under an ongoing flood
   // the cure is a losing race in any case. Said here because the line below sounds final.
-  const cleared = clearAllLocks(home);
+  let cleared;
+  try {
+    cleared = clearAllRecords(home);
+  } catch (err) {
+    // A HOME THIS PROCESS CANNOT WRITE, most often. Reported in the command's own words, because the
+    // bare errno reads as a bug in loam rather than as a permission on a directory — and because the
+    // serving door is in the same position: it cannot grow or clear a count either, so those names go
+    // on paying their accumulated wait until the forget window retires them.
+    io.err(
+      `user unlock --all: ${home} holds login records this command cannot rewrite, so none were ` +
+        `cleared: ${err instanceof Error ? err.message : String(err)}. The serving door cannot ` +
+        `change them either. Make the home writable, or wait out the forget window.`,
+    );
+    return 1;
+  }
+  // KNOWN GAP (T121): the line below is ALSO what a file this command could not READ answers with — a
+  // directory at the path, damaged bytes, a dangling symlinked home, a mistyped --home. Every one of
+  // those means the login door is charging no name any delay, and none of them is reported here. This
+  // command is the only reader that looks at the file, so the fault is reported nowhere.
   io.out(
     cleared === 0
-      ? `loam: ${home} holds no login locks\n  nothing to lift`
+      ? `loam: ${home} holds no login records\n  nothing to clear`
       : `loam: cleared ${cleared} login ${cleared === 1 ? "record" : "records"}\n` +
-          `  every failure count starts from zero — including any attacker's`,
+          `  every failure count starts from zero, including a guessing caller's`,
   );
   return 0;
 }
 
 function cmdUserUnlock(name: string, home: string, io: IO): number {
-  // THE LOCK FILE IS THE AUTHORITY here, and it is read FIRST — before the credential file, which may be
-  // absent or damaged. A record outlives its user: erase the deltas, remove the credential entry, and the
-  // lock record — keyed by the user NAME — is still there. The health report promises this command works
+  // THE RECORD FILE IS THE AUTHORITY here, and it is read FIRST — before the credential file, which may
+  // be absent or damaged. A record outlives its user: erase the deltas, remove the credential entry, and
+  // the record — keyed by the user NAME — is still there. The health report promises this command works
   // whether or not the user still exists, so nothing about the credential file may stand in its way.
-  const cleared = clearLock(home, name);
-  if (cleared.held) {
+  let cleared;
+  try {
+    cleared = clearRecord(home, name);
+  } catch (err) {
+    io.err(
+      `user unlock: ${name} holds a login record this command cannot rewrite, so nothing was ` +
+        `cleared: ${err instanceof Error ? err.message : String(err)}. The serving door cannot ` +
+        `change it either, so ${name} keeps paying its accumulated wait until the forget window ` +
+        `retires it. Make the home writable, or wait it out.`,
+    );
+    return 1;
+  }
+  if (cleared !== undefined) {
+    // The COUNT and its age, never a wait. The serving door owns the policy that turns a count into a
+    // wait, and this process was never told it: naming a count is a fact, naming a wait would be a
+    // guess. The age is clamped at zero — a wall clock stepped backwards can leave the stamp ahead of
+    // now, and "in 4 minutes" is not a report.
+    const seconds = Math.round(Math.max(0, Date.now() - cleared.lastFailureAt) / 1000);
     io.out(
-      cleared.locked
-        ? `loam: unlocked ${name}\n  the next login attempt is counted from zero`
-        : `loam: ${name} was not locked, and its failure count is cleared\n` +
-            `  the next login attempt is counted from zero`,
+      `loam: cleared ${name}'s login record\n` +
+        `  it held ${cleared.failures} failed ` +
+        `${cleared.failures === 1 ? "attempt" : "attempts"}, the last one ${seconds}s ago\n` +
+        `  the next attempt for ${name} waits for nothing`,
     );
     return 0;
   }
+  // KNOWN GAP (T121): "this name has no record" and "the record file could not be read at all" reach
+  // this point identically, and so does "this --home is not a usable directory". Only the first is
+  // benign. The others mean the login door is charging no name any delay, and nothing below says so.
   let existing;
   try {
     existing = readCredentials(home);
   } catch (err) {
-    // Nothing was locked and the credential file is unreadable, so this cannot tell a typo'd name from a
-    // real user. It says which of the two it could not check.
+    // There was no record, and the credential file is unreadable, so this cannot tell a typo'd name from
+    // a real user. It says which of the two it could not check.
     io.err(
-      `user unlock: ${name} holds no lock, and ${credentialsPath(home)} is unreadable so this ` +
-        `command cannot say whether that user exists: ` +
+      `user unlock: ${name} holds no login record, and ${credentialsPath(home)} is unreadable so ` +
+        `this command cannot say whether that user exists: ` +
         `${err instanceof Error ? err.message : String(err)}`,
     );
     return 1;
   }
   if (entryFor(existing, name) === undefined) {
     io.err(
-      `user unlock: ${home} holds no lock and no user named ${name} — nothing was unlocked. ` +
+      `user unlock: ${home} holds no login record and no user named ${name} — nothing was cleared. ` +
         `\`loam user create ${name}\` makes one.`,
     );
     return 2;
   }
-  io.out(`loam: ${name} was not locked\n  nothing to lift`);
+  io.out(`loam: ${name} holds no login record\n  its next attempt already waits for nothing`);
   return 0;
 }
 
