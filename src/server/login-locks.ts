@@ -1,23 +1,31 @@
 // The failed-login limiter's state, in a file (SPEC §36).
 //
+// IT DELAYS; IT NEVER DENIES. A correct password is admitted however many failures came before it. A
+// wrong one makes the next attempt for that name wait longer, up to a cap. There is no lock here, no
+// expiry to wait out, and nothing scarce for a flood to steer — because a lock is an off switch a
+// stranger can pull. Anyone who knows a username could hold the operator out of their own store with
+// a handful of wrong passwords, and no keying of that lock makes it safe.
+//
 // It keys on the USERNAME, never on a caller-supplied source. Behind a proxy every request arrives
 // from 127.0.0.1, and X-Forwarded-For is a header the caller writes — so a per-source limiter is a
-// remote off-switch the attacker holds, and it points at the operator's own login. Keying on the
-// username moves the off-switch to a place only the box can reach: `loam user unlock`.
+// remote lever, and it points at the operator's own login. Keying on the username puts the one lever
+// that clears a record where only the box can reach it: `loam user unlock`.
 //
 // The state lives in the home rather than in server memory for exactly that reason: `loam user
-// unlock` is a SEPARATE PROCESS, and memory it cannot reach is a lock it cannot clear.
+// unlock` is a SEPARATE PROCESS, and memory it cannot reach is a record it cannot clear. The file
+// keeps the name login-locks.json, which the erasure report and the CLI both name to an operator; the
+// vocabulary inside it is the delay.
 //
-// Deliberate posture on damage: a file this module cannot parse reads as NO LOCKS, and a file with SOME
-// damaged records reads as the records it could parse. That is fail-open, and it is the right direction
-// here — this file is a work budget, not an authorization surface, and failing closed would turn a local
-// disk fault into a total login outage with no way in.
+// Deliberate posture on damage: a file this module cannot parse reads as NO RECORDS, and a file with
+// SOME damaged records reads as the records it could parse. That is fail-open, and it is the right
+// direction here — this file is a work budget, not an authorization surface, and failing closed would
+// turn a local disk fault into a slow login for everyone with nothing to clear.
 //
 // AN UNAUTHENTICATED CALLER DRIVES THIS FILE. A failed login writes it, for any well-formed name,
-// existing or not. So the size bound and the eviction rule below are load-bearing rather than tidy, and
-// every cost on this path is a cost a stranger can ask for. The per-attempt read and rewrite are
-// synchronous and whole-file, which is H8's shape: keep `maxTracked` small enough that the walk stays
-// cheap, and do not add work here without asking who can pay for it.
+// existing or not. So the size bound below is load-bearing rather than tidy, and every cost on this
+// path is a cost a stranger can ask for. The per-attempt read and rewrite are synchronous and
+// whole-file, which is H8's shape: keep `maxTracked` small enough that the walk stays cheap, and do
+// not add work here without asking who can pay for it.
 
 import {
   chmodSync,
@@ -32,45 +40,50 @@ import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 
 export interface LimitPolicy {
-  readonly maxFailures: number; // failures inside the window that engage the lock
-  readonly windowMs: number; // how long a failure is remembered
-  readonly lockMs: number; // how long the lock holds once engaged
+  readonly baseDelayMs: number; // what the FIRST failure buys the next attempt
+  readonly maxDelayMs: number; // the ceiling: no attempt ever waits longer than this
+  readonly forgetMs: number; // silence this long and the count starts over
   readonly maxTracked: number; // live records the file will hold — see noteFailure
 }
 
 export const DEFAULT_LIMIT: LimitPolicy = {
-  maxFailures: 5,
-  windowMs: 60_000,
-  lockMs: 900_000,
+  baseDelayMs: 250,
+  // The CAP is what keeps "slow" from becoming "shut". Five seconds is a long pause for a person
+  // typing a password once, and it holds a guessing caller to a fifth of an attempt per second.
+  maxDelayMs: 5_000,
+  forgetMs: 900_000,
   // Small ON PURPOSE: every failed attempt reads and rewrites this file whole, and an unauthenticated
   // caller drives that path. A bigger table buys a longer walk for the same protection.
   maxTracked: 512,
 };
 
-export interface LockRecord {
+export interface FailureRecord {
   readonly failures: number;
-  readonly firstFailureAt: number;
-  readonly lockedUntil?: number;
+  /**
+   * WALL CLOCK, and it has to be: this file outlives the process, and `loam user unlock` reads it from
+   * another one, so a process-local monotonic origin would mean nothing to either. What the decay does
+   * with it is written so that the unsafe direction cannot happen — see `spent`.
+   */
+  readonly lastFailureAt: number;
 }
 
 export const locksPath = (home: string): string => join(home, "login-locks.json");
 
-const isRecord = (raw: unknown): raw is LockRecord => {
+const isRecord = (raw: unknown): raw is FailureRecord => {
   if (raw === null || typeof raw !== "object") return false;
-  const { failures, firstFailureAt, lockedUntil } = raw as Record<string, unknown>;
+  const { failures, lastFailureAt } = raw as Record<string, unknown>;
   return (
     typeof failures === "number" &&
     Number.isInteger(failures) &&
     failures >= 0 &&
-    typeof firstFailureAt === "number" &&
-    Number.isFinite(firstFailureAt) &&
-    (lockedUntil === undefined || (typeof lockedUntil === "number" && Number.isFinite(lockedUntil)))
+    typeof lastFailureAt === "number" &&
+    Number.isFinite(lastFailureAt)
   );
 };
 
-/** Every lock the home records. An absent or damaged file reads as none — see the header. */
-export function readLocks(home: string): Map<string, LockRecord> {
-  const locks = new Map<string, LockRecord>();
+/** Every record the home holds. An absent or damaged file reads as none — see the header. */
+export function readLocks(home: string): Map<string, FailureRecord> {
+  const locks = new Map<string, FailureRecord>();
   let raw: string;
   try {
     raw = readFileSync(locksPath(home), "utf8");
@@ -98,14 +111,14 @@ export function readLocks(home: string): Map<string, LockRecord> {
  * NO FSYNC, and that is the one place this differs from credentials.json. A failed attempt rewrites this
  * file, so an fsync would add a DISK FLUSH — the slowest thing here by orders of magnitude — to a path an
  * unauthenticated caller drives, to make a durability promise nobody needs. Losing the last few failure
- * counts to a power cut costs an attacker nothing they did not already have.
+ * counts to a power cut costs a caller nothing they did not already have.
  *
  * What that does NOT remove: the read, the parse, the stringify and the write are all synchronous and
  * whole-file, so an attempt still blocks the event loop for as long as the table takes to walk. That is
  * what `maxTracked` is small for. The temp-and-rename stays either way — a HALF-WRITTEN file would read
- * as no locks at all.
+ * as no records at all.
  */
-export function writeLocks(home: string, locks: Map<string, LockRecord>): void {
+export function writeLocks(home: string, locks: Map<string, FailureRecord>): void {
   const target = locksPath(home);
   const temp = `${target}.${process.pid}-${randomBytes(6).toString("hex")}.tmp`;
   const body = `${JSON.stringify({ users: Object.fromEntries(locks) }, null, 2)}\n`;
@@ -124,131 +137,89 @@ export function writeLocks(home: string, locks: Map<string, LockRecord>): void {
   chmodSync(target, 0o600);
 }
 
-/** Milliseconds the lock on `name` still holds, read from an already-loaded table; 0 = open. */
-export function lockedMsIn(
-  locks: ReadonlyMap<string, LockRecord>,
-  name: string,
-  now: number,
-): number {
-  const record = locks.get(name);
-  if (record?.lockedUntil === undefined) return 0;
-  return record.lockedUntil > now ? record.lockedUntil - now : 0;
-}
-
-/** Has this record stopped saying anything? Its window has passed and it holds no live lock. */
-const spent = (record: LockRecord, now: number, policy: LimitPolicy): boolean =>
-  now - record.firstFailureAt > policy.windowMs &&
-  (record.lockedUntil === undefined || record.lockedUntil <= now);
+/**
+ * Has this record stopped saying anything? Only silence for `forgetMs` retires a count.
+ *
+ * A WALL CLOCK STEPPED BACKWARDS MUST NOT RETIRE ONE. Such a step leaves `lastFailureAt` in the
+ * future, so the elapsed time reads negative — and a negative elapsed is never greater than the
+ * window, so the record stands. A step FORWARD past the window does retire the count, which is
+ * indistinguishable from the time truly passing, and retiring is this file's fail-open direction
+ * anyway.
+ */
+const spent = (record: FailureRecord, now: number, policy: LimitPolicy): boolean =>
+  now - record.lastFailureAt > policy.forgetMs;
 
 /**
- * Can this name be recorded at all right now? True when the table is FULL OF LIVE LOCKS and holds no
- * record for `name` — so a failure could not be counted against it.
+ * The wait `failures` failures have bought: the base, doubled once per failure after the first, never
+ * past the cap. No failures wait for nothing, which is what keeps an ordinary login fast.
  *
- * The door asks this BEFORE comparing a password, not after. Refusing afterwards would be no defence:
- * the guess has already been evaluated, and 429-versus-200 tells the caller whether it was right just
- * as plainly as 401-versus-200 would. Only a refusal that precedes the comparison stops guessing.
- *
- * Advisory by design — `noteFailure` re-reads and re-decides for itself, because the read-and-write
- * there must stay a single synchronous step. This is the cheap look that keeps an unaccountable attempt
- * from ever reaching the hash.
+ * `2 ** big` reaches Infinity rather than wrapping, and Math.min carries that to the cap, so a count
+ * no caller could reach still answers a number.
  */
-export function saturatedFor(
-  home: string,
+export function delayFor(failures: number, policy: LimitPolicy): number {
+  if (failures < 1) return 0;
+  return Math.min(policy.maxDelayMs, policy.baseDelayMs * 2 ** (failures - 1));
+}
+
+/** The wait `name` owes, read from an already-loaded table; 0 = nothing owed. */
+export function delayMsIn(
+  locks: ReadonlyMap<string, FailureRecord>,
   name: string,
   now: number,
   policy: LimitPolicy,
-): boolean {
-  const locks = readLocks(home);
-  if (locks.has(name)) return false;
-  let live = 0;
-  for (const [held, record] of locks) {
-    if (spent(record, now, policy)) continue; // a spent record is room, and noteFailure prunes it
-    if (lockedMsIn(locks, held, now) === 0) return false; // an unlocked record is evictable
-    live += 1;
-  }
-  return live >= policy.maxTracked;
+): number {
+  const record = locks.get(name);
+  if (record === undefined || spent(record, now, policy)) return 0;
+  return delayFor(record.failures, policy);
 }
 
-/** Milliseconds the lock on `name` still holds; 0 when the door is open. */
-export const lockedMs = (home: string, name: string, now: number): number =>
-  lockedMsIn(readLocks(home), name, now);
+/** The wait `name` owes, read from the home; 0 = nothing owed. */
+export const delayMs = (home: string, name: string, now: number, policy: LimitPolicy): number =>
+  delayMsIn(readLocks(home), name, now, policy);
 
 /**
  * Record one failed attempt for `name`.
  *
  * IT READS THE FILE ITSELF, and that is not a saving to optimise away. The read, the increment and the
  * write must happen with NO await between them, or two overlapping attempts each compute `failures + 1`
- * from the same value and the second write erases the first. That makes the effective limit
- * `maxFailures × concurrency` instead of `maxFailures`, and it lets a stale write resurrect a count that
- * a successful login — or `loam user unlock` — had just cleared. Synchronous in a single-threaded loop IS
- * the atomicity argument; handing this function a table read before an await throws it away.
+ * from the same value and the second write erases the first. The count then says one where four
+ * landed, and a stale write can resurrect a count that a successful login — or `loam user unlock` —
+ * had just cleared. Synchronous in a single-threaded loop IS the atomicity argument; handing this
+ * function a table read from before an await throws it away.
  *
- * Three rules, each answering a different failure:
+ * SILENCE FOR `forgetMs` STARTS THE COUNT OVER, measured from the LAST failure rather than the first.
+ * From the first, a caller who keeps guessing would collect a fresh count every window — which is a
+ * ceiling on the wait they can ever be charged, and the ceiling is the thing they want.
  *
- * A lapsed window and a lapsed lock both START THE COUNT OVER — a lock that expired but left its count
- * behind would re-lock on the very next attempt, which is a permanent lock wearing a timer's clothes.
+ * SPENT RECORDS ARE PRUNED. A failed attempt is recorded for any well-formed name, existing or not, so
+ * a caller walking names would otherwise add a row per attempt forever.
  *
- * SPENT RECORDS ARE PRUNED. A failed attempt is recorded for any well-formed name, existing or not, so a
- * caller walking names would otherwise add a row per attempt forever.
- *
- * And past `maxTracked` a record is EVICTED to make room — but ONLY ONE THAT HOLDS NO LIVE LOCK. A
- * live lock is the only thing in this file protecting anyone, so it is the one thing eviction may not
- * take. EVERY eviction rule over live locks has been shown steerable: taking the nearest-to-expire
- * takes the FIRST victim's lock, and taking the furthest takes the victim's the moment their own lock
- * becomes the newest. So none is taken.
- *
- * When nothing is evictable this REFUSES TO RECORD, and says so by returning false — the caller must
- * then refuse the attempt. That direction is deliberate: a table saturated with live locks means the
- * door is under a flood it cannot account for, and a limiter that cannot account for an attempt must
- * not wave it through. Recording nothing and answering 401 anyway is unlimited guessing (H9's shape at
- * the login door: unprovable is not clean).
- *
- * The cost is named rather than hidden, and it is a real one: a caller who pays
- * `maxFailures × maxTracked` attempts can shut the HTML login door for every name not already tracked,
- * until the locks drain after `lockMs`. The bearer-token doors are untouched throughout, so the API
- * stays reachable while it happens. A denial is the lesser failure; guessing without a ceiling does not
- * heal.
- *
- * THE RECOVERY, stated exactly, because an overclaimed remedy is its own defect: waiting `lockMs` for
- * the locks to go spent, or `loam user unlock --all` from the box. A RESTART DOES NOT CLEAR IT — this
- * file is on disk and is re-read verbatim, and nothing prunes it at boot. Per-name `loam user unlock`
- * cures one entry, which is the wrong shape for a table an attacker filled with names of their own
- * choosing.
- *
- * @returns true when the attempt was recorded; false when the table could not account for it.
+ * And past `maxTracked` the WEAKEST records are evicted to make room. Nothing in this file can refuse a
+ * login, so an eviction can never be an off switch; the most it can hand back is a wait. It is still
+ * ordered by strength rather than by age, for two reasons. Displacing a name with F failures costs the
+ * caller F failures on every other row first, and each of those pays its own delay. And a wait rebuilds
+ * on the very next failure, so what the theft buys is about one attempt — there is no expiry here for a
+ * flood to steal.
  */
-export function noteFailure(home: string, name: string, now: number, policy: LimitPolicy): boolean {
+export function noteFailure(home: string, name: string, now: number, policy: LimitPolicy): void {
   const locks = readLocks(home);
   const previous = locks.get(name);
   for (const [held, record] of locks) {
     if (held !== name && spent(record, now, policy)) locks.delete(held);
   }
   if (previous === undefined && locks.size >= policy.maxTracked) {
-    let unlocked: { name: string; at: number } | undefined;
-    for (const [held, record] of locks) {
-      if (lockedMsIn(locks, held, now) !== 0) continue; // a live lock is never evictable
-      if (unlocked === undefined || record.firstFailureAt < unlocked.at) {
-        unlocked = { name: held, at: record.firstFailureAt };
-      }
-    }
-    // Nothing evictable means every record is a live lock. Leave them all, and tell the caller this
-    // attempt is unaccounted for — it must be refused rather than counted as a plain miss.
-    if (unlocked === undefined) return false;
-    locks.delete(unlocked.name);
+    // Weakest first, and ENOUGH OF THEM that one new row still fits: a policy narrowed since the last
+    // write can leave the table over its own bound, and evicting a single row would never catch up.
+    const weakest = [...locks].sort(
+      ([, a], [, b]) => a.failures - b.failures || a.lastFailureAt - b.lastFailureAt,
+    );
+    for (const [held] of weakest.slice(0, locks.size - policy.maxTracked + 1)) locks.delete(held);
   }
-  const lapsed =
-    previous === undefined ||
-    now - previous.firstFailureAt > policy.windowMs ||
-    (previous.lockedUntil !== undefined && previous.lockedUntil <= now);
-  const failures = lapsed ? 1 : previous.failures + 1;
-  const firstFailureAt = lapsed ? now : previous.firstFailureAt;
   locks.set(name, {
-    failures,
-    firstFailureAt,
-    ...(failures >= policy.maxFailures ? { lockedUntil: now + policy.lockMs } : {}),
+    failures: previous === undefined || spent(previous, now, policy) ? 1 : previous.failures + 1,
+    lastFailureAt: now,
   });
   writeLocks(home, locks);
-  return true;
 }
 
 /** Forget `name`'s failures — what a successful login earns. */
@@ -258,15 +229,13 @@ export function forgetFailures(home: string, name: string): void {
 }
 
 /**
- * Clear EVERY record. What `loam user unlock --all` earns, and the only cure sized to a table an
- * attacker filled with names nobody can enumerate in advance. Returns how many records went.
+ * Clear EVERY record. What `loam user unlock --all` earns, and the only cure sized to a file a caller
+ * filled with names nobody can enumerate in advance. Returns how many records went.
  *
- * It clears live locks too, which is the point: the operator is the authority on the box, and a lock
- * is a work budget rather than an authorization surface. The failure counts start from zero, so this
- * gives an attacker back their whole budget as well — an operator reaching for it is choosing to
- * reopen the door they were shut out of.
+ * Every count starts from zero afterwards, so this hands a guessing caller their whole budget back as
+ * well. An operator reaching for it is choosing that over waiting out `forgetMs`.
  */
-export function clearAllLocks(home: string): number {
+export function clearAllRecords(home: string): number {
   const locks = readLocks(home);
   if (locks.size === 0) return 0;
   writeLocks(home, new Map());
@@ -274,18 +243,17 @@ export function clearAllLocks(home: string): number {
 }
 
 /**
- * Clear `name`'s record from the box. `held` says a record was there at all; `locked` says it was holding
- * a LIVE lock. The two differ — a name with four failures and no lock still has a record worth clearing —
- * and a caller that reported "unlocked" for both would be overclaiming on the smaller one.
+ * Clear `name`'s record from the box, and answer what it held — undefined when there was none.
+ *
+ * It answers the COUNT and its age rather than a wait. A wait is a property of the serving door's
+ * policy, and this runs in another process that was never told that policy: naming a count is a fact,
+ * naming a wait would be a guess.
  */
-export function clearLock(
-  home: string,
-  name: string,
-): { readonly held: boolean; readonly locked: boolean } {
+export function clearRecord(home: string, name: string): FailureRecord | undefined {
   const locks = readLocks(home);
-  if (locks.get(name) === undefined) return { held: false, locked: false };
-  const locked = lockedMsIn(locks, name, Date.now()) > 0;
+  const held = locks.get(name);
+  if (held === undefined) return undefined;
   locks.delete(name);
   writeLocks(home, locks);
-  return { held: true, locked };
+  return held;
 }

@@ -2,6 +2,16 @@
 
 **Ticket: T113.** Status: design approved in chat (Myk, 2026-07-26); implementation delegated.
 
+**Amended by T116** (Myk, 2026-07-27, in chat): the failed-login limiter DELAYS; it never locks. A
+lock is an off switch a stranger can pull — anyone who knows a username could hold the operator out
+of their own store. So each failure for a name makes the next attempt for that name wait longer, up
+to a cap, and the door always admits a correct password. Criteria (o) and (p) below are T116's.
+
+**The cost, named.** A caller who grinds the operator's username makes the operator's own login slow,
+up to the cap, once per login. Slow is not shut, and that is the whole trade. A waiting attempt also
+holds one connection for the length of its wait; the wait spends no hash budget, so the CPU stays
+bounded by the concurrent-hash cap and one name's flood cannot make this door refuse another name.
+
 ## The problem
 
 Today one word, "token", does three jobs. A bearer token authenticates the caller, carries the
@@ -122,12 +132,26 @@ may do.
   does not extend it (expiry is monotonic) — `test/server/login.test.ts`
 - (n) A server restart invalidates all cookies: the same cookie that opened a door before the
   restart is refused after it — `test/server/login.test.ts`
-- (o) The failed-login limiter keys on the USERNAME, not on a caller-supplied source: six wrong
-  passwords for `myk` lock `myk` with 429 and `Retry-After`, while a second user's correct
-  password still succeeds — and rotating `X-Forwarded-For` does not reset the count —
+- (o) The failed-login limiter keys on the USERNAME, not on a caller-supplied source, and it DELAYS
+  rather than locks: twenty wrong passwords for `myk` never refuse `myk`, the right password still
+  answers 200 with a session cookie, and rotating `X-Forwarded-For` does not reset the count —
   `test/server/login-limit.test.ts`
-- (p) `loam user unlock <name>` clears the lock from the box, so a remote party cannot hold the
-  door shut — `test/server/login-limit.test.ts`
+- (o1) The wait grows with each failure and is CAPPED, so it cannot become a denial under another
+  name; `delayFor` saturates at the cap for any count — `test/server/login-limit.test.ts`
+- (o2) The wait is paid BEFORE the password comparison: a door with no hash budget at all still waits
+  it out before it answers 503 — `test/server/login-limit.test.ts`
+- (o3) A flood against one name neither slows another name's login nor spends the hash budget — a
+  waiting attempt holds no slot, and the concurrent-login cap is asserted with waits in flight —
+  `test/server/login-limit.test.ts`
+- (o4) Concurrent attempts cannot lose an accumulated count: four overlapping misses record four, and
+  the next attempt is charged for all four — `test/server/login-limit.test.ts`
+- (o5) A wall clock stepped BACKWARDS cannot erase an accumulated wait, and silence past the forget
+  window does clear one — `test/server/login-limit.test.ts`
+- (o6) The record file holds no more than `maxTracked` rows, and a flood of fresh names cannot flush
+  a record that holds more failures — `test/server/login-limit.test.ts`
+- (p) `loam user unlock <name>` clears that name's accumulated wait from the box, `--all` clears every
+  record whatever name it holds, and the report names the COUNT rather than a wait the CLI's process
+  cannot know — `test/server/login-limit.test.ts`
 - (q) Unauthenticated scrypt work is globally capped: concurrent login attempts past the cap are
   refused without hashing — `test/server/login-limit.test.ts`
 - (r) The login page carries a `Content-Security-Policy` that permits no script —

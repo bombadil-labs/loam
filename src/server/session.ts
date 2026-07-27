@@ -32,10 +32,9 @@ import {
 } from "./credentials.js";
 import {
   DEFAULT_LIMIT,
+  delayMs,
   forgetFailures,
-  lockedMs,
   noteFailure,
-  saturatedFor,
   type LimitPolicy,
 } from "./login-locks.js";
 import { roleOf, userNameDefect, type UserRole } from "./users.js";
@@ -57,6 +56,7 @@ export interface UserDoorOptions {
   readonly maxTokensPerSession?: number; // live tokens one session may hold (default 16)
   readonly maxConcurrentHashes?: number; // unauthenticated scrypt work in flight (default 4)
   readonly scrypt?: ScryptParams;
+  /** The failed-login DELAY: how a wrong password makes the next one cost. Never a refusal. */
   readonly limit?: LimitPolicy;
   /** A monotonic millisecond source. Injectable so a rail can drive it; never Date.now(). */
   readonly monotonicNow?: () => number;
@@ -114,6 +114,11 @@ const CSP =
   "form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
 
 const MAX_BODY = 8 * 1024; // a login form is a few hundred bytes; nothing here needs more
+
+// The wait a failed-login delay costs. The timer subsystem serves it, and Node drives timers from a
+// MONOTONIC clock — so a wall clock stepped backwards mid-wait cannot shorten it, and a step forwards
+// cannot skip it.
+const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 const DEFAULTS = {
   idleMs: 30 * 60_000,
@@ -596,39 +601,34 @@ data doors on its own.</p>`,
       refuseLogin(res);
       return;
     }
-    // THE BUDGET COMES BEFORE THE LOCK FILE, and the order is the point: the lock check is a file read,
-    // so consulting it first would let a flood spend the box's disk before anything capped it. A refusal
-    // here is not a failed attempt, so it never fills the limiter either.
+    // THE WAIT COMES FIRST, BEFORE THE COMPARE, and the order is the whole design.
+    //
+    // A cost charged after the compare is no cost at all: the guess has already been evaluated, and a
+    // fast refusal beside a slow success tells the caller which they got just as plainly as the status
+    // would. So this is paid ahead of the hash budget, ahead of the credential read, ahead of any
+    // comparison.
+    //
+    // IT IS A WAIT, NEVER A REFUSAL. A correct password is admitted however many failures came before
+    // it, so nobody — including a stranger who knows the name — can shut the operator out of their own
+    // store by guessing at it. The cap on the wait is what keeps "slow" from becoming "shut".
+    //
+    // AND IT COMES BEFORE THE HASH BUDGET, not after. A waiting attempt holds no hash slot, so a flood
+    // against one name cannot make this door answer 503 to another name. Swapped, the denial this
+    // design removes would come straight back through the budget.
+    //
+    // The read is ADVISORY — `noteFailure` re-reads and re-decides for itself, because the read and the
+    // write there must stay one synchronous step. What that costs, named rather than hidden: attempts
+    // arriving together all read the same count, so they all pay the same wait, and a caller buys
+    // `maxConcurrentHashes` guesses per wait instead of one. Re-reading after the wait would close that
+    // and open something far worse — a caller who keeps failing could then extend an honest attempt
+    // without limit, which is the lockout again under a different name.
+    const owed = delayMs(options.home, user, Date.now(), limit);
+    if (owed > 0) await wait(owed);
+    // A refusal here is not a failed attempt, so it never fills the limiter either.
     if (hashesInFlight >= maxHashes) {
       json(res, 503, {
         errors: ["the login door is busy: too much unauthenticated work is already in flight"],
       });
-      return;
-    }
-    // The lock check reads the table, and `noteFailure` below reads it AGAIN. That is deliberate:
-    // carrying a snapshot across the hash and writing it back is a LOST UPDATE — two overlapping attempts
-    // each increment from the same value, and the effective limit becomes maxFailures times the
-    // concurrency. One extra read on the failure path is the price of a limit that means what it says.
-    // ONE refusal for both reasons a login can be rate-limited: this name is locked, or the table is
-    // too saturated to account for the attempt. Same bytes, so neither is an oracle for the other.
-    const tooManyAttempts = (remainsMs: number): void => {
-      res.writeHead(429, {
-        "content-type": "application/json",
-        "retry-after": String(Math.max(1, Math.ceil(remainsMs / 1000))),
-        "cache-control": "no-store",
-      });
-      res.end(JSON.stringify({ errors: ["too many failed attempts: this login is locked"] }));
-    };
-    const lockRemains = lockedMs(options.home, user, Date.now());
-    if (lockRemains > 0) {
-      tooManyAttempts(lockRemains);
-      return;
-    }
-    // BEFORE the hash, not after. A table saturated with live locks cannot count a failure against this
-    // name, and an attempt nobody can count must not be evaluated at all — refusing after the compare
-    // would leak the answer through 429-versus-200 and leave guessing unbounded.
-    if (saturatedFor(options.home, user, Date.now(), limit)) {
-      tooManyAttempts(limit.lockMs);
       return;
     }
     let credentials;
@@ -669,12 +669,8 @@ data doors on its own.</p>`,
       hashesInFlight -= 1;
     }
     if (!matched) {
-      // A table saturated with live locks cannot account for this attempt. Refusing with the lock's
-      // own answer is the only safe direction: counting it as a plain miss would be unlimited guessing.
-      if (!noteFailure(options.home, user, Date.now(), limit)) {
-        tooManyAttempts(limit.lockMs);
-        return;
-      }
+      // The count grows, so the NEXT attempt for this name costs more. This attempt already paid.
+      noteFailure(options.home, user, Date.now(), limit);
       refuseLogin(res);
       return;
     }
