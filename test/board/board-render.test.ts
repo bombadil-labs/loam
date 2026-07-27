@@ -10,10 +10,12 @@
 
 import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { signClaims } from "@bombadil/rhizomatic";
+import { makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { publicClaims } from "../../src/gateway/public.js";
 import { BOARD_ENTITY, BOARD_ROUTE } from "../../demos/board/vocabulary.mjs";
 import {
+  FABLE,
+  FABLE_SEED,
   MOUNT,
   OPERATOR,
   OP_SEED,
@@ -168,5 +170,94 @@ describe("(d) the public declaration serves the page; the door still refuses tok
       await closed.handle.close();
       await closed.gw.close();
     }
+  });
+});
+
+// H1 at the object level, through the PUBLIC door — the highest-stakes edge in §34. `Board.items`
+// is `{all}` over the `item` role expanded through the BoardItem reading; the parent's `select`
+// admits only deltas targeting board:main, so a struck BoardItem STATUS delta (which targets the
+// ITEM) is not in the parent operand set. Whether the strike binds depends on the substrate
+// `expand` re-resolving each child over the full negation-closed set. It does — and this rail
+// pins it, two-sided, so a future re-registration or renderer change that strands the strike goes
+// red rather than silently serving a retracted status to an anonymous LAN reader.
+describe("H1: a struck BoardItem vanishes from the singleton's items[] through the public door", () => {
+  // A signed status/membership pair for one item, so a test holds the delta ids it will strike.
+  const memberOf = (id: string, ts: number): Delta =>
+    signClaims(
+      {
+        timestamp: ts,
+        author: FABLE,
+        pointers: [
+          {
+            role: "subject",
+            target: { kind: "entity", entity: { id: BOARD_ENTITY, context: "items" } },
+          },
+          { role: "item", target: { kind: "entity", entity: { id, context: "listed" } } },
+        ],
+      },
+      FABLE_SEED,
+    );
+  const propOf = (id: string, prop: string, value: string, ts: number): Delta =>
+    signClaims(
+      {
+        timestamp: ts,
+        author: FABLE,
+        pointers: [
+          { role: "subject", target: { kind: "entity", entity: { id, context: prop } } },
+          { role: "value", target: { kind: "primitive", value } },
+        ],
+      },
+      FABLE_SEED,
+    );
+
+  // The items[] titles the ANONYMOUS door answers, and the status it carries for a named item.
+  const anonBoard = async (): Promise<Array<Record<string, unknown>>> => {
+    const res = await gql(
+      open.base,
+      `{ board(entity: ${JSON.stringify(BOARD_ENTITY)}) { items } }`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.json.errors).toBeUndefined();
+    return (res.json.data as { board: { items: Array<Record<string, unknown>> } }).board.items;
+  };
+
+  it("striking a STATUS delta drops that status; a live bystander's status survives", async () => {
+    const target = propOf("board:h1-target", "status", "building", 40_000);
+    await open.gw.append([
+      memberOf("board:h1-target", 40_001),
+      propOf("board:h1-target", "title", "H1 target", 40_002),
+      target,
+      memberOf("board:h1-bystander", 40_010),
+      propOf("board:h1-bystander", "title", "H1 bystander", 40_011),
+      propOf("board:h1-bystander", "status", "review", 40_012),
+    ]);
+    const before = await anonBoard();
+    expect(before.find((x) => x["title"] === "H1 target")?.["status"]).toBe("building");
+
+    await open.gw.append([signClaims(makeNegationClaims(FABLE, 40_100, target.id), FABLE_SEED)]);
+
+    const after = await anonBoard();
+    // Target: the struck status is GONE (absent, not merely reverted to an older value — there
+    // was no older status). Bystander: unmoved.
+    expect(after.find((x) => x["title"] === "H1 target")?.["status"]).toBeUndefined();
+    expect(after.find((x) => x["title"] === "H1 bystander")?.["status"]).toBe("review");
+    // And the item itself is still listed — a struck status is not a struck membership.
+    expect(after.some((x) => x["title"] === "H1 target")).toBe(true);
+  });
+
+  it("striking a MEMBERSHIP delta removes the item; the bystander stays listed", async () => {
+    const member = memberOf("board:h1-leaver", 41_000);
+    await open.gw.append([
+      member,
+      propOf("board:h1-leaver", "title", "H1 leaver", 41_001),
+      propOf("board:h1-leaver", "status", "building", 41_002),
+    ]);
+    expect((await anonBoard()).some((x) => x["title"] === "H1 leaver")).toBe(true);
+
+    await open.gw.append([signClaims(makeNegationClaims(FABLE, 41_100, member.id), FABLE_SEED)]);
+
+    const after = await anonBoard();
+    expect(after.some((x) => x["title"] === "H1 leaver")).toBe(false); // gone from the list
+    expect(after.some((x) => x["title"] === "H1 bystander")).toBe(true); // bystander survives
   });
 });

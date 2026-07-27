@@ -78,7 +78,12 @@ export const BOARD_REGISTRATION = {
     props: {
       banner: PICK,
       // Every filing survives, oldest first — the render order, and the reason a duplicate
-      // boardAdd is harmless noise rather than a lost item.
+      // boardAdd is harmless noise rather than a lost item. The dual is honest about the cost:
+      // because `all` collects EVERY membership delta (each boardAdd is a distinct delta, H4),
+      // genuinely removing an item means striking every membership delta that filed it — a
+      // single strike leaves a twice-added item listed through its other filing. v1 has no
+      // retract mutation; the operator strikes memberships directly (see the H1 rail in
+      // test/board/board-render.test.ts) until T110's listing door owns removal.
       items: { all: { order: { byTimestamp: "asc" } } },
     },
     default: PICK,

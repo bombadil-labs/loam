@@ -110,9 +110,11 @@ try {
   // whose law was improvised over the wire.
   for (const raw of [BOARD_ITEM_REGISTRATION, BOARD_REGISTRATION]) {
     const input = parseRegistrationInput(raw);
-    const held = gw.registered.find(
-      (r) => (r.lensName ?? r.hyperschema.name) === input.hyperschema.name,
-    );
+    // Match on the PROGRAM name both sides (H6): publishRegistration files at the hyperschema
+    // entity (`hyperschema:<Name>`), so "is this already bound" is a program-name question. Using
+    // the LENS name (`r.lensName ?? r.hyperschema.name`) would fork the law against a coexisting
+    // sibling reading — the §21.7 world — binding a second program under the same entity.
+    const held = gw.registered.find((r) => r.hyperschema.name === input.hyperschema.name);
     if (held !== undefined && lawPrint(held) === lawPrint(input)) {
       say(`  law       ${input.hyperschema.name} already bound — kept`);
       continue;
