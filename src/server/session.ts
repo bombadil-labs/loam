@@ -852,10 +852,12 @@ data doors on its own.</p>`,
         : { kind: "not-operator", ...carried };
     },
     loginPrompt(req) {
-      // The same stateless pre-session GET /login hands out — no table grows, so a connector pointing a
-      // flood at the consent page cannot fill the seat a real login needs.
-      const nonce = sessionIdFrom(req) ?? opaque();
-      return { body: loginPage(preSessionToken(nonce)), cookie: setCookie(nonce) };
+      // Byte for byte what `GET /login` hands an anonymous visitor: the stateless pre-session, in its
+      // OWN cookie. Reading or writing the SESSION cookie here would be the bug PRESESSION_COOKIE
+      // exists to prevent — any page on the internet could point a browser at the consent URL and
+      // overwrite the operator's live session id with a nonce.
+      const nonce = preSessionIdFrom(req) ?? opaque();
+      return { body: loginPage(preSessionToken(nonce)), cookie: setPreCookie(nonce) };
     },
     fromThisPage,
   };
