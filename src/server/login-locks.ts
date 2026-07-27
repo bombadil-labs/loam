@@ -24,7 +24,20 @@
 // Deliberate posture on damage: a file this module cannot parse reads as NO RECORDS, and a file with
 // SOME damaged records reads as the records it could parse. That is fail-open, and it is the right
 // direction here — this file is a work budget, not an authorization surface, and failing closed would
-// turn a local disk fault into a slow login for everyone with nothing to clear.
+// hand a local disk fault the power to refuse a correct password.
+//
+// WHAT FAILING OPEN ACTUALLY COSTS, since "fail-open" is easy to read as "degrades a little". It splits
+// by which operation fails, and the read case is the total one:
+//
+//   - THE FILE CANNOT BE READ — a directory at the path, mode 0000, damaged bytes. No row is readable,
+//     so every name waits zero and the budget is GONE for everyone until an operator repairs it.
+//   - THE FILE READS BUT CANNOT BE WRITTEN. A name with no row waits zero. A name WITH a row keeps
+//     paying its accumulated wait, and that wait can no longer be grown or cleared — not by a correct
+//     password and not by `loam user unlock`, because both need the same write. It retires only when
+//     `forgetMs` of silence makes the row spent on read.
+//
+// Neither case refuses a login, which is the promise that matters. Both are an operator's disk to fix,
+// and `loam user unlock` names the fault it can see rather than reporting an empty table as tidy.
 //
 // THE NO-AWAIT DISCIPLINE IN `noteFailure` SETTLES ONE PROCESS, NOT TWO. Every write replaces the
 // file whole through a rename, so two servers over one home are last-writer-wins and each silently
@@ -53,8 +66,7 @@ export interface LimitPolicy {
   readonly baseDelayMs: number; // what the FIRST failure buys the next attempt
   readonly maxDelayMs: number; // the ceiling: no attempt ever waits longer than this
   readonly forgetMs: number; // silence this long and the count starts over
-  // Live records the file will hold, for any value of 1 or more — see noteFailure. At 0 it holds ONE:
-  // the table is emptied and then this attempt's row is seated, so the floor is a row rather than none.
+  // Live records the file will hold — see noteFailure. Below 1 nothing is tracked at all.
   readonly maxTracked: number;
 }
 
@@ -131,6 +143,62 @@ export function readLocks(home: string): Map<string, FailureRecord> {
 }
 
 /**
+ * Why this home's record file yielded nothing, in one sentence for an operator — or undefined when
+ * there is nothing to report.
+ *
+ * IT EXISTS FOR `loam user unlock`, which is the only reader that owes an explanation. The door's own
+ * path must stay silent and cheap: it fails open by design, and a diagnostic per unauthenticated
+ * attempt is a log a stranger can fill. So this is a SECOND read, paid only when a human asks.
+ *
+ * An absent file is not a fault — a home where nobody has failed a login yet holds no record file at
+ * all. A file that is present and yields no records is: either it cannot be read, or its bytes are not
+ * a record table, and both mean the door is charging nobody.
+ */
+export function unreadableRecordFile(home: string): string | undefined {
+  const path = locksPath(home);
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code === "ENOENT") return undefined; // no file, no failures recorded yet, nothing to explain
+    return (
+      `${path} exists and cannot be read: ${err instanceof Error ? err.message : String(err)}. ` +
+      `The login door reads it the same way, so it is charging no name any delay. Repair or remove it.`
+    );
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    const users =
+      parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)["users"]
+        : undefined;
+    if (users === null || typeof users !== "object" || Array.isArray(users)) {
+      return (
+        `${path} holds no \`users\` table, so nothing in it is a login record. The login door reads ` +
+        `it the same way, so it is charging no name any delay. Repair or remove it.`
+      );
+    }
+    // ENTRIES THAT ALL FAIL `isRecord` are damage; an EMPTY table is not; and a table where SOME parse
+    // is not a fault this function reports — `readLocks` returns those, so the door is charging them,
+    // and a name simply missing from a healthy file is an answer rather than an error.
+    const entries = Object.entries(users as Record<string, unknown>);
+    const valid = entries.filter(([, record]) => isRecord(record)).length;
+    if (entries.length === 0 || valid > 0) return undefined;
+    return (
+      `${path} holds ${entries.length} entr${entries.length === 1 ? "y" : "ies"} that are not login ` +
+      `records. The login door reads it the same way, so it is charging no name any delay. Repair or ` +
+      `remove it.`
+    );
+  } catch {
+    return (
+      `${path} is not JSON this command can parse. The login door reads it the same way, so it is ` +
+      `charging no name any delay. Repair or remove it.`
+    );
+  }
+}
+
+/**
  * Replace the file whole: 0600 temp, rename, chmod.
  *
  * NO FSYNC, and that is the one place this differs from credentials.json. A failed attempt rewrites this
@@ -154,12 +222,16 @@ export function writeLocks(home: string, locks: Map<string, FailureRecord>): voi
     closeSync(fd);
   }
   try {
+    // MODE BEFORE THE RENAME, never after. The rename replaces the target's inode with this temp's, so
+    // chmod-ing the temp is equivalent — and it keeps every throw on the side where NOTHING landed. A
+    // chmod that failed after a successful rename would report a failure over a write that succeeded,
+    // and `loam user unlock` turns a thrown write into "nothing was cleared".
+    chmodSync(temp, 0o600);
     renameSync(temp, target);
   } catch (err) {
     rmSync(temp, { force: true });
     throw err;
   }
-  chmodSync(target, 0o600);
 }
 
 /**
@@ -243,13 +315,18 @@ export const delayMs = (home: string, name: string, now: number, policy: LimitPo
  * (H8) — or per-name counters that collide, which would slow innocent names and break criterion (o3).
  * Both are their own ticket.
  *
- * WHAT THE SQUAT COSTS TO SUSTAIN, since the cheapest attack is the one worth quoting: one flush per
- * guess, PLUS a refresh of every squatted row inside each `forgetMs` window, because `spent` prunes a
- * row nobody has touched. At the shipped policy that is `maxTracked − 1` = 511 refreshes per 15
- * minutes. Cheap, and not free — and it means the squat DECAYS: stop refreshing and the target starts
- * being charged again after one window. The narrow form's setup also scales with the TARGET's standing
- * count rather than being a flat 2×: a target already at five failures needs the junk rows above five,
- * and junk at two does not flush it at all.
+ * WHAT EACH SHAPE COSTS TO SUSTAIN, per shape, because the two do not price the same:
+ *
+ *   - WIDE: `maxTracked` requests per guess, and nothing else. The flood IS the refresh, since every
+ *     row it writes is new. At the shipped policy that is 512 requests per guess.
+ *   - NARROW: one request per guess, plus a refresh of every squatted row inside each `forgetMs`
+ *     window — 511 per 15 minutes at the shipped policy — because `spent` prunes a row nobody touched.
+ *     Its setup also scales with the TARGET's standing count rather than being a flat 2×: a target at
+ *     five failures needs the junk rows above five, and junk at two does not flush it at all.
+ *
+ * EITHER WAY THE SQUAT DECAYS. Stop, and one `forgetMs` prunes the junk; the target is charged again
+ * from its next failure. Measured: 0, 0, 0 while squatted, then 0, 200, 400, 800, 1600 after one idle
+ * window. So this is a cost an attacker pays continuously, not a state they reach and keep.
  *
  * What an eviction takes when the table is NOT squatted is about one attempt, because a wait rebuilds
  * on the very next failure. And the cost it imposes is not F rounds of waiting: waits do not serialize
@@ -262,13 +339,16 @@ export function noteFailure(home: string, name: string, now: number, policy: Lim
   for (const [held, record] of locks) {
     if (held !== name && spent(record, now, policy)) locks.delete(held);
   }
+  // BELOW ONE, THE BOUND MEANS NOTHING IS TRACKED. Seating a row anyway would make "no more than
+  // `maxTracked` rows" false at exactly one value, and a bound documented as breaking at its own floor
+  // is not a bound. This is an operator-supplied number, so the door is not the place to argue with it.
+  if (policy.maxTracked < 1) {
+    if (locks.size > 0) writeLocks(home, new Map());
+    return;
+  }
   if (previous === undefined && locks.size >= policy.maxTracked) {
     // Weakest first, and ENOUGH OF THEM that one new row still fits: a policy narrowed since the last
     // write can leave the table over its own bound, and evicting a single row would never catch up.
-    //
-    // `maxTracked: 0` is the one off-by-one here: the table empties and then this attempt's row is
-    // seated, so the file ends with one row rather than none. No shipped policy uses 0, and the excess
-    // is one row, so it is named rather than branched on.
     const weakest = [...locks].sort(
       ([, a], [, b]) => a.failures - b.failures || a.lastFailureAt - b.lastFailureAt,
     );

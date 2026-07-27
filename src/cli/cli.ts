@@ -30,7 +30,7 @@ import {
   writeCredentials,
   type ScryptParams,
 } from "../server/credentials.js";
-import { clearAllRecords, clearRecord } from "../server/login-locks.js";
+import { clearAllRecords, clearRecord, unreadableRecordFile } from "../server/login-locks.js";
 import {
   resolveUserView,
   roleClaims,
@@ -1128,6 +1128,15 @@ function cmdUserUnlockAll(home: string, io: IO): number {
     );
     return 1;
   }
+  // AN UNREADABLE FILE IS NOT AN EMPTY ONE, and this is the only command that looks at it. Reporting
+  // "no login records" over a directory or a damaged file would be true about what was read and silent
+  // about the reason — and the reason matters more than the count here, because a file the door cannot
+  // read means no name is being charged at all.
+  const unreadable = unreadableRecordFile(home);
+  if (cleared === 0 && unreadable !== undefined) {
+    io.err(`user unlock --all: ${unreadable}`);
+    return 1;
+  }
   io.out(
     cleared === 0
       ? `loam: ${home} holds no login records\n  nothing to clear`
@@ -1167,6 +1176,14 @@ function cmdUserUnlock(name: string, home: string, io: IO): number {
         `  the next attempt for ${name} waits for nothing`,
     );
     return 0;
+  }
+  // No record was found — but "not found" and "could not be read" are different answers, and only one
+  // of them means the door is charging nobody. Said before the credential file is consulted, because
+  // this fault is about the file this command owns.
+  const unreadable = unreadableRecordFile(home);
+  if (unreadable !== undefined) {
+    io.err(`user unlock: ${unreadable}`);
+    return 1;
   }
   let existing;
   try {

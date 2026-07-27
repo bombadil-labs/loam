@@ -38,11 +38,14 @@ to a cap, and the door always admits a correct password. Criteria (o) and (p) be
    The boundary is exact: at `maxTracked − 1` fresh names per round the tie-break holds and the target
    is charged 0, 200, 400, 800, 1600ms. At `maxTracked` it is charged nothing.
 
-   **What it costs to sustain**, because the cheapest attack is the one to quote: one flush per guess,
-   plus a refresh of every squatted row inside each `forgetMs` window — 511 refreshes per 15 minutes at
-   the shipped policy, since an untouched row is pruned. So the squat DECAYS: stop refreshing and the
-   target is charged again after one window. The first shape's setup also scales with the target's
-   standing count rather than being flat; junk rows at two failures do not flush a target at five.
+   **What each shape costs to sustain.** The wide shape costs `maxTracked` requests per guess — 512 at
+   the shipped policy — and nothing else, because every row it writes is new. The narrow shape costs one
+   request per guess plus 511 refreshes per 15 minutes, since an untouched row is pruned; and its setup
+   scales with the target's standing count, so junk rows at two failures do not flush a target at five.
+
+   **Either way the squat DECAYS.** Stop, and one `forgetMs` prunes the junk and the target is charged
+   again. Measured: 0, 0, 0 while squatted, then 0, 200, 400, 800, 1600 after one idle window. This is a
+   cost an attacker pays continuously, not a state they reach and keep.
 
    So the delay taxes a serial guesser against an UNSQUATTED table, and a caller willing to sustain a
    squat can guess one chosen name at the concurrent-hash cap's rate — which is where the pre-T116 lock
@@ -194,9 +197,13 @@ may do.
   first, so a newly seated row survives to accumulate — `test/server/login-limit.test.ts`
 - (o7) BOTH writes to the record file fail open: a home the door cannot write leaves a failed attempt
   answering 401 rather than 503, and still admits a correct password, reporting the fault to the
-  operator's channel instead of the caller. It does NOT keep the limiter working: a count already on
-  disk can no longer grow OR be cleared, so that name pays the cap until `forgetMs` of silence —
-  `test/server/login-limit.test.ts`
+  operator's channel instead of the caller. It does NOT keep the limiter working — a count already on
+  disk still charges its own accumulated wait, up to the cap, and can no longer grow OR be cleared, so
+  it stands until `forgetMs` of silence; and a record file that cannot be READ charges every name
+  nothing — `test/server/login-limit.test.ts`
+- (o8) `loam user unlock` distinguishes a record file that is ABSENT from one it cannot read: the first
+  reports an empty table and exits 0, the second names the fault, says the door is charging nobody, and
+  exits non-zero — `test/server/login-limit.test.ts`
 - (p) `loam user unlock <name>` clears that name's accumulated wait from the box, `--all` clears every
   record whatever name it holds, and the report names the COUNT rather than a wait the CLI's process
   cannot know — `test/server/login-limit.test.ts`

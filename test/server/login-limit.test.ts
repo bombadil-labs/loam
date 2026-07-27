@@ -30,14 +30,19 @@
 //     the wait a SERIAL attempt pays; read none of them as attempts per second.
 //  3. Two servers over one home. Every write replaces the file whole, so they are last-writer-wins
 //     on the count. One home, one server is the supported posture.
-//  4. WHAT THE LIMITER DOES WHEN ITS FILE CANNOT BE WRITTEN, beyond the answer not moving. The two
-//     fail-open rails prove 401 stays 401 and a correct password is still admitted. They do not
-//     characterise the state, and it is not "the limiter stops limiting" — the file is still READ, so
-//     a name with no row waits zero while a name WITH a row keeps paying it and can no longer have it
-//     grown OR cleared. A correct password does not clear it; `loam user unlock` cannot either. Both
-//     need the same write. Measured at 5000ms still charged after both cures. It retires only after
-//     `forgetMs` of silence. Slow, never shut, and the cure is the disk. Only ONE of the two rails
-//     runs on Windows: the clearing half needs a POSIX mode to build its fixture.
+//  4. WHAT THE LIMITER DOES WHEN ITS FILE IS BROKEN, beyond the answer not moving. The fail-open rails
+//     prove 401 stays 401 and a correct password is still admitted; they do not characterise the state,
+//     and the state SPLITS by which operation fails:
+//       - the file cannot be READ (a directory at the path, mode 0000, damaged bytes): no row is
+//         readable, so every name waits zero and the budget is gone for everyone, for as long as it
+//         lasts. That is the first (o7) rail's own fixture.
+//       - the file reads but the home cannot be WRITTEN: a name with no row waits zero, while a name
+//         WITH a row keeps paying its accumulated wait — up to the cap, not automatically the cap — and
+//         that wait can no longer be grown OR cleared. A correct password does not clear it and
+//         `loam user unlock` cannot either; both need the same write. It retires only after `forgetMs`
+//         of silence. That is the second (o7) rail's fixture.
+//     Slow or unbudgeted, never shut, and the cure is the disk. Only ONE of the two rails runs on
+//     Windows: the write half needs a POSIX mode to build its fixture.
 //  5. TIME, in the byte-identical refusal rail below. It compares status and body only, and says so
 //     again at its own call site.
 //  6. THAT A TARGETED NAME IS CHARGED AT ALL WHEN THE TABLE IS SQUATTED. A row is seated at one
@@ -242,12 +247,22 @@ describe("the failed-login delay", () => {
       //
       // The fixture needs the file READABLE and the directory UNWRITABLE, which a mode is the only way
       // to get: a record has to survive the read for the clearing write to be attempted at all.
+      //
+      // The policy CHARGES a visible wait, so the rail can pin what the frozen record costs. Four
+      // failures at 200ms doubling is 1600ms — its own accumulated wait, which is what the criterion
+      // claims, and not automatically the cap.
+      const stepped: LimitPolicy = {
+        baseDelayMs: 200,
+        maxDelayMs: 6400,
+        forgetMs: 600_000,
+        maxTracked: 64,
+      };
       writeFileSync(
         locksPath(home),
         JSON.stringify({ users: { myk: { failures: 4, lastFailureAt: Date.now() } } }),
       );
       const faults: string[] = [];
-      served = await serveHome(home, { limit: COUNTING, onFault: (m) => faults.push(m) });
+      served = await serveHome(home, { limit: stepped, onFault: (m) => faults.push(m) });
       expect(readLocks(home).get("myk")?.failures).toBe(4); // the record really is there to be cleared
       chmodSync(home, 0o500);
       try {
@@ -259,12 +274,20 @@ describe("the failed-login delay", () => {
           rmSync(probe, { force: true });
         }, "this home is still writable, so the clearing write cannot fail: run as a non-root user").toThrow();
 
-        const opened = await tryPassword("myk", PASSWORD);
+        const { ms, res: opened } = await timed(tryPassword("myk", PASSWORD));
         expect(opened.status).toBe(200);
         expect(cookieFrom(opened)).toBeDefined();
         expect(faults.join("\n")).toMatch(/login-locks\.json/);
+        // THE FROZEN RECORD STILL CHARGES ITS OWN WAIT, and this is what criterion (o7) claims: four
+        // failures at 200ms doubling is 1600ms, not the 6400ms cap. Without this the criterion names a
+        // behaviour no rail measures.
+        expect(ms).toBeGreaterThanOrEqual(1500);
+        expect(ms).toBeLessThan(5000); // its accumulated wait, and not the cap
         // the count survived, because clearing it is a courtesy rather than a step
         expect(readLocks(home).get("myk")?.failures).toBe(4);
+        // and a SECOND login pays it again — the successful one could not clear it
+        const { ms: again } = await timed(tryPassword("myk", PASSWORD));
+        expect(again).toBeGreaterThanOrEqual(1500);
       } finally {
         chmodSync(home, 0o700); // or afterEach cannot remove its own temp home
       }
@@ -774,6 +797,58 @@ describe("the failed-login delay", () => {
       }
     },
   );
+
+  it("(o8) unlock tells an ABSENT record file apart from one it cannot read", async () => {
+    // An unreadable file and an empty one read the same way to the door — no records — but they mean
+    // opposite things to an operator. Absent is the ordinary state of a home where nobody has failed a
+    // login. Unreadable means the door is charging NOBODY, and this is the only command that looks at
+    // the file, so silence here is the fault going unreported anywhere.
+    served = await serveHome(home, { limit: COUNTING });
+
+    // ABSENT: no file at all, so nothing to explain. Exit 0, and no fault named.
+    expect(readLocks(home).size).toBe(0);
+    const absent = testIo();
+    expect(await run(["user", "unlock", "--all", "--home", home], absent.io)).toBe(0);
+    expect(absent.out.join("\n")).toMatch(/no login records/);
+    expect(absent.err.join("\n")).toBe("");
+
+    // UNREADABLE: a directory where the file belongs. Same empty read, opposite report.
+    mkdirSync(locksPath(home));
+    const broken = testIo();
+    expect(await run(["user", "unlock", "--all", "--home", home], broken.io)).toBe(1);
+    expect(broken.err.join("\n")).toMatch(/login-locks\.json/);
+    expect(broken.err.join("\n")).toMatch(/charging no name any delay/);
+    expect(broken.out.join("\n")).not.toMatch(/nothing to clear/);
+
+    // and the per-name path says it too, rather than "already waits for nothing"
+    const named = testIo();
+    expect(await run(["user", "unlock", "myk", "--home", home], named.io)).toBe(1);
+    expect(named.err.join("\n")).toMatch(/charging no name any delay/);
+    expect(named.out.join("\n")).not.toMatch(/waits for nothing/);
+  });
+
+  it("(o8) DAMAGED BYTES report the same way an unreadable file does", async () => {
+    // The other shape of the same fault, and the one an operator is likelier to cause: the file is
+    // readable and its contents are not a record table. Both leave the door charging nobody.
+    served = await serveHome(home, { limit: COUNTING });
+    writeFileSync(locksPath(home), "this is not json at all");
+    const io = testIo();
+    expect(await run(["user", "unlock", "--all", "--home", home], io.io)).toBe(1);
+    expect(io.err.join("\n")).toMatch(/not JSON/);
+
+    // and a `users` table whose entries are not records: read as none, reported as damage
+    writeFileSync(locksPath(home), JSON.stringify({ users: { myk: "locked forever" } }));
+    expect(readLocks(home).size).toBe(0);
+    const entries = testIo();
+    expect(await run(["user", "unlock", "--all", "--home", home], entries.io)).toBe(1);
+    expect(entries.err.join("\n")).toMatch(/are not login records/);
+
+    // TWO-SIDED: a legitimately EMPTY users table is not damage, and must not be reported as any
+    writeFileSync(locksPath(home), JSON.stringify({ users: {} }));
+    const empty = testIo();
+    expect(await run(["user", "unlock", "--all", "--home", home], empty.io)).toBe(0);
+    expect(empty.err.join("\n")).toBe("");
+  });
 
   it("(p) unlock reports the COUNT it cleared, never a wait it cannot know", async () => {
     // The command runs in a different process from the door and was never told the door's policy. A
