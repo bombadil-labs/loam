@@ -25,8 +25,10 @@ vi.setConfig({ testTimeout: 15000 });
 
 const BUNDLE = readFileSync(new URL("../../demos/board/renderer.mjs", import.meta.url), "utf8");
 
+// The trailing space pins the per-paragraph trim; the four-newline gap pins the "2 or more"
+// split (a `\n{2}` split would mint an empty paragraph).
 const BRIEF =
-  "The question: does the door refuse in one shape or two?\n\n" +
+  "The question: does the door refuse in one shape or two? \n\n\n\n" +
   "Recommendation: keep two shapes. Each shape protects one boundary.";
 
 let world: BoardWorld;
@@ -93,7 +95,10 @@ describe("the brief resolves through the doors (delta/door level)", () => {
     const items = (res.json.data as { board: { items: Array<Record<string, unknown>> } }).board
       .items;
     expect(items.find((x) => x["title"] === "the briefed item")?.["brief"]).toBe(BRIEF);
-    expect(items.find((x) => x["title"] === "the terse item")?.["brief"]).toBeUndefined();
+    // The negative establishes its own subject: an absent item would also answer no brief.
+    const terse = items.find((x) => x["title"] === "the terse item");
+    expect(terse).toBeDefined();
+    expect(terse?.["brief"]).toBeUndefined();
   });
 });
 
@@ -106,7 +111,11 @@ describe("the page renders the brief as an expandable block (object level)", () 
     expect(briefed).toContain(
       "<p>Recommendation: keep two shapes. Each shape protects one boundary.</p>",
     );
-    expect(card(html, "the terse item")).not.toContain("<details");
+    expect(briefed).not.toContain("<p></p>");
+    // The negative establishes its own subject: an unrendered card would also hold no <details>.
+    const terse = card(html, "the terse item");
+    expect(terse).toContain("note · waiting-myk");
+    expect(terse).not.toContain("<details");
   });
 
   it("markup in a brief arrives escaped, byte for byte", async () => {
