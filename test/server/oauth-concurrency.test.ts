@@ -287,8 +287,9 @@ describe("(s) the cross-process lock", () => {
     // two of them on one thread cannot interleave. `Promise.all` over them ran the first to completion
     // before the second started, and its assertions held whether or not anything locked at all.
     //
-    // The child is BUNDLED with esbuild: this repo has no runtime TypeScript hook, esbuild is already a
-    // dependency, and the output runs on plain node.
+    // The child is BUNDLED with esbuild: nothing among this repo's dependencies is a TypeScript loader a
+    // spawned `node` could use — vitest transforms in its own process and cannot lend that to a child —
+    // esbuild is already a dependency, and the output runs on plain node.
     const entry = fileURLToPath(new URL("./oauth-lock-child.mts", import.meta.url));
     const bundle = join(home, "lock-child.mjs");
     await esbuild.build({
@@ -468,9 +469,9 @@ describe("a lock the door cannot take", () => {
   // other local fault in §37 makes.
   //
   // WHICH CLASS THESE RAILS REACH: `OAuthFileBusy` only. Pre-creating the lock is the one way a real
-  // filesystem produces a contended claim, and every rail below induces it that way. The unsupported
-  // -filesystem class needs `linkSync` to fail some other way, which no filesystem state can arrange —
-  // `oauth-lock-unsupported.test.ts` mocks it in its own file and asserts the door's answer there.
+  // filesystem produces a contended claim, and every rail below induces it that way. Reaching the other
+  // class needs `linkSync` to fail some way no filesystem state can arrange, so
+  // `oauth-lock-unsupported.test.ts` mocks it in its own file and asserts the doors' answers there.
 
   it("(u) tells the caller nothing about the home, and tells the operator everything", async () => {
     // Induced by holding the lock from outside: the door waits its budget, gives up with
