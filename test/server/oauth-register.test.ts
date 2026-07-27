@@ -293,29 +293,66 @@ describe("POST /oauth/register", () => {
       }
       expect(parked).toBe(true);
 
-      // 2. A registration, CONFIRMED queued: its request cannot answer while the chain is parked.
-      const marker = Symbol("pending");
-      const flood = register(served.base, { name: "flood" });
-      const settled = await Promise.race([
-        flood,
-        new Promise((r) => setTimeout(() => r(marker), 250)),
-      ]);
-      expect(settled).toBe(marker);
+      let decoyOut: Awaited<typeof decoyRedeem> | undefined;
+      let floodOut: Awaited<ReturnType<typeof register>> | undefined;
+      let victimOut: Awaited<ReturnType<typeof redeem>> | undefined;
+      let flood: ReturnType<typeof register> | undefined;
+      let victimRedeem: ReturnType<typeof redeem> | undefined;
+      try {
+        // 2. A registration, CONFIRMED queued: its request cannot answer while the chain is parked.
+        const marker = Symbol("pending");
+        flood = register(served.base, { name: "flood" });
+        const settled = await Promise.race([
+          flood,
+          new Promise((r) => setTimeout(() => r(marker), 250)),
+        ]);
+        expect(settled).toBe(marker);
 
-      // 3. The victim redeems. The burn is synchronous on arrival; its mint enqueues behind the flood.
-      const victimRedeem = redeem(served.base, {
-        grant_type: "authorization_code",
-        code: victimCode.code,
-        redirect_uri: CLAUDE_REDIRECT,
-        client_id: victim.clientId,
-        code_verifier: victimCode.verifier,
-      });
-      await new Promise((r) => setTimeout(r, 300));
+        // 3. The victim redeems. The burn is synchronous on arrival; its mint enqueues behind the flood.
+        victimRedeem = redeem(served.base, {
+          grant_type: "authorization_code",
+          code: victimCode.code,
+          redirect_uri: CLAUDE_REDIRECT,
+          client_id: victim.clientId,
+          code_verifier: victimCode.verifier,
+        });
 
-      // 4. Drain. The flood runs while the victim holds neither a code nor a grant.
-      release!();
-      const [decoyOut, floodOut, victimOut] = await Promise.all([decoyRedeem, flood, victimRedeem]);
+        // CONFIRM THE BURN rather than sleeping and hoping. A second redemption of the same code is
+        // refused with a message only a SPENT code produces, and that path returns before it touches the
+        // queue — so the probe is inert once the burn has happened. If the burn has NOT happened, the
+        // probe spends the code itself and fails at PKCE, which turns this rail RED at step 4 rather than
+        // letting it pass having proved nothing. A silent false pass was the shape to avoid.
+        const burnedFrom = Date.now();
+        let burned = false;
+        while (!burned && Date.now() - burnedFrom < 20_000) {
+          const probe = await redeem(served.base, {
+            grant_type: "authorization_code",
+            code: victimCode.code,
+            redirect_uri: CLAUDE_REDIRECT,
+            client_id: victim.clientId,
+            code_verifier: "not-the-verifier-this-code-was-minted-against",
+          });
+          const why = probe.body["error_description"];
+          burned = typeof why === "string" && /not one this store is holding/.test(why);
+          if (!burned) await new Promise((r) => setTimeout(r, 5));
+        }
+        expect(burned).toBe(true);
 
+        // 4. Drain. The flood runs while the victim holds neither a code nor a grant.
+        release!();
+        [decoyOut, floodOut, victimOut] = await Promise.all([decoyRedeem, flood, victimRedeem]);
+      } finally {
+        // A failure above must not leave the append parked: the chain would stay wedged and `afterEach`
+        // would close against an in-flight write, turning one assertion into a timeout charged to a
+        // later test.
+        release!();
+        await Promise.allSettled([decoyRedeem, flood, victimRedeem]);
+      }
+
+      // Narrowed rather than merely asserted, so the reads below need no non-null operators.
+      if (decoyOut === undefined || floodOut === undefined || victimOut === undefined) {
+        throw new Error("the flow did not complete, so there is nothing to assert about it");
+      }
       expect(decoyOut.res.status).toBe(200);
       expect(floodOut.status).toBe(201);
       // THE ASSERTION. Without the redeeming pin the flood evicts the victim and this is a 400.

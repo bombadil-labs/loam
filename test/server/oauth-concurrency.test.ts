@@ -282,13 +282,16 @@ describe("(s) the cross-process lock", () => {
   });
 
   it("(v) TWO PROCESSES contending both land their write", async () => {
-    // THE ONLY HONEST TEST OF A CROSS-PROCESS LOCK, and the reason the in-process version of this rail
-    // was deleted: `withOAuthFile`'s callback is synchronous by design and `cmdGrant` is synchronous
-    // throughout, so two of them on one thread cannot interleave. `Promise.all` over them runs the first
-    // to completion before the second starts, and the assertions then hold whether or not anything
-    // The in-process rails above cover the primitive; this one contends for real, which is the only
-    // honest test of a cross-process lock — everything synchronous on one thread passes whether or not
-    // anything locks.
+    // A REAL PROCESS BOUNDARY, and the reason the in-process version of this rail was deleted:
+    // `withOAuthFile`'s callback is synchronous by design and `cmdGrant` is synchronous throughout, so
+    // two of them on one thread cannot interleave. `Promise.all` over them ran the first to completion
+    // before the second started, and its assertions held whether or not anything locked at all.
+    //
+    // The child is BUNDLED with esbuild rather than run through a TypeScript loader: this repo has no
+    // runtime TS hook, esbuild is already a dependency, and the bundle runs on plain node. Its
+    // dependencies are bundled in rather than left external, because the output lives in the temp home
+    // and node resolves a bare import relative to the importing file — which from there finds no
+    // node_modules at all.
     const entry = fileURLToPath(new URL("./oauth-lock-child.mts", import.meta.url));
     const bundle = join(home, "lock-child.mjs");
     await esbuild.build({
@@ -350,41 +353,51 @@ describe("(s) the cross-process lock", () => {
     expect(held).toBe(true);
 
     // The parent's write, issued while the child holds the lock. It must WAIT, not overwrite.
-    withOAuthFile<undefined>(home, (file) => ({
-      next: {
-        ...file,
-        clients: [
-          ...file.clients,
-          {
-            clientId: "parent-one",
-            clientName: "parent-one",
-            redirectUris: ["https://claude.ai/parent"],
-            registeredAt: Date.now(),
-            generation: 1,
-          },
-        ],
-      },
-      result: undefined,
-    }));
-    // NO TIMING FLOOR IS ASSERTED HERE, and that is a correction rather than a gap.
     //
-    // The tempting assertion is "the acquire took at least one poll interval, so it really waited". It is
-    // unsound: the lock is observed on the event loop and claimed after it, and a stall spanning the
-    // child's whole hold leaves the child released before the parent's first claim — which then succeeds
-    // with no pause, in about a millisecond, through no fault of the lock. Load does NOT only make the
-    // wait longer; past the hold it makes it vanish.
+    // NO TIMING FLOOR, and that is a correction rather than a gap: "the acquire took at least one poll
+    // interval" is unsound, because the lock is observed on the event loop and claimed after it, so a
+    // stall spanning the child's whole hold leaves the child released before the parent's first claim —
+    // which then succeeds with no pause at all, through no fault of the lock.
     //
-    // What discriminates is the property itself, asserted below: both writes survive. With mutual
-    // exclusion removed the parent reads a pre-child snapshot and its write drops the child's row, so
-    // `toContain("child-one")` fails — measured, not assumed.
+    // WHAT REPLACES IT IS AN OBSERVATION FROM INSIDE THE CALLBACK, and it needs no clock at all.
+    //
+    // Serialization means the LATER writer reads the earlier one's finished work. The child claims,
+    // reads, busy-waits, and writes last, releasing only after that — so a parent that genuinely waited
+    // must find `child-one` already in the file. A parent that did NOT wait reads a snapshot from before
+    // the child's write, and then its own write drops that row.
+    //
+    // So this assertion and the two below fail in opposite directions on the same defect, which is what
+    // makes the pair honest: with exclusion removed, this one sees no child row AND `toContain` loses it.
+    let sawChildAlready = false;
+    withOAuthFile<undefined>(home, (file) => {
+      sawChildAlready = file.clients.some((c) => c.clientId === "child-one");
+      return {
+        next: {
+          ...file,
+          clients: [
+            ...file.clients,
+            {
+              clientId: "parent-one",
+              clientName: "parent-one",
+              redirectUris: ["https://claude.ai/parent"],
+              registeredAt: Date.now(),
+              generation: 1,
+            },
+          ],
+        },
+        result: undefined,
+      };
+    });
     await spawned;
 
-    // BOTH writes survived. Without the lock the second writer spreads a snapshot taken before the
-    // first, and exactly one of these two is missing.
+    // THE PARENT REALLY WAITED: its callback read a file the child had already finished writing.
+    expect(sawChildAlready).toBe(true);
+    // And BOTH writes survived. Without the lock the parent spreads a snapshot taken before the child's
+    // write, and `child-one` is the row that disappears.
     const ids = readOAuthFile(home).clients.map((c) => c.clientId);
     expect(ids).toContain("child-one");
     expect(ids).toContain("parent-one");
-    // And the lock is released rather than left behind by either.
+    // The lock is released rather than left behind by either.
     expect(existsSync(oauthLockPath(home))).toBe(false);
   });
 
@@ -443,6 +456,87 @@ describe("(s) the cross-process lock", () => {
     expect(readOAuthFile(home)).toEqual(before);
     expect(readFileSync(oauthLockPath(home), "utf8")).toBe("someone-else\n");
     rmSync(oauthLockPath(home), { force: true });
+  });
+});
+
+describe("a lock the door cannot take", () => {
+  // TWO CLASSES, ONE ANSWER TO A CALLER. `OAuthFileBusy` (someone holds it, or a stale break took it)
+  // and `OAuthFileUnlockable` (this home's filesystem has no hard links) both mean "the lock could not
+  // be taken". Their messages name the lock's ABSOLUTE PATH, and the unlockable one also names a serve
+  // flag — and both of these doors are unauthenticated and answer with `access-control-allow-origin: *`.
+  // So the caller gets a fixed string and the operator gets the detail, which is the same split every
+  // other local fault in §37 makes.
+
+  it("(u) tells the caller nothing about the home, and tells the operator everything", async () => {
+    // Induced by holding the lock from outside: the door waits its budget, gives up with
+    // `OAuthFileBusy`, and answers. Reaching the class is the point — every other rail in this file
+    // induces `OAuthFileUnreadable` instead, which is why they were blind to this one.
+    writeOAuthFile(home, readOAuthFile(home));
+    writeFileSync(oauthLockPath(home), "someone-else\n");
+    try {
+      const registered = await register(served.base);
+      expect([500, 503]).toContain(registered.status);
+      const body = JSON.stringify(registered.body);
+      // THE CALLER LEARNS NOTHING. Not the home, not the lock's path, not a flag to probe.
+      expect(body).not.toContain(home);
+      expect(body).not.toContain("oauth.json");
+      expect(body).not.toContain("oauth-allow-redirect");
+      expect(body).not.toContain("hard link");
+      // and it does say the true thing, so the refusal is not merely opaque
+      expect(body).toMatch(/lock/);
+
+      // THE OPERATOR LEARNS EVERYTHING, on the channel that is theirs alone.
+      const said = served.faults.join("\n");
+      expect(said).toContain(home);
+      expect(said).toMatch(/oauth\.json\.lock/);
+    } finally {
+      rmSync(oauthLockPath(home), { force: true });
+    }
+  });
+
+  it("(u) the same split on the token endpoint", async () => {
+    // The mint path has its own catch and its own refusal, so it needs its own assertion — the two
+    // doors were changed together and could drift apart.
+    const client = await register(served.base);
+    const code = await codeFor(client.clientId);
+    writeFileSync(oauthLockPath(home), "someone-else\n");
+    try {
+      const redeemed = await redeem(served.base, {
+        grant_type: "authorization_code",
+        code: code.code,
+        redirect_uri: CLAUDE_REDIRECT,
+        client_id: client.clientId,
+        code_verifier: code.verifier,
+      });
+      expect([500, 503]).toContain(redeemed.res.status);
+      const body = JSON.stringify(redeemed.body);
+      expect(body).not.toContain(home);
+      expect(body).not.toContain("oauth.json");
+      expect(body).toMatch(/lock/);
+      expect(served.faults.join("\n")).toContain(home);
+    } finally {
+      rmSync(oauthLockPath(home), { force: true });
+    }
+  });
+
+  it("(u) a lock fault is NOT reported as a damaged file", async () => {
+    // The distinction the caller is entitled to: a home whose lock is held is not a home whose records
+    // are corrupt, and sending the operator to read a perfectly good file is the failure this branch
+    // exists to prevent. Asserted against the OTHER refusal's wording.
+    writeOAuthFile(home, readOAuthFile(home));
+    writeFileSync(oauthLockPath(home), "someone-else\n");
+    let locked;
+    try {
+      locked = await register(served.base);
+    } finally {
+      rmSync(oauthLockPath(home), { force: true });
+    }
+    expect(JSON.stringify(locked.body)).not.toMatch(/cannot read/);
+
+    // And the damaged-file refusal still says its own thing, so the two are really distinct.
+    writeFileSync(oauthPath(home), "{{{ not json");
+    const unreadable = await register(served.base);
+    expect(JSON.stringify(unreadable.body)).toMatch(/cannot read/);
   });
 });
 

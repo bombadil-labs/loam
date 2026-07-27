@@ -43,6 +43,7 @@ import { type IncomingMessage, type ServerResponse } from "node:http";
 import { authorForSeed } from "@bombadil/rhizomatic";
 import {
   EMPTY_OAUTH,
+  OAuthFileBusy,
   OAuthFileUnlockable,
   clientFor,
   clientNameDefect,
@@ -546,7 +547,7 @@ export function makeOAuthDoors(deps: OAuthDeps): OAuthDoors {
       | { kind: "ok"; client: OAuthClient }
       | { kind: "full" }
       | { kind: "unreadable" }
-      | { kind: "unlockable"; why: string };
+      | { kind: "locked" };
 
     // THE SWEEP MOVES OUT; THE READ STAYS IN. Two different questions, and only one of them belongs
     // outside the lock.
@@ -633,17 +634,28 @@ export function makeOAuthDoors(deps: OAuthDeps): OAuthDoors {
           `the connector doors could not register a connector in ${oauthPath(home)}: ` +
             `${err instanceof Error ? err.message : String(err)}`,
         );
-        // A HOME THAT CANNOT HOLD THE LOCK IS NOT A DAMAGED FILE, and answering as though it were sends
-        // the operator to read a file that is perfectly fine.
-        if (err instanceof OAuthFileUnlockable) {
-          return { kind: "unlockable" as const, why: err.message };
+        // A LOCK THAT COULD NOT BE TAKEN IS NOT A DAMAGED FILE, and answering as though it were sends
+        // the operator to read a file that is perfectly fine. Both classes land here: `OAuthFileBusy`
+        // (another process holds it, or a stale break took it) and `OAuthFileUnlockable` (this home's
+        // filesystem has no hard links). The DETAIL of either goes only to `onFault` above — the busy
+        // message names the lock's absolute path, and the unlockable one names it plus a serve flag.
+        if (err instanceof OAuthFileBusy || err instanceof OAuthFileUnlockable) {
+          return { kind: "locked" as const };
         }
         return { kind: "unreadable" as const };
       }
     });
 
-    if (outcome.kind === "unlockable") {
-      refuse(res, 503, "temporarily_unavailable", outcome.why);
+    if (outcome.kind === "locked") {
+      // FIXED STRING. This door is unauthenticated and answers with `access-control-allow-origin: *`,
+      // so anything derived from the error would put the home's absolute path on the open internet —
+      // which is the invariant `load` states 170 lines above and two rails assert.
+      refuse(
+        res,
+        503,
+        "temporarily_unavailable",
+        "this store cannot take the lock on its connector records, so it registers nothing",
+      );
       return;
     }
     if (outcome.kind === "unreadable") {
@@ -919,14 +931,14 @@ ${hidden("approve", "yes")}
   ): Promise<
     | { kind: "ok"; token: string }
     | { kind: "unreadable" }
-    | { kind: "unlockable"; why: string }
+    | { kind: "locked" }
     | { kind: "full" }
     | { kind: "gone" }
     | { kind: "revoked" }
   > => {
     type Refusal =
       | { kind: "unreadable" }
-      | { kind: "unlockable"; why: string }
+      | { kind: "locked" }
       | { kind: "full" }
       | { kind: "gone" }
       | { kind: "revoked" };
@@ -952,8 +964,10 @@ ${hidden("approve", "yes")}
           `the connector doors could not update ${oauthPath(home)}: ` +
             `${err instanceof Error ? err.message : String(err)}`,
         );
-        if (err instanceof OAuthFileUnlockable) {
-          return { kind: "unlockable" as const, why: err.message };
+        // See `postRegister`: both lock classes are the same answer to a caller, and their detail names
+        // the home's path, so it stays in the operator's channel.
+        if (err instanceof OAuthFileBusy || err instanceof OAuthFileUnlockable) {
+          return { kind: "locked" as const };
         }
         return { kind: "unreadable" as const };
       }
@@ -1085,8 +1099,13 @@ ${hidden("approve", "yes")}
       if (left <= 0) redeeming.delete(clientId);
       else redeeming.set(clientId, left);
     }
-    if (minted.kind === "unlockable") {
-      refuse(res, 503, "temporarily_unavailable", minted.why);
+    if (minted.kind === "locked") {
+      refuse(
+        res,
+        503,
+        "temporarily_unavailable",
+        "this store cannot take the lock on its connector records, so it mints nothing",
+      );
       return;
     }
     if (minted.kind === "unreadable") {
