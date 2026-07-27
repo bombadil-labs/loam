@@ -162,12 +162,16 @@ export const MAX_CLIENT_NAME = 200;
 /**
  * C0, DEL and C1, plus the two Unicode separators a terminal also breaks a line on.
  *
- * EVERY caller-supplied string that reaches `loam grant list` is held to this, and there are two of
- * them: the client name AND each redirect uri. The uri is the one that hides — `new URL()` STRIPS tab,
+ * EVERY string that reaches a `loam grant list` row is held to this, and there are THREE: the client
+ * name, each redirect uri, and the client id. The uri is the one that hides — `new URL()` STRIPS tab,
  * LF and CR while parsing, so a uri carrying them parses clean, passes the origin and
- * percent-transparency checks, and keeps its raw bytes in the stored string. The operator's only view
- * of what is registered is where they decide what to revoke, so a forged row there is worth refusing
- * at the door rather than escaping at the printer.
+ * percent-transparency checks, and keeps its raw bytes in the stored string. The id is the one nothing
+ * on the wire can set, and it is checked anyway: the threat model that earned the uri its read-side
+ * check is a file edited by hand or written by an older build, and that reaches the id equally. The
+ * operator's only view of what is registered is where they decide what to revoke, so a forged row there
+ * is worth refusing at the reader rather than escaping at the printer.
+ *
+ * `actor` needs no check — it is re-derived from its own seed — and `registeredAt` is a number.
  */
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
@@ -188,6 +192,12 @@ export const uriTextDefect = (uri: string): string | undefined =>
     ? "a redirect_uri carries no control character, escape, or line separator"
     : undefined;
 
+/** And for the client id, which is the third field on that row. */
+export const idTextDefect = (id: string): string | undefined =>
+  CONTROL.test(id)
+    ? "a client_id carries no control character, escape, or line separator"
+    : undefined;
+
 function checkClient(raw: unknown, where: string): OAuthClient {
   object(raw, where);
   const uris = array((raw as Record<string, unknown>)["redirectUris"], `${where}: redirectUris`);
@@ -200,8 +210,11 @@ function checkClient(raw: unknown, where: string): OAuthClient {
   if (!Number.isInteger(generation) || generation < 1) {
     throw new OAuthFileUnreadable(`${where} has a generation that is not a positive integer`);
   }
+  const clientId = str(raw, where, "clientId");
+  const idDefect = idTextDefect(clientId);
+  if (idDefect !== undefined) throw new OAuthFileUnreadable(`${where}: ${idDefect}`);
   return {
-    clientId: str(raw, where, "clientId"),
+    clientId,
     clientName,
     redirectUris: uris.map((uri, i) => {
       if (typeof uri !== "string" || uri === "") {
@@ -353,74 +366,125 @@ export const oauthLockPath = (home: string): string => join(home, "oauth.json.lo
 
 /** How long a held lock may be before a later writer treats it as a crashed one and breaks it. */
 export const LOCK_STALE_MS = 30_000;
-/** How long a writer waits for the lock before giving up. Longer than any honest hold. */
-const LOCK_WAIT_MS = 10_000;
 
-/** The lock is held and not stale. Never a licence to write anyway. */
+/**
+ * How long a writer waits for a LIVE lock before giving up.
+ *
+ * Deliberately short, and the reason is that the waiting is SYNCHRONOUS: in the serving process this
+ * thread is the whole server, so a contended acquire serves no other request and fires no timer while
+ * it waits. Every honest hold is a few microseconds — `work` cannot await — so real contention clears
+ * in milliseconds and this bound is never reached in ordinary use. A crashed holder does not consume it
+ * either: a stale lock is detected on the first pass and broken at once. What it bounds is the narrow
+ * case of a holder killed within the staleness window, and there the trade is stated plainly: a short
+ * refusal beats a long stall on a door an anonymous caller can knock on.
+ */
+const LOCK_WAIT_MS = 2_000;
+
+/** The lock is held by another process, or was taken from us. Never a licence to write anyway. */
 export class OAuthFileBusy extends Error {}
 
-// A SYNCHRONOUS sleep, because the whole point is that no other work in this process interleaves with
-// a held lock. `Atomics.wait` on a private buffer parks the thread without a busy loop.
+// A SYNCHRONOUS sleep, because the whole point is that no other work in this process interleaves with a
+// held lock. `Atomics.wait` on a private buffer parks the thread without a busy loop — and in the
+// serving process that thread is the server, which is why LOCK_WAIT_MS above is small.
 const pause = (ms: number): void => {
   const buffer = new SharedArrayBuffer(4);
   Atomics.wait(new Int32Array(buffer), 0, 0, ms);
 };
 
-/**
- * Run `work` with `oauth.json` locked against every other process, and write what it returns.
- *
- * `work` is SYNCHRONOUS by signature, and that is the load-bearing part: a lock held across an await
- * is a lock held for an unbounded time, and a caller that needs to await something does it between two
- * calls to this rather than inside one. Returning `undefined` for `next` reads without writing.
- *
- * A lock older than `LOCK_STALE_MS` is broken and taken, because a crashed writer must not wedge the
- * operator out of their own store forever. That is a real trade: a writer paused longer than the
- * staleness window can have its lock stolen. It is bounded by making every hold short — which the
- * synchronous signature is what enforces.
- */
 export interface OAuthWrite<T> {
   /** The file to write, or absent to read without writing. */
   readonly next?: OAuthFile | undefined;
   readonly result: T;
 }
 
+/** Whose lock is this? An empty string for a lock file we cannot read. */
+const lockHolder = (lock: string): string => {
+  try {
+    return readFileSync(lock, "utf8");
+  } catch {
+    return "";
+  }
+};
+
+/**
+ * Run `work` with `oauth.json` locked against every other process, and write what it returns.
+ *
+ * `work` is SYNCHRONOUS by signature, and that is the load-bearing part: a lock held across an await is
+ * a lock held for an unbounded time, and a caller that needs to await something does it between two
+ * calls to this rather than inside one. Returning `undefined` for `next` reads without writing.
+ *
+ * THE LOCK CARRIES A NONCE, AND THAT IS WHAT MAKES BREAKING A STALE ONE SAFE. Removing a stale lock by
+ * PATH cannot be made race-free: two writers can both decide the same lock is stale, and the second
+ * `rmSync` then deletes the FIRST one's fresh lock rather than the stale one — after which both are
+ * inside `work` at once and every guarantee above is void. `force: true` even swallows the ENOENT that
+ * would have hinted at it.
+ *
+ * So ownership is proven by CONTENT rather than assumed from a successful create. Each acquire writes a
+ * unique nonce and reads it back; a mismatch means another writer took the lock in the window, and this
+ * one retries instead of proceeding. The check runs AGAIN immediately before the write, because the
+ * theft can land after the first check — and there the answer is to refuse, not to retry, since `work`
+ * has already read a file that may since have moved. The release removes the lock only while the nonce
+ * is still ours, so a writer that lost the lock cannot delete its successor's.
+ *
+ * A lock older than `LOCK_STALE_MS` is broken, because a crashed writer must not wedge the operator out
+ * of their own store forever. The trade is real and bounded by the synchronous signature: a hold long
+ * enough to be stolen cannot happen without a crash.
+ */
 export function withOAuthFile<T>(home: string, work: (file: OAuthFile) => OAuthWrite<T>): T {
   const lock = oauthLockPath(home);
+  const nonce = `${process.pid}:${randomBytes(16).toString("hex")}\n`;
   const waitedFrom = Date.now();
-  let fd: number | undefined;
+  const busy = (): OAuthFileBusy =>
+    new OAuthFileBusy(
+      `${lock} is held by another process, so this change was not made. Retry, or remove that file ` +
+        `if no loam process is running.`,
+    );
+
   for (;;) {
+    // EVERY path through this loop is bounded by the deadline, including the two that retry. An
+    // unbounded retry here is a hot spin on the server's only thread: a dangling SYMLINK at the lock
+    // path is enough — `openSync` fails EEXIST whatever the target, and `statSync` follows it and
+    // throws ENOENT — and the door would then never answer again, with nothing logged.
+    if (Date.now() - waitedFrom > LOCK_WAIT_MS) throw busy();
+    let fd: number;
     try {
       fd = openSync(lock, "wx", 0o600);
-      break;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
       let heldSince: number;
       try {
         heldSince = statSync(lock).mtimeMs;
       } catch {
-        continue; // it went away between the open and the stat: try to take it
-      }
-      if (Date.now() - heldSince > LOCK_STALE_MS) {
-        // A crashed writer. Remove and retry; if two writers race to break it, one wins the open.
-        rmSync(lock, { force: true });
+        pause(25); // it went away, or it is a dangling symlink; either way do not spin
         continue;
       }
-      if (Date.now() - waitedFrom > LOCK_WAIT_MS) {
-        throw new OAuthFileBusy(
-          `${lock} is held by another process, so this change was not made. Retry, or remove that ` +
-            `file if no loam process is running.`,
-        );
-      }
-      pause(25);
+      if (Date.now() - heldSince > LOCK_STALE_MS) rmSync(lock, { force: true });
+      else pause(25);
+      continue;
     }
-  }
-  try {
-    const outcome = work(readOAuthFile(home));
-    if (outcome.next !== undefined) writeOAuthFile(home, outcome.next);
-    return outcome.result;
-  } finally {
-    closeSync(fd);
-    rmSync(lock, { force: true });
+    // Created it. Now PROVE it is ours: a writer that broke a stale lock in this window has deleted
+    // this one and created its own, and its nonce is what a read-back returns.
+    try {
+      writeSync(fd, nonce);
+    } finally {
+      closeSync(fd);
+    }
+    if (lockHolder(lock) !== nonce) continue;
+
+    try {
+      const outcome = work(readOAuthFile(home));
+      if (outcome.next !== undefined) {
+        // AGAIN, immediately before the write. The theft can land after the check above, and by then
+        // `work` has read a file that may have moved underneath it — so this refuses rather than
+        // retrying, and writes nothing.
+        if (lockHolder(lock) !== nonce) throw busy();
+        writeOAuthFile(home, outcome.next);
+      }
+      return outcome.result;
+    } finally {
+      // Only while it is still ours: a writer that lost the lock must not delete its successor's.
+      if (lockHolder(lock) === nonce) rmSync(lock, { force: true });
+    }
   }
 }
 
@@ -431,22 +495,27 @@ export const grantFor = (file: OAuthFile, clientId: string): OAuthGrant | undefi
   file.grants.find((g) => g.clientId === clientId);
 
 /**
- * The grant a token digest names — the ONE read on the request path, and the reason it is not
- * `readOAuthFile`.
+ * The grant a token digest names — the read on the request path.
  *
- * `checkGrant` re-derives `authorForSeed(actorSeed)` for every grant, and that is an Ed25519 scalar
- * multiplication in pure JS. `identify` runs for any bearer token the static and session tables
- * declined — which is exactly what an anonymous caller on the public internet presents — so reading
- * the whole file there would spend N derivations per wrong guess. This finds the token first and
- * derives once, for the one grant it is about to return, so an unknown token costs zero.
+ * IT IS AS STRICT AS `readOAuthFile`, AND THE ONLY THING IT SAVES IS THE UNKNOWN-TOKEN CASE. That is
+ * the whole design, and getting it wrong the other way is a hole rather than a slow path:
  *
- * Still strict where it looks: a match whose grant is damaged throws rather than answering. And a
- * file this cannot parse throws, because a token cannot be verified against a file of unknown shape.
+ *   - `identify` runs for any bearer token the static and session tables declined, which is exactly
+ *     what an anonymous caller on the public internet presents. `checkGrant` re-derives
+ *     `authorForSeed(actorSeed)` per grant, an Ed25519 scalar multiplication in pure JS, so validating
+ *     the whole file per wrong guess would sell that work to a stranger.
+ *   - So the digest is looked up FIRST, over the token entries alone. An unknown token costs zero
+ *     derivations and returns here.
+ *   - A KNOWN digest then falls through to `readOAuthFile`, whole-file validation and all. A caller
+ *     holding a real token is a legitimate connector, the file holds a handful of grants, and rule 2
+ *     at the top of this file has no exception: a token cannot be verified against a file whose shape
+ *     is unknown. An earlier form validated only the ONE grant it returned, which made this a second,
+ *     more forgiving parser than the write path — a damaged neighbour would refuse every write while
+ *     still admitting tokens.
  *
  * What it does NOT avoid, said out loud: one `readFileSync` and one `JSON.parse` per presented token.
- * The file holds a handful of connectors, and the read is a few microseconds beside the request it
- * serves — but it is per-request work an unauthenticated caller can ask for, and a cache keyed on
- * mtime would be a stale-index trap on the exact table that decides who may write here.
+ * The read is a few microseconds beside the request it serves, and a cache keyed on mtime would be a
+ * stale-index trap on the exact table that decides who may write here.
  */
 export function grantForToken(home: string, digest: string): OAuthGrant | undefined {
   const path = oauthPath(home);
@@ -476,18 +545,16 @@ export function grantForToken(home: string, digest: string): OAuthGrant | undefi
       `${path} is version ${String(file["version"])}, and this door reads version 1`,
     );
   }
+  // The token entries only, and every one of them: a damaged token entry is refused here rather than
+  // skipped, or "this digest is in no table" would cover "this table cannot be read".
   const tokens = array(file["tokens"], `${path}: tokens`);
-  let clientId: string | undefined;
+  let held = false;
   for (const [i, entry] of tokens.entries()) {
-    const checked = checkToken(entry, `${path}: token ${i}`);
-    if (checked.digest === digest) clientId = checked.clientId;
+    if (checkToken(entry, `${path}: token ${i}`).digest === digest) held = true;
   }
-  if (clientId === undefined) return undefined;
-  const grants = array(file["grants"], `${path}: grants`);
-  for (const [i, entry] of grants.entries()) {
-    // Shape only, until the clientId matches: the derivation is what this function exists to avoid.
-    const at = object(entry, `${path}: grant ${i}`);
-    if (at["clientId"] === clientId) return checkGrant(entry, `${path}: grant ${i}`);
-  }
-  return undefined;
+  if (!held) return undefined;
+  // A real token. Now pay for the whole file, exactly as every write does.
+  const whole = readOAuthFile(home);
+  const clientId = whole.tokens.find((t) => t.digest === digest)?.clientId;
+  return clientId === undefined ? undefined : grantFor(whole, clientId);
 }

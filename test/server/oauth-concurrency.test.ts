@@ -32,7 +32,10 @@ import {
   withOAuthFile,
   writeOAuthFile,
 } from "../../src/server/oauth-file.js";
-import { run } from "../../src/cli/cli.js";
+import { spawn } from "node:child_process";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import * as esbuild from "esbuild";
 import {
   CLAUDE_REDIRECT,
   approve,
@@ -259,52 +262,187 @@ describe("(s) the cross-process lock", () => {
     expect(() => withOAuthFile(home, (file) => ({ next: file, result: 0 }))).not.toThrow();
   });
 
-  it("(v) a revoke and a mint do not lose each other's write", async () => {
-    // The end-to-end statement, through the doors rather than the primitive: two connectors, one
-    // revoked while the other is granted. Both changes must survive.
-    const one = await register(served.base);
-    const two = await register(served.base);
-    const first = await codeFor(one.clientId);
-    await redeem(served.base, {
-      grant_type: "authorization_code",
-      code: first.code,
-      redirect_uri: CLAUDE_REDIRECT,
-      client_id: one.clientId,
-      code_verifier: first.verifier,
+  it("(v) TWO PROCESSES contending both land their write", async () => {
+    // THE ONLY HONEST TEST OF A CROSS-PROCESS LOCK, and the reason the in-process version of this rail
+    // was deleted: `withOAuthFile`'s callback is synchronous by design and `cmdGrant` is synchronous
+    // throughout, so two of them on one thread cannot interleave. `Promise.all` over them runs the first
+    // to completion before the second starts, and the assertions then hold whether or not anything
+    // locks. Rails 1 to 3 above discriminate on the primitive; this one contends for real.
+    //
+    // The child is bundled with esbuild rather than run through a TypeScript loader, because the repo
+    // has no runtime TS hook — esbuild is already a dependency, and the bundle runs on plain node.
+    const entry = fileURLToPath(new URL("./oauth-lock-child.mts", import.meta.url));
+    const bundle = join(home, "lock-child.mjs");
+    await esbuild.build({
+      entryPoints: [entry],
+      outfile: bundle,
+      bundle: true,
+      platform: "node",
+      format: "esm",
+      // Dependencies are bundled IN rather than left external: the output lives in the temp home, and
+      // node resolves a bare import relative to the importing file, which from /tmp finds no
+      // node_modules at all. `oauth-file.ts` reaches only node builtins and one pure-JS package, so
+      // there is nothing native to leave behind.
+      logLevel: "silent",
     });
-    const second = await codeFor(two.clientId);
+    writeOAuthFile(home, readOAuthFile(home));
 
-    // The revoke and the second mint, issued together.
-    const io = { out: () => {}, err: () => {} };
-    const [, minted] = await Promise.all([
-      run(["grant", "revoke", one.clientId, "--home", home], io),
-      redeem(served.base, {
-        grant_type: "authorization_code",
-        code: second.code,
-        redirect_uri: CLAUDE_REDIRECT,
-        client_id: two.clientId,
-        code_verifier: second.verifier,
+    // The child takes the lock and HOLDS it for 400ms inside its locked section.
+    const spawned = new Promise<void>((resolve, reject) => {
+      const proc = spawn(process.execPath, [bundle, home, "child-one", "400"], {
+        stdio: ["ignore", "ignore", "pipe"],
+        cwd: process.cwd(),
+      });
+      let stderr = "";
+      proc.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
+      proc.on("error", reject);
+      proc.on("exit", (code) =>
+        code === 0 ? resolve() : reject(new Error(`child exited ${String(code)}: ${stderr}`)),
+      );
+    });
+
+    // Wait until the child actually holds it, so the parent's acquire genuinely contends.
+    const from = Date.now();
+    while (!existsSync(oauthLockPath(home)) && Date.now() - from < 20_000) {
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(existsSync(oauthLockPath(home))).toBe(true);
+
+    // The parent's write, issued while the child holds the lock. It must WAIT, not overwrite.
+    const waitedFrom = Date.now();
+    withOAuthFile<undefined>(home, (file) => ({
+      next: {
+        ...file,
+        clients: [
+          ...file.clients,
+          {
+            clientId: "parent-one",
+            clientName: "parent-one",
+            redirectUris: ["https://claude.ai/parent"],
+            registeredAt: Date.now(),
+            generation: 1,
+          },
+        ],
+      },
+      result: undefined,
+    }));
+    // It really waited: the child held the lock for 400ms and this acquire could not have been instant.
+    expect(Date.now() - waitedFrom).toBeGreaterThan(50);
+    await spawned;
+
+    // BOTH writes survived. Without the lock the second writer spreads a snapshot taken before the
+    // first, and exactly one of these two is missing.
+    const ids = readOAuthFile(home).clients.map((c) => c.clientId);
+    expect(ids).toContain("child-one");
+    expect(ids).toContain("parent-one");
+    // And the lock is released rather than left behind by either.
+    expect(existsSync(oauthLockPath(home))).toBe(false);
+  });
+
+  it("a writer whose lock is STOLEN refuses rather than writing over the thief", () => {
+    // Breaking a stale lock by PATH cannot be made race-free: two writers can both decide the same lock
+    // is stale, and the second removal deletes the FIRST one's fresh lock. Both would then be inside the
+    // callback at once, which is the whole bug this lock exists to prevent. So ownership is proven by
+    // the nonce in the file rather than assumed from a successful create.
+    writeOAuthFile(home, readOAuthFile(home));
+    const before = readOAuthFile(home);
+    expect(() =>
+      withOAuthFile<undefined>(home, (file) => {
+        // Simulate the theft: another writer broke this lock and took it, mid-callback.
+        writeFileSync(oauthLockPath(home), "someone-else\n");
+        return {
+          next: {
+            ...file,
+            clients: [
+              ...file.clients,
+              {
+                clientId: "should-not-land",
+                clientName: "x",
+                redirectUris: [],
+                registeredAt: 1,
+                generation: 1,
+              },
+            ],
+          },
+          result: undefined,
+        };
       }),
-    ]);
-    expect(minted.res.status).toBe(200);
+    ).toThrow(OAuthFileBusy);
+    // NOTHING was written, and the thief's lock is still there — this writer must not delete it.
+    expect(readOAuthFile(home)).toEqual(before);
+    expect(readFileSync(oauthLockPath(home), "utf8")).toBe("someone-else\n");
+    rmSync(oauthLockPath(home), { force: true });
+  });
+});
 
-    const file = readOAuthFile(home);
-    // The revoke survived: no token for the revoked client, and its generation moved.
-    expect(file.tokens.filter((t) => t.clientId === one.clientId)).toEqual([]);
-    expect(file.clients.find((c) => c.clientId === one.clientId)!.generation).toBe(2);
-    // The mint survived: the other client holds its token and its grant stands.
-    expect(file.tokens.filter((t) => t.clientId === two.clientId).length).toBe(1);
-    expect(file.grants.find((g) => g.clientId === two.clientId)!.standing).toBe(true);
-    // And each token behaves accordingly at the door.
-    expect(
-      (
-        await mcp(
-          served.base,
-          { jsonrpc: "2.0", id: 1, method: "tools/list" },
-          bearer(minted.body["access_token"] as string),
-        )
-      ).status,
-    ).toBe(200);
+describe("the bounds nothing else counts", () => {
+  it("maxCodes bounds the codes in flight, and a lapsed one frees its slot", async () => {
+    // Consent is the only thing that mints a code, so this is not an anonymous lever — but an unbounded
+    // map is still an unbounded map, and the sweep before the cap is what makes the 503 honest.
+    let ticks = 0;
+    await served.close();
+    served = await serveOAuth(home, {
+      oauth: { maxCodes: 2, codeTtlMs: 1000, monotonicNow: () => ticks },
+    });
+    session = await signIn(served.base);
+    const client = await register(served.base);
+    await codeFor(client.clientId);
+    await codeFor(client.clientId);
+
+    // The third is refused rather than admitted.
+    const secret = pkce();
+    const params = {
+      ...wellFormedAuthorize(client.clientId, secret.challenge),
+      redirect_uri: CLAUDE_REDIRECT,
+    };
+    const page = await getAuthorize(served.base, params, session.cookie);
+    const full = await approve(served.base, params, {
+      cookie: session.cookie,
+      formToken: formTokenIn(page.body),
+    });
+    expect(full.status).toBe(503);
+    expect(codeFrom(full)).toBeUndefined();
+
+    // LAPSED CODES FREE THEIR SLOTS, or the cap would be permanent and the 503's advice a lie.
+    ticks += 1001;
+    const after = await approve(served.base, params, {
+      cookie: session.cookie,
+      formToken: formTokenIn(page.body),
+    });
+    expect(after.status).toBe(302);
+    expect(codeFrom(after)).toMatch(/.+/);
+  });
+
+  it("maxTokensPerClient bounds one connector's live tokens", async () => {
+    await served.close();
+    served = await serveOAuth(home, { oauth: { maxTokensPerClient: 2 } });
+    session = await signIn(served.base);
+    const client = await register(served.base);
+    const statuses: number[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      const code = await codeFor(client.clientId);
+      const redeemed = await redeem(served.base, {
+        grant_type: "authorization_code",
+        code: code.code,
+        redirect_uri: CLAUDE_REDIRECT,
+        client_id: client.clientId,
+        code_verifier: code.verifier,
+      });
+      statuses.push(redeemed.res.status);
+    }
+    expect(statuses).toEqual([200, 200, 400]);
+    expect(readOAuthFile(home).tokens.length).toBe(2);
+    // One connector's cap is its own: another connector still mints.
+    const other = await register(served.base);
+    const code = await codeFor(other.clientId);
+    const mine = await redeem(served.base, {
+      grant_type: "authorization_code",
+      code: code.code,
+      redirect_uri: CLAUDE_REDIRECT,
+      client_id: other.clientId,
+      code_verifier: code.verifier,
+    });
+    expect(mine.res.status).toBe(200);
   });
 });
 
@@ -469,6 +607,73 @@ describe("(u) a file this door cannot read", () => {
       bearer("some-token-that-is-not-in-the-static-table"),
     );
     expect(probe.status).toBe(401);
+  });
+
+  it("(u) a REAL token is refused while ANY grant entry is damaged", async () => {
+    // The token half of (u), and it was vacuous: the only "presented bearer token" assertion used a
+    // token in no table, so its 401 came from an unrelated cause and would have held with the whole
+    // corruption check deleted. This mints a real one and damages a DIFFERENT grant.
+    //
+    // It is also what pins `grantForToken` to the same strictness as `readOAuthFile`. That function
+    // exists to skip N key derivations for an UNKNOWN token; an earlier form skipped validating every
+    // grant but the one it returned, which made the request path a second, more forgiving parser — a
+    // damaged neighbour refused every write and still admitted tokens.
+    const client = await register(served.base);
+    const code = await codeFor(client.clientId);
+    const redeemed = await redeem(served.base, {
+      grant_type: "authorization_code",
+      code: code.code,
+      redirect_uri: CLAUDE_REDIRECT,
+      client_id: client.clientId,
+      code_verifier: code.verifier,
+    });
+    expect(redeemed.res.status).toBe(200);
+    const token = redeemed.body["access_token"] as string;
+    // It works before the damage, or "it stopped working" proves nothing.
+    expect(
+      (await mcp(served.base, { jsonrpc: "2.0", id: 1, method: "tools/list" }, bearer(token)))
+        .status,
+    ).toBe(200);
+
+    const sound = readOAuthFile(home);
+    const damaged = {
+      ...sound,
+      grants: [
+        ...sound.grants,
+        // A SECOND connector's grant, whose actor does not derive from its own seed. Nothing about
+        // this entry concerns the live token, which is exactly why a per-entry parser admitted it.
+        {
+          clientId: "connector-somebody-else",
+          actorSeed: "22".repeat(32),
+          actor: "ed25519:not-the-author-of-that-seed",
+          grantedAt: 1,
+          standing: true,
+        },
+      ],
+    };
+    writeFileSync(oauthPath(home), `${JSON.stringify(damaged, null, 2)}\n`);
+    // The file no longer reads, so the door cannot say who holds this token.
+    expect(() => readOAuthFile(home)).toThrow(OAuthFileUnreadable);
+    const refused = await mcp(
+      served.base,
+      { jsonrpc: "2.0", id: 2, method: "tools/list" },
+      bearer(token),
+    );
+    expect(refused.status).toBe(401);
+    // And the operator is TOLD, because a door that silently stopped opening is a swallowed error.
+    expect(served.faults.join("\n")).toMatch(/oauth\.json/);
+  });
+
+  it("(u) the operator is told, and the caller is not — both halves of every refusal", async () => {
+    // `onFault` is the operator's channel and the detail names the home's absolute path, so the two
+    // claims are asserted against each other: the message reaches the operator AND not the caller.
+    writeFileSync(oauthPath(home), "{{{ not json");
+    const registered = await register(served.base);
+    expect([500, 503]).toContain(registered.status);
+    const said = served.faults.join("\n");
+    expect(said).toMatch(/oauth\.json/);
+    expect(said).toContain(home);
+    expect(JSON.stringify(registered.body)).not.toContain(home);
   });
 
   it("does not crash the BOOT path either", async () => {

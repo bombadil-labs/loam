@@ -23,7 +23,7 @@ import {
   signIn,
   storeDeltas,
 } from "./user-fixture.js";
-import { oauthPath, readOAuthFile } from "../../src/server/oauth-file.js";
+import { oauthPath, readOAuthFile, writeOAuthFile } from "../../src/server/oauth-file.js";
 import {
   CLAUDE_ORIGIN,
   CLAUDE_REDIRECT,
@@ -678,10 +678,7 @@ describe("(w) no secret reaches the ground", () => {
     expect(whole).toContain(grant.actor);
   });
 
-  it("the grant's standing is recorded, and a token is only minted once it stands", async () => {
-    // The seed is written to the file BEFORE the grant is appended, so the file can never grow a
-    // second seed for one connector. That leaves one gap — a seed whose grant never landed — and the
-    // flag is what names it, so the retry reuses the SAME seed instead of minting another.
+  it("a successful grant ends with standing recorded, in the file and in the ground", async () => {
     const walked = await upToCode();
     await redeem(served.base, {
       grant_type: "authorization_code",
@@ -692,13 +689,122 @@ describe("(w) no secret reaches the ground", () => {
     });
     const grant = readOAuthFile(home).grants[0]!;
     expect(grant.standing).toBe(true);
-    // And the ground agrees: standing is a claim about the store, so it must be true there too.
-    const deltas = await storeDeltas(home);
-    const standing = deltas.filter((d) => {
+    // Standing is a claim about the STORE, so the ground has to agree.
+    const standing = (await storeDeltas(home)).filter((d) => {
       const json = JSON.stringify(d.claims.pointers);
       return json.includes(grant.actor) && json.includes('"value":"write"');
     });
     expect(standing.length).toBe(1);
+  });
+
+  it("a grant left at standing:false is RETRIED with the same seed, not replaced", async () => {
+    // THE STATE THE FLAG EXISTS FOR, planted rather than waited for. Asserting only that a successful
+    // grant ends `standing: true` pins the field's existence twice and never reaches the recovery: it
+    // would hold with the retry deleted, and with the flag written as a constant.
+    //
+    // The gap is real. The seed is recorded BEFORE the ground append, so a crash between them leaves a
+    // seed whose grant never landed. What must NOT happen then is a second seed: the connector's
+    // history would split, and the first half would be signed by a key nothing accounts for.
+    const client = await register(served.base);
+    expect(client.status).toBe(201);
+    const planted = readOAuthFile(home);
+    const actorSeed = "7c".repeat(32);
+    const actor = authorForSeed(actorSeed);
+    writeOAuthFile(home, {
+      ...planted,
+      grants: [
+        ...planted.grants,
+        { clientId: client.clientId, actorSeed, actor, grantedAt: Date.now(), standing: false },
+      ],
+    });
+    // Nothing in the ground grants this author anything yet — that is the interrupted state.
+    const before = (await storeDeltas(home)).filter((d) =>
+      JSON.stringify(d.claims.pointers).includes(actor),
+    );
+    expect(before).toEqual([]);
+
+    const secret = pkce();
+    const params = {
+      ...wellFormedAuthorize(client.clientId, secret.challenge),
+      redirect_uri: CLAUDE_REDIRECT,
+    };
+    const page = await getAuthorize(served.base, params, session.cookie);
+    const approved = await approve(served.base, params, {
+      cookie: session.cookie,
+      formToken: formTokenIn(page.body),
+    });
+    const redeemed = await redeem(served.base, {
+      grant_type: "authorization_code",
+      code: codeFrom(approved)!,
+      redirect_uri: CLAUDE_REDIRECT,
+      client_id: client.clientId,
+      code_verifier: secret.verifier,
+    });
+    expect(redeemed.res.status).toBe(200);
+
+    const after = readOAuthFile(home);
+    // ONE grant, the SAME seed, now standing. A second seed here is the bug this rail exists for.
+    expect(after.grants.length).toBe(1);
+    expect(after.grants[0]!.actorSeed).toBe(actorSeed);
+    expect(after.grants[0]!.standing).toBe(true);
+    // And the retry actually appended: the ground now holds the write grant it was missing.
+    const landed = (await storeDeltas(home)).filter((d) => {
+      const json = JSON.stringify(d.claims.pointers);
+      return json.includes(actor) && json.includes('"value":"write"');
+    });
+    expect(landed.length).toBe(1);
+    // The token really is that connector's — the planted seed is what signs.
+    const wrote = await gql(
+      served.base,
+      `mutation { plant(entity: "${MOSS}", height: 61) { height } }`,
+      bearer(redeemed.body["access_token"] as string),
+    );
+    expect(wrote.status).toBe(200);
+    const carriers = (await storeDeltas(home)).filter((d) =>
+      JSON.stringify(d.claims.pointers).includes(`"value":61`),
+    );
+    expect(carriers.length).toBe(1);
+    expect(carriers[0]!.claims.author).toBe(actor);
+  });
+
+  it("a grant already standing is NOT re-appended on a later token", async () => {
+    // The other side of the retry: `standing: true` must skip the append, or every token mint grows the
+    // store another redundant grant delta and the flag governs nothing.
+    const walked = await upToCode();
+    await redeem(served.base, {
+      grant_type: "authorization_code",
+      code: walked.code,
+      redirect_uri: walked.redirectUri,
+      client_id: walked.clientId,
+      code_verifier: walked.verifier,
+    });
+    const actor = readOAuthFile(home).grants[0]!.actor;
+    const countGrants = async (): Promise<number> =>
+      (await storeDeltas(home)).filter((d) => {
+        const json = JSON.stringify(d.claims.pointers);
+        return json.includes(actor) && json.includes('"value":"write"');
+      }).length;
+    expect(await countGrants()).toBe(1);
+
+    const secret = pkce();
+    const params = {
+      ...wellFormedAuthorize(walked.clientId, secret.challenge),
+      redirect_uri: walked.redirectUri,
+    };
+    const page = await getAuthorize(served.base, params, session.cookie);
+    const approved = await approve(served.base, params, {
+      cookie: session.cookie,
+      formToken: formTokenIn(page.body),
+    });
+    const second = await redeem(served.base, {
+      grant_type: "authorization_code",
+      code: codeFrom(approved)!,
+      redirect_uri: walked.redirectUri,
+      client_id: walked.clientId,
+      code_verifier: secret.verifier,
+    });
+    expect(second.res.status).toBe(200);
+    expect(await countGrants()).toBe(1);
   });
 
   it("the caller's scope text never reaches the page, the code, or the answer", async () => {

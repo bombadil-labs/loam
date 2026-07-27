@@ -539,11 +539,21 @@ export function makeOAuthDoors(deps: OAuthDeps): OAuthDoors {
           //
           // TWO KINDS OF CLIENT ARE NOT EVICTABLE, and the second is the subtle one:
           //   - one the operator APPROVED (it holds a grant) — its seed signs deltas the store holds;
-          //   - one with a CODE IN FLIGHT. A grant appears only after a successful token mint, so the
-          //     whole interval from registration through the consent page to redemption would otherwise
-          //     be evictable — and a sustained flood always reaches the oldest, which is the pending
-          //     legitimate client. The operator's approval would then die at redemption. Consent
-          //     already given must not be discarded by a stranger's traffic.
+          //   - one holding a LIVE CODE. A grant appears only after a successful token mint, so without
+          //     this the window from consent to redemption is evictable, and a sustained flood always
+          //     reaches the oldest — which is the client the operator just approved. Their approval
+          //     would then die at redemption, for traffic that has nothing to do with them.
+          //
+          // WHAT IS STILL EVICTABLE, said rather than implied: the window from REGISTRATION to consent.
+          // A code exists only after the approval POST, so a flood during that window can still displace
+          // a pending client. That failure is visible and harmless — the authorize GET then says no such
+          // client, so the operator sees a refusal instead of losing a grant — and pinning it would mean
+          // trusting an unauthenticated registration to hold a slot, which is the lockout again.
+          //
+          // Lapsed codes are swept FIRST, or an expired one keeps pinning its client until the next
+          // approval happens to sweep it.
+          const moment = now();
+          for (const [code, held] of codes) if (held.expiresAt <= moment) codes.delete(code);
           const pinned = new Set([
             ...file.grants.map((g) => g.clientId),
             ...[...codes.values()].map((c) => c.clientId),
@@ -592,8 +602,8 @@ export function makeOAuthDoors(deps: OAuthDeps): OAuthDoors {
         res,
         400,
         "invalid_client_metadata",
-        `this store already holds ${maxClients} APPROVED connectors, which is all it will hold. ` +
-          `\`loam grant list\` names them.`,
+        `this store already holds ${maxClients} connectors it will not displace — each one is either ` +
+          `approved or has an approval in flight. \`loam grant list\` names them.`,
       );
       return;
     }

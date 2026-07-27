@@ -25,7 +25,7 @@ import {
   storeDeltas,
   testIo,
 } from "./user-fixture.js";
-import { readOAuthFile } from "../../src/server/oauth-file.js";
+import { readOAuthFile, writeOAuthFile } from "../../src/server/oauth-file.js";
 import {
   CLAUDE_REDIRECT,
   approve,
@@ -110,6 +110,46 @@ describe("loam grant list", () => {
     expect(listed.out).not.toContain(connector.token);
     // It says how many live tokens the connector holds — the number the operator revokes.
     expect(listed.out).toMatch(/1 (live )?token/);
+  });
+
+  it("names a connector that has registered but never been approved", async () => {
+    // `cmdGrant`'s author column has three branches and only one of them was ever reached. A registered
+    // client with no grant is the ordinary state between claude.ai registering and Myk approving, and
+    // it is exactly when he wants to read the listing.
+    const client = await register(served.base, { name: "Not Yet Approved" });
+    expect(client.status).toBe(201);
+    const listed = await grant(["list"]);
+    expect(listed.code).toBe(0);
+    expect(listed.out).toContain(client.clientId);
+    expect(listed.out).toMatch(/not yet approved/i);
+    expect(listed.out).toMatch(/0 live tokens/);
+  });
+
+  it("says when a connector's write grant never landed in the ground", async () => {
+    // The third branch. A seed recorded whose grant append did not finish is a real, recoverable state,
+    // and the operator's listing must not print it as an ordinary author — it would read as a working
+    // connector that cannot write.
+    const client = await register(served.base, { name: "Interrupted" });
+    const file = readOAuthFile(home);
+    const actorSeed = "5b".repeat(32);
+    writeOAuthFile(home, {
+      ...file,
+      grants: [
+        {
+          clientId: client.clientId,
+          actorSeed,
+          actor: authorForSeed(actorSeed),
+          grantedAt: Date.now(),
+          standing: false,
+        },
+      ],
+    });
+    const listed = await grant(["list"]);
+    expect(listed.code).toBe(0);
+    expect(listed.out).toContain(authorForSeed(actorSeed));
+    expect(listed.out).toMatch(/never landed/i);
+    // The seed is still the one thing it must not print.
+    expect(listed.out).not.toContain(actorSeed);
   });
 
   it("says so plainly when there is nothing to list", async () => {

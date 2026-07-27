@@ -32,6 +32,14 @@ export interface ServedOAuth {
   readonly handle: ServerHandle;
   readonly gateway: Gateway;
   readonly base: string;
+  /**
+   * What the doors told the OPERATOR, in order.
+   *
+   * Every local refusal in §37 is TWO claims — the caller learns nothing, and the operator is told —
+   * and a rail that only reads the response asserts one of them. A fault nobody hears is a swallowed
+   * error, so this is how the second half is reachable.
+   */
+  readonly faults: string[];
   close(): Promise<void>;
 }
 
@@ -55,15 +63,23 @@ export async function serveOAuth(home: string, opts: ServeOAuthOptions = {}): Pr
     assembleGenesis({ operatorSeed: readSeed(home) }),
   );
   await opts.prepare?.(gateway);
+  const faults: string[] = [];
   const handle = await serve({
     mounts: { default: gateway },
     tokens: opts.tokens ?? { "op-token": { operator: true } },
     port: 0,
     host: "127.0.0.1",
-    users: { home, mount: "default", scrypt: TEST_SCRYPT, ...opts.users },
+    users: {
+      home,
+      mount: "default",
+      scrypt: TEST_SCRYPT,
+      onFault: (m) => faults.push(m),
+      ...opts.users,
+    },
     oauth: {
       home,
       allowRedirectOrigins: [CLAUDE_ORIGIN, OTHER_ORIGIN],
+      onFault: (m) => faults.push(m),
       ...opts.oauth,
     },
   });
@@ -71,6 +87,7 @@ export async function serveOAuth(home: string, opts: ServeOAuthOptions = {}): Pr
   return {
     handle,
     gateway,
+    faults,
     base: handle.url,
     async close() {
       if (closed) return;
