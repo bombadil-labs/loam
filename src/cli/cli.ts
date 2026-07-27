@@ -1128,9 +1128,10 @@ function cmdUserUnlockAll(home: string, io: IO): number {
     );
     return 1;
   }
-  // KNOWN GAP (T120): "no login records" is what a file this command could not READ answers with too —
-  // a directory at the path, damaged bytes, a mistyped --home. All of those mean the door is charging
-  // nobody, and none of them is reported here.
+  // KNOWN GAP (T121): the line below is ALSO what a file this command could not READ answers with — a
+  // directory at the path, damaged bytes, a dangling symlinked home, a mistyped --home. Every one of
+  // those means the login door is charging no name any delay, and none of them is reported here. This
+  // command is the only reader that looks at the file, so the fault is reported nowhere.
   io.out(
     cleared === 0
       ? `loam: ${home} holds no login records\n  nothing to clear`
@@ -1171,8 +1172,9 @@ function cmdUserUnlock(name: string, home: string, io: IO): number {
     );
     return 0;
   }
-  // KNOWN GAP (T120): "no record was found" and "the record file could not be read" reach this point
-  // identically, and only the second means the door is charging nobody.
+  // KNOWN GAP (T121): "this name has no record" and "the record file could not be read at all" reach
+  // this point identically, and so does "this --home is not a usable directory". Only the first is
+  // benign. The others mean the login door is charging no name any delay, and nothing below says so.
   let existing;
   try {
     existing = readCredentials(home);

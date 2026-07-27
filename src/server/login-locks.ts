@@ -45,8 +45,11 @@
 //     when `forgetMs` of silence makes the row spent on read.
 //
 // No case refuses a login, which is the promise that matters. All three are an operator's disk to fix,
-// and NOTHING HERE TELLS THEM SO: a read fault is silent everywhere, and `loam user unlock` reports an
-// empty table for a home whose records it could not read. That gap is T120's, with the evidence.
+// and NOTHING HERE TELLS THEM SO — a KNOWN GAP, ticketed as T121 with the evidence. A read fault is
+// silent on every path: the door says nothing because it fails open by design, and `loam user unlock`
+// prints "holds no login records / nothing to clear" for a file it could not read, which is
+// byte-identical to what it prints for a healthy home where nobody has failed a login yet. So the
+// operator sees a tidy answer while no name is being charged at all.
 //
 // THE NO-AWAIT DISCIPLINE IN `noteFailure` SETTLES ONE PROCESS, NOT TWO. Every write replaces the
 // file whole through a rename, so two servers over one home are last-writer-wins and each silently
