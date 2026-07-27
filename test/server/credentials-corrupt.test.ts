@@ -19,11 +19,13 @@
 //     deletable with every rail here still green. Closing it wants a spy on the node:fs binding, which
 //     an ESM named import does not offer, so the honest move today is to say so.
 
+import { scryptSync } from "node:crypto";
 import { chmodSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   PASSWORD,
+  TEST_SCRYPT,
   beginLogin,
   bootStore,
   cookieFrom,
@@ -211,7 +213,10 @@ describe("writing credentials.json", () => {
     expect(statSync(file()).ino).not.toBe(before);
   });
 
-  it("(t) the target is never observed truncated: every write is whole or the old one", () => {
+  // Twenty sequential writes with no concurrency and no crash. This does NOT prove atomicity — the
+  // rename rail above is what binds that. What it pins is narrower and still worth pinning: a
+  // completed write leaves parseable JSON holding the same users.
+  it("(t) a completed write leaves parseable JSON with the same users", () => {
     const good = readFileSync(file(), "utf8");
     for (let round = 0; round < 20; round += 1) {
       writeCredentials(home, readCredentials(home));
@@ -221,6 +226,32 @@ describe("writing credentials.json", () => {
     }
     const original = JSON.parse(good) as { users: Record<string, unknown> };
     expect(Object.keys(readCredentials(home).users)).toEqual(Object.keys(original.users));
+  });
+});
+
+// A salt exists so two users who choose the same password do not share a hash. Nothing above proves the
+// salt reaches the derivation: a round trip through hashPassword/verifyPassword is green even when
+// `derive` ignores its salt argument, because both halves ignore it together.
+describe("the salt reaches the derivation", () => {
+  it("the same password hashed twice gives different bytes, and each verifies only against its own", async () => {
+    const first = await hashPassword(PASSWORD, TEST_SCRYPT);
+    const second = await hashPassword(PASSWORD, TEST_SCRYPT);
+    expect(first.salt).not.toBe(second.salt);
+    expect(first.hash).not.toBe(second.hash);
+    expect(await verifyPassword(first, PASSWORD)).toBe(true);
+    expect(await verifyPassword(second, PASSWORD)).toBe(true);
+    // the pair, crossed: a hash paired with the wrong salt must not verify
+    expect(await verifyPassword({ ...first, salt: second.salt }, PASSWORD)).toBe(false);
+  });
+
+  it("the stored bytes are scrypt over that entry's own salt and params", async () => {
+    const entry = await hashPassword(PASSWORD, TEST_SCRYPT);
+    const expected = scryptSync(PASSWORD, Buffer.from(entry.salt, "hex"), TEST_SCRYPT.keylen, {
+      N: TEST_SCRYPT.N,
+      r: TEST_SCRYPT.r,
+      p: TEST_SCRYPT.p,
+    }).toString("hex");
+    expect(entry.hash).toBe(expected);
   });
 });
 
@@ -235,7 +266,10 @@ describe("what a decoy hash costs", () => {
   it("borrows an existing entry's parameters, never the door's", () => {
     const entry = readCredentials(home).users["myk"]!;
     const otherwise = { N: 4096, r: 4, p: 2, keylen: 32 };
-    expect(decoyParamsFor(readCredentials(home), otherwise)).toEqual(entry.params);
+    // Pinned against the LITERAL the user was created with, not against the file's own answer. Read
+    // from the file, both sides of the comparison move together when hashPassword ignores its params.
+    expect(entry.params).toEqual(TEST_SCRYPT);
+    expect(decoyParamsFor(readCredentials(home), otherwise)).toEqual(TEST_SCRYPT);
     expect(entry.params).not.toEqual(otherwise); // the two really are different, or this proves nothing
   });
 

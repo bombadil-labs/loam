@@ -53,6 +53,7 @@ import {
   unreachableStoreReport,
 } from "./container.js";
 import {
+  UNSWEPT_SURFACES,
   eraseImpl,
   erasureOutstanding,
   isTombstone,
@@ -1759,6 +1760,9 @@ export async function deriveReceiptImpl(
       ),
       "A RESTORED BACKUP CAN RESURFACE BYTES, and this document is RE-ISSUABLE to prove present " +
         "state — every per-tier verdict above was probed at the issue moment, never reprinted.",
+      // The sweep reaches deltas. A home also holds files that are not deltas, and this is the
+      // document a reader treats as proof — so the list must reach here, not only to `health()`.
+      ...UNSWEPT_SURFACES.map((surface) => `A SURFACE IS NOT SWEPT AT ALL: ${surface}`),
     ],
   };
 }

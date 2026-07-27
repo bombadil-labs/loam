@@ -64,6 +64,11 @@ describe("POST /login", () => {
     expect(cookieFrom(res)).toMatch(/^[A-Za-z0-9_-]{20,}$/);
     expect(cookieAttributes(res)).toBe("HttpOnly; Secure; SameSite=Lax; Path=/");
     expect(res.headers.getSetCookie().join(" ")).not.toMatch(/Domain/i);
+    // EXACTLY one, as the title says: the reader helpers both take the first match, so a second
+    // Set-Cookie for the same name — with weaker attributes — would be invisible to every rail here.
+    expect(
+      res.headers.getSetCookie().filter((c) => c.startsWith(`${SESSION_COOKIE}=`)),
+    ).toHaveLength(1);
   });
 
   it("(d) a wrong password answers 401 and sets no cookie at all", async () => {
@@ -129,7 +134,7 @@ describe("POST /login", () => {
     expect(await stillOpen(served.base, first.cookie)).toBe(true);
 
     const res = await postLogin(served.base, "myk", PASSWORD, {
-      cookie: first.cookie,
+      sessionCookie: first.cookie,
       formToken: first.formToken,
     });
     expect(res.status).toBe(200);
@@ -138,6 +143,47 @@ describe("POST /login", () => {
     expect(second).not.toBe(first.cookie);
     expect(await stillOpen(served.base, second!)).toBe(true);
     expect(await stillOpen(served.base, first.cookie)).toBe(false);
+  });
+
+  // THE ATTACK THIS CLOSES: any page on the internet fetches GET /login with credentials. SameSite=Lax
+  // withholds the cookie on a cross-site subresource request, so the door sees no session and mints a
+  // fresh pre-session nonce. Written into the SAME cookie name, that nonce lands on top of the live
+  // session id and signs the operator out — and the orphaned session keeps its idle window with no
+  // cookie left to reach it, so the tokens it minted can no longer be revoked by signing out.
+  //
+  // Two-sided: the session survives the cross-site GET, and GET /login still does its own job — it
+  // hands an anonymous visitor a usable nonce.
+  it("(l) a cross-site GET /login cannot overwrite a live session", async () => {
+    served = await serveHome(home);
+    const session = await signIn(served.base);
+    const token = await postDoor(served.base, "/session/token", {
+      cookie: session.cookie,
+      formToken: session.formToken,
+    });
+    expect(token.status).toBe(200);
+
+    // the shape a cross-site subresource request has: no cookie reaches the server at all
+    const drive = await fetch(`${served.base}/login`, {
+      headers: { "sec-fetch-site": "cross-site" },
+    });
+    expect(drive.status).toBe(200);
+    // whatever it set, it did NOT set the session cookie
+    expect(drive.headers.getSetCookie().some((c) => c.startsWith(`${SESSION_COOKIE}=`))).toBe(
+      false,
+    );
+    // and the session it could not see is still open, still minting
+    expect(await stillOpen(served.base, session.cookie)).toBe(true);
+    // the other side: an anonymous visitor still gets a nonce that works
+    const begun = await beginLogin(served.base);
+    expect(begun.cookie).not.toBe("");
+    expect(
+      (
+        await postLogin(served.base, "myk", PASSWORD, {
+          cookie: begun.cookie,
+          formToken: begun.formToken,
+        })
+      ).status,
+    ).toBe(200);
   });
 
   it("(r) the login page permits no script", async () => {
@@ -175,7 +221,12 @@ describe("POST /logout", () => {
     ).toBe(403);
     const stale = await formTokenFor(served.base, session.cookie);
     expect(
-      (await postDoor(served.base, "/logout", { cookie: session.cookie, formToken: stale })).status,
+      (
+        await postDoor(served.base, "/logout", {
+          preCookie: session.cookie,
+          formToken: stale,
+        })
+      ).status,
     ).toBe(401);
   });
 });

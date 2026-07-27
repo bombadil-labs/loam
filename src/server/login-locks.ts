@@ -135,14 +135,43 @@ export function lockedMsIn(
   return record.lockedUntil > now ? record.lockedUntil - now : 0;
 }
 
-/** Milliseconds the lock on `name` still holds; 0 when the door is open. */
-export const lockedMs = (home: string, name: string, now: number): number =>
-  lockedMsIn(readLocks(home), name, now);
-
 /** Has this record stopped saying anything? Its window has passed and it holds no live lock. */
 const spent = (record: LockRecord, now: number, policy: LimitPolicy): boolean =>
   now - record.firstFailureAt > policy.windowMs &&
   (record.lockedUntil === undefined || record.lockedUntil <= now);
+
+/**
+ * Can this name be recorded at all right now? True when the table is FULL OF LIVE LOCKS and holds no
+ * record for `name` — so a failure could not be counted against it.
+ *
+ * The door asks this BEFORE comparing a password, not after. Refusing afterwards would be no defence:
+ * the guess has already been evaluated, and 429-versus-200 tells the caller whether it was right just
+ * as plainly as 401-versus-200 would. Only a refusal that precedes the comparison stops guessing.
+ *
+ * Advisory by design — `noteFailure` re-reads and re-decides for itself, because the read-and-write
+ * there must stay a single synchronous step. This is the cheap look that keeps an unaccountable attempt
+ * from ever reaching the hash.
+ */
+export function saturatedFor(
+  home: string,
+  name: string,
+  now: number,
+  policy: LimitPolicy,
+): boolean {
+  const locks = readLocks(home);
+  if (locks.has(name)) return false;
+  let live = 0;
+  for (const [held, record] of locks) {
+    if (spent(record, now, policy)) continue; // a spent record is room, and noteFailure prunes it
+    if (lockedMsIn(locks, held, now) === 0) return false; // an unlocked record is evictable
+    live += 1;
+  }
+  return live >= policy.maxTracked;
+}
+
+/** Milliseconds the lock on `name` still holds; 0 when the door is open. */
+export const lockedMs = (home: string, name: string, now: number): number =>
+  lockedMsIn(readLocks(home), name, now);
 
 /**
  * Record one failed attempt for `name`.
@@ -162,13 +191,27 @@ const spent = (record: LockRecord, now: number, policy: LimitPolicy): boolean =>
  * SPENT RECORDS ARE PRUNED. A failed attempt is recorded for any well-formed name, existing or not, so a
  * caller walking names would otherwise add a row per attempt forever.
  *
- * And past `maxTracked` a record is EVICTED to make room — the oldest UNLOCKED one, or failing that the
- * lock nearest to expiring. IT ALWAYS RECORDS. "Stop counting when the table is full" is an off switch: a
- * caller fills the table with locked junk names and the limiter stops applying to every name not already
- * in it, which is the limiter gone. Evicting means a flood can only displace what it created, and the
- * worst it buys is an early end to one of its own locks.
+ * And past `maxTracked` a record is EVICTED to make room — but ONLY ONE THAT HOLDS NO LIVE LOCK. A
+ * live lock is the only thing in this file protecting anyone, so it is the one thing eviction may not
+ * take. EVERY eviction rule over live locks has been shown steerable: taking the nearest-to-expire
+ * takes the FIRST victim's lock, and taking the furthest takes the victim's the moment their own lock
+ * becomes the newest. So none is taken.
+ *
+ * When nothing is evictable this REFUSES TO RECORD, and says so by returning false — the caller must
+ * then refuse the attempt. That direction is deliberate: a table saturated with live locks means the
+ * door is under a flood it cannot account for, and a limiter that cannot account for an attempt must
+ * not wave it through. Recording nothing and answering 401 anyway is unlimited guessing (H9's shape at
+ * the login door: unprovable is not clean).
+ *
+ * The cost is named rather than hidden, and it is a real one: a caller who pays
+ * `maxFailures × maxTracked` attempts can shut the HTML login door for every name not already tracked,
+ * until the locks drain. That is a DENIAL, recoverable by `loam user unlock` or a restart, and the
+ * bearer-token doors are untouched throughout. A denial is the lesser failure; guessing without a
+ * ceiling does not heal.
+ *
+ * @returns true when the attempt was recorded; false when the table could not account for it.
  */
-export function noteFailure(home: string, name: string, now: number, policy: LimitPolicy): void {
+export function noteFailure(home: string, name: string, now: number, policy: LimitPolicy): boolean {
   const locks = readLocks(home);
   const previous = locks.get(name);
   for (const [held, record] of locks) {
@@ -176,18 +219,16 @@ export function noteFailure(home: string, name: string, now: number, policy: Lim
   }
   if (previous === undefined && locks.size >= policy.maxTracked) {
     let unlocked: { name: string; at: number } | undefined;
-    let soonest: { name: string; until: number } | undefined;
     for (const [held, record] of locks) {
-      if (lockedMsIn(locks, held, now) === 0) {
-        if (unlocked === undefined || record.firstFailureAt < unlocked.at) {
-          unlocked = { name: held, at: record.firstFailureAt };
-        }
-      } else if (soonest === undefined || record.lockedUntil! < soonest.until) {
-        soonest = { name: held, until: record.lockedUntil! };
+      if (lockedMsIn(locks, held, now) !== 0) continue; // a live lock is never evictable
+      if (unlocked === undefined || record.firstFailureAt < unlocked.at) {
+        unlocked = { name: held, at: record.firstFailureAt };
       }
     }
-    const evicted = unlocked?.name ?? soonest?.name;
-    if (evicted !== undefined) locks.delete(evicted);
+    // Nothing evictable means every record is a live lock. Leave them all, and tell the caller this
+    // attempt is unaccounted for — it must be refused rather than counted as a plain miss.
+    if (unlocked === undefined) return false;
+    locks.delete(unlocked.name);
   }
   const lapsed =
     previous === undefined ||
@@ -201,6 +242,7 @@ export function noteFailure(home: string, name: string, now: number, policy: Lim
     ...(failures >= policy.maxFailures ? { lockedUntil: now + policy.lockMs } : {}),
   });
   writeLocks(home, locks);
+  return true;
 }
 
 /** Forget `name`'s failures — what a successful login earns. */
