@@ -181,6 +181,19 @@ describe("T103(a) — pull and register into a served home say the server will n
     quiet();
     expect(await run(["pull", offer, "--home", home], io())).toBe(0);
     expect(err.join("\n")).toMatch(/may be serving/);
+
+    // A LIVE pid (this very process) but NO store field: the probe cannot say which world is
+    // served, so it must warn — and it must warn by RETURNING, never by throwing. The store check
+    // is what stops `resolve(undefined)` from becoming an uncaught TypeError two lines on; delete
+    // it and this pull would exit non-zero with no warning, which is why the exit code is asserted
+    // as hard as the message.
+    writeFileSync(
+      join(home, "serving.json"),
+      JSON.stringify({ pid: process.pid, url: "http://127.0.0.1:1" }),
+    );
+    quiet();
+    expect(await run(["pull", offer, "--home", home], io())).toBe(0);
+    expect(err.join("\n")).toMatch(/may be serving/);
   });
 
   it("a pull into a DIFFERENT store file in the same home is not the trap, and stays quiet", async () => {
