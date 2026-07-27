@@ -1,5 +1,11 @@
 # Users and connectors: a phased plan
 
+**Status. AN INDEPENDENT REVIEW FAILED THIS PLAN ON 2026-07-27. Read section 8 before section 3.**
+Three load-bearing claims are wrong. One of them writes an authorization escalation into an acceptance
+criterion, which is a worse outcome than #282 produced — a reviewer would have caught it, and a builder
+reading a criterion will build it. Phases 2 and 3 are BLOCKED pending one decision from Myk. Phases 6
+and 7 need re-cutting. The rest stand, subject to section 8.
+
 **Status.** A plan for review. It replaces the single change in
 [#282](https://github.com/bombadil-labs/loam/pull/282). It creates no tickets yet. Myk approves the
 plan first. Then the tickets replace T113, T114, T116, T117, T118, T119 and T121.
@@ -624,3 +630,127 @@ limit only bites when a second person holds the role, and these phases are what 
 4. I archive T113, T114, T116, T117, T118, T119 and T121 with a note naming this plan.
 5. `spec-lint` must pass on every new working spec before any build starts.
 6. #282 stays open until phase 1 lands. Then it closes, and its branch stays for salvage.
+
+---
+
+## 8. What the independent review found
+
+A reviewer read this plan against the codebase on 2026-07-27. It found ten items. Three are
+plan-breaking. I verified the three myself before recording them.
+
+### 8.1 Phase 2 criterion 11 encodes an ESCALATION — plan-breaking
+
+**The defect.** Widening the read's `authoredBy` from the genesis operator to a trust set lets ANY set
+member grant the operator role to a stranger.
+
+**Why it works.** `users.ts` says it plainly, and I quoted it approvingly without following it:
+a role binding "has no grant shape for `constitutionalDefect` to recognise and nothing refuses it at
+the append door". So the READ-SIDE select is the only defence. Criterion 11 removes it. A granted
+operator B then files a role claim at `user:C`. The delta is at root, its author is in the set, so the
+gather admits it, so C holds `operator`. C never enters the trusted set — and does not need to.
+
+**Why my depth-one answer was wrong.** Stratification limits the depth of SET MEMBERSHIP. It says
+nothing about who may write a role. My criterion 12 — "a user the genesis operator trusted cannot
+extend that trust to a third party" — is true of the set and false of the role.
+
+**CONFIRMED** against `src/gateway/accounts.ts` and `origin/t113-users:src/server/users.ts`.
+
+### 8.2 The delegated set cannot be built the way I specified — plan-breaking
+
+`inView`'s extract compares only `author` or `id` (`@bombadil/rhizomatic/dist/pred.d.ts:53,84`). A
+role binding's pointers are an ENTITY (`user:<name>`) and a PRIMITIVE (`"operator"`). Neither is a
+key, so the set resolves empty forever.
+
+`lawfulStrikersJson` works because it extracts `{ role: "subject" }` from a GRANT, and a grant's
+subject pointer already holds a public key as a primitive. So the precedent I cited does not transfer
+to the delta I defined.
+
+**Adding a key pointer to the role binding in phase 3 changes the bytes of a delta phases 2 and 4
+already landed.** That contradicts phase 3 criterion 8 and owes a §20 migration. My cheapest-looking
+criterion was the most expensive.
+
+**CONFIRMED.**
+
+### 8.3 The governing rule does not catch behaviour coupling — plan-breaking
+
+`rails-guard-ci` guards only DECLARED RAILS. It never guards source. So a later phase may freely edit
+an earlier phase's source — and that is the hole, because behaviour lives in source while assertions
+live in frozen files.
+
+Concretely: phase 6 ships `POST /login` and rails it. Phase 7 makes the form token mandatory. Phase
+6's rails cannot carry a token phase 7 invented, so they turn red, so phase 7 must edit phase 6's
+frozen rail file. The guard exits 2.
+
+**The rule needs a second clause: a phase must not add a PRECONDITION to a door an earlier phase
+railed.** So phase 6 ships the whole token SURFACE and phase 7 adds only the ENFORCEMENT.
+
+### 8.4 My diagnosis of #282 was factually wrong
+
+Section 1 says "T116 rewrites the limiter's rail file, and T113 declared it". T113 declares seven
+rails and the limiter file is not among them. T116 declares it alone — **because I moved that
+declaration myself the night before.** So section 1 describes a state I created and then changed.
+
+The real mechanism was T116 declaring a rail on a file T113's work had authored, which CLAUDE.md
+forbids: "Declare `rails` when the tests EXIST, never in advance." A rule aimed at same-file overlap
+prevents neither that nor 8.3.
+
+**CONFIRMED** from both ticket shards.
+
+### 8.5 The rest, in short
+
+- **Phase 3 is not buildable at position 3.** Five of its ten criteria need a CLI and a session that
+  phases 4, 5 and 6 deliver. Same reaching-forward in phase 4 (criteria 6, 15) and phase 5 (5, 6).
+- **Phase 3 criterion 6 is self-contradictory.** A trust-set `inView` is re-evaluated per read with no
+  as-of bound, so revoking a role retracts that user's PAST deltas too. "Stops the key going forward
+  and keeps the past" cannot both hold.
+- **Nine promises from the two working specs are dropped.** Two matter: §36 (o), that the limiter keys
+  on the USERNAME and a rotated `X-Forwarded-For` does not reset the count — an IP-keyed limiter passes
+  every phase-9 criterion; and §36 (q), the global cap on unauthenticated scrypt work, which two
+  phase-9 criteria assume and none rails. Also §36 (k), (o5)'s forget-window half, (p); and §37 (s),
+  (t), (u), (c).
+- **Phase 13's pin has no producer.** Codes arrive in phase 14, grants in phase 15. Its criterion 5
+  could be deleted whole with every phase-13 rail still green.
+- **Phase 4 criteria 11 and 13 are jointly unreachable.** One refuses a duplicate grant; the other
+  needs two. The fixture must append the second directly, and the plan must say so.
+- **T120 is orphaned.** It is a live ticket against `readLocks` in phase 9's own file, and the plan
+  never mentions it.
+- **The bookkeeping will not execute.** §7 archives seven tickets that exist only on
+  `origin/t113-users`, so `adlc ticket archive` fails. §7 says twelve tickets for fifteen phases. The
+  estimates sum to 6,400, not 5,900. The finding count is 41 in two places and 35 in another. Phase 7
+  calls phase 6's doors "phase 5's" three times. Phase 2's source column omits `gather.ts`.
+- **How fifteen phases become SPEC sections is unstated.** §36 and §37 are two reserved numbers, and
+  `test/site/capabilities.test.ts` requires every `spec/` file to be claimed by exactly one chapter.
+
+### 8.6 What the review found sound
+
+Both mechanical checks re-verified clean: seventeen rail files, all distinct, none matching any of the
+72 rails across 41 live and 33 archived tickets. Section 2's seven lessons are the strongest part of
+the document. The phase 13/15 pin MONOTONICITY claim is true. Phases 1, 10, 11 and 12 are genuinely
+independently mergeable and valuable.
+
+---
+
+## 9. THE DECISION THIS NOW NEEDS FROM MYK
+
+8.1 and 8.2 together mean per-operator keys need a different mechanism, and choosing it decides
+something about the trust model.
+
+**The mechanism that works** is the EXISTING grant vocabulary. A grant's subject is a primitive
+holding a key, which is what `inView` can extract and what `constitutionalDefect` already validates at
+the append door. So `assign-role` would file TWO deltas: the role binding, and a grant to that user's
+key.
+
+**The question is what a delegated operator may then do.**
+
+- **(a) Only Myk creates operators.** The role READ stays restricted to genesis-operator-authored
+  claims. A second operator can do everything except make a third. Simplest, and no escalation exists
+  to reason about.
+- **(b) A delegated operator may create operators.** The role read admits the trusted set. This is
+  8.1's escalation made deliberate and bounded — it needs the append door to refuse a role claim from
+  outside the set, which is new validation in `constitutionalDefect`.
+- **(c) Split the two.** A role binding is read as (a). A KEY grant is read as today. Then a delegated
+  operator writes as themselves but cannot mint another operator.
+
+**I recommend (a).** It gives you what you asked for — many users holding operator, each writing under
+their own key — and it adds no new validation surface. (b) widens the most dangerous door in the
+system to solve a problem you have not said you have.
