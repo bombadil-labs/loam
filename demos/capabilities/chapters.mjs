@@ -948,13 +948,13 @@ export const CHAPTERS = [
             says: "What was identified is what gets destroyed: a [[slate]]'s set is fixed by content address the moment it is named, and re-pointing it afterwards binds nothing — so the impact list cannot quietly widen between the warning and the deletion.",
             spec: "spec/29-slating-and-graveyards.md",
             proof: "test/gateway/slate.test.ts",
-            door: "Gateway",
+            door: "slateClaims",
           },
           {
             says: "While a [[slate]] stands the set cannot grow: the store declines to hand those facts to a peer, declines new claims that depend on them, and — if you asked for it — declines to serve them at all.",
             spec: "spec/29-slating-and-graveyards.md",
             proof: "test/gateway/slate-doors.test.ts",
-            door: "Gateway",
+            door: "readSlates",
           },
           {
             says: "If forgetting one fact would bring another back to life, you are shown which ones BEFORE the deletion — and a cut that cannot finish leaves the [[slate]] standing rather than half-done, so it can be repaired and resumed.",
