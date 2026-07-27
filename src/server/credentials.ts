@@ -57,7 +57,9 @@ export const credentialsPath = (home: string): string => join(home, "credentials
 
 const HEX = /^[0-9a-f]+$/;
 
-const isPowerOfTwo = (n: number): boolean => Number.isInteger(n) && n >= 2 && (n & (n - 1)) === 0;
+// Bounded above as well as below: the bitwise test coerces to int32, so a huge N would wrap and pass.
+const isPowerOfTwo = (n: number): boolean =>
+  Number.isInteger(n) && n >= 2 && n <= 2 ** 30 && (n & (n - 1)) === 0;
 
 function checkParams(raw: unknown, where: string): ScryptParams {
   if (raw === null || typeof raw !== "object") {

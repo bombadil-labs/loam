@@ -136,7 +136,9 @@ describe("the failed-login limiter", () => {
   it("(o) the lock lifts when its own window passes, and the count starts over", async () => {
     // The FAILURE window stays long so machine load cannot make the two misses drift apart; only
     // the lock is short, and the sleep is twice its length.
-    served = await serveHome(home, { limit: { maxFailures: 2, windowMs: 60_000, lockMs: 100 } });
+    served = await serveHome(home, {
+      limit: { maxFailures: 2, windowMs: 60_000, lockMs: 100, maxTracked: 64 },
+    });
     for (let attempt = 1; attempt <= 2; attempt += 1) await missOnce("myk", attempt);
     expect((await missOnce("myk", 3)).status).toBe(429);
     await new Promise((resolve) => setTimeout(resolve, 250));

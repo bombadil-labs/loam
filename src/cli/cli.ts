@@ -31,7 +31,7 @@ import {
   type ScryptParams,
 } from "../server/credentials.js";
 import { clearLock } from "../server/login-locks.js";
-import { roleClaims, userClaims, userNameDefect, type UserRole } from "../server/users.js";
+import { roleClaims, roleOf, userClaims, userNameDefect, type UserRole } from "../server/users.js";
 import { promptSecret } from "./prompt.js";
 import type { StoreBackend } from "../store/backend.js";
 import { ArchiveBackend } from "../store/archive.js";
@@ -137,8 +137,11 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "Home access IS the proof of operatorship: this command needs the home's seed, like erasure.",
       "The password hash lives in credentials.json (mode 0600) and never enters the ground, because",
       "the ground replicates. The user record and its role binding ARE deltas: facts, erasable,",
-      "provenance-carrying. Erasing a user record shuts the login door; it leaves credentials.json",
-      "alone, and `loam serve`'s health report names that surface as one it does not sweep.",
+      "provenance-carrying.",
+      "",
+      "Erasing a user record shuts the login door and stops new session tokens. A token already",
+      "minted keeps working until its short window ends. Erasure leaves credentials.json and",
+      "login-locks.json alone; the health report names both as surfaces it does not sweep.",
     ],
   },
   repair: {
@@ -444,6 +447,9 @@ async function cmdServe(
           users: {
             home,
             mount: "default",
+            // A local fault the CALLER must never read (it names paths and other users) still has to
+            // reach someone — a report nobody hears is a swallowed error (H9).
+            onFault: (message: string) => io.err(`loam: ${message}`),
             ...(publicUrl === undefined ? {} : { publicUrl }),
           },
         }
@@ -913,7 +919,7 @@ async function cmdUserCreate(
   if (entryFor(existing, name) !== undefined) {
     io.err(
       `user create: ${name} already has a credential in ${home} — this command will not overwrite ` +
-        `one. Remove the entry from ${credentialsPath(home)} to start that user over.`,
+        `one. Remove the entry from ${credentialsPath(home)} to set that user a new password.`,
     );
     return 2;
   }
@@ -931,31 +937,55 @@ async function cmdUserCreate(
   }
   const entry = await hashPassword(password, options.scrypt);
 
-  // THE DELTAS LAND FIRST, and the order is the recovery story. A credential written over a failed
-  // append would open a door onto a user the ground never heard of, and the re-run would refuse
-  // because the credential exists. This way round, a failed write leaves two harmless facts and a
-  // re-run that simply lands them again (content-addressed: the second append is a duplicate).
   const path = storePath(home, parsed.flags.get("store"));
   const seed = readSeed(home);
   const gateway = await Gateway.boot(openStore(path, io), assembleGenesis({ operatorSeed: seed }));
+  let already: UserRole | undefined;
   try {
-    const operator = authorForSeed(seed);
-    const at = Date.now();
-    await gateway.append([
-      signClaims(userClaims(name, operator, at), seed),
-      signClaims(roleClaims(name, role, operator, at), seed),
-    ]);
+    // ASK THE GROUND, not only the credential file. The two halves of a user can come apart — a
+    // credential removed by hand, or a write that failed after the deltas landed — and appending a
+    // SECOND user record for the same name is the shape that outlives an erasure: the operator forgets
+    // one record, `pickLatest` resolves the other, and the door stays open on a user they forgot.
+    // (The append is not idempotent by content address either: these claims carry a fresh timestamp,
+    // so a re-run hashes to a new delta rather than the one already there.)
+    already = roleOf(gateway.reactor, gateway.operator, name);
+    if (already === undefined) {
+      // THE DELTAS LAND FIRST, and the order is the recovery story. A credential written over a failed
+      // append would open a door onto a user the ground never heard of, and a re-run would refuse
+      // because the credential exists. This way round, a failed credential write leaves two harmless
+      // facts, and the re-run above finds them and appends nothing.
+      const operator = authorForSeed(seed);
+      const at = Date.now();
+      await gateway.append([
+        signClaims(userClaims(name, operator, at), seed),
+        signClaims(roleClaims(name, role, operator, at), seed),
+      ]);
+    }
   } catch (err) {
     await gateway.close().catch(() => {}); // never let a close failure mask the real refusal
     throw err;
   }
   await gateway.close();
 
+  if (already !== undefined && already !== role) {
+    // Changing a role is not this command's business, and doing it quietly on the way to writing a
+    // password would be the widest possible side effect of the narrowest possible flag.
+    io.err(
+      `user create: the ground already binds ${name} to the ${already} role, and you asked for ` +
+        `${role} — this command will not change a role. Nothing was written.`,
+    );
+    return 2;
+  }
+
   writeCredentials(home, { version: 1, users: { ...existing.users, [name]: entry } });
   io.out(
-    `loam: created ${name} with the ${role} role\n` +
-      `  the user and its role binding are deltas in ${path}\n` +
-      `  the password hash is local to ${credentialsPath(home)} — it never enters the ground`,
+    already === undefined
+      ? `loam: created ${name} with the ${role} role\n` +
+          `  the user and its role binding are deltas in ${path}\n` +
+          `  the password hash is local to ${credentialsPath(home)} — it never enters the ground`
+      : `loam: set a new password for ${name}, who already holds the ${role} role\n` +
+          `  the ground already knew this user, so nothing was appended\n` +
+          `  the password hash is local to ${credentialsPath(home)} — it never enters the ground`,
   );
   if (role !== "operator") {
     io.out("  a plain actor may sign in; only the operator role mints a session token today");

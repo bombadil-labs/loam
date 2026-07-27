@@ -142,6 +142,60 @@ describe("POST /session/token", () => {
     expect(again.status).toBe(200);
   });
 
+  it("(f) signing out retires the tokens that session minted", async () => {
+    // A logout that answers 200 while the token it issued keeps writing has revoked nothing. The window
+    // is short, but "short" is not "closed", and the caller asked to be signed out.
+    const session = await signIn(served.base);
+    const res = await postDoor(served.base, "/session/token", {
+      cookie: session.cookie,
+      formToken: session.formToken,
+    });
+    const { token } = (await res.json()) as { token: string };
+    expect((await gql(`{ __typename }`, bearer(token))).status).toBe(200);
+
+    const out = await postDoor(served.base, "/logout", {
+      cookie: session.cookie,
+      formToken: session.formToken,
+    });
+    expect(out.status).toBe(200);
+    const dead = await gql(`{ __typename }`, bearer(token));
+    expect(dead.status).toBe(401);
+    expect(await dead.text()).toBe(NO_CREDENTIAL_BODY);
+    // and the write door is shut with it — a read refusal alone would not prove the identity is gone
+    const wrote = await gql(
+      `mutation { plant(entity: "${MOSS}", height: 99) { height } }`,
+      bearer(token),
+    );
+    expect(wrote.status).toBe(401);
+  });
+
+  it("(f) a session may not mint tokens without limit", async () => {
+    const session = await signIn(served.base);
+    await served.close();
+    served = await serveHome(
+      home,
+      { maxTokensPerSession: 2 },
+      { "op-token": { operator: true } },
+      (gateway) => {
+        gateway.register(PLANT, PLANT_POLICY, [MOSS], undefined, PLANT_WRITABLE);
+      },
+    );
+    const live = await signIn(served.base);
+    void session;
+    for (let i = 0; i < 2; i += 1) {
+      const ok = await postDoor(served.base, "/session/token", {
+        cookie: live.cookie,
+        formToken: live.formToken,
+      });
+      expect(ok.status, `mint ${i}`).toBe(200);
+    }
+    const refused = await postDoor(served.base, "/session/token", {
+      cookie: live.cookie,
+      formToken: live.formToken,
+    });
+    expect(refused.status).toBe(429);
+  });
+
   it("(f) a user with no operator role is refused a token, and told why", async () => {
     // A running server answers from the memory it booted with, so a user created behind its back is
     // invisible to it — the store is single-writer, and that staleness is documented, not a bug.

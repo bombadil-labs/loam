@@ -16,7 +16,6 @@
 import {
   chmodSync,
   closeSync,
-  fsyncSync,
   openSync,
   readFileSync,
   renameSync,
@@ -30,12 +29,14 @@ export interface LimitPolicy {
   readonly maxFailures: number; // failures inside the window that engage the lock
   readonly windowMs: number; // how long a failure is remembered
   readonly lockMs: number; // how long the lock holds once engaged
+  readonly maxTracked: number; // live records the file will hold — see noteFailure
 }
 
 export const DEFAULT_LIMIT: LimitPolicy = {
   maxFailures: 5,
   windowMs: 60_000,
   lockMs: 900_000,
+  maxTracked: 4096,
 };
 
 export interface LockRecord {
@@ -83,7 +84,15 @@ export function readLocks(home: string): Map<string, LockRecord> {
   return locks;
 }
 
-/** Replace the file whole: 0600 temp, fsync, rename — the same discipline credentials.json gets. */
+/**
+ * Replace the file whole: 0600 temp, rename, chmod.
+ *
+ * NO FSYNC, and that is the one place this differs from credentials.json. A failed attempt rewrites this
+ * file, so an fsync here would put a disk flush on the shared event loop on a path an unauthenticated
+ * caller can drive — stalling every mount and every live stream to make a durability promise nobody
+ * needs. Losing the last few failure counts to a power cut costs an attacker nothing they did not
+ * already have. The temp-and-rename stays: a HALF-WRITTEN file would read as no locks at all.
+ */
 export function writeLocks(home: string, locks: Map<string, LockRecord>): void {
   const target = locksPath(home);
   const temp = `${target}.${process.pid}-${randomBytes(6).toString("hex")}.tmp`;
@@ -91,7 +100,6 @@ export function writeLocks(home: string, locks: Map<string, LockRecord>): void {
   const fd = openSync(temp, "wx", 0o600);
   try {
     writeSync(fd, body);
-    fsyncSync(fd);
   } finally {
     closeSync(fd);
   }
@@ -111,18 +119,39 @@ export function lockedMs(home: string, name: string, now: number): number {
   return record.lockedUntil > now ? record.lockedUntil - now : 0;
 }
 
+/** Has this record stopped saying anything? Its window has passed and it holds no live lock. */
+const spent = (record: LockRecord, now: number, policy: LimitPolicy): boolean =>
+  now - record.firstFailureAt > policy.windowMs &&
+  (record.lockedUntil === undefined || record.lockedUntil <= now);
+
 /**
- * Record one failed attempt for `name`. A lapsed window and a lapsed lock both START THE COUNT OVER:
- * a lock that expired but left its count behind would re-lock on the very next attempt, which is a
- * permanent lock wearing a timer's clothes.
+ * Record one failed attempt for `name`. Three things happen, and each answers a different failure:
+ *
+ * A lapsed window and a lapsed lock both START THE COUNT OVER — a lock that expired but left its count
+ * behind would re-lock on the very next attempt, which is a permanent lock wearing a timer's clothes.
+ *
+ * SPENT RECORDS ARE PRUNED. A failed attempt is recorded for any well-formed name, existing or not, so
+ * a caller walking names would otherwise add a row per attempt forever, and every later attempt pays to
+ * read and rewrite the whole file.
+ *
+ * And past `maxTracked` LIVE records the file stops growing: the count is dropped rather than recorded.
+ * A caller who can fill it is already being refused by the global hash cap, and a limiter that grows
+ * without bound is a worse outcome than one that stops counting.
  */
 export function noteFailure(home: string, name: string, now: number, policy: LimitPolicy): void {
   const locks = readLocks(home);
   const previous = locks.get(name);
+  for (const [held, record] of locks) {
+    if (held !== name && spent(record, now, policy)) locks.delete(held);
+  }
   const lapsed =
     previous === undefined ||
     now - previous.firstFailureAt > policy.windowMs ||
     (previous.lockedUntil !== undefined && previous.lockedUntil <= now);
+  if (previous === undefined && locks.size >= policy.maxTracked) {
+    writeLocks(home, locks); // the prune above is still worth keeping
+    return;
+  }
   const failures = lapsed ? 1 : previous.failures + 1;
   const firstFailureAt = lapsed ? now : previous.firstFailureAt;
   locks.set(name, {

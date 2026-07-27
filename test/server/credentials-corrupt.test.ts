@@ -116,6 +116,48 @@ describe("a credentials.json the door cannot trust", () => {
     expect((await attempt(PASSWORD)).status).toBe(200);
   });
 
+  it("(s) a damaged NEIGHBOUR refuses myk's login too — the file is the unit, not the entry", async () => {
+    // The rule this pins: a file whose shape is unknown is not a file to authenticate against. Validate
+    // only the entry a login names and every case above still passes, because in each of them the named
+    // entry or the JSON envelope is what is broken.
+    served = await serveHome(home);
+    await served.close();
+    await createUser(home, "wren", "another password", { operator: false });
+    served = await serveHome(home);
+    expect((await attempt(PASSWORD)).status).toBe(200); // both entries sound: myk gets in
+
+    const file2 = JSON.parse(readFileSync(file(), "utf8")) as {
+      version: number;
+      users: Record<string, unknown>;
+    };
+    file2.users["wren"] = { kind: "scrypt", salt: "ab12", hash: "" }; // wren's entry, not myk's
+    writeFileSync(file(), JSON.stringify(file2));
+    const res = await attempt(PASSWORD);
+    expect(res.status).toBe(503);
+    expect(cookieFrom(res)).toBeUndefined();
+  });
+
+  it("(s) the refusal names no path and no other user — a fault is not an oracle", async () => {
+    const faults: string[] = [];
+    served = await serveHome(home, { onFault: (m) => faults.push(m) });
+    await served.close();
+    await createUser(home, "wren", "another password", { operator: false });
+    served = await serveHome(home, { onFault: (m) => faults.push(m) });
+    writeFileSync(
+      file(),
+      '{"version":1,"users":{"wren":{"kind":"scrypt","salt":"ab","hash":"zz"}}}',
+    );
+
+    const body = await (await attempt(PASSWORD)).text();
+    expect(body).toMatch(/credential/i);
+    expect(body).not.toContain(home); // no absolute path
+    expect(body).not.toContain("wren"); // no other user's name
+    expect(body).not.toContain("credentials.json");
+    // the operator DOES get the detail, on their own channel — a fault nobody hears is a swallowed error
+    expect(faults.join("\n")).toContain("credentials.json");
+    expect(faults.join("\n")).toContain("wren");
+  });
+
   it("(s) a file that vanishes refuses rather than admitting everyone", async () => {
     served = await serveHome(home);
     writeFileSync(file(), '{"version":1,"users":{}}');
@@ -151,6 +193,15 @@ describe("writing credentials.json", () => {
       readdirSync(home).filter((n) => n.endsWith(".tmp") && n !== "credentials.json.tmp"),
     ).toEqual([]);
     expect(readdirSync(home)).toContain("credentials.json.tmp");
+  });
+
+  it("(t) writes through a rename, not in place: the inode changes", () => {
+    // The one observable that separates temp-then-rename from a direct write. Without it, replacing the
+    // whole atomic body with `writeFileSync(target, body)` leaves every other rail in this block green —
+    // a comment claiming atomicity over a test that cannot see it.
+    const before = statSync(file()).ino;
+    writeCredentials(home, readCredentials(home));
+    expect(statSync(file()).ino).not.toBe(before);
   });
 
   it("(t) the target is never observed truncated: every write is whole or the old one", () => {

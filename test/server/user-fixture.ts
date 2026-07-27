@@ -18,6 +18,7 @@ import { SqliteBackend } from "../../src/store/sqlite.js";
 import { serve, type ServerHandle, type UserDoorOptions } from "../../src/server/http.js";
 import { run } from "../../src/cli/cli.js";
 import { initHome, readSeed, storePath } from "../../src/cli/config.js";
+import { SESSION_COOKIE } from "../../src/server/session.js";
 
 // scrypt at production cost is ~100ms a call, and one rail spends six of them on purpose. These
 // params keep the suite quick while leaving the ALGORITHM and the comparison exactly as shipped.
@@ -129,7 +130,9 @@ export async function serveHome(
   };
 }
 
-export const SESSION_COOKIE = "loam_session";
+// Imported, never re-typed: a rail that spelled the cookie name itself would go quietly green if the
+// shipped name changed, and the name carries the `__Host-` prefix that host-locks it.
+export { SESSION_COOKIE } from "../../src/server/session.js";
 
 /**
  * The login door's own refusal, pinned. It is deliberately DIFFERENT from the mount-level

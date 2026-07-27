@@ -576,6 +576,9 @@ export const UNSWEPT_SURFACES: readonly string[] = [
   "credentials.json in the loam home (SPEC §36) — per-user login credentials. They are never " +
     "deltas, so no tombstone reaches them and this report promises nothing about them. Removing a " +
     "user's credential entry is a separate operator action.",
+  "login-locks.json in the loam home (SPEC §36) — per-user failed-login counts, keyed by user " +
+    "name. Also never deltas, so also unreachable from here. `loam user unlock <name>` clears one " +
+    "entry; nothing in an erasure does.",
 ];
 
 export interface ErasureHealth {

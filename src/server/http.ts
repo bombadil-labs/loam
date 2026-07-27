@@ -359,20 +359,34 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     throw new Error("loam serve: no tokens configured — an unlockable door is a wall");
   }
 
-  // Session-minted bearer tokens (SPEC §36): short-lived, held by digest, and swept as they lapse.
-  // They are how a BROWSER writes — a session cookie never opens a door below, so the browser asks
-  // /session/token and then presents a header like any other client. Minting one requires an already
-  // authenticated session, so this list is bounded by the session table, not by the network.
-  const sessionTokens: { digest: Buffer; identity: TokenIdentity; expiresAt: number }[] = [];
+  // Session-minted bearer tokens (SPEC §36): short-lived, held by DIGEST, swept as they lapse, and
+  // retired early when the session that bought them signs out. They are how a BROWSER writes — a
+  // session cookie never opens a door below, so the browser asks /session/token and then presents a
+  // header like any other client.
+  //
+  // Keyed by digest hex rather than scanned with timingSafeEqual, so a request pays one map lookup
+  // however many tokens are live. That is safe because the key is a SHA-256 OF the secret: timing on a
+  // digest lookup tells an attacker nothing they could not compute, and it would take a preimage to
+  // use. The static table above keeps its scan — it is a handful of entries the operator configured.
+  //
+  // Bounded by mint rate multiplied by the token window, which is why session.ts caps tokens per
+  // session; the session table alone does not bound it.
+  const sessionTokens = new Map<string, { identity: TokenIdentity; expiresAt: number }>();
   const clock = options.users?.monotonicNow ?? ((): number => performance.now());
+  const sweepTokens = (moment: number): void => {
+    for (const [key, minted] of sessionTokens) {
+      if (minted.expiresAt <= moment) sessionTokens.delete(key);
+    }
+  };
   const mintSessionToken = (identity: TokenIdentity, ttlMs: number): string => {
     const secret = randomBytes(32).toString("base64url");
     const moment = clock();
-    for (let i = sessionTokens.length - 1; i >= 0; i -= 1) {
-      if (sessionTokens[i]!.expiresAt <= moment) sessionTokens.splice(i, 1);
-    }
-    sessionTokens.push({ digest: sha(secret), identity, expiresAt: moment + ttlMs });
+    sweepTokens(moment);
+    sessionTokens.set(sha(secret).toString("hex"), { identity, expiresAt: moment + ttlMs });
     return secret;
+  };
+  const revokeSessionTokens = (secrets: readonly string[]): void => {
+    for (const secret of secrets) sessionTokens.delete(sha(secret).toString("hex"));
   };
 
   // The identity a presented token names, compared timing-safely; undefined = refuse. A cookie is
@@ -384,17 +398,14 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     for (const [expected, identity] of tokenEntries) {
       if (timingSafeEqual(presented, expected)) return identity;
     }
-    const moment = clock();
-    let found: TokenIdentity | undefined;
-    for (let i = sessionTokens.length - 1; i >= 0; i -= 1) {
-      const minted = sessionTokens[i]!;
-      if (minted.expiresAt <= moment) {
-        sessionTokens.splice(i, 1);
-        continue;
-      }
-      if (timingSafeEqual(presented, minted.digest)) found = minted.identity;
+    if (sessionTokens.size === 0) return undefined;
+    const minted = sessionTokens.get(presented.toString("hex"));
+    if (minted === undefined) return undefined;
+    if (minted.expiresAt <= clock()) {
+      sessionTokens.delete(presented.toString("hex"));
+      return undefined;
     }
-    return found;
+    return minted.identity;
   };
 
   const contextFor = (identity: TokenIdentity): RequestContext | undefined =>
@@ -1220,6 +1231,20 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
 
   if (options.users !== undefined) {
     const forUsers = options.users;
+    // ONE MOUNT, or no login doors. `/session/token` mints `{ operator: true }`, which is authority over
+    // this whole SERVER — every mount it hosts, now or later. The role binding that earns it is read
+    // from ONE mount's ground, so a second world would be handed authority nobody in it granted. There
+    // is no way to say "operator of this mount" today, so this refuses rather than quietly widening.
+    const hosted = Object.keys(options.mounts);
+    if (hosted.length !== 1 || hosted[0] !== forUsers.mount) {
+      throw new Error(
+        `loam serve: the login doors mint an operator identity for the whole server, so they need a ` +
+          `single mount that is the one they read users from — this server hosts ` +
+          `[${hosted.join(", ")}] and the doors name "${forUsers.mount}". A session token cannot be ` +
+          `scoped to one mount yet, so opening them here would grant authority over worlds no role ` +
+          `binding named.`,
+      );
+    }
     userDoors = makeUserDoors({
       options: forUsers,
       // Named, or the bound address — which is right for a loopback store and wrong the moment a
@@ -1234,6 +1259,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           : { reactor: gateway.reactor, operator: gateway.operator };
       },
       mint: mintSessionToken,
+      revoke: revokeSessionTokens,
     });
   }
 
@@ -1242,6 +1268,16 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     port,
     url,
     addMount(name: string, gateway: Gateway): void {
+      // A session token is authority over the whole server, and the role binding that earned it was read
+      // from one world. Adding a second world while the login doors are open would extend that authority
+      // to a mount no role binding named — the same reason boot refuses more than one.
+      if (userDoors !== undefined) {
+        throw new Error(
+          `loam serve: this server has the login doors open, and a session token is server-wide ` +
+            `authority — mounting "${name}" would extend it to a world no role binding named. Take the ` +
+            `login doors down, or run that world on its own server.`,
+        );
+      }
       mounts.add(name, gateway);
     },
     async removeMount(name: string): Promise<boolean> {

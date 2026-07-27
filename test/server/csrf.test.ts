@@ -59,6 +59,13 @@ const CROSS_SITE: readonly (readonly [string, PostOptions])[] = [
     "an Origin that is not the configured public URL",
     { secFetchSite: null, origin: "https://attacker.example" },
   ],
+  // The shape that pins the PRECEDENCE. A caller writes both headers, so a foreign Origin has to be
+  // refused even while Sec-Fetch-Site claims same-origin — otherwise the two checks could be reordered
+  // to let the weaker one answer first, and every other case here would stay green.
+  [
+    "a foreign Origin alongside Sec-Fetch-Site: same-origin",
+    { secFetchSite: "same-origin", origin: "https://attacker.example" },
+  ],
 ];
 
 describe("POST /login refuses a cross-site shape", () => {
@@ -112,15 +119,22 @@ describe("POST /login refuses a cross-site shape", () => {
     }
   });
 
-  it("(i) one session's form token does not open another session's door", async () => {
-    const mine = await signIn(served.base);
-    const other = await beginLogin(served.base);
+  it("(i) one session's form token does not open another SIGNED-IN session's door", async () => {
+    // Both sessions are AUTHENTICATED on purpose. Pairing a signed-in token with a pre-session cookie
+    // would be refused for want of a session, before the token was ever compared — so the rail would
+    // pass even if every session shared one process-wide form token.
+    const mine = await signIn(served.base, "myk", PASSWORD);
+    const theirs = await signIn(served.base, "myk", PASSWORD);
+    expect(theirs.formToken).not.toBe(mine.formToken);
+
     const res = await postDoor(served.base, "/session/token", {
-      cookie: other.cookie,
+      cookie: theirs.cookie,
       formToken: mine.formToken,
     });
-    expect(res.status).not.toBe(200);
-    expect(await stillOpen(mine.cookie)).toBe(true); // mine is untouched
+    expect(res.status).toBe(403);
+    // and each session still opens its OWN door
+    expect(await stillOpen(theirs.cookie)).toBe(true);
+    expect(await stillOpen(mine.cookie)).toBe(true);
   });
 });
 
@@ -164,5 +178,38 @@ describe("POST /logout and POST /session/token refuse a cross-site shape", () =>
       headers: { "sec-fetch-site": "cross-site" },
     });
     expect(res.status).toBe(200);
+  });
+});
+
+// With NO --public-url the store's own address is the one it bound, and a browser typed at
+// `http://localhost:<port>` sends that spelling of it. An exact compare against `127.0.0.1` would
+// refuse the operator's own form on the commonest path there is, so the loopback spellings on the same
+// port count as this store — and nothing else does.
+describe("the default public URL knows its own loopback spellings", () => {
+  it("(h) accepts localhost and 127.0.0.1 on the bound port, and no other host", async () => {
+    await served.close();
+    served = await serveHome(home); // no publicUrl: it defaults to the bound http://127.0.0.1:<port>
+    const port = new URL(served.base).port;
+    for (const origin of [`http://127.0.0.1:${port}`, `http://localhost:${port}`]) {
+      const begun = await beginLogin(served.base);
+      const res = await postLogin(served.base, "myk", PASSWORD, {
+        secFetchSite: null,
+        origin,
+        cookie: begun.cookie,
+        formToken: begun.formToken,
+      });
+      expect(res.status, origin).toBe(200);
+    }
+    // a different PORT on loopback is a different store, and a foreign host is a foreign host
+    for (const origin of [`http://127.0.0.1:${Number(port) + 1}`, "http://evil.example"]) {
+      const begun = await beginLogin(served.base);
+      const res = await postLogin(served.base, "myk", PASSWORD, {
+        secFetchSite: null,
+        origin,
+        cookie: begun.cookie,
+        formToken: begun.formToken,
+      });
+      expect(res.status, origin).toBe(403);
+    }
   });
 });

@@ -20,8 +20,8 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { type IncomingMessage, type ServerResponse } from "node:http";
 import { type Reactor } from "@bombadil/rhizomatic";
 import {
-  CredentialsUnreadable,
   DEFAULT_SCRYPT,
+  credentialsPath,
   entryFor,
   readCredentials,
   spendDecoyHash,
@@ -49,13 +49,21 @@ export interface UserDoorOptions {
    */
   readonly publicUrl?: string;
   readonly idleMs?: number; // session idle window (default 30 minutes)
+  readonly preSessionMs?: number; // a not-yet-signed-in session's window (default 5 minutes)
   readonly tokenTtlMs?: number; // /session/token lifetime (default 5 minutes)
   readonly maxSessions?: number; // live sessions, pre-login ones included (default 4096)
+  readonly maxTokensPerSession?: number; // live tokens one session may hold (default 16)
   readonly maxConcurrentHashes?: number; // unauthenticated scrypt work in flight (default 4)
   readonly scrypt?: ScryptParams;
   readonly limit?: LimitPolicy;
   /** A monotonic millisecond source. Injectable so a rail can drive it; never Date.now(). */
   readonly monotonicNow?: () => number;
+  /**
+   * Where a local fault goes — a credentials.json this door cannot read, an unparseable public URL.
+   * The CALLER never sees the detail (it names paths and other users), and a fault nobody is told
+   * about is a swallowed error, so the two have to be different channels.
+   */
+  readonly onFault?: (message: string) => void;
 }
 
 export interface UserDoorDeps {
@@ -66,6 +74,8 @@ export interface UserDoorDeps {
   ground(): { reactor: Reactor; operator: string | undefined } | undefined;
   /** Mint a short-lived bearer token for an identity the caller has already authorized. */
   mint(identity: { actor?: string; operator?: true }, ttlMs: number): string;
+  /** Retire minted tokens before their window ends — what signing out has to be able to do. */
+  revoke(tokens: readonly string[]): void;
 }
 
 export interface UserDoors {
@@ -73,7 +83,11 @@ export interface UserDoors {
   handle(pathname: string, req: IncomingMessage, res: ServerResponse): Promise<void>;
 }
 
-export const SESSION_COOKIE = "loam_session";
+// The `__Host-` prefix is load-bearing, not decoration: a browser refuses to store such a cookie
+// unless it is Secure, `Path=/`, and carries NO Domain, which makes it HOST-LOCKED by construction.
+// Without it a sibling subdomain can set a `Domain=example.com` cookie of the same name, and the
+// browser sends both — so the store would be reading a cookie a neighbour wrote.
+export const SESSION_COOKIE = "__Host-loam_session";
 
 // Pinned, and pinned as ONE STRING: every attribute here is a decision, and computing any of them
 // from a request header is how a caller's own Host ends up scoping the operator's cookie.
@@ -91,8 +105,13 @@ const MAX_BODY = 8 * 1024; // a login form is a few hundred bytes; nothing here 
 
 const DEFAULTS = {
   idleMs: 30 * 60_000,
+  // A PRE-SESSION only has to live long enough to type a password, and it costs an unauthenticated GET
+  // to make one. Giving it the full idle window is what turns `GET /login` into a way to fill the
+  // table and take the login door down for half an hour.
+  preSessionMs: 5 * 60_000,
   tokenTtlMs: 5 * 60_000,
   maxSessions: 4096,
+  maxTokensPerSession: 16,
   maxConcurrentHashes: 4,
 };
 
@@ -102,6 +121,8 @@ interface Session {
   role?: UserRole;
   formToken: string;
   expiresAt: number;
+  /** When it was opened — the eviction order when the table is full of pre-sessions. */
+  readonly openedAt: number;
 }
 
 const opaque = (): string => randomBytes(32).toString("base64url");
@@ -112,18 +133,24 @@ const sameSecret = (a: string, b: string): boolean => {
   return left.length === right.length && left.length > 0 && timingSafeEqual(left, right);
 };
 
-/** The session id a Cookie header carries, or undefined. Never trusts a value's shape. */
+/**
+ * The session id a Cookie header carries, or undefined. Never trusts a value's shape.
+ *
+ * TWO cookies of the same name is not a session, it is an AMBIGUITY, and picking either one is picking
+ * whichever an injector managed to place first. So it refuses.
+ */
 export function sessionIdFrom(req: IncomingMessage): string | undefined {
   const header = req.headers.cookie;
   if (header === undefined) return undefined;
+  const values: string[] = [];
   for (const pair of header.split(";")) {
     const eq = pair.indexOf("=");
     if (eq < 0) continue;
     if (pair.slice(0, eq).trim() !== SESSION_COOKIE) continue;
-    const value = pair.slice(eq + 1).trim();
-    return value === "" ? undefined : value;
+    values.push(pair.slice(eq + 1).trim());
   }
-  return undefined;
+  if (values.length !== 1 || values[0] === "") return undefined;
+  return values[0];
 }
 
 const escapeHtml = (raw: string): string =>
@@ -175,26 +202,72 @@ function fields(body: string | undefined, contentType: string | undefined): Map<
 export function makeUserDoors(deps: UserDoorDeps): UserDoors {
   const options = deps.options;
   const idleMs = options.idleMs ?? DEFAULTS.idleMs;
+  // A pre-session never outlives an authenticated one, whatever the operator configured.
+  const preSessionMs = Math.min(options.preSessionMs ?? DEFAULTS.preSessionMs, idleMs);
   const tokenTtlMs = options.tokenTtlMs ?? DEFAULTS.tokenTtlMs;
   const maxSessions = options.maxSessions ?? DEFAULTS.maxSessions;
-  const maxHashes = options.maxConcurrentHashes ?? DEFAULTS.maxConcurrentHashes;
+  const maxTokensPerSession = options.maxTokensPerSession ?? DEFAULTS.maxTokensPerSession;
   const scryptParams = options.scrypt ?? DEFAULT_SCRYPT;
   const limit = options.limit ?? DEFAULT_LIMIT;
   const now = options.monotonicNow ?? ((): number => performance.now());
-  const publicOrigin = ((): string | undefined => {
+  const onFault = options.onFault ?? ((message: string): void => void message);
+
+  /**
+   * The origins this store answers its own forms from. Exactly the configured one — EXCEPT when that
+   * one is loopback, where the equivalent spellings on the same port are the same store: a browser at
+   * `http://localhost:4321` sends `Origin: http://localhost:4321`, and a default of `127.0.0.1` would
+   * refuse the operator's own form. The widening is bounded to loopback literals on the SAME PORT, so
+   * it can never admit a foreign host.
+   */
+  const ownOrigins = ((): ReadonlySet<string> => {
+    let url: URL;
     try {
-      return new URL(deps.publicUrl).origin;
+      url = new URL(deps.publicUrl);
     } catch {
-      return undefined;
+      // An unparseable public URL means no origin can be recognised, so every Origin-bearing POST is
+      // refused. Failing closed is right, and it is loud enough to find.
+      onFault(
+        `the login doors cannot parse the public URL "${deps.publicUrl}", so every POST refuses`,
+      );
+      return new Set();
     }
+    const loopback = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
+    if (!loopback.has(url.hostname) && !loopback.has(url.host.replace(/:\d+$/, ""))) {
+      return new Set([url.origin]);
+    }
+    const port = url.port === "" ? "" : `:${url.port}`;
+    return new Set([
+      url.origin,
+      `${url.protocol}//127.0.0.1${port}`,
+      `${url.protocol}//localhost${port}`,
+      `${url.protocol}//[::1]${port}`,
+    ]);
   })();
 
   const sessions = new Map<string, Session>();
+  /** Tokens minted per session, so signing out revokes what signing in bought. */
+  const minted = new Map<string, string[]>();
   let hashesInFlight = 0;
+  let decoyInFlight = 0;
+  // Decoy hashing — the unknown-username path — gets half the budget, and at least one slot so the
+  // no-timing-oracle property survives a cap of one. A cap of zero stays zero: no hashing at all.
+  const maxHashes = options.maxConcurrentHashes ?? DEFAULTS.maxConcurrentHashes;
+  const decoyHashes = maxHashes === 0 ? 0 : Math.max(1, Math.floor(maxHashes / 2));
 
   const sweep = (): void => {
     const moment = now();
-    for (const [id, session] of sessions) if (session.expiresAt <= moment) sessions.delete(id);
+    for (const [id, session] of sessions) if (session.expiresAt <= moment) drop(id);
+  };
+
+  // Closing a session revokes the bearer tokens it minted. Without this, "sign out" answers 200 having
+  // revoked nothing it issued, and the token keeps writing for the rest of its window.
+  const drop = (id: string): void => {
+    sessions.delete(id);
+    const tokens = minted.get(id);
+    if (tokens !== undefined) {
+      minted.delete(id);
+      deps.revoke(tokens);
+    }
   };
 
   // The presented session, if it is live. Touching it slides the idle window forward — which is the
@@ -206,22 +279,35 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
     if (session === undefined) return undefined;
     const moment = now();
     if (session.expiresAt <= moment) {
-      sessions.delete(id);
+      drop(id);
       return undefined;
     }
-    session.expiresAt = moment + idleMs;
+    session.expiresAt = moment + (session.user === undefined ? preSessionMs : idleMs);
     return { id, session };
   };
 
   const open = (user?: string, role?: UserRole): { id: string; session: Session } | undefined => {
+    sweep(); // every open, not only a full table: a lapsed session is not something to hold on to
     if (sessions.size >= maxSessions) {
-      sweep();
-      if (sessions.size >= maxSessions) return undefined;
+      // Evict the OLDEST PRE-SESSION rather than refusing. A pre-session is unauthenticated and free to
+      // make, so refusing here would let anyone close the login door for everyone; evicting means the
+      // flood can only displace its own kind, and never an authenticated session.
+      let oldest: { id: string; openedAt: number } | undefined;
+      for (const [id, session] of sessions) {
+        if (session.user !== undefined) continue;
+        if (oldest === undefined || session.openedAt < oldest.openedAt) {
+          oldest = { id, openedAt: session.openedAt };
+        }
+      }
+      if (oldest === undefined) return undefined; // every seat holds a signed-in user: genuinely full
+      drop(oldest.id);
     }
     const id = opaque();
+    const moment = now();
     const session: Session = {
       formToken: opaque(),
-      expiresAt: now() + idleMs,
+      openedAt: moment,
+      expiresAt: moment + (user === undefined ? preSessionMs : idleMs),
       ...(user === undefined ? {} : { user }),
       ...(role === undefined ? {} : { role }),
     };
@@ -332,14 +418,15 @@ data doors on its own.</p>`,
     );
 
   /**
-   * Did this POST come from this store's own page? `Origin`, when present, must BE the configured
-   * public origin — a foreign Origin is refused even when Sec-Fetch-Site says same-origin, because a
-   * caller writes both. With no Origin at all, the browser's own Sec-Fetch-Site must say same-origin.
+   * Did this POST come from this store's own page? `Origin`, when present, must be one of this store's
+   * own — and it OUTRANKS `Sec-Fetch-Site`, because a non-browser caller writes both and the one that
+   * names a specific foreign page is the one to believe. With no Origin at all, the browser's own
+   * Sec-Fetch-Site must say same-origin.
    */
   const fromThisPage = (req: IncomingMessage): boolean => {
     const origin = req.headers.origin;
     if (typeof origin === "string" && origin !== "" && origin !== "null") {
-      return publicOrigin !== undefined && origin === publicOrigin;
+      return ownOrigins.has(origin);
     }
     return req.headers["sec-fetch-site"] === "same-origin";
   };
@@ -369,14 +456,24 @@ data doors on its own.</p>`,
   };
 
   const getLogin = (req: IncomingMessage, res: ServerResponse): void => {
-    const held = touch(req);
+    let held = touch(req);
     if (held?.session.user !== undefined) {
-      html(
-        res,
-        200,
-        signedInPage(held.session.user, held.session.role ?? "actor", held.session.formToken),
-      );
-      return;
+      // Re-read the role from the ground rather than printing the session's copy. A role revoked, or a
+      // user erased, after signing in must not leave this store's own page telling the caller they
+      // still hold it — and dropping the session revokes the tokens it minted. Cheap here: this is a
+      // page load, not a request path.
+      const ground = deps.ground();
+      const role =
+        ground === undefined
+          ? undefined
+          : roleOf(ground.reactor, ground.operator, held.session.user);
+      if (role !== undefined) {
+        held.session.role = role;
+        html(res, 200, signedInPage(held.session.user, role, held.session.formToken));
+        return;
+      }
+      drop(held.id);
+      held = undefined; // fall through to the form, on a new pre-session
     }
     if (held !== undefined) {
       html(res, 200, loginPage(held.session.formToken)); // an existing pre-session keeps its token
@@ -400,6 +497,15 @@ data doors on its own.</p>`,
       refuseLogin(res);
       return;
     }
+    // THE BUDGET COMES BEFORE THE LOCK FILE, and the order is the point: the lock check is a file read,
+    // so consulting it first would let a flood spend the box's disk before anything capped it. A refusal
+    // here is not a failed attempt, so it never fills the limiter either.
+    if (hashesInFlight >= maxHashes) {
+      json(res, 503, {
+        errors: ["the login door is busy: too much unauthenticated work is already in flight"],
+      });
+      return;
+    }
     const lockRemains = lockedMs(options.home, user, Date.now());
     if (lockRemains > 0) {
       res.writeHead(429, {
@@ -410,10 +516,29 @@ data doors on its own.</p>`,
       res.end(JSON.stringify({ errors: ["too many failed attempts: this login is locked"] }));
       return;
     }
-    // The budget, checked BEFORE any hashing: scrypt is expensive on purpose, and an unauthenticated
-    // caller must not be able to spend the box's CPU by asking. A refusal here is not a failed
-    // attempt, so it never fills the limiter either.
-    if (hashesInFlight >= maxHashes) {
+    let credentials;
+    try {
+      credentials = readCredentials(options.home);
+    } catch (err) {
+      // The door could not DECIDE. That is never a match. The DETAIL names the home's path and the
+      // other entries in it, so it goes to the operator's own channel and never to the caller.
+      onFault(
+        `the login door cannot read ${credentialsPath(options.home)}: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+      json(res, 503, {
+        errors: ["the login door cannot read its credentials, so it refuses every login"],
+      });
+      return;
+    }
+    const entry = entryFor(credentials, user);
+    // A NAME NOBODY HOLDS still costs a hash, so a miss and an unknown user take the same time. That
+    // makes the decoy path a lever an unauthenticated caller can pull with an endless supply of fresh
+    // names, which the username-keyed limiter cannot slow. So decoy hashing gets its OWN, smaller share
+    // of the budget: a name-rotating flood can occupy at most that share, and a real login keeps
+    // headroom. Login stays deliberately degradable under load; the operator's own bearer token does not
+    // pass through here at all.
+    if (entry === undefined && decoyInFlight >= decoyHashes) {
       json(res, 503, {
         errors: ["the login door is busy: too much unauthenticated work is already in flight"],
       });
@@ -421,20 +546,24 @@ data doors on its own.</p>`,
     }
     let matched: boolean;
     hashesInFlight += 1;
+    if (entry === undefined) decoyInFlight += 1;
     try {
-      const entry = entryFor(readCredentials(options.home), user);
       matched =
         entry === undefined
-          ? await spendDecoyHash(password, scryptParams) // same cost as a miss: no timing oracle
+          ? await spendDecoyHash(password, scryptParams)
           : await verifyPassword(entry, password);
     } catch (err) {
-      // The door could not DECIDE. That is never a match, and it is the operator's fault to see.
-      const why =
-        err instanceof CredentialsUnreadable ? err.message : "the credential store failed";
-      json(res, 503, { errors: [`the login door cannot read its credentials: ${why}`] });
+      onFault(
+        `the login door could not verify a credential: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+      json(res, 503, {
+        errors: ["the login door cannot read its credentials, so it refuses every login"],
+      });
       return;
     } finally {
       hashesInFlight -= 1;
+      if (entry === undefined) decoyInFlight -= 1;
     }
     if (!matched) {
       noteFailure(options.home, user, Date.now(), limit);
@@ -455,7 +584,7 @@ data doors on its own.</p>`,
     }
     // A NEW id, and the presented one dies: a session must never survive its own authentication
     // (session fixation — an attacker who plants a pre-session id would otherwise hold a live one).
-    sessions.delete(guard.id);
+    drop(guard.id);
     const opened = open(user, role);
     if (opened === undefined) {
       json(res, 503, { errors: ["this store is holding all the login sessions it can"] });
@@ -468,7 +597,9 @@ data doors on its own.</p>`,
   const postLogout = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const guard = await guarded(req, res, false);
     if (guard === undefined) return;
-    sessions.delete(guard.id);
+    // `drop`, never a bare delete: signing out has to revoke the bearer tokens this session minted, or
+    // it answers 200 having retired nothing it issued.
+    drop(guard.id);
     html(res, 200, signedOutPage(), clearCookie());
   };
 
@@ -485,7 +616,8 @@ data doors on its own.</p>`,
     // after sign-in must stop minting tokens on the next ask, not on the next restart.
     const role = roleOf(ground.reactor, ground.operator, user);
     if (role === undefined) {
-      sessions.delete(guard.id);
+      // The ground has forgotten this user, so the session goes — and with it every token it minted.
+      drop(guard.id);
       json(res, 401, { errors: ["this store no longer holds a record of that user"] });
       return;
     }
@@ -498,10 +630,26 @@ data doors on its own.</p>`,
       });
       return;
     }
+    // One session may not mint without limit: every live token is one more entry the token table holds
+    // and one more comparison every request pays for.
+    const held = minted.get(guard.id) ?? [];
+    if (held.length >= maxTokensPerSession) {
+      json(res, 429, {
+        errors: [
+          `this session already holds ${held.length} live tokens — sign out, or wait for one to lapse`,
+        ],
+      });
+      return;
+    }
     // A user is not a seed (§36). The operator ROLE is what entitles this session to the operator's
     // signing identity, so the token names that identity and the store signs as it does for the
     // operator's own bearer token. No new authority is created here.
+    //
+    // WHAT THIS TOKEN IS, exactly: the operator's authority on this server, for `tokenTtlMs`. Signing
+    // out retires it early (see `drop`); nothing else does. So revoking the user's role closes the door
+    // to NEW tokens at once, and an already-minted one lives out its window.
     const token = deps.mint({ operator: true }, tokenTtlMs);
+    minted.set(guard.id, [...held, token]);
     json(res, 200, { token, expiresIn: Math.floor(tokenTtlMs / 1000), user, role });
   };
 

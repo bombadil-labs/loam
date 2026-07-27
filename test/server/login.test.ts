@@ -197,6 +197,25 @@ describe("a session's lifetime", () => {
     }
   });
 
+  it("(m) the SHIPPED clock is monotonic too, with no clock injected at all", async () => {
+    // The rail above drives an injected clock, which proves the expiry LOGIC and says nothing about the
+    // default. This one injects nothing: it lets the real monotonic source run, then moves Date.now()
+    // a day into the past. Only `Date` is faked — faking `performance` would freeze the very clock
+    // under test. An implementation reading Date.now() revives the session here and fails.
+    served = await serveHome(home, { idleMs: 1000 });
+    const session = await signIn(served.base);
+    expect(await stillOpen(served.base, session.cookie)).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(Date.now() - 24 * 3600 * 1000));
+      expect(await stillOpen(served.base, session.cookie)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("(m) activity inside the window keeps the session alive", async () => {
     let ticks = 0;
     served = await serveHome(home, { idleMs: 1000, monotonicNow: () => ticks });

@@ -148,6 +148,21 @@ export function governedGatherBody(operator: string): Term {
   return entityGatherBody({ mask: { trust: lawfulStrikersJson(operator, false) } });
 }
 
+// The same governed gather, narrowed to the OPERATOR'S OWN ASSERTIONS — for a fact that is only true
+// because the operator said it. The mask above answers "whose strikes bind"; this answers the other
+// question, "whose claims count", and the two are independent. Leave one open and a resolution that
+// picks the latest claim hands the field to any author with write standing: the operator says a user
+// holds `actor`, a stranger says `operator` a second later, and the later claim wins.
+//
+// Use it for a constitutional fact filed at an ordinary entity — one that has no `grant` or
+// `membership` shape for `constitutionalDefect` to recognise, so nothing refuses it at the door.
+export function operatorGatherBody(operator: string): Term {
+  return entityGatherBody({
+    mask: { trust: lawfulStrikersJson(operator, false) },
+    authoredBy: operator,
+  });
+}
+
 // Is `id` struck AS DATA — the question a governed READER answers, which is not the question
 // `lawfulNegated` answers. That one counts a negation only from the OPERATOR: right for LAW (a
 // grantee's strike must not retire the operator's schema) and wrong for data, where the governed

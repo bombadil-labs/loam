@@ -10,15 +10,19 @@
 // It does not, by design (§36 "Deferred, named"), and users-erasure-honesty.test.ts pins the
 // report that says so.
 
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { authorForSeed, canonicalHex } from "@bombadil/rhizomatic";
+import { authorForSeed, canonicalHex, signClaims } from "@bombadil/rhizomatic";
 import { readSeed, storePath } from "../../src/cli/config.js";
+import { grantClaims } from "../../src/gateway/accounts.js";
+import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import {
   CTX_ROLE,
   CTX_USER,
   resolveUserView,
+  roleClaims,
+  roleOf,
   userEntity,
   userNameDefect,
 } from "../../src/server/users.js";
@@ -38,6 +42,10 @@ import {
 } from "./user-fixture.js";
 
 vi.setConfig({ testTimeout: 20000 });
+
+// An author the operator grants ordinary write standing — everything an app author has, and nothing more.
+const STRANGER_SEED = "57".repeat(32);
+const STRANGER = authorForSeed(STRANGER_SEED);
 
 let home: string;
 beforeEach(async () => {
@@ -120,6 +128,48 @@ describe("loam user create — the bootstrap door", () => {
     expect(readFileSync(join(home, "credentials.json"), "utf8")).toBe(firstEntry);
   });
 
+  it("(b) a create after the credential is removed appends NOTHING — one user, one record", async () => {
+    // The dangerous shape this closes: a second user-record pair for the same name. The operator then
+    // erases one record, `pickLatest` resolves the other, and the login door stays open on a user they
+    // ordered forgotten — while the erasure report says it settled. The claims carry a fresh timestamp,
+    // so a re-append is NOT the same delta by content address; only asking the ground prevents it.
+    expect((await createUser(home, "myk", PASSWORD)).code).toBe(0);
+    const before = await storeDeltas(home);
+
+    // the credential file is where this command's own guard lives, so take the guard away
+    writeFileSync(join(home, "credentials.json"), JSON.stringify({ version: 1, users: {} }));
+    const again = await createUser(home, "myk", "a brand new password");
+    expect(again.code, again.io.err.join("\n")).toBe(0);
+    expect(again.io.out.join("\n")).toMatch(/nothing was appended/);
+
+    // the ground did not grow, and the new password is the one that works
+    expect((await storeDeltas(home)).length).toBe(before.length);
+    const gateway = await Gateway.boot(
+      new SqliteBackend(storePath(home)),
+      assembleGenesis({ operatorSeed: readSeed(home) }),
+    );
+    try {
+      const view = resolveUserView(gateway.reactor, gateway.operator, "myk") as Record<
+        string,
+        unknown
+      >;
+      expect(view[CTX_ROLE]).toBe("operator");
+    } finally {
+      await gateway.close();
+    }
+  });
+
+  it("(b) a create that asks for a different role than the ground holds refuses", async () => {
+    expect((await createUser(home, "wren", PASSWORD, { operator: false })).code).toBe(0);
+    const before = await storeDeltas(home);
+    writeFileSync(join(home, "credentials.json"), JSON.stringify({ version: 1, users: {} }));
+
+    const escalate = await createUser(home, "wren", PASSWORD); // --operator, over an actor
+    expect(escalate.code).toBe(2);
+    expect(escalate.io.err.join("\n")).toMatch(/will not change a role/);
+    expect((await storeDeltas(home)).length).toBe(before.length);
+  });
+
   it("(b) refuses when the two password prompts disagree, and writes nothing at all", async () => {
     const before = await storeDeltas(home);
     const result = await createUser(home, "myk", PASSWORD, { confirm: "typo" });
@@ -170,6 +220,63 @@ describe("loam user create — the bootstrap door", () => {
       expect(view[CTX_ROLE]).toBe("operator");
       // a name nobody created resolves to no user at all — absence is absence, not a default
       expect(resolveUserView(gateway.reactor, gateway.operator, "nobody")).toBeUndefined();
+    } finally {
+      await gateway.close();
+    }
+  });
+});
+
+// A ROLE BINDING IS ONLY THE OPERATOR'S WORD. It is filed at an ordinary entity in an ordinary
+// context, so it has no grant shape for the constitutional gate to recognise and nothing refuses it at
+// the append door: any author holding ordinary write standing may sign one. If the reading counted every
+// author and picked the latest claim, that author could name themselves — or anyone — an operator.
+//
+// Two-sided, because one side alone cannot see this: the forged claim must not bind, AND the operator's
+// own binding must still resolve. A reading that returned undefined for everyone would pass half of it.
+describe("who may say what role a user holds", () => {
+  it("counts only the operator's claim, and a write-grantee's later claim binds nothing", async () => {
+    await createUser(home, "wren", "a password", { operator: false });
+    const seed = readSeed(home);
+    const operator = authorForSeed(seed);
+    const gateway = await Gateway.boot(
+      new SqliteBackend(storePath(home)),
+      assembleGenesis({ operatorSeed: seed }),
+    );
+    try {
+      expect(roleOf(gateway.reactor, operator, "wren")).toBe("actor");
+
+      // a stranger with ordinary write standing — the grant is the operator's, the forgery is not
+      await gateway.append([
+        signClaims(grantClaims(STORE_ENTITY, STRANGER, "write", operator, 9101), seed),
+      ]);
+      const forged = signClaims(
+        roleClaims("wren", "operator", STRANGER, Date.now() + 60_000),
+        STRANGER_SEED,
+      );
+      const receipt = await gateway.append([forged]);
+      expect(receipt.accepted, "the append door takes it: nothing there refuses this shape").toBe(
+        1,
+      );
+
+      // the READING is what refuses. wren is still an actor, and the operator's word still resolves.
+      expect(roleOf(gateway.reactor, operator, "wren")).toBe("actor");
+      const view = resolveUserView(gateway.reactor, operator, "wren") as Record<string, unknown>;
+      expect(view[CTX_USER]).toBe("wren");
+      expect(view[CTX_ROLE]).toBe("actor");
+    } finally {
+      await gateway.close();
+    }
+  });
+
+  it("has no ungoverned form: with no operator, there is no user and no role", async () => {
+    await createUser(home, "myk", PASSWORD);
+    const gateway = await Gateway.boot(
+      new SqliteBackend(storePath(home)),
+      assembleGenesis({ operatorSeed: readSeed(home) }),
+    );
+    try {
+      expect(resolveUserView(gateway.reactor, undefined, "myk")).toBeUndefined();
+      expect(roleOf(gateway.reactor, undefined, "myk")).toBeUndefined();
     } finally {
       await gateway.close();
     }

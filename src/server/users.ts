@@ -10,6 +10,8 @@
 // any other fact. That is deliberate. Erasing a user's record must actually shut the door, which is
 // what `roleOf` returning undefined does — and it is the half of §36's erasure honesty that the
 // report cannot supply on its own.
+//
+// "Operator-signed" is enforced on the READ, not only asserted on the write — see `userHyperSchema`.
 
 import {
   resolveView,
@@ -21,8 +23,7 @@ import {
   type View,
 } from "@bombadil/rhizomatic";
 import { evalTerm } from "@bombadil/rhizomatic";
-import { entityGatherBody } from "../gateway/gather.js";
-import { governedGatherBody } from "../gateway/accounts.js";
+import { operatorGatherBody } from "../gateway/accounts.js";
 
 export const CTX_USER = "loam.user";
 export const CTX_ROLE = "loam.role";
@@ -83,16 +84,22 @@ export function roleClaims(
 }
 
 /**
- * The reading a user resolves through. Governed when the store names an operator, so a federated
- * stranger's negation cannot retract a role binding — a heckler's veto over who may sign here would
- * be the worst possible shape for this particular fact.
+ * The GATHER PROGRAM a user's deltas are selected by — a HyperSchema, resolved into a View through
+ * `USER_SCHEMA` below.
+ *
+ * It counts the OPERATOR'S ASSERTIONS ONLY, and that is the whole security of a role binding. A role
+ * binding is filed at an ordinary entity in an ordinary context, so it has no grant shape for
+ * `constitutionalDefect` to recognise and nothing refuses it at the append door: any author holding
+ * write standing may sign one. Gathering every author and then picking the latest claim would let that
+ * author name themselves — or anyone — an operator. So the select names the operator, and the mask
+ * keeps a stranger's negation from retracting what the operator said.
+ *
+ * There is no ungoverned form. A store with no operator has no one whose word this could be, so a
+ * caller with no operator gets no user and no role — the door stays shut rather than opening on a
+ * fact nobody is answerable for.
  */
-export function userHyperSchema(operator: string | undefined): HyperSchema {
-  return {
-    name: "LoamUser",
-    alg: 1,
-    body: operator === undefined ? entityGatherBody() : governedGatherBody(operator),
-  };
+export function userHyperSchema(operator: string): HyperSchema {
+  return { name: "LoamUser", alg: 1, body: operatorGatherBody(operator) };
 }
 
 const pickLatest: Policy = { kind: "pick", order: { kind: "byTimestamp", dir: "desc" } };
@@ -116,6 +123,7 @@ export function resolveUserView(
   operator: string | undefined,
   name: string,
 ): View | undefined {
+  if (operator === undefined) return undefined; // no operator, no constitution, no users
   if (userNameDefect(name) !== undefined) return undefined;
   const result = evalTerm(userHyperSchema(operator).body, reactor.snapshot(), userEntity(name));
   if (result.sort !== "hview") return undefined;
