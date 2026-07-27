@@ -71,8 +71,8 @@ export const DEFAULT_LIMIT: LimitPolicy = {
   // That is not a hole this constant can close. A per-name queue would let a caller who keeps failing
   // extend an honest attempt without limit, which is the lockout again. So the delay taxes a serial
   // guesser AGAINST ONE NAME, the hash cap bounds the parallel one, and neither pretends to be the
-  // other. Even the serial claim assumes the target's row stays in the table — see `noteFailure` on
-  // what displacing it costs, because that cost is the only thing making this number mean anything.
+  // other. And the serial claim holds only while the target's row is IN the table — a caller who squats
+  // `maxTracked` rows keeps a chosen name out of it and pays this number nothing. See `noteFailure`.
   maxDelayMs: 5_000,
   forgetMs: 900_000,
   // Small ON PURPOSE: every failed attempt reads and rewrites this file whole, and an unauthenticated
@@ -221,24 +221,26 @@ export const delayMs = (home: string, name: string, now: number, policy: LimitPo
  * among equals. Nothing in this file can refuse a login, so an eviction can never be an off switch;
  * the most it can hand back is a wait.
  *
- * FEWEST-FAILURES IS THE LOAD-BEARING HALF. A row is only displaced by rows that out-count it, so
- * keeping a name's row out of the table costs a caller F failures on EVERY other row, each paying its
- * own delay and each spending a hash the door's cap rations. The price of displacement scales with
- * what the defence is worth, which is the property to preserve in any future change here.
+ * THE BOUND IS A REAL LIMIT ON WHAT THIS FILE CAN PROMISE, and no eviction order fixes it. A row is
+ * seated at ONE failure, so a new row is always among the weakest — which means a caller who squats
+ * `maxTracked` rows can keep a CHOSEN name's row out of the table and hold its delay at zero. Measured
+ * against this module, `maxTracked: 8`, a target charged over eight rounds:
  *
- * OLDEST-AMONG-EQUALS IS NOT A COIN FLIP, and the other direction is a trap worth naming. A row is
- * seated at ONE failure, so it is always the newest of the one-failure rows. Evict the newest of an
- * equal count and a caller keeping the table full of fresh names flushes any target's row with ONE
- * extra undelayed request, every round — the target's count never reaches two, and the delay is zero
- * forever for exactly the name somebody is attacking. Oldest-among-equals leaves a newly seated row
- * the LAST of its count to go, so it survives to accumulate. Measured both ways: newest-first charged
- * a targeted name 0ms on six consecutive rounds, oldest-first charged it 0, 250, 500, 1000, 2000,
- * 4000.
+ *   - newest-among-equals: 0ms every round. The flush costs one undelayed request, with no setup.
+ *   - oldest-among-equals: 0ms every round, after raising each junk row to two failures first. Setup
+ *     costs 2×(maxTracked−1) recorded failures; each later flush costs one request.
  *
- * What an eviction takes even so is about one attempt, because a wait rebuilds on the very next
- * failure — there is no expiry here for a flood to steal. And the cost it imposes is NOT F rounds of
- * waiting: waits do not serialize across names, so the wall-clock price is the hash cap's rather than
- * the delay's. See DEFAULT_LIMIT on the same confusion.
+ * So the tie-break only moves the SETUP price, and oldest-among-equals is kept because that price is
+ * the only difference in the defender's favour. Do not read the order as a defence; the honest claim
+ * is that an unsquatted table charges a serial guesser, and a squatted one does not charge the name it
+ * is squatting against. Closing that needs a store this file cannot be — a bounded whole-file rewrite
+ * on an unauthenticated path is what forces `maxTracked` to be small (H8) — or per-name counters that
+ * collide, which would slow innocent names and break criterion (o3). Both are their own ticket.
+ *
+ * What an eviction takes when the table is NOT squatted is about one attempt, because a wait rebuilds
+ * on the very next failure. And the cost it imposes is not F rounds of waiting: waits do not serialize
+ * across names, so the wall-clock price is the hash cap's rather than the delay's. See DEFAULT_LIMIT
+ * on the same confusion.
  */
 export function noteFailure(home: string, name: string, now: number, policy: LimitPolicy): void {
   const locks = readLocks(home);

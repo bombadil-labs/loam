@@ -16,7 +16,7 @@
 // rails cannot flake upward, and an absent delay answers in milliseconds, which is the whole signal.
 // Where an upper bound is unavoidable it sits at least twenty times over the real cost.
 //
-// WHAT THEY DELIBERATELY DO NOT ASSERT — five gaps, and this list is meant to be complete:
+// WHAT THEY DELIBERATELY DO NOT ASSERT — six gaps, and this list is meant to be complete:
 //
 //  1. That a flood against one name cannot make this door refuse another name. It CAN. What is pinned
 //     is narrower and the difference matters: an attempt spends no hash budget WHILE IT WAITS, so
@@ -31,13 +31,21 @@
 //  3. Two servers over one home. Every write replaces the file whole, so they are last-writer-wins
 //     on the count. One home, one server is the supported posture.
 //  4. THAT THE LIMITER STILL LIMITS WHEN ITS FILE CANNOT BE WRITTEN. The two fail-open rails prove
-//     only that the ANSWER does not move — 401 stays 401 and a correct password is still admitted.
+//     only that the ANSWER does not move — 401 stays 401 and a correct password is still admitted. And
+//     only ONE of the two runs on Windows: the clearing half needs a POSIX mode to build its fixture.
 //     Fail-open on the write means the count never grows, so on an unwritable home the delay is
 //     silently zero for every name and the budget is gone entirely. That is the chosen direction, not
 //     an oversight: the alternative hands a disk fault the power to shut the login door. No rail
 //     asserts a protection there, because there is none.
 //  5. TIME, in the byte-identical refusal rail below. It compares status and body only, and says so
 //     again at its own call site.
+//  6. THAT A TARGETED NAME IS CHARGED AT ALL WHEN THE TABLE IS SQUATTED. A row is seated at one
+//     failure, so a new row is always among the weakest — and a caller holding `maxTracked` rows above
+//     that count keeps a chosen name out of the table entirely, at one fresh name per round. Measured
+//     at 0ms charged on every round, under BOTH tie-break orders. The cycle rail below covers the
+//     cheap form (a flood of one-failure names) and says so at its own call site; the expensive form
+//     no eviction order can fix. login-locks.ts states what closing it would take, and it is a
+//     different store rather than a different comparator.
 //
 // The last half of the file is a different budget. scrypt is expensive ON PURPOSE, which makes an
 // unauthenticated login a lever on the server's CPU. So the door caps concurrent hashing globally,
@@ -348,7 +356,16 @@ describe("the failed-login delay", () => {
     served = await serveHome(home, { limit: LONG, maxConcurrentHashes: 1 });
     expect((await missOnce("myk", 1)).status).toBe(401); // one failure: every later myk attempt waits 2s
 
-    const flood = [2, 3, 4, 5].map((attempt) => inFlight(missOnce("myk", attempt)));
+    // THE PRE-SESSIONS ARE BOUGHT FIRST, so the four POSTs are the next thing on the wire. Fetched
+    // inside the flood promises instead, a flood attempt might not have sent its POST before wren sent
+    // hers — and then wren would find the hash slot free even under the mutant this rail exists to
+    // catch, and the rail would go green on a request-ordering accident.
+    const begun = await Promise.all([2, 3, 4, 5].map(() => beginLogin(served.base)));
+    const flood = begun.map((b, i) =>
+      inFlight(
+        postLogin(served.base, "myk", `wrong ${i}`, { cookie: b.cookie, formToken: b.formToken }),
+      ),
+    );
 
     // ONE WITNESS, TAKEN AFTER WREN'S OWN ROUND TRIP. A check between firing the flood and awaiting it
     // would be worthless — nothing has had time to settle yet, so `running()` is true for any door at
@@ -399,8 +416,14 @@ describe("the failed-login delay", () => {
     // cannot fail excludes nothing, and what it is here to exclude is four SERIALIZED attempts.
     //
     // So this rail buys its own window: one prior failure means every one of the four waits 200ms
-    // before it reaches a hash, and the witness is read 100ms in. All four are then provably open at
-    // once, which is the state a snapshot-carrying limiter needs in order to lose an update.
+    // before it reaches a hash, and the witness is read 100ms in.
+    //
+    // WHAT THE WITNESS PROVES, exactly: none of the four had answered yet. It does NOT prove they
+    // overlap — a door that queued them one behind another would also have all four pending at 100ms.
+    // What makes them overlap is that they all wake from the SAME 200ms wait and then hash together
+    // under `maxConcurrentHashes: 4`. The witness's job is narrower and still worth having: it fails
+    // the moment the door stops charging a wait at all, which is when four instant answers could
+    // serialize and the lost-update assertion below would prove nothing.
     expect((await missOnce("myk", 0)).status).toBe(401);
     const begun = await Promise.all([1, 2, 3, 4].map(() => beginLogin(served.base)));
     const flight = begun.map((b, i) =>
@@ -411,7 +434,7 @@ describe("the failed-login delay", () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(
       flight.map((f) => f.running()),
-      "an attempt answered inside its own wait: the four did not overlap",
+      "an attempt answered inside its own wait: the door charged no wait, so these did not overlap",
     ).toEqual([true, true, true, true]);
 
     const misses = await Promise.all(flight.map((f) => f.wait));
@@ -513,6 +536,13 @@ describe("the failed-login delay", () => {
     // first of its count to go, the target's row is flushed before it can ever reach two failures. The
     // count stays at one, the wait stays at the base, and every rail that watches a single eviction
     // stays green.
+    //
+    // WHAT THIS COVERS, EXACTLY: a flood of ONE-FAILURE names. That is the cheap attack, and it is the
+    // one the tie-break decides. It does NOT cover a caller who first raises every junk row ABOVE the
+    // target's count — then the target's row is the unique weakest and one fresh name per round flushes
+    // it whatever the tie-break says. Measured: 0ms charged on every round. No eviction order fixes
+    // that, so no rail here asserts it does; gap 6 in the header names it, and login-locks.ts states
+    // what closing it would take.
     const small: LimitPolicy = {
       baseDelayMs: 200,
       maxDelayMs: 4000,
@@ -525,7 +555,10 @@ describe("the failed-login delay", () => {
     }
     expect(readLocks(home).size).toBe(small.maxTracked); // the table really is full
 
-    // Four rounds of: one guess at the target, then one FRESH name to force an eviction.
+    // Four rounds of: one guess at the target, then one FRESH name to force an eviction. Only ROUND ONE
+    // is decided by the tie — from round two the target out-counts every other row and `failures` alone
+    // protects it. That is the point: the tie decision has to hold once for the count to start growing,
+    // and after that the count defends itself.
     for (let round = 1; round <= 4; round += 1) {
       expect((await missOnce("myk", round)).status, `round ${round}`).toBe(401);
       expect((await missOnce(`fresh-${round}`, 1)).status, `round ${round} filler`).toBe(401);
@@ -537,6 +570,44 @@ describe("the failed-login delay", () => {
     const { ms, res } = await timed(tryPassword("myk", PASSWORD));
     expect(res.status).toBe(200);
     expect(ms).toBeGreaterThanOrEqual(1500);
+  });
+
+  it("(o6) the tie reads the LAST FAILURE, not the order rows were seated", async () => {
+    // THE THIRD VARIANT, which neither sibling rail can see. Drop the secondary sort term altogether
+    // and `sort` is stable, so ties fall back to insertion order — and in every other fixture here
+    // insertion order and age order are the same list, so both stay green on a comparator that has no
+    // tie-break at all.
+    //
+    // They come apart when a row's count GROWS IN PLACE: a Map keeps the key's original slot, so the
+    // row is insertion-FIRST while its last failure is the newest. This fixture builds exactly that.
+    // myk is seated first and fails last, so insertion order says evict myk and the last failure says
+    // evict the junk row. Only the second is right, and only the second leaves the row that was just
+    // attacked in the table.
+    const small: LimitPolicy = {
+      baseDelayMs: 200,
+      maxDelayMs: 3200,
+      forgetMs: 600_000,
+      maxTracked: 2,
+    };
+    served = await serveHome(home, { limit: small });
+    expect((await missOnce("myk", 1)).status).toBe(401); // seated FIRST, one failure
+    expect((await missOnce("junk", 1)).status).toBe(401); // seated second, one failure
+    expect((await missOnce("junk", 2)).status).toBe(401); // junk reaches two
+    expect((await missOnce("myk", 2)).status).toBe(401); // myk reaches two, and is now the NEWEST
+    expect(readLocks(home).get("myk")?.failures).toBe(2);
+    expect(readLocks(home).get("junk")?.failures).toBe(2); // the tie really is a tie
+
+    // A third name forces one eviction between two rows tied at two failures.
+    expect((await missOnce("fresh", 1)).status).toBe(401);
+    const after = readLocks(home);
+    expect(after.size).toBe(2);
+    expect(after.has("junk")).toBe(false); // its failure was older, so it went
+    expect(after.get("myk")?.failures).toBe(2); // and the row just attacked survived, count intact
+
+    // Object level: the door still charges myk for those two failures. 200ms × 2 = 400ms.
+    const { ms, res } = await timed(tryPassword("myk", PASSWORD));
+    expect(res.status).toBe(200);
+    expect(ms).toBeGreaterThanOrEqual(350);
   });
 
   it("(o6) a NEWLY SEATED row is the last of its count to go, not the first", async () => {

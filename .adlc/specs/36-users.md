@@ -7,7 +7,7 @@ lock is an off switch a stranger can pull — anyone who knows a username could 
 of their own store. So each failure for a name makes the next attempt for that name wait longer, up
 to a cap, and the door always admits a correct password. Criteria (o) and (p) below are T116's.
 
-**The cost, named — three parts, and none of them is a bound to lean on.**
+**The cost, named — four parts, and none of them is a bound to lean on.**
 
 1. A caller who grinds the operator's username makes the operator's own login slow, up to the cap,
    once per login. Slow is not shut, and that is the whole trade.
@@ -25,6 +25,18 @@ to a cap, and the door always admits a correct password. Criteria (o) and (p) be
    cap pre-dates this change. Do not read `maxDelayMs` as an attempts-per-second bound; against a
    caller who opens more than one connection it is wrong by orders of magnitude. A per-name queue
    would close it and reintroduce the lockout, so it stays open and named.
+4. **A SQUATTED TABLE CHARGES A TARGETED NAME NOTHING, and this one is Myk's to weigh.** The record
+   file is bounded by `maxTracked`, because an unauthenticated caller writes a row per name and every
+   write rewrites the file whole (H8). A row is seated at ONE failure, so a new row is always among
+   the weakest — and a caller who holds `maxTracked` rows above that count keeps a chosen name out of
+   the table for one fresh name per round. Measured against the module at `maxTracked: 8`: 0ms charged
+   to the target on every round, under BOTH eviction tie-break orders. The tie-break only moves the
+   setup price. So the delay taxes a serial guesser against an UNSQUATTED table, and a determined
+   caller who squats can guess one chosen name at the concurrent-hash cap's rate — which is where the
+   pre-T116 lock also ended up, by a different route. Closing it needs a store that is not a bounded
+   whole-file rewrite, or per-name counters that collide and therefore slow innocent names, breaking
+   criterion (o3). Recommendation: land T116 as it stands, and open a follow-up ticket for the store.
+   The residual is strictly narrower than the lockout this section removes, and it refuses nobody.
 
 ## The problem
 

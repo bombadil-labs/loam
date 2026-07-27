@@ -649,9 +649,16 @@ data doors on its own.</p>`,
     // it, so nobody — including a stranger who knows the name — can shut the operator out of their own
     // store by guessing at it. The cap on the wait is what keeps "slow" from becoming "shut".
     //
-    // AND IT COMES BEFORE THE HASH BUDGET, not after. A waiting attempt holds no hash slot, so a flood
-    // against one name cannot make this door answer 503 to another name. Swapped, the denial this
-    // design removes would come straight back through the budget.
+    // A WAITING ATTEMPT HOLDS NO HASH SLOT, and what buys that is the position of `hashesInFlight += 1`
+    // below — it is taken immediately before the hash, not here — rather than the position of the check.
+    // So another name gets in DURING the wait. It does NOT follow that a flood cannot draw a 503 for
+    // another name: the waits elapse together, the flood then spends the whole budget at once, and a
+    // name arriving in that window is refused. Login stays deliberately degradable under a flood.
+    //
+    // THE CHECK COMES AFTER THE WAIT for a different reason, and it is the load-bearing one: the check
+    // and the increment must have NO await between them. Check first and every waiting attempt would
+    // pass on the same free-budget snapshot, then all hash at once when their waits elapse — the cap
+    // would read as satisfied by a measurement taken seconds before the work.
     //
     // The read is ADVISORY — `noteFailure` re-reads and re-decides for itself, because the read and the
     // write there must stay one synchronous step. What that costs, named rather than hidden: attempts
