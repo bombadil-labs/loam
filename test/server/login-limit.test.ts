@@ -1005,6 +1005,37 @@ describe("the failed-login delay", () => {
         }
         // the file-valued home names WHY, rather than only that something went wrong
         expect(unreadableRecordFile(asFile)).toMatch(/it is not a directory/);
+
+        // AN UNTRAVERSABLE DIRECTORY IS A SIXTH SHAPE, and `isDirectory` alone says yes to it: `stat`
+        // needs only a traversable PARENT, so a mode-0000 home passes the type test and the record-file
+        // branch then offers perishable-bytes advice for a file that can never exist there.
+        const sealed = join(root, "sealed");
+        mkdirSync(sealed);
+        chmodSync(sealed, 0o000);
+        try {
+          const said = unreadableRecordFile(sealed);
+          expect(said).toMatch(/is not a usable loam home/);
+          expect(said).not.toMatch(/copy it now/); // never the record-file advice
+        } finally {
+          chmodSync(sealed, 0o700);
+        }
+
+        // TWO-SIDED, and this is the trap in the fix: a READ-ONLY home is a SUPPORTED state — criterion
+        // (o7) covers it, with a row frozen at its accumulated wait — so asking for write here would
+        // condemn a home the door works with. It must stay silent.
+        const readOnly = join(root, "read-only");
+        mkdirSync(readOnly);
+        writeFileSync(
+          locksPath(readOnly),
+          JSON.stringify({ users: { myk: { failures: 4, lastFailureAt: Date.now() } } }),
+        );
+        chmodSync(readOnly, 0o500);
+        try {
+          expect(unreadableRecordFile(readOnly)).toBeUndefined();
+          expect(readLocks(readOnly).get("myk")?.failures).toBe(4); // and the row is still charged
+        } finally {
+          chmodSync(readOnly, 0o700);
+        }
       } finally {
         dropHome(root);
       }

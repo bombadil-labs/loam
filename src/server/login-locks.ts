@@ -58,8 +58,10 @@
 // not add work here without asking who can pay for it.
 
 import {
+  accessSync,
   chmodSync,
   closeSync,
+  constants,
   lstatSync,
   openSync,
   readFileSync,
@@ -186,16 +188,22 @@ export function unreadableRecordFile(home: string): string | undefined {
   // has failed a login yet" — a tidy exit 0 over a path that holds nothing and never will. The door
   // charges nobody there and cannot self-repair either, since even the temp file cannot be created.
   //
-  // IT ASKS `stat().isDirectory()`, WHICH IS THE OPPOSITE CALL FROM THE RECORD FILE BELOW, for the
-  // opposite reason. For the FILE the link itself is the thing at the path. For a HOME what matters is
-  // the RESOLVED TARGET: a symlinked home on a removed volume must read as broken, and a healthy
-  // symlinked home must read as fine. `lstat` cannot tell those apart — it SUCCEEDS on a dangling link
-  // and answers `isDirectory=false` for a healthy one — so `lstat` alone misses the dangling home and
-  // `lstat().isDirectory()` would condemn a working one. Only `stat().isDirectory()` separates all five
-  // shapes: real, symlinked, dangling, file, missing.
+  // IT ASKS `stat`, WHICH IS THE OPPOSITE CALL FROM THE RECORD FILE BELOW, for the opposite reason. For
+  // the FILE the link itself is the thing at the path. For a HOME what matters is the RESOLVED TARGET: a
+  // symlinked home on a removed volume must read as broken, and a healthy symlinked home must read as
+  // fine. `lstat` cannot tell those apart — it SUCCEEDS on a dangling link and answers
+  // `isDirectory=false` for a healthy one — so `lstat` alone misses the dangling home and
+  // `lstat().isDirectory()` would condemn a working one.
+  //
+  // AND `isDirectory` ALONE IS NECESSARY BUT NOT SUFFICIENT. A mode-0000 directory answers it happily —
+  // `stat` only needs a traversable PARENT — so the home would pass and the record-file branch below
+  // would then offer perishable-bytes advice for a file that can never exist there. So traversal is
+  // asked too. X_OK, NOT W_OK: a read-only home is a SUPPORTED state with its own criterion, where a
+  // row stays frozen at its accumulated wait, and demanding write here would condemn it.
   let why: string | undefined;
   try {
     if (!statSync(home).isDirectory()) why = "it is not a directory";
+    else accessSync(home, constants.X_OK);
   } catch (err) {
     why = err instanceof Error ? err.message : String(err);
   }
@@ -204,10 +212,13 @@ export function unreadableRecordFile(home: string): string | undefined {
     // a reader who passed no flag would hunt for a typo they never made. And NOTHING about perishable
     // bytes: there is no record file here and never was, so the advice below would describe a
     // replacement that can never happen.
+    //
+    // The path is shown as `(empty)` when it is the empty string, or the sentence opens on nothing at
+    // all — `--home ""` reaches this, since `??` only defaults away null and undefined.
     return (
-      `${home} is not a usable loam home: ${why}. No login records can live there, so do not read an ` +
-      `empty answer as a clean one. Check the --home path if you passed one, or run \`loam init\` if ` +
-      `this home was never made.`
+      `${home === "" ? "(empty)" : home} is not a usable loam home: ${why}. No login records can live ` +
+      `there, so do not read an empty answer as a clean one. Check the --home path if you passed one, ` +
+      `or run \`loam init\` if this home was never made.`
     );
   }
   try {
