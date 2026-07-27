@@ -92,6 +92,7 @@ export interface ItemProps {
   readonly seam?: string;
   readonly url?: string;
   readonly est?: number;
+  readonly brief?: string;
 }
 
 // One item, born through the door: a boardAdd membership claim, then the typed field mutation

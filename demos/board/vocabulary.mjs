@@ -1,7 +1,7 @@
 // The board's vocabulary (§34), in the one registration dialect every door speaks — the same
 // object `loam register <file>`, POST /:mount/register, and the MCP tool accept. Two lenses:
 //
-//   BoardItem — one entity per item (`board:pr-262`), six latest-wins props, and the
+//   BoardItem — one entity per item (`board:pr-262`), seven latest-wins props, and the
 //               `boardEvent` claim template: one call, ONE signed delta, a status transition.
 //   Board     — the singleton `board:main`. Its gather expands the `item` role of every
 //               membership claim through the BoardItem reading, so the whole board arrives at a
@@ -38,11 +38,13 @@ export const BOARD_ITEM_REGISTRATION = {
     },
   },
   schema: {
-    props: { kind: PICK, title: PICK, seam: PICK, url: PICK, status: PICK, est: PICK },
+    // `brief` is the expandable long form: the open questions and the recommendation, in STE.
+    // Blank-line breaks are paragraph breaks; the renderer owns that reading.
+    props: { kind: PICK, title: PICK, seam: PICK, url: PICK, status: PICK, est: PICK, brief: PICK },
     default: PICK,
   },
   roots: [],
-  writable: ["kind", "title", "seam", "url", "status", "est"],
+  writable: ["kind", "title", "seam", "url", "status", "est", "brief"],
   mutations: {
     // A transition in one authed call: subject at (item, status), one primitive value.
     boardEvent: {
