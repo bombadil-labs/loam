@@ -9,8 +9,9 @@
 // browser-shaped request is missing one of them. A single `login()` that always sent the right
 // headers would hide exactly the states those rails exist to pin.
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { expect } from "vitest";
 import { join } from "node:path";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
@@ -161,6 +162,20 @@ export function preCookieFrom(res: Response): string | undefined {
 }
 
 /** The session id a Set-Cookie header carries, or undefined when it carries none. */
+// The credential file's mode is a POSIX promise, and Windows has no POSIX modes — node reports 0666
+// for an ordinary file there whatever `chmod` was asked for. So the assertion is made where it means
+// something and the gap is NAMED where it does not, rather than weakened everywhere to a value both
+// platforms happen to satisfy.
+//
+// NAMED GAP: on win32 this asserts only that the file exists. Its protection there is the directory
+// ACL, which this suite does not inspect at all — so a Windows run proves nothing about who can read
+// a credential, and the POSIX run is the whole of that evidence.
+export function expectOwnerOnlyMode(path: string): void {
+  expect(existsSync(path)).toBe(true);
+  if (process.platform === "win32") return;
+  expect(statSync(path).mode & 0o777).toBe(0o600);
+}
+
 export function cookieFrom(res: Response): string | undefined {
   const header = res.headers.getSetCookie().find((c) => c.startsWith(`${SESSION_COOKIE}=`));
   return header?.slice(`${SESSION_COOKIE}=`.length).split(";")[0];

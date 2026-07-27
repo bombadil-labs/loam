@@ -35,6 +35,7 @@ import {
   postLogin,
   serveHome,
   type Served,
+  expectOwnerOnlyMode,
 } from "./user-fixture.js";
 import {
   DEFAULT_SCRYPT,
@@ -177,14 +178,20 @@ describe("a credentials.json the door cannot trust", () => {
 });
 
 describe("writing credentials.json", () => {
-  it("(t) lands at 0600 even when the path already sat at 0644", async () => {
-    chmodSync(file(), 0o644);
-    expect(statSync(file()).mode & 0o777).toBe(0o644);
-    await createUser(home, "wren", "another password", { operator: false });
-    expect(statSync(file()).mode & 0o777).toBe(0o600);
-    // and both users survived the rewrite
-    expect(Object.keys(readCredentials(home).users).sort()).toEqual(["myk", "wren"]);
-  });
+  // POSIX only: the whole subject is a mode transition, and Windows reports 0666 for an ordinary file
+  // whatever chmod was asked for. `expectOwnerOnlyMode` names the same gap for the assertions that
+  // survive on both platforms.
+  it.skipIf(process.platform === "win32")(
+    "(t) lands at 0600 even when the path already sat at 0644",
+    async () => {
+      chmodSync(file(), 0o644);
+      expect(statSync(file()).mode & 0o777).toBe(0o644);
+      await createUser(home, "wren", "another password", { operator: false });
+      expect(statSync(file()).mode & 0o777).toBe(0o600);
+      // and both users survived the rewrite
+      expect(Object.keys(readCredentials(home).users).sort()).toEqual(["myk", "wren"]);
+    },
+  );
 
   it("(t) leaves no residue behind, and a stale temp file does not poison the write", () => {
     writeFileSync(join(home, "credentials.json.tmp"), "garbage from a crashed write");
@@ -195,7 +202,7 @@ describe("writing credentials.json", () => {
     });
     const after = readCredentials(home);
     expect(Object.keys(after.users).sort()).toEqual(["myk", "wren"]);
-    expect(statSync(file()).mode & 0o777).toBe(0o600);
+    expectOwnerOnlyMode(file());
     // no temp of the WRITER's own making is left behind (the one this test planted is still there,
     // which is the other half of the assertion: the write did not adopt or delete a stranger's file)
     expect(

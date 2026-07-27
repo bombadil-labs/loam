@@ -10,7 +10,7 @@
 // It does not, by design (§36 "Deferred, named"), and users-erasure-honesty.test.ts pins the
 // report that says so.
 
-import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authorForSeed, canonicalHex, signClaims } from "@bombadil/rhizomatic";
@@ -39,6 +39,7 @@ import {
   serveHome,
   signIn,
   storeDeltas,
+  expectOwnerOnlyMode,
 } from "./user-fixture.js";
 
 vi.setConfig({ testTimeout: 20000 });
@@ -117,8 +118,7 @@ describe("loam user create — the bootstrap door", () => {
 
     // the home half: one entry, scrypt-shaped, mode 0600, and NOT the password
     const file = join(home, "credentials.json");
-    expect(existsSync(file)).toBe(true);
-    expect(statSync(file).mode & 0o777).toBe(0o600);
+    expectOwnerOnlyMode(file);
     const entry = readCredentials(home).users["myk"];
     expect(entry?.kind).toBe("scrypt");
     expect(entry?.salt).toMatch(/^[0-9a-f]{32,}$/);
