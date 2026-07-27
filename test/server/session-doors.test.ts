@@ -271,21 +271,39 @@ describe("POST /session/token", () => {
 // one mount's ground. So the doors refuse to open beside a second world. Both guards are new, and both
 // are deletable with every other rail green — which is what earns them this one.
 describe("the login doors want a single mount", () => {
-  it("refuse to open at boot beside a second mount", async () => {
+  it("refuse to open at boot beside a second mount, WITHOUT leaving the socket bound", async () => {
     const other = await Gateway.boot(
       new SqliteBackend(join(home, "other.sqlite")),
       assembleGenesis({ operatorSeed: readSeed(home) }),
     );
+    // A named port, so the refusal's timing is observable: this is a pure function of the options, so
+    // it must happen BEFORE listen. Thrown after, it leaves a live listener with no doors — and the
+    // only way to see that from outside is that the port stays taken.
+    const port = 45771;
     try {
       await expect(
         serve({
           mounts: { default: served.gateway, other },
           tokens: { "op-token": { operator: true } },
-          port: 0,
+          port,
           host: "127.0.0.1",
           users: { home, mount: "default" },
         }),
       ).rejects.toThrow(/single mount/);
+
+      // The port is free, which is only true if nothing ever bound it. A second serve on the same port
+      // succeeds; if the refused boot had left a listener, this would fail EADDRINUSE.
+      const after = await serve({
+        mounts: { default: served.gateway },
+        tokens: { "op-token": { operator: true } },
+        port,
+        host: "127.0.0.1",
+      });
+      try {
+        expect(after.port).toBe(port);
+      } finally {
+        await after.close();
+      }
     } finally {
       await other.close();
     }

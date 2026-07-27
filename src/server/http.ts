@@ -1327,14 +1327,15 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
   });
 
   // EVERY REFUSAL THAT IS A PURE FUNCTION OF THE OPTIONS HAPPENS HERE, BEFORE THE SOCKET BINDS. A
-  // throw after `listen` leaves an embedder that catches it holding a live listener with the mounts
-  // served and the login and connector doors absent — a strictly worse posture than not starting. All
-  // three of these read `options` only, so none of them needs the bound port.
+  // throw after `listen` leaves a caller that catches it holding a live listener with the mounts served
+  // and the login and connector doors absent — a strictly worse posture than not starting. All three of
+  // these read `options` only, so none of them needs the bound port.
+  //
+  // ONE MOUNT, or no login doors. `/session/token` mints `{ operator: true }`, which is authority over
+  // this whole SERVER — every mount it hosts, now or later. The role binding that earns it is read
+  // from ONE mount's ground, so a second world would be handed authority nobody in it granted. There
+  // is no way to say "operator of this mount" today, so this refuses rather than quietly widening.
   if (options.users !== undefined) {
-    // ONE MOUNT, or no login doors. `/session/token` mints `{ operator: true }`, which is authority over
-    // this whole SERVER — every mount it hosts, now or later. The role binding that earns it is read
-    // from ONE mount's ground, so a second world would be handed authority nobody in it granted. There
-    // is no way to say "operator of this mount" today, so this refuses rather than quietly widening.
     const hosted = Object.keys(options.mounts);
     if (hosted.length !== 1 || hosted[0] !== options.users.mount) {
       throw new Error(
