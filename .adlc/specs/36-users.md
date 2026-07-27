@@ -168,19 +168,22 @@ may do.
   name; `delayFor` saturates at the cap for any count — `test/server/login-limit.test.ts`
 - (o2) The wait is paid BEFORE the password comparison: a door with no hash budget at all still waits
   it out before it answers 503 — `test/server/login-limit.test.ts`
-- (o3) A flood against one name neither slows another name's login nor spends the hash budget — a
-  waiting attempt holds no slot, and the concurrent-login cap is asserted with waits in flight —
-  `test/server/login-limit.test.ts`
+- (o3) A WAITING attempt holds no hash slot, so another name signs in while a flood waits; and the
+  concurrent-hash cap still refuses on the far side of the wait. The stronger reading — that a flood
+  cannot refuse another name at all — is false and is not claimed: once the waits elapse the flood
+  spends the whole budget at once — `test/server/login-limit.test.ts`
 - (o4) Concurrent attempts cannot lose an accumulated count: four overlapping misses record four, and
   the next attempt is charged for all four — `test/server/login-limit.test.ts`
 - (o5) A wall clock stepped BACKWARDS cannot erase an accumulated wait, and silence past the forget
   window does clear one — `test/server/login-limit.test.ts`
 - (o6) The record file holds no more than `maxTracked` rows, a flood of fresh names cannot flush a
-  record that holds more failures, and MATCHING a record's count does not evict it — ties take the
-  newest — `test/server/login-limit.test.ts`
+  record that holds more failures, and a tie is broken by the LAST FAILURE — oldest of equals goes
+  first, so a newly seated row survives to accumulate — `test/server/login-limit.test.ts`
 - (o7) BOTH writes to the record file fail open: a home the door cannot write leaves a failed attempt
   answering 401 rather than 503, and still admits a correct password, reporting the fault to the
-  operator's channel instead of the caller — `test/server/login-limit.test.ts`
+  operator's channel instead of the caller. It does NOT keep the limiter working: a count already on
+  disk can no longer grow OR be cleared, so that name pays the cap until `forgetMs` of silence —
+  `test/server/login-limit.test.ts`
 - (p) `loam user unlock <name>` clears that name's accumulated wait from the box, `--all` clears every
   record whatever name it holds, and the report names the COUNT rather than a wait the CLI's process
   cannot know — `test/server/login-limit.test.ts`

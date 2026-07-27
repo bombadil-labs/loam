@@ -315,12 +315,23 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
   // promises cannot happen. The fault goes to the operator's own channel, where a local condition
   // belongs, and the caller's answer does not move.
   //
-  // WHAT FAILING OPEN COSTS, stated so nobody has to derive it: on a home this process cannot write,
-  // THE LIMITER IS GONE. Not weakened — gone. No count grows, so every attempt for every name waits
-  // zero, and the only ceiling left is the concurrent-hash cap. That is the chosen direction, because
-  // the alternative hands a local disk fault the power to shut the login door, and a caller cannot
-  // reach this state anyway. The operator hears it on every attempt through `onFault`, which is the
-  // signal that the box needs attention rather than the door.
+  // WHAT FAILING OPEN COSTS, stated so nobody has to derive it — and it is NOT "the limiter stops
+  // limiting". On a home this process cannot write, the file it already holds is still READ, so the
+  // effect splits by whether a name has a row:
+  //
+  //   - a name with NO row waits zero, for as long as the fault lasts. That is the budget gone.
+  //   - a name WITH a row keeps paying it, and the count can no longer grow OR be cleared. A correct
+  //     password does not clear it and `loam user unlock` cannot either — both need the same write.
+  //     So that name pays its accumulated wait, up to the cap, on every login until `forgetMs` of
+  //     silence retires the row on read.
+  //
+  // Measured on an unwritable home holding a six-failure row: 5000ms charged before the login, and
+  // 5000ms still charged after a successful login and after `unlock`. Slow, never shut — the login
+  // still succeeds, which is the promise that matters. The operator hears the fault on every attempt
+  // through `onFault`, and the cure is the disk rather than the door.
+  //
+  // Failing open is still right: the alternative hands a local disk fault the power to REFUSE a correct
+  // password, and no caller can reach this state.
   const recordFailure = (user: string): void => {
     try {
       noteFailure(options.home, user, Date.now(), limit);

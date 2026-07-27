@@ -251,6 +251,10 @@ export function noteFailure(home: string, name: string, now: number, policy: Lim
   if (previous === undefined && locks.size >= policy.maxTracked) {
     // Weakest first, and ENOUGH OF THEM that one new row still fits: a policy narrowed since the last
     // write can leave the table over its own bound, and evicting a single row would never catch up.
+    //
+    // `maxTracked: 0` is the one off-by-one here: the table empties and then this attempt's row is
+    // seated, so the file ends with one row rather than none. No shipped policy uses 0, and the excess
+    // is one row, so it is named rather than branched on.
     const weakest = [...locks].sort(
       ([, a], [, b]) => a.failures - b.failures || a.lastFailureAt - b.lastFailureAt,
     );

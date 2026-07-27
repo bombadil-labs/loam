@@ -30,13 +30,14 @@
 //     the wait a SERIAL attempt pays; read none of them as attempts per second.
 //  3. Two servers over one home. Every write replaces the file whole, so they are last-writer-wins
 //     on the count. One home, one server is the supported posture.
-//  4. THAT THE LIMITER STILL LIMITS WHEN ITS FILE CANNOT BE WRITTEN. The two fail-open rails prove
-//     only that the ANSWER does not move — 401 stays 401 and a correct password is still admitted. And
-//     only ONE of the two runs on Windows: the clearing half needs a POSIX mode to build its fixture.
-//     Fail-open on the write means the count never grows, so on an unwritable home the delay is
-//     silently zero for every name and the budget is gone entirely. That is the chosen direction, not
-//     an oversight: the alternative hands a disk fault the power to shut the login door. No rail
-//     asserts a protection there, because there is none.
+//  4. WHAT THE LIMITER DOES WHEN ITS FILE CANNOT BE WRITTEN, beyond the answer not moving. The two
+//     fail-open rails prove 401 stays 401 and a correct password is still admitted. They do not
+//     characterise the state, and it is not "the limiter stops limiting" — the file is still READ, so
+//     a name with no row waits zero while a name WITH a row keeps paying it and can no longer have it
+//     grown OR cleared. A correct password does not clear it; `loam user unlock` cannot either. Both
+//     need the same write. Measured at 5000ms still charged after both cures. It retires only after
+//     `forgetMs` of silence. Slow, never shut, and the cure is the disk. Only ONE of the two rails
+//     runs on Windows: the clearing half needs a POSIX mode to build its fixture.
 //  5. TIME, in the byte-identical refusal rail below. It compares status and body only, and says so
 //     again at its own call site.
 //  6. THAT A TARGETED NAME IS CHARGED AT ALL WHEN THE TABLE IS SQUATTED. A row is seated at one
@@ -224,9 +225,11 @@ describe("the failed-login delay", () => {
   // POSIX ONLY, and skipped rather than weakened (T116). The fixture needs a directory that can be READ
   // and not WRITTEN, and a mode is the only way to get one — the clearing write is never attempted
   // unless a record survives the read. Windows maps `chmodSync` to the read-only attribute alone, which
-  // does not deny creating a file inside a directory, so the fixture would not bite and the rail would
-  // pass having proved nothing. An honest skip on one leg is a visible hole; a rail that quietly does
-  // not bite is an invisible one. The Linux leg proves it.
+  // does not deny creating a file inside a directory, so the mode would not bite. The rail would then
+  // go RED on its own bite-check below, not pass — which is the right direction and the wrong report:
+  // it would blame the operator's user account for a platform difference. So it is skipped there, and
+  // the Linux leg proves the behaviour, which is platform-agnostic try/catch in session.ts. The sibling
+  // (o7) rail uses a directory instead of a mode and still runs on both legs.
   it.skipIf(process.platform === "win32")(
     "(o7) a COUNT that cannot be cleared still admits the right password",
     async () => {

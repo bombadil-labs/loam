@@ -1113,7 +1113,21 @@ function cmdUserUnlockAll(home: string, io: IO): number {
   // so a rename landing between that read and its write restores the old table after this has printed.
   // The window is microseconds and every other writer here shares the shape; under an ongoing flood
   // the cure is a losing race in any case. Said here because the line below sounds final.
-  const cleared = clearAllRecords(home);
+  let cleared;
+  try {
+    cleared = clearAllRecords(home);
+  } catch (err) {
+    // A HOME THIS PROCESS CANNOT WRITE, most often. Reported in the command's own words, because the
+    // bare errno reads as a bug in loam rather than as a permission on a directory — and because the
+    // serving door is in the same position: it cannot grow or clear a count either, so those names go
+    // on paying their accumulated wait until the forget window retires them.
+    io.err(
+      `user unlock --all: ${home} holds login records this command cannot rewrite, so none were ` +
+        `cleared: ${err instanceof Error ? err.message : String(err)}. The serving door cannot ` +
+        `change them either. Make the home writable, or wait out the forget window.`,
+    );
+    return 1;
+  }
   io.out(
     cleared === 0
       ? `loam: ${home} holds no login records\n  nothing to clear`
@@ -1128,7 +1142,18 @@ function cmdUserUnlock(name: string, home: string, io: IO): number {
   // be absent or damaged. A record outlives its user: erase the deltas, remove the credential entry, and
   // the record — keyed by the user NAME — is still there. The health report promises this command works
   // whether or not the user still exists, so nothing about the credential file may stand in its way.
-  const cleared = clearRecord(home, name);
+  let cleared;
+  try {
+    cleared = clearRecord(home, name);
+  } catch (err) {
+    io.err(
+      `user unlock: ${name} holds a login record this command cannot rewrite, so nothing was ` +
+        `cleared: ${err instanceof Error ? err.message : String(err)}. The serving door cannot ` +
+        `change it either, so ${name} keeps paying its accumulated wait until the forget window ` +
+        `retires it. Make the home writable, or wait it out.`,
+    );
+    return 1;
+  }
   if (cleared !== undefined) {
     // The COUNT and its age, never a wait. The serving door owns the policy that turns a count into a
     // wait, and this process was never told it: naming a count is a fact, naming a wait would be a
