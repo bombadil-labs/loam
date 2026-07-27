@@ -33,12 +33,13 @@
 //  4. WHAT THE LIMITER DOES WHEN ITS FILE IS BROKEN, beyond the answer not moving. The fail-open rails
 //     prove 401 stays 401 and a correct password is still admitted; they do not characterise the state,
 //     and the state splits three ways rather than two:
-//       - the file cannot be READ and the home CAN be written (damaged bytes, no `users` table, mode
+//       - the file cannot be READ and the PATH CAN BE REPLACED (damaged bytes, no `users` table, mode
 //         0000, a dangling symlink): every name waits zero, and it lasts exactly ONE failed login —
 //         the next one writes a new table over the damage, which self-repairs and DISCARDS every record
-//         nobody could read.
-//       - NEITHER read nor write works (a directory at the path): every name waits zero until an
-//         operator clears the path. That is the first (o7) rail's own fixture.
+//         nobody could read. The discriminator is the path, not the home: a writable home is not enough.
+//       - the PATH CANNOT BE REPLACED (a directory at it): `renameSync` answers EISDIR however writable
+//         the home is, so every name waits zero until an operator clears the path. That is the first
+//         (o7) rail's own fixture.
 //       - the file reads but the home cannot be WRITTEN: a name with no row waits zero, while a name
 //         WITH a row keeps paying its accumulated wait — up to the cap, not automatically the cap — and
 //         that wait can no longer be grown OR cleared. A correct password does not clear it and
@@ -974,6 +975,28 @@ describe("the failed-login delay", () => {
     const io = testIo();
     expect(await run(["user", "unlock", "--all", "--home", home], io.io)).toBe(0);
     expect(io.err.join("\n")).toBe("");
+  });
+
+  it("(o7) a DIRECTORY at the path does NOT self-repair, on a writable home", async () => {
+    // The other side of the rail above, and the reason its claim is about the PATH rather than the home.
+    // This home is writable — the temp file lands beside the directory without complaint — and the
+    // rename onto a directory still answers EISDIR. So the fault persists, and any wording that says
+    // "if the home is writable it repairs" is wrong for exactly this case.
+    mkdirSync(locksPath(home));
+    const faults: string[] = [];
+    served = await serveHome(home, { limit: STEPPED, onFault: (m) => faults.push(m) });
+
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      expect((await missOnce("attacker", attempt)).status).toBe(401);
+    }
+    // No row was ever written, so nobody is charged and the fault is still there after three attempts.
+    expect(readLocks(home).size).toBe(0);
+    expect(delayMs(home, "attacker", Date.now(), STEPPED)).toBe(0);
+    expect(faults.length).toBeGreaterThanOrEqual(3); // the operator hears it on every attempt
+    // and the home really is writable, so the directory is the whole reason
+    const probe = join(home, "probe.tmp");
+    writeFileSync(probe, "x");
+    rmSync(probe, { force: true });
   });
 
   it("(o6) a table of nothing but SPENT rows is cleared when maxTracked is below one", () => {

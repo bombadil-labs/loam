@@ -29,12 +29,17 @@
 // WHAT FAILING OPEN ACTUALLY COSTS, since "fail-open" is easy to read as "degrades a little". It splits
 // by which operation fails, and the read case is the total one:
 //
-//   - THE FILE CANNOT BE READ BUT THE HOME CAN BE WRITTEN — damaged bytes, no `users` table, mode 0000,
+// The discriminator is whether the PATH CAN BE REPLACED by a rename — not whether the home is writable,
+// which is the mistake this comment used to make. A directory at the path sits on a perfectly writable
+// home and cannot be replaced at all.
+//
+//   - THE FILE CANNOT BE READ AND THE PATH CAN BE REPLACED — damaged bytes, no `users` table, mode 0000,
 //     a dangling symlink. Every name waits zero, and it lasts EXACTLY ONE FAILED LOGIN: the next one
 //     writes a whole new table over the damage. So it self-repairs, and the repair DISCARDS every
 //     record nobody could read. An operator who wants those counts has to act before the next attempt.
-//   - NEITHER READ NOR WRITE WORKS — a directory at the path is the case that reaches this. Every name
-//     waits zero and stays that way until an operator clears the path.
+//   - THE PATH CANNOT BE REPLACED — a directory here is the case that reaches this, and `renameSync`
+//     answers EISDIR however writable the home is. Every name waits zero until an operator clears the
+//     path.
 //   - THE FILE READS BUT THE HOME CANNOT BE WRITTEN. A name with no row waits zero. A name WITH a row
 //     keeps paying its accumulated wait, and that wait can no longer be grown or cleared — not by a
 //     correct password and not by `loam user unlock`, because both need the same write. It retires only
@@ -172,8 +177,8 @@ export function unreadableRecordFile(home: string): string | undefined {
   // which repairs the file and DISCARDS the records nobody could read. Only a path the door cannot
   // write either (a directory here) survives that. Hedged on writability because this does not test it.
   const soWhat =
-    `The login door reads it the same way, so it is charging no name any delay. If this home is ` +
-    `writable, the next failed login replaces the file and discards whatever could not be read.`;
+    `The login door reads it the same way, so it is charging no name any delay. The next failed login ` +
+    `replaces the file if it can, and the replacement discards whatever could not be read.`;
   try {
     lstatSync(path);
   } catch (err) {

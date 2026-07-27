@@ -200,8 +200,9 @@ may do.
   operator's channel instead of the caller. It does NOT keep the limiter working — a count already on
   disk still charges its own accumulated wait, up to the cap, and can no longer grow OR be cleared, so
   it stands until `forgetMs` of silence; and a record file that cannot be READ charges every name
-  nothing, self-repairing on the next failed login where the home is writable and discarding the
-  records nobody could read — `test/server/login-limit.test.ts`
+  nothing, self-repairing on the next failed login WHERE THE PATH CAN BE REPLACED — a directory at it
+  cannot, however writable the home — and discarding the records nobody could read —
+  `test/server/login-limit.test.ts`
 - (o8) `loam user unlock` distinguishes a record file that is ABSENT from one it cannot read: the first
   reports an empty table and exits 0, the second names the fault, says the door is charging nobody, says
   the next failed login will replace the file, and exits non-zero —
