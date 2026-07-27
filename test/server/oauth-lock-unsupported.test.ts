@@ -3,20 +3,25 @@
 // ITS OWN FILE, because reaching this state needs `node:fs` mocked, and a mock of a builtin must not
 // reach a rail that did not ask for one.
 //
-// WHY THE MOCK IS SAFE HERE, stated as what is actually true rather than as a claim about the graph:
-// the second half of this file boots a real `SqliteBackend`, a real `Gateway` and a live HTTP server,
-// so `node:fs` is mocked across all of that. It is safe because the override is PASS-THROUGH unless a
-// test asks otherwise, because `oauth-file.ts` is the only module in the tree that calls `linkSync` at
-// all, and because `better-sqlite3` is native CJS reached through `require` outside vitest's module
-// registry. The toggle is cleared in `afterEach` on both halves, so a failing test cannot leave it on.
+// WHY THE MOCK IS SAFE HERE, and only the parts that were actually checked. The second half of this
+// file boots a real `SqliteBackend`, a real `Gateway` and a live HTTP server, so `node:fs` is mocked
+// across all of that. Two verified facts carry it:
+//
+//   - the override is PASS-THROUGH unless a test toggles it, which the first rail below asserts;
+//   - `src/server/oauth-file.ts` holds the only `linkSync` CALL in `src/` or `test/`, so for every
+//     other caller in the graph the mocked module is indistinguishable from the real one — the toggle
+//     cannot reach code that never calls the one function it changes.
+//
+// The toggle is cleared in `afterEach` on both halves, so a throwing test cannot leave it on.
 //
 // WHY IT HAS TO BE INDUCED AT ALL. `claimLock` hard-links the lock from a temp that already holds the
 // owner's nonce, and the ONLY failure a filesystem hands it that means "someone holds this" is EEXIST.
 // Every other code — EPERM, EXDEV, ENOSYS, EOPNOTSUPP, the answers FAT and exFAT and some SMB and FUSE
 // mounts give — means the operation is unavailable here, and no retry will change that. No state a test
 // can put a normal filesystem into produces one, so every rail in `oauth-concurrency.test.ts` reaches
-// `OAuthFileBusy` alone. That left the unlockable branch, and the disclosure it once carried, pinned by
-// nothing.
+// `OAuthFileBusy` as its only LOCK failure. (That file reaches plenty of other faults — a whole
+// describe block is about a file it cannot READ — which is a different class and not what this is
+// about.) What went unpinned was the unlockable branch, and the disclosure it once carried.
 
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -80,6 +85,21 @@ afterEach(() => {
 });
 
 describe("a filesystem that will not take a hard link", () => {
+  it("the mocked module still carries the real fs surface, default export included", async () => {
+    // THE OVERRIDE THAT NOTHING ELSE EXERCISES. Every `from "node:fs"` in `src/` and `test/` is a NAMED
+    // import, so no module reads the default export — which makes the default override correct and
+    // unpinned, the same shape as the pass-through this file had to add a rail for.
+    //
+    // It also guards the spread that builds it: `{ ...(actual.default as object), linkSync }` yields
+    // `{ linkSync }` alone if that value were ever absent, and a default export carrying one function
+    // would fail somewhere far from the cause.
+    const mocked = await import("node:fs");
+    expect(typeof mocked.default.readFileSync).toBe("function");
+    expect(typeof mocked.default.writeFileSync).toBe("function");
+    // And the override really is on it, so the guard above cannot pass on an untouched module.
+    expect(mocked.default.linkSync).toBe(mocked.linkSync);
+  });
+
   it("takes the lock normally when the toggle is OFF", () => {
     // THE MOCK'S PASS-THROUGH, ASSERTED. Every other rail in this file wants `linkSync` to fail, so a
     // mock that failed unconditionally would satisfy all of them — and the toggle, which is what gives
