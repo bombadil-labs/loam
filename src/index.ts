@@ -64,6 +64,46 @@ export {
   type TrustMode,
   type TrustPolicy,
 } from "./gateway/trust.js";
+// The slate DOORS are `Gateway.cut` / `.slates` / `.receipt` / `.graveyards` (SPEC §29); what
+// follows is what a caller needs to DESCRIBE, SIGN, and READ what those doors answer — the
+// vocabulary and claim builders that stand a slate, and every shape the reports are made of.
+// The `*Impl` bodies and the closure wiring (`egressWithheld`, `readClosedIds`, `slateRefusal`,
+// `slateHealth`, …) take a `Gateway` because ingest, reads, and erase share one implementation —
+// publishing any of them would freeze a seam as API, so none appears here however public the
+// compiler thinks it is.
+export {
+  CTX_GRAVEYARD,
+  CTX_SLATE,
+  RECEIPT_FIELDS,
+  RECOMMENDED_CLOSES,
+  SLATE_CONTEXTS,
+  SLATE_ENTITY,
+  enforcedBy,
+  frozenMembershipTerm,
+  graveyardClaims,
+  graveyardCompleteness,
+  isGraveyard,
+  isSlateRecord,
+  readGraveyards,
+  readSlates,
+  slateClaims,
+  slateDefect,
+  slatePointer,
+  type ByteVerdict,
+  type CompletenessCheck,
+  type CutMemberReport,
+  type CutReport,
+  type Duplicate,
+  type GraveyardRecord,
+  type GraveyardSpec,
+  type Receipt,
+  type ReceiptMember,
+  type Slate,
+  type SlateClosure,
+  type SlateReport,
+  type SlateSpec,
+  type TierVerdict,
+} from "./gateway/slate.js";
 // The DOOR and its vocabulary, never the plumbing behind it. `Gateway.openContainer` /
 // `.containers` / `.adoptLaw` / `.blessAll` / `.lawFrom` are the reachable surface (SPEC §27); what
 // follows is what a caller needs to DESCRIBE, SIGN, and READ what those doors answer. A `*Impl`
