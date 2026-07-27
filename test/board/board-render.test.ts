@@ -114,6 +114,21 @@ describe("(c) the route renders every section from live store state", () => {
   });
 });
 
+describe("the face escapes what it renders — a title is text, never markup", () => {
+  it("markup in a claimed title/seam arrives escaped, byte for byte", async () => {
+    await addItem(open.base, "fable", "board:sneaky", {
+      kind: "note",
+      title: `<script>alert("board")</script>`,
+      seam: `a & b < c`,
+      status: "building",
+    });
+    const html = await (await page(open.base)).text();
+    expect(html).not.toContain(`<script>alert`);
+    expect(html).toContain(`&lt;script&gt;alert(&quot;board&quot;)&lt;/script&gt;`);
+    expect(html).toContain(`a &amp; b &lt; c`);
+  });
+});
+
 describe("(d) the public declaration serves the page; the door still refuses tokenless writes", () => {
   it("a tokenless GET reads the board; a tokenless boardEvent lands nothing", async () => {
     const res = await page(open.base);
