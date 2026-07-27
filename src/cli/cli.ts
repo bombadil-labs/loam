@@ -43,7 +43,8 @@ export interface RunOptions {
 
 const VERSION = "0.1.0";
 
-type CommandName = "init" | "serve" | "register" | "pull" | "migrate" | "store" | "repair";
+type CommandName =
+  "init" | "serve" | "register" | "pull" | "migrate" | "store" | "repair" | "artifact";
 
 interface CommandSpec {
   readonly summary: string; // the line the top-level help shows
@@ -105,6 +106,31 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
     usage: "loam store [options]",
     flags: new Set(["home", "store"]),
   },
+  artifact: {
+    summary: "ask whether a route may be published as an artifact, and what it could do",
+    usage: "loam artifact pack <mount>/<route>/<entity> [options]",
+    flags: new Set([
+      "url",
+      "token",
+      "connector",
+      "store-address",
+      "out",
+      "acknowledge-pen",
+      "acknowledge-writable",
+    ]),
+    booleans: new Set(["acknowledge-pen", "acknowledge-writable"]),
+    notes: [
+      "A THIN CLIENT of the gateway's own door, deliberately: the verdict is re-derived from surviving",
+      "law on every call, so striking the declaration or the binding darkens it live. A CLI that read a",
+      "file and decided for itself would keep approving a route whose law had been withdrawn.",
+      "",
+      "The door is OPERATOR-ONLY and to any other identity it does not exist — what it describes is a",
+      "publication that would carry the renderer's own source, which no other door discloses.",
+      "",
+      "--connector is the DISPLAY NAME of the connector a published page would read through. It is the",
+      "whole binding between such a page and a store: no host, no mount, and no token travel with it.",
+    ],
+  },
   repair: {
     summary: "list and settle a store's quarantine (SPEC §25)",
     usage: "loam repair <list|discard|re-admit|leave> [<key>] [options]",
@@ -136,7 +162,21 @@ const FLAG_HELP: Readonly<Record<string, { readonly arg: string; readonly note: 
   token: { arg: "<secret>", note: "the bearer token for the door ($LOAM_TOKEN)" },
   http: { arg: "", note: "serve over HTTP — the only transport today" },
   archive: { arg: "<dir>", note: "mirror every delta into a cold store, relative to the home" },
-  out: { arg: "<file>", note: "write the re-expressed offer here (default stdout)" },
+  out: { arg: "<file>", note: "write the output here (default stdout)" },
+  url: { arg: "<base>", note: "the running gateway to ask (default http://127.0.0.1:4321)" },
+  connector: { arg: "<name>", note: "the connector DISPLAY NAME a published page reads through" },
+  "store-address": {
+    arg: "<text>",
+    note: "the store address the onboarding copy shows — text a viewer reads, never a target",
+  },
+  "acknowledge-pen": {
+    arg: "",
+    note: "yes, I know this renderer names a pen and an artifact writes as the viewer",
+  },
+  "acknowledge-writable": {
+    arg: "",
+    note: "yes, I know only the schema\u2019s writable list binds on that host",
+  },
 };
 
 function topHelp(): string {
@@ -794,6 +834,78 @@ async function cmdRepair(args: readonly string[], io: IO): Promise<number> {
   }
 }
 
+// `loam artifact pack` — a THIN HTTP CLIENT of `GET /:mount/artifact/<route>/<entity>`, and nothing
+// more. Every refusal and every word of the verdict comes from the door, so a refusal reads identically
+// here, over HTTP, and from a direct call. The one shape for every door.
+async function cmdArtifact(args: readonly string[], io: IO): Promise<number> {
+  const parsed = parseFor("artifact", args);
+  if (parsed.positionals[0] !== "pack") {
+    io.err(`artifact: unknown subcommand "${parsed.positionals[0] ?? ""}" — pack`);
+    return 2;
+  }
+  const target = parsed.positionals[1];
+  if (target === undefined) {
+    io.err("artifact pack wants a target: `loam artifact pack <mount>/<route>/<entity>`");
+    return 2;
+  }
+  const parts = target.split("/");
+  if (parts.length !== 3 || parts.some((x) => x === "")) {
+    io.err(`artifact pack: "${target}" is not <mount>/<route>/<entity>`);
+    return 2;
+  }
+  const connector = parsed.flags.get("connector");
+  if (connector === undefined) {
+    io.err("artifact pack wants --connector <name>: the display name a page reads through");
+    return 2;
+  }
+  const token = parsed.flags.get("token") ?? process.env["LOAM_TOKEN"];
+  if (token === undefined) {
+    io.err("artifact pack wants --token (or $LOAM_TOKEN): this door is the operator's");
+    return 2;
+  }
+  const base = (parsed.flags.get("url") ?? "http://127.0.0.1:4321").replace(/\/+$/, "");
+  const query = new URLSearchParams({ connector });
+  const storeAddress = parsed.flags.get("store-address");
+  if (storeAddress !== undefined) query.set("store", storeAddress);
+  // A boolean flag lands in `parsed.booleans`, never in `flags` (args.ts) — reading it from the wrong
+  // map is silently always-false, which is a refusal the operator cannot acknowledge their way past
+  // however many times they type the flag.
+  if (parsed.booleans.has("acknowledge-pen")) query.set("acknowledgePen", "1");
+  if (parsed.booleans.has("acknowledge-writable")) query.set("acknowledgeWritable", "1");
+  const [mount, route, entity] = parts as [string, string, string];
+  const url =
+    `${base}/${encodeURIComponent(mount)}/artifact/` +
+    `${encodeURIComponent(route)}/${encodeURIComponent(entity)}?${query.toString()}`;
+  const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+  const text = await res.text();
+  if (!res.ok) {
+    // The door's own words, unchanged. A CLI that rephrased a refusal would be a second source of
+    // truth about what a renderer may be published as.
+    let said = text;
+    try {
+      const body: unknown = JSON.parse(text);
+      const errors = (body as { errors?: unknown }).errors;
+      if (Array.isArray(errors) && errors.length > 0) said = errors.map(String).join("; ");
+    } catch {
+      /* not JSON: the body IS the reason */
+    }
+    io.err(`artifact pack: ${said}`);
+    return 2;
+  }
+  const out = parsed.flags.get("out");
+  if (out !== undefined) {
+    writeFileSync(out, text, "utf8");
+    io.out(`loam: wrote ${out} (${text.length} bytes)`);
+  }
+  const verdict = JSON.parse(text) as {
+    manifest?: readonly string[];
+    capability?: readonly string[];
+  };
+  io.out(`  tools: ${(verdict.manifest ?? []).join(", ")}`);
+  for (const line of verdict.capability ?? []) io.out(`  ${line}`);
+  return 0;
+}
+
 function defaultHome(): string {
   return process.env["LOAM_HOME"] ?? ".loam";
 }
@@ -845,6 +957,8 @@ export async function run(
         return await cmdStore(rest, io);
       case "repair":
         return await cmdRepair(rest, io);
+      case "artifact":
+        return await cmdArtifact(rest, io);
       default:
         io.err(`loam: unknown command "${command}" — run \`loam --help\``);
         return 2;

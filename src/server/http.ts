@@ -957,6 +957,58 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           json(res, 200, await gateway.health());
           return;
         }
+        // The artifact ASSESSMENT door (SPEC §30): may this route be published, and what would a page
+        // emitted from it be permitted to do? It answers the pack door's verdict — the manifest, the
+        // coordinates, the derived capability statement — or the operator's own refusal. What it does
+        // NOT yet serve is the page itself; that arrives with the emission, as another field here.
+        //
+        // OPERATOR-ONLY, and to every other identity it does not exist — `health`'s idiom, for a
+        // reason specific to this door: a page emitted from these coordinates carries the renderer's
+        // BUNDLE SOURCE verbatim, which no existing door discloses (`serveRoute` discloses only the
+        // bundle's output). Deciding to publish your code is the operator's, and so is every answer
+        // that describes the publication.
+        //
+        // "DOES NOT EXIST" HAS TWO UNIFORM SHAPES, NOT ONE, and this door must match the right one per
+        // caller. A single response byte-identical across an actor token, no token, and a bad token is
+        // not available here and should not be: a bad or absent token never reaches this switch at all.
+        // It is refused before mount resolution matters, precisely so an anonymous prober learns
+        // nothing about which mounts exist.
+        //
+        //   token-bearing non-operator → 404, uniform ACROSS VERBS  (this door looks like every
+        //                                                            unknown one)
+        //   no token, or a bad token   → 401, uniform ACROSS MOUNTS (no 404-vs-401 oracle)
+        //
+        // Two families, both deliberate. A refusal from `packArtifact` itself is a THIRD thing and is
+        // answered in full: the operator has already proved they may see this door, so hiding the
+        // reason would only hide it from the one person entitled to it.
+        case "artifact": {
+          if (req.method !== "GET" || identity.operator !== true) {
+            json(res, 404, { errors: ["no such surface"] });
+            return;
+          }
+          const parsed = appRouteOf(url.pathname);
+          if (parsed === undefined) {
+            json(res, 404, { errors: ["no such surface"] });
+            return;
+          }
+          const store = url.searchParams.get("store");
+          try {
+            const packed = gateway.packArtifact(parsed.route, parsed.entity, {
+              server: url.searchParams.get("connector") ?? "",
+              ...(store === null ? {} : { storeAddress: store }),
+              ...(url.searchParams.get("acknowledgePen") === "1" ? { acknowledgePen: true } : {}),
+              ...(url.searchParams.get("acknowledgeWritable") === "1"
+                ? { acknowledgeWritable: true }
+                : {}),
+            });
+            json(res, 200, packed);
+          } catch (err) {
+            // One shape for every door: the same plain-English reason a direct call throws and the CLI
+            // relays, so nothing rephrases a refusal about what a renderer may be published as.
+            json(res, 400, { errors: [err instanceof Error ? err.message : String(err)] });
+          }
+          return;
+        }
         // The other doors (SPEC §17): the same registrations, spoken in REST/OpenAPI. The
         // token carries the SAME identity discipline — an actor token writes as that actor,
         // an operator token as the operator; the hooks enforce standing, not the transport.
