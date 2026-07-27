@@ -92,6 +92,7 @@ import {
   delayMs,
   locksPath,
   noteFailure,
+  unreadableRecordFile,
   readLocks,
   type LimitPolicy,
 } from "../../src/server/login-locks.js";
@@ -928,7 +929,6 @@ describe("the failed-login delay", () => {
     const entries = testIo();
     expect(await run(["user", "unlock", "--all", "--home", home], entries.io)).toBe(1);
     expect(entries.err.join("\n")).toMatch(/1 entry that is not a login record/);
-    // and the advice names the SELF-REPAIR, because the fault lasts one failed login on a writable home
     // and the advice WARNS rather than promising: whether the file is replaced turns on the door's
     // policy and on the path, neither of which this process was told.
     expect(entries.err.join("\n")).toMatch(/may replace this file/);
@@ -961,6 +961,55 @@ describe("the failed-login delay", () => {
     expect(named.err.join("\n")).toMatch(/do not read an empty answer as a clean one/);
     expect(named.out.join("\n")).not.toMatch(/waits for nothing/);
   });
+
+  // POSIX only for the symlink shapes; Windows needs a privilege to make one. The predicate under test
+  // is `statSync(home).isDirectory()`, which is platform-agnostic.
+  it.skipIf(process.platform === "win32")(
+    "(o8) an UNUSABLE HOME is named, whatever shape makes it unusable",
+    () => {
+      // FIVE SHAPES, and the reason this rail exists as a table rather than one case: the check has been
+      // wrong twice, each time on a shape the previous version did not consider. `lstat` alone misses a
+      // DANGLING home — it succeeds on the link — and `lstat().isDirectory()` would condemn a HEALTHY
+      // symlinked home, which is the trap in the one-token fix. Only `stat().isDirectory()` separates all
+      // five, so all five are asserted here together.
+      const root = makeHome();
+      try {
+        const real = join(root, "real");
+        mkdirSync(real);
+        const target = join(root, "target");
+        mkdirSync(target);
+        const link = join(root, "link");
+        symlinkSync(target, link);
+        const dangling = join(root, "dangling");
+        symlinkSync(join(root, "gone"), dangling);
+        const asFile = join(root, "as-file");
+        writeFileSync(asFile, "not a home");
+        const missing = join(root, "missing");
+
+        // USABLE: silent. A healthy symlinked home is the one this must not condemn.
+        expect(unreadableRecordFile(real)).toBeUndefined();
+        expect(unreadableRecordFile(link)).toBeUndefined();
+
+        // UNUSABLE: each named, and each says it is the HOME rather than the record file.
+        for (const [label, path] of [
+          ["dangling", dangling],
+          ["file", asFile],
+          ["missing", missing],
+        ] as const) {
+          const said = unreadableRecordFile(path);
+          expect(said, label).toMatch(/is not a usable loam home/);
+          expect(said, label).toMatch(/Check the --home path if you passed one/);
+          expect(said, label).toMatch(/loam init/); // the first-run reader has a cure too
+          // and NOT the record-file advice: there are no bytes here to be perishable
+          expect(said, label).not.toMatch(/copy it now/);
+        }
+        // the file-valued home names WHY, rather than only that something went wrong
+        expect(unreadableRecordFile(asFile)).toMatch(/it is not a directory/);
+      } finally {
+        dropHome(root);
+      }
+    },
+  );
 
   it("(o8) a DANGLING SYMLINK is something at the path, not an absent file", async () => {
     // `readFileSync` follows the link and raises ENOENT, which reads exactly like "no file yet" — so an

@@ -26,17 +26,18 @@
 // direction here — this file is a work budget, not an authorization surface, and failing closed would
 // hand a local disk fault the power to refuse a correct password.
 //
-// WHAT FAILING OPEN ACTUALLY COSTS, since "fail-open" is easy to read as "degrades a little". Three
-// cases, and they differ by whether the PATH CAN BE REPLACED by a rename — not by whether the home is
-// writable. A directory at the path sits on a perfectly writable home and cannot be replaced at all.
+// WHAT FAILING OPEN ACTUALLY COSTS, since "fail-open" is easy to read as "degrades a little". TWO AXES,
+// not one — can the file be READ, and can the path be REPLACED — and neither implies the other. A
+// directory at the path is unreplaceable on a perfectly writable home (EISDIR); a read-only home is
+// unreplaceable with nothing wrong with the path (EACCES). The three reachable combinations:
 //
 //   - THE FILE CANNOT BE READ AND THE PATH CAN BE REPLACED — damaged bytes, no `users` table, mode 0000,
 //     a dangling symlink. Every name waits zero, and it lasts EXACTLY ONE FAILED LOGIN: the next one
 //     writes a whole new table over the damage. So it self-repairs, and the repair DISCARDS every
 //     record nobody could read. An operator who wants those counts has to act before the next attempt.
-//   - THE PATH CANNOT BE REPLACED — a directory here is the case that reaches this, and `renameSync`
-//     answers EISDIR however writable the home is. Every name waits zero until an operator clears the
-//     path.
+//   - THE FILE CANNOT BE READ AND THE PATH CANNOT BE REPLACED — a directory here (EISDIR), or damaged
+//     bytes on a read-only home (EACCES). Every name waits zero and stays that way until an operator
+//     fixes it. NOT a directory-only shape: the second form has nothing wrong with the path at all.
 //   - THE FILE READS BUT THE HOME CANNOT BE WRITTEN. A name with no row waits zero. A name WITH a row
 //     keeps paying its accumulated wait, and that wait can no longer be grown or cleared — not by a
 //     correct password and not by `loam user unlock`, because both need the same write. It retires only
@@ -64,6 +65,7 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   writeSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -180,20 +182,32 @@ export function unreadableRecordFile(home: string): string | undefined {
     `The login door reads it the same way, so it is charging no name any delay. A later failed login ` +
     `may replace this file and discard whatever could not be read: copy it now if those counts matter.`;
   // THE HOME COMES FIRST, because a MISTYPED `--home` is the likeliest way to reach this function and
-  // the worst one to answer with silence. No home means no record file, which read as "nobody has
-  // failed a login yet" — a tidy exit 0 over a path that holds nothing and never will. And in that
-  // state the door charges nobody AND cannot self-repair, since even the temp file cannot be created.
+  // the worst one to answer with silence. No usable home means no record file, which reads as "nobody
+  // has failed a login yet" — a tidy exit 0 over a path that holds nothing and never will. The door
+  // charges nobody there and cannot self-repair either, since even the temp file cannot be created.
+  //
+  // IT ASKS `stat().isDirectory()`, WHICH IS THE OPPOSITE CALL FROM THE RECORD FILE BELOW, for the
+  // opposite reason. For the FILE the link itself is the thing at the path. For a HOME what matters is
+  // the RESOLVED TARGET: a symlinked home on a removed volume must read as broken, and a healthy
+  // symlinked home must read as fine. `lstat` cannot tell those apart — it SUCCEEDS on a dangling link
+  // and answers `isDirectory=false` for a healthy one — so `lstat` alone misses the dangling home and
+  // `lstat().isDirectory()` would condemn a working one. Only `stat().isDirectory()` separates all five
+  // shapes: real, symlinked, dangling, file, missing.
+  let why: string | undefined;
   try {
-    lstatSync(home);
+    if (!statSync(home).isDirectory()) why = "it is not a directory";
   } catch (err) {
-    // It does NOT say "check --home": the default home reaches this too, on a box where nobody has run
-    // `loam init` yet, and a first-run reader who passed no flag would go looking for a typo they never
-    // made. Both cures are named instead, and the reader picks the one that applies to them.
+    why = err instanceof Error ? err.message : String(err);
+  }
+  if (why !== undefined) {
+    // TWO CURES, because the default home reaches this too — on a box where nobody has run `loam init`,
+    // a reader who passed no flag would hunt for a typo they never made. And NOTHING about perishable
+    // bytes: there is no record file here and never was, so the advice below would describe a
+    // replacement that can never happen.
     return (
-      `${home} is not a directory this command can examine: ` +
-      `${err instanceof Error ? err.message : String(err)}. No login records can live there, so do ` +
-      `not read an empty answer as a clean one. Check the --home path if you passed one, or run ` +
-      `\`loam init\` if this home was never made.`
+      `${home} is not a usable loam home: ${why}. No login records can live there, so do not read an ` +
+      `empty answer as a clean one. Check the --home path if you passed one, or run \`loam init\` if ` +
+      `this home was never made.`
     );
   }
   try {

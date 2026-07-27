@@ -203,10 +203,11 @@ may do.
   nothing, self-repairing on the next failed login WHERE THE PATH CAN BE REPLACED — a directory at it
   cannot, however writable the home — and discarding the records nobody could read —
   `test/server/login-limit.test.ts`
-- (o8) `loam user unlock` distinguishes a record file that is ABSENT from one it cannot read, and a home
-  that does not exist from either: the absent file reports an empty table and exits 0, while an
-  unreadable file and a missing home each name the fault, say the door is charging nobody, warn that the
-  bytes are perishable rather than promising a repair the CLI cannot predict, and exit non-zero —
+- (o8) `loam user unlock` never reports an empty answer as a clean one. An ABSENT record file on a usable
+  home reports an empty table and exits 0. An UNREADABLE file names the fault, says the door is charging
+  nobody, and warns the bytes are perishable rather than promising a repair the CLI cannot predict. A
+  home that is not a usable directory — missing, a dangling symlink, or a file — names that instead and
+  offers both cures, saying nothing about bytes it does not have. Each fault exits non-zero —
   `test/server/login-limit.test.ts`
 - (p) `loam user unlock <name>` clears that name's accumulated wait from the box, `--all` clears every
   record whatever name it holds, and the report names the COUNT rather than a wait the CLI's process
