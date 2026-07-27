@@ -6,7 +6,8 @@
 // live ServerHandle so a caller (a test, or a supervisor) can drive and close it. The default
 // `serve` blocks until the process is signalled.
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { authorForSeed } from "@bombadil/rhizomatic";
 import { Gateway, type FederationReport } from "../gateway/gateway.js";
 import { parseOffer } from "../federation/offer.js";
@@ -64,7 +65,7 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
   serve: {
     summary: "boot a store and serve it (GraphQL + SSE + MCP over HTTP)",
     usage: "loam serve --http [options]",
-    flags: new Set(["home", "store", "port", "token", "http", "archive"]),
+    flags: new Set(["home", "store", "port", "token", "http", "archive", "host"]),
     booleans: new Set(["http"]),
     notes: [
       "A fresh home self-initializes: it mints (or, via LOAM_SEED, imports) an operator identity,",
@@ -128,6 +129,10 @@ const FLAG_HELP: Readonly<Record<string, { readonly arg: string; readonly note: 
   store: { arg: "<file>", note: "the store file inside the home (default store.sqlite)" },
   seed: { arg: "<hex>", note: "import an operator seed instead of minting one ($LOAM_SEED)" },
   port: { arg: "<n>", note: "the port to listen on — 0 for ephemeral (default 4321)" },
+  host: {
+    arg: "<addr>",
+    note: "the address to bind (default 127.0.0.1 — loopback only; 0.0.0.0 opens the LAN)",
+  },
   token: { arg: "<secret>", note: "the bearer token for the door ($LOAM_TOKEN)" },
   http: { arg: "", note: "serve over HTTP — the only transport today" },
   archive: { arg: "<dir>", note: "mirror every delta into a cold store, relative to the home" },
@@ -184,6 +189,70 @@ function parseFor(command: CommandName, args: readonly string[]): Parsed {
 // rides the operator's log. A scrub nobody hears about is a §11 promise quietly left unkept.
 function openStore(path: string, io: IO): SqliteBackend {
   return new SqliteBackend(path, { onScrubDeferred: (why) => io.err(why) });
+}
+
+// WHO IS SERVING THIS HOME. `loam serve` leaves a record beside config.json; the offline
+// commands (pull, register) consult it so a success report can say the one thing sqlite cannot:
+// a running server answers from the memory it booted with, and nothing lands in that memory
+// through a second handle. Removed on clean shutdown; a crash leaves it behind, and the dead-pid
+// check below is what keeps the stale record quiet.
+const servingFile = (home: string): string => join(home, "serving.json");
+
+const recordServing = (home: string, url: string, store: string): void => {
+  const record = { pid: process.pid, url, store: resolve(store), startedAt: Date.now() };
+  writeFileSync(servingFile(home), `${JSON.stringify(record)}\n`);
+};
+
+// The staleness probe, and its direction is the whole design (H9, inverted: this probe's SILENCE
+// is what licenses the trap, so uncertainty must never read as absence). Two silences are earned —
+// no record at all, and a recorded pid that is provably dead. A record that cannot be read,
+// cannot be parsed, or is missing its fields WARNS: a false warning costs a sentence; a false
+// silence costs an operator an afternoon of disbelieving their own store.
+function servingWarning(home: string, store: string): string | undefined {
+  const file = servingFile(home);
+  const uncertain =
+    `a server may be serving this store — ${file} exists but does not read as a serving ` +
+    `record, and a maybe must not pass as a no. If one is running, it answers from the memory ` +
+    `it booted with, so it will not see what just landed until it restarts`;
+  let raw: string;
+  try {
+    raw = readFileSync(file, "utf8");
+  } catch (err) {
+    // ENOENT is the one absence this probe may trust: nothing claims to be serving.
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    return uncertain;
+  }
+  let record: { pid?: unknown; url?: unknown; store?: unknown };
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== "object") return uncertain;
+    record = parsed;
+  } catch {
+    return uncertain;
+  }
+  if (
+    typeof record.pid !== "number" ||
+    !Number.isInteger(record.pid) ||
+    record.pid <= 0 ||
+    typeof record.store !== "string"
+  ) {
+    return uncertain;
+  }
+  // A server on a DIFFERENT store file is not this trap: the world that moved is not the one
+  // being served. (Same-path spellings are resolved; a genuinely different file stays quiet.)
+  if (resolve(record.store) !== resolve(store)) return undefined;
+  try {
+    process.kill(record.pid, 0); // signal 0: existence check, nothing delivered
+  } catch (err) {
+    // ESRCH is checked-and-no — a crash's leftover record. Anything else (EPERM: alive, not
+    // ours) means a process is there, and a process we cannot ask is a process we warn about.
+    if ((err as NodeJS.ErrnoException).code === "ESRCH") return undefined;
+  }
+  const at = typeof record.url === "string" ? `, ${record.url}` : "";
+  return (
+    `a server is serving this store right now (pid ${record.pid}${at}) — it answers from the ` +
+    `memory it booted with, so it will not see what just landed until it restarts`
+  );
 }
 
 function cmdInit(args: readonly string[], io: IO): number {
@@ -324,18 +393,21 @@ async function cmdServe(
     mounts: { default: gateway },
     tokens: { [token]: { operator: true } },
     port,
-    host: "127.0.0.1",
+    host: parsed.flags.get("host") ?? "127.0.0.1",
   });
+  recordServing(home, server.url, path);
   io.out(
     `loam: serving ${path} at ${server.url}/default${vault === undefined ? "" : `\n  archive ${vault}`}`,
   );
 
   // Closing the server also releases the gateway (and its backend file) — one shutdown, whole.
+  // The serving record goes LAST: while any of this can still fail, a live pid is still true.
   const handle: ServerHandle = {
     ...server,
     async close(): Promise<void> {
       await server.close();
       await gateway.close();
+      rmSync(servingFile(home), { force: true });
     },
   };
 
@@ -388,8 +460,9 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
   const home = parsed.flags.get("home") ?? defaultHome();
   const init = initHome(home);
   if (init.created) io.out(`loam: initialized ${home}\n  operator ${init.operator}`);
+  const path = storePath(home, parsed.flags.get("store"));
   const gateway = await Gateway.boot(
-    openStore(storePath(home, parsed.flags.get("store")), io),
+    openStore(path, io),
     assembleGenesis({ operatorSeed: readSeed(home) }),
   );
   try {
@@ -412,6 +485,10 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
     `loam: registered ${input.hyperschema.name} at ${schemaEntityFor(input.hyperschema, input.entity)}\n` +
       `  the definition is deltas now — the next serve grows the surface from it`,
   );
+  // The success is true and incomplete on its own: a server already holding this store will keep
+  // serving the surface it booted with. The warning qualifies the report; it never blocks it.
+  const staleness = servingWarning(home, path);
+  if (staleness !== undefined) io.err(`loam: ${staleness}`);
   return 0;
 }
 
@@ -464,8 +541,9 @@ async function cmdPull(args: readonly string[], io: IO): Promise<number> {
   const home = parsed.flags.get("home") ?? defaultHome();
   const init = initHome(home);
   if (init.created) io.out(`loam: initialized ${home}\n  operator ${init.operator}`);
+  const path = storePath(home, parsed.flags.get("store"));
   const gateway = await Gateway.boot(
-    openStore(storePath(home, parsed.flags.get("store")), io),
+    openStore(path, io),
     assembleGenesis({ operatorSeed: readSeed(home) }),
   );
   let report: FederationReport;
@@ -482,6 +560,11 @@ async function cmdPull(args: readonly string[], io: IO): Promise<number> {
       `  ${report.accepted} accepted, ${report.rejected} refused, of ${report.offered} offered — ` +
       `union is union; pulling again is safe`,
   );
+  // "Accepted" is true of the FILE, not of any server already holding it open: a running serve
+  // keeps answering from boot-time memory. Say so, right under the count that would otherwise lie
+  // by omission — and never block; the deltas are durable whatever the server knows.
+  const staleness = servingWarning(home, path);
+  if (staleness !== undefined) io.err(`loam: ${staleness}`);
   if (init.created) {
     // The fork is the operator's (SPEC §15): a home minted THIS run holds a brand-new seed,
     // so whatever law rode the offer is another operator's here — inert by design.

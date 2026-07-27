@@ -104,6 +104,48 @@ interface LiveStream {
 
 const sha = (s: string): Buffer => createHash("sha256").update(s).digest();
 
+// What GET / answers, whole: self-contained HTML (no external asset could ride a tokenless GET
+// anyway), served verbatim to every caller. Editing it is safe exactly as long as it stays
+// ignorant of the store it fronts — no mount names, no counts, no hint of what is declared
+// public. The words say where the doors are; they never say which doors exist.
+const GREETING = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>a Loam store</title>
+<style>
+  body { margin: 0; font: 16px/1.65 ui-sans-serif, system-ui, sans-serif; color: #2b2620;
+         background: #faf7f1; display: grid; min-height: 100vh; place-items: center; }
+  main { max-width: 34rem; padding: 2rem 1.5rem 4rem; }
+  h1 { font-size: 1.35rem; font-weight: 650; margin: 0 0 1rem; }
+  p { margin: 0.75rem 0; }
+  code { font: 0.92em ui-monospace, "Cascadia Mono", monospace; background: #00000012;
+         padding: 0.1em 0.4em; border-radius: 0.3em; }
+  .quiet { color: #6f675c; font-size: 0.92em; margin-top: 1.5rem; }
+  @media (prefers-color-scheme: dark) {
+    body { color: #e6dfd4; background: #1f1b17; }
+    code { background: #ffffff1f; }
+    .quiet { color: #a89e90; }
+  }
+</style>
+</head>
+<body>
+<main>
+<h1>A Loam store serves here.</h1>
+<p>Its doors are the mounts: <code>/&lt;mount&gt;/graphql</code> to ask,
+<code>/&lt;mount&gt;/subscribe</code> to listen, <code>/&lt;mount&gt;/rest</code> and
+<code>/&lt;mount&gt;/mcp</code> for the same worlds in other tongues.</p>
+<p>What the operator has declared public answers without a token; every other door wants
+<code>Authorization: Bearer &hellip;</code> — and a door that refuses you is not saying
+nothing is there, only that it will not say.</p>
+<p class="quiet">This page names no mounts, on purpose. Which worlds live here is between
+you and your token.</p>
+</main>
+</body>
+</html>
+`;
+
 class BodyTooLarge extends Error {
   constructor() {
     super("request body too large");
@@ -697,6 +739,16 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
   const refused = (res: ServerResponse): void =>
     json(res, 401, { errors: ["a bearer token is required, and this one opens nothing"] });
 
+  // The front door. The bare root is the one path with no world behind it, so it is the one path
+  // that can afford a human answer — and the first thing anyone does with a served store's URL is
+  // open it in a browser. The greeting is a CONSTANT: one string, blind to the mount table, the
+  // token presented, and every public declaration, because a front page that varied on any of
+  // them would be an oracle the uniform refusals below pay to prevent. It names no mount, ever.
+  const greeted = (res: ServerResponse): void => {
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8", ...CORS });
+    res.end(GREETING);
+  };
+
   const server = createServer((req, res) => {
     void (async () => {
       // The preflight answers before anything else: it is knowledge-free (fixed headers, no
@@ -706,6 +758,20 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         return;
       }
       const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+      // GET / is greeted before any identity or mount resolution — the answer is the same
+      // constant for every caller, so there is nothing here for resolution to decide. Any other
+      // method on the root falls through to the ordinary door discipline.
+      if (req.method === "GET" && url.pathname === "/") {
+        greeted(res);
+        return;
+      }
+      // Every browser asks for the icon before anything else; 204 is the quiet true answer —
+      // nothing is here, and nothing is wrong.
+      if (req.method === "GET" && url.pathname === "/favicon.ico") {
+        res.writeHead(204, CORS);
+        res.end();
+        return;
+      }
       const [, mountName, verb] = url.pathname.split("/");
       // A malformed percent-escape resolves no mount — it must fall into the same uniform
       // refusal as any other unresolvable name, never a 500 that marks the input special.
