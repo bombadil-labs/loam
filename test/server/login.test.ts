@@ -167,10 +167,15 @@ describe("POST /logout", () => {
     });
     expect(res.status).toBe(200);
     expect(await stillOpen(served.base, session.cookie)).toBe(false);
-    // and logging out again finds no session to end
+    // logging out again: a WRONG form token is not this page's form (403), and the right stateless one
+    // reaches the door and finds no session to end (401). Both refusals, and each for its own reason.
     expect(
       (await postDoor(served.base, "/logout", { cookie: session.cookie, formToken: "anything" }))
         .status,
+    ).toBe(403);
+    const stale = await formTokenFor(served.base, session.cookie);
+    expect(
+      (await postDoor(served.base, "/logout", { cookie: session.cookie, formToken: stale })).status,
     ).toBe(401);
   });
 });

@@ -1056,7 +1056,10 @@ async function cmdUserCreate(
     return 1;
   }
   if (entryFor(current, name) !== undefined) {
-    io.err(`user create: ${name} gained a credential while this ran — nothing was overwritten`);
+    io.err(
+      `user create: ${name} gained a credential while this ran, so no credential was overwritten — ` +
+        `but the user deltas above DID land. Check \`loam store\` before running this again.`,
+    );
     return 2;
   }
   writeCredentials(home, { version: 1, users: { ...current.users, [name]: entry } });
@@ -1089,18 +1092,23 @@ function cmdUserUnlock(name: string, home: string, io: IO): number {
     );
     return 1;
   }
+  // THE LOCK FILE IS THE AUTHORITY here, not the credential file. A record outlives its user: erase the
+  // deltas and remove the credential entry, and the lock record — keyed by the user NAME — is still
+  // there. Keying this refusal on the credential would mean the one tool named for clearing that record
+  // refuses in exactly the state a forget-me request produces.
+  const locked = clearLock(home, name);
+  if (locked) {
+    io.out(`loam: unlocked ${name}\n  the next login attempt is counted from zero`);
+    return 0;
+  }
   if (entryFor(existing, name) === undefined) {
     io.err(
-      `user unlock: ${home} has no user named ${name} — \`loam user create ${name}\` makes one. ` +
-        `Nothing was unlocked.`,
+      `user unlock: ${home} holds no lock and no user named ${name} — nothing was unlocked. ` +
+        `\`loam user create ${name}\` makes one.`,
     );
     return 2;
   }
-  io.out(
-    clearLock(home, name)
-      ? `loam: unlocked ${name}\n  the next login attempt is counted from zero`
-      : `loam: ${name} was not locked\n  nothing to lift`,
-  );
+  io.out(`loam: ${name} was not locked\n  nothing to lift`);
   return 0;
 }
 

@@ -240,6 +240,23 @@ export async function verifyPassword(entry: unknown, password: string): Promise<
   return computed.length === expected.length && timingSafeEqual(computed, expected);
 }
 
+/**
+ * WHICH COST a decoy hash should pay: the cost a REAL verify on this file would pay.
+ *
+ * `verifyPassword` derives at the parameters the ENTRY carries, which is what lets an operator raise the
+ * door's cost without invalidating every stored password. So a decoy at the DOOR's cost would take a
+ * different time from a real miss the moment those two differ — and that difference is a username oracle
+ * measured with a stopwatch instead of a status code.
+ *
+ * So the decoy borrows an existing entry's parameters, picked deterministically, and falls back to the
+ * door's own only when there is no entry to imitate — in which case no name exists and there is nothing
+ * to distinguish.
+ */
+export function decoyParamsFor(file: CredentialsFile, fallback: ScryptParams): ScryptParams {
+  const names = Object.keys(file.users).sort();
+  return names.length === 0 ? fallback : (file.users[names[0]!] as CredentialEntry).params;
+}
+
 // A decoy the door hashes against when no entry exists, so an unknown user costs the same time as a
 // wrong password. Its salt is random per process: nothing ever verifies against it successfully.
 const DECOY_SALT = randomBytes(16);

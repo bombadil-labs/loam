@@ -80,9 +80,13 @@ const filedValue = (
   return value?.target.kind === "primitive" ? String(value.target.value) : undefined;
 };
 
-// Every form a secret could take on the way into the ground or the store file. The hex STRING is the
-// form the credential file holds, so its ASCII is the likely leak; the decoded bytes are the form a
-// `bytes` target would carry. Both, for each secret, at both levels.
+// Every form a secret could take on the way into the ground or the store file.
+//
+// The hex STRING is the realistic leak — it is the form credentials.json holds, so a pointer carrying it
+// carries that text — and it is the form the probe below plants and proves both levels can see. The
+// DECODED rows are belt: a `bytes` target would carry those, and the store writes claims as JSON text,
+// so the decoded needles can only fire at the delta level. Named rather than implied, because a list that
+// reads as five proven forms when one is proven is the same overclaim in a smaller place.
 const secretNeedles = (entry: {
   salt: string;
   hash: string;
@@ -395,8 +399,10 @@ describe("who may say what role a user holds", () => {
       );
       expect(roleDelta).toBeDefined();
 
-      // the stranger strikes the operator's own role binding
-      await gateway.append([
+      // the stranger strikes the operator's own role binding. The RECEIPT matters: if the append door
+      // refused this delta, `roleOf` would answer "operator" for a reason that has nothing to do with
+      // the mask, and this rail would be green having tested nothing.
+      const struck = await gateway.append([
         signClaims(
           {
             timestamp: Date.now(),
@@ -408,6 +414,7 @@ describe("who may say what role a user holds", () => {
           STRANGER_SEED,
         ),
       ]);
+      expect(struck.accepted).toBe(1);
       expect(roleOf(gateway.reactor, operator, "myk")).toBe("operator"); // inert
 
       // the operator's own strike is not

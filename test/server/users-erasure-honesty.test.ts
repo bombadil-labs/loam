@@ -102,8 +102,11 @@ describe("the erasure report and the login door agree about what is swept", () =
     // §36 creates in the home, and require each to appear. A future file that skips the report fails here.
     await attempt("myk", "wrong, so login-locks.json exists");
     const said = (await served.gateway.health()).unswept.join(" ");
+    // EVERY file in the home, not only the .json ones — a future §36 file with another extension must
+    // not slip past a filter. What older sections own is named here, so anything new is §36's to explain.
+    const OLDER = ["config.json", "operator.seed", "serving.json", "store.sqlite"];
     const owned = readdirSync(home).filter(
-      (f) => f.endsWith(".json") && f !== "config.json" && f !== "serving.json",
+      (f) => !OLDER.includes(f) && !f.startsWith("store.sqlite"),
     );
     // A FLOOR, so the loop cannot pass by checking nothing: both of §36's files must be there to check.
     expect(owned.sort()).toEqual(["credentials.json", "login-locks.json"]);
@@ -143,10 +146,15 @@ describe("the erasure report and the login door agree about what is swept", () =
     expect((await attempt("wren", WREN)).status).toBe(200);
   });
 
-  it("(u) an already-open session closes when the ground forgets its user", async () => {
+  it("(u) an already-open session closes when the ground forgets its user — in this exact order", async () => {
     // The fresh-login rails cannot see this: they sign in AFTER the erase. A session already open, and a
-    // token already minted, are the state that outlives an erasure — so the doors re-read the ground
-    // rather than trusting the session's own copy of the role.
+    // token already minted, are the state that outlives an erasure.
+    //
+    // THE ORDER IS THE ASSERTION. An erasure does not reach the server's memory, and this file's own
+    // report says so — so asserting a dead token straight after the erase would claim a completeness the
+    // report disclaims, and it would pass only by accident of whatever request ran first. What is true is
+    // narrower and worth pinning exactly: the token OUTLIVES the erase; the next touch of a login door
+    // re-reads the ground, finds no user, and drops the session; and THAT is what retires the token.
     const session = await signIn(served.base, "myk", PASSWORD);
     const minted = await postDoor(served.base, "/session/token", {
       cookie: session.cookie,
@@ -154,24 +162,31 @@ describe("the erasure report and the login door agree about what is swept", () =
     });
     expect(minted.status).toBe(200);
     const { token } = (await minted.json()) as { token: string };
+    const opensDoor = (): Promise<Response> =>
+      fetch(`${served.base}/default/graphql`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ query: "{ __typename }" }),
+      });
+    expect((await opensDoor()).status).toBe(200);
 
     const bystander = await signIn(served.base, "wren", WREN);
     await served.gateway.erase(await userRecordId("myk"));
 
-    // the open session mints nothing more, and the token it already had is dead
+    // FIRST: the token still works. The erase reached the ground, not this process's memory.
+    expect((await opensDoor()).status).toBe(200);
+
+    // THEN: the session's next touch of a login door re-reads the ground and drops it
     const refused = await postDoor(served.base, "/session/token", {
       cookie: session.cookie,
       formToken: session.formToken,
     });
     expect(refused.status).toBe(401);
-    const dead = await fetch(`${served.base}/default/graphql`, {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-      body: JSON.stringify({ query: "{ __typename }" }),
-    });
-    expect(dead.status).toBe(401);
 
-    // and the bystander's live session is untouched — the erase reached one user, not the door
+    // AND SO: the drop revoked what the session had minted
+    expect((await opensDoor()).status).toBe(401);
+
+    // the bystander's live session is untouched throughout — the erase reached one user, not the door
     expect(await formTokenFor(served.base, bystander.cookie)).not.toBe("");
   });
 
@@ -212,8 +227,9 @@ describe("the erasure report and the login door agree about what is swept", () =
     // delta level: the record is gone from the store and the bystander's is not
     await expect(userRecordId("myk")).rejects.toThrow(/no user record/);
     expect(await userRecordId("wren")).toBeTruthy();
-    // and at the BYTES, through the probe the health report itself uses. A row read cannot answer this:
-    // `deltasSince` skips what a purge removed, while `holds` asks the store whether it still has it.
+    // and through the probe the health report itself uses. NOT a byte scan: `holds` is a row lookup that
+    // is tier-aware where `deltasSince` is not, and the byte guarantee below it belongs to the sqlite
+    // driver's own secure-delete machinery. What this pins is that the store no longer HAS the row.
     // (The id STRING is still in the file, in the tombstone — a tombstone names what it forgot.)
     expect(await served.gateway.backend.holds(erased)).toBe(false);
     expect(await served.gateway.backend.holds(await userRecordId("wren"))).toBe(true);

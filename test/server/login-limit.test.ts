@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   PASSWORD,
+  SLOW_SCRYPT,
   beginLogin,
   bootStore,
   cookieFrom,
@@ -146,10 +147,41 @@ describe("the failed-login limiter", () => {
   });
 });
 
+// The budget rails need ONE hash to outlast a round trip by orders of magnitude, and the lever is the
+// user's OWN cost: `verifyPassword` derives at the parameters the entry carries, and the decoy imitates
+// an existing entry rather than the door's configuration — which is what keeps an absent name and a
+// present one costing the same (criterion j, again). So these rails get their own home holding a single
+// user created at SLOW_SCRYPT, roughly a second a hash.
 describe("the cap on unauthenticated hashing", () => {
+  let slowHome: string;
+  let slow: Served;
+
+  beforeEach(async () => {
+    slowHome = makeHome();
+    await bootStore(slowHome);
+    await createUser(slowHome, "myk", PASSWORD, { scrypt: SLOW_SCRYPT });
+  });
+  afterEach(async () => {
+    await slow?.close();
+    dropHome(slowHome);
+  });
+
+  const slowTry = async (name: string, password: string): Promise<Response> => {
+    const begun = await beginLogin(slow.base);
+    return postLogin(slow.base, name, password, {
+      cookie: begun.cookie,
+      formToken: begun.formToken,
+    });
+  };
+
+  // The witness every timing fixture here owes: were the held hashes STILL RUNNING when the probe ran?
+  // Without it a rail whose fixture silently completed early would pass having tested nothing.
+  const stillHolding = async (held: Promise<unknown>): Promise<string> =>
+    Promise.race([held.then(() => "finished"), Promise.resolve("still running")]);
+
   it("(q) a cap of zero refuses the RIGHT password without hashing it", async () => {
-    // The strict form of the criterion, and it needs no clock: a correct password cannot answer
-    // 503 if the cap were consulted after the compare — it would answer 200.
+    // The strict form of the criterion, and it needs no clock: a correct password cannot answer 503 if
+    // the cap were consulted after the compare — it would answer 200.
     served = await serveHome(home, { maxConcurrentHashes: 0 });
     const res = await tryPassword("myk", PASSWORD);
     expect(res.status).toBe(503);
@@ -164,49 +196,18 @@ describe("the cap on unauthenticated hashing", () => {
     expect((await tryPassword("myk", PASSWORD)).status).toBe(200);
   });
 
-  it("(q) the busy refusal is BYTE-IDENTICAL for a name that exists and one that does not", async () => {
-    // A budget that reserves a smaller share for unknown names is a USERNAME ORACLE: the two shares run
-    // out at different times, so an existing name answers 401 while an absent one answers 503, and the
-    // caller learns which names exist. That is precisely what the decoy hash prevents (criterion j), so
-    // the budget must be ONE counter that both branches draw on.
-    //
-    // FOUR slots, TWO held by slow decoy hashes. That is under the global cap and exactly AT a reserved
-    // decoy share of half — so a split budget turns the absent name away with 503 while the known name
-    // goes through to its 401. One counter answers both the same. The known password is WRONG on
-    // purpose: two refusals are comparable, a success and a refusal are not.
-    served = await serveHome(home, {
-      maxConcurrentHashes: 4,
-      scrypt: { N: 131072, r: 8, p: 1, keylen: 64 },
-    });
-    const holding = [tryPassword("nobody-at-all", PASSWORD), tryPassword("nor-this-one", PASSWORD)];
-    await new Promise((resolve) => setTimeout(resolve, 100));
-
-    const known = await tryPassword("myk", "the wrong password");
-    const absent = await tryPassword("also-nobody", "the wrong password");
-    expect(known.status).toBe(401);
-    expect(absent.status).toBe(401);
-    expect(await known.text()).toBe(await absent.text());
-
-    await Promise.all(holding);
-  });
-
   it("(q) an attempt arriving while one is in flight is refused, and the first still succeeds", async () => {
-    // NOT a race between equals: this test makes ONE hash slow on purpose (N = 2^17, about a second)
-    // and issues the second attempt well inside that window. Six requests fired at once would need two
-    // of them to overlap a 1ms hash, which is a coin flip dressed as a rail — and a flaky gate is worse
-    // than no gate. The margin here is ~20x, the same order every fetch in this suite already assumes.
-    served = await serveHome(home, {
-      maxConcurrentHashes: 1,
-      scrypt: { N: 131072, r: 8, p: 1, keylen: 64 },
-    });
-    // The slow one names a user NOBODY HOLDS, because that is the path the door's own configured cost
-    // governs: an existing credential is always verified at the parameters ITS OWN entry carries, which
-    // is what lets an operator raise the cost without invalidating every password. So the decoy hash is
-    // the lever here, and it holds the budget for as long as it runs.
-    const holding = tryPassword("nobody-at-all", PASSWORD);
+    // NOT a race between equals. One hash runs for about a second, and the second attempt arrives 100ms
+    // in. Six requests fired at once would need two of them to overlap a one-millisecond hash, which is
+    // a coin flip dressed as a rail.
+    slow = await serveHome(slowHome, { maxConcurrentHashes: 1 });
+    const holding = slowTry("nobody-at-all", PASSWORD);
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    const turned = await tryPassword("myk", PASSWORD);
+    const turned = await slowTry("myk", PASSWORD);
+    expect(await stillHolding(holding), "the held hash finished early: this proved nothing").toBe(
+      "still running",
+    );
     expect(turned.status).toBe(503);
     expect((await turned.json()) as { errors: string[] }).toEqual({
       errors: [expect.stringMatching(/busy/i) as unknown as string],
@@ -215,6 +216,37 @@ describe("the cap on unauthenticated hashing", () => {
 
     // the one that held the budget was answered, not dropped — and the slot came back
     expect((await holding).status).toBe(401);
-    expect((await tryPassword("myk", PASSWORD)).status).not.toBe(503);
+    expect((await slowTry("myk", PASSWORD)).status).toBe(200);
+  });
+
+  it("(q) the refusal is BYTE-IDENTICAL for a name that exists and one that does not", async () => {
+    // A budget that reserves a smaller share for unknown names is a USERNAME ORACLE: the two shares run
+    // out at different times, so an existing name answers 401 while an absent one answers 503, and the
+    // caller learns which names exist. That is what the decoy hash prevents, so the budget has to be ONE
+    // counter both branches draw on.
+    //
+    // FOUR slots, TWO held. Under the global cap, and exactly AT a reserved decoy share of half — so a
+    // split budget turns the absent name away with 503 while the known name goes through to its 401. One
+    // counter answers both the same. The known password is WRONG on purpose: two refusals are comparable,
+    // a success and a refusal are not.
+    slow = await serveHome(slowHome, { maxConcurrentHashes: 4 });
+    const holding = Promise.all([
+      slowTry("nobody-at-all", PASSWORD),
+      slowTry("nor-this", PASSWORD),
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const known = await slowTry("myk", "the wrong password");
+    const absent = await slowTry("also-nobody", "the wrong password");
+    expect(await stillHolding(holding), "the held hashes finished early: this proved nothing").toBe(
+      "still running",
+    );
+    expect(known.status).toBe(401);
+    expect(absent.status).toBe(401);
+    expect(await known.text()).toBe(await absent.text());
+
+    // NAMED GAP: this compares status and body, never TIME. `decoyParamsFor` is what makes the two paths
+    // cost the same, and credentials-corrupt.test.ts pins that directly rather than with a stopwatch.
+    await holding;
   });
 });

@@ -16,12 +16,13 @@
 // A session's expiry rides a MONOTONIC clock. Date.now() is settable, and a store whose wall clock
 // slips backwards must not resurrect a session that already timed out.
 
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { type IncomingMessage, type ServerResponse } from "node:http";
 import { type Reactor } from "@bombadil/rhizomatic";
 import {
   DEFAULT_SCRYPT,
   credentialsPath,
+  decoyParamsFor,
   entryFor,
   readCredentials,
   spendDecoyHash,
@@ -31,8 +32,9 @@ import {
 import {
   DEFAULT_LIMIT,
   forgetFailures,
-  lockedMs,
-  noteFailure,
+  lockedMsIn,
+  noteFailureIn,
+  readLocks,
   type LimitPolicy,
 } from "./login-locks.js";
 import { roleOf, userNameDefect, type UserRole } from "./users.js";
@@ -49,9 +51,8 @@ export interface UserDoorOptions {
    */
   readonly publicUrl?: string;
   readonly idleMs?: number; // session idle window (default 30 minutes)
-  readonly preSessionMs?: number; // a not-yet-signed-in session's window (default 5 minutes)
   readonly tokenTtlMs?: number; // /session/token lifetime (default 5 minutes)
-  readonly maxSessions?: number; // live sessions, pre-login ones included (default 4096)
+  readonly maxSessions?: number; // signed-in sessions this server will hold (default 4096)
   readonly maxTokensPerSession?: number; // live tokens one session may hold (default 16)
   readonly maxConcurrentHashes?: number; // unauthenticated scrypt work in flight (default 4)
   readonly scrypt?: ScryptParams;
@@ -105,24 +106,21 @@ const MAX_BODY = 8 * 1024; // a login form is a few hundred bytes; nothing here 
 
 const DEFAULTS = {
   idleMs: 30 * 60_000,
-  // A PRE-SESSION only has to live long enough to type a password, and it costs an unauthenticated GET
-  // to make one. Giving it the full idle window is what turns `GET /login` into a way to fill the
-  // table and take the login door down for half an hour.
-  preSessionMs: 5 * 60_000,
   tokenTtlMs: 5 * 60_000,
   maxSessions: 4096,
   maxTokensPerSession: 16,
   maxConcurrentHashes: 4,
 };
 
+/**
+ * A SIGNED-IN session. There is no other kind: the not-yet-signed-in half of a login is stateless (see
+ * `preSessionToken`), so every row in the table cost a correct password.
+ */
 interface Session {
-  /** Absent until a password verifies: GET /login mints a pre-session to carry the form token. */
-  user?: string;
-  role?: UserRole;
-  formToken: string;
+  readonly user: string;
+  role: UserRole;
+  readonly formToken: string;
   expiresAt: number;
-  /** When it was opened — the eviction order when the table is full of pre-sessions. */
-  readonly openedAt: number;
 }
 
 const opaque = (): string => randomBytes(32).toString("base64url");
@@ -202,8 +200,6 @@ function fields(body: string | undefined, contentType: string | undefined): Map<
 export function makeUserDoors(deps: UserDoorDeps): UserDoors {
   const options = deps.options;
   const idleMs = options.idleMs ?? DEFAULTS.idleMs;
-  // A pre-session never outlives an authenticated one, whatever the operator configured.
-  const preSessionMs = Math.min(options.preSessionMs ?? DEFAULTS.preSessionMs, idleMs);
   const tokenTtlMs = options.tokenTtlMs ?? DEFAULTS.tokenTtlMs;
   const maxSessions = options.maxSessions ?? DEFAULTS.maxSessions;
   const maxTokensPerSession = options.maxTokensPerSession ?? DEFAULTS.maxTokensPerSession;
@@ -305,38 +301,42 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
       drop(id);
       return undefined;
     }
-    session.expiresAt = moment + (session.user === undefined ? preSessionMs : idleMs);
+    session.expiresAt = moment + idleMs;
     return { id, session };
   };
 
-  const open = (user?: string, role?: UserRole): { id: string; session: Session } | undefined => {
+  /**
+   * Open a SIGNED-IN session. Nothing unauthenticated reaches this, which is what makes `maxSessions` a
+   * real limit rather than a lever: filling it costs a correct password per seat.
+   */
+  const open = (user: string, role: UserRole): { id: string; session: Session } | undefined => {
     sweep(); // every open, not only a full table: a lapsed session is not something to hold on to
-    if (sessions.size >= maxSessions) {
-      // Evict the OLDEST PRE-SESSION rather than refusing. A pre-session is unauthenticated and free to
-      // make, so refusing here would let anyone close the login door for everyone; evicting means the
-      // flood can only displace its own kind, and never an authenticated session.
-      let oldest: { id: string; openedAt: number } | undefined;
-      for (const [id, session] of sessions) {
-        if (session.user !== undefined) continue;
-        if (oldest === undefined || session.openedAt < oldest.openedAt) {
-          oldest = { id, openedAt: session.openedAt };
-        }
-      }
-      if (oldest === undefined) return undefined; // every seat holds a signed-in user: genuinely full
-      drop(oldest.id);
-    }
+    if (sessions.size >= maxSessions) return undefined;
     const id = opaque();
     const moment = now();
-    const session: Session = {
-      formToken: opaque(),
-      openedAt: moment,
-      expiresAt: moment + (user === undefined ? preSessionMs : idleMs),
-      ...(user === undefined ? {} : { user }),
-      ...(role === undefined ? {} : { role }),
-    };
-    sessions.set(id, session);
-    return { id, session };
+    sessions.set(id, { formToken: opaque(), expiresAt: moment + idleMs, user, role });
+    return { id, session: sessions.get(id)! };
   };
+
+  /**
+   * THE PRE-SESSION IS STATELESS, and that is a security property rather than an economy.
+   *
+   * A login form needs two things: a cookie the browser will send back, and a token in the body that
+   * proves the form came from this store's own page. Neither needs a row in a table. Keeping one meant
+   * `GET /login` — no password, no hash, no file — allocated server memory, so a flood could fill the
+   * table and evict the seat a real user needed a moment later. Whichever way that eviction went, the
+   * displaced thing was exactly what a login requires.
+   *
+   * So the cookie carries a random nonce, and the form token is an HMAC of that nonce under a key minted
+   * at boot. Verifying costs one hash of 32 bytes and no state. The key dies with the process, which is
+   * also what makes a restart invalidate every form in flight.
+   *
+   * It grants nothing: holding a valid pair buys the right to ATTEMPT a password, which the username
+   * limiter and the hash budget govern independently.
+   */
+  const formKey = randomBytes(32);
+  const preSessionToken = (nonce: string): string =>
+    createHmac("sha256", formKey).update(nonce).digest("base64url");
 
   const json = (res: ServerResponse, status: number, body: unknown, cookie?: string): void => {
     res.writeHead(status, {
@@ -454,33 +454,61 @@ data doors on its own.</p>`,
     return req.headers["sec-fetch-site"] === "same-origin";
   };
 
-  // A POST door's shared preamble: the origin signal, the body, the live session, the form token. It
-  // returns the session or answers the refusal itself — no door may skip a step by forgetting one.
+  /**
+   * A POST door's shared preamble: the origin signal, the body, whatever the cookie names, and the form
+   * token that matches it. It answers the refusal itself, so no door can skip a step by forgetting one.
+   *
+   * `wantSignedIn` decides whether a STATELESS pre-session is enough. /login accepts one — it is how a
+   * first login arrives. /logout and /session/token do not: there is no session behind it to end or to
+   * mint from.
+   */
   const guarded = async (
     req: IncomingMessage,
     res: ServerResponse,
-    wantSignedIn: boolean,
-  ): Promise<{ id: string; session: Session; body: Map<string, string> } | undefined> => {
+  ): Promise<
+    | { readonly held: { id: string; session: Session }; readonly body: Map<string, string> }
+    | { readonly held: undefined; readonly body: Map<string, string> }
+    | undefined
+  > => {
     if (!fromThisPage(req)) {
       notThisPage(res);
       return undefined;
     }
     const body = fields(await readBody(req), req.headers["content-type"]);
+    const presented = body.get("form_token") ?? "";
     const held = touch(req);
-    if (held === undefined || (wantSignedIn && held.session.user === undefined)) {
-      json(res, 401, { errors: ["no live session is presented here"] });
-      return undefined;
+    if (held !== undefined) {
+      if (!sameSecret(presented, held.session.formToken)) {
+        notThisPage(res);
+        return undefined;
+      }
+      return { held, body };
     }
-    if (!sameSecret(body.get("form_token") ?? "", held.session.formToken)) {
+    const nonce = sessionIdFrom(req);
+    if (nonce === undefined || !sameSecret(presented, preSessionToken(nonce))) {
       notThisPage(res);
       return undefined;
     }
-    return { ...held, body };
+    return { held: undefined, body };
+  };
+
+  /** The same guard, for a door that needs a session behind the cookie rather than only a form token. */
+  const guardedSession = async (
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<{ id: string; session: Session; body: Map<string, string> } | undefined> => {
+    const guard = await guarded(req, res);
+    if (guard === undefined) return undefined;
+    if (guard.held === undefined) {
+      json(res, 401, { errors: ["no live session is presented here"] });
+      return undefined;
+    }
+    return { ...guard.held, body: guard.body };
   };
 
   const getLogin = (req: IncomingMessage, res: ServerResponse): void => {
-    let held = touch(req);
-    if (held?.session.user !== undefined) {
+    const held = touch(req);
+    if (held !== undefined) {
       // Re-read the role from the ground rather than printing the session's copy. A role revoked, or a
       // user erased, after signing in must not leave this store's own page telling the caller they
       // still hold it — and dropping the session revokes the tokens it minted. Cheap here: this is a
@@ -502,22 +530,16 @@ data doors on its own.</p>`,
         return;
       }
       drop(held.id); // the ground answered, and it no longer holds this user
-      held = undefined; // fall through to the form, on a new pre-session
     }
-    if (held !== undefined) {
-      html(res, 200, loginPage(held.session.formToken)); // an existing pre-session keeps its token
-      return;
-    }
-    const opened = open();
-    if (opened === undefined) {
-      json(res, 503, { errors: ["this store is holding all the login sessions it can"] });
-      return;
-    }
-    html(res, 200, loginPage(opened.session.formToken), setCookie(opened.id));
+    // The form, on a stateless pre-session. An EXISTING cookie value is reused as the nonce, so
+    // reloading the page does not change the token a half-filled form already carries; otherwise a
+    // fresh one. Either way no table grows, so this path cannot be flooded into refusing.
+    const nonce = sessionIdFrom(req) ?? opaque();
+    html(res, 200, loginPage(preSessionToken(nonce)), setCookie(nonce));
   };
 
   const postLogin = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    const guard = await guarded(req, res, false);
+    const guard = await guarded(req, res);
     if (guard === undefined) return;
     const user = guard.body.get("user") ?? "";
     const password = guard.body.get("password") ?? "";
@@ -535,7 +557,11 @@ data doors on its own.</p>`,
       });
       return;
     }
-    const lockRemains = lockedMs(options.home, user, Date.now());
+    // ONE read of the lock table for the whole attempt: this path is unauthenticated, and a second
+    // whole-file walk would be a second cost a stranger can ask for.
+    const wall = Date.now();
+    const locks = readLocks(options.home);
+    const lockRemains = lockedMsIn(locks, user, wall);
     if (lockRemains > 0) {
       res.writeHead(429, {
         "content-type": "application/json",
@@ -568,7 +594,7 @@ data doors on its own.</p>`,
       // branch above this point answered differently for the two, and none below does either.
       matched =
         entry === undefined
-          ? await spendDecoyHash(password, scryptParams)
+          ? await spendDecoyHash(password, decoyParamsFor(credentials, scryptParams))
           : await verifyPassword(entry, password);
     } catch (err) {
       onFault(
@@ -583,7 +609,7 @@ data doors on its own.</p>`,
       hashesInFlight -= 1;
     }
     if (!matched) {
-      noteFailure(options.home, user, Date.now(), limit);
+      noteFailureIn(options.home, locks, user, wall, limit);
       refuseLogin(res);
       return;
     }
@@ -599,12 +625,13 @@ data doors on its own.</p>`,
       refuseLogin(res);
       return;
     }
-    // A NEW id, and the presented one dies: a session must never survive its own authentication
-    // (session fixation — an attacker who plants a pre-session id would otherwise hold a live one).
-    drop(guard.id);
+    // A NEW id, and any session presented dies with the old cookie value: a session must never survive
+    // its own authentication (session fixation — an attacker who plants a cookie value would otherwise
+    // be holding a live session id once the victim signs in).
+    if (guard.held !== undefined) drop(guard.held.id);
     const opened = open(user, role);
     if (opened === undefined) {
-      json(res, 503, { errors: ["this store is holding all the login sessions it can"] });
+      json(res, 503, { errors: ["this store is holding all the sessions it can"] });
       return;
     }
     forgetFailures(options.home, user);
@@ -612,7 +639,7 @@ data doors on its own.</p>`,
   };
 
   const postLogout = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    const guard = await guarded(req, res, false);
+    const guard = await guardedSession(req, res);
     if (guard === undefined) return;
     // `drop`, never a bare delete: signing out has to revoke the bearer tokens this session minted, or
     // it answers 200 having retired nothing it issued.
@@ -621,9 +648,9 @@ data doors on its own.</p>`,
   };
 
   const postToken = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    const guard = await guarded(req, res, true);
+    const guard = await guardedSession(req, res);
     if (guard === undefined) return;
-    const user = guard.session.user!;
+    const user = guard.session.user;
     const ground = deps.ground();
     if (ground === undefined) {
       json(res, 503, { errors: ["this store's ground is not reachable, so no token is minted"] });
@@ -670,21 +697,48 @@ data doors on its own.</p>`,
     json(res, 200, { token, expiresIn: Math.floor(tokenTtlMs / 1000), user, role });
   };
 
+  const route = async (
+    pathname: string,
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<void> => {
+    if (pathname === "/login" && req.method === "GET") {
+      getLogin(req, res);
+      return;
+    }
+    if (req.method !== "POST") {
+      json(res, 405, { errors: [`${pathname} answers POST`] });
+      return;
+    }
+    if (pathname === "/login") return postLogin(req, res);
+    if (pathname === "/logout") return postLogout(req, res);
+    return postToken(req, res);
+  };
+
   return {
     owns: (pathname) =>
       pathname === "/login" || pathname === "/logout" || pathname === "/session/token",
     async handle(pathname, req, res) {
-      if (pathname === "/login" && req.method === "GET") {
-        getLogin(req, res);
-        return;
+      // ONE GUARD OVER ALL FOUR DOORS, because "the caller never sees the detail" has to hold for a
+      // fault nobody anticipated too. Without it an ENOSPC from the lock-file write, or a throw from the
+      // ground read, escapes to the server's generic handler — which answers 500 with the message, and
+      // those messages carry the home's absolute path. Per-call-site try blocks would each be one
+      // omission away from the same leak.
+      try {
+        await route(pathname, req, res);
+      } catch (err) {
+        onFault(
+          `the login door failed answering ${pathname}: ` +
+            `${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
+        );
+        if (!res.headersSent) {
+          json(res, 503, {
+            errors: ["the login door could not answer, and it says no rather than why"],
+          });
+        } else {
+          res.end();
+        }
       }
-      if (req.method !== "POST") {
-        json(res, 405, { errors: [`${pathname} answers POST`] });
-        return;
-      }
-      if (pathname === "/login") return postLogin(req, res);
-      if (pathname === "/logout") return postLogout(req, res);
-      return postToken(req, res);
     },
   };
 }

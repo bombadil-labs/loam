@@ -36,6 +36,7 @@ import {
 } from "./user-fixture.js";
 import {
   DEFAULT_SCRYPT,
+  decoyParamsFor,
   hashPassword,
   readCredentials,
   verifyPassword,
@@ -225,6 +226,24 @@ describe("writing credentials.json", () => {
 // The rails above all run at a reduced scrypt cost, which leaves the SHIPPED parameters unexercised —
 // and a bad default is a login door that throws on every attempt rather than one that runs slowly. So
 // this pays for one real hash at the production cost, once.
+// The decoy hash exists so an unknown user costs the same TIME as a wrong password. That only holds if
+// the decoy pays what a real verify pays — and a real verify pays what the ENTRY says, not what the door
+// is configured with. Pinned here as a value rather than with a stopwatch: timing assertions are flaky,
+// and this is the mechanism the timing rests on.
+describe("what a decoy hash costs", () => {
+  it("borrows an existing entry's parameters, never the door's", () => {
+    const entry = readCredentials(home).users["myk"]!;
+    const otherwise = { N: 4096, r: 4, p: 2, keylen: 32 };
+    expect(decoyParamsFor(readCredentials(home), otherwise)).toEqual(entry.params);
+    expect(entry.params).not.toEqual(otherwise); // the two really are different, or this proves nothing
+  });
+
+  it("falls back to the door's only when there is no entry to imitate", () => {
+    const otherwise = { N: 4096, r: 4, p: 2, keylen: 32 };
+    expect(decoyParamsFor({ version: 1, users: {} }, otherwise)).toEqual(otherwise);
+  });
+});
+
 describe("the shipped scrypt parameters", () => {
   it("hash and verify each other, and reject a wrong password", async () => {
     expect(DEFAULT_SCRYPT.N & (DEFAULT_SCRYPT.N - 1)).toBe(0); // a power of two, as scrypt demands

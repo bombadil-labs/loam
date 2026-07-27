@@ -18,6 +18,7 @@ import { SqliteBackend } from "../../src/store/sqlite.js";
 import { serve, type ServerHandle, type UserDoorOptions } from "../../src/server/http.js";
 import { run } from "../../src/cli/cli.js";
 import { initHome, readSeed, storePath } from "../../src/cli/config.js";
+import { type ScryptParams } from "../../src/server/credentials.js";
 import { SESSION_COOKIE } from "../../src/server/session.js";
 
 // scrypt at production cost is ~100ms a call, and one rail spends six of them on purpose. These
@@ -75,17 +76,27 @@ export async function createUser(
   home: string,
   name: string,
   password: string,
-  opts: { operator?: boolean; confirm?: string } = {},
+  opts: { operator?: boolean; confirm?: string; scrypt?: ScryptParams } = {},
 ): Promise<{ code: number; io: TestIo }> {
   const io = testIo();
   const answers = [password, opts.confirm ?? password];
   const code = await run(
     ["user", "create", name, ...(opts.operator === false ? [] : ["--operator"]), "--home", home],
     io.io,
-    { readSecret: () => Promise.resolve(answers.shift() ?? ""), scrypt: TEST_SCRYPT },
+    {
+      readSecret: () => Promise.resolve(answers.shift() ?? ""),
+      scrypt: opts.scrypt ?? TEST_SCRYPT,
+    },
   );
   return { code: code as number, io };
 }
+
+/**
+ * A cost expensive enough that one hash outlasts a round trip by orders of magnitude — the lever the
+ * budget rails need. It is the ENTRY's parameters that decide what a verify costs (and what the decoy
+ * imitates), so a slow rail wants a user CREATED at this cost, not a door configured with it.
+ */
+export const SLOW_SCRYPT = { N: 131072, r: 8, p: 1, keylen: 64 } as const;
 
 export interface Served {
   readonly handle: ServerHandle;
