@@ -5,7 +5,7 @@
 plan first. Then the tickets replace T113, T114, T116, T117, T118, T119 and T121.
 
 **What this plan is for.** #282 holds 13,299 lines. Myk cannot read a change that size. This plan
-cuts the same work into thirteen phases. Each phase merges on its own. Each phase is useful on its own.
+cuts the same work into fifteen phases. Each phase merges on its own. Each phase is useful on its own.
 
 **Read this section first if you read nothing else.** The plan carries 41 findings from 20 review
 rounds. Those findings are now ACCEPTANCE CRITERIA rather than discoveries. A builder reads the
@@ -114,14 +114,18 @@ Each row states the deliverable and the rail files it owns. No file appears twic
 | 10 | Erasure honesty | `test/server/users-erasure.test.ts` | `erase.ts`, `slate.ts` | ~300 |
 | 11 | Connector records at rest | `test/server/oauth-file.test.ts` + `test/server/oauth-lock-child.mts` | `oauth-file.ts` | ~600 |
 | 12 | Discovery and the 401 | `test/server/oauth-discovery.test.ts` | `oauth.ts` | ~350 |
-| 13 | The connector grant | `test/server/oauth-grant.test.ts` + `test/server/oauth-consent.test.ts` | `oauth.ts`, `cli.ts` | ~900 |
+| 13 | Connector registration | `test/server/oauth-register.test.ts` | `oauth.ts` | ~350 |
+| 14 | The consent page | `test/server/oauth-consent.test.ts` | `oauth.ts` | ~300 |
+| 15 | The token exchange and revocation | `test/server/oauth-token.test.ts` + `test/server/oauth-revoke.test.ts` | `oauth.ts`, `cli.ts` | ~450 |
 
-Thirteen phases. About 5,800 lines of source and rails. #282 holds 13,299 lines. The plan is smaller
+Fifteen phases. About 5,900 lines of source and rails. #282 holds 13,299 lines. The plan is smaller
 because 41 findings are criteria now, and because three deleted rails do not return.
 
-**Phase 13 is the largest and I flag it.** It holds registration, consent and the token exchange. I
-can cut it into three. I did not, because its three parts share one file and one fixture, and a
-reviewer must hold the whole grant flow to judge any part of it. Myk decides.
+**The grant flow is three phases, at Myk's direction (2026-07-27): small footprints.** Registration,
+consent and the token exchange each merge alone. The seam that makes this work is the eviction pin.
+Phase 13 ships it reading two sources. Phase 15 adds the third. Adding a pin source only makes
+eviction more conservative, so phase 13's rails still pass unchanged — no phase rewrites another's
+rail file. The largest phase is now the login door at about 500 lines.
 
 ---
 
@@ -485,50 +489,96 @@ authority stays off the JSON doors.
    headers included.
 4. The documents require PKCE S256 and declare a public client.
 
-### Phase 13 — The connector grant
+### Phase 13 — Connector registration
 
-**Delivers.** Registration, the consent page, the token exchange, `loam grant list` and
-`loam grant revoke`.
+**Delivers.** `POST /oauth/register`. The configured redirect-origin fence. The client cap with its
+eviction rule and pin.
 
-**Merges alone.** This completes the connector. It is the largest phase. Myk may cut it in three.
+**Merges alone.** With phase 12's discovery, a client can find the store and register. It can do
+nothing else yet, and that is a safe place to stop.
 
-**Must not.** It must not mint an operator identity. There must be no code path from a grant to
-`{ operator: true }`.
+**Must not.** It must not mint a code, a token or a seed.
 
-**Criteria from findings.**
+**Criteria.**
 1. Registration is fenced by a CONFIGURED allowlist of redirect origins. It cannot require a session,
    because claude.ai registers before any human is present. Without the fence, a stranger registers a
    client named "Claude", sends the operator an authorize link, and holds a writing identity. **That
    attack never needs operator escalation, so "the mint path cannot produce operator" is necessary and
    nowhere near sufficient.**
-2. `redirect_uri` matches a registered one EXACTLY, at registration and at authorize. A different
-   path, an added query and another port are all refused.
-3. No response carries a `Location` outside the allowlist, including on refusal paths.
-4. The consent page escapes `client_name`. It displays the REGISTERED uri, never caller text. It
-   carries a no-script CSP.
-5. Control bytes are refused in EVERY operator-facing field. `new URL()` strips tab and newline, so a
-   value can parse clean and still forge a row in `grant list`. A rule for one field must cover its
-   siblings.
-6. A code binds to `client_id` AND `redirect_uri`. It is single-use and burns on ANY redemption
-   attempt. Its expiry is monotonic.
-7. THE EVICTION PIN READS THREE SOURCES: a live code, a redemption in flight, and a grant in the file.
-   Redemption deletes the code before it writes the grant. Between those points the client holds
-   neither. A flood in that window evicts an approved connector, and its code is already burnt.
-8. `redeeming` is a COUNT, not a flag. Two redemptions for one client would otherwise have the first
-   to finish clear a pin the second needs.
-9. The eviction cap evicts the oldest never-approved client, never an approved one. A plain cap is a
-   lockout: a stranger fills it and the real connector is refused forever.
-10. A grant mints a NEW actor seed per client. The seed is written before the ground append, so a
-    retry reuses it rather than minting a second.
-11. Revocation bumps a generation. A code issued before a revoke must not mint a token after it.
-12. Revocation binds on the very next request of the SAME live process. A rail that restarts between
-    revoke and retry proves nothing.
-13. Revocation is two-sided: access is gone AND past deltas still name their author.
-14. An unknown bearer token must not cost one key derivation per stored grant on the event loop.
-15. Neither the seed, the token nor the PKCE material appears in any delta. Scan after a full flow.
-16. No refusal sends the home path or a flag name to a caller. The detail goes to `onFault`. **A
-    fixed string goes to the caller.** Rail it by inducing the fault and asserting the door's BODY,
-    not what the code throws.
+2. A `redirect_uri` outside the allowlist is refused AT REGISTRATION, not only at authorize.
+3. Control bytes are refused in EVERY operator-facing field — `client_name` and every entry of
+   `redirect_uris`. `new URL()` strips tab and newline, so a value can parse clean and still forge a
+   row in `grant list`. A rule written for one field must cover its siblings. That is how this defect
+   escaped once already.
+4. **THE CAP EVICTS, IT DOES NOT REFUSE.** A plain cap is a lockout: a stranger fills it and the real
+   connector is refused forever, with no command to remove one. So the pressure falls on registrations
+   nobody is using.
+5. **AN APPROVED CLIENT IS NEVER EVICTED.** The pin reads two sources in this phase: a grant in the
+   file, and a live code. Phase 15 adds the third. Rail both sides — an approved client survives a
+   flood, and an unpinned stranger is still evictable.
+6. A registration survives a restart.
+7. The registration door answers a fixed string on any file fault. The detail goes to `onFault`. Never
+   the home path, never a flag name.
+
+### Phase 14 — The consent page
+
+**Delivers.** `GET /oauth/authorize` and its approval POST. The code it mints.
+
+**Merges alone.** The operator can approve a connector and see a code issued. Redemption arrives in
+phase 15.
+
+**Must not.** It must not mint a seed or a token.
+
+**Criteria.**
+1. The page requires a phase 6 session. Without one it shows the login form and mints nothing.
+2. `redirect_uri` must EXACTLY match one registered for that client. A different path, an added query
+   and another port are all refused.
+3. No response carries a `Location` outside the allowlist, including on every refusal path.
+4. The page escapes `client_name`. It displays the REGISTERED uri, never caller text. It carries a
+   no-script CSP.
+5. The approval POST carries phase 7's same-origin check and form token. A cross-site-shaped approval
+   mints nothing.
+6. A minted code binds to `client_id` AND `redirect_uri`. Its expiry is monotonic, so a wall-clock step
+   backwards does not extend it.
+7. The consent copy states the powers a grant really carries. **A granted author is a lawful striker,
+   so it can retract claims the operator wrote.** Say that, or narrow the model — and narrowing is
+   T118, not this phase.
+
+### Phase 15 — The token exchange and revocation
+
+**Delivers.** `POST /oauth/token`. The per-connector seed. `loam grant list` and `loam grant revoke`.
+
+**Merges alone.** This completes the connector. claude.ai can connect.
+
+**Must not.** There must be no code path from a grant to `{ operator: true }`.
+
+**Criteria.**
+1. A code is single-use and BURNS ON ANY REDEMPTION ATTEMPT. A wrong PKCE verifier kills it; the right
+   verifier afterwards is refused too.
+2. A code minted for one client is refused when redeemed with another client's id, and refused against
+   a different `redirect_uri` than it was bound to.
+3. **THE EVICTION PIN NOW READS THREE SOURCES: a live code, a redemption IN FLIGHT, and a grant in the
+   file.** Redemption deletes the code before it writes the grant. Between those two points the client
+   holds neither, so a flood in that window evicts an approved connector whose code is already burnt.
+   This phase adds the third source; phase 13 shipped the first two.
+4. `redeeming` is a COUNT, not a flag. Two redemptions for one client would otherwise have the first to
+   finish clear a pin the second still needs. Increment it immediately before the awaited mint, and
+   release it in a `finally` so a throw cannot leak it.
+5. A grant mints a NEW actor seed per client, never the operator's. Write the seed BEFORE the ground
+   append, so a retry reuses it rather than minting a second.
+6. A delta written through a minted token is authored by that connector's own actor. Assert at the
+   delta level and through a reading.
+7. No input to any endpoint can mint an operator identity. Enumerate the mint path's outputs.
+8. Revocation bumps a GENERATION. A code issued before a revoke must not mint a token after it.
+9. Revocation binds on the very next request of the SAME live process. A rail that restarts between
+   revoke and retry proves nothing.
+10. Revocation is two-sided: access is gone AND past deltas still name their author.
+11. An unknown bearer token must not cost one key derivation per stored grant on the event loop.
+12. Neither the seed, the token nor the PKCE material appears in any delta. Scan after a full flow.
+13. No refusal sends the home path or a flag name to a caller. Rail it by INDUCING the fault and
+    asserting the door's BODY, not what the code throws. Give every negative a positive control naming
+    which branch answered — a 503 and the word "lock" are what separate this refusal from an unrelated
+    400.
 
 ---
 
@@ -556,7 +606,8 @@ of reading. Every phase must include a vocabulary read: HyperSchema, HyperView, 
 constraint. Myk scoped it into the work instead, and it is now phase 3. That is the right call: the
 limit only bites when a second person holds the role, and these phases are what let that happen.
 
-1. **Whether phase 12 splits into three.** Myk decides.
+1. ~~Whether the grant flow splits into three.~~ **ANSWERED 2026-07-27: it does.** Phases 13, 14
+   and 15.
 2. **T115 — an erasure at a drilled-down entity.** Widen the purge, or document the limit. Both change
    §30's promise. Myk decides. Not in these phases.
 3. **T118 — scope a connector to a container.** Myk ruled on the model. It needs its own plan, after
