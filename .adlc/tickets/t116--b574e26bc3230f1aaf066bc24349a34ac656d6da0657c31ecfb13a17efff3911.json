@@ -1,0 +1,14 @@
+{
+  "body": "T113's failed-login limiter produced TWO confirmed auth-bypasses in successive P5 rounds, and the second was introduced by the fix for the first. The current state is safe against both, but the policy it settles on is a DECISION about what the door promises under attack, and that is Myk's, not the model's.\n\nWHAT SHIPPED (safe, and the reasoning is in login-locks.ts): no live lock is ever evictable — every eviction rule over live locks is steerable, because taking the nearest-to-expire takes the first victim's lock and taking the furthest takes the victim's the moment their own is newest. An attempt the table cannot account for is REFUSED before the password comparison, so guessing is bounded. `saturatedFor` is that pre-check.\n\nTHE COST, stated plainly: a caller who pays maxFailures × maxTracked attempts (2560 at the shipped defaults, about a minute) can shut the HTML LOGIN DOOR for every name the table does not already hold, until the locks drain (15 minutes). The bearer-token doors are untouched, and `loam user unlock` or a restart clears it. So it is a recoverable denial rather than a compromise.\n\nSEPARATELY, and simpler: a caller who knows the username can hold that ONE name locked forever with five wrong passwords per fifteen minutes. That is inherent to a username-keyed limiter, and a source-keyed one is worse behind a funnel where every request is 127.0.0.1.\n\nTHE DECISION FOR MYK — three options, and the model recommends (b):\n(a) Keep it. A remote party can deny the browser login; the API stays open; recovery is on the box.\n(b) Replace DENY with DELAY: per-username exponential backoff, capped, that never refuses a correct password. Nobody can ever be locked out, and guessing collapses to a few attempts per second against the global hash budget. This removes the whole lockout class rather than trading it around. It does weaken a hard stop, so it is a promise change and needs Myk's word.\n(c) Take the login door off the public internet and reach it over the tailnet only. Removes the exposure rather than the flaw — but the OAuth consent page (T114) must be publicly reachable for a connector to work, and it shares the origin, so this needs a path-scoped funnel to be real.\n\nRAILS, whichever is chosen, both sides: guessing is bounded AND a legitimate correct password is never permanently refused. The current rails are `test/server/login-limit.test.ts` — the saturation refusal and the flood-cannot-evict pair.",
+  "edges": [],
+  "id": "T116",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "src/server/login-locks.ts",
+    "src/server/session.ts",
+    "test/server/login-limit.test.ts"
+  ],
+  "status": "todo",
+  "title": "The login limiter's saturation policy is a decision, not a repair — Myk chooses what the door does under a flood"
+}
