@@ -14,12 +14,12 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   PASSWORD,
+  SESSION_COOKIE,
   beginLogin,
   bootStore,
   cookieFrom,
   createUser,
   dropHome,
-  formTokenFor,
   makeHome,
   postDoor,
   postLogin,
@@ -186,8 +186,16 @@ describe("the erasure report and the login door agree about what is swept", () =
     // AND SO: the drop revoked what the session had minted
     expect((await opensDoor()).status).toBe(401);
 
-    // the bystander's live session is untouched throughout — the erase reached one user, not the door
-    expect(await formTokenFor(served.base, bystander.cookie)).not.toBe("");
+    // The bystander's live session is untouched throughout — the erase reached one user, not the door.
+    // ASSERTED ON THE SIGNED-IN PAGE, because a form token is not a witness: `GET /login` renders a form
+    // token for a dead cookie, an unknown cookie and a random string alike, so `not.toBe("")` would hold
+    // in a world where the erase had dropped every session. The signed-in page names the user.
+    const stillIn = await fetch(`${served.base}/login`, {
+      headers: { cookie: `${SESSION_COOKIE}=${bystander.cookie}` },
+    });
+    const page = await stillIn.text();
+    expect(page).toContain("Signed in.");
+    expect(page).toContain("wren");
   });
 
   it("(u) a forgotten user record refuses the login, while the credential entry is still on disk", async () => {

@@ -145,9 +145,14 @@ const spent = (record: LockRecord, now: number, policy: LimitPolicy): boolean =>
   (record.lockedUntil === undefined || record.lockedUntil <= now);
 
 /**
- * Record one failed attempt for `name`. Pass the table you already read, so an attempt costs one read
- * rather than two — an unauthenticated caller drives this path, and every whole-file walk here is a
- * walk they asked for.
+ * Record one failed attempt for `name`.
+ *
+ * IT READS THE FILE ITSELF, and that is not a saving to optimise away. The read, the increment and the
+ * write must happen with NO await between them, or two overlapping attempts each compute `failures + 1`
+ * from the same value and the second write erases the first. That makes the effective limit
+ * `maxFailures × concurrency` instead of `maxFailures`, and it lets a stale write resurrect a count that
+ * a successful login — or `loam user unlock` — had just cleared. Synchronous in a single-threaded loop IS
+ * the atomicity argument; handing this function a table read before an await throws it away.
  *
  * Three rules, each answering a different failure:
  *
@@ -157,36 +162,32 @@ const spent = (record: LockRecord, now: number, policy: LimitPolicy): boolean =>
  * SPENT RECORDS ARE PRUNED. A failed attempt is recorded for any well-formed name, existing or not, so a
  * caller walking names would otherwise add a row per attempt forever.
  *
- * And past `maxTracked` the oldest UNLOCKED record is EVICTED to make room. Never "stop counting": a
- * caller who fills the table with locked junk names would otherwise switch the limiter off for everyone
- * not already in it, which is the whole point of the limiter, gone. Evicting means a flood can only
- * displace the counts it created. When every record holds a live lock the table is genuinely full of
- * decided cases, and the new name waits — it took `maxFailures` hashes per row to get there.
+ * And past `maxTracked` a record is EVICTED to make room — the oldest UNLOCKED one, or failing that the
+ * lock nearest to expiring. IT ALWAYS RECORDS. "Stop counting when the table is full" is an off switch: a
+ * caller fills the table with locked junk names and the limiter stops applying to every name not already
+ * in it, which is the limiter gone. Evicting means a flood can only displace what it created, and the
+ * worst it buys is an early end to one of its own locks.
  */
-export function noteFailureIn(
-  home: string,
-  locks: Map<string, LockRecord>,
-  name: string,
-  now: number,
-  policy: LimitPolicy,
-): void {
+export function noteFailure(home: string, name: string, now: number, policy: LimitPolicy): void {
+  const locks = readLocks(home);
   const previous = locks.get(name);
   for (const [held, record] of locks) {
     if (held !== name && spent(record, now, policy)) locks.delete(held);
   }
   if (previous === undefined && locks.size >= policy.maxTracked) {
-    let oldest: { name: string; at: number } | undefined;
+    let unlocked: { name: string; at: number } | undefined;
+    let soonest: { name: string; until: number } | undefined;
     for (const [held, record] of locks) {
-      if (lockedMsIn(locks, held, now) > 0) continue;
-      if (oldest === undefined || record.firstFailureAt < oldest.at) {
-        oldest = { name: held, at: record.firstFailureAt };
+      if (lockedMsIn(locks, held, now) === 0) {
+        if (unlocked === undefined || record.firstFailureAt < unlocked.at) {
+          unlocked = { name: held, at: record.firstFailureAt };
+        }
+      } else if (soonest === undefined || record.lockedUntil! < soonest.until) {
+        soonest = { name: held, until: record.lockedUntil! };
       }
     }
-    if (oldest === undefined) {
-      writeLocks(home, locks); // every seat is a live lock; the prune above is still worth keeping
-      return;
-    }
-    locks.delete(oldest.name);
+    const evicted = unlocked?.name ?? soonest?.name;
+    if (evicted !== undefined) locks.delete(evicted);
   }
   const lapsed =
     previous === undefined ||
@@ -202,20 +203,25 @@ export function noteFailureIn(
   writeLocks(home, locks);
 }
 
-/** The same, reading the table itself — for a caller that has not already loaded it. */
-export const noteFailure = (home: string, name: string, now: number, policy: LimitPolicy): void =>
-  noteFailureIn(home, readLocks(home), name, now, policy);
-
 /** Forget `name`'s failures — what a successful login earns. */
 export function forgetFailures(home: string, name: string): void {
   const locks = readLocks(home);
   if (locks.delete(name)) writeLocks(home, locks);
 }
 
-/** Clear `name`'s lock from the box. True if one was there. */
-export function clearLock(home: string, name: string): boolean {
+/**
+ * Clear `name`'s record from the box. `held` says a record was there at all; `locked` says it was holding
+ * a LIVE lock. The two differ — a name with four failures and no lock still has a record worth clearing —
+ * and a caller that reported "unlocked" for both would be overclaiming on the smaller one.
+ */
+export function clearLock(
+  home: string,
+  name: string,
+): { readonly held: boolean; readonly locked: boolean } {
   const locks = readLocks(home);
-  if (!locks.delete(name)) return false;
+  if (locks.get(name) === undefined) return { held: false, locked: false };
+  const locked = lockedMsIn(locks, name, Date.now()) > 0;
+  locks.delete(name);
   writeLocks(home, locks);
-  return true;
+  return { held: true, locked };
 }

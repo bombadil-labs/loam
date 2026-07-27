@@ -32,9 +32,8 @@ import {
 import {
   DEFAULT_LIMIT,
   forgetFailures,
-  lockedMsIn,
-  noteFailureIn,
-  readLocks,
+  lockedMs,
+  noteFailure,
   type LimitPolicy,
 } from "./login-locks.js";
 import { roleOf, userNameDefect, type UserRole } from "./users.js";
@@ -557,11 +556,11 @@ data doors on its own.</p>`,
       });
       return;
     }
-    // ONE read of the lock table for the whole attempt: this path is unauthenticated, and a second
-    // whole-file walk would be a second cost a stranger can ask for.
-    const wall = Date.now();
-    const locks = readLocks(options.home);
-    const lockRemains = lockedMsIn(locks, user, wall);
+    // The lock check reads the table, and `noteFailure` below reads it AGAIN. That is deliberate:
+    // carrying a snapshot across the hash and writing it back is a LOST UPDATE — two overlapping attempts
+    // each increment from the same value, and the effective limit becomes maxFailures times the
+    // concurrency. One extra read on the failure path is the price of a limit that means what it says.
+    const lockRemains = lockedMs(options.home, user, Date.now());
     if (lockRemains > 0) {
       res.writeHead(429, {
         "content-type": "application/json",
@@ -609,7 +608,7 @@ data doors on its own.</p>`,
       hashesInFlight -= 1;
     }
     if (!matched) {
-      noteFailureIn(options.home, locks, user, wall, limit);
+      noteFailure(options.home, user, Date.now(), limit);
       refuseLogin(res);
       return;
     }

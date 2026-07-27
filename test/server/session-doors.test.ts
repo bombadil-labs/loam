@@ -10,9 +10,14 @@
 // status code shows: the write is asserted through the READ DOOR and again on the delta the store
 // actually holds.
 
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authorForSeed } from "@bombadil/rhizomatic";
 import { readSeed } from "../../src/cli/config.js";
+import { Gateway } from "../../src/gateway/gateway.js";
+import { assembleGenesis } from "../../src/gateway/genesis.js";
+import { SqliteBackend } from "../../src/store/sqlite.js";
+import { serve } from "../../src/server/http.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
 import {
   PASSWORD,
@@ -216,6 +221,50 @@ describe("POST /session/token", () => {
     expect((await res.json()) as { errors: string[] }).toEqual({
       errors: [expect.stringMatching(/operator role/i) as unknown as string],
     });
+  });
+});
+
+// A session token is authority over the WHOLE SERVER, and the role binding that earns it is read from
+// one mount's ground. So the doors refuse to open beside a second world. Both guards are new, and both
+// are deletable with every other rail green — which is what earns them this one.
+describe("the login doors want a single mount", () => {
+  it("refuse to open at boot beside a second mount", async () => {
+    const other = await Gateway.boot(
+      new SqliteBackend(join(home, "other.sqlite")),
+      assembleGenesis({ operatorSeed: readSeed(home) }),
+    );
+    try {
+      await expect(
+        serve({
+          mounts: { default: served.gateway, other },
+          tokens: { "op-token": { operator: true } },
+          port: 0,
+          host: "127.0.0.1",
+          users: { home, mount: "default" },
+        }),
+      ).rejects.toThrow(/single mount/);
+    } finally {
+      await other.close();
+    }
+  });
+
+  it("refuse a mount added while they are open", async () => {
+    const other = await Gateway.boot(
+      new SqliteBackend(join(home, "later.sqlite")),
+      assembleGenesis({ operatorSeed: readSeed(home) }),
+    );
+    try {
+      expect(() => served.handle.addMount("later", other)).toThrow(/server-wide authority/);
+      // and the world really did not mount: its door answers as a name that never existed
+      const res = await fetch(`${served.base}/later/graphql`, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...bearer("op-token") },
+        body: JSON.stringify({ query: "{ __typename }" }),
+      });
+      expect(res.status).toBe(404);
+    } finally {
+      await other.close();
+    }
   });
 });
 

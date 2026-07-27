@@ -1082,24 +1082,32 @@ async function cmdUserCreate(
 }
 
 function cmdUserUnlock(name: string, home: string, io: IO): number {
+  // THE LOCK FILE IS THE AUTHORITY here, and it is read FIRST — before the credential file, which may be
+  // absent or damaged. A record outlives its user: erase the deltas, remove the credential entry, and the
+  // lock record — keyed by the user NAME — is still there. The health report promises this command works
+  // whether or not the user still exists, so nothing about the credential file may stand in its way.
+  const cleared = clearLock(home, name);
+  if (cleared.held) {
+    io.out(
+      cleared.locked
+        ? `loam: unlocked ${name}\n  the next login attempt is counted from zero`
+        : `loam: ${name} was not locked, and its failure count is cleared\n` +
+            `  the next login attempt is counted from zero`,
+    );
+    return 0;
+  }
   let existing;
   try {
     existing = readCredentials(home);
   } catch (err) {
+    // Nothing was locked and the credential file is unreadable, so this cannot tell a typo'd name from a
+    // real user. It says which of the two it could not check.
     io.err(
-      `user unlock: ${credentialsPath(home)} is unreadable: ` +
+      `user unlock: ${name} holds no lock, and ${credentialsPath(home)} is unreadable so this ` +
+        `command cannot say whether that user exists: ` +
         `${err instanceof Error ? err.message : String(err)}`,
     );
     return 1;
-  }
-  // THE LOCK FILE IS THE AUTHORITY here, not the credential file. A record outlives its user: erase the
-  // deltas and remove the credential entry, and the lock record — keyed by the user NAME — is still
-  // there. Keying this refusal on the credential would mean the one tool named for clearing that record
-  // refuses in exactly the state a forget-me request produces.
-  const locked = clearLock(home, name);
-  if (locked) {
-    io.out(`loam: unlocked ${name}\n  the next login attempt is counted from zero`);
-    return 0;
   }
   if (entryFor(existing, name) === undefined) {
     io.err(

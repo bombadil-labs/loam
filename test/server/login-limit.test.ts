@@ -174,10 +174,26 @@ describe("the cap on unauthenticated hashing", () => {
     });
   };
 
-  // The witness every timing fixture here owes: were the held hashes STILL RUNNING when the probe ran?
-  // Without it a rail whose fixture silently completed early would pass having tested nothing.
-  const stillHolding = async (held: Promise<unknown>): Promise<string> =>
-    Promise.race([held.then(() => "finished"), Promise.resolve("still running")]);
+  /**
+   * The witness every timing fixture here owes: was this request STILL IN FLIGHT? Without it a fixture
+   * that silently completed early would leave its rail green having tested nothing.
+   *
+   * A FLAG, not `Promise.race`. Racing a pending promise against `Promise.resolve("still running")` looks
+   * like a witness and is a constant: the already-fulfilled arm queues its callback first, every time,
+   * even for a promise that settled seconds ago. This one records the fact when it happens and reads it
+   * after a full macrotask drain, so a settled promise has had every chance to say so.
+   */
+  const inFlight = <T>(
+    request: Promise<T>,
+  ): { readonly running: () => boolean; wait: Promise<T> } => {
+    let done = false;
+    const wait = request.then((value) => {
+      done = true;
+      return value;
+    });
+    return { running: () => !done, wait };
+  };
+  const drained = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
   it("(q) a cap of zero refuses the RIGHT password without hashing it", async () => {
     // The strict form of the criterion, and it needs no clock: a correct password cannot answer 503 if
@@ -201,13 +217,12 @@ describe("the cap on unauthenticated hashing", () => {
     // in. Six requests fired at once would need two of them to overlap a one-millisecond hash, which is
     // a coin flip dressed as a rail.
     slow = await serveHome(slowHome, { maxConcurrentHashes: 1 });
-    const holding = slowTry("nobody-at-all", PASSWORD);
+    const holding = inFlight(slowTry("nobody-at-all", PASSWORD));
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     const turned = await slowTry("myk", PASSWORD);
-    expect(await stillHolding(holding), "the held hash finished early: this proved nothing").toBe(
-      "still running",
-    );
+    await drained();
+    expect(holding.running(), "the held hash finished early: this proved nothing").toBe(true);
     expect(turned.status).toBe(503);
     expect((await turned.json()) as { errors: string[] }).toEqual({
       errors: [expect.stringMatching(/busy/i) as unknown as string],
@@ -215,7 +230,7 @@ describe("the cap on unauthenticated hashing", () => {
     expect(cookieFrom(turned)).toBeUndefined();
 
     // the one that held the budget was answered, not dropped — and the slot came back
-    expect((await holding).status).toBe(401);
+    expect((await holding.wait).status).toBe(401);
     expect((await slowTry("myk", PASSWORD)).status).toBe(200);
   });
 
@@ -229,24 +244,91 @@ describe("the cap on unauthenticated hashing", () => {
     // split budget turns the absent name away with 503 while the known name goes through to its 401. One
     // counter answers both the same. The known password is WRONG on purpose: two refusals are comparable,
     // a success and a refusal are not.
+    //
+    // The two probes go out TOGETHER. Awaited one after the other, the second would arrive after the held
+    // pair had finished, and the rail would compare two answers given by an empty budget — green, and
+    // about nothing.
     slow = await serveHome(slowHome, { maxConcurrentHashes: 4 });
-    const holding = Promise.all([
-      slowTry("nobody-at-all", PASSWORD),
-      slowTry("nor-this", PASSWORD),
-    ]);
+    const holding = [
+      inFlight(slowTry("nobody-at-all", PASSWORD)),
+      inFlight(slowTry("nor-this", PASSWORD)),
+    ];
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    const known = await slowTry("myk", "the wrong password");
-    const absent = await slowTry("also-nobody", "the wrong password");
-    expect(await stillHolding(holding), "the held hashes finished early: this proved nothing").toBe(
-      "still running",
-    );
+    const probes = Promise.all([
+      slowTry("myk", "the wrong password"),
+      slowTry("also-nobody", "the wrong password"),
+    ]);
+    // witnessed BEFORE the probes are awaited: both holders must still be occupying their slots
+    await drained();
+    expect(
+      holding.map((h) => h.running()),
+      "a held hash finished early: this proved nothing",
+    ).toEqual([true, true]);
+
+    const [known, absent] = await probes;
     expect(known.status).toBe(401);
     expect(absent.status).toBe(401);
     expect(await known.text()).toBe(await absent.text());
 
     // NAMED GAP: this compares status and body, never TIME. `decoyParamsFor` is what makes the two paths
     // cost the same, and credentials-corrupt.test.ts pins that directly rather than with a stopwatch.
-    await holding;
+    await Promise.all(holding.map((h) => h.wait));
+  });
+
+  // THE LIMITER MUST HAVE NO OFF SWITCH, and "the table is full" is the shape an off switch hides in.
+  // Both fillings are tested, because the first version of this fix only handled one of them: a table of
+  // UNLOCKED counts evicted correctly, and a table where every record held a LIVE LOCK stopped counting
+  // altogether — 4096 junk names bought fifteen minutes of no limiting for everyone else.
+  it.each([
+    ["unlocked counts", 1],
+    ["live locks", 3],
+  ])("(o) a table full of %s still tracks a new name", async (_label, missesPerFiller) => {
+    served = await serveHome(home, {
+      limit: { maxFailures: 3, windowMs: 600_000, lockMs: 600_000, maxTracked: 2 },
+    });
+    for (const name of ["filler-one", "filler-two"]) {
+      for (let i = 0; i < missesPerFiller; i += 1) {
+        const begun = await beginLogin(served.base);
+        const res = await postLogin(served.base, name, `wrong ${i}`, {
+          cookie: begun.cookie,
+          formToken: begun.formToken,
+        });
+        expect([401, 429]).toContain(res.status);
+      }
+    }
+    // a third name still gets counted, and still reaches its lock
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const begun = await beginLogin(served.base);
+      const res = await postLogin(served.base, "myk", `wrong ${attempt}`, {
+        cookie: begun.cookie,
+        formToken: begun.formToken,
+      });
+      expect(res.status, `miss ${attempt}`).toBe(401);
+    }
+    const locked = await tryPassword("myk", PASSWORD);
+    expect(locked.status).toBe(429);
+  });
+
+  it("(o) overlapping attempts each count: the limit is not multiplied by the concurrency", async () => {
+    // A LOST UPDATE is what this pins. Read the table, await the hash, write the snapshot back, and two
+    // overlapping attempts both compute the same `failures + 1` — so the effective limit becomes
+    // maxFailures times however many hashes may run at once. Measured at 20 for the shipped defaults when
+    // this was broken. Concurrency is the whole point: sent one at a time, a broken limiter looks fine.
+    served = await serveHome(home, { maxConcurrentHashes: 4 });
+    const misses = await Promise.all(
+      Array.from({ length: 4 }, async (_unused, i) => {
+        const begun = await beginLogin(served.base);
+        return postLogin(served.base, "myk", `wrong ${i}`, {
+          cookie: begun.cookie,
+          formToken: begun.formToken,
+        });
+      }),
+    );
+    expect(misses.map((r) => r.status)).toEqual([401, 401, 401, 401]);
+    // FOUR attempts landed, so four are counted. One more reaches five and the lock engages.
+    const fifth = await missOnce("myk", 5);
+    expect(fifth.status).toBe(401);
+    expect((await tryPassword("myk", PASSWORD)).status).toBe(429);
   });
 });
