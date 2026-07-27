@@ -6,8 +6,9 @@
 // ANSWERS — the manifest it would grant, the coordinates it would hand a page, and every one of the six
 // refusals firing with its own reason.
 //
-// WHAT IS DELIBERATELY NOT HERE: anything asserted over emitted BYTES. This door decides; the emission
-// is a separate concern and travels with its own change, so nothing below reads a page.
+// The emission arrived, so the byte-level assertions arrived with it: the bundle recovered from a page
+// content-addresses EQUAL to the binding's, the page carries no view data, and it references no external
+// host through any channel.
 //
 // WHAT IT DELIBERATELY DOES NOT ASSERT. "The emitted page contains the pen name nowhere" — unsatisfiable
 // against a verbatim-riding bundle for exactly the bindings that COMPLY with §23.3, since a compliant
@@ -21,6 +22,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
+import { bundleFromPage } from "../../src/gateway/artifact-page.js";
+import { esmAddress } from "../../src/gateway/esm.js";
 import { grantClaims } from "../../src/gateway/accounts.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
@@ -79,6 +82,82 @@ const ready = async (over: Record<string, unknown> = {}, gwOver = {}): Promise<G
 
 const pack = (gw: Gateway, opts: Record<string, unknown> = {}) =>
   gw.packArtifact("plant", FERN, { server: "My Loam", ...opts });
+
+describe("§30 criterion 1: one bundle, two hosts, one content address", () => {
+  it("the bundle recovered from the page content-addresses EQUAL to the binding's", async () => {
+    const gw = await ready();
+    const { page } = pack(gw);
+    const recovered = bundleFromPage(page);
+    expect(recovered).toBe(FLOOR_BUNDLE);
+    expect(esmAddress(recovered!)).toBe(esmAddress(gw.renderers()[0]!.bundle));
+    // …and the SAME binding still serves its HTML unchanged at the host route.
+    const served = await gw.serveRoute("plant", FERN, "full");
+    expect(served.status).toBe(200);
+    expect(served.body).toContain("h=42 tag=-");
+    await gw.close();
+  });
+
+  it("no target role exists on the binding — the pre-T79 pointer set, exactly", async () => {
+    const gw = await ready();
+    const binding = gw.renderers()[0]!;
+    const delta = [...gw.reactor.snapshot()].find((d) => d.id === binding.deltaId)!;
+    const roles = delta.claims.pointers.map((p) => p.role).sort();
+    // Delta level. The whole point of Recommendation 1: the duality is a property of the HOST, so the
+    // binding carries no target vocabulary and no per-target bundle role — one hash, no signed-vs-
+    // executed gap, and §23.5's latest-per-route law untouched because no new key is introduced.
+    expect(roles).toEqual(["bundle", "consumes", "renders", "route", "schema"]);
+    expect(roles).not.toContain("target");
+    expect(roles).not.toContain("reads");
+    await gw.close();
+  });
+});
+
+describe("§30 criterion 3: the page carries no data", () => {
+  it("emits neither the sentinel value nor any token or seed", async () => {
+    const SENTINEL = "zqx-sentinel-77";
+    const gw = await boot({ pens: { editor: PEN_SEED } });
+    await gw.append([observed(FERN, "height", SENTINEL, 1000, OP_SEED)]);
+    await gw.publishRenderer(spec());
+    await gw.declareArtifact(["plant"]);
+    const { page } = pack(gw);
+    // The value is legible through the door and ABSENT from the emitted bytes.
+    expect((await gw.serveRoute("plant", FERN, "full")).body).toContain(SENTINEL);
+    expect(page).not.toContain(SENTINEL);
+    // Negatively over the WHOLE token/seed table, so a renamed field cannot hide a leak. The pen's
+    // SEED is what was ever at risk here, and it is safe by construction: it lives server-side in
+    // GatewayOptions.pens, and no artifact has a server.
+    for (const secret of [OP_SEED, PEN_SEED, OP]) expect(page).not.toContain(secret);
+    await gw.close();
+  });
+});
+
+describe("§30 criterion 4 (static half): the page requests nothing from an external host", () => {
+  it("references no http(s) URL as a request target, and contains no eval or new Function", async () => {
+    const gw = await ready();
+    const { page } = pack(gw, { storeAddress: "https://example.test/garden/mcp" });
+    // No code path builds a request at an external host. The store address appears only as the
+    // human-readable onboarding copy a viewer READS — never as a target the page requests.
+    for (const form of [
+      /fetch\s*\(\s*["'`]https?:/,
+      /new\s+XMLHttpRequest/,
+      /new\s+WebSocket/,
+      /import\s*\(\s*["'`]https?:/,
+      /\ssrc\s*=\s*["']https?:/,
+      /\shref\s*=\s*["']https?:/,
+    ]) {
+      expect(page).not.toMatch(form);
+    }
+    // The three names DO appear once each — inside the confined realm's scrub list, which exists to
+    // REMOVE them. A rail matching the bare token would have to be satisfied by not naming the thing
+    // being taken away, which is the opposite of what this criterion wants.
+    expect(page).not.toMatch(/\beval\s*\(/);
+    expect(page).not.toMatch(/new\s+Function/);
+    // The mount mechanism is a data:/blob: module import — the bytes the operator signed are the
+    // bytes that run. A textual rewrite would reintroduce the signed-vs-executed gap §23.1 closes.
+    expect(page).toMatch(/createObjectURL|data:text\/javascript/);
+    await gw.close();
+  });
+});
 
 describe("§30 criterion 2: publication is a declaration, and it fail-closes both ways", () => {
   it("refuses an undeclared route, emits once declared, and refuses again on the next request", async () => {
@@ -408,6 +487,25 @@ describe("§30 criterion 21 (the shared-clock half): both hosts carry the SAME n
     expect(pack(gw).coordinates.renderTimeoutMs).toBe(250);
     await gw.close();
   });
+});
+
+it("the ALREADY-EMITTED bytes are unaffected by a later withdrawal — the accepted residual", async () => {
+  // Criterion 26's delta half. The page a stranger already holds is the one thing withdrawal cannot
+  // reach, and that is ACCEPTED and pinned here rather than implied: the DATA never outlives its
+  // source (criterion 3 proves it at the bytes) and the CODE always does. The follow-on that would
+  // close it is a `loam_manifest(route)` read over constitutional publication state, checked before
+  // mounting — a new disclosure decision, and not this ticket's. If it lands, this inverts.
+  const gw = await ready();
+  const { page } = pack(gw);
+  const binding = gw.renderers()[0]!;
+  await gw.append([
+    signClaims(makeNegationClaims(OP, 9_000_000, binding.deltaId, "retire the renderer"), OP_SEED),
+  ]);
+  expect(() => pack(gw)).toThrow();
+  // The bytes in hand still carry the whole app. `test/site/artifact-shell.test.ts` drives them.
+  expect(bundleFromPage(page)).toBe(FLOOR_BUNDLE);
+  expect(page).toContain("loam-app");
+  await gw.close();
 });
 
 describe("§30: an erase order is still the operator's, and this door widens nothing", () => {
