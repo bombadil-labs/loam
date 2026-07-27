@@ -7,10 +7,23 @@ lock is an off switch a stranger can pull — anyone who knows a username could 
 of their own store. So each failure for a name makes the next attempt for that name wait longer, up
 to a cap, and the door always admits a correct password. Criteria (o) and (p) below are T116's.
 
-**The cost, named.** A caller who grinds the operator's username makes the operator's own login slow,
-up to the cap, once per login. Slow is not shut, and that is the whole trade. A waiting attempt also
-holds one connection for the length of its wait; the wait spends no hash budget, so the CPU stays
-bounded by the concurrent-hash cap and one name's flood cannot make this door refuse another name.
+**The cost, named — three parts, and only the first is bounded.**
+
+1. A caller who grinds the operator's username makes the operator's own login slow, up to the cap,
+   once per login. Slow is not shut, and that is the whole trade.
+2. A waiting attempt spends no hash budget. That is what criterion (o3) proves, and it is the whole
+   claim: a flood against one name cannot draw a 503 for another name. It does NOT follow that the
+   flood is harmless. Nothing caps how many attempts may be waiting at once, and no such cap is safe
+   — refusing past one is the lockout again, and serving past one without the wait is free guessing.
+   So each waiting attempt pins one socket on the shared `node:http` server for up to `maxDelayMs`,
+   and a caller holding enough sockets exhausts descriptors for every door. That exposure is
+   unbounded here and is not railed.
+3. The delay bounds a SERIAL guesser only. Waits do not serialize — the pre-compare read is advisory
+   and the wait is a bare timer with no per-name queue — so a caller holding many connections has all
+   their waits elapse together, and their rate is the concurrent-hash cap divided by one hash. That
+   cap pre-dates this change. Do not read `maxDelayMs` as an attempts-per-second bound; against a
+   caller who opens more than one connection it is wrong by orders of magnitude. A per-name queue
+   would close it and reintroduce the lockout, so it stays open and named.
 
 ## The problem
 
@@ -54,7 +67,9 @@ signed by a seed. The door token keeps working for API callers and never gains a
 - `GET /login` — a minimal HTML form. No script.
 - `POST /login` — verifies the password against `credentials.json` (scrypt, timing-safe
   compare), sets the session cookie on success, answers 401 on failure. Failed attempts are
-  rate-limited per source: after 5 failures in a minute, 429 with `Retry-After`.
+  DELAYED per username, never refused: each failure makes the next attempt for that name wait
+  longer, up to a cap. There is no lock and no `Retry-After`, because a correct password is
+  always admitted.
 - `POST /logout` — drops the session.
 - `POST /session/token` — with a session, answers a short-lived bearer token for the session
   user's identity. This is how a browser UI writes: JavaScript holds the token and sends it in

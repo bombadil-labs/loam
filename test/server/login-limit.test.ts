@@ -1,4 +1,4 @@
-// §36 (T113/T116), criteria (o) (p) (q): the failed-login DELAY, and the cap on unpaid work.
+// §36 (T113/T116), criteria (o) (o1)–(o6) (p) (q): the failed-login DELAY, and the cap on unpaid work.
 //
 // THE LOGIN DOOR DELAYS; IT NEVER LOCKS. A correct password is admitted however many failures came
 // before it. A wrong one makes the next attempt for that name wait longer, up to a cap. A lock is an
@@ -16,16 +16,24 @@
 // rails cannot flake upward, and an absent delay answers in milliseconds, which is the whole signal.
 // Where an upper bound is unavoidable it sits at least twenty times over the real cost.
 //
-// WHAT THEY DELIBERATELY DO NOT ASSERT: that a waiting attempt costs the caller nothing. It costs a
-// connection for the length of the wait, and that is the trade. The rail below pins the part that
-// matters — a waiting attempt spends no HASH budget, so one name's flood cannot make this door
-// refuse another name.
+// WHAT THEY DELIBERATELY DO NOT ASSERT — three gaps, and this list is meant to be complete:
+//
+//  1. That a waiting attempt costs the caller nothing. It pins one connection for the length of the
+//     wait. Nothing caps how many may wait at once, and no cap is safe: refusing past one is the
+//     lockout again. What IS pinned is that a waiting attempt spends no HASH budget, so one name's
+//     flood cannot make this door refuse another name.
+//  2. ANY GUESS RATE. Waits do not serialize, so a caller with many connections has them elapse
+//     together and their rate is the concurrent-hash cap's, not `maxDelayMs`'s. The rails below fix
+//     the wait a SERIAL attempt pays; read none of them as attempts per second.
+//  3. Two servers over one home. Every write replaces the file whole, so they are last-writer-wins
+//     on the count. One home, one server is the supported posture.
 //
 // The last half of the file is a different budget. scrypt is expensive ON PURPOSE, which makes an
 // unauthenticated login a lever on the server's CPU. So the door caps concurrent hashing globally,
 // and refuses past the cap WITHOUT hashing.
 
-import { writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   PASSWORD,
@@ -138,7 +146,7 @@ const inFlight = <T>(
 const drained = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
 describe("the failed-login delay", () => {
-  it("(a) twenty failures do not lock: the RIGHT password still opens the door", async () => {
+  it("(o) twenty failures do not lock: the RIGHT password still opens the door", async () => {
     // THE RAIL THAT GOES RED IF A LOCK CREEPS BACK. Nothing else here would notice: a limiter that
     // refuses after five misses satisfies every "guessing is bounded" assertion in this file.
     served = await serveHome(home, { limit: COUNTING });
@@ -162,7 +170,69 @@ describe("the failed-login delay", () => {
     expect(readLocks(home).has("myk")).toBe(false);
   });
 
-  it("(a) an unknown username accumulates the same way, and shuts nobody out", async () => {
+  it("(o) a FAILURE that cannot be recorded answers 401, never 503", async () => {
+    // THE READ IS FAIL-OPEN AND THE WRITE HAS TO MATCH. A directory where login-locks.json belongs
+    // makes the recording write throw: the rename onto a directory fails with EISDIR. Unguarded, that
+    // reaches the door's outer guard and answers 503, so a local disk fault would decide what the
+    // door says — and a caller who sees 503 where 401 belongs learns that something is wrong with the
+    // box rather than with their password.
+    //
+    // A DIRECTORY rather than a mode, because a test running as root ignores a mode.
+    mkdirSync(locksPath(home));
+    const faults: string[] = [];
+    served = await serveHome(home, { limit: LONG, onFault: (m) => faults.push(m) });
+
+    expect((await missOnce("myk", 1)).status).toBe(401);
+    // and the right password is still admitted — nothing about this state refuses it
+    const opened = await tryPassword("myk", PASSWORD);
+    expect(opened.status).toBe(200);
+    expect(cookieFrom(opened)).toBeDefined();
+
+    // NOT SWALLOWED. The operator's own channel hears it; the caller's answer never moved.
+    expect(faults.join("\n")).toMatch(/login-locks\.json/);
+    // EXACTLY ONE, and the count says which half ran: the read fails open to no records, so the
+    // success path finds nothing to clear and never writes. The clearing half is pinned separately,
+    // because this fixture cannot reach it.
+    expect(faults).toHaveLength(1);
+  });
+
+  it("(o) a COUNT that cannot be cleared still admits the right password", async () => {
+    // The other half of the fail-open write, and the one that matters most: the password has already
+    // been accepted, so nothing after that may refuse it. Unguarded, this answers 503 with a session
+    // already seated and no cookie to reach it — a correct password refused, and one of `maxSessions`
+    // burned per retry.
+    //
+    // The fixture needs the file READABLE and the directory UNWRITABLE, which a mode is the only way
+    // to get: a record has to survive the read for the clearing write to be attempted at all.
+    writeFileSync(
+      locksPath(home),
+      JSON.stringify({ users: { myk: { failures: 4, lastFailureAt: Date.now() } } }),
+    );
+    const faults: string[] = [];
+    served = await serveHome(home, { limit: COUNTING, onFault: (m) => faults.push(m) });
+    expect(readLocks(home).get("myk")?.failures).toBe(4); // the record really is there to be cleared
+    chmodSync(home, 0o500);
+    try {
+      // THE FIXTURE HAS TO BITE, and it cannot as root. Asserted rather than skipped: a rail that
+      // quietly passes without exercising its subject is worse than one that says it could not.
+      expect(() => {
+        const probe = join(home, "probe.tmp");
+        writeFileSync(probe, "x");
+        rmSync(probe, { force: true });
+      }, "this home is still writable, so the clearing write cannot fail: run as a non-root user").toThrow();
+
+      const opened = await tryPassword("myk", PASSWORD);
+      expect(opened.status).toBe(200);
+      expect(cookieFrom(opened)).toBeDefined();
+      expect(faults.join("\n")).toMatch(/login-locks\.json/);
+      // the count survived, because clearing it is a courtesy rather than a step
+      expect(readLocks(home).get("myk")?.failures).toBe(4);
+    } finally {
+      chmodSync(home, 0o700); // or afterEach cannot remove its own temp home
+    }
+  });
+
+  it("(o) an unknown username accumulates the same way, and shuts nobody out", async () => {
     // The limiter is no oracle: a name nobody holds is counted exactly like one that exists.
     served = await serveHome(home, { limit: COUNTING });
     for (let attempt = 1; attempt <= 20; attempt += 1) {
@@ -176,7 +246,7 @@ describe("the failed-login delay", () => {
     expect(delayMs(home, "myk", Date.now(), COUNTING)).toBe(0);
   });
 
-  it("(a) the cost is paid BEFORE the compare: a door that cannot hash still waits it out", async () => {
+  it("(o2) the cost is paid BEFORE the compare: a door that cannot hash still waits it out", async () => {
     // `maxConcurrentHashes: 0` means NO password can be compared at all. An attempt for a name that
     // has accumulated failures must still pay its wait before it hears that. A cost charged after the
     // compare is no cost: the answer is already decided, and a fast 401 beside a slow 200 tells the
@@ -192,7 +262,7 @@ describe("the failed-login delay", () => {
     expect(ms).toBeGreaterThanOrEqual(1900);
   });
 
-  it("(b) the wait grows with each failure", async () => {
+  it("(o1) the wait grows with each failure", async () => {
     served = await serveHome(home, { limit: STEPPED });
     const miss = async (attempt: number): Promise<number> => {
       const { ms, res } = await timed(missOnce("myk", attempt));
@@ -210,9 +280,9 @@ describe("the failed-login delay", () => {
     expect(fourth).toBeGreaterThan(second);
   });
 
-  it("(b) the wait is CAPPED: twenty-five failures still answer promptly", async () => {
-    // Doubling with no ceiling would reach 40ms × 2²⁴ — eleven days — so an uncapped wait does not
-    // make this rail slow. It makes it never return, and the test times out red.
+  it("(o1) the wait is CAPPED: twenty-five failures still answer promptly", async () => {
+    // Doubling with no ceiling would reach 40ms × 2²⁴, which is over a week, so an uncapped wait does
+    // not make this rail slow. It makes it never return, and the test times out red.
     const capped: LimitPolicy = {
       baseDelayMs: 40,
       maxDelayMs: 120,
@@ -229,7 +299,7 @@ describe("the failed-login delay", () => {
     expect(ms).toBeLessThan(3000);
   });
 
-  it("(b) `delayFor` doubles from the base and saturates at the cap", () => {
+  it("(o1) `delayFor` doubles from the base and saturates at the cap", () => {
     const policy: LimitPolicy = {
       baseDelayMs: 250,
       maxDelayMs: 2000,
@@ -246,7 +316,7 @@ describe("the failed-login delay", () => {
     expect(delayFor(4096, DEFAULT_LIMIT)).toBe(DEFAULT_LIMIT.maxDelayMs);
   });
 
-  it("(c) (f) waiting attempts spend no hash budget, so one name's flood cannot refuse another", async () => {
+  it("(o3) waiting attempts spend no hash budget, so one name's flood cannot refuse another", async () => {
     // ONE hash slot for the whole door. If a waiting attempt held that slot, wren could not get in —
     // and a 503 for wren is the denial this whole design exists to remove, arriving by another route.
     served = await serveHome(home, { limit: LONG, maxConcurrentHashes: 1 });
@@ -269,20 +339,21 @@ describe("the failed-login delay", () => {
       "the flood drained before wren got in: this proved nothing",
     ).toEqual([true, true, true, true]);
 
-    // Every waiting attempt is ANSWERED, and none of the answers is 429 — a delay is not a quiet
-    // refusal, and there is no lock for one to reach. WHICH answer each gets is the hash cap's
-    // business: the four wake together and one slot serves them, so the rest read 503. That is the
-    // cap doing its job, and it is why this asserts the SET rather than a fixed order.
+    // THE CAP STILL BITES ON THE FAR SIDE OF THE WAIT, and this is the assertion that says so. The
+    // four wake together against ONE slot, so exactly one reaches a compare and the other three read
+    // 503. Asserting only "every status is 401 or 503" would be a tautology — those are the only two
+    // a wrong password can produce now that no login path emits 429 — and it stays green if the cap
+    // is removed entirely and all four hash at once. The exact count of 503s does not.
     const answered = await Promise.all(flood.map((f) => f.wait));
-    expect(answered.every((r) => r.status === 401 || r.status === 503)).toBe(true);
-    expect(answered.some((r) => r.status === 401)).toBe(true); // the slot came back, and was used
-    // and a 503 costs the caller no count, so only the compared attempts were charged
-    expect(readLocks(home).get("myk")?.failures).toBe(
-      1 + answered.filter((r) => r.status === 401).length,
-    );
+    expect(answered.filter((r) => r.status === 503)).toHaveLength(3);
+    expect(answered.filter((r) => r.status === 401)).toHaveLength(1);
+    // and a 503 costs the caller no count: one attempt was compared, so the count moved by one.
+    // Derived from the DOOR's answers rather than from login-locks.ts, so the subject cannot set its
+    // own expectation (H10) — and pinned to a literal above, so it cannot drift with a broken cap.
+    expect(readLocks(home).get("myk")?.failures).toBe(2);
   });
 
-  it("(d) overlapping attempts each count: no attempt loses another's failure", async () => {
+  it("(o4) overlapping attempts each count: no attempt loses another's failure", async () => {
     // A LOST UPDATE is what this pins. Read the table, await the hash, write the snapshot back, and
     // four overlapping attempts all compute the same `failures + 1` — so the count says one or two
     // where four landed. Concurrency is the whole point: sent one at a time, a broken limiter looks
@@ -294,15 +365,22 @@ describe("the failed-login delay", () => {
       maxTracked: 64,
     };
     served = await serveHome(home, { limit: doubling, maxConcurrentHashes: 4 });
-    const misses = await Promise.all(
-      Array.from({ length: 4 }, async (_unused, i) => {
-        const begun = await beginLogin(served.base);
-        return postLogin(served.base, "myk", `wrong ${i}`, {
-          cookie: begun.cookie,
-          formToken: begun.formToken,
-        });
-      }),
+    // THE FOUR MUST GENUINELY OVERLAP, and nothing but a witness can say they did. Serialized by load
+    // or by a fast hash, a limiter that carries a snapshot across its await records four anyway, and
+    // this rail goes green having exercised nothing. So the first pre-session is fetched, then all
+    // four POSTs go out together, and each is witnessed still in flight while its siblings are open.
+    const begun = await Promise.all([1, 2, 3, 4].map(() => beginLogin(served.base)));
+    const flight = begun.map((b, i) =>
+      inFlight(
+        postLogin(served.base, "myk", `wrong ${i}`, { cookie: b.cookie, formToken: b.formToken }),
+      ),
     );
+    await drained();
+    expect(
+      flight.map((f) => f.running()),
+      "an attempt answered before its siblings were sent: they did not overlap",
+    ).toEqual([true, true, true, true]);
+    const misses = await Promise.all(flight.map((f) => f.wait));
     expect(misses.map((r) => r.status)).toEqual([401, 401, 401, 401]);
     // Delta level: four attempts landed, so the record says four.
     expect(readLocks(home).get("myk")?.failures).toBe(4);
@@ -313,7 +391,7 @@ describe("the failed-login delay", () => {
     expect(ms).toBeGreaterThanOrEqual(1500);
   });
 
-  it("(e) a wall clock stepped BACKWARDS cannot erase an accumulated wait", async () => {
+  it("(o5) a wall clock stepped BACKWARDS cannot erase an accumulated wait", async () => {
     // A step backwards leaves the recorded stamp IN THE FUTURE, which is exactly what this writes by
     // hand. The door must read that as no time passed, never as the forget window having lapsed.
     writeFileSync(
@@ -330,7 +408,7 @@ describe("the failed-login delay", () => {
     expect(ms).toBeGreaterThanOrEqual(1900);
   });
 
-  it("(e) silence past the forget window DOES clear it — the other side of the same read", async () => {
+  it("(o5) silence past the forget window DOES clear it — the other side of the same read", async () => {
     const brief: LimitPolicy = {
       baseDelayMs: 2000,
       maxDelayMs: 2000,
@@ -348,7 +426,7 @@ describe("the failed-login delay", () => {
     expect(ms).toBeLessThan(UNWAITED_MS);
   });
 
-  it("(e) a fresh failure re-arms a spent record rather than resuming its count", async () => {
+  it("(o5) a fresh failure re-arms a spent record rather than resuming its count", async () => {
     // A count that survived its own forget window would be a permanent wait wearing a timer's
     // clothes: nine failures forgiven, then one miss charging as if it were the tenth.
     const brief: LimitPolicy = {
@@ -367,7 +445,7 @@ describe("the failed-login delay", () => {
     expect(delayMs(home, "myk", Date.now(), brief)).toBe(300);
   });
 
-  it("(f) the table holds no more than maxTracked, and a flood cannot flush a stronger record", async () => {
+  it("(o6) the table holds no more than maxTracked, and a flood cannot flush a stronger record", async () => {
     // THE FILE IS BOUNDED, because an unauthenticated caller drives every write to it. Bounded means
     // something has to give when it is full — and what gives must never be the record a caller has
     // already been made to pay for.
@@ -391,6 +469,56 @@ describe("the failed-login delay", () => {
     expect(after.has("flood-e")).toBe(true);
     // and whatever the table holds, the correct password still opens the door
     expect((await tryPassword("myk", PASSWORD)).status).toBe(200);
+  });
+
+  it("(o6) MATCHING a record's count does not evict it: the newest of equals goes first", async () => {
+    // The tie-break is the whole finding. Break ties toward the OLDEST and a caller need only match a
+    // count to displace it — and the older row is always the established one rather than the flood's,
+    // so the operator's record is the first taken. Ties must go the other way.
+    const small: LimitPolicy = { baseDelayMs: 1, maxDelayMs: 4, forgetMs: 600_000, maxTracked: 2 };
+    served = await serveHome(home, { limit: small });
+    expect((await missOnce("myk", 1)).status).toBe(401); // myk: 1 failure, and the OLDEST row
+    expect((await missOnce("flood-a", 1)).status).toBe(401); // flood-a: 1 failure, newer
+    expect(readLocks(home).size).toBe(2);
+
+    // A third name at the SAME count. The table is full, and every row ties at one failure.
+    expect((await missOnce("flood-b", 1)).status).toBe(401);
+    const after = readLocks(home);
+    expect(after.size).toBe(2);
+    expect(after.has("myk")).toBe(true); // the oldest row survived a tie
+    expect(after.has("flood-a")).toBe(false); // the newest of the equals went
+  });
+
+  it("(o6) an over-bound table is cut back to the bound, not trimmed by one", async () => {
+    // The multi-row eviction branch. A policy narrowed since the last write leaves the file over its
+    // own bound, and evicting a single row per attempt would never catch up. Written by hand because
+    // the door itself can never produce an over-bound file — which is also why no other rail reaches
+    // this branch at a value where `size - maxTracked + 1` is anything but one.
+    const now = Date.now();
+    writeFileSync(
+      locksPath(home),
+      JSON.stringify({
+        users: {
+          strongest: { failures: 9, lastFailureAt: now - 5000 },
+          strong: { failures: 7, lastFailureAt: now - 4000 },
+          middle: { failures: 5, lastFailureAt: now - 3000 },
+          weak: { failures: 3, lastFailureAt: now - 2000 },
+          weaker: { failures: 2, lastFailureAt: now - 1000 },
+          weakest: { failures: 1, lastFailureAt: now },
+        },
+      }),
+    );
+    expect(readLocks(home).size).toBe(6); // the fixture really is over the bound below
+    const small: LimitPolicy = { baseDelayMs: 1, maxDelayMs: 4, forgetMs: 600_000, maxTracked: 3 };
+    served = await serveHome(home, { limit: small });
+
+    expect((await missOnce("newcomer", 1)).status).toBe(401);
+    const after = readLocks(home);
+    // ONE attempt cut six rows to three. Trimming by one would leave five, plus the newcomer.
+    expect(after.size).toBe(small.maxTracked);
+    // and it cut from the WEAK end: the two strongest survived beside the new row
+    expect([...after.keys()].sort()).toEqual(["newcomer", "strong", "strongest"]);
+    expect(after.get("strongest")?.failures).toBe(9); // the count survived, not just the key
   });
 
   it("(p) `loam user unlock` clears the accumulated wait from the box", async () => {

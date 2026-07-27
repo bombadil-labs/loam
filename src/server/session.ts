@@ -34,6 +34,7 @@ import {
   DEFAULT_LIMIT,
   delayMs,
   forgetFailures,
+  locksPath,
   noteFailure,
   type LimitPolicy,
 } from "./login-locks.js";
@@ -304,6 +305,39 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
   // it happens. An availability dent is the cheaper failure; a confidentiality leak does not heal.
   const maxHashes = options.maxConcurrentHashes ?? DEFAULTS.maxConcurrentHashes;
   let hashesInFlight = 0;
+
+  // THE LIMITER'S WRITES FAIL OPEN, both of them, and the reason is the promise this door makes.
+  //
+  // login-locks.json is a work budget rather than an authorization surface, and `readLocks` already
+  // treats a file it cannot parse as no records at all. The writes have to agree. Unguarded they
+  // reach the door's outer guard, which answers 503 — so an unwritable home, ENOSPC, or the file
+  // replaced by a directory would refuse a CORRECT password, which is the one thing this design
+  // promises cannot happen. The fault goes to the operator's own channel, where a local condition
+  // belongs, and the caller's answer does not move.
+  //
+  // What failing open costs: the count does not grow, so a guesser is not charged for that attempt.
+  // A disk the server cannot write is not a state a caller can reach, and the alternative is handing
+  // a disk fault the power to shut the login door.
+  const recordFailure = (user: string): void => {
+    try {
+      noteFailure(options.home, user, Date.now(), limit);
+    } catch (err) {
+      onFault(
+        `the login door could not record a failed attempt in ${locksPath(options.home)}: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  };
+  const forgetCount = (user: string): void => {
+    try {
+      forgetFailures(options.home, user);
+    } catch (err) {
+      onFault(
+        `the login door could not clear a failure count in ${locksPath(options.home)}: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  };
 
   const sweep = (): void => {
     const moment = now();
@@ -670,7 +704,13 @@ data doors on its own.</p>`,
     }
     if (!matched) {
       // The count grows, so the NEXT attempt for this name costs more. This attempt already paid.
-      noteFailure(options.home, user, Date.now(), limit);
+      //
+      // A WRITE FAULT MUST NOT CHANGE THE ANSWER. `readLocks` is fail-open by design, and the write
+      // has to match it: an unwritable home, ENOSPC, or login-locks.json replaced by a directory
+      // would otherwise reach the outer guard and turn this 401 into a 503. That direction gives a
+      // local disk fault a say in what the door answers, and a fault nobody can cause is still one
+      // nobody can clear. Failing open costs the count, which is a work budget, not authority.
+      recordFailure(user);
       refuseLogin(res);
       return;
     }
@@ -695,7 +735,12 @@ data doors on its own.</p>`,
       json(res, 503, { errors: ["this store is holding all the sessions it can"] });
       return;
     }
-    forgetFailures(options.home, user);
+    // THE CORRECT PASSWORD IS ALREADY ACCEPTED, so nothing after this line may refuse it. Clearing
+    // the count is a courtesy — it saves this name one wait next time — and a write fault must cost
+    // exactly that courtesy and nothing more. Unguarded, it reaches the outer guard as a 503, which
+    // refuses a correct password AND leaves the session `open` just seated with no cookie to reach
+    // it, burning one of `maxSessions` per retry.
+    forgetCount(user);
     // the nonce is spent: one login is all it was ever good for
     html(res, 200, signedInPage(user, role, opened.session.formToken), [
       setCookie(opened.id),
@@ -785,7 +830,7 @@ data doors on its own.</p>`,
       pathname === "/login" || pathname === "/logout" || pathname === "/session/token",
     async handle(pathname, req, res) {
       // ONE GUARD OVER ALL FOUR DOORS, because "the caller never sees the detail" has to hold for a
-      // fault nobody anticipated too. Without it an ENOSPC from the lock-file write, or a throw from the
+      // fault nobody anticipated too. Without it an ENOSPC from the login-locks.json write, or a throw from the
       // ground read, escapes to the server's generic handler — which answers 500 with the message, and
       // those messages carry the home's absolute path. Per-call-site try blocks would each be one
       // omission away from the same leak.

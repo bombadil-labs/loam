@@ -12,14 +12,24 @@
 // that clears a record where only the box can reach it: `loam user unlock`.
 //
 // The state lives in the home rather than in server memory for exactly that reason: `loam user
-// unlock` is a SEPARATE PROCESS, and memory it cannot reach is a record it cannot clear. The file
-// keeps the name login-locks.json, which the erasure report and the CLI both name to an operator; the
-// vocabulary inside it is the delay.
+// unlock` is a SEPARATE PROCESS, and memory it cannot reach is a record it cannot clear.
+//
+// TWO VOCABULARIES LIVE HERE, and the split is deliberate rather than half-finished. Anything naming
+// the FILE keeps the lock word — `login-locks.json`, `locksPath`, `readLocks`, `writeLocks`, and the
+// local `locks` map they hand around — because that file name is on disk, in the erasure report's
+// unswept list, and in what an operator reads. Anything naming the BEHAVIOUR uses the delay word:
+// `FailureRecord`, `delayFor`, `delayMs`, `clearRecord`. So `locks` in this file means "the rows of
+// login-locks.json", never "a lock somebody holds" — there is no such thing here any more.
 //
 // Deliberate posture on damage: a file this module cannot parse reads as NO RECORDS, and a file with
 // SOME damaged records reads as the records it could parse. That is fail-open, and it is the right
 // direction here — this file is a work budget, not an authorization surface, and failing closed would
 // turn a local disk fault into a slow login for everyone with nothing to clear.
+//
+// THE NO-AWAIT DISCIPLINE IN `noteFailure` SETTLES ONE PROCESS, NOT TWO. Every write replaces the
+// file whole through a rename, so two servers over one home are last-writer-wins and each silently
+// discards the other's counts. `loam user unlock` shares the shape and says so at its call site. One
+// home, one server is the supported posture; the failure mode is a lost count, never a lost login.
 //
 // AN UNAUTHENTICATED CALLER DRIVES THIS FILE. A failed login writes it, for any well-formed name,
 // existing or not. So the size bound below is load-bearing rather than tidy, and every cost on this
@@ -49,7 +59,19 @@ export interface LimitPolicy {
 export const DEFAULT_LIMIT: LimitPolicy = {
   baseDelayMs: 250,
   // The CAP is what keeps "slow" from becoming "shut". Five seconds is a long pause for a person
-  // typing a password once, and it holds a guessing caller to a fifth of an attempt per second.
+  // typing a password once.
+  //
+  // IT BOUNDS A SERIAL GUESSER ONLY, and nothing here should be read as a rate. Waits do not
+  // serialize: the pre-compare read in session.ts is advisory, and `wait` is a bare timer with no
+  // per-name queue, so a caller who holds many sockets has all their waits elapse together. Their
+  // rate is then the CONCURRENT-HASH CAP divided by one hash — tens per second, and independent of
+  // this number. Dividing one second by the cap gives 0.2 attempts per second and is wrong by orders
+  // of magnitude against a caller who opens more than one connection.
+  //
+  // That is not a hole this constant can close. A per-name queue would let a caller who keeps
+  // failing extend an honest attempt without limit, which is the lockout again. So the delay taxes
+  // the cheap serial attack, the hash cap bounds the parallel one, and neither pretends to be the
+  // other.
   maxDelayMs: 5_000,
   forgetMs: 900_000,
   // Small ON PURPOSE: every failed attempt reads and rewrites this file whole, and an unauthenticated
@@ -194,12 +216,20 @@ export const delayMs = (home: string, name: string, now: number, policy: LimitPo
  * SPENT RECORDS ARE PRUNED. A failed attempt is recorded for any well-formed name, existing or not, so
  * a caller walking names would otherwise add a row per attempt forever.
  *
- * And past `maxTracked` the WEAKEST records are evicted to make room. Nothing in this file can refuse a
- * login, so an eviction can never be an off switch; the most it can hand back is a wait. It is still
- * ordered by strength rather than by age, for two reasons. Displacing a name with F failures costs the
- * caller F failures on every other row first, and each of those pays its own delay. And a wait rebuilds
- * on the very next failure, so what the theft buys is about one attempt — there is no expiry here for a
- * flood to steal.
+ * And past `maxTracked` the WEAKEST records are evicted to make room — fewest failures, and the
+ * NEWEST among equals. Nothing in this file can refuse a login, so an eviction can never be an off
+ * switch; the most it can hand back is a wait.
+ *
+ * BOTH HALVES OF THAT ORDER ARE LOAD-BEARING. Fewest-failures means a caller must out-count a row to
+ * displace it. Newest-among-equals means they must strictly EXCEED it: tie-break the other way and
+ * merely matching a count evicts the older row, which is always the established one rather than the
+ * flood's. So displacing a name with F failures costs F failures on every other row, and each of
+ * those costs a hash the door's own cap rations.
+ *
+ * What the theft buys even then is about one attempt, because a wait rebuilds on the very next
+ * failure — there is no expiry here for a flood to steal. What it does NOT cost is F rounds of
+ * waiting: waits do not serialize across names, so the wall-clock price is the hash cap's, not the
+ * delay's. Do not read that sentence as a serial cost; see DEFAULT_LIMIT on the same confusion.
  */
 export function noteFailure(home: string, name: string, now: number, policy: LimitPolicy): void {
   const locks = readLocks(home);
@@ -211,7 +241,7 @@ export function noteFailure(home: string, name: string, now: number, policy: Lim
     // Weakest first, and ENOUGH OF THEM that one new row still fits: a policy narrowed since the last
     // write can leave the table over its own bound, and evicting a single row would never catch up.
     const weakest = [...locks].sort(
-      ([, a], [, b]) => a.failures - b.failures || a.lastFailureAt - b.lastFailureAt,
+      ([, a], [, b]) => a.failures - b.failures || b.lastFailureAt - a.lastFailureAt,
     );
     for (const [held] of weakest.slice(0, locks.size - policy.maxTracked + 1)) locks.delete(held);
   }
