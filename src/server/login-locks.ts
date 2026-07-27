@@ -53,7 +53,9 @@ export interface LimitPolicy {
   readonly baseDelayMs: number; // what the FIRST failure buys the next attempt
   readonly maxDelayMs: number; // the ceiling: no attempt ever waits longer than this
   readonly forgetMs: number; // silence this long and the count starts over
-  readonly maxTracked: number; // live records the file will hold — see noteFailure
+  // Live records the file will hold, for any value of 1 or more — see noteFailure. At 0 it holds ONE:
+  // the table is emptied and then this attempt's row is seated, so the floor is a row rather than none.
+  readonly maxTracked: number;
 }
 
 export const DEFAULT_LIMIT: LimitPolicy = {
@@ -223,19 +225,31 @@ export const delayMs = (home: string, name: string, now: number, policy: LimitPo
  *
  * THE BOUND IS A REAL LIMIT ON WHAT THIS FILE CAN PROMISE, and no eviction order fixes it. A row is
  * seated at ONE failure, so a new row is always among the weakest — which means a caller who squats
- * `maxTracked` rows can keep a CHOSEN name's row out of the table and hold its delay at zero. Measured
- * against this module, `maxTracked: 8`, a target charged over eight rounds:
+ * `maxTracked` rows can keep a CHOSEN name's row out of the table and hold its delay at zero. Two
+ * shapes, measured against this module at `maxTracked` 4 and 8, a target charged per round:
  *
- *   - newest-among-equals: 0ms every round. The flush costs one undelayed request, with no setup.
- *   - oldest-among-equals: 0ms every round, after raising each junk row to two failures first. Setup
- *     costs 2×(maxTracked−1) recorded failures; each later flush costs one request.
+ *   - NARROW, one fresh name per round. 0ms under newest-among-equals with no setup. Under
+ *     oldest-among-equals it needs every junk row raised ABOVE the target's count first, and then
+ *     0ms per round. `0, 200, 400, 800, 1600` without that setup — the tie-break holds.
+ *   - WIDE, `maxTracked` or more fresh names per round, cycling the whole table. 0ms under EITHER
+ *     order, with no setup at all. The tie-break never decides anything, because no row survives the
+ *     round that could tie. The boundary is exact: at `maxTracked − 1` fresh names the tie-break
+ *     holds; at `maxTracked` it does not.
  *
- * So the tie-break only moves the SETUP price, and oldest-among-equals is kept because that price is
- * the only difference in the defender's favour. Do not read the order as a defence; the honest claim
- * is that an unsquatted table charges a serial guesser, and a squatted one does not charge the name it
- * is squatting against. Closing that needs a store this file cannot be — a bounded whole-file rewrite
- * on an unauthenticated path is what forces `maxTracked` to be small (H8) — or per-name counters that
- * collide, which would slow innocent names and break criterion (o3). Both are their own ticket.
+ * So the order changes which callers pay a setup, not whether the squat works. Do not read it as a
+ * defence. The honest claim is that an unsquatted table charges a serial guesser, and a squatted one
+ * does not charge the name it is squatting against. Closing that needs a store this file cannot be —
+ * a bounded whole-file rewrite on an unauthenticated path is what forces `maxTracked` to be small
+ * (H8) — or per-name counters that collide, which would slow innocent names and break criterion (o3).
+ * Both are their own ticket.
+ *
+ * WHAT THE SQUAT COSTS TO SUSTAIN, since the cheapest attack is the one worth quoting: one flush per
+ * guess, PLUS a refresh of every squatted row inside each `forgetMs` window, because `spent` prunes a
+ * row nobody has touched. At the shipped policy that is `maxTracked − 1` = 511 refreshes per 15
+ * minutes. Cheap, and not free — and it means the squat DECAYS: stop refreshing and the target starts
+ * being charged again after one window. The narrow form's setup also scales with the TARGET's standing
+ * count rather than being a flat 2×: a target already at five failures needs the junk rows above five,
+ * and junk at two does not flush it at all.
  *
  * What an eviction takes when the table is NOT squatted is about one attempt, because a wait rebuilds
  * on the very next failure. And the cost it imposes is not F rounds of waiting: waits do not serialize

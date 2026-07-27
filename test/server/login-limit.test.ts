@@ -41,12 +41,14 @@
 //  5. TIME, in the byte-identical refusal rail below. It compares status and body only, and says so
 //     again at its own call site.
 //  6. THAT A TARGETED NAME IS CHARGED AT ALL WHEN THE TABLE IS SQUATTED. A row is seated at one
-//     failure, so a new row is always among the weakest — and a caller holding `maxTracked` rows above
-//     that count keeps a chosen name out of the table entirely, at one fresh name per round. Measured
-//     at 0ms charged on every round, under BOTH tie-break orders. The cycle rail below covers the
-//     cheap form (a flood of one-failure names) and says so at its own call site; the expensive form
-//     no eviction order can fix. login-locks.ts states what closing it would take, and it is a
-//     different store rather than a different comparator.
+//     failure, so a new row is always among the weakest, and a caller who squats `maxTracked` rows
+//     keeps a chosen name out of the table. Two shapes, both measured at 0ms charged per round:
+//     RAISE the junk rows above the target's count and flood one fresh name per round; or flood
+//     `maxTracked` or more fresh names per round and cycle the whole table, which needs no setup and
+//     works under EITHER tie-break order. The cycle rail below covers the widest flood the tie-break
+//     does survive — `maxTracked − 1` per round — and names both shapes it does not. No eviction order
+//     fixes them: login-locks.ts states what closing them takes, and it is a different store rather
+//     than a different comparator.
 //
 // The last half of the file is a different budget. scrypt is expensive ON PURPOSE, which makes an
 // unauthenticated login a lever on the server's CPU. So the door caps concurrent hashing globally,
@@ -540,12 +542,18 @@ describe("the failed-login delay", () => {
     // count stays at one, the wait stays at the base, and every rail that watches a single eviction
     // stays green.
     //
-    // WHAT THIS COVERS, EXACTLY: a flood of ONE-FAILURE names. That is the cheap attack, and it is the
-    // one the tie-break decides. It does NOT cover a caller who first raises every junk row ABOVE the
-    // target's count — then the target's row is the unique weakest and one fresh name per round flushes
-    // it whatever the tie-break says. Measured: 0ms charged on every round. No eviction order fixes
-    // that, so no rail here asserts it does; gap 6 in the header names it, and login-locks.ts states
-    // what closing it would take.
+    // WHAT THIS COVERS, EXACTLY — and the boundary is sharp, so it is worth stating rather than
+    // implying. This floods `maxTracked − 1` fresh one-failure names per round, which is the widest
+    // flood the tie-break still survives. Two shapes fall outside it, neither of them railed:
+    //
+    //   - RAISE THE JUNK ROWS above the target's count first, then one fresh name per round. The
+    //     target is then the unique weakest and `failures` alone evicts it, whatever the tie says.
+    //   - FLOOD `maxTracked` OR MORE fresh names per round, cycling the whole table. No setup, and no
+    //     row survives a round that could tie, so the tie-break never decides anything.
+    //
+    // Measured at `maxTracked` 4 and 8: `maxTracked − 1` fresh names charge 0, 200, 400, 800, 1600 —
+    // and `maxTracked` charges 0 every round. No eviction order fixes either shape, so no rail here
+    // claims one does. Gap 6 in the header names both; login-locks.ts states what closing them takes.
     const small: LimitPolicy = {
       baseDelayMs: 200,
       maxDelayMs: 4000,

@@ -27,16 +27,29 @@ to a cap, and the door always admits a correct password. Criteria (o) and (p) be
    would close it and reintroduce the lockout, so it stays open and named.
 4. **A SQUATTED TABLE CHARGES A TARGETED NAME NOTHING, and this one is Myk's to weigh.** The record
    file is bounded by `maxTracked`, because an unauthenticated caller writes a row per name and every
-   write rewrites the file whole (H8). A row is seated at ONE failure, so a new row is always among
-   the weakest — and a caller who holds `maxTracked` rows above that count keeps a chosen name out of
-   the table for one fresh name per round. Measured against the module at `maxTracked: 8`: 0ms charged
-   to the target on every round, under BOTH eviction tie-break orders. The tie-break only moves the
-   setup price. So the delay taxes a serial guesser against an UNSQUATTED table, and a determined
-   caller who squats can guess one chosen name at the concurrent-hash cap's rate — which is where the
-   pre-T116 lock also ended up, by a different route. Closing it needs a store that is not a bounded
-   whole-file rewrite, or per-name counters that collide and therefore slow innocent names, breaking
-   criterion (o3). Recommendation: land T116 as it stands, and open a follow-up ticket for the store.
-   The residual is strictly narrower than the lockout this section removes, and it refuses nobody.
+   write rewrites the file whole (H8). A row is seated at ONE failure, so a new row is always among the
+   weakest, and a caller who squats `maxTracked` rows keeps a chosen name out of the table. Two shapes,
+   both measured against the module at `maxTracked` 4 and 8, both charging the target 0ms every round:
+
+   - Raise every squatted row ABOVE the target's count, then flood one fresh name per round.
+   - Flood `maxTracked` or more fresh names per round and cycle the whole table. This needs no setup
+     and works under either eviction tie-break order.
+
+   The boundary is exact: at `maxTracked − 1` fresh names per round the tie-break holds and the target
+   is charged 0, 200, 400, 800, 1600ms. At `maxTracked` it is charged nothing.
+
+   **What it costs to sustain**, because the cheapest attack is the one to quote: one flush per guess,
+   plus a refresh of every squatted row inside each `forgetMs` window — 511 refreshes per 15 minutes at
+   the shipped policy, since an untouched row is pruned. So the squat DECAYS: stop refreshing and the
+   target is charged again after one window. The first shape's setup also scales with the target's
+   standing count rather than being flat; junk rows at two failures do not flush a target at five.
+
+   So the delay taxes a serial guesser against an UNSQUATTED table, and a caller willing to sustain a
+   squat can guess one chosen name at the concurrent-hash cap's rate — which is where the pre-T116 lock
+   also ended up, by a different route. Closing it needs a store that is not a bounded whole-file
+   rewrite, or per-name counters that collide and therefore slow innocent names, breaking criterion
+   (o3). **Recommendation: land T116 as it stands, and open a follow-up ticket for the store.** The
+   residual is strictly narrower than the lockout this section removes, and it refuses nobody.
 
 ## The problem
 
