@@ -11,8 +11,10 @@
 // serve, not a fixture record), and the earned silences stay silent.
 //
 // Deliberately not asserted here: that the running server later ingests anything (it does not —
-// the pull door and the watcher are T103's unbuilt halves), and nothing about `~/.loam` or any
-// path outside this test's own mkdtemp.
+// the pull door and the watcher are T103's unbuilt halves); the record-present-but-UNREADABLE
+// branch (a non-ENOENT read error also warns, but no portable fixture can make a file unreadable
+// on every CI platform — chmod is advisory on Windows and a no-op under root); and nothing about
+// `~/.loam` or any path outside this test's own mkdtemp.
 
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
