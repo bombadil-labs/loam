@@ -6,9 +6,9 @@
 // live ServerHandle so a caller (a test, or a supervisor) can drive and close it. The default
 // `serve` blocks until the process is signalled.
 
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { authorForSeed } from "@bombadil/rhizomatic";
+import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { Gateway, type FederationReport } from "../gateway/gateway.js";
 import { parseOffer } from "../federation/offer.js";
 import { toWire } from "../federation/wire.js";
@@ -22,6 +22,17 @@ import {
   type RegistrationInput,
 } from "../gateway/registration.js";
 import { serve, type ServerHandle } from "../server/http.js";
+import {
+  credentialsPath,
+  entryFor,
+  hashPassword,
+  readCredentials,
+  writeCredentials,
+  type ScryptParams,
+} from "../server/credentials.js";
+import { clearLock } from "../server/login-locks.js";
+import { roleClaims, userClaims, userNameDefect, type UserRole } from "../server/users.js";
+import { promptSecret } from "./prompt.js";
 import type { StoreBackend } from "../store/backend.js";
 import { ArchiveBackend } from "../store/archive.js";
 import { MirrorBackend } from "../store/mirror.js";
@@ -39,11 +50,15 @@ export interface IO {
 export interface RunOptions {
   readonly detach?: boolean; // serve: return the handle instead of blocking
   readonly version?: string; // override the reported version (tests)
+  /** `user create`: ask for a secret some other way than the terminal (embedders; tests). */
+  readonly readSecret?: (prompt: string) => Promise<string>;
+  /** `user create`: the scrypt cost, for a caller that must not pay the interactive default (tests). */
+  readonly scrypt?: ScryptParams;
 }
 
 const VERSION = "0.1.0";
 
-type CommandName = "init" | "serve" | "register" | "pull" | "migrate" | "store" | "repair";
+type CommandName = "init" | "serve" | "register" | "pull" | "migrate" | "store" | "repair" | "user";
 
 interface CommandSpec {
   readonly summary: string; // the line the top-level help shows
@@ -65,11 +80,15 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
   serve: {
     summary: "boot a store and serve it (GraphQL + SSE + MCP over HTTP)",
     usage: "loam serve --http [options]",
-    flags: new Set(["home", "store", "port", "token", "http", "archive", "host"]),
+    flags: new Set(["home", "store", "port", "token", "http", "archive", "host", "public-url"]),
     booleans: new Set(["http"]),
     notes: [
       "A fresh home self-initializes: it mints (or, via LOAM_SEED, imports) an operator identity,",
       "so a container serves with nothing but a token.",
+      "",
+      "A home holding a credentials.json also opens the login doors (/login, /logout,",
+      "/session/token). Behind a proxy, name the outside address with --public-url: Host and",
+      "X-Forwarded-* are the caller's to write, so this server never reads them.",
     ],
   },
   register: {
@@ -105,6 +124,23 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
     usage: "loam store [options]",
     flags: new Set(["home", "store"]),
   },
+  user: {
+    summary: "create a login user, or clear a locked login",
+    usage: "loam user <create|unlock> <name> [options]",
+    flags: new Set(["home", "store", "operator"]),
+    booleans: new Set(["operator"]),
+    notes: [
+      "subcommands:",
+      "  create <name>    ask for a password twice, write the credential, plant the user deltas",
+      "  unlock <name>    clear a locked login — the lock is the box's to lift, never a caller's",
+      "",
+      "Home access IS the proof of operatorship: this command needs the home's seed, like erasure.",
+      "The password hash lives in credentials.json (mode 0600) and never enters the ground, because",
+      "the ground replicates. The user record and its role binding ARE deltas: facts, erasable,",
+      "provenance-carrying. Erasing a user record shuts the login door; it leaves credentials.json",
+      "alone, and `loam serve`'s health report names that surface as one it does not sweep.",
+    ],
+  },
   repair: {
     summary: "list and settle a store's quarantine (SPEC §25)",
     usage: "loam repair <list|discard|re-admit|leave> [<key>] [options]",
@@ -137,6 +173,11 @@ const FLAG_HELP: Readonly<Record<string, { readonly arg: string; readonly note: 
   http: { arg: "", note: "serve over HTTP — the only transport today" },
   archive: { arg: "<dir>", note: "mirror every delta into a cold store, relative to the home" },
   out: { arg: "<file>", note: "write the re-expressed offer here (default stdout)" },
+  operator: { arg: "", note: "give the new user the operator role (default: a plain actor)" },
+  "public-url": {
+    arg: "<url>",
+    note: "the store's address as the outside world sees it (default: the bound URL)",
+  },
 };
 
 function topHelp(): string {
@@ -389,15 +430,29 @@ async function cmdServe(
   // Boot the store from its genesis (idempotent): a fresh store is born governed; an existing
   // one simply re-lands the same operator identity.
   const gateway = await Gateway.boot(backend, assembleGenesis({ operatorSeed: seed }));
+  // The login doors open only for a home that HAS users (SPEC §36). A store with no credentials.json
+  // is exactly the store it was before §36: /login resolves no mount, and no request reads a cookie.
+  const publicUrl = parsed.flags.get("public-url");
+  const withUsers = existsSync(credentialsPath(home));
   const server = await serve({
     mounts: { default: gateway },
     tokens: { [token]: { operator: true } },
     port,
     host: parsed.flags.get("host") ?? "127.0.0.1",
+    ...(withUsers
+      ? {
+          users: {
+            home,
+            mount: "default",
+            ...(publicUrl === undefined ? {} : { publicUrl }),
+          },
+        }
+      : {}),
   });
   recordServing(home, server.url, path);
   io.out(
-    `loam: serving ${path} at ${server.url}/default${vault === undefined ? "" : `\n  archive ${vault}`}`,
+    `loam: serving ${path} at ${server.url}/default${vault === undefined ? "" : `\n  archive ${vault}`}` +
+      (withUsers ? `\n  login at ${publicUrl ?? server.url}/login` : ""),
   );
 
   // Closing the server also releases the gateway (and its backend file) — one shutdown, whole.
@@ -794,6 +849,149 @@ async function cmdRepair(args: readonly string[], io: IO): Promise<number> {
   }
 }
 
+// `loam user` (SPEC §36): the bootstrap door for a person, run on the box. Home access is the proof
+// of operatorship — the same authority erasure and repair need — so there is no remote way in.
+//
+//   loam user create <name> [--operator]   ask twice, hash, plant the two deltas, write the credential
+//   loam user unlock <name>                clear a locked login
+async function cmdUser(args: readonly string[], io: IO, options: RunOptions): Promise<number> {
+  const parsed = parseFor("user", args);
+  const sub = parsed.positionals[0];
+  if (sub === undefined) {
+    io.err(
+      "user wants a subcommand: `loam user create <name> [--operator]` or `loam user unlock <name>`",
+    );
+    return 2;
+  }
+  const name = parsed.positionals[1];
+  if (name === undefined) {
+    io.err(`user ${sub} wants a name: \`loam user ${sub} <name>\``);
+    return 2;
+  }
+  if (parsed.positionals.length > 2) {
+    io.err(`user ${sub} takes exactly one name`);
+    return 2;
+  }
+  const defect = userNameDefect(name);
+  if (defect !== undefined) {
+    io.err(`user ${sub}: ${defect}`);
+    return 2;
+  }
+  const home = parsed.flags.get("home") ?? defaultHome();
+  switch (sub) {
+    case "create":
+      return await cmdUserCreate(name, parsed, home, io, options);
+    case "unlock":
+      return cmdUserUnlock(name, home, io);
+    default:
+      io.err(`user: unknown subcommand "${sub}" — create | unlock`);
+      return 2;
+  }
+}
+
+async function cmdUserCreate(
+  name: string,
+  parsed: Parsed,
+  home: string,
+  io: IO,
+  options: RunOptions,
+): Promise<number> {
+  const role: UserRole = parsed.booleans.has("operator") ? "operator" : "actor";
+  const init = initHome(home);
+  if (init.created) io.out(`loam: initialized ${home}\n  operator ${init.operator}`);
+
+  let existing;
+  try {
+    existing = readCredentials(home);
+  } catch (err) {
+    io.err(
+      `user create: ${credentialsPath(home)} is unreadable, so this command will not overwrite it: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    );
+    return 1;
+  }
+  if (entryFor(existing, name) !== undefined) {
+    io.err(
+      `user create: ${name} already has a credential in ${home} — this command will not overwrite ` +
+        `one. Remove the entry from ${credentialsPath(home)} to start that user over.`,
+    );
+    return 2;
+  }
+
+  const ask = options.readSecret ?? promptSecret;
+  const password = await ask(`password for ${name}: `);
+  const again = await ask("the same password again: ");
+  if (password.length === 0) {
+    io.err("user create: a password is required");
+    return 2;
+  }
+  if (password !== again) {
+    io.err("user create: the two passwords did not match — nothing was written");
+    return 2;
+  }
+  const entry = await hashPassword(password, options.scrypt);
+
+  // THE DELTAS LAND FIRST, and the order is the recovery story. A credential written over a failed
+  // append would open a door onto a user the ground never heard of, and the re-run would refuse
+  // because the credential exists. This way round, a failed write leaves two harmless facts and a
+  // re-run that simply lands them again (content-addressed: the second append is a duplicate).
+  const path = storePath(home, parsed.flags.get("store"));
+  const seed = readSeed(home);
+  const gateway = await Gateway.boot(openStore(path, io), assembleGenesis({ operatorSeed: seed }));
+  try {
+    const operator = authorForSeed(seed);
+    const at = Date.now();
+    await gateway.append([
+      signClaims(userClaims(name, operator, at), seed),
+      signClaims(roleClaims(name, role, operator, at), seed),
+    ]);
+  } catch (err) {
+    await gateway.close().catch(() => {}); // never let a close failure mask the real refusal
+    throw err;
+  }
+  await gateway.close();
+
+  writeCredentials(home, { version: 1, users: { ...existing.users, [name]: entry } });
+  io.out(
+    `loam: created ${name} with the ${role} role\n` +
+      `  the user and its role binding are deltas in ${path}\n` +
+      `  the password hash is local to ${credentialsPath(home)} — it never enters the ground`,
+  );
+  if (role !== "operator") {
+    io.out("  a plain actor may sign in; only the operator role mints a session token today");
+  }
+  // True of the FILE, and not of a server already holding this store open — say so under the report.
+  const staleness = servingWarning(home, path);
+  if (staleness !== undefined) io.err(`loam: ${staleness}`);
+  return 0;
+}
+
+function cmdUserUnlock(name: string, home: string, io: IO): number {
+  let existing;
+  try {
+    existing = readCredentials(home);
+  } catch (err) {
+    io.err(
+      `user unlock: ${credentialsPath(home)} is unreadable: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    );
+    return 1;
+  }
+  if (entryFor(existing, name) === undefined) {
+    io.err(
+      `user unlock: ${home} has no user named ${name} — \`loam user create ${name}\` makes one. ` +
+        `Nothing was unlocked.`,
+    );
+    return 2;
+  }
+  io.out(
+    clearLock(home, name)
+      ? `loam: unlocked ${name}\n  the next login attempt is counted from zero`
+      : `loam: ${name} was not locked\n  nothing to lift`,
+  );
+  return 0;
+}
+
 function defaultHome(): string {
   return process.env["LOAM_HOME"] ?? ".loam";
 }
@@ -845,6 +1043,8 @@ export async function run(
         return await cmdStore(rest, io);
       case "repair":
         return await cmdRepair(rest, io);
+      case "user":
+        return await cmdUser(rest, io, options);
       default:
         io.err(`loam: unknown command "${command}" — run \`loam --help\``);
         return 2;

@@ -7,14 +7,23 @@
     }
   ],
   "id": "T113",
-  "phase": "P1",
-  "rails": [],
+  "phase": "P3",
+  "rails": [
+    "test/server/user-fixture.ts",
+    "test/server/users-bootstrap.test.ts",
+    "test/server/login.test.ts",
+    "test/server/session-doors.test.ts",
+    "test/server/csrf.test.ts",
+    "test/server/login-limit.test.ts",
+    "test/server/credentials-corrupt.test.ts",
+    "test/server/users-erasure-honesty.test.ts"
+  ],
   "scope": [
     "src/server/",
     "src/cli/",
     "test/server/",
     ".adlc/specs/36-users.md"
   ],
-  "status": "todo",
+  "status": "in-progress",
   "title": "Users: authenticate a person, authorize a role, sign with a seed — three jobs, three things"
 }

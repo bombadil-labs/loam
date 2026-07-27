@@ -564,6 +564,20 @@ export async function eraseReplicaImpl(
 // which seeds from the primary's deltasSince — a primary that lost its tombstones mid-run while a
 // mirror kept a forgotten byte is out of this instrument's sight until the next boot heal.)
 
+// Surfaces this sweep DOES NOT REACH, named out loud (H7). The sweep purges DELTAS from every tier
+// it owns; a local secret that never enters the ground has no delta to tombstone, so no erasure can
+// promise anything about it. Saying so is the whole point: a `settled: true` beside a silent gap
+// teaches a reader that "settled" means "everything", and it does not.
+//
+// Named unconditionally rather than only when the file exists. A gateway cannot see the home it is
+// served from, and a report that appeared and vanished with a file it cannot examine would be a
+// weaker claim wearing a stronger one's clothes.
+export const UNSWEPT_SURFACES: readonly string[] = [
+  "credentials.json in the loam home (SPEC §36) — per-user login credentials. They are never " +
+    "deltas, so no tombstone reaches them and this report promises nothing about them. Removing a " +
+    "user's credential entry is a separate operator action.",
+];
+
 export interface ErasureHealth {
   readonly settled: boolean; // every promise is bytes-gone on every tier owned AND every attached pool
   readonly promised: number; // ids promised forgotten (targets of surviving operator tombstones)
@@ -586,6 +600,13 @@ export interface StoreHealth {
   // be ignored. So the compliance clock lives in `slates`, and `status` keeps its meaning exactly.
   readonly status: "ok" | "settling" | "unproven";
   readonly erasure: ErasureHealth;
+  /**
+   * Surfaces the sweep does not reach at all — `UNSWEPT_SURFACES`. A SIBLING of `erasure`, not a field
+   * inside it: `erasure` is the promise LEDGER (counts and ids, every one computed from this ground),
+   * and this is a standing statement about the sweep's reach that no ground can change. `erasure`'s
+   * shape is also pinned by rails that compare it whole, so growing it is not free.
+   */
+  readonly unswept: readonly string[];
   readonly slates: SlateHealth;
   readonly forgiven: ForgivenHealth;
   readonly lagging?: boolean; // present when the backend exposes mirror lag (MirrorBackend)
@@ -650,6 +671,7 @@ export async function healthImpl(gw: Gateway, now = Date.now()): Promise<StoreHe
   return {
     status,
     erasure,
+    unswept: UNSWEPT_SURFACES,
     // Both sections are LAWFUL facts rather than debt, so neither moves `status` — but without them
     // a lapsed compliance window and a forgiven-and-returned id are invisible to every instrument
     // the store has (a struck tombstone leaves `readTombstones`, and therefore `promised`, entirely).

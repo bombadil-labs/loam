@@ -24,7 +24,7 @@
 // presents them; each is authorized by its own verified author (Gateway.append), and the
 // server never holds the key. A future raw-append endpoint exposes that path over HTTP.
 
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { type Delta, type Primitive } from "@bombadil/rhizomatic";
 import { Kind, OperationTypeNode, parse, type DocumentNode } from "graphql";
@@ -39,6 +39,9 @@ import {
 import { parseRegistrationInput, schemaEntityFor, type LensName } from "../gateway/registration.js";
 import { parseReadGesture, type ReadGesture } from "../gateway/renderers.js";
 import { makeMountTable, type ResolvedMount } from "./mounts.js";
+import { makeUserDoors, type UserDoorOptions, type UserDoors } from "./session.js";
+
+export { type UserDoorOptions } from "./session.js";
 
 export interface TokenIdentity {
   readonly actor?: string; // a signing seed: requests act as this identity
@@ -53,6 +56,11 @@ export interface ServeOptions {
   readonly maxBodyBytes?: number; // reject a request body larger than this (default 4 MiB)
   readonly maxStreams?: number; // refuse a new SSE stream past this many live (default 1024)
   readonly maxPublicStreams?: number; // the anonymous door's own smaller stream budget (default 256)
+  /**
+   * The login doors (SPEC §36). Absent, this server has none — `/login` is an unresolvable mount
+   * name, exactly as it was before §36, and no request anywhere reads a cookie.
+   */
+  readonly users?: UserDoorOptions;
 }
 
 const DEFAULT_MAX_BODY = 4 * 1024 * 1024;
@@ -351,7 +359,24 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     throw new Error("loam serve: no tokens configured — an unlockable door is a wall");
   }
 
-  // The identity a presented token names, compared timing-safely; undefined = refuse.
+  // Session-minted bearer tokens (SPEC §36): short-lived, held by digest, and swept as they lapse.
+  // They are how a BROWSER writes — a session cookie never opens a door below, so the browser asks
+  // /session/token and then presents a header like any other client. Minting one requires an already
+  // authenticated session, so this list is bounded by the session table, not by the network.
+  const sessionTokens: { digest: Buffer; identity: TokenIdentity; expiresAt: number }[] = [];
+  const clock = options.users?.monotonicNow ?? ((): number => performance.now());
+  const mintSessionToken = (identity: TokenIdentity, ttlMs: number): string => {
+    const secret = randomBytes(32).toString("base64url");
+    const moment = clock();
+    for (let i = sessionTokens.length - 1; i >= 0; i -= 1) {
+      if (sessionTokens[i]!.expiresAt <= moment) sessionTokens.splice(i, 1);
+    }
+    sessionTokens.push({ digest: sha(secret), identity, expiresAt: moment + ttlMs });
+    return secret;
+  };
+
+  // The identity a presented token names, compared timing-safely; undefined = refuse. A cookie is
+  // never consulted here, and that is §36's load-bearing invariant: authority is an explicit header.
   const identify = (req: IncomingMessage): TokenIdentity | undefined => {
     const header = req.headers.authorization;
     if (header === undefined || !header.startsWith("Bearer ")) return undefined;
@@ -359,7 +384,17 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     for (const [expected, identity] of tokenEntries) {
       if (timingSafeEqual(presented, expected)) return identity;
     }
-    return undefined;
+    const moment = clock();
+    let found: TokenIdentity | undefined;
+    for (let i = sessionTokens.length - 1; i >= 0; i -= 1) {
+      const minted = sessionTokens[i]!;
+      if (minted.expiresAt <= moment) {
+        sessionTokens.splice(i, 1);
+        continue;
+      }
+      if (timingSafeEqual(presented, minted.digest)) found = minted.identity;
+    }
+    return found;
   };
 
   const contextFor = (identity: TokenIdentity): RequestContext | undefined =>
@@ -749,6 +784,10 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     res.end(GREETING);
   };
 
+  // Assigned once the port is known, because the public URL defaults to the bound one. No request can
+  // arrive before `listen` resolves, so the doors are in place before anything can ask for them.
+  let userDoors: UserDoors | undefined;
+
   const server = createServer((req, res) => {
     void (async () => {
       // The preflight answers before anything else: it is knowledge-free (fixed headers, no
@@ -770,6 +809,13 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       if (req.method === "GET" && url.pathname === "/favicon.ico") {
         res.writeHead(204, CORS);
         res.end();
+        return;
+      }
+      // The login doors (SPEC §36), answered BEFORE mount routing — they are the store's own pages,
+      // not any world's. They carry no CORS header on purpose: they are the only doors that read a
+      // cookie, and a cross-origin page must not be able to read their answers.
+      if (userDoors?.owns(url.pathname) === true) {
+        await userDoors.handle(url.pathname, req, res);
         return;
       }
       const [, mountName, verb] = url.pathname.split("/");
@@ -1170,11 +1216,31 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
   await new Promise<void>((resolve) => server.listen(options.port ?? 0, host, resolve));
   const address = server.address();
   const port = typeof address === "object" && address !== null ? address.port : 0;
+  const url = `http://${host}:${port}`;
+
+  if (options.users !== undefined) {
+    const forUsers = options.users;
+    userDoors = makeUserDoors({
+      options: forUsers,
+      // Named, or the bound address — which is right for a loopback store and wrong the moment a
+      // proxy is in front. A caller's Host and X-Forwarded-* are never consulted for it.
+      publicUrl: forUsers.publicUrl ?? url,
+      ground: () => {
+        const gateway = mounts.resolve(forUsers.mount)?.gateway;
+        // `reactor` is read through the getter every call: erase() re-seats the gateway on a fresh
+        // one, and a captured reference would keep answering from the ground before the purge.
+        return gateway === undefined
+          ? undefined
+          : { reactor: gateway.reactor, operator: gateway.operator };
+      },
+      mint: mintSessionToken,
+    });
+  }
 
   return {
     server,
     port,
-    url: `http://${host}:${port}`,
+    url,
     addMount(name: string, gateway: Gateway): void {
       mounts.add(name, gateway);
     },
