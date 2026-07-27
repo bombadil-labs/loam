@@ -96,6 +96,12 @@ export interface UserDoors {
  * copy, because a second implementation of "is this the operator?" is a second thing to get wrong —
  * and a session's authority is re-read from the GROUND on every ask, which is the part a copy would
  * quietly drop.
+ *
+ * NOTHING HERE READS THE FAILED-LOGIN POLICY, and that is deliberate rather than incidental. The
+ * per-username limiter governs one thing — how a wrong PASSWORD is answered — and it lives entirely
+ * in `postLogin`. A consent page has already been shown a correct password by the session it holds,
+ * so admitting the limiter here would let the policy for guessing govern a door where nobody is
+ * guessing. Whoever replaces that policy may change it freely: this surface has no opinion about it.
  */
 export interface ConsentAuth {
   /**

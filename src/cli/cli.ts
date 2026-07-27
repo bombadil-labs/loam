@@ -31,7 +31,7 @@ import {
   writeCredentials,
   type ScryptParams,
 } from "../server/credentials.js";
-import { clearLock } from "../server/login-locks.js";
+import { clearAllLocks, clearLock } from "../server/login-locks.js";
 import { oauthPath, readOAuthFile, writeOAuthFile } from "../server/oauth-file.js";
 import {
   resolveUserView,
@@ -161,13 +161,20 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
   },
   user: {
     summary: "create a login user, or clear a locked login",
-    usage: "loam user <create|unlock> <name> [options]",
-    flags: new Set(["home", "store", "operator"]),
-    booleans: new Set(["operator"]),
+    usage: "loam user create|unlock <name> [options] | loam user unlock --all [options]",
+    flags: new Set(["home", "store", "operator", "all"]),
+    booleans: new Set(["operator", "all"]),
     notes: [
       "subcommands:",
       "  create <name>    ask for a password twice, write the credential, plant the user deltas",
       "  unlock <name>    clear a locked login — the lock is the box's to lift, never a caller's",
+      "  unlock --all     clear every login record, whatever name it holds",
+      "",
+      "`unlock --all` is the cure sized to a saturated table. A flood fills the lock file with names",
+      "of the caller's own choosing — readable in the file, so a per-name unlock CAN clear one, but",
+      "one at a time is the wrong shape for a table somebody else filled. A restart does not help:",
+      "the file is on disk and nothing prunes it at boot. Waiting out the lock window is the other",
+      "cure.",
       "",
       "Home access IS the proof of operatorship: this command needs the home's seed, like erasure.",
       "The password hash lives in credentials.json (mode 0600) and never enters the ground, because",
@@ -261,6 +268,7 @@ const FLAG_HELP: Readonly<Record<string, { readonly arg: string; readonly note: 
   archive: { arg: "<dir>", note: "mirror every delta into a cold store, relative to the home" },
   out: { arg: "<file>", note: "write the output here (default stdout)" },
   operator: { arg: "", note: "give the new user the operator role (default: a plain actor)" },
+  all: { arg: "", note: "unlock: clear EVERY login record, whatever name it holds" },
   "public-url": {
     arg: "<url>",
     note: "the store's address as the outside world sees it (default: the bound URL)",
@@ -999,9 +1007,18 @@ async function cmdUser(args: readonly string[], io: IO, options: RunOptions): Pr
   const sub = parsed.positionals[0];
   if (sub === undefined) {
     io.err(
-      "user wants a subcommand: `loam user create <name> [--operator]` or `loam user unlock <name>`",
+      "user wants a subcommand: `loam user create <name> [--operator]`, " +
+        "`loam user unlock <name>`, or `loam user unlock --all`",
     );
     return 2;
+  }
+  // `unlock --all` names no user, so it is answered before the name is demanded.
+  if (sub === "unlock" && parsed.booleans.has("all")) {
+    if (parsed.positionals.length > 1) {
+      io.err("user unlock --all clears every record, so it takes no name");
+      return 2;
+    }
+    return cmdUserUnlockAll(parsed.flags.get("home") ?? defaultHome(), io);
   }
   const name = parsed.positionals[1];
   if (name === undefined) {
@@ -1164,6 +1181,25 @@ async function cmdUserCreate(
   // True of the FILE, and not of a server already holding this store open — say so under the report.
   const staleness = servingWarning(home, path);
   if (staleness !== undefined) io.err(`loam: ${staleness}`);
+  return 0;
+}
+
+// `loam user unlock --all` — the cure sized to a saturated table. A flood fills the lock file with
+// names of the attacker's choosing; a per-name unlock clears one of them, which is the wrong shape
+// for a table of hundreds. A restart does not help: the file is on disk and nothing prunes it at boot.
+function cmdUserUnlockAll(home: string, io: IO): number {
+  // A RUNNING SERVER CAN RESURRECT WHAT THIS CLEARS. `noteFailure` reads and writes the file in one
+  // synchronous block, which settles interleaving inside one process — but this is a separate process,
+  // so a rename landing between that read and its write restores the old table after this has printed.
+  // The window is microseconds and every other writer here shares the shape; under an ongoing flood
+  // the cure is a losing race in any case. Said here because the line below sounds final.
+  const cleared = clearAllLocks(home);
+  io.out(
+    cleared === 0
+      ? `loam: ${home} holds no login locks\n  nothing to lift`
+      : `loam: cleared ${cleared} login ${cleared === 1 ? "record" : "records"}\n` +
+          `  every failure count starts from zero — including any attacker's`,
+  );
   return 0;
 }
 

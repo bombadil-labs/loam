@@ -108,6 +108,49 @@ describe("the failed-login limiter", () => {
     expect((await tryPassword("myk", PASSWORD)).status).toBe(200);
   });
 
+  // The saturation denial's REAL cure. A per-name unlock cannot reach a table an attacker filled with
+  // names nobody can enumerate, and a restart does not clear it — the file is on disk and nothing
+  // prunes it at boot. So the claimed remedy has to exist, or the source overclaims it.
+  it("(p) `loam user unlock --all` clears a saturated table, and a restart does NOT", async () => {
+    served = await serveHome(home, {
+      limit: { maxFailures: 2, windowMs: 600_000, lockMs: 600_000, maxTracked: 2 },
+    });
+    const miss = async (name: string, i: number): Promise<number> => {
+      const begun = await beginLogin(served.base);
+      const res = await postLogin(served.base, name, `wrong ${i}`, {
+        cookie: begun.cookie,
+        formToken: begun.formToken,
+      });
+      return res.status;
+    };
+    for (const name of ["junk-a", "junk-b"]) {
+      for (let i = 0; i < 2; i += 1) expect(await miss(name, i)).toBe(401);
+    }
+    expect((await tryPassword("myk", PASSWORD)).status).toBe(429); // saturated: myk cannot get in
+
+    // A RESTART DOES NOT CURE IT. The lock file outlives the process, so the same denial returns.
+    await served.close();
+    served = await serveHome(home, {
+      limit: { maxFailures: 2, windowMs: 600_000, lockMs: 600_000, maxTracked: 2 },
+    });
+    expect(readLocks(home).size).toBe(2);
+    expect((await tryPassword("myk", PASSWORD)).status).toBe(429);
+
+    // `--all` does. It names no user, and it clears records whose names it was never told.
+    const io = testIo();
+    expect(await run(["user", "unlock", "--all", "--home", home], io.io)).toBe(0);
+    expect(io.out.join("\n")).toMatch(/cleared 2 login records/);
+    expect(readLocks(home).size).toBe(0);
+    expect((await tryPassword("myk", PASSWORD)).status).toBe(200);
+  });
+
+  it("(p) unlock --all takes no name, and says so", async () => {
+    served = await serveHome(home);
+    const io = testIo();
+    expect(await run(["user", "unlock", "myk", "--all", "--home", home], io.io)).toBe(2);
+    expect(io.err.join("\n")).toMatch(/takes no name/);
+  });
+
   it("(p) unlock refuses a name the home has no user for, and unlocks nobody by accident", async () => {
     served = await serveHome(home);
     for (let attempt = 1; attempt <= 6; attempt += 1) await missOnce("myk", attempt);

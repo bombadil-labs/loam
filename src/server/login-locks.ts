@@ -205,9 +205,15 @@ export const lockedMs = (home: string, name: string, now: number): number =>
  *
  * The cost is named rather than hidden, and it is a real one: a caller who pays
  * `maxFailures × maxTracked` attempts can shut the HTML login door for every name not already tracked,
- * until the locks drain. That is a DENIAL, recoverable by `loam user unlock` or a restart, and the
- * bearer-token doors are untouched throughout. A denial is the lesser failure; guessing without a
- * ceiling does not heal.
+ * until the locks drain after `lockMs`. The bearer-token doors are untouched throughout, so the API
+ * stays reachable while it happens. A denial is the lesser failure; guessing without a ceiling does not
+ * heal.
+ *
+ * THE RECOVERY, stated exactly, because an overclaimed remedy is its own defect: waiting `lockMs` for
+ * the locks to go spent, or `loam user unlock --all` from the box. A RESTART DOES NOT CLEAR IT — this
+ * file is on disk and is re-read verbatim, and nothing prunes it at boot. Per-name `loam user unlock`
+ * cures one entry, which is the wrong shape for a table an attacker filled with names of their own
+ * choosing.
  *
  * @returns true when the attempt was recorded; false when the table could not account for it.
  */
@@ -249,6 +255,22 @@ export function noteFailure(home: string, name: string, now: number, policy: Lim
 export function forgetFailures(home: string, name: string): void {
   const locks = readLocks(home);
   if (locks.delete(name)) writeLocks(home, locks);
+}
+
+/**
+ * Clear EVERY record. What `loam user unlock --all` earns, and the only cure sized to a table an
+ * attacker filled with names nobody can enumerate in advance. Returns how many records went.
+ *
+ * It clears live locks too, which is the point: the operator is the authority on the box, and a lock
+ * is a work budget rather than an authorization surface. The failure counts start from zero, so this
+ * gives an attacker back their whole budget as well — an operator reaching for it is choosing to
+ * reopen the door they were shut out of.
+ */
+export function clearAllLocks(home: string): number {
+  const locks = readLocks(home);
+  if (locks.size === 0) return 0;
+  writeLocks(home, new Map());
+  return locks.size;
 }
 
 /**
