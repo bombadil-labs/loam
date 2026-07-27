@@ -9,7 +9,7 @@
 // unauthenticated login a lever on the server's CPU. So the door caps concurrent hashing globally,
 // and refuses past the cap WITHOUT hashing.
 
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -27,7 +27,7 @@ import {
   type Served,
 } from "./user-fixture.js";
 import { run } from "../../src/cli/cli.js";
-import { lockedMs } from "../../src/server/login-locks.js";
+import { lockedMs, readLocks } from "../../src/server/login-locks.js";
 
 vi.setConfig({ testTimeout: 30000 });
 
@@ -310,6 +310,10 @@ describe("the cap on unauthenticated hashing", () => {
       });
       expect(res.status).toBe(401);
     }
+    // THE TABLE REALLY IS FULL. Without this the eviction branch is never entered and the rest of
+    // this test passes having exercised nothing.
+    expect(readLocks(home).size).toBe(2);
+
     // a third name still gets counted, and still reaches its lock
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       const begun = await beginLogin(served.base);
@@ -320,12 +324,61 @@ describe("the cap on unauthenticated hashing", () => {
       expect(res.status, `miss ${attempt}`).toBe(401);
     }
     expect((await tryPassword("myk", PASSWORD)).status).toBe(429);
+
+    // and it evicted ONE record, the oldest — not the table. `locks.clear()` in place of the single
+    // delete passes everything above: myk still reaches its lock, and the flood test returns before
+    // the delete. So the survivor is what says which rule ran.
+    const after = readLocks(home);
+    expect(after.has("filler-two")).toBe(true);
+    expect(after.has("filler-one")).toBe(false);
+    expect(after.get("filler-two")?.failures).toBe(1); // its count survived, not just its key
   });
 
-  // THE ATTACK THIS CLOSES: lock a victim, then fill the table with fresh names so the victim's lock is
-  // evicted to make room, and resume guessing. Evicting "the lock nearest to expiring" reads as fair and
-  // picks precisely the victim, because the victim was locked FIRST. So a live lock is never evictable,
-  // and when every record holds one this stops tracking new names instead — the cost named in the source.
+  // A TABLE SATURATED WITH LIVE LOCKS MUST NOT BECOME AN OFF SWITCH. Two rules meet here, and the
+  // history is worth the paragraph because two different bypasses lived in this one branch:
+  // evicting the nearest-to-expire lock takes the FIRST victim's lock, and evicting the furthest takes
+  // the victim's the moment their own lock is newest. So no live lock is ever evicted — and the attempt
+  // that finds nothing evictable is REFUSED (429) rather than counted as a plain miss, because a
+  // limiter that cannot account for an attempt must not wave it through.
+  //
+  // This is the rail for that second half. Without it, "record nothing and answer 401" reads as
+  // reasonable and is unlimited password guessing.
+  it("(o) an attempt the table cannot account for is refused, never waved through", async () => {
+    served = await serveHome(home, {
+      limit: { maxFailures: 2, windowMs: 600_000, lockMs: 600_000, maxTracked: 2 },
+    });
+    const miss = async (name: string, i: number): Promise<number> => {
+      const begun = await beginLogin(served.base);
+      const res = await postLogin(served.base, name, `wrong ${i}`, {
+        cookie: begun.cookie,
+        formToken: begun.formToken,
+      });
+      return res.status;
+    };
+    // saturate: two names, each holding a live lock
+    for (const name of ["junk-a", "junk-b"]) {
+      expect(await miss(name, 0)).toBe(401);
+      expect(await miss(name, 1)).toBe(401);
+    }
+    expect(readLocks(home).size).toBe(2);
+    expect(lockedMs(home, "junk-a", Date.now())).toBeGreaterThan(0);
+    expect(lockedMs(home, "junk-b", Date.now())).toBeGreaterThan(0);
+
+    // myk has no record at all now, and the table cannot make room for one. Every guess must be
+    // REFUSED — if these answer 401 the door is an open brute-force window.
+    for (let i = 0; i < 6; i += 1) {
+      expect(await miss("myk", i), `unaccounted guess ${i}`).toBe(429);
+    }
+    // and the refusal did not invent a record or displace a lock
+    expect(readLocks(home).size).toBe(2);
+    expect(lockedMs(home, "junk-a", Date.now())).toBeGreaterThan(0);
+    // the CORRECT password is refused too while the door is saturated — this is a denial, and the rail
+    // says so plainly rather than leaving the cost implied
+    expect((await tryPassword("myk", PASSWORD)).status).toBe(429);
+  });
+
+  // THE FIRST ATTACK: lock a victim, then fill the table with fresh names so the victim's lock is
+  // evicted to make room, and resume guessing.
   //
   // Two-sided, because only one side is the security property: the victim's lock SURVIVES the flood, and
   // the flood's own names are still counted up to the point where the table is all live locks.
@@ -348,16 +401,26 @@ describe("the cap on unauthenticated hashing", () => {
     const lockedAtFirst = lockedMs(home, "myk", Date.now());
     expect(lockedAtFirst).toBeGreaterThan(0);
 
-    // now walk far more fresh names than the table can hold, locking each one
-    for (const name of ["flood-a", "flood-b", "flood-c", "flood-d", "flood-e"]) {
-      for (let i = 0; i < 2; i += 1) expect([401, 429]).toContain(await miss(name, i));
+    // Now walk far more fresh names than the table can hold. The first two fill it and lock; after that
+    // the table is all live locks and every further name is REFUSED rather than admitted by displacing
+    // someone. So a flood's reach is bounded by maxTracked, and it can never buy itself room.
+    for (const name of ["flood-a", "flood-b"]) {
+      for (let i = 0; i < 2; i += 1) expect(await miss(name, i), `${name} miss ${i}`).toBe(401);
+    }
+    for (const name of ["flood-c", "flood-d", "flood-e"]) {
+      expect(await miss(name, 0), `${name} past saturation`).toBe(429);
     }
 
-    // the victim is STILL locked — the flood displaced nothing it did not create
+    // Both levels, and they must be INDEPENDENT: the file on disk, parsed here rather than through the
+    // module under test, and then the door's own answer.
+    const onDisk = JSON.parse(readFileSync(join(home, "login-locks.json"), "utf8")) as {
+      users: Record<string, { lockedUntil?: number }>;
+    };
+    expect(onDisk.users["myk"]?.lockedUntil ?? 0).toBeGreaterThan(Date.now());
     expect(lockedMs(home, "myk", Date.now())).toBeGreaterThan(0);
     expect((await tryPassword("myk", PASSWORD)).status).toBe(429);
     // and the earliest flood name it locked is still locked too: nothing was quietly given back
-    expect(lockedMs(home, "flood-a", Date.now())).toBeGreaterThan(0);
+    expect(onDisk.users["flood-a"]?.lockedUntil ?? 0).toBeGreaterThan(Date.now());
   });
 
   it("(o) overlapping attempts each count: the limit is not multiplied by the concurrency", async () => {

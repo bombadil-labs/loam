@@ -131,14 +131,31 @@ describe("POST /session/token", () => {
   // in the ground must be a seed the home actually holds; a stranger here would mean login had
   // grown a signing identity of its own, which the three-way split forbids.
   it("(f2) no delta is authored by a key the home does not hold", async () => {
+    // The sweep has to run over a store that CONTAINS a session's own write, or it says nothing about
+    // login: genesis and `user create` alone would satisfy it with the whole feature deleted.
+    const session = await signIn(served.base);
+    const res = await postDoor(served.base, "/session/token", {
+      cookie: session.cookie,
+      formToken: session.formToken,
+    });
+    expect(res.status).toBe(200);
+    const { token } = (await res.json()) as { token: string };
+    const wrote = await gql(
+      `mutation { plant(entity: "${MOSS}", height: 11) { height } }`,
+      bearer(token),
+    );
+    expect(wrote.status).toBe(200);
+
     const known = new Set(
       readdirSync(home)
         .filter((f) => f.endsWith(".seed"))
         .map((f) => authorForSeed(readFileSync(join(home, f), "utf8").trim())),
     );
     expect(known.size).toBeGreaterThan(0);
-    const authors = new Set((await storeDeltas(home)).map((d) => d.claims.author));
-    expect(authors.size).toBeGreaterThan(0);
+    const deltas = await storeDeltas(home);
+    // the session's write really is in the set being swept
+    expect(deltas.some((d) => JSON.stringify(d.claims.pointers).includes(`"value":11`))).toBe(true);
+    const authors = new Set(deltas.map((d) => d.claims.author));
     expect([...authors].filter((a) => !known.has(a))).toEqual([]);
   });
 
@@ -319,6 +336,10 @@ describe("the login doors want a single mount", () => {
       backend: new SqliteBackend(join(home, "grove.sqlite")),
     });
     try {
+      // give the container a queryable surface of its own, so the anchor below reads real data
+      // rather than an empty-schema refusal both callers would share
+      expect(c.gateway).toBeDefined();
+      c.gateway!.register(PLANT, PLANT_POLICY, [MOSS], undefined, PLANT_WRITABLE);
       const session = await signIn(served.base);
       const token = await postDoor(served.base, "/session/token", {
         cookie: session.cookie,
@@ -327,14 +348,25 @@ describe("the login doors want a single mount", () => {
       expect(token.status).toBe(200);
       const minted = ((await token.json()) as { token: string }).token;
 
+      // The container was seeded from the host, so the host's own reading answers there.
       const ask = (auth: Record<string, string>): Promise<Response> =>
         fetch(`${served.base}/grove/graphql`, {
           method: "POST",
           headers: { "content-type": "application/json", ...auth },
-          body: JSON.stringify({ query: "{ __typename }" }),
+          body: JSON.stringify({ query: `{ plant(entity: "${MOSS}") { height } }` }),
         });
       const bySession = await ask(bearer(minted));
       const byOperator = await ask(bearer("op-token"));
+      // ANCHOR THE MOUNT FIRST. Two byte-identical refusals would satisfy the equality below while the
+      // container's authority went entirely unexercised — an unreachable mount name is a real failure
+      // mode this repo has already hit, so equality alone is not the property.
+      expect(byOperator.status).toBe(200);
+      const opBody = (await byOperator.clone().json()) as {
+        data?: { plant?: unknown };
+        errors?: string[];
+      };
+      expect(opBody.errors, JSON.stringify(opBody.errors)).toBeUndefined();
+      expect(opBody.data?.plant).toBeDefined();
       expect(bySession.status).toBe(byOperator.status);
       expect(await bySession.text()).toBe(await byOperator.text());
       // and the cookie ALONE still opens nothing there — the invariant holds at this tier too

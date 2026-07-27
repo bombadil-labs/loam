@@ -35,6 +35,7 @@ import {
   forgetFailures,
   lockedMs,
   noteFailure,
+  saturatedFor,
   type LimitPolicy,
 } from "./login-locks.js";
 import { roleOf, userNameDefect, type UserRole } from "./users.js";
@@ -608,14 +609,26 @@ data doors on its own.</p>`,
     // carrying a snapshot across the hash and writing it back is a LOST UPDATE — two overlapping attempts
     // each increment from the same value, and the effective limit becomes maxFailures times the
     // concurrency. One extra read on the failure path is the price of a limit that means what it says.
-    const lockRemains = lockedMs(options.home, user, Date.now());
-    if (lockRemains > 0) {
+    // ONE refusal for both reasons a login can be rate-limited: this name is locked, or the table is
+    // too saturated to account for the attempt. Same bytes, so neither is an oracle for the other.
+    const tooManyAttempts = (remainsMs: number): void => {
       res.writeHead(429, {
         "content-type": "application/json",
-        "retry-after": String(Math.max(1, Math.ceil(lockRemains / 1000))),
+        "retry-after": String(Math.max(1, Math.ceil(remainsMs / 1000))),
         "cache-control": "no-store",
       });
       res.end(JSON.stringify({ errors: ["too many failed attempts: this login is locked"] }));
+    };
+    const lockRemains = lockedMs(options.home, user, Date.now());
+    if (lockRemains > 0) {
+      tooManyAttempts(lockRemains);
+      return;
+    }
+    // BEFORE the hash, not after. A table saturated with live locks cannot count a failure against this
+    // name, and an attempt nobody can count must not be evaluated at all — refusing after the compare
+    // would leak the answer through 429-versus-200 and leave guessing unbounded.
+    if (saturatedFor(options.home, user, Date.now(), limit)) {
+      tooManyAttempts(limit.lockMs);
       return;
     }
     let credentials;
@@ -656,7 +669,12 @@ data doors on its own.</p>`,
       hashesInFlight -= 1;
     }
     if (!matched) {
-      noteFailure(options.home, user, Date.now(), limit);
+      // A table saturated with live locks cannot account for this attempt. Refusing with the lock's
+      // own answer is the only safe direction: counting it as a plain miss would be unlimited guessing.
+      if (!noteFailure(options.home, user, Date.now(), limit)) {
+        tooManyAttempts(limit.lockMs);
+        return;
+      }
       refuseLogin(res);
       return;
     }
