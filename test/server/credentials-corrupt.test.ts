@@ -38,6 +38,7 @@ import {
   DEFAULT_SCRYPT,
   decoyParamsFor,
   hashPassword,
+  paramsDisagree,
   readCredentials,
   verifyPassword,
   writeCredentials,
@@ -241,6 +242,28 @@ describe("what a decoy hash costs", () => {
   it("falls back to the door's only when there is no entry to imitate", () => {
     const otherwise = { N: 4096, r: 4, p: 2, keylen: 32 };
     expect(decoyParamsFor({ version: 1, users: {} }, otherwise)).toEqual(otherwise);
+  });
+
+  it("and the door SAYS SO when the file's own entries disagree about cost", async () => {
+    // Borrowing one entry's cost only hides an absent name among the users who share that cost. If the
+    // file disagrees, the rest are still distinguishable by time — so the door names the condition rather
+    // than leaving a reader to believe the decoy covers everyone.
+    expect(paramsDisagree(readCredentials(home))).toBe(false);
+    await createUser(home, "zoe", "another password", {
+      operator: false,
+      scrypt: { N: 4096, r: 8, p: 1, keylen: 64 },
+    });
+    expect(paramsDisagree(readCredentials(home))).toBe(true);
+
+    const faults: string[] = [];
+    served = await serveHome(home, { onFault: (m) => faults.push(m) });
+    expect(faults.join("\n")).toMatch(/disagree about scrypt cost/);
+    expect(faults.join("\n")).toContain("credentials.json");
+    // and it is said ONCE, at the door's opening — not once per unauthenticated attempt
+    const before = faults.length;
+    await attempt(PASSWORD);
+    await attempt("wrong");
+    expect(faults.length).toBe(before);
   });
 });
 

@@ -24,6 +24,7 @@ import {
   credentialsPath,
   decoyParamsFor,
   entryFor,
+  paramsDisagree,
   readCredentials,
   spendDecoyHash,
   verifyPassword,
@@ -238,6 +239,21 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
       `${url.protocol}//[::1]${port}`,
     ]);
   })();
+
+  // Said ONCE, at the door's own opening, because it is a property of the credential file rather than of
+  // any one attempt — and because a warning per attempt on an unauthenticated path is a log a stranger can
+  // fill. See `decoyParamsFor`: disagreeing costs leave a timing distinction the decoy hash cannot cover,
+  // and a door that noticed and stayed quiet would be the report overclaiming again.
+  try {
+    if (paramsDisagree(readCredentials(options.home))) {
+      onFault(
+        `the entries in ${credentialsPath(options.home)} disagree about scrypt cost, so login timing ` +
+          `can tell some of those names apart from an absent one. Re-create those users to even it out.`,
+      );
+    }
+  } catch {
+    // an unreadable file is the login door's own refusal to make, per attempt, in its own words
+  }
 
   const sessions = new Map<string, Session>();
   /** Tokens minted per session, so signing out revokes what signing in bought. */
