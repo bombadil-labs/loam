@@ -5,7 +5,7 @@
 plan first. Then the tickets replace T113, T114, T116, T117, T118, T119 and T121.
 
 **What this plan is for.** #282 holds 13,299 lines. Myk cannot read a change that size. This plan
-cuts the same work into twelve phases. Each phase merges on its own. Each phase is useful on its own.
+cuts the same work into thirteen phases. Each phase merges on its own. Each phase is useful on its own.
 
 **Read this section first if you read nothing else.** The plan carries 41 findings from 20 review
 rounds. Those findings are now ACCEPTANCE CRITERIA rather than discoveries. A builder reads the
@@ -103,22 +103,23 @@ Each row states the deliverable and the rail files it owns. No file appears twic
 | # | phase | owns these rail files | source | est. |
 |---|---|---|---|---|
 | 1 | Credentials at rest | `test/server/credentials.test.ts` | `credentials.ts` | ~450 |
-| 2 | A user is a fact | `test/server/users-ground.test.ts` | `users.ts` | ~400 |
-| 3 | The bootstrap and role commands | `test/cli/user-roles.test.ts` | `cli.ts`, `prompt.ts` | ~500 |
-| 4 | The session table | `test/server/session-table.test.ts` | `session.ts` | ~400 |
-| 5 | The login door | `test/server/login-door.test.ts` | `session.ts`, `http.ts` | ~500 |
-| 6 | Cross-site defence | `test/server/login-csrf.test.ts` | `session.ts` | ~350 |
-| 7 | The bearer bridge | `test/server/session-token.test.ts` | `session.ts`, `http.ts` | ~350 |
-| 8 | The login delay | `test/server/login-delay.test.ts` | `login-locks.ts` | ~450 |
-| 9 | Erasure honesty | `test/server/users-erasure.test.ts` | `erase.ts`, `slate.ts` | ~300 |
-| 10 | Connector records at rest | `test/server/oauth-file.test.ts` + `test/server/oauth-lock-child.mts` | `oauth-file.ts` | ~600 |
-| 11 | Discovery and the 401 | `test/server/oauth-discovery.test.ts` | `oauth.ts` | ~350 |
-| 12 | The connector grant | `test/server/oauth-grant.test.ts` + `test/server/oauth-consent.test.ts` | `oauth.ts`, `cli.ts` | ~900 |
+| 2 | A user is a fact | `test/server/users-ground.test.ts` | `users.ts`, `accounts.ts` | ~500 |
+| 3 | **Per-operator signing keys** | `test/server/operator-keys.test.ts` | `users.ts`, `config.ts` | ~550 |
+| 4 | The bootstrap and role commands | `test/cli/user-roles.test.ts` | `cli.ts`, `prompt.ts` | ~500 |
+| 5 | The session table | `test/server/session-table.test.ts` | `session.ts` | ~400 |
+| 6 | The login door | `test/server/login-door.test.ts` | `session.ts`, `http.ts` | ~500 |
+| 7 | Cross-site defence | `test/server/login-csrf.test.ts` | `session.ts` | ~350 |
+| 8 | The bearer bridge | `test/server/session-token.test.ts` | `session.ts`, `http.ts` | ~350 |
+| 9 | The login delay | `test/server/login-delay.test.ts` | `login-locks.ts` | ~450 |
+| 10 | Erasure honesty | `test/server/users-erasure.test.ts` | `erase.ts`, `slate.ts` | ~300 |
+| 11 | Connector records at rest | `test/server/oauth-file.test.ts` + `test/server/oauth-lock-child.mts` | `oauth-file.ts` | ~600 |
+| 12 | Discovery and the 401 | `test/server/oauth-discovery.test.ts` | `oauth.ts` | ~350 |
+| 13 | The connector grant | `test/server/oauth-grant.test.ts` + `test/server/oauth-consent.test.ts` | `oauth.ts`, `cli.ts` | ~900 |
 
-Twelve phases. About 5,400 lines of source and rails. #282 holds 13,299 lines. The plan is smaller
+Thirteen phases. About 5,800 lines of source and rails. #282 holds 13,299 lines. The plan is smaller
 because 41 findings are criteria now, and because three deleted rails do not return.
 
-**Phase 12 is the largest and I flag it.** It holds registration, consent and the token exchange. I
+**Phase 13 is the largest and I flag it.** It holds registration, consent and the token exchange. I
 can cut it into three. I did not, because its three parts share one file and one fixture, and a
 reviewer must hold the whole grant flow to judge any part of it. Myk decides.
 
@@ -178,15 +179,63 @@ counts the operator's assertions only. A Schema that resolves latest-wins. `reso
 7. **MANY USERS MAY HOLD THE OPERATOR ROLE.** Each user is its own entity, and its role binding is a
    claim at that entity. So the shape carries no limit of one. Rail it: assign the role to two users,
    and `roleOf` answers `operator` for both. Rail the other side too: revoking one leaves the other.
-8. **STATE THE PROVENANCE LIMIT, because the code cannot fix it here.** The read admits only deltas
-   authored by the STORE'S operator key, and a session signs with the home's operator seed. So every
-   operator-role user writes as the same author. Authorization separates them. Provenance does not.
-   Two operators are indistinguishable in the ground. Say that in the module header. A reader must not
-   infer a per-operator audit trail that does not exist.
+8. **THE TRUSTED SET ADMITS DELEGATION BY CONSTRUCTION, even before any key uses it.** Today the read
+   is `authoredBy: <the one operator key>`. Phase 3 needs it to be {the genesis operator} ∪ {users the
+   genesis operator granted the operator role}. Build that shape HERE, in phase 2. With zero grants it
+   resolves to exactly today's behaviour, so it costs almost nothing now — and it means phase 3 adds
+   keys without rewriting phase 2's rails. Rail the degenerate case: with no grants, the set is the
+   genesis operator alone.
+9. **ONE LEVEL OF DELEGATION, and say why.** `lawfulStrikersJson` in `accounts.ts` already computes
+   this shape with `inView`, and stratification bans `inView` inside the sub-term. So the chain cannot
+   recurse. A user the genesis operator trusted cannot extend that trust to a third party. That is a
+   limit, not an oversight. State it where a reader meets the set.
 9. A role a user does not hold answers `undefined`, never a default. An unknown role name is refused
    rather than guessed at.
 
-### Phase 3 — The bootstrap and role commands
+### Phase 3 — Per-operator signing keys
+
+**Delivers.** A signing key per operator-role user. Their deltas carry their own author. Two operators
+become distinguishable in the ground.
+
+**Merges alone.** Phase 2 makes a role readable. This makes an operator's writes attributable. Neither
+needs a door.
+
+**Must not.** It must not widen who may write. An operator-role user could already write everything;
+this changes WHOSE NAME is on it. It must not let a granted operator grant to a third party — phase 2
+fixed the depth at one.
+
+**Why this phase exists, in Myk's words.** He read phase 2's provenance limit and scoped it into the
+work rather than accepting it. Two operators writing as one author is fine for one person. It stops
+being fine the moment a second person holds the role, which is what these phases enable.
+
+**Criteria.**
+1. `loam user create <name> --operator` mints a keypair for that user. The seed lands in the home at
+   mode 0600, beside the operator's. It never enters the ground, for the same reason a credential does
+   not: the ground replicates under federation.
+2. A session for that user signs with THAT USER'S seed, not the home's operator seed. Assert at the
+   delta level: the author equals the user's own public key.
+3. **TWO OPERATORS ARE DISTINGUISHABLE.** Two operator-role users each write a claim. The two deltas
+   carry different authors. This is the whole point of the phase, so it is the rail that must not be
+   hollow — assert the authors DIFFER and that each equals its own user's key, not merely that they
+   are non-empty.
+4. The genesis operator remains trusted. An existing store's deltas were all signed by it, and they
+   must keep resolving. Rail it against a store built before this phase.
+5. A granted operator's writes resolve for a governed reader. The trusted set from phase 2 admits
+   them, so their role bindings and their claims both count.
+6. **REVOKING A ROLE STOPS THE KEY GOING FORWARD AND KEEPS THE PAST.** After `remove-role`, that
+   user's new writes no longer resolve for a governed reader. Their earlier deltas still do, and still
+   name them. Two-sided, and it is the provenance win stated as a rail.
+7. A user with no operator role gets no operator seed. An actor's writes are signed by whatever the
+   actor path already uses. State what that is rather than inventing a second mechanism.
+8. **NO ON-WIRE MIGRATION IS OWED, and prove it.** No existing delta changes shape. This phase only
+   ADDS deltas — role bindings authored by new keys. Rail that a store created before this phase reads
+   identically after it. If any delta's bytes change, this phase owes a §20 step and the plan is wrong.
+9. The seed file's mode is asserted on POSIX only, and the gap is named on Windows. Reuse phase 1's
+   helper rather than writing a second one.
+10. Losing a user's seed is recoverable and the help text says how: `assign-role` again mints a fresh
+    key. The user's past deltas keep their old author, so history does not rewrite.
+
+### Phase 4 — The bootstrap and role commands
 
 **Delivers.** `loam user create <name> --operator --home <dir>`, plus `loam user assign-role` and
 `loam user remove-role`. `create` prompts twice with echo off, writes the credential, and appends the
@@ -197,8 +246,8 @@ two deltas. The role commands change a role binding and nothing else.
 **Must not.** It must not add a door.
 
 **Criteria from findings.**
-1. It writes one credential entry at 0600 and appends exactly two deltas. Count deltas before and
-   after.
+1. It writes one credential entry at 0600, mints the user's seed at 0600 when the role is operator,
+   and appends exactly two deltas. Count deltas before and after.
 2. A second run refuses by name and appends nothing. Count deltas before and after.
 3. A refusal that reaches the ground check reports honestly. It must not say deltas landed when
    nothing was appended.
@@ -239,7 +288,7 @@ two deltas. The role commands change a role binding and nothing else.
     remove the only operator, then assign it again, and the door opens. State this in the help text,
     because an operator who thinks they can lock themselves out will not use the command.
 
-### Phase 4 — The session table
+### Phase 5 — The session table
 
 **Delivers.** Sessions in server memory. An opaque id. An idle window. A monotonic clock. A cap.
 
@@ -257,7 +306,7 @@ two deltas. The role commands change a role binding and nothing else.
 6. Dropping a session revokes the tokens it minted. A logout that answers 200 and revokes nothing has
    revoked nothing.
 
-### Phase 5 — The login door
+### Phase 6 — The login door
 
 **Delivers.** `GET /login`, `POST /login`, `POST /logout`. The session cookie. The pre-session
 cookie.
@@ -285,7 +334,7 @@ cookie.
 10. THE PUBLIC URL IS CONFIGURED. `--public-url` names the outside address. `Host` and
     `X-Forwarded-*` are the caller's to write and change nothing.
 
-### Phase 6 — Cross-site defence
+### Phase 7 — Cross-site defence
 
 **Delivers.** A same-origin signal check. A per-session form token. Both on every POST door.
 
@@ -304,7 +353,7 @@ cookie.
 5. A cross-site POST cannot fill a victim's failure counter.
 6. `GET /login` allocates nothing. A thousand of them leave the door open.
 
-### Phase 7 — The bearer bridge
+### Phase 8 — The bearer bridge
 
 **Delivers.** `POST /session/token`. It answers a short-lived bearer token for the session user.
 
@@ -318,9 +367,10 @@ authority stays off the JSON doors.
    same bytes as a request with no credential. A cookie is ambient, so a cookie-opened data door is
    cross-site forgeable. `http.ts` states that authority is an explicit header.
 2. The token opens a read door and a write door.
-3. The landed delta is signed by the store's operator seed. The role authorizes. The seed signs. A
-   user is not a seed.
-4. No delta carries an author the home does not hold. Login must not grow a signing key.
+3. The landed delta is signed by THAT USER'S OWN seed, per phase 3. The role authorizes. The seed
+   signs. A user is not a seed, and a user's key is not the store's key.
+4. Every author in the ground is a key the home holds — the genesis operator, or a user's own seed
+   from phase 3. Login must not grow a key nobody granted.
 5. The token dies with its window. The session that minted it survives.
 6. Signing out retires the tokens that session minted.
 7. A container mount answers a session token exactly as it answers the static operator token. Anchor
@@ -328,7 +378,7 @@ authority stays off the JSON doors.
 8. The one-mount guard throws BEFORE the socket binds. A refusal that is a pure function of the
    options must not leave a bound listener with no doors.
 
-### Phase 8 — The login delay
+### Phase 9 — The login delay
 
 **Delivers.** A per-username delay that replaces a lock. Records in `login-locks.json`.
 
@@ -356,7 +406,7 @@ authority stays off the JSON doors.
 11. Do not state a guesses-per-second bound. Concurrent attempts read one count and pay one wait, so
     a caller buys `maxConcurrentHashes` guesses per wait.
 
-### Phase 9 — Erasure honesty
+### Phase 10 — Erasure honesty
 
 **Delivers.** The unswept-surface disclosure. It reaches `health()` AND the compliance receipt.
 
@@ -373,7 +423,7 @@ authority stays off the JSON doors.
    two-phase cut.
 5. Erasing a credential entry is OUT OF SCOPE and stays a separate ticket.
 
-### Phase 10 — Connector records at rest
+### Phase 11 — Connector records at rest
 
 **Delivers.** `oauth.json`. Read, validate, write atomically. A cross-process lock.
 
@@ -403,7 +453,7 @@ authority stays off the JSON doors.
 10. A refusal that already opened a resource must release it. On POSIX a leaked handle is invisible.
     On Windows the home cannot be removed. The Windows leg is the rail; name that in the test file.
 
-### Phase 11 — Discovery and the 401
+### Phase 12 — Discovery and the 401
 
 **Delivers.** Both well-known documents. The `WWW-Authenticate` header on the MCP door's 401.
 
@@ -419,7 +469,7 @@ authority stays off the JSON doors.
    headers included.
 4. The documents require PKCE S256 and declare a public client.
 
-### Phase 12 — The connector grant
+### Phase 13 — The connector grant
 
 **Delivers.** Registration, the consent page, the token exchange, `loam grant list` and
 `loam grant revoke`.
@@ -485,6 +535,10 @@ of reading. Every phase must include a vocabulary read: HyperSchema, HyperView, 
 ---
 
 ## 6. What this plan does not decide
+
+**Removed from this list on 2026-07-27.** The shared-operator-key limit was here as an accepted
+constraint. Myk scoped it into the work instead, and it is now phase 3. That is the right call: the
+limit only bites when a second person holds the role, and these phases are what let that happen.
 
 1. **Whether phase 12 splits into three.** Myk decides.
 2. **T115 — an erasure at a drilled-down entity.** Widen the purge, or document the limit. Both change
