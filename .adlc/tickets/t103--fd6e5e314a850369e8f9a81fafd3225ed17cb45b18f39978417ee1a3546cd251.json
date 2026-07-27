@@ -3,7 +3,10 @@
   "edges": [],
   "id": "T103",
   "phase": "P1",
-  "rails": [],
+  "rails": [
+    "test/cli/serve-staleness-warning.test.ts",
+    "test/cli/serve-host.test.ts"
+  ],
   "scope": [
     "src/cli/cli.ts",
     "src/server/http.ts",
