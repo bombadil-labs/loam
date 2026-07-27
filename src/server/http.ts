@@ -374,7 +374,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
   const sessionTokens = new Map<string, { identity: TokenIdentity; expiresAt: number }>();
   const clock = options.users?.monotonicNow ?? ((): number => performance.now());
   const sweepTokens = (moment: number): void => {
-    for (const [key, minted] of sessionTokens) {
+    for (const [key] of sessionTokens) {
       if (minted.expiresAt <= moment) sessionTokens.delete(key);
     }
   };

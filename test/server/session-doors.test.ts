@@ -10,6 +10,7 @@
 // status code shows: the write is asserted through the READ DOOR and again on the delta the store
 // actually holds.
 
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authorForSeed } from "@bombadil/rhizomatic";
@@ -114,6 +115,21 @@ describe("POST /session/token", () => {
     );
     expect(carriers.length).toBe(1);
     expect(carriers[0]!.claims.author).toBe(operator);
+  });
+
+  // (f2) The role authorizes and the seed signs — so no per-user key exists to mint. Every author
+  // in the ground must be a seed the home actually holds; a stranger here would mean login had
+  // grown a signing identity of its own, which the three-way split forbids.
+  it("(f2) no delta is authored by a key the home does not hold", async () => {
+    const known = new Set(
+      readdirSync(home)
+        .filter((f) => f.endsWith(".seed"))
+        .map((f) => authorForSeed(readFileSync(join(home, f), "utf8").trim())),
+    );
+    expect(known.size).toBeGreaterThan(0);
+    const authors = new Set((await storeDeltas(home)).map((d) => d.claims.author));
+    expect(authors.size).toBeGreaterThan(0);
+    expect([...authors].filter((a) => !known.has(a))).toEqual([]);
   });
 
   it("(f) the token dies with its window, and the session that minted it survives", async () => {

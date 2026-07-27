@@ -96,8 +96,13 @@ may do.
   `X-Forwarded-Proto: https`, with a foreign `Host`, or with no forwarding headers at all —
   `test/server/login.test.ts`
 - (f) A session cookie opens `/session/token`, and the token it answers opens a read door AND a
-  write door; the landed delta's author is the session user, asserted at the delta level and
-  through a reading — `test/server/session-doors.test.ts`
+  write door; the token carries the identity the user's ROLE binding names, and the landed delta
+  is signed by the store's operator seed — asserted at the delta level (the author key in the
+  ground) and through a reading — `test/server/session-doors.test.ts`
+  <!-- A user is not a seed: the role authorizes, the seed signs. An earlier wording asked for a
+  delta authored by the user, which the three-way split makes impossible by construction. -->
+- (f2) A per-user signing key is NOT minted: no delta in the ground is authored by a key absent
+  from the home's seed files — `test/server/session-doors.test.ts`
 - (g) The session cookie ALONE opens no JSON door: a cookie-only request to graphql, append,
   and mcp is refused with the same bytes a request with no credential at all receives —
   `test/server/session-doors.test.ts`
