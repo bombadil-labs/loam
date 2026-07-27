@@ -339,18 +339,21 @@ describe("the failed-login delay", () => {
       "the flood drained before wren got in: this proved nothing",
     ).toEqual([true, true, true, true]);
 
-    // THE CAP STILL BITES ON THE FAR SIDE OF THE WAIT, and this is the assertion that says so. The
-    // four wake together against ONE slot, so exactly one reaches a compare and the other three read
-    // 503. Asserting only "every status is 401 or 503" would be a tautology — those are the only two
-    // a wrong password can produce now that no login path emits 429 — and it stays green if the cap
-    // is removed entirely and all four hash at once. The exact count of 503s does not.
+    // Every waiting attempt is ANSWERED — a wait is not a quiet refusal — and none of the answers is
+    // 429, because there is no lock for one to reach.
+    //
+    // WHICH answer each gets is NOT asserted here, and that is deliberate rather than weak. On the far
+    // side of the wait the four contend for one slot, and how many reach a compare depends on whether
+    // a hash outlasts the few milliseconds of stagger between the wakers. At this home's scrypt cost
+    // it does not, so any count from one to four is a legitimate outcome and pinning one would be a
+    // coin flip. The rail below buys the same property on a home where one hash lasts about a second.
     const answered = await Promise.all(flood.map((f) => f.wait));
-    expect(answered.filter((r) => r.status === 503)).toHaveLength(3);
-    expect(answered.filter((r) => r.status === 401)).toHaveLength(1);
-    // and a 503 costs the caller no count: one attempt was compared, so the count moved by one.
-    // Derived from the DOOR's answers rather than from login-locks.ts, so the subject cannot set its
-    // own expectation (H10) — and pinned to a literal above, so it cannot drift with a broken cap.
-    expect(readLocks(home).get("myk")?.failures).toBe(2);
+    expect(answered.every((r) => r.status === 401 || r.status === 503)).toBe(true);
+    // and a 503 costs the caller no count, so the count moved by exactly the compares that happened.
+    // The expectation comes from the DOOR's own answers, never from login-locks.ts (H10).
+    expect(readLocks(home).get("myk")?.failures).toBe(
+      1 + answered.filter((r) => r.status === 401).length,
+    );
   });
 
   it("(o4) overlapping attempts each count: no attempt loses another's failure", async () => {
@@ -740,5 +743,46 @@ describe("the cap on unauthenticated hashing", () => {
     // NAMED GAP: this compares status and body, never TIME. `decoyParamsFor` is what makes the two paths
     // cost the same, and credentials-corrupt.test.ts pins that directly rather than with a stopwatch.
     await Promise.all(holding.map((h) => h.wait));
+  });
+
+  it("(o3) the hash cap still bites on the FAR SIDE of a wait", async () => {
+    // The other half of (o3), and it belongs in THIS describe rather than beside its twin, because it
+    // needs what this home has: one hash that lasts about a second.
+    //
+    // Four attempts for one name wake from their wait within a few milliseconds of each other, against
+    // ONE hash slot. That only settles deterministically when a hash outlasts the stagger by orders of
+    // magnitude — at the fast home's cost it does not, and asserting a count there is a coin flip that
+    // reads like a rail. Here the first waker holds the slot for ~1s, so the other three are refused
+    // every time.
+    //
+    // Asserting only "every status is 401 or 503" would prove nothing: those are the only two a wrong
+    // password can produce now that no login path emits 429, and the pair stays green with the cap
+    // removed entirely. The COUNT of refusals is what goes red then.
+    const brief: LimitPolicy = {
+      baseDelayMs: 300,
+      maxDelayMs: 300,
+      forgetMs: 600_000,
+      maxTracked: 8,
+    };
+    slow = await serveHome(slowHome, { limit: brief, maxConcurrentHashes: 1 });
+    expect((await slowTry("myk", "wrong once")).status).toBe(401); // one failure: later attempts wait
+
+    const begun = await Promise.all([1, 2, 3, 4].map(() => beginLogin(slow.base)));
+    const flight = begun.map((b, i) =>
+      inFlight(
+        postLogin(slow.base, "myk", `wrong ${i}`, { cookie: b.cookie, formToken: b.formToken }),
+      ),
+    );
+    await drained();
+    expect(
+      flight.map((f) => f.running()),
+      "an attempt answered before its siblings were sent: they did not overlap",
+    ).toEqual([true, true, true, true]);
+
+    const answered = await Promise.all(flight.map((f) => f.wait));
+    expect(answered.filter((r) => r.status === 503)).toHaveLength(3);
+    expect(answered.filter((r) => r.status === 401)).toHaveLength(1);
+    // and a refusal for want of budget is not a failed attempt: one compare, so one more count
+    expect(readLocks(slowHome).get("myk")?.failures).toBe(2);
   });
 });
