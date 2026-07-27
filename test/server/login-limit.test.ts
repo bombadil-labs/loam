@@ -1,4 +1,4 @@
-// §36 (T113/T116), criteria (o) (o1)–(o7) (p) (q): the failed-login DELAY, and the cap on unpaid work.
+// §36 (T113/T116), criteria (o) (o1)–(o8) (p) (q): the failed-login DELAY, and the cap on unpaid work.
 //
 // THE LOGIN DOOR DELAYS; IT NEVER LOCKS. A correct password is admitted however many failures came
 // before it. A wrong one makes the next attempt for that name wait longer, up to a cap. A lock is an
@@ -32,10 +32,13 @@
 //     on the count. One home, one server is the supported posture.
 //  4. WHAT THE LIMITER DOES WHEN ITS FILE IS BROKEN, beyond the answer not moving. The fail-open rails
 //     prove 401 stays 401 and a correct password is still admitted; they do not characterise the state,
-//     and the state SPLITS by which operation fails:
-//       - the file cannot be READ (a directory at the path, mode 0000, damaged bytes): no row is
-//         readable, so every name waits zero and the budget is gone for everyone, for as long as it
-//         lasts. That is the first (o7) rail's own fixture.
+//     and the state splits three ways rather than two:
+//       - the file cannot be READ and the home CAN be written (damaged bytes, no `users` table, mode
+//         0000, a dangling symlink): every name waits zero, and it lasts exactly ONE failed login —
+//         the next one writes a new table over the damage, which self-repairs and DISCARDS every record
+//         nobody could read.
+//       - NEITHER read nor write works (a directory at the path): every name waits zero until an
+//         operator clears the path. That is the first (o7) rail's own fixture.
 //       - the file reads but the home cannot be WRITTEN: a name with no row waits zero, while a name
 //         WITH a row keeps paying its accumulated wait — up to the cap, not automatically the cap — and
 //         that wait can no longer be grown OR cleared. A correct password does not clear it and
@@ -45,21 +48,26 @@
 //     Windows: the write half needs a POSIX mode to build its fixture.
 //  5. TIME, in the byte-identical refusal rail below. It compares status and body only, and says so
 //     again at its own call site.
-//  6. THAT A TARGETED NAME IS CHARGED AT ALL WHEN THE TABLE IS SQUATTED. A row is seated at one
-//     failure, so a new row is always among the weakest, and a caller who squats `maxTracked` rows
-//     keeps a chosen name out of the table. Two shapes, both measured at 0ms charged per round:
-//     RAISE the junk rows above the target's count and flood one fresh name per round; or flood
-//     `maxTracked` or more fresh names per round and cycle the whole table, which needs no setup and
-//     works under EITHER tie-break order. The cycle rail below covers the widest flood the tie-break
-//     does survive — `maxTracked − 1` per round — and names both shapes it does not. No eviction order
-//     fixes them: login-locks.ts states what closing them takes, and it is a different store rather
-//     than a different comparator.
+//  6. THAT A TARGETED NAME IS CHARGED WHEN THE TABLE IS SQUATTED. It is not. A row is seated at one
+//     failure, so a row being seated is always among the weakest, and the operative quantity is
+//     SEATINGS PER ROUND — rows added for a name not currently in the table, whether or not the name is
+//     new. Both shapes are measured at 0ms charged per round:
+//       - `maxTracked` seatings per round, cycling the whole table. No setup, works under EITHER
+//         tie-break order, and NOTHING standing: a full `forgetMs` of silence before every guess does
+//         not erode it. This is the cheap shape and it does not decay.
+//       - ONE seating per round, with the other rows held at a count at least the target's. Setup is
+//         `count × (maxTracked − 1)`; junk at EXACTLY the target's count is enough. This shape needs
+//         `maxTracked − 1` refreshes per `forgetMs` window whatever the guess rate, so it does decay.
+//     The BOUNDARY is railed on both sides below — `maxTracked − 1` seatings and the target
+//     accumulates, `maxTracked` and it holds no row at all. What is NOT railed is the second shape's
+//     setup, and no eviction order fixes either: login-locks.ts states what closing them takes, and it
+//     is a different store rather than a different comparator.
 //
 // The last half of the file is a different budget. scrypt is expensive ON PURPOSE, which makes an
 // unauthenticated login a lever on the server's CPU. So the door caps concurrent hashing globally,
 // and refuses past the cap WITHOUT hashing.
 
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -82,6 +90,7 @@ import {
   delayFor,
   delayMs,
   locksPath,
+  noteFailure,
   readLocks,
   type LimitPolicy,
 } from "../../src/server/login-locks.js";
@@ -565,18 +574,10 @@ describe("the failed-login delay", () => {
     // count stays at one, the wait stays at the base, and every rail that watches a single eviction
     // stays green.
     //
-    // WHAT THIS COVERS, EXACTLY — and the boundary is sharp, so it is worth stating rather than
-    // implying. This floods `maxTracked − 1` fresh one-failure names per round, which is the widest
-    // flood the tie-break still survives. Two shapes fall outside it, neither of them railed:
-    //
-    //   - RAISE THE JUNK ROWS above the target's count first, then one fresh name per round. The
-    //     target is then the unique weakest and `failures` alone evicts it, whatever the tie says.
-    //   - FLOOD `maxTracked` OR MORE fresh names per round, cycling the whole table. No setup, and no
-    //     row survives a round that could tie, so the tie-break never decides anything.
-    //
-    // Measured at `maxTracked` 4 and 8: `maxTracked − 1` fresh names charge 0, 200, 400, 800, 1600 —
-    // and `maxTracked` charges 0 every round. No eviction order fixes either shape, so no rail here
-    // claims one does. Gap 6 in the header names both; login-locks.ts states what closing them takes.
+    // THIS SITS ON THE BOUNDARY, at `maxTracked − 1` SEATINGS per round — the widest flood the
+    // tie-break survives. The quantity is SEATINGS, meaning rows added for a name not currently in the
+    // table, and not "fresh names": a name the flood evicted last round is absent now, so recycling one
+    // seats a row exactly as a never-seen name does. The sibling rail below pins the far side.
     const small: LimitPolicy = {
       baseDelayMs: 200,
       maxDelayMs: 4000,
@@ -589,13 +590,17 @@ describe("the failed-login delay", () => {
     }
     expect(readLocks(home).size).toBe(small.maxTracked); // the table really is full
 
-    // Four rounds of: one guess at the target, then one FRESH name to force an eviction. Only ROUND ONE
-    // is decided by the tie — from round two the target out-counts every other row and `failures` alone
-    // protects it. That is the point: the tie decision has to hold once for the count to start growing,
-    // and after that the count defends itself.
+    // Four rounds of: one guess at the target, then `maxTracked − 1` seatings. Only ROUND ONE is decided
+    // by the tie — from round two the target out-counts every other row and `failures` alone protects
+    // it. That is the point: the tie has to hold ONCE for the count to start growing, and after that the
+    // count defends itself.
     for (let round = 1; round <= 4; round += 1) {
       expect((await missOnce("myk", round)).status, `round ${round}`).toBe(401);
-      expect((await missOnce(`fresh-${round}`, 1)).status, `round ${round} filler`).toBe(401);
+      for (let i = 0; i < small.maxTracked - 1; i += 1) {
+        expect((await missOnce(`r${round}-f${i}`, 1)).status, `round ${round} filler ${i}`).toBe(
+          401,
+        );
+      }
     }
 
     // Delta level: the target's count GREW across the rounds. Flushed every round it would read one.
@@ -604,6 +609,85 @@ describe("the failed-login delay", () => {
     const { ms, res } = await timed(tryPassword("myk", PASSWORD));
     expect(res.status).toBe(200);
     expect(ms).toBeGreaterThanOrEqual(1500);
+  });
+
+  it("(o6) at maxTracked SEATINGS per round the tie-break stops helping — the limit, pinned", async () => {
+    // THE FAR SIDE OF THE SAME BOUNDARY, and it asserts the LIMITATION rather than a protection. Three
+    // documents now claim this boundary is exact; without a rail on both sides that claim rests on a
+    // scratch probe, and a change that moved the boundary would leave every other rail here green.
+    //
+    // One more seating per round than the rail above, and nothing survives a round that could tie. So
+    // the tie-break never decides anything and the target's row is gone every time — with no setup, and
+    // under either eviction order. This is the residual the working spec asks Myk to weigh.
+    const small: LimitPolicy = {
+      baseDelayMs: 200,
+      maxDelayMs: 4000,
+      forgetMs: 600_000,
+      maxTracked: 4,
+    };
+    served = await serveHome(home, { limit: small });
+    for (let round = 1; round <= 4; round += 1) {
+      // the target is charged NOTHING, every round: measured before its own miss, so a wait would show
+      expect(delayMs(home, "myk", Date.now(), small), `round ${round}`).toBe(0);
+      expect((await missOnce("myk", round)).status).toBe(401);
+      for (let i = 0; i < small.maxTracked; i += 1) {
+        expect((await missOnce(`r${round}-f${i}`, 1)).status, `round ${round} filler ${i}`).toBe(
+          401,
+        );
+      }
+    }
+    // Delta level: four rounds of failures and the target holds no row at all.
+    expect(readLocks(home).has("myk")).toBe(false);
+    expect(readLocks(home).size).toBe(small.maxTracked); // the bound still holds while this happens
+    // Object level: the door charges nothing, so the correct password is admitted promptly.
+    const { ms, res } = await timed(tryPassword("myk", PASSWORD));
+    expect(res.status).toBe(200);
+    expect(ms).toBeLessThan(UNWAITED_MS);
+  });
+
+  it("(o6) a RECYCLED name seats a row: the boundary is seatings, not novelty", async () => {
+    // `maxTracked − 1` fresh names plus ONE name reused every round reaches `maxTracked` seatings, so it
+    // defeats the tie-break exactly as an all-fresh flood does. Without this, "flood `maxTracked` fresh
+    // names" reads as the requirement and a caller who recycles looks bounded when they are not.
+    const small: LimitPolicy = {
+      baseDelayMs: 200,
+      maxDelayMs: 4000,
+      forgetMs: 600_000,
+      maxTracked: 4,
+    };
+    served = await serveHome(home, { limit: small });
+    for (let round = 1; round <= 4; round += 1) {
+      expect((await missOnce("myk", round)).status).toBe(401);
+      for (let i = 0; i < small.maxTracked - 1; i += 1) {
+        await missOnce(`r${round}-f${i}`, 1);
+      }
+      // the same name every round — evicted by the flood above, so it is absent and SEATS again
+      expect((await missOnce("pong", round)).status, `round ${round} recycled`).toBe(401);
+      expect(readLocks(home).get("pong")?.failures, `round ${round}`).toBe(1); // re-seated, not grown
+    }
+    expect(readLocks(home).has("myk")).toBe(false);
+    const { ms, res } = await timed(tryPassword("myk", PASSWORD));
+    expect(res.status).toBe(200);
+    expect(ms).toBeLessThan(UNWAITED_MS);
+  });
+
+  it("(o6) maxTracked below one tracks nothing, so the bound holds at every value", () => {
+    const home2 = makeHome();
+    try {
+      const off: LimitPolicy = {
+        baseDelayMs: 200,
+        maxDelayMs: 4000,
+        forgetMs: 600_000,
+        maxTracked: 0,
+      };
+      for (const name of ["a", "b", "c"]) noteFailure(home2, name, Date.now(), off);
+      expect(readLocks(home2).size).toBe(0); // not one — the criterion's bound is exact at zero
+      const one: LimitPolicy = { ...off, maxTracked: 1 };
+      for (const name of ["a", "b", "c"]) noteFailure(home2, name, Date.now(), one);
+      expect(readLocks(home2).size).toBe(1);
+    } finally {
+      dropHome(home2);
+    }
   });
 
   it("(o6) the tie reads the LAST FAILURE, not the order rows were seated", async () => {
@@ -836,18 +920,81 @@ describe("the failed-login delay", () => {
     expect(await run(["user", "unlock", "--all", "--home", home], io.io)).toBe(1);
     expect(io.err.join("\n")).toMatch(/not JSON/);
 
-    // and a `users` table whose entries are not records: read as none, reported as damage
+    // and a `users` table whose entries are not records: read as none, reported as damage. ONE entry
+    // reads "1 entry that is", not "1 entry that are" — a report an operator reads has to parse.
     writeFileSync(locksPath(home), JSON.stringify({ users: { myk: "locked forever" } }));
     expect(readLocks(home).size).toBe(0);
     const entries = testIo();
     expect(await run(["user", "unlock", "--all", "--home", home], entries.io)).toBe(1);
-    expect(entries.err.join("\n")).toMatch(/are not login records/);
+    expect(entries.err.join("\n")).toMatch(/1 entry that is not a login record/);
+    // and the advice names the SELF-REPAIR, because the fault lasts one failed login on a writable home
+    expect(entries.err.join("\n")).toMatch(/next failed login replaces the file/);
 
     // TWO-SIDED: a legitimately EMPTY users table is not damage, and must not be reported as any
     writeFileSync(locksPath(home), JSON.stringify({ users: {} }));
     const empty = testIo();
     expect(await run(["user", "unlock", "--all", "--home", home], empty.io)).toBe(0);
     expect(empty.err.join("\n")).toBe("");
+  });
+
+  it("(o8) a DANGLING SYMLINK is something at the path, not an absent file", async () => {
+    // `readFileSync` follows the link and raises ENOENT, which reads exactly like "no file yet" — so an
+    // existence test built on the read's errno calls this healthy and stays silent. It is not healthy:
+    // the door is charging nobody. Presence is asked with `lstat`, which sees the link itself.
+    served = await serveHome(home, { limit: COUNTING });
+    symlinkSync(join(home, "nothing-is-here.json"), locksPath(home));
+    expect(readLocks(home).size).toBe(0);
+    const io = testIo();
+    expect(await run(["user", "unlock", "--all", "--home", home], io.io)).toBe(1);
+    expect(io.err.join("\n")).toMatch(/cannot be read/);
+    expect(io.err.join("\n")).toMatch(/charging no name any delay/);
+  });
+
+  it("(o7) a read fault SELF-REPAIRS on the next failed login, discarding what it could not read", async () => {
+    // The correction that matters most about fail-open: it is not a standing outage. `readLocks` returns
+    // nothing, then `noteFailure` writes a whole new table over the damage — so one unauthenticated
+    // failed login repairs the file AND throws away every record nobody could parse. An operator who
+    // wants those counts has to act before the next attempt, which is why `unlock` says so.
+    // Bytes that are not JSON at all, so the WHOLE table is unreadable. A file with one damaged entry
+    // beside a good one is not this case — `readLocks` returns the good one and the door charges it.
+    writeFileSync(locksPath(home), '{"users": {"victim": {"failures": 9, "lastFai');
+    expect(readLocks(home).size).toBe(0);
+    served = await serveHome(home, { limit: STEPPED });
+
+    // ONE failed login for a different name replaces the file.
+    expect((await missOnce("attacker", 1)).status).toBe(401);
+    const after = readLocks(home);
+    expect(after.size).toBe(1);
+    expect(after.has("attacker")).toBe(true);
+    expect(after.has("victim")).toBe(false); // the unreadable records are GONE, not recovered
+
+    // and the file is healthy again: the count grows from here, and unlock reports no fault
+    expect((await missOnce("attacker", 2)).status).toBe(401);
+    expect(readLocks(home).get("attacker")?.failures).toBe(2);
+    const io = testIo();
+    expect(await run(["user", "unlock", "--all", "--home", home], io.io)).toBe(0);
+    expect(io.err.join("\n")).toBe("");
+  });
+
+  it("(o6) a table of nothing but SPENT rows is cleared when maxTracked is below one", () => {
+    // The bound's floor, by the route the in-memory prune hides. Every row is spent, so the prune empties
+    // the map before the below-one branch looks at it — and a size test on the PRUNED map skips the write
+    // and leaves those rows on disk forever, breaking the bound at exactly the value the branch defends.
+    const home2 = makeHome();
+    try {
+      const brief: LimitPolicy = { baseDelayMs: 1, maxDelayMs: 4, forgetMs: 1, maxTracked: 0 };
+      writeFileSync(
+        locksPath(home2),
+        JSON.stringify({
+          users: { a: { failures: 9, lastFailureAt: 1 }, b: { failures: 3, lastFailureAt: 2 } },
+        }),
+      );
+      expect(readLocks(home2).size).toBe(2); // the rows really are on disk, and long spent
+      noteFailure(home2, "c", Date.now(), brief);
+      expect(readLocks(home2).size).toBe(0); // cleared from DISK, not merely from the map
+    } finally {
+      dropHome(home2);
+    }
   });
 
   it("(p) unlock reports the COUNT it cleared, never a wait it cannot know", async () => {

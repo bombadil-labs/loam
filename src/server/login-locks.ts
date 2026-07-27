@@ -29,14 +29,18 @@
 // WHAT FAILING OPEN ACTUALLY COSTS, since "fail-open" is easy to read as "degrades a little". It splits
 // by which operation fails, and the read case is the total one:
 //
-//   - THE FILE CANNOT BE READ — a directory at the path, mode 0000, damaged bytes. No row is readable,
-//     so every name waits zero and the budget is GONE for everyone until an operator repairs it.
-//   - THE FILE READS BUT CANNOT BE WRITTEN. A name with no row waits zero. A name WITH a row keeps
-//     paying its accumulated wait, and that wait can no longer be grown or cleared — not by a correct
-//     password and not by `loam user unlock`, because both need the same write. It retires only when
-//     `forgetMs` of silence makes the row spent on read.
+//   - THE FILE CANNOT BE READ BUT THE HOME CAN BE WRITTEN — damaged bytes, no `users` table, mode 0000,
+//     a dangling symlink. Every name waits zero, and it lasts EXACTLY ONE FAILED LOGIN: the next one
+//     writes a whole new table over the damage. So it self-repairs, and the repair DISCARDS every
+//     record nobody could read. An operator who wants those counts has to act before the next attempt.
+//   - NEITHER READ NOR WRITE WORKS — a directory at the path is the case that reaches this. Every name
+//     waits zero and stays that way until an operator clears the path.
+//   - THE FILE READS BUT THE HOME CANNOT BE WRITTEN. A name with no row waits zero. A name WITH a row
+//     keeps paying its accumulated wait, and that wait can no longer be grown or cleared — not by a
+//     correct password and not by `loam user unlock`, because both need the same write. It retires only
+//     when `forgetMs` of silence makes the row spent on read.
 //
-// Neither case refuses a login, which is the promise that matters. Both are an operator's disk to fix,
+// No case refuses a login, which is the promise that matters. All three are an operator's disk to fix,
 // and `loam user unlock` names the fault it can see rather than reporting an empty table as tidy.
 //
 // THE NO-AWAIT DISCIPLINE IN `noteFailure` SETTLES ONE PROCESS, NOT TWO. Every write replaces the
@@ -53,6 +57,7 @@
 import {
   chmodSync,
   closeSync,
+  lstatSync,
   openSync,
   readFileSync,
   renameSync,
@@ -150,22 +155,40 @@ export function readLocks(home: string): Map<string, FailureRecord> {
  * path must stay silent and cheap: it fails open by design, and a diagnostic per unauthenticated
  * attempt is a log a stranger can fill. So this is a SECOND read, paid only when a human asks.
  *
- * An absent file is not a fault — a home where nobody has failed a login yet holds no record file at
- * all. A file that is present and yields no records is: either it cannot be read, or its bytes are not
- * a record table, and both mean the door is charging nobody.
+ * NOTHING AT THE PATH is not a fault — a home where nobody has failed a login yet holds no record file
+ * at all. Anything else that yields no records is: it cannot be read, or its bytes are not a record
+ * table, and both mean the door is charging nobody.
+ *
+ * IT TESTS EXISTENCE WITH `lstatSync`, NOT WITH THE READ'S ERRNO. A read that fails `ENOENT` does not
+ * prove nothing is there — a DANGLING SYMLINK reads that way and is very much something. And a read
+ * that fails some other errno does not prove something IS there: a home that is a regular file gives
+ * `ENOTDIR` for a path that does not exist. So presence is asked directly, and `lstat` rather than
+ * `stat` because the link itself is the thing at the path.
  */
 export function unreadableRecordFile(home: string): string | undefined {
   const path = locksPath(home);
+  // THE FAULT IS USUALLY TRANSIENT, and the advice has to say so or an operator reads it as a wall.
+  // `readLocks` fails open, so the next failed login writes a whole new table over whatever is there —
+  // which repairs the file and DISCARDS the records nobody could read. Only a path the door cannot
+  // write either (a directory here) survives that. Hedged on writability because this does not test it.
+  const soWhat =
+    `The login door reads it the same way, so it is charging no name any delay. If this home is ` +
+    `writable, the next failed login replaces the file and discards whatever could not be read.`;
+  try {
+    lstatSync(path);
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code === "ENOENT") return undefined; // nothing at the path: no failures recorded yet
+    return `${path} cannot be examined: ${err instanceof Error ? err.message : String(err)}. ${soWhat}`;
+  }
   let raw: string;
   try {
     raw = readFileSync(path, "utf8");
   } catch (err) {
-    const code = (err as { code?: string }).code;
-    if (code === "ENOENT") return undefined; // no file, no failures recorded yet, nothing to explain
-    return (
-      `${path} exists and cannot be read: ${err instanceof Error ? err.message : String(err)}. ` +
-      `The login door reads it the same way, so it is charging no name any delay. Repair or remove it.`
-    );
+    // Something IS at the path — `lstat` said so — so this reports a read failure without claiming
+    // more than that. A dangling symlink lands here with `ENOENT`, which the guard above would have
+    // read as "no file at all".
+    return `${path} cannot be read: ${err instanceof Error ? err.message : String(err)}. ${soWhat}`;
   }
   try {
     const parsed: unknown = JSON.parse(raw);
@@ -174,10 +197,7 @@ export function unreadableRecordFile(home: string): string | undefined {
         ? (parsed as Record<string, unknown>)["users"]
         : undefined;
     if (users === null || typeof users !== "object" || Array.isArray(users)) {
-      return (
-        `${path} holds no \`users\` table, so nothing in it is a login record. The login door reads ` +
-        `it the same way, so it is charging no name any delay. Repair or remove it.`
-      );
+      return `${path} holds no \`users\` table, so nothing in it is a login record. ${soWhat}`;
     }
     // ENTRIES THAT ALL FAIL `isRecord` are damage; an EMPTY table is not; and a table where SOME parse
     // is not a fault this function reports — `readLocks` returns those, so the door is charging them,
@@ -185,16 +205,10 @@ export function unreadableRecordFile(home: string): string | undefined {
     const entries = Object.entries(users as Record<string, unknown>);
     const valid = entries.filter(([, record]) => isRecord(record)).length;
     if (entries.length === 0 || valid > 0) return undefined;
-    return (
-      `${path} holds ${entries.length} entr${entries.length === 1 ? "y" : "ies"} that are not login ` +
-      `records. The login door reads it the same way, so it is charging no name any delay. Repair or ` +
-      `remove it.`
-    );
+    const count = entries.length === 1 ? `1 entry that is` : `${entries.length} entries that are`;
+    return `${path} holds ${count} not a login record. ${soWhat}`;
   } catch {
-    return (
-      `${path} is not JSON this command can parse. The login door reads it the same way, so it is ` +
-      `charging no name any delay. Repair or remove it.`
-    );
+    return `${path} is not JSON this command can parse. ${soWhat}`;
   }
 }
 
@@ -296,17 +310,23 @@ export const delayMs = (home: string, name: string, now: number, policy: LimitPo
  * the most it can hand back is a wait.
  *
  * THE BOUND IS A REAL LIMIT ON WHAT THIS FILE CAN PROMISE, and no eviction order fixes it. A row is
- * seated at ONE failure, so a new row is always among the weakest — which means a caller who squats
- * `maxTracked` rows can keep a CHOSEN name's row out of the table and hold its delay at zero. Two
- * shapes, measured against this module at `maxTracked` 4 and 8, a target charged per round:
+ * seated at ONE failure, so a row being seated is always among the weakest — which means a caller can
+ * keep a CHOSEN name's row out of the table and hold its delay at zero.
  *
- *   - NARROW, one fresh name per round. 0ms under newest-among-equals with no setup. Under
- *     oldest-among-equals it needs every junk row raised ABOVE the target's count first, and then
- *     0ms per round. `0, 200, 400, 800, 1600` without that setup — the tie-break holds.
- *   - WIDE, `maxTracked` or more fresh names per round, cycling the whole table. 0ms under EITHER
- *     order, with no setup at all. The tie-break never decides anything, because no row survives the
- *     round that could tie. The boundary is exact: at `maxTracked − 1` fresh names the tie-break
- *     holds; at `maxTracked` it does not.
+ * THE OPERATIVE QUANTITY IS SEATINGS PER ROUND: rows added for a name not currently in the table. NOT
+ * "fresh names" — a name the flood evicted last round is absent now, so recycling one seats a row just
+ * as a never-seen name does. Measured at `maxTracked` 4 and 8, base 200ms, a target charged per round:
+ *
+ *   - WIDE, `maxTracked` seatings per round. 0ms every round, under EITHER tie-break order, with no
+ *     setup. No row survives a round, so the tie-break never decides anything. `maxTracked − 1` fresh
+ *     names plus ONE recycled name reaches this — the boundary is in seatings, not in novelty.
+ *   - NARROW, ONE seating per round, with the other `maxTracked − 1` rows held at a count at least the
+ *     target's. 0ms every round. Junk at EXACTLY the target's count is enough when the junk rows'
+ *     last failure is more recent than the target's, which a caller controls; only if the target
+ *     fails after the raise do they need one more. Setup is therefore `C × (maxTracked − 1)`.
+ *
+ * At `maxTracked − 1` seatings and no raised junk, the tie-break holds and the target is charged
+ * `0, 200, 400, 800, 1600`. That boundary is railed in login-limit.test.ts, both sides.
  *
  * So the order changes which callers pay a setup, not whether the squat works. Do not read it as a
  * defence. The honest claim is that an unsquatted table charges a serial guesser, and a squatted one
@@ -315,18 +335,20 @@ export const delayMs = (home: string, name: string, now: number, policy: LimitPo
  * (H8) — or per-name counters that collide, which would slow innocent names and break criterion (o3).
  * Both are their own ticket.
  *
- * WHAT EACH SHAPE COSTS TO SUSTAIN, per shape, because the two do not price the same:
+ * WHAT EACH SHAPE COSTS TO SUSTAIN, and ONLY ONE OF THEM DECAYS:
  *
- *   - WIDE: `maxTracked` requests per guess, and nothing else. The flood IS the refresh, since every
- *     row it writes is new. At the shipped policy that is 512 requests per guess.
- *   - NARROW: one request per guess, plus a refresh of every squatted row inside each `forgetMs`
- *     window — 511 per 15 minutes at the shipped policy — because `spent` prunes a row nobody touched.
- *     Its setup also scales with the TARGET's standing count rather than being a flat 2×: a target at
- *     five failures needs the junk rows above five, and junk at two does not flush it at all.
+ *   - WIDE: `maxTracked` requests per guess — 512 at the shipped policy — and NOTHING standing. Every
+ *     row it writes is seated in the same round it is used, so `forgetMs` has nothing to prune between
+ *     guesses. Measured with a full `forgetMs` of silence before EVERY guess: still 0ms, every round.
+ *     A caller guessing once a day pays 513 requests a day and is charged nothing. This shape does not
+ *     decay, and no waiting on the defender's part erodes it.
+ *   - NARROW: one request per guess, PLUS `maxTracked − 1` refreshes inside each `forgetMs` window —
+ *     511 per 15 minutes — whatever the guess rate, because `spent` prunes a row nobody touched. This
+ *     shape does decay: stop refreshing and one window restores the charge. Measured 0, 0, 0 squatted,
+ *     then 0, 200, 400, 800, 1600 after one idle window.
  *
- * EITHER WAY THE SQUAT DECAYS. Stop, and one `forgetMs` prunes the junk; the target is charged again
- * from its next failure. Measured: 0, 0, 0 while squatted, then 0, 200, 400, 800, 1600 after one idle
- * window. So this is a cost an attacker pays continuously, not a state they reach and keep.
+ * The cheap shape is therefore the one with no standing cost and no decay. Any future claim that time
+ * is on the defender's side here has to name which shape it means.
  *
  * What an eviction takes when the table is NOT squatted is about one attempt, because a wait rebuilds
  * on the very next failure. And the cost it imposes is not F rounds of waiting: waits do not serialize
@@ -336,6 +358,11 @@ export const delayMs = (home: string, name: string, now: number, policy: LimitPo
 export function noteFailure(home: string, name: string, now: number, policy: LimitPolicy): void {
   const locks = readLocks(home);
   const previous = locks.get(name);
+  // WHAT THE DISK HELD, captured BEFORE the prune below empties the map. The `maxTracked < 1` branch
+  // needs to know whether there is anything on disk to clear, and the pruned map cannot say: a table of
+  // nothing but spent rows prunes to empty, so a size test after it skips the write and leaves those
+  // rows on disk forever — the bound broken by the very branch that exists to keep it.
+  const onDisk = locks.size;
   for (const [held, record] of locks) {
     if (held !== name && spent(record, now, policy)) locks.delete(held);
   }
@@ -343,7 +370,7 @@ export function noteFailure(home: string, name: string, now: number, policy: Lim
   // `maxTracked` rows" false at exactly one value, and a bound documented as breaking at its own floor
   // is not a bound. This is an operator-supplied number, so the door is not the place to argue with it.
   if (policy.maxTracked < 1) {
-    if (locks.size > 0) writeLocks(home, new Map());
+    if (onDisk > 0) writeLocks(home, new Map());
     return;
   }
   if (previous === undefined && locks.size >= policy.maxTracked) {
