@@ -43,6 +43,7 @@ import { type IncomingMessage, type ServerResponse } from "node:http";
 import { authorForSeed } from "@bombadil/rhizomatic";
 import {
   EMPTY_OAUTH,
+  OAuthFileUnlockable,
   clientFor,
   clientNameDefect,
   grantFor,
@@ -343,6 +344,21 @@ export function makeOAuthDoors(deps: OAuthDeps): OAuthDoors {
 
   const codes = new Map<string, AuthCode>();
 
+  /**
+   * Clients with a redemption IN FLIGHT, counted rather than flagged.
+   *
+   * THE THIRD LINK IN THE PIN'S CHAIN, and without it there is a gap the other two cannot see.
+   * `postToken` burns the code before it awaits `mintToken`, and the grant only exists once phase one
+   * has written it — so between those two points a client holds no code and no grant, and a
+   * registration running in that window finds it unpinned and evicts it. The mint then answers 400 with
+   * the code already spent, and the operator's approval is gone for good.
+   *
+   * COUNTED because two redemptions for one client would otherwise have the first to finish clear a pin
+   * the second still needs. Only a FIRST redemption is exposed to this at all — a later one is pinned by
+   * the grant it already has — which is exactly the consent-to-first-token window the pin exists for.
+   */
+  const redeeming = new Map<string, number>();
+
   // ONE WRITER at a time, and it is what criterion (s) rests on. A redemption reads oauth.json, sees no
   // seed for this client, mints one, AWAITS the grant append, and writes the file. Two redemptions in
   // that window each mint a seed; the second write wins, and the first grant is left standing in the
@@ -527,7 +543,10 @@ export function makeOAuthDoors(deps: OAuthDeps): OAuthDoors {
     }
 
     type Registered =
-      { kind: "ok"; client: OAuthClient } | { kind: "full" } | { kind: "unreadable" };
+      | { kind: "ok"; client: OAuthClient }
+      | { kind: "full" }
+      | { kind: "unreadable" }
+      | { kind: "unlockable"; why: string };
 
     // THE SWEEP MOVES OUT; THE READ STAYS IN. Two different questions, and only one of them belongs
     // outside the lock.
@@ -566,14 +585,28 @@ export function makeOAuthDoors(deps: OAuthDeps): OAuthDoors {
           // a pending client. That failure is visible and harmless — the authorize GET then says no such
           // client, so the operator sees a refusal instead of losing a grant — and pinning it would mean
           // trusting an unauthenticated registration to hold a slot, which is the lockout again.
-          // Read HERE, not before the await above, and NO RAIL PROVES IT — forcing the difference needs
-          // this door suspended at an await while a code is minted, and the only await on the path is a
-          // signed sqlite write whose duration a test cannot control. The rails prove the pin exists;
-          // this line is why it is also current. A code that expired since the sweep still pins its
-          // client for this pass, which over-protects by one entry and is the safe direction.
+          // THREE SOURCES, AND THE UNION IS THE POINT — consent reaches a token through three states,
+          // and a pin that reads any two of them has a hole where the third would have spoken:
+          //
+          //   1. a live CODE — the operator approved, nothing is redeemed yet;
+          //   2. a redemption IN FLIGHT — the code is burnt and the grant is not written yet. Neither
+          //      of the other two sees this, and it lasts as long as a signed sqlite write;
+          //   3. a GRANT in the file — the token was minted.
+          //
+          // Read FRESH, inside the callback, not snapshotted before the await above: `postAuthorize` and
+          // `postToken` both move these tables without passing through this door's queue, so a set
+          // captured before a multi-second wait describes a client that has since moved on.
+          //
+          // READING FRESH IS A TRADE, NOT A STRICT IMPROVEMENT, and both directions are real. A stale
+          // snapshot under-pins a client approved during the wait. A fresh read under-pins one whose code
+          // is already burnt — which is why `redeeming` exists, and why the pin is a union of three
+          // sources rather than a choice between two. A code that lapsed since the sweep still pins its
+          // client for this pass, and any number of them can lapse during a long wait, so the `full`
+          // refusal below can say every slot is approved-or-in-flight when some hold only lapsed codes.
           const pinned = new Set([
             ...file.grants.map((g) => g.clientId),
             ...[...codes.values()].map((c) => c.clientId),
+            ...redeeming.keys(),
           ]);
           let clients = [...file.clients];
           while (clients.length >= maxClients) {
@@ -600,10 +633,19 @@ export function makeOAuthDoors(deps: OAuthDeps): OAuthDoors {
           `the connector doors could not register a connector in ${oauthPath(home)}: ` +
             `${err instanceof Error ? err.message : String(err)}`,
         );
+        // A HOME THAT CANNOT HOLD THE LOCK IS NOT A DAMAGED FILE, and answering as though it were sends
+        // the operator to read a file that is perfectly fine.
+        if (err instanceof OAuthFileUnlockable) {
+          return { kind: "unlockable" as const, why: err.message };
+        }
         return { kind: "unreadable" as const };
       }
     });
 
+    if (outcome.kind === "unlockable") {
+      refuse(res, 503, "temporarily_unavailable", outcome.why);
+      return;
+    }
     if (outcome.kind === "unreadable") {
       refuse(
         res,
@@ -877,12 +919,17 @@ ${hidden("approve", "yes")}
   ): Promise<
     | { kind: "ok"; token: string }
     | { kind: "unreadable" }
+    | { kind: "unlockable"; why: string }
     | { kind: "full" }
     | { kind: "gone" }
     | { kind: "revoked" }
   > => {
     type Refusal =
-      { kind: "unreadable" } | { kind: "full" } | { kind: "gone" } | { kind: "revoked" };
+      | { kind: "unreadable" }
+      | { kind: "unlockable"; why: string }
+      | { kind: "full" }
+      | { kind: "gone" }
+      | { kind: "revoked" };
 
     // Everything that must be true of the file before a token is minted, asked INSIDE the lock so a
     // concurrent revoke cannot land between the check and the write.
@@ -905,6 +952,9 @@ ${hidden("approve", "yes")}
           `the connector doors could not update ${oauthPath(home)}: ` +
             `${err instanceof Error ? err.message : String(err)}`,
         );
+        if (err instanceof OAuthFileUnlockable) {
+          return { kind: "unlockable" as const, why: err.message };
+        }
         return { kind: "unreadable" as const };
       }
     };
@@ -1022,7 +1072,23 @@ ${hidden("approve", "yes")}
       return;
     }
 
-    const minted = await mintToken(held.clientId, held.generation);
+    // PIN THE CLIENT ACROSS THE MINT. The code is already burnt and no grant exists yet, so from here
+    // until `mintToken` settles this client is invisible to every other source the eviction reads.
+    // Nothing between the burn above and this line awaits, so the window opens exactly here.
+    const clientId = held.clientId;
+    redeeming.set(clientId, (redeeming.get(clientId) ?? 0) + 1);
+    let minted: Awaited<ReturnType<typeof mintToken>>;
+    try {
+      minted = await mintToken(clientId, held.generation);
+    } finally {
+      const left = (redeeming.get(clientId) ?? 1) - 1;
+      if (left <= 0) redeeming.delete(clientId);
+      else redeeming.set(clientId, left);
+    }
+    if (minted.kind === "unlockable") {
+      refuse(res, 503, "temporarily_unavailable", minted.why);
+      return;
+    }
     if (minted.kind === "unreadable") {
       refuse(
         res,

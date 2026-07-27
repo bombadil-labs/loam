@@ -286,10 +286,9 @@ describe("(s) the cross-process lock", () => {
     // was deleted: `withOAuthFile`'s callback is synchronous by design and `cmdGrant` is synchronous
     // throughout, so two of them on one thread cannot interleave. `Promise.all` over them runs the first
     // to completion before the second starts, and the assertions then hold whether or not anything
-    // locks. Rails 1 to 3 above discriminate on the primitive; this one contends for real.
-    //
-    // The child is bundled with esbuild rather than run through a TypeScript loader, because the repo
-    // has no runtime TS hook — esbuild is already a dependency, and the bundle runs on plain node.
+    // The in-process rails above cover the primitive; this one contends for real, which is the only
+    // honest test of a cross-process lock — everything synchronous on one thread passes whether or not
+    // anything locks.
     const entry = fileURLToPath(new URL("./oauth-lock-child.mts", import.meta.url));
     const bundle = join(home, "lock-child.mjs");
     await esbuild.build({
@@ -351,7 +350,6 @@ describe("(s) the cross-process lock", () => {
     expect(held).toBe(true);
 
     // The parent's write, issued while the child holds the lock. It must WAIT, not overwrite.
-    const waitedFrom = Date.now();
     withOAuthFile<undefined>(home, (file) => ({
       next: {
         ...file,
@@ -368,12 +366,17 @@ describe("(s) the cross-process lock", () => {
       },
       result: undefined,
     }));
-    // IT REALLY WAITED, and the floor is derived from the lock's own poll interval rather than from the
-    // child's hold. The lock existed when the parent started, so the parent's first claim had to fail
-    // and it had to pause at least once; anything at or below one poll is an acquire that never
-    // contended. Written this way the assertion holds for ANY hold length, so tuning the child cannot
-    // quietly turn this rail into a timing bet — and load only ever makes the wait longer.
-    expect(Date.now() - waitedFrom).toBeGreaterThanOrEqual(20);
+    // NO TIMING FLOOR IS ASSERTED HERE, and that is a correction rather than a gap.
+    //
+    // The tempting assertion is "the acquire took at least one poll interval, so it really waited". It is
+    // unsound: the lock is observed on the event loop and claimed after it, and a stall spanning the
+    // child's whole hold leaves the child released before the parent's first claim — which then succeeds
+    // with no pause, in about a millisecond, through no fault of the lock. Load does NOT only make the
+    // wait longer; past the hold it makes it vanish.
+    //
+    // What discriminates is the property itself, asserted below: both writes survive. With mutual
+    // exclusion removed the parent reads a pre-child snapshot and its write drops the child's row, so
+    // `toContain("child-one")` fails — measured, not assumed.
     await spawned;
 
     // BOTH writes survived. Without the lock the second writer spreads a snapshot taken before the

@@ -218,16 +218,125 @@ describe("POST /oauth/register", () => {
     expect(redeemed.res.status).toBe(200);
   });
 
+  it(
+    "(f) a client is pinned across its REDEMPTION, not just up to it",
+    { timeout: 60_000 },
+    async () => {
+      // THE GAP BETWEEN THE OTHER TWO PINS. `postToken` burns the code before it awaits the mint, and
+      // the grant appears only once that mint writes it — so in between, the client holds no code and no
+      // grant. A registration that RUNS in that window sees it unpinned and evicts it, and the mint then
+      // answers 400 with the code already spent. The operator's approval is gone for good.
+      //
+      // THE ORDER THE QUEUE MUST BE IN, because getting it backwards proves nothing: the registration has
+      // to sit AHEAD of the victim's mint. Every one of these doors shares one serialization chain, so
+      // parking the victim's own mint at the head would simply block the registration behind it and the
+      // window would never open.
+      //
+      //   [a decoy mint, parked by hand] [the registration] [the victim's mint]
+      //
+      // The decoy is what holds the chain open. The registration is confirmed QUEUED by observing that
+      // its own request has not answered — that is a real observation, not a sleep. Only the victim's
+      // redeem needs a settle, and its failure direction is a test that proves nothing rather than a
+      // flake; the revert-probe in the commit message is what shows this rail bites.
+      let release: (() => void) | undefined;
+      const held = new Promise<void>((resolve) => (release = resolve));
+      let parked = false;
+
+      await served.close();
+      served = await serveOAuth(home, {
+        oauth: { maxClients: 3 },
+        prepare: (gateway) => {
+          // Patch the gateway this test constructed — no production seam, and the real append still runs.
+          const append = gateway.append.bind(gateway);
+          gateway.append = async (deltas) => {
+            if (!parked) {
+              parked = true;
+              await held;
+            }
+            return append(deltas);
+          };
+        },
+      });
+      const session = await signIn(served.base);
+
+      // The VICTIM registers first, so it is the oldest evictable entry. Then the decoy, then a filler
+      // that brings the table to its cap.
+      const victim = await register(served.base, { name: "Claude" });
+      const decoy = await register(served.base, { name: "decoy" });
+      await register(served.base, { name: "filler" });
+      expect(readOAuthFile(home).clients.length).toBe(3);
+
+      const codeFor = async (clientId: string): Promise<{ code: string; verifier: string }> => {
+        const secret = pkce();
+        const params = wellFormedAuthorize(clientId, secret.challenge);
+        const page = await getAuthorize(served.base, params, session.cookie);
+        const approved = await approve(served.base, params, {
+          cookie: session.cookie,
+          formToken: formTokenIn(page.body),
+        });
+        return { code: codeFrom(approved)!, verifier: secret.verifier };
+      };
+      const decoyCode = await codeFor(decoy.clientId);
+      const victimCode = await codeFor(victim.clientId);
+
+      // 1. The decoy's mint parks the chain on the held append.
+      const decoyRedeem = redeem(served.base, {
+        grant_type: "authorization_code",
+        code: decoyCode.code,
+        redirect_uri: CLAUDE_REDIRECT,
+        client_id: decoy.clientId,
+        code_verifier: decoyCode.verifier,
+      });
+      const parkedFrom = Date.now();
+      while (!parked && Date.now() - parkedFrom < 20_000) {
+        await new Promise((r) => setTimeout(r, 2));
+      }
+      expect(parked).toBe(true);
+
+      // 2. A registration, CONFIRMED queued: its request cannot answer while the chain is parked.
+      const marker = Symbol("pending");
+      const flood = register(served.base, { name: "flood" });
+      const settled = await Promise.race([
+        flood,
+        new Promise((r) => setTimeout(() => r(marker), 250)),
+      ]);
+      expect(settled).toBe(marker);
+
+      // 3. The victim redeems. The burn is synchronous on arrival; its mint enqueues behind the flood.
+      const victimRedeem = redeem(served.base, {
+        grant_type: "authorization_code",
+        code: victimCode.code,
+        redirect_uri: CLAUDE_REDIRECT,
+        client_id: victim.clientId,
+        code_verifier: victimCode.verifier,
+      });
+      await new Promise((r) => setTimeout(r, 300));
+
+      // 4. Drain. The flood runs while the victim holds neither a code nor a grant.
+      release!();
+      const [decoyOut, floodOut, victimOut] = await Promise.all([decoyRedeem, flood, victimRedeem]);
+
+      expect(decoyOut.res.status).toBe(200);
+      expect(floodOut.status).toBe(201);
+      // THE ASSERTION. Without the redeeming pin the flood evicts the victim and this is a 400.
+      expect(victimOut.res.status).toBe(200);
+      expect(victimOut.body["access_token"]).toMatch(/.+/);
+      const file = readOAuthFile(home);
+      expect(file.clients.map((c) => c.clientId)).toContain(victim.clientId);
+      expect(file.grants.map((g) => g.clientId).sort()).toEqual(
+        [decoy.clientId, victim.clientId].sort(),
+      );
+    },
+  );
+
   it("(f) an approved-but-unredeemed client survives a registration flood", async () => {
     // The pin's EXISTENCE, and this rail is what protects it: remove the code from the pinned set and
     // this goes red, because a client with a code but no grant is otherwise the oldest evictable entry.
     //
     // WHAT IT DOES NOT REACH, measured rather than assumed: whether the pinned set is read INSIDE the
     // locked callback or snapshotted before it. Every registration here snapshots after the code was
-    // minted, so both forms pass. Reaching the difference needs a registration suspended at an await
-    // while a code is minted, and the only await in that path is a signed sqlite write whose duration
-    // is not controllable from a test — a rail built on that window would be a flake, which outranks
-    // the coverage it would buy. The read's position is argued in `postRegister`'s own comment instead.
+    // minted, so both forms pass. The rail above it — the redemption window — is the one that reaches
+    // a queue ordering, and it does so by holding the ground append open rather than by racing a clock.
     await served.close();
     served = await serveOAuth(home, { oauth: { maxClients: 2 } });
     const session = await signIn(served.base);

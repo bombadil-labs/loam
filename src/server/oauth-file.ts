@@ -484,8 +484,9 @@ const claimLock = (lock: string, nonce: string): boolean => {
  * together, the check repeats immediately before the write, and the release removes the lock only while
  * the name is still ours.
  *
- * THREE NARROW WINDOWS REMAIN OPEN, all inherent to advisory locking without a compare-and-swap, and
- * all named rather than implied:
+ * FOUR NARROW WINDOWS REMAIN OPEN, all inherent to advisory locking without a compare-and-swap, and
+ * all named rather than implied. Every one of them ends in a REFUSED WRITE or a re-taken lock rather
+ * than in a lost update, which is why the guarantee above is stated about the write:
  *
  *   - the pre-write check is check-then-act. A theft landing between it and `writeOAuthFile` is not
  *     caught.
@@ -493,6 +494,9 @@ const claimLock = (lock: string, nonce: string): boolean => {
  *     an absolute: between reading our own name and removing the file, a thief that broke our lock can
  *     claim it, and we then delete its lock rather than ours. Same third-order reachability as the
  *     first, and the same missing primitive.
+ *   - the STALE BREAK is check-then-act as well. `statSync` reads an age and `rmSync` acts on it, and
+ *     between the two the holder can release and a new one claim — so the breaker can delete a fresh
+ *     live lock it never judged stale. One breaker is enough for this; it needs no race between two.
  *   - a holder paused longer than `LOCK_STALE_MS` has its lock broken and its write refused. The
  *     synchronous signature is what keeps that to a crash rather than to slow work.
  *
