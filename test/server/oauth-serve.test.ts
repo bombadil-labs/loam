@@ -189,6 +189,16 @@ describe("the connector doors ride the login doors", () => {
       expect(code).toBe(2);
       expect(io.err.join("\n")).toMatch(/login doors/);
       expect(io.err.join("\n")).toMatch(/loam user create/);
+
+      // NAMED GAP: this does NOT assert that the refusal gave the store back, and the obvious way to
+      // try is hollow. The refusal happens after the store is open, and re-opening it here passes
+      // whether or not the first handle was released, because sqlite permits concurrent readers on
+      // POSIX — I wrote that assertion, measured it against the unfixed code, and it stayed green.
+      //
+      // What actually proves it is `dropHome` below, ON WINDOWS ONLY: a held directory cannot be
+      // removed there, so a leaked handle fails this test's teardown with EPERM. That is how the leak
+      // was found, and the Windows CI leg is the rail. On POSIX an unlinked open file simply goes when
+      // the process does, so there is nothing here to observe.
     } finally {
       dropHome(bare);
     }

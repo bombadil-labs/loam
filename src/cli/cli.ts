@@ -559,6 +559,10 @@ async function cmdServe(
     const defect = redirectOriginDefect(origin);
     if (defect !== undefined) {
       io.err(`serve: --oauth-allow-redirect ${defect}`);
+      // The store is already open by here, so a refusal has to give it back. On POSIX a leaked handle
+      // is invisible — an unlinked open file just goes when the process does. On Windows the home
+      // cannot be removed at all while it is held, which is how this was found.
+      await gateway.close().catch(() => {});
       return 2;
     }
   }
@@ -567,6 +571,7 @@ async function cmdServe(
       "serve: --oauth-allow-redirect opens the connector doors, and they ride the login doors — the " +
         "consent page asks the operator to sign in. Run `loam user create <name> --operator` first.",
     );
+    await gateway.close().catch(() => {});
     return 2;
   }
   const server = await serve({
