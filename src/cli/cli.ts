@@ -892,15 +892,19 @@ async function cmdArtifact(args: readonly string[], io: IO): Promise<number> {
     io.err(`artifact pack: ${said}`);
     return 2;
   }
-  const out = parsed.flags.get("out");
-  if (out !== undefined) {
-    writeFileSync(out, text, "utf8");
-    io.out(`loam: wrote ${out} (${text.length} bytes)`);
-  }
   const verdict = JSON.parse(text) as {
+    page?: string;
     manifest?: readonly string[];
     capability?: readonly string[];
   };
+  const out = parsed.flags.get("out");
+  if (out !== undefined) {
+    // The PAGE where the door served one, so `--out page.html` is a page rather than a verdict wrapping
+    // one; the whole answer otherwise, so nothing is silently dropped.
+    const bytes = verdict.page ?? text;
+    writeFileSync(out, bytes, "utf8");
+    io.out(`loam: wrote ${out} (${bytes.length} bytes)`);
+  }
   io.out(`  tools: ${(verdict.manifest ?? []).join(", ")}`);
   for (const line of verdict.capability ?? []) io.out(`  ${line}`);
   return 0;

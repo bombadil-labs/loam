@@ -111,7 +111,12 @@ describe("§30 criterion 17: the CLI is a thin client of the door", () => {
     ]);
     expect(err).toEqual([]);
     expect(code).toBe(0);
-    expect(readFileSync(out, "utf8")).toBe(await doorBody("?connector=My+Loam"));
+    // `--out page.html` writes the PAGE, not the envelope carrying it — and the page it writes is the
+    // door's own, byte for byte. A CLI that re-rendered would be a second source of truth about what
+    // gets published.
+    const served = JSON.parse(await doorBody("?connector=My+Loam")) as { page: string };
+    expect(readFileSync(out, "utf8")).toBe(served.page);
+    expect(readFileSync(out, "utf8")).toContain("<!doctype html>");
   });
 
   it("reports the manifest and the capability statement the door derived", async () => {
