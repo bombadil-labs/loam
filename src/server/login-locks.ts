@@ -26,12 +26,9 @@
 // direction here — this file is a work budget, not an authorization surface, and failing closed would
 // hand a local disk fault the power to refuse a correct password.
 //
-// WHAT FAILING OPEN ACTUALLY COSTS, since "fail-open" is easy to read as "degrades a little". It splits
-// by which operation fails, and the read case is the total one:
-//
-// The discriminator is whether the PATH CAN BE REPLACED by a rename — not whether the home is writable,
-// which is the mistake this comment used to make. A directory at the path sits on a perfectly writable
-// home and cannot be replaced at all.
+// WHAT FAILING OPEN ACTUALLY COSTS, since "fail-open" is easy to read as "degrades a little". Three
+// cases, and they differ by whether the PATH CAN BE REPLACED by a rename — not by whether the home is
+// writable. A directory at the path sits on a perfectly writable home and cannot be replaced at all.
 //
 //   - THE FILE CANNOT BE READ AND THE PATH CAN BE REPLACED — damaged bytes, no `users` table, mode 0000,
 //     a dangling symlink. Every name waits zero, and it lasts EXACTLY ONE FAILED LOGIN: the next one
@@ -164,21 +161,37 @@ export function readLocks(home: string): Map<string, FailureRecord> {
  * at all. Anything else that yields no records is: it cannot be read, or its bytes are not a record
  * table, and both mean the door is charging nobody.
  *
- * IT TESTS EXISTENCE WITH `lstatSync`, NOT WITH THE READ'S ERRNO. A read that fails `ENOENT` does not
- * prove nothing is there — a DANGLING SYMLINK reads that way and is very much something. And a read
- * that fails some other errno does not prove something IS there: a home that is a regular file gives
- * `ENOTDIR` for a path that does not exist. So presence is asked directly, and `lstat` rather than
- * `stat` because the link itself is the thing at the path.
+ * IT TESTS EXISTENCE WITH `lstatSync`, NOT WITH THE READ'S ERRNO, and the reason is the DANGLING
+ * SYMLINK: `readFileSync` follows the link and answers `ENOENT`, which is indistinguishable from no
+ * file at all — so a read-errno test calls that healthy and stays silent while the door charges
+ * nobody. `lstat` rather than `stat` for the same reason: the link itself is the thing at the path.
+ * It buys nothing on the other errnos — a home that is a regular file answers `ENOTDIR` to lstat too —
+ * so the wording below never claims the file EXISTS, only that it could not be read.
  */
 export function unreadableRecordFile(home: string): string | undefined {
   const path = locksPath(home);
-  // THE FAULT IS USUALLY TRANSIENT, and the advice has to say so or an operator reads it as a wall.
-  // `readLocks` fails open, so the next failed login writes a whole new table over whatever is there —
-  // which repairs the file and DISCARDS the records nobody could read. Only a path the door cannot
-  // write either (a directory here) survives that. Hedged on writability because this does not test it.
+  // WHAT IT WILL NOT PROMISE. A read fault usually clears itself: `readLocks` fails open, the next
+  // failed login writes a whole new table over the damage, and the records nobody could read are gone
+  // with it. But WHETHER that happens turns on the door's own policy — `maxTracked` below 1 writes no
+  // row at all — and on whether the path can be replaced, and this process was told neither. So it
+  // reports the fault, warns that the bytes are perishable, and names the one thing an operator can act
+  // on. Same discipline as the count-versus-wait split below: state a fact, refuse a guess.
   const soWhat =
-    `The login door reads it the same way, so it is charging no name any delay. The next failed login ` +
-    `replaces the file if it can, and the replacement discards whatever could not be read.`;
+    `The login door reads it the same way, so it is charging no name any delay. A later failed login ` +
+    `may replace this file and discard whatever could not be read: copy it now if those counts matter.`;
+  // THE HOME COMES FIRST, because a MISTYPED `--home` is the likeliest way to reach this function and
+  // the worst one to answer with silence. No home means no record file, which read as "nobody has
+  // failed a login yet" — a tidy exit 0 over a path that holds nothing and never will. And in that
+  // state the door charges nobody AND cannot self-repair, since even the temp file cannot be created.
+  try {
+    lstatSync(home);
+  } catch (err) {
+    return (
+      `${home} is not a directory this command can examine: ` +
+      `${err instanceof Error ? err.message : String(err)}. No login records can live there, so ` +
+      `check the --home path before reading anything into an empty answer.`
+    );
+  }
   try {
     lstatSync(path);
   } catch (err) {

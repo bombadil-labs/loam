@@ -68,7 +68,7 @@
 // unauthenticated login a lever on the server's CPU. So the door caps concurrent hashing globally,
 // and refuses past the cap WITHOUT hashing.
 
-import { chmodSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -929,13 +929,36 @@ describe("the failed-login delay", () => {
     expect(await run(["user", "unlock", "--all", "--home", home], entries.io)).toBe(1);
     expect(entries.err.join("\n")).toMatch(/1 entry that is not a login record/);
     // and the advice names the SELF-REPAIR, because the fault lasts one failed login on a writable home
-    expect(entries.err.join("\n")).toMatch(/next failed login replaces the file/);
+    // and the advice WARNS rather than promising: whether the file is replaced turns on the door's
+    // policy and on the path, neither of which this process was told.
+    expect(entries.err.join("\n")).toMatch(/may replace this file/);
+    expect(entries.err.join("\n")).toMatch(/copy it now/);
 
     // TWO-SIDED: a legitimately EMPTY users table is not damage, and must not be reported as any
     writeFileSync(locksPath(home), JSON.stringify({ users: {} }));
     const empty = testIo();
     expect(await run(["user", "unlock", "--all", "--home", home], empty.io)).toBe(0);
     expect(empty.err.join("\n")).toBe("");
+  });
+
+  it("(o8) a MISTYPED --home is named, not answered with an empty table", async () => {
+    // The likeliest way anybody reaches this code, and the worst one to answer with silence. A home that
+    // does not exist holds no record file, which reads exactly like "nobody has failed a login yet" — so
+    // the command used to print "nothing to clear" and exit 0 over a typo. And that state is the one
+    // (o8) exists for: the door charges nobody there and cannot even self-repair, because the temp file
+    // cannot be created either.
+    const missing = join(home, "no-such-home");
+    const io = testIo();
+    expect(await run(["user", "unlock", "--all", "--home", missing], io.io)).toBe(1);
+    expect(io.err.join("\n")).toMatch(/no-such-home/);
+    expect(io.err.join("\n")).toMatch(/check the --home path/);
+    expect(io.out.join("\n")).not.toMatch(/nothing to clear/);
+
+    // and the per-name path says it too rather than "already waits for nothing"
+    const named = testIo();
+    expect(await run(["user", "unlock", "myk", "--home", missing], named.io)).toBe(1);
+    expect(named.err.join("\n")).toMatch(/check the --home path/);
+    expect(named.out.join("\n")).not.toMatch(/waits for nothing/);
   });
 
   it("(o8) a DANGLING SYMLINK is something at the path, not an absent file", async () => {
@@ -967,7 +990,12 @@ describe("the failed-login delay", () => {
     const after = readLocks(home);
     expect(after.size).toBe(1);
     expect(after.has("attacker")).toBe(true);
-    expect(after.has("victim")).toBe(false); // the unreadable records are GONE, not recovered
+    // AT THE BYTES, because the claim is about bytes. `readLocks` returned nothing BEFORE the write
+    // too, so `has("victim") === false` is satisfied by a table that never had it and by one that
+    // salvaged those bytes under a key `isRecord` rejects — and `unreadableRecordFile` goes silent
+    // either way once one valid row exists. Only reading the file distinguishes discarded from hidden.
+    expect(readFileSync(locksPath(home), "utf8")).not.toContain("victim");
+    expect(after.has("victim")).toBe(false); // and the reader agrees with the bytes
 
     // and the file is healthy again: the count grows from here, and unlock reports no fault
     expect((await missOnce("attacker", 2)).status).toBe(401);
