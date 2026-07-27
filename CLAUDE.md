@@ -501,8 +501,15 @@ busy.
   (Before 0.3.0 these were named `Policy` and `PropPolicy`; older Journal entries use the old
   names — that is historical, don't rewrite them.) The at-rest schema-definition vocabulary is
   `rhizomatic.hyperschema.*`. Don't parallel any of these with near-synonyms.
-- **The poetry is as important as the engineering** — errors, help text, commit messages, and docs
-  are first-class craft. This holds for ticket bodies too: they are the record now.
+- **The poetry is as important as the engineering** — errors, help text, and docs are first-class
+  craft. This holds for ticket bodies too: they are the record now.
+- **TEXT FOR MYK USES STE STYLE** (Myk, 2026-07-26 — a pilot, based on ASD-STE100). The rule
+  covers chat messages to Myk, PR bodies, open questions, the board artifact, journal entries, and
+  commit messages. The rules of the style: write one instruction per sentence; keep sentences at 20
+  words or fewer; use active voice; use simple tenses; use no metaphor; give each word one meaning.
+  Technical names (delta, schema, rail, door, operator) are permitted as domain terms. The SPEC may
+  keep its dense register — but every spec idea must be expressible in STE when you communicate it
+  to Myk. Craft still applies: STE limits the sentence shape, not the care.
 - **Comments explain the code; HISTORY goes in the journal** (Myk, 2026-07-21). A comment answers
   *what will bite whoever changes this next* — a non-obvious substrate behavior, an invariant, why
   not the obvious thing. It does **not** narrate how the code got here: what an audit found, what an
