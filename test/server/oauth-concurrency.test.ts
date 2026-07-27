@@ -213,11 +213,24 @@ describe("(s) the cross-process lock", () => {
   // other's change and silently discard it — and the direction that discards the REVOKE leaves the
   // operator told a connector was closed while its token still opens the door.
   //
-  // WHAT THESE RAILS DO AND DO NOT REACH, said plainly. They drive the lock PRIMITIVE, which is the
-  // fix: a held lock blocks, a stale lock is broken, and no read-modify-write inside it can be
-  // interleaved. They do NOT spawn a second OS process and race it, so a genuine two-process
-  // interleaving is proven by reading `withOAuthFile` rather than by a rail. The rail that would close
-  // that gap forks a child and contends for real; it is not here.
+  // WHAT THESE RAILS REACH, said plainly. The first three drive the lock PRIMITIVE in this process: a
+  // held lock blocks and writes nothing, a stale lock is broken, and a writer whose lock is stolen
+  // refuses instead of overwriting the thief. The fourth SPAWNS A SECOND OS PROCESS and contends for
+  // real, which is the only honest test of a cross-process lock — everything synchronous on one thread
+  // passes whether or not anything locks.
+  //
+  // WHAT THEY DO NOT REACH, two things, both named because a reader will look for them.
+  //
+  // The guarantee here is about the WRITE, not about the callback. A stale-break race can put two
+  // writers inside `work` at once, and only the loser's write is refused; no rail asserts that, because
+  // it is not a property this lock claims. `withOAuthFile`'s docstring says which window stays open and
+  // why closing it needs a compare-and-swap the filesystem does not offer.
+  //
+  // And `claimLock` makes the lock and its owner's name appear in ONE atomic step, by hard-linking from
+  // a temp that already holds the nonce. No rail here can see that: by the time any callback runs, the
+  // name is present either way, so a rail written for it passes against the two-step form it replaced —
+  // measured, not assumed. The property is proven by reading `claimLock`, and the reason it matters is
+  // that every ownership test in that file reads the name.
 
   it("a held lock blocks a second writer rather than letting it overwrite", () => {
     // The discriminating assertion for the lock's existence. Without it, `withOAuthFile` reads and
@@ -287,9 +300,15 @@ describe("(s) the cross-process lock", () => {
     });
     writeOAuthFile(home, readOAuthFile(home));
 
-    // The child takes the lock and HOLDS it for 400ms inside its locked section.
+    // The child takes the lock and HOLDS it for 150ms inside its locked section.
+    //
+    // 150 rather than 400 on purpose: the parent's whole wait budget is LOCK_WAIT_MS (2s) and its clock
+    // starts when it first tries to claim, so the hold plus two fsyncs plus scheduling all have to fit
+    // inside it. A hold near the budget turns a loaded machine into an `OAuthFileBusy`, which is a flake
+    // rather than a finding. 150ms is still two orders of magnitude above the ~microsecond honest hold
+    // this rail is distinguishing from, so the discrimination is unchanged.
     const spawned = new Promise<void>((resolve, reject) => {
-      const proc = spawn(process.execPath, [bundle, home, "child-one", "400"], {
+      const proc = spawn(process.execPath, [bundle, home, "child-one", "150"], {
         stdio: ["ignore", "ignore", "pipe"],
         cwd: process.cwd(),
       });
@@ -302,11 +321,28 @@ describe("(s) the cross-process lock", () => {
     });
 
     // Wait until the child actually holds it, so the parent's acquire genuinely contends.
-    const from = Date.now();
-    while (!existsSync(oauthLockPath(home)) && Date.now() - from < 20_000) {
-      await new Promise((r) => setTimeout(r, 5));
-    }
-    expect(existsSync(oauthLockPath(home))).toBe(true);
+    //
+    // RACED AGAINST THE CHILD'S OWN EXIT. If the child dies before it ever creates the lock, a bare
+    // discovery loop burns its whole timeout, fails on a confusing assertion, and leaves `spawned`
+    // rejecting unawaited — which surfaces as an unhandled rejection attributed to a LATER test. This
+    // way the child's failure is the failure this rail reports.
+    let held = false;
+    await Promise.race([
+      spawned.then(() => {
+        throw new Error("the child finished before the parent ever saw its lock");
+      }),
+      (async () => {
+        const from = Date.now();
+        while (Date.now() - from < 20_000) {
+          if (existsSync(oauthLockPath(home))) {
+            held = true;
+            return;
+          }
+          await new Promise((r) => setTimeout(r, 2));
+        }
+      })(),
+    ]);
+    expect(held).toBe(true);
 
     // The parent's write, issued while the child holds the lock. It must WAIT, not overwrite.
     const waitedFrom = Date.now();
@@ -337,6 +373,28 @@ describe("(s) the cross-process lock", () => {
     expect(ids).toContain("parent-one");
     // And the lock is released rather than left behind by either.
     expect(existsSync(oauthLockPath(home))).toBe(false);
+  });
+
+  it("a writer that did NOT create the lock never enters the callback", () => {
+    // The acquire-side ownership question, from the only angle one process can ask it: a live lock held
+    // by someone else must keep this writer OUT of `work` entirely, not merely refuse its write. A
+    // callback that ran here would have read the file and could have had a side effect.
+    writeOAuthFile(home, readOAuthFile(home));
+    writeFileSync(oauthLockPath(home), "someone-else\n");
+    let entered = false;
+    try {
+      expect(() =>
+        withOAuthFile<undefined>(home, (file) => {
+          entered = true;
+          return { next: file, result: undefined };
+        }),
+      ).toThrow(OAuthFileBusy);
+      expect(entered).toBe(false);
+      // The holder's lock is untouched: a writer that never had it must not release it.
+      expect(readFileSync(oauthLockPath(home), "utf8")).toBe("someone-else\n");
+    } finally {
+      rmSync(oauthLockPath(home), { force: true });
+    }
   });
 
   it("a writer whose lock is STOLEN refuses rather than writing over the thief", () => {

@@ -39,15 +39,17 @@
 // and strands the first — the exact outcome `standing` exists to prevent. Both are H7 at the process
 // layer against criterion (v)'s own promise, so the lock is not an optimisation.
 //
-// The lock is an `O_CREAT|O_EXCL` file, held for the whole read-modify-write, and the callback it wraps
-// is SYNCHRONOUS on purpose: an await inside would hold a cross-process lock across work of unbounded
-// length. The server's ground append therefore happens BETWEEN two locked phases rather than inside
-// one (oauth.ts, `mintToken`).
+// The lock is a hard link whose content names its owner, held across the whole read-modify-write, and
+// the callback it wraps is SYNCHRONOUS on purpose: an await inside would hold a cross-process lock
+// across work of unbounded length. The server's ground append therefore happens BETWEEN two locked
+// phases rather than inside one (oauth.ts, `mintToken`). What is exclusive is the WRITE — see
+// `withOAuthFile` for why that is the honest word, and for what a callback may therefore assume.
 
 import {
   chmodSync,
   closeSync,
   fsyncSync,
+  linkSync,
   openSync,
   readFileSync,
   renameSync,
@@ -385,6 +387,9 @@ export const LOCK_STALE_MS = 30_000;
  */
 const LOCK_WAIT_MS = 2_000;
 
+/** How long a contended writer waits between attempts. */
+const POLL_MS = 25;
+
 /** The lock is held by another process, or was taken from us. Never a licence to write anyway. */
 export class OAuthFileBusy extends Error {}
 
@@ -412,28 +417,64 @@ const lockHolder = (lock: string): string => {
 };
 
 /**
- * Run `work` with `oauth.json` locked against every other process, and write what it returns.
+ * A lock file whose CONTENT is our nonce the instant it appears, or false if someone holds it.
+ *
+ * The nonce is written to a private temp file FIRST and the lock is then hard-linked from it. `link` is
+ * atomic and fails if the target exists, so there is no window in which the lock exists without its
+ * owner's name inside — which is what makes reading the name a sound ownership test everywhere below.
+ * `open(…, "wx")` cannot give that: it creates an EMPTY file, and the write is a second step.
+ */
+const claimLock = (lock: string, nonce: string): boolean => {
+  const temp = `${lock}.${process.pid}-${randomBytes(8).toString("hex")}.claim`;
+  const fd = openSync(temp, "wx", 0o600);
+  try {
+    writeSync(fd, nonce);
+  } finally {
+    closeSync(fd);
+  }
+  try {
+    linkSync(temp, lock);
+    return true;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+    return false;
+  } finally {
+    rmSync(temp, { force: true });
+  }
+};
+
+/**
+ * Run `work` against `oauth.json` and write what it returns, with THE WRITE exclusive against every
+ * other process. Returning `undefined` for `next` reads without writing.
  *
  * `work` is SYNCHRONOUS by signature, and that is the load-bearing part: a lock held across an await is
  * a lock held for an unbounded time, and a caller that needs to await something does it between two
- * calls to this rather than inside one. Returning `undefined` for `next` reads without writing.
+ * calls to this rather than inside one.
  *
- * THE LOCK CARRIES A NONCE, AND THAT IS WHAT MAKES BREAKING A STALE ONE SAFE. Removing a stale lock by
- * PATH cannot be made race-free: two writers can both decide the same lock is stale, and the second
- * `rmSync` then deletes the FIRST one's fresh lock rather than the stale one — after which both are
- * inside `work` at once and every guarantee above is void. `force: true` even swallows the ENOENT that
- * would have hinted at it.
+ * THE GUARANTEE IS ABOUT THE WRITE, NOT ABOUT `work`, and the difference is worth being exact about.
+ * Breaking a stale lock cannot be made race-free by any amount of care: two writers can both decide the
+ * same lock is stale, and the second removal deletes the FIRST one's live lock. Both are then inside
+ * `work` at once. What the nonce prevents is the LOST UPDATE that used to follow — the loser reads back
+ * a name that is not its own and writes nothing.
  *
- * So ownership is proven by CONTENT rather than assumed from a successful create. Each acquire writes a
- * unique nonce and reads it back; a mismatch means another writer took the lock in the window, and this
- * one retries instead of proceeding. The check runs AGAIN immediately before the write, because the
- * theft can land after the first check — and there the answer is to refuse, not to retry, since `work`
- * has already read a file that may since have moved. The release removes the lock only while the nonce
- * is still ours, so a writer that lost the lock cannot delete its successor's.
+ * So a `work` callback must be a pure function of the `file` it is handed. Every one in this repo is,
+ * and a future one that mutates state outside it would run twice on one lock and keep the mutation even
+ * when its write is refused.
+ *
+ * Ownership is proven by CONTENT throughout — `claimLock` makes the lock and its owner's name appear
+ * together, the check repeats immediately before the write, and the release removes the lock only while
+ * the name is still ours, so a writer that lost the lock cannot delete its successor's.
+ *
+ * TWO NARROW WINDOWS REMAIN OPEN, both inherent to advisory locking without a compare-and-swap, and both
+ * named rather than implied:
+ *
+ *   - the pre-write check is check-then-act. A theft landing between it and `writeOAuthFile` is not
+ *     caught. Closing it needs an atomic swap the filesystem does not offer.
+ *   - a holder paused longer than `LOCK_STALE_MS` has its lock broken and its write refused. The
+ *     synchronous signature is what keeps that to a crash rather than to slow work.
  *
  * A lock older than `LOCK_STALE_MS` is broken, because a crashed writer must not wedge the operator out
- * of their own store forever. The trade is real and bounded by the synchronous signature: a hold long
- * enough to be stolen cannot happen without a crash.
+ * of their own store forever.
  */
 export function withOAuthFile<T>(home: string, work: (file: OAuthFile) => OAuthWrite<T>): T {
   const lock = oauthLockPath(home);
@@ -445,51 +486,37 @@ export function withOAuthFile<T>(home: string, work: (file: OAuthFile) => OAuthW
         `if no loam process is running.`,
     );
 
-  for (;;) {
-    // EVERY path through this loop is bounded by the deadline, including the two that retry. An
-    // unbounded retry here is a hot spin on the server's only thread: a dangling SYMLINK at the lock
-    // path is enough — `openSync` fails EEXIST whatever the target, and `statSync` follows it and
-    // throws ENOENT — and the door would then never answer again, with nothing logged.
+  // EVERY path through this loop either makes progress or pauses, and all of them are bounded by the
+  // deadline. An unbounded spin here runs on the server's only thread: a dangling SYMLINK at the lock
+  // path is enough to reach one, since the link fails EEXIST whatever the target while `statSync`
+  // follows it and throws.
+  while (!claimLock(lock, nonce)) {
     if (Date.now() - waitedFrom > LOCK_WAIT_MS) throw busy();
-    let fd: number;
+    let heldSince: number;
     try {
-      fd = openSync(lock, "wx", 0o600);
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-      let heldSince: number;
-      try {
-        heldSince = statSync(lock).mtimeMs;
-      } catch {
-        pause(25); // it went away, or it is a dangling symlink; either way do not spin
-        continue;
-      }
-      if (Date.now() - heldSince > LOCK_STALE_MS) rmSync(lock, { force: true });
-      else pause(25);
+      heldSince = statSync(lock).mtimeMs;
+    } catch {
+      pause(POLL_MS); // it went away, or it is a dangling symlink; either way do not spin
       continue;
     }
-    // Created it. Now PROVE it is ours: a writer that broke a stale lock in this window has deleted
-    // this one and created its own, and its nonce is what a read-back returns.
-    try {
-      writeSync(fd, nonce);
-    } finally {
-      closeSync(fd);
-    }
-    if (lockHolder(lock) !== nonce) continue;
+    // A crashed holder: free it and retry AT ONCE, which is the fastest recovery. At most one
+    // unpaused pass per stale lock — losing that race leaves a fresh holder, and the next pass pauses.
+    if (Date.now() - heldSince > LOCK_STALE_MS) rmSync(lock, { force: true });
+    else pause(POLL_MS);
+  }
 
-    try {
-      const outcome = work(readOAuthFile(home));
-      if (outcome.next !== undefined) {
-        // AGAIN, immediately before the write. The theft can land after the check above, and by then
-        // `work` has read a file that may have moved underneath it — so this refuses rather than
-        // retrying, and writes nothing.
-        if (lockHolder(lock) !== nonce) throw busy();
-        writeOAuthFile(home, outcome.next);
-      }
-      return outcome.result;
-    } finally {
-      // Only while it is still ours: a writer that lost the lock must not delete its successor's.
-      if (lockHolder(lock) === nonce) rmSync(lock, { force: true });
+  try {
+    const outcome = work(readOAuthFile(home));
+    if (outcome.next !== undefined) {
+      // The lock may have been broken while `work` ran, and by now it has read a file that could have
+      // moved underneath it — so this refuses rather than retrying, and writes nothing.
+      if (lockHolder(lock) !== nonce) throw busy();
+      writeOAuthFile(home, outcome.next);
     }
+    return outcome.result;
+  } finally {
+    // Only while it is still ours: a writer that lost the lock must not delete its successor's.
+    if (lockHolder(lock) === nonce) rmSync(lock, { force: true });
   }
 }
 
@@ -518,9 +545,10 @@ export const grantFor = (file: OAuthFile, clientId: string): OAuthGrant | undefi
  *     more forgiving parser than the write path — a damaged neighbour would refuse every write while
  *     still admitting tokens.
  *
- * What it does NOT avoid, said out loud: one `readFileSync` and one `JSON.parse` per presented token.
- * The read is a few microseconds beside the request it serves, and a cache keyed on mtime would be a
- * stale-index trap on the exact table that decides who may write here.
+ * What it does NOT avoid, said out loud: an unknown token still costs one `readFileSync` and one
+ * `JSON.parse`, and a KNOWN one costs two of each — the gate pass plus `readOAuthFile`'s own. Both are
+ * a few microseconds beside the request they serve, and a cache keyed on mtime would be a stale-index
+ * trap on the exact table that decides who may write here.
  */
 export function grantForToken(home: string, digest: string): OAuthGrant | undefined {
   const path = oauthPath(home);

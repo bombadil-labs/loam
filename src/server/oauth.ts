@@ -137,8 +137,10 @@ export interface OAuthDoors {
    * one, and a cached table would keep it open until a restart.
    *
    * It runs for any token the static and session tables declined — which is what an anonymous caller
-   * presents — so it reads through `grantForToken`, which finds the digest first and derives one public
-   * key at most. `readOAuthFile` would derive one per stored grant, per wrong guess.
+   * presents — so it reads through `grantForToken`, which looks the digest up over the token entries
+   * alone. An UNKNOWN token therefore derives no public keys at all. A known one is a real connector and
+   * pays the whole-file read, derivations included, which is what keeps the request path exactly as
+   * strict as the write path.
    */
   identify(digestHex: string): ActorIdentity | undefined;
   /** The `WWW-Authenticate` value every refusal carries — blind to mount, verb and token. */
@@ -527,6 +529,15 @@ export function makeOAuthDoors(deps: OAuthDeps): OAuthDoors {
     type Registered =
       { kind: "ok"; client: OAuthClient } | { kind: "full" } | { kind: "unreadable" };
 
+    // The code sweep happens BEFORE the lock, not inside it. `withOAuthFile`'s callback is allowed to
+    // run twice on one lock — a stale-break race can put two writers in it, and only the loser's WRITE
+    // is refused — so a callback must be a pure function of the file it is handed. Sweeping inside it
+    // would be a mutation that survives a refused write, which is the one shape that guarantee cannot
+    // carry. Lapsed codes must still be swept first, or an expired one keeps pinning its client.
+    const moment = now();
+    for (const [code, held] of codes) if (held.expiresAt <= moment) codes.delete(code);
+    const inFlight = new Set([...codes.values()].map((c) => c.clientId));
+
     const outcome: Registered = await serialized((): Registered => {
       try {
         return withOAuthFile<Registered>(home, (file) => {
@@ -549,15 +560,7 @@ export function makeOAuthDoors(deps: OAuthDeps): OAuthDoors {
           // a pending client. That failure is visible and harmless — the authorize GET then says no such
           // client, so the operator sees a refusal instead of losing a grant — and pinning it would mean
           // trusting an unauthenticated registration to hold a slot, which is the lockout again.
-          //
-          // Lapsed codes are swept FIRST, or an expired one keeps pinning its client until the next
-          // approval happens to sweep it.
-          const moment = now();
-          for (const [code, held] of codes) if (held.expiresAt <= moment) codes.delete(code);
-          const pinned = new Set([
-            ...file.grants.map((g) => g.clientId),
-            ...[...codes.values()].map((c) => c.clientId),
-          ]);
+          const pinned = new Set([...file.grants.map((g) => g.clientId), ...inFlight]);
           let clients = [...file.clients];
           while (clients.length >= maxClients) {
             const oldest = clients
