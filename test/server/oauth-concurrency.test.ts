@@ -287,11 +287,8 @@ describe("(s) the cross-process lock", () => {
     // two of them on one thread cannot interleave. `Promise.all` over them ran the first to completion
     // before the second started, and its assertions held whether or not anything locked at all.
     //
-    // The child is BUNDLED with esbuild rather than run through a TypeScript loader: this repo has no
-    // runtime TS hook, esbuild is already a dependency, and the bundle runs on plain node. Its
-    // dependencies are bundled in rather than left external, because the output lives in the temp home
-    // and node resolves a bare import relative to the importing file — which from there finds no
-    // node_modules at all.
+    // The child is BUNDLED with esbuild: this repo has no runtime TypeScript hook, esbuild is already a
+    // dependency, and the output runs on plain node.
     const entry = fileURLToPath(new URL("./oauth-lock-child.mts", import.meta.url));
     const bundle = join(home, "lock-child.mjs");
     await esbuild.build({
@@ -362,12 +359,14 @@ describe("(s) the cross-process lock", () => {
     // WHAT REPLACES IT IS AN OBSERVATION FROM INSIDE THE CALLBACK, and it needs no clock at all.
     //
     // Serialization means the LATER writer reads the earlier one's finished work. The child claims,
-    // reads, busy-waits, and writes last, releasing only after that — so a parent that genuinely waited
-    // must find `child-one` already in the file. A parent that did NOT wait reads a snapshot from before
-    // the child's write, and then its own write drops that row.
+    // reads, busy-waits, and writes LAST, releasing only after that — so a parent that genuinely waited
+    // must find `child-one` already in the file.
     //
-    // So this assertion and the two below fail in opposite directions on the same defect, which is what
-    // makes the pair honest: with exclusion removed, this one sees no child row AND `toContain` loses it.
+    // WHICH ROW GOES MISSING WITHOUT THE LOCK, traced rather than guessed: the parent enters at once and
+    // writes immediately, and the child then writes at the end of its hold, spreading the snapshot it
+    // read before `parent-one` existed. So `parent-one` is the row that disappears and `child-one`
+    // survives — which is why the assertion below is about the child's row being ALREADY THERE, and why
+    // that is the one that speaks first. `toContain("child-one")` would still pass.
     let sawChildAlready = false;
     withOAuthFile<undefined>(home, (file) => {
       sawChildAlready = file.clients.some((c) => c.clientId === "child-one");
@@ -390,10 +389,11 @@ describe("(s) the cross-process lock", () => {
     });
     await spawned;
 
-    // THE PARENT REALLY WAITED: its callback read a file the child had already finished writing.
+    // THE PARENT REALLY WAITED: its callback read a file the child had already finished writing. This is
+    // the assertion that catches a missing lock most directly.
     expect(sawChildAlready).toBe(true);
-    // And BOTH writes survived. Without the lock the parent spreads a snapshot taken before the child's
-    // write, and `child-one` is the row that disappears.
+    // And BOTH writes survived. Without the lock the child writes last and spreads a snapshot taken
+    // before the parent's write, so `parent-one` is the row that disappears.
     const ids = readOAuthFile(home).clients.map((c) => c.clientId);
     expect(ids).toContain("child-one");
     expect(ids).toContain("parent-one");
@@ -466,6 +466,11 @@ describe("a lock the door cannot take", () => {
   // flag — and both of these doors are unauthenticated and answer with `access-control-allow-origin: *`.
   // So the caller gets a fixed string and the operator gets the detail, which is the same split every
   // other local fault in §37 makes.
+  //
+  // WHICH CLASS THESE RAILS REACH: `OAuthFileBusy` only. Pre-creating the lock is the one way a real
+  // filesystem produces a contended claim, and every rail below induces it that way. The unsupported
+  // -filesystem class needs `linkSync` to fail some other way, which no filesystem state can arrange —
+  // `oauth-lock-unsupported.test.ts` mocks it in its own file and asserts the door's answer there.
 
   it("(u) tells the caller nothing about the home, and tells the operator everything", async () => {
     // Induced by holding the lock from outside: the door waits its budget, gives up with
@@ -480,6 +485,10 @@ describe("a lock the door cannot take", () => {
       // THE CALLER LEARNS NOTHING. Not the home, not the lock's path, not a flag to probe.
       expect(body).not.toContain(home);
       expect(body).not.toContain("oauth.json");
+      // These two describe strings only the OTHER lock class can produce, and this fixture reaches
+      // `OAuthFileBusy` alone — `oauth-lock-unsupported.test.ts` induces the unsupported-filesystem
+      // class and asserts the door's answer for it. Kept here because they cost nothing and a future
+      // catch site that folded the two together would be caught by whichever rail ran first.
       expect(body).not.toContain("oauth-allow-redirect");
       expect(body).not.toContain("hard link");
       // and it does say the true thing, so the refusal is not merely opaque

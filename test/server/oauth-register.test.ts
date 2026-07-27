@@ -319,9 +319,10 @@ describe("POST /oauth/register", () => {
 
         // CONFIRM THE BURN rather than sleeping and hoping. A second redemption of the same code is
         // refused with a message only a SPENT code produces, and that path returns before it touches the
-        // queue — so the probe is inert once the burn has happened. If the burn has NOT happened, the
-        // probe spends the code itself and fails at PKCE, which turns this rail RED at step 4 rather than
-        // letting it pass having proved nothing. A silent false pass was the shape to avoid.
+        // queue — so the probe is inert once the burn has happened.
+        //
+        // If the burn has NOT happened the probe spends the code itself, and that is DETECTED below
+        // rather than left to surface as a confusing 400 three assertions later.
         const burnedFrom = Date.now();
         let burned = false;
         while (!burned && Date.now() - burnedFrom < 20_000) {
@@ -333,6 +334,17 @@ describe("POST /oauth/register", () => {
             code_verifier: "not-the-verifier-this-code-was-minted-against",
           });
           const why = probe.body["error_description"];
+          // THE PROBE MUST NOT WIN THE RACE. Both requests ride their own socket, so under load the
+          // probe can reach the burn first — it then spends the code itself and answers the PKCE
+          // message, and the NEXT probe would see an empty slot and report a burn the probe caused. The
+          // victim's request then answers 400, and the assertion at the end fails under a banner
+          // describing a defect that did not happen. So the race is named where it occurs.
+          if (typeof why === "string" && /code_verifier does not match/.test(why)) {
+            throw new Error(
+              "the probe beat the victim to the burn, so this rail never reached its window — " +
+                "nothing here is proven or disproven about the pin",
+            );
+          }
           burned = typeof why === "string" && /not one this store is holding/.test(why);
           if (!burned) await new Promise((r) => setTimeout(r, 5));
         }

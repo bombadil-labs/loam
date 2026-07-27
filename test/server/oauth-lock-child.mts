@@ -5,7 +5,9 @@
 // revoke is synchronous throughout, so two of them on one thread can never interleave: a rail that
 // runs both here passes whether or not anything locks, which is exactly the hollow shape.
 //
-// Run as: node --import tsx oauth-lock-child.mts <home> <clientId> <holdMs>
+// NOT RUN DIRECTLY. `oauth-concurrency.test.ts` bundles this with esbuild and spawns the bundle on
+// plain node: `node <bundle> <home> <clientId> <holdMs>`. This repo has no runtime TypeScript hook,
+// so there is no invocation of this path itself that works.
 //
 // It registers one client under the lock, busy-waits inside the locked section so the parent's own
 // acquire genuinely overlaps it, and exits 0. A busy wait rather than a sleep because the callback is
