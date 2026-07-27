@@ -212,6 +212,7 @@ export {
   type PackArtifactOptions,
   type PackedArtifact,
 } from "./gateway/artifact.js";
+export { artifactPage, bundleFromPage, coordinatesFromPage } from "./gateway/artifact-page.js";
 export {
   CTX_RENDERER,
   parseReadGesture,

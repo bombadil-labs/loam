@@ -1,0 +1,14 @@
+{
+  "body": "FOUND BY T79's P5 rounds and carried in #271's body, source comment, and test header rather than fixed. An artifact page reads a drilled-down entity. An erasure that names that entity removes its deltas, but a reading rooted at the UNTOUCHED root still assembles a view containing the drilled-down values. So the page keeps showing what the store was told to forget.\n\nTwo closures, and BOTH change what §30 promises rather than repairing a stated promise: (a) widen the purge so an erasure at any entity reaches every reading that drills into it — this WIDENS WHAT GETS PURGED, so it is Myk's merge by standing rule and its PR must state in one line what can now be deleted that could not before; (b) keep the purge as it is and narrow §30's claim, naming the drill-down as an explicit limit the spec does not cover. Recommend (b) first because it is the honest-report direction and self-mergeable, then (a) as a separate decision with Myk's word.\n\nMyk merged #271 on 2026-07-27 with the question open and explicitly routed it here.\n\nEvery rail is TWO-SIDED: the drilled-down value is gone from the page AND a named live bystander at the same root still renders. A rail that only proves removal cannot see over-purging.",
+  "edges": [],
+  "id": "T115",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "src/gateway/",
+    "test/gateway/",
+    "spec/30-artifacts.md"
+  ],
+  "status": "todo",
+  "title": "An erasure at a drilled-down entity survives when the root is untouched — §30 promises more than it keeps"
+}

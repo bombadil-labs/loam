@@ -29,6 +29,7 @@
 
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import type { Claims, Reactor } from "@bombadil/rhizomatic";
+import { artifactPage } from "./artifact-page.js";
 import { HOST_GLOBALS, scanHostReferences } from "./artifact-scan.js";
 import type { Gateway, RequestContext } from "./gateway.js";
 import { RENDER_TIMEOUT_MS } from "./render-worker.js";
@@ -249,10 +250,11 @@ export interface PackArtifactOptions {
   readonly refetchInterval?: number;
 }
 
-// WHAT THIS DOOR ANSWERS: whether a route may be published, and what a page emitted from it would be
-// permitted to do. Not the page. The emission is a separate concern that consumes exactly this, and
-// keeping them apart is what lets the decisions be read without the markup.
+// WHAT THIS DOOR ANSWERS: whether a route may be published, what a page emitted from it is permitted to
+// do — and now the page itself, emitted from exactly those coordinates. The verdict stayed separable from
+// the emission through the whole build, which is why every decision above could be read without markup.
 export interface PackedArtifact {
+  readonly page: string;
   readonly coordinates: ArtifactCoordinates;
   readonly capability: readonly string[];
   readonly manifest: readonly string[];
@@ -410,7 +412,12 @@ export function packArtifactImpl(
     refetchInterval: Math.max(opts.refetchInterval ?? DEFAULT_REFETCH_MS, DEFAULT_REFETCH_MS),
     renderTimeoutMs: gw.options.renderTimeoutMs ?? RENDER_TIMEOUT_MS,
   };
-  return { coordinates, capability, manifest };
+  return {
+    page: artifactPage({ coordinates, binding, capability }),
+    coordinates,
+    capability,
+    manifest,
+  };
 }
 
 // Every pen name this gateway holds a seed for. The pack-time source check is a substring against THESE

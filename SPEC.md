@@ -60,6 +60,7 @@ name begins with that number.
 | §28 | [Trust is a property of a container — admission delegates, effectiveness attenuates](spec/28-container-trust.md) *(design-stage draft)* |
 | §29 | [Two-phase erasure — slating, the cut, and the graveyard](spec/29-slating-and-graveyards.md) |
 | §31 | [The mount table — which world answers at a name, asked per request](spec/31-mount-table.md) |
+| §34 | [The board — our status page as a Loam app](spec/34-the-board.md) |
 
 _**§21**, **§22**, **§25**, and **§26** are **landed** — design accepted and implemented (see each
 Provenance footer; §21.7's coexistence design is accepted with its implementation queued as ticket T2).

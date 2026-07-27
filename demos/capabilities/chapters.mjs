@@ -1045,7 +1045,7 @@ export const CHAPTERS = [
     title: "Apps are deltas",
     thesis:
       "A page and a background function are records in the store like any other — push them and the store serves them, with no build step, no deploy, and no key handed to the code.",
-    covers: ["spec/06-functions-runner.md", "spec/23-renderers.md"],
+    covers: ["spec/06-functions-runner.md", "spec/23-renderers.md", "spec/34-the-board.md"],
     body: [
       {
         kind: "prose",
@@ -1062,6 +1062,10 @@ export const CHAPTERS = [
       {
         kind: "prose",
         text: "Running somebody's code is a risk, and the honest summary is that Loam bounds the accidents and not yet the malice. A bundle that hangs, throws, or eats memory becomes a clean failure that leaks nothing of its internals, and it cannot wedge the server. A bundle that deliberately reaches for the filesystem or the network is not yet stopped — which is exactly why the [[quarantine]] exists, and why this is stated here rather than buried.",
+      },
+      {
+        kind: "prose",
+        text: "And it is not hypothetical: the team's own status board is a Loam app (§34) — one boot script over an empty home lands the vocabulary, the grants, the [[renderer]], and the tokenless-read declaration in a single run, and from then on every board event is one signed claim from whoever reported it. The claude.ai artifact people read on their phones is generated from the store's own view, so it cannot disagree with the board.",
       },
       {
         kind: "claims",
@@ -1101,6 +1105,18 @@ export const CHAPTERS = [
             spec: "spec/23-renderers.md",
             proof: "test/server/byte-door-http.test.ts",
             door: "serve",
+          },
+          {
+            says: "One run of a boot script over an empty home stands a whole application up — vocabulary, a granted writer, the page, the open door — and a re-run re-expresses law that differs instead of deferring to it.",
+            spec: "spec/34-the-board.md",
+            proof: "test/board/board-boot.test.ts",
+            door: "Gateway",
+          },
+          {
+            says: "A retracted claim vanishes from the app's public page and its collection view — striking one item's status or membership never touches a live neighbor.",
+            spec: "spec/34-the-board.md",
+            proof: "test/board/board-render.test.ts",
+            door: "publicClaims",
           },
         ],
       },
