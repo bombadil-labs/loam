@@ -7,17 +7,18 @@ lock is an off switch a stranger can pull — anyone who knows a username could 
 of their own store. So each failure for a name makes the next attempt for that name wait longer, up
 to a cap, and the door always admits a correct password. Criteria (o) and (p) below are T116's.
 
-**The cost, named — three parts, and only the first is bounded.**
+**The cost, named — three parts, and none of them is a bound to lean on.**
 
 1. A caller who grinds the operator's username makes the operator's own login slow, up to the cap,
    once per login. Slow is not shut, and that is the whole trade.
-2. A waiting attempt spends no hash budget. That is what criterion (o3) proves, and it is the whole
-   claim: a flood against one name cannot draw a 503 for another name. It does NOT follow that the
-   flood is harmless. Nothing caps how many attempts may be waiting at once, and no such cap is safe
-   — refusing past one is the lockout again, and serving past one without the wait is free guessing.
-   So each waiting attempt pins one socket on the shared `node:http` server for up to `maxDelayMs`,
-   and a caller holding enough sockets exhausts descriptors for every door. That exposure is
-   unbounded here and is not railed.
+2. A waiting attempt spends no hash budget WHILE IT WAITS, so another name gets in during the wait.
+   That is all criterion (o3) proves, and the stronger reading is false: the waits then elapse
+   together, the flood spends the whole hash budget at once, and a name arriving in that window is
+   refused with 503. Login is deliberately degradable under a flood, and it still is. A waiting
+   attempt also pins one socket on the shared `node:http` server for up to `maxDelayMs`, and a caller
+   holding enough sockets exhausts descriptors for every door. Nothing caps how many attempts may
+   wait at once, and no such cap is safe — refusing past one is the lockout again, and serving past
+   one without the wait is free guessing. That exposure is unbounded here and is not railed.
 3. The delay bounds a SERIAL guesser only. Waits do not serialize — the pre-compare read is advisory
    and the wait is a bare timer with no per-name queue — so a caller holding many connections has all
    their waits elapse together, and their rate is the concurrent-hash cap divided by one hash. That
@@ -162,8 +163,12 @@ may do.
   the next attempt is charged for all four — `test/server/login-limit.test.ts`
 - (o5) A wall clock stepped BACKWARDS cannot erase an accumulated wait, and silence past the forget
   window does clear one — `test/server/login-limit.test.ts`
-- (o6) The record file holds no more than `maxTracked` rows, and a flood of fresh names cannot flush
-  a record that holds more failures — `test/server/login-limit.test.ts`
+- (o6) The record file holds no more than `maxTracked` rows, a flood of fresh names cannot flush a
+  record that holds more failures, and MATCHING a record's count does not evict it — ties take the
+  newest — `test/server/login-limit.test.ts`
+- (o7) BOTH writes to the record file fail open: a home the door cannot write leaves a failed attempt
+  answering 401 rather than 503, and still admits a correct password, reporting the fault to the
+  operator's channel instead of the caller — `test/server/login-limit.test.ts`
 - (p) `loam user unlock <name>` clears that name's accumulated wait from the box, `--all` clears every
   record whatever name it holds, and the report names the COUNT rather than a wait the CLI's process
   cannot know — `test/server/login-limit.test.ts`

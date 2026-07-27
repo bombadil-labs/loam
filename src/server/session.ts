@@ -315,9 +315,12 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
   // promises cannot happen. The fault goes to the operator's own channel, where a local condition
   // belongs, and the caller's answer does not move.
   //
-  // What failing open costs: the count does not grow, so a guesser is not charged for that attempt.
-  // A disk the server cannot write is not a state a caller can reach, and the alternative is handing
-  // a disk fault the power to shut the login door.
+  // WHAT FAILING OPEN COSTS, stated so nobody has to derive it: on a home this process cannot write,
+  // THE LIMITER IS GONE. Not weakened — gone. No count grows, so every attempt for every name waits
+  // zero, and the only ceiling left is the concurrent-hash cap. That is the chosen direction, because
+  // the alternative hands a local disk fault the power to shut the login door, and a caller cannot
+  // reach this state anyway. The operator hears it on every attempt through `onFault`, which is the
+  // signal that the box needs attention rather than the door.
   const recordFailure = (user: string): void => {
     try {
       noteFailure(options.home, user, Date.now(), limit);

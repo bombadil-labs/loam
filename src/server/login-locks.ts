@@ -68,10 +68,11 @@ export const DEFAULT_LIMIT: LimitPolicy = {
   // this number. Dividing one second by the cap gives 0.2 attempts per second and is wrong by orders
   // of magnitude against a caller who opens more than one connection.
   //
-  // That is not a hole this constant can close. A per-name queue would let a caller who keeps
-  // failing extend an honest attempt without limit, which is the lockout again. So the delay taxes
-  // the cheap serial attack, the hash cap bounds the parallel one, and neither pretends to be the
-  // other.
+  // That is not a hole this constant can close. A per-name queue would let a caller who keeps failing
+  // extend an honest attempt without limit, which is the lockout again. So the delay taxes a serial
+  // guesser AGAINST ONE NAME, the hash cap bounds the parallel one, and neither pretends to be the
+  // other. Even the serial claim assumes the target's row stays in the table — see `noteFailure` on
+  // what displacing it costs, because that cost is the only thing making this number mean anything.
   maxDelayMs: 5_000,
   forgetMs: 900_000,
   // Small ON PURPOSE: every failed attempt reads and rewrites this file whole, and an unauthenticated
@@ -216,20 +217,28 @@ export const delayMs = (home: string, name: string, now: number, policy: LimitPo
  * SPENT RECORDS ARE PRUNED. A failed attempt is recorded for any well-formed name, existing or not, so
  * a caller walking names would otherwise add a row per attempt forever.
  *
- * And past `maxTracked` the WEAKEST records are evicted to make room — fewest failures, and the
- * NEWEST among equals. Nothing in this file can refuse a login, so an eviction can never be an off
- * switch; the most it can hand back is a wait.
+ * And past `maxTracked` the WEAKEST records are evicted to make room — fewest failures, and the OLDEST
+ * among equals. Nothing in this file can refuse a login, so an eviction can never be an off switch;
+ * the most it can hand back is a wait.
  *
- * BOTH HALVES OF THAT ORDER ARE LOAD-BEARING. Fewest-failures means a caller must out-count a row to
- * displace it. Newest-among-equals means they must strictly EXCEED it: tie-break the other way and
- * merely matching a count evicts the older row, which is always the established one rather than the
- * flood's. So displacing a name with F failures costs F failures on every other row, and each of
- * those costs a hash the door's own cap rations.
+ * FEWEST-FAILURES IS THE LOAD-BEARING HALF. A row is only displaced by rows that out-count it, so
+ * keeping a name's row out of the table costs a caller F failures on EVERY other row, each paying its
+ * own delay and each spending a hash the door's cap rations. The price of displacement scales with
+ * what the defence is worth, which is the property to preserve in any future change here.
  *
- * What the theft buys even then is about one attempt, because a wait rebuilds on the very next
- * failure — there is no expiry here for a flood to steal. What it does NOT cost is F rounds of
- * waiting: waits do not serialize across names, so the wall-clock price is the hash cap's, not the
- * delay's. Do not read that sentence as a serial cost; see DEFAULT_LIMIT on the same confusion.
+ * OLDEST-AMONG-EQUALS IS NOT A COIN FLIP, and the other direction is a trap worth naming. A row is
+ * seated at ONE failure, so it is always the newest of the one-failure rows. Evict the newest of an
+ * equal count and a caller keeping the table full of fresh names flushes any target's row with ONE
+ * extra undelayed request, every round — the target's count never reaches two, and the delay is zero
+ * forever for exactly the name somebody is attacking. Oldest-among-equals leaves a newly seated row
+ * the LAST of its count to go, so it survives to accumulate. Measured both ways: newest-first charged
+ * a targeted name 0ms on six consecutive rounds, oldest-first charged it 0, 250, 500, 1000, 2000,
+ * 4000.
+ *
+ * What an eviction takes even so is about one attempt, because a wait rebuilds on the very next
+ * failure — there is no expiry here for a flood to steal. And the cost it imposes is NOT F rounds of
+ * waiting: waits do not serialize across names, so the wall-clock price is the hash cap's rather than
+ * the delay's. See DEFAULT_LIMIT on the same confusion.
  */
 export function noteFailure(home: string, name: string, now: number, policy: LimitPolicy): void {
   const locks = readLocks(home);
@@ -241,7 +250,7 @@ export function noteFailure(home: string, name: string, now: number, policy: Lim
     // Weakest first, and ENOUGH OF THEM that one new row still fits: a policy narrowed since the last
     // write can leave the table over its own bound, and evicting a single row would never catch up.
     const weakest = [...locks].sort(
-      ([, a], [, b]) => a.failures - b.failures || b.lastFailureAt - a.lastFailureAt,
+      ([, a], [, b]) => a.failures - b.failures || a.lastFailureAt - b.lastFailureAt,
     );
     for (const [held] of weakest.slice(0, locks.size - policy.maxTracked + 1)) locks.delete(held);
   }
