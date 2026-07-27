@@ -967,11 +967,17 @@ describe("the failed-login delay", () => {
   it.skipIf(process.platform === "win32")(
     "(o8) an UNUSABLE HOME is named, whatever shape makes it unusable",
     () => {
-      // FIVE SHAPES, and the reason this rail exists as a table rather than one case: the check has been
-      // wrong twice, each time on a shape the previous version did not consider. `lstat` alone misses a
-      // DANGLING home — it succeeds on the link — and `lstat().isDirectory()` would condemn a HEALTHY
-      // symlinked home, which is the trap in the one-token fix. Only `stat().isDirectory()` separates all
-      // five, so all five are asserted here together.
+      // A TABLE RATHER THAN ONE CASE, because this check has now been wrong three times, each time on a
+      // shape the previous version did not consider. `lstat` alone misses a DANGLING home — it succeeds
+      // on the link. `lstat().isDirectory()` would condemn a HEALTHY symlinked home, the trap in the
+      // one-token fix. And `isDirectory` alone says yes to a mode-0000 home, because `stat` needs only a
+      // traversable parent. So every shape is asserted here together, healthy ones included.
+      //
+      // FUNCTION LEVEL ONLY, and named per the both-levels rule: this calls `unreadableRecordFile`
+      // directly, while criterion (o8) is a claim about what `loam user unlock` PRINTS and EXITS. The
+      // sibling `(o8) a MISTYPED --home` rail carries the CLI level for one shape — exit code, stdout and
+      // stderr through `run` — and the shapes here share that one code path, so the levels meet there
+      // rather than being asserted per shape twice.
       const root = makeHome();
       try {
         const real = join(root, "real");
@@ -991,18 +997,23 @@ describe("the failed-login delay", () => {
         expect(unreadableRecordFile(link)).toBeUndefined();
 
         // UNUSABLE: each named, and each says it is the HOME rather than the record file.
-        for (const [label, path] of [
-          ["dangling", dangling],
-          ["file", asFile],
-          ["missing", missing],
+        // EACH SHAPE GETS THE CURE THAT APPLIES TO IT. One unconditional pair of cures was wrong for
+        // most of these: a dangling home was typed correctly and `loam init` is not its fix, and an
+        // unreachable home is neither a typo nor a missing init. So the cure is asserted per shape.
+        for (const [label, path, cure] of [
+          ["missing", missing, /Check the --home path if you passed one, or run `loam init`/],
+          ["dangling", dangling, /Repair or remove the link/],
+          ["file", asFile, /a loam home is a directory/],
         ] as const) {
           const said = unreadableRecordFile(path);
           expect(said, label).toMatch(/is not a usable loam home/);
-          expect(said, label).toMatch(/Check the --home path if you passed one/);
-          expect(said, label).toMatch(/loam init/); // the first-run reader has a cure too
+          expect(said, label).toMatch(cure);
           // and NOT the record-file advice: there are no bytes here to be perishable
           expect(said, label).not.toMatch(/copy it now/);
         }
+        // the two shapes `stat` reports identically are told apart, and only ONE is offered `loam init`
+        expect(unreadableRecordFile(dangling)).toMatch(/symlink whose target is gone/);
+        expect(unreadableRecordFile(dangling)).not.toMatch(/loam init/);
         // the file-valued home names WHY, rather than only that something went wrong
         expect(unreadableRecordFile(asFile)).toMatch(/it is not a directory/);
 
@@ -1016,6 +1027,8 @@ describe("the failed-login delay", () => {
           const said = unreadableRecordFile(sealed);
           expect(said).toMatch(/is not a usable loam home/);
           expect(said).not.toMatch(/copy it now/); // never the record-file advice
+          expect(said).toMatch(/cannot traverse into it/); // and its own cure, not a typo hunt
+          expect(said).not.toMatch(/loam init/);
         } finally {
           chmodSync(sealed, 0o700);
         }

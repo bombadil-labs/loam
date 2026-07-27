@@ -29,7 +29,8 @@
 // WHAT FAILING OPEN ACTUALLY COSTS, since "fail-open" is easy to read as "degrades a little". TWO AXES,
 // not one — can the file be READ, and can the path be REPLACED — and neither implies the other. A
 // directory at the path is unreplaceable on a perfectly writable home (EISDIR); a read-only home is
-// unreplaceable with nothing wrong with the path (EACCES). The three reachable combinations:
+// unreplaceable with nothing wrong with the path (EACCES). The fourth combination is the ordinary
+// healthy state, so these are the three FAULTY ones:
 //
 //   - THE FILE CANNOT BE READ AND THE PATH CAN BE REPLACED — damaged bytes, no `users` table, mode 0000,
 //     a dangling symlink. Every name waits zero, and it lasts EXACTLY ONE FAILED LOGIN: the next one
@@ -165,12 +166,22 @@ export function readLocks(home: string): Map<string, FailureRecord> {
  * at all. Anything else that yields no records is: it cannot be read, or its bytes are not a record
  * table, and both mean the door is charging nobody.
  *
- * IT TESTS EXISTENCE WITH `lstatSync`, NOT WITH THE READ'S ERRNO, and the reason is the DANGLING
- * SYMLINK: `readFileSync` follows the link and answers `ENOENT`, which is indistinguishable from no
- * file at all — so a read-errno test calls that healthy and stays silent while the door charges
- * nobody. `lstat` rather than `stat` for the same reason: the link itself is the thing at the path.
- * It buys nothing on the other errnos — a home that is a regular file answers `ENOTDIR` to lstat too —
- * so the wording below never claims the file EXISTS, only that it could not be read.
+ * TWO SUBJECTS, TWO DIFFERENT CALLS, and they are opposites on purpose:
+ *
+ *   - THE HOME is asked with `stat().isDirectory()` plus a traversal check. What matters is the RESOLVED
+ *     target, so a symlinked home on a removed volume reads as broken while a healthy symlinked one
+ *     reads as fine. See the body for why `lstat` cannot do this job and why the access mask is `X_OK`
+ *     and not `W_OK`.
+ *   - THE RECORD FILE is asked with `lstatSync`, NOT with the read's errno, and the reason is the
+ *     DANGLING SYMLINK: `readFileSync` follows the link and answers `ENOENT`, indistinguishable from no
+ *     file at all, so a read-errno test would call that healthy and stay silent while the door charges
+ *     nobody. `lstat` because the link ITSELF is the thing at the path. It buys nothing on the other
+ *     errnos, so the wording never claims the file EXISTS, only that it could not be read.
+ *
+ * NEITHER CALL IS ATOMIC WITH WHAT FOLLOWS IT. A home removed between the two checks returns undefined
+ * and prints the silent-clean answer this function exists to prevent. The window is microseconds, no
+ * caller can steer it, and the cost is one misleading CLI line rather than any door behaviour — recorded
+ * rather than closed.
  */
 export function unreadableRecordFile(home: string): string | undefined {
   const path = locksPath(home);
@@ -200,25 +211,64 @@ export function unreadableRecordFile(home: string): string | undefined {
   // would then offer perishable-bytes advice for a file that can never exist there. So traversal is
   // asked too. X_OK, NOT W_OK: a read-only home is a SUPPORTED state with its own criterion, where a
   // row stays frozen at its accumulated wait, and demanding write here would condemn it.
-  let why: string | undefined;
-  try {
-    if (!statSync(home).isDirectory()) why = "it is not a directory";
-    else accessSync(home, constants.X_OK);
-  } catch (err) {
-    why = err instanceof Error ? err.message : String(err);
-  }
-  if (why !== undefined) {
-    // TWO CURES, because the default home reaches this too — on a box where nobody has run `loam init`,
-    // a reader who passed no flag would hunt for a typo they never made. And NOTHING about perishable
-    // bytes: there is no record file here and never was, so the advice below would describe a
-    // replacement that can never happen.
-    //
-    // The path is shown as `(empty)` when it is the empty string, or the sentence opens on nothing at
-    // all — `--home ""` reaches this, since `??` only defaults away null and undefined.
+  // THE CURE IS PER FAULT, never one pair of cures for all of them. "Check --home or run `loam init`"
+  // is right for a path that does not exist and WRONG for most of the rest: an EACCES home was typed
+  // correctly, exists, and may hold a real record file, so that advice sends an operator hunting for a
+  // mistake they did not make. `stat` also collapses two opposite shapes onto one ENOENT — a dangling
+  // symlink and nothing at all — so `lstat` is asked to tell them apart, which is the one thing it is
+  // good for here.
+  const defect = ((): { why: string; cure: string } | undefined => {
+    let stats;
+    try {
+      stats = statSync(home);
+    } catch (err) {
+      const why = err instanceof Error ? err.message : String(err);
+      const code = (err as { code?: string }).code;
+      if (code === "ENOENT") {
+        let atPath = false;
+        try {
+          lstatSync(home);
+          atPath = true;
+        } catch {
+          /* nothing at the path at all, not even a link */
+        }
+        return atPath
+          ? {
+              why: `it is a symlink whose target is gone (${why})`,
+              cure: "Repair or remove the link.",
+            }
+          : {
+              why,
+              cure: "Check the --home path if you passed one, or run `loam init` if this home was never made.",
+            };
+      }
+      if (code === "ELOOP") return { why, cure: "Repair or remove the symlink at that path." };
+      return { why, cure: "Check the --home path, and this command's permission to reach it." };
+    }
+    if (!stats.isDirectory()) {
+      return {
+        why: "it is not a directory",
+        cure: "Check the --home path: a loam home is a directory.",
+      };
+    }
+    try {
+      accessSync(home, constants.X_OK);
+    } catch (err) {
+      return {
+        why: err instanceof Error ? err.message : String(err),
+        cure: "This command cannot traverse into it: fix the directory's permissions.",
+      };
+    }
+    return undefined;
+  })();
+  if (defect !== undefined) {
+    // NOTHING ABOUT PERISHABLE BYTES: there is no reachable record file here, so the advice below would
+    // describe a replacement that cannot happen. The path shows as `(empty)` when it is the empty
+    // string, or the sentence opens on nothing at all — `--home ""` reaches this, since `??` only
+    // defaults away null and undefined.
     return (
-      `${home === "" ? "(empty)" : home} is not a usable loam home: ${why}. No login records can live ` +
-      `there, so do not read an empty answer as a clean one. Check the --home path if you passed one, ` +
-      `or run \`loam init\` if this home was never made.`
+      `${home === "" ? "(empty)" : home} is not a usable loam home: ${defect.why}. No login records ` +
+      `can live there, so do not read an empty answer as a clean one. ${defect.cure}`
     );
   }
   try {

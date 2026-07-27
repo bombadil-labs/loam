@@ -200,8 +200,10 @@ may do.
   operator's channel instead of the caller. It does NOT keep the limiter working — a count already on
   disk still charges its own accumulated wait, up to the cap, and can no longer grow OR be cleared, so
   it stands until `forgetMs` of silence; and a record file that cannot be READ charges every name
-  nothing, self-repairing on the next failed login WHERE THE PATH CAN BE REPLACED — a directory at it
-  cannot, however writable the home — and discarding the records nobody could read —
+  nothing, self-repairing on the next failed login WHERE THE PATH CAN BE REPLACED and discarding the
+  records nobody could read. Readability and replaceability are independent: a directory at the path is
+  unreplaceable on a writable home (EISDIR), and damaged bytes on a home this process cannot write are
+  unreplaceable with nothing wrong with the path (EACCES). Neither self-repairs —
   `test/server/login-limit.test.ts`
 - (o8) `loam user unlock` never reports an empty answer as a clean one. An ABSENT record file on a usable
   home reports an empty table and exits 0. An UNREADABLE file names the fault, says the door is charging
