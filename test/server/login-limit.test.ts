@@ -27,6 +27,7 @@ import {
   type Served,
 } from "./user-fixture.js";
 import { run } from "../../src/cli/cli.js";
+import { lockedMs } from "../../src/server/login-locks.js";
 
 vi.setConfig({ testTimeout: 30000 });
 
@@ -144,6 +145,25 @@ describe("the failed-login limiter", () => {
     expect((await missOnce("myk", 3)).status).toBe(429);
     await new Promise((resolve) => setTimeout(resolve, 250));
     expect((await tryPassword("myk", PASSWORD)).status).toBe(200);
+  });
+
+  // A correct password is what `loam user unlock` prints as the ordinary cure, so the count must
+  // reset on success. Without this, four misses then a good login then one miss locks the operator
+  // out — and every other rail here stays green, because none of them ever passes mid-count.
+  it("(o) a successful login clears the count: the next miss starts from one", async () => {
+    served = await serveHome(home, {
+      limit: { maxFailures: 5, windowMs: 60_000, lockMs: 900_000, maxTracked: 64 },
+    });
+    for (let attempt = 1; attempt <= 4; attempt += 1) {
+      expect((await missOnce("myk", attempt)).status, `first run miss ${attempt}`).toBe(401);
+    }
+    expect((await tryPassword("myk", PASSWORD)).status).toBe(200);
+    // Five more misses answer 401 and the sixth locks — the same shape as a fresh counter. If the
+    // success had NOT cleared the four, the second miss here would already be the sixth and lock.
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      expect((await missOnce("myk", attempt)).status, `after success, miss ${attempt}`).toBe(401);
+    }
+    expect((await missOnce("myk", 6)).status).toBe(429);
   });
 });
 
@@ -277,25 +297,18 @@ describe("the cap on unauthenticated hashing", () => {
   });
 
   // THE LIMITER MUST HAVE NO OFF SWITCH, and "the table is full" is the shape an off switch hides in.
-  // Both fillings are tested, because the first version of this fix only handled one of them: a table of
-  // UNLOCKED counts evicted correctly, and a table where every record held a LIVE LOCK stopped counting
-  // altogether — 4096 junk names bought fifteen minutes of no limiting for everyone else.
-  it.each([
-    ["unlocked counts", 1],
-    ["live locks", 3],
-  ])("(o) a table full of %s still tracks a new name", async (_label, missesPerFiller) => {
+  // A table of UNLOCKED counts evicts the oldest and keeps counting.
+  it("(o) a table full of unlocked counts still tracks a new name", async () => {
     served = await serveHome(home, {
       limit: { maxFailures: 3, windowMs: 600_000, lockMs: 600_000, maxTracked: 2 },
     });
     for (const name of ["filler-one", "filler-two"]) {
-      for (let i = 0; i < missesPerFiller; i += 1) {
-        const begun = await beginLogin(served.base);
-        const res = await postLogin(served.base, name, `wrong ${i}`, {
-          cookie: begun.cookie,
-          formToken: begun.formToken,
-        });
-        expect([401, 429]).toContain(res.status);
-      }
+      const begun = await beginLogin(served.base);
+      const res = await postLogin(served.base, name, "wrong once", {
+        cookie: begun.cookie,
+        formToken: begun.formToken,
+      });
+      expect(res.status).toBe(401);
     }
     // a third name still gets counted, and still reaches its lock
     for (let attempt = 1; attempt <= 3; attempt += 1) {
@@ -306,8 +319,45 @@ describe("the cap on unauthenticated hashing", () => {
       });
       expect(res.status, `miss ${attempt}`).toBe(401);
     }
-    const locked = await tryPassword("myk", PASSWORD);
-    expect(locked.status).toBe(429);
+    expect((await tryPassword("myk", PASSWORD)).status).toBe(429);
+  });
+
+  // THE ATTACK THIS CLOSES: lock a victim, then fill the table with fresh names so the victim's lock is
+  // evicted to make room, and resume guessing. Evicting "the lock nearest to expiring" reads as fair and
+  // picks precisely the victim, because the victim was locked FIRST. So a live lock is never evictable,
+  // and when every record holds one this stops tracking new names instead — the cost named in the source.
+  //
+  // Two-sided, because only one side is the security property: the victim's lock SURVIVES the flood, and
+  // the flood's own names are still counted up to the point where the table is all live locks.
+  it("(o) a flood of fresh names cannot evict a victim's live lock", async () => {
+    served = await serveHome(home, {
+      limit: { maxFailures: 2, windowMs: 600_000, lockMs: 600_000, maxTracked: 3 },
+    });
+    const miss = async (name: string, i: number): Promise<number> => {
+      const begun = await beginLogin(served.base);
+      const res = await postLogin(served.base, name, `wrong ${i}`, {
+        cookie: begun.cookie,
+        formToken: begun.formToken,
+      });
+      return res.status;
+    };
+
+    // the victim is locked FIRST, so its lock is the nearest to expiring for the rest of this test
+    for (let i = 0; i < 2; i += 1) expect(await miss("myk", i)).toBe(401);
+    expect((await tryPassword("myk", PASSWORD)).status).toBe(429);
+    const lockedAtFirst = lockedMs(home, "myk", Date.now());
+    expect(lockedAtFirst).toBeGreaterThan(0);
+
+    // now walk far more fresh names than the table can hold, locking each one
+    for (const name of ["flood-a", "flood-b", "flood-c", "flood-d", "flood-e"]) {
+      for (let i = 0; i < 2; i += 1) expect([401, 429]).toContain(await miss(name, i));
+    }
+
+    // the victim is STILL locked — the flood displaced nothing it did not create
+    expect(lockedMs(home, "myk", Date.now())).toBeGreaterThan(0);
+    expect((await tryPassword("myk", PASSWORD)).status).toBe(429);
+    // and the earliest flood name it locked is still locked too: nothing was quietly given back
+    expect(lockedMs(home, "flood-a", Date.now())).toBeGreaterThan(0);
   });
 
   it("(o) overlapping attempts each count: the limit is not multiplied by the concurrency", async () => {

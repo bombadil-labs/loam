@@ -1058,7 +1058,10 @@ async function cmdUserCreate(
   if (entryFor(current, name) !== undefined) {
     io.err(
       `user create: ${name} gained a credential while this ran, so no credential was overwritten — ` +
-        `but the user deltas above DID land. Check \`loam store\` before running this again.`,
+        (known
+          ? `and the ground already knew this user, so nothing was appended either.`
+          : `but the user deltas above DID land.`) +
+        ` Check \`loam store\` before running this again.`,
     );
     return 2;
   }

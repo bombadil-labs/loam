@@ -19,7 +19,7 @@ import { serve, type ServerHandle, type UserDoorOptions } from "../../src/server
 import { run } from "../../src/cli/cli.js";
 import { initHome, readSeed, storePath } from "../../src/cli/config.js";
 import { type ScryptParams } from "../../src/server/credentials.js";
-import { SESSION_COOKIE } from "../../src/server/session.js";
+import { PRESESSION_COOKIE, SESSION_COOKIE } from "../../src/server/session.js";
 
 // scrypt at production cost is ~100ms a call, and one rail spends six of them on purpose. These
 // params keep the suite quick while leaving the ALGORITHM and the comparison exactly as shipped.
@@ -143,7 +143,7 @@ export async function serveHome(
 
 // Imported, never re-typed: a rail that spelled the cookie name itself would go quietly green if the
 // shipped name changed, and the name carries the `__Host-` prefix that host-locks it.
-export { SESSION_COOKIE } from "../../src/server/session.js";
+export { PRESESSION_COOKIE, SESSION_COOKIE } from "../../src/server/session.js";
 
 /**
  * The login door's own refusal, pinned. It is deliberately DIFFERENT from the mount-level
@@ -151,6 +151,14 @@ export { SESSION_COOKIE } from "../../src/server/session.js";
  * answers 401" would pass on a store where `/login` is just an unresolvable mount name.
  */
 export const LOGIN_REFUSED_BODY = JSON.stringify({ errors: ["the login was refused"] });
+
+/** The pre-session nonce a Set-Cookie header carries — GET /login's own cookie, never the session. */
+export function preCookieFrom(res: Response): string | undefined {
+  const header = res.headers
+    .getSetCookie()
+    .find((c) => c.startsWith(`${PRESESSION_COOKIE}=`) && !c.includes("Max-Age=0"));
+  return header?.slice(`${PRESESSION_COOKIE}=`.length).split(";")[0];
+}
 
 /** The session id a Set-Cookie header carries, or undefined when it carries none. */
 export function cookieFrom(res: Response): string | undefined {
@@ -175,7 +183,7 @@ export async function beginLogin(
   const res = await fetch(`${base}/login`);
   const body = await res.text();
   return {
-    cookie: cookieFrom(res) ?? "",
+    cookie: preCookieFrom(res) ?? "",
     formToken: FORM_TOKEN.exec(body)?.[1] ?? "",
     res,
     body,
@@ -184,12 +192,18 @@ export async function beginLogin(
 
 /** The form token a signed-in page carries — how a caller chains to /logout or /session/token. */
 export async function formTokenFor(base: string, cookie: string): Promise<string> {
-  const res = await fetch(`${base}/login`, { headers: { cookie: `${SESSION_COOKIE}=${cookie}` } });
+  const res = await fetch(`${base}/login`, {
+    headers: { cookie: `${SESSION_COOKIE}=${cookie}; ${PRESESSION_COOKIE}=${cookie}` },
+  });
   return FORM_TOKEN.exec(await res.text())?.[1] ?? "";
 }
 
 export interface PostOptions {
   readonly cookie?: string;
+  /** The pre-session nonce, in its own cookie. POST /login reads this one, never `cookie`. */
+  readonly preCookie?: string;
+  /** A LIVE session on POST /login — the one door where both cookies can arrive together. */
+  readonly sessionCookie?: string;
   /** Explicitly `undefined` sends no form token at all — a shape criterion (i) has to reach. */
   readonly formToken?: string | undefined;
   /** Omit for the browser-shaped default (`same-origin`); null sends none at all. */
@@ -198,8 +212,16 @@ export interface PostOptions {
   readonly headers?: Record<string, string>;
 }
 
+const cookieHeader = (opts: PostOptions): string =>
+  [
+    opts.cookie === undefined ? undefined : `${SESSION_COOKIE}=${opts.cookie}`,
+    opts.preCookie === undefined ? undefined : `${PRESESSION_COOKIE}=${opts.preCookie}`,
+  ]
+    .filter((part): part is string => part !== undefined)
+    .join("; ");
+
 const guardHeaders = (opts: PostOptions): Record<string, string> => ({
-  ...(opts.cookie === undefined ? {} : { cookie: `${SESSION_COOKIE}=${opts.cookie}` }),
+  ...(cookieHeader(opts) === "" ? {} : { cookie: cookieHeader(opts) }),
   ...(opts.secFetchSite === null ? {} : { "sec-fetch-site": opts.secFetchSite ?? "same-origin" }),
   ...(opts.origin === undefined ? {} : { origin: opts.origin }),
   ...opts.headers,
@@ -217,10 +239,19 @@ export function postLogin(
     password,
     ...(opts.formToken === undefined ? {} : { form_token: opts.formToken }),
   });
+  // A login POST carries the NONCE, so `cookie` here means the pre-session cookie — that is what the
+  // page's own form sends. A rail that needs a live session on this door sets `sessionCookie`.
+  const nonce = opts.preCookie ?? opts.cookie;
+  const shaped: PostOptions = {
+    ...opts,
+    ...(nonce === undefined ? {} : { preCookie: nonce }),
+    ...(opts.sessionCookie === undefined ? {} : { cookie: opts.sessionCookie }),
+  };
+  if (opts.sessionCookie === undefined) delete (shaped as { cookie?: string }).cookie;
   return fetch(`${base}/login`, {
     method: "POST",
     redirect: "manual",
-    headers: { "content-type": "application/x-www-form-urlencoded", ...guardHeaders(opts) },
+    headers: { "content-type": "application/x-www-form-urlencoded", ...guardHeaders(shaped) },
     body: body.toString(),
   });
 }

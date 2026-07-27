@@ -16,7 +16,7 @@
 // A session's expiry rides a MONOTONIC clock. Date.now() is settable, and a store whose wall clock
 // slips backwards must not resurrect a session that already timed out.
 
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { type IncomingMessage, type ServerResponse } from "node:http";
 import { type Reactor } from "@bombadil/rhizomatic";
 import {
@@ -76,7 +76,8 @@ export interface UserDoorDeps {
   /** Mint a short-lived bearer token for an identity the caller has already authorized. */
   mint(identity: { actor?: string; operator?: true }, ttlMs: number): string;
   /** Retire minted tokens before their window ends — what signing out has to be able to do. */
-  revoke(tokens: readonly string[]): void;
+  /** Retire these tokens by SHA-256 digest (hex) — the plaintext never leaves the response. */
+  revoke(digests: readonly string[]): void;
 }
 
 export interface UserDoors {
@@ -89,6 +90,15 @@ export interface UserDoors {
 // Without it a sibling subdomain can set a `Domain=example.com` cookie of the same name, and the
 // browser sends both — so the store would be reading a cookie a neighbour wrote.
 export const SESSION_COOKIE = "__Host-loam_session";
+
+// The pre-session nonce lives in its OWN cookie, and that separation is a security property rather
+// than tidiness. Sharing one name means `GET /login` — which must set a nonce for an anonymous
+// visitor — overwrites a live session id whenever the cookie is not presented. SameSite=Lax
+// withholds the cookie on a cross-site subresource request, so any page on the internet could fetch
+// /login with credentials, get a fresh nonce written over the operator's session cookie, and sign
+// them out. Worse than the logout: the Session row survives its idle window with no cookie left to
+// reach it, so the tokens it minted can no longer be revoked by signing out.
+export const PRESESSION_COOKIE = "__Host-loam_form";
 
 // Pinned, and pinned as ONE STRING: every attribute here is a decision, and computing any of them
 // from a request header is how a caller's own Host ends up scoping the operator's cookie.
@@ -138,13 +148,22 @@ const sameSecret = (a: string, b: string): boolean => {
  * whichever an injector managed to place first. So it refuses.
  */
 export function sessionIdFrom(req: IncomingMessage): string | undefined {
+  return cookieValue(req, SESSION_COOKIE);
+}
+
+/** The pre-session nonce a caller presented, by the same one-value discipline. */
+export function preSessionIdFrom(req: IncomingMessage): string | undefined {
+  return cookieValue(req, PRESESSION_COOKIE);
+}
+
+function cookieValue(req: IncomingMessage, name: string): string | undefined {
   const header = req.headers.cookie;
   if (header === undefined) return undefined;
   const values: string[] = [];
   for (const pair of header.split(";")) {
     const eq = pair.indexOf("=");
     if (eq < 0) continue;
-    if (pair.slice(0, eq).trim() !== SESSION_COOKIE) continue;
+    if (pair.slice(0, eq).trim() !== name) continue;
     values.push(pair.slice(eq + 1).trim());
   }
   if (values.length !== 1 || values[0] === "") return undefined;
@@ -256,8 +275,13 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
   }
 
   const sessions = new Map<string, Session>();
-  /** Tokens minted per session, so signing out revokes what signing in bought. */
-  const minted = new Map<string, { token: string; expiresAt: number }[]>();
+  // Tokens minted per session, so signing out revokes what signing in bought — held as DIGESTS, never
+  // as the secret. The token table this feeds is digest-keyed and says so; keeping the plaintext here
+  // to hand back at revocation time would undo that, and hold it far longer than the token is valid:
+  // a session idles for its whole window, six times a token's own life, and nothing prunes a lapsed
+  // entry until the same session mints again. A heap dump would then yield live operator tokens.
+  const minted = new Map<string, { digest: string; expiresAt: number }[]>();
+  const digestOf = (token: string): string => createHash("sha256").update(token).digest("hex");
 
   // ONE COUNTER FOR EVERY ATTEMPT, and the reason is worth the paragraph.
   //
@@ -287,7 +311,7 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
     const held = minted.get(id);
     if (held !== undefined) {
       minted.delete(id);
-      deps.revoke(held.map((m) => m.token));
+      deps.revoke(held.map((m) => m.digest));
     }
   };
 
@@ -296,7 +320,7 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
    * would make the per-session cap permanent: a session that reached the cap could never mint again,
    * however long it waited, while its own idle window kept it alive indefinitely.
    */
-  const liveTokens = (id: string): { token: string; expiresAt: number }[] => {
+  const liveTokens = (id: string): { digest: string; expiresAt: number }[] => {
     const moment = now();
     const held = (minted.get(id) ?? []).filter((m) => m.expiresAt > moment);
     if (held.length === 0) minted.delete(id);
@@ -363,7 +387,12 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
     res.end(JSON.stringify(body));
   };
 
-  const html = (res: ServerResponse, status: number, body: string, cookie?: string): void => {
+  const html = (
+    res: ServerResponse,
+    status: number,
+    body: string,
+    cookie?: string | string[],
+  ): void => {
     res.writeHead(status, {
       "content-type": "text/html; charset=utf-8",
       "content-security-policy": CSP,
@@ -376,6 +405,9 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
 
   const setCookie = (id: string): string => `${SESSION_COOKIE}=${id}; ${COOKIE_ATTRIBUTES}`;
   const clearCookie = (): string => `${SESSION_COOKIE}=; ${COOKIE_ATTRIBUTES}; Max-Age=0`;
+  const setPreCookie = (nonce: string): string =>
+    `${PRESESSION_COOKIE}=${nonce}; ${COOKIE_ATTRIBUTES}`;
+  const clearPreCookie = (): string => `${PRESESSION_COOKIE}=; ${COOKIE_ATTRIBUTES}; Max-Age=0`;
 
   // The login door's ONE refusal, whatever went wrong behind it: an unknown user, a wrong password,
   // a user whose record the ground no longer holds. Anything finer would be an oracle.
@@ -499,7 +531,7 @@ data doors on its own.</p>`,
       }
       return { held, body };
     }
-    const nonce = sessionIdFrom(req);
+    const nonce = preSessionIdFrom(req);
     if (nonce === undefined || !sameSecret(presented, preSessionToken(nonce))) {
       notThisPage(res);
       return undefined;
@@ -549,8 +581,8 @@ data doors on its own.</p>`,
     // The form, on a stateless pre-session. An EXISTING cookie value is reused as the nonce, so
     // reloading the page does not change the token a half-filled form already carries; otherwise a
     // fresh one. Either way no table grows, so this path cannot be flooded into refusing.
-    const nonce = sessionIdFrom(req) ?? opaque();
-    html(res, 200, loginPage(preSessionToken(nonce)), setCookie(nonce));
+    const nonce = preSessionIdFrom(req) ?? opaque();
+    html(res, 200, loginPage(preSessionToken(nonce)), setPreCookie(nonce));
   };
 
   const postLogin = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
@@ -650,7 +682,11 @@ data doors on its own.</p>`,
       return;
     }
     forgetFailures(options.home, user);
-    html(res, 200, signedInPage(user, role, opened.session.formToken), setCookie(opened.id));
+    // the nonce is spent: one login is all it was ever good for
+    html(res, 200, signedInPage(user, role, opened.session.formToken), [
+      setCookie(opened.id),
+      clearPreCookie(),
+    ]);
   };
 
   const postLogout = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
@@ -659,7 +695,7 @@ data doors on its own.</p>`,
     // `drop`, never a bare delete: signing out has to revoke the bearer tokens this session minted, or
     // it answers 200 having retired nothing it issued.
     drop(guard.id);
-    html(res, 200, signedOutPage(), clearCookie());
+    html(res, 200, signedOutPage(), [clearCookie(), clearPreCookie()]);
   };
 
   const postToken = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
@@ -708,7 +744,7 @@ data doors on its own.</p>`,
     // out retires it early (see `drop`); nothing else does. So revoking the user's role closes the door
     // to NEW tokens at once, and an already-minted one lives out its window.
     const token = deps.mint({ operator: true }, tokenTtlMs);
-    minted.set(guard.id, [...held, { token, expiresAt: now() + tokenTtlMs }]);
+    minted.set(guard.id, [...held, { digest: digestOf(token), expiresAt: now() + tokenTtlMs }]);
     json(res, 200, { token, expiresIn: Math.floor(tokenTtlMs / 1000), user, role });
   };
 

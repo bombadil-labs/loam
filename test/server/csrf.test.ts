@@ -8,6 +8,7 @@
 // "Refused" is not enough on its own, so every rail here also asserts that the SESSION DID NOT
 // MOVE: a refusal that logged the caller out, or minted a token anyway, would be the bug.
 
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -221,8 +222,18 @@ describe("POST /logout and POST /session/token refuse a cross-site shape", () =>
 describe("the stateless form token", () => {
   it("(i) a cookie of the caller's own choosing needs the matching HMAC, which only this store can make", async () => {
     const mine = "a-nonce-i-chose-myself-0123456789";
-    // no form token at all, and a plausible-looking one: both refused
-    for (const formToken of [undefined, "", mine, Buffer.from(mine).toString("base64url")]) {
+    // The candidates include what a KEYLESS digest over the nonce would emit. Without it, dropping the
+    // secret from the HMAC leaves every refusal here intact — the rail would bind the token to the
+    // cookie and say nothing about who can mint one.
+    const keyless = createHash("sha256").update(mine).digest("base64url");
+    for (const formToken of [
+      undefined,
+      "",
+      mine,
+      Buffer.from(mine).toString("base64url"),
+      keyless,
+      createHash("sha256").update(`loam:form:${mine}`).digest("base64url"),
+    ]) {
       const res = await postLogin(served.base, "myk", PASSWORD, { cookie: mine, formToken });
       expect(res.status, String(formToken)).toBe(403);
       expect(cookieFrom(res), String(formToken)).toBeUndefined();

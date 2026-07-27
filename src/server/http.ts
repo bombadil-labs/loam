@@ -385,8 +385,8 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     sessionTokens.set(sha(secret).toString("hex"), { identity, expiresAt: moment + ttlMs });
     return secret;
   };
-  const revokeSessionTokens = (secrets: readonly string[]): void => {
-    for (const secret of secrets) sessionTokens.delete(sha(secret).toString("hex"));
+  const revokeSessionTokens = (digests: readonly string[]): void => {
+    for (const digest of digests) sessionTokens.delete(digest);
   };
 
   // The identity a presented token names, compared timing-safely; undefined = refuse. A cookie is

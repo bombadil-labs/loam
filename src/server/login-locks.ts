@@ -162,11 +162,18 @@ const spent = (record: LockRecord, now: number, policy: LimitPolicy): boolean =>
  * SPENT RECORDS ARE PRUNED. A failed attempt is recorded for any well-formed name, existing or not, so a
  * caller walking names would otherwise add a row per attempt forever.
  *
- * And past `maxTracked` a record is EVICTED to make room — the oldest UNLOCKED one, or failing that the
- * lock nearest to expiring. IT ALWAYS RECORDS. "Stop counting when the table is full" is an off switch: a
- * caller fills the table with locked junk names and the limiter stops applying to every name not already
- * in it, which is the limiter gone. Evicting means a flood can only displace what it created, and the
- * worst it buys is an early end to one of its own locks.
+ * And past `maxTracked` a record is EVICTED to make room — but ONLY ONE THAT HOLDS NO LIVE LOCK, and
+ * never a live lock however close to expiring. A live lock is the only thing in this file that is
+ * actually protecting someone, so it is the one thing eviction may not take. Evicting the
+ * nearest-to-expire lock reads as fair and is the exact opposite: the lock nearest to expiring belongs
+ * to whoever was attacked FIRST, so a caller who locks a target and then walks `maxTracked` fresh names
+ * would evict the target's lock and resume guessing — the limiter paying for its own defeat.
+ *
+ * When every record holds a live lock there is nothing evictable, and this STOPS TRACKING NEW NAMES
+ * rather than displacing a lock. That is a real cost, named rather than hidden: a caller who has already
+ * paid `maxFailures × maxTracked` attempts can keep a not-yet-seen name from being counted. It is the
+ * lesser cost by a wide margin — an untracked name is one nobody was defending yet, while an evicted
+ * lock is a defence that was already earned and is silently withdrawn.
  */
 export function noteFailure(home: string, name: string, now: number, policy: LimitPolicy): void {
   const locks = readLocks(home);
@@ -176,18 +183,15 @@ export function noteFailure(home: string, name: string, now: number, policy: Lim
   }
   if (previous === undefined && locks.size >= policy.maxTracked) {
     let unlocked: { name: string; at: number } | undefined;
-    let soonest: { name: string; until: number } | undefined;
     for (const [held, record] of locks) {
-      if (lockedMsIn(locks, held, now) === 0) {
-        if (unlocked === undefined || record.firstFailureAt < unlocked.at) {
-          unlocked = { name: held, at: record.firstFailureAt };
-        }
-      } else if (soonest === undefined || record.lockedUntil! < soonest.until) {
-        soonest = { name: held, until: record.lockedUntil! };
+      if (lockedMsIn(locks, held, now) !== 0) continue; // a live lock is never evictable
+      if (unlocked === undefined || record.firstFailureAt < unlocked.at) {
+        unlocked = { name: held, at: record.firstFailureAt };
       }
     }
-    const evicted = unlocked?.name ?? soonest?.name;
-    if (evicted !== undefined) locks.delete(evicted);
+    // Nothing evictable means every record is a live lock. Leave them all and record nothing.
+    if (unlocked === undefined) return;
+    locks.delete(unlocked.name);
   }
   const lapsed =
     previous === undefined ||

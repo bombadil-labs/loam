@@ -9,12 +9,22 @@
 // Both levels, because a token that authenticates and writes as the wrong identity is a bug no
 // status code shows: the write is asserted through the READ DOOR and again on the delta the store
 // actually holds.
+//
+// NAMED GAPS:
+//   - Criterion (f) asks for authorship "through a reading" as well as at the delta level. The
+//     reading here resolves the VALUE, not the author: no door resolves provenance today, so the
+//     object level of the authorship claim is unasserted. A provenance gesture would close it.
+//   - The 503 "ground not reachable" branch in session.ts is unrailed. It looks unreachable through
+//     `serve` — the login mount is static and `mounts.remove` refuses a static mount — so driving it
+//     wants makeUserDoors directly with `ground: () => undefined`. The decision worth pinning when
+//     someone does: that branch must NOT drop the session, because a local fault is not a logout.
 
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { authorForSeed } from "@bombadil/rhizomatic";
+import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { readSeed } from "../../src/cli/config.js";
+import { containerClaims } from "../../src/gateway/container.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
@@ -280,6 +290,65 @@ describe("the login doors want a single mount", () => {
       expect(res.status).toBe(404);
     } finally {
       await other.close();
+    }
+  });
+
+  // THE THIRD TIER the two guards above do NOT cover. A container mount is derived from the host's own
+  // attachment registry, so it needs neither the boot check nor addMount — it simply appears. The
+  // premise that makes this safe is stated in mounts.ts rather than checked at the seam: a container
+  // shares the host's operator (§24.1), so a session token reaches it with exactly the authority the
+  // host's own static operator token already had, and nothing more.
+  //
+  // This rail is the check that premise never had. Two-sided, because "refused" is not the property:
+  // the session token and the static operator token must answer the SAME at a container mount. If a
+  // later design gives a container its own identities, this goes red — which is the point.
+  it("a container mount answers a session token exactly as it answers the operator token", async () => {
+    // the operator's word that the name exists — a container cannot be opened without it
+    await served.gateway.append([
+      signClaims(
+        containerClaims(
+          { container: "grove", trust: "curated", posture: "separate" },
+          authorForSeed(readSeed(home)),
+          90_000,
+        ),
+        readSeed(home),
+      ),
+    ]);
+    const c = await served.gateway.openContainer({
+      name: "grove",
+      backend: new SqliteBackend(join(home, "grove.sqlite")),
+    });
+    try {
+      const session = await signIn(served.base);
+      const token = await postDoor(served.base, "/session/token", {
+        cookie: session.cookie,
+        formToken: session.formToken,
+      });
+      expect(token.status).toBe(200);
+      const minted = ((await token.json()) as { token: string }).token;
+
+      const ask = (auth: Record<string, string>): Promise<Response> =>
+        fetch(`${served.base}/grove/graphql`, {
+          method: "POST",
+          headers: { "content-type": "application/json", ...auth },
+          body: JSON.stringify({ query: "{ __typename }" }),
+        });
+      const bySession = await ask(bearer(minted));
+      const byOperator = await ask(bearer("op-token"));
+      expect(bySession.status).toBe(byOperator.status);
+      expect(await bySession.text()).toBe(await byOperator.text());
+      // and the cookie ALONE still opens nothing there — the invariant holds at this tier too
+      const byCookie = await fetch(`${served.base}/grove/graphql`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: `${SESSION_COOKIE}=${session.cookie}`,
+        },
+        body: JSON.stringify({ query: "{ __typename }" }),
+      });
+      expect(byCookie.status).not.toBe(200);
+    } finally {
+      await c.drop();
     }
   });
 });
