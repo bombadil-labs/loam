@@ -728,6 +728,45 @@ describe("the failed-login delay", () => {
     expect(readLocks(home).get("myk")?.failures).toBe(1); // myk's record is untouched
   });
 
+  // POSIX ONLY, for the reason the (o7) clearing rail names: the fixture needs a home that can be READ
+  // and not WRITTEN, and only a mode gives that. Skipped on Windows rather than weakened.
+  it.skipIf(process.platform === "win32")(
+    "(p) unlock REFUSES when it cannot rewrite the file, and never claims it cleared anything",
+    async () => {
+      // The command's whole job is to clear a record. A write it cannot make must be reported as a
+      // failure, in the command's own words — a bare errno reads as a bug in loam rather than as a
+      // permission on a directory, and "cleared" printed over a record still on disk would be the
+      // report claiming an operation it did not achieve.
+      served = await serveHome(home, { limit: COUNTING });
+      expect((await missOnce("myk", 1)).status).toBe(401);
+      expect(readLocks(home).get("myk")?.failures).toBe(1);
+      chmodSync(home, 0o500);
+      try {
+        expect(() => {
+          const probe = join(home, "probe.tmp");
+          writeFileSync(probe, "x");
+          rmSync(probe, { force: true });
+        }, "this home is still writable, so the clearing write cannot fail").toThrow();
+
+        const one = testIo();
+        expect(await run(["user", "unlock", "myk", "--home", home], one.io)).toBe(1);
+        expect(one.out.join("\n")).not.toMatch(/cleared/);
+        expect(one.err.join("\n")).toMatch(/nothing was cleared/);
+        expect(one.err.join("\n")).toMatch(/forget window/); // it names a cure, not just a failure
+
+        const all = testIo();
+        expect(await run(["user", "unlock", "--all", "--home", home], all.io)).toBe(1);
+        expect(all.out.join("\n")).not.toMatch(/cleared/);
+        expect(all.err.join("\n")).toMatch(/none were cleared/);
+
+        // and the record really is still there — the refusal was honest in both directions
+        expect(readLocks(home).get("myk")?.failures).toBe(1);
+      } finally {
+        chmodSync(home, 0o700);
+      }
+    },
+  );
+
   it("(p) unlock reports the COUNT it cleared, never a wait it cannot know", async () => {
     // The command runs in a different process from the door and was never told the door's policy. A
     // wait is a property of that policy, so naming one here would be a guess; the count is a fact.
