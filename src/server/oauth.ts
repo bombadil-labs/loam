@@ -529,14 +529,20 @@ export function makeOAuthDoors(deps: OAuthDeps): OAuthDoors {
     type Registered =
       { kind: "ok"; client: OAuthClient } | { kind: "full" } | { kind: "unreadable" };
 
-    // The code sweep happens BEFORE the lock, not inside it. `withOAuthFile`'s callback is allowed to
-    // run twice on one lock — a stale-break race can put two writers in it, and only the loser's WRITE
-    // is refused — so a callback must be a pure function of the file it is handed. Sweeping inside it
-    // would be a mutation that survives a refused write, which is the one shape that guarantee cannot
-    // carry. Lapsed codes must still be swept first, or an expired one keeps pinning its client.
+    // THE SWEEP MOVES OUT; THE READ STAYS IN. Two different questions, and only one of them belongs
+    // outside the lock.
+    //
+    // The sweep MUTATES `codes`, and `withOAuthFile`'s callback may run twice on one lock — a
+    // stale-break race can put two writers in it, and only the loser's WRITE is refused. A mutation
+    // there survives a refused write, so the callback must be a pure function of what it is handed.
+    //
+    // The READ is pure, so it belongs inside, and it MUST be inside: `postAuthorize` mints codes
+    // without passing through `serialized`, so a registration waiting its turn here — behind a flood's
+    // writes, behind a redemption that awaits a signed sqlite write — can wait seconds. A set captured
+    // before that wait says "no code in flight" about a client the operator has since approved, and
+    // the eviction below then discards exactly the consent this pin exists to protect.
     const moment = now();
     for (const [code, held] of codes) if (held.expiresAt <= moment) codes.delete(code);
-    const inFlight = new Set([...codes.values()].map((c) => c.clientId));
 
     const outcome: Registered = await serialized((): Registered => {
       try {
@@ -560,7 +566,15 @@ export function makeOAuthDoors(deps: OAuthDeps): OAuthDoors {
           // a pending client. That failure is visible and harmless — the authorize GET then says no such
           // client, so the operator sees a refusal instead of losing a grant — and pinning it would mean
           // trusting an unauthenticated registration to hold a slot, which is the lockout again.
-          const pinned = new Set([...file.grants.map((g) => g.clientId), ...inFlight]);
+          // Read HERE, not before the await above, and NO RAIL PROVES IT — forcing the difference needs
+          // this door suspended at an await while a code is minted, and the only await on the path is a
+          // signed sqlite write whose duration a test cannot control. The rails prove the pin exists;
+          // this line is why it is also current. A code that expired since the sweep still pins its
+          // client for this pass, which over-protects by one entry and is the safe direction.
+          const pinned = new Set([
+            ...file.grants.map((g) => g.clientId),
+            ...[...codes.values()].map((c) => c.clientId),
+          ]);
           let clients = [...file.clients];
           while (clients.length >= maxClients) {
             const oldest = clients

@@ -393,6 +393,13 @@ const POLL_MS = 25;
 /** The lock is held by another process, or was taken from us. Never a licence to write anyway. */
 export class OAuthFileBusy extends Error {}
 
+/**
+ * The lock cannot be TAKEN here at all — the home's filesystem refuses the operation the lock is built
+ * from. Distinct from `OAuthFileBusy`, which means somebody else holds it: this one means nobody ever
+ * can, and no amount of retrying will change it.
+ */
+export class OAuthFileUnlockable extends Error {}
+
 // A SYNCHRONOUS sleep, because the whole point is that no other work in this process interleaves with a
 // held lock. `Atomics.wait` on a private buffer parks the thread without a busy loop — and in the
 // serving process that thread is the server, which is why LOCK_WAIT_MS above is small.
@@ -426,18 +433,30 @@ const lockHolder = (lock: string): string => {
  */
 const claimLock = (lock: string, nonce: string): boolean => {
   const temp = `${lock}.${process.pid}-${randomBytes(8).toString("hex")}.claim`;
-  const fd = openSync(temp, "wx", 0o600);
+  // ONE `finally` over the whole body, so the temp cannot outlive a throw from any step in it.
   try {
-    writeSync(fd, nonce);
-  } finally {
-    closeSync(fd);
-  }
-  try {
-    linkSync(temp, lock);
-    return true;
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-    return false;
+    const fd = openSync(temp, "wx", 0o600);
+    try {
+      writeSync(fd, nonce);
+    } finally {
+      closeSync(fd);
+    }
+    try {
+      linkSync(temp, lock);
+      return true;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "EEXIST") return false; // somebody holds it; the caller decides whether to wait
+      // ANY OTHER FAILURE IS DIAGNOSED HERE, because hard links are the one thing this file needs that
+      // an ordinary writable directory may not provide — FAT and exFAT volumes, some SMB and FUSE
+      // mounts. Left raw, it reaches a caller that reports "cannot read its connector records", which
+      // sends the operator to the wrong subsystem while every connector write is dead.
+      throw new OAuthFileUnlockable(
+        `${lock} could not be created as a hard link (${String(code)}). The connector doors need a ` +
+          `home on a filesystem that supports hard links; FAT, exFAT and some network mounts do not. ` +
+          `Move the loam home onto a local filesystem, or serve without --oauth-allow-redirect.`,
+      );
+    }
   } finally {
     rmSync(temp, { force: true });
   }
@@ -463,13 +482,17 @@ const claimLock = (lock: string, nonce: string): boolean => {
  *
  * Ownership is proven by CONTENT throughout — `claimLock` makes the lock and its owner's name appear
  * together, the check repeats immediately before the write, and the release removes the lock only while
- * the name is still ours, so a writer that lost the lock cannot delete its successor's.
+ * the name is still ours.
  *
- * TWO NARROW WINDOWS REMAIN OPEN, both inherent to advisory locking without a compare-and-swap, and both
- * named rather than implied:
+ * THREE NARROW WINDOWS REMAIN OPEN, all inherent to advisory locking without a compare-and-swap, and
+ * all named rather than implied:
  *
  *   - the pre-write check is check-then-act. A theft landing between it and `writeOAuthFile` is not
- *     caught. Closing it needs an atomic swap the filesystem does not offer.
+ *     caught.
+ *   - the RELEASE is check-then-act in the same way, so the sentence above is a near-truth rather than
+ *     an absolute: between reading our own name and removing the file, a thief that broke our lock can
+ *     claim it, and we then delete its lock rather than ours. Same third-order reachability as the
+ *     first, and the same missing primitive.
  *   - a holder paused longer than `LOCK_STALE_MS` has its lock broken and its write refused. The
  *     synchronous signature is what keeps that to a crash rather than to slow work.
  *

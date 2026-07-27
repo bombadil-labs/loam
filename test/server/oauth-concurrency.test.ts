@@ -213,11 +213,17 @@ describe("(s) the cross-process lock", () => {
   // other's change and silently discard it — and the direction that discards the REVOKE leaves the
   // operator told a connector was closed while its token still opens the door.
   //
-  // WHAT THESE RAILS REACH, said plainly. The first three drive the lock PRIMITIVE in this process: a
-  // held lock blocks and writes nothing, a stale lock is broken, and a writer whose lock is stolen
-  // refuses instead of overwriting the thief. The fourth SPAWNS A SECOND OS PROCESS and contends for
-  // real, which is the only honest test of a cross-process lock — everything synchronous on one thread
-  // passes whether or not anything locks.
+  // WHAT THESE RAILS REACH, named rather than numbered — an ordinal here goes stale the moment a rail is
+  // added, and the wrong ordinals then read as authoritative.
+  //
+  // In this process, on the lock PRIMITIVE: a held lock blocks and writes nothing; a stale lock is
+  // broken; the lock is released even when the callback throws; a writer that did not create it never
+  // enters the callback; and a writer whose lock is stolen mid-callback refuses rather than overwriting
+  // the thief.
+  //
+  // Across processes: ONE rail spawns a second OS process and contends for real. That is the only honest
+  // test of a cross-process lock, because everything synchronous on one thread passes whether or not
+  // anything locks at all.
   //
   // WHAT THEY DO NOT REACH, two things, both named because a reader will look for them.
   //
@@ -300,15 +306,15 @@ describe("(s) the cross-process lock", () => {
     });
     writeOAuthFile(home, readOAuthFile(home));
 
-    // The child takes the lock and HOLDS it for 150ms inside its locked section.
+    // The child takes the lock and HOLDS it for 400ms inside its locked section.
     //
-    // 150 rather than 400 on purpose: the parent's whole wait budget is LOCK_WAIT_MS (2s) and its clock
-    // starts when it first tries to claim, so the hold plus two fsyncs plus scheduling all have to fit
-    // inside it. A hold near the budget turns a loaded machine into an `OAuthFileBusy`, which is a flake
-    // rather than a finding. 150ms is still two orders of magnitude above the ~microsecond honest hold
-    // this rail is distinguishing from, so the discrimination is unchanged.
+    // The hold is generous on purpose, and the parent's 2s wait budget is not the constraint that
+    // decides it: the parent waits with a SYNCHRONOUS `Atomics.wait`, so its budget is unaffected by
+    // event-loop load. What load does affect is the parent's ability to OBSERVE the lock before the
+    // child releases it — the discovery poll below runs on the event loop — so a long hold is the safe
+    // direction, and the assertion after the acquire is written not to care how long it is.
     const spawned = new Promise<void>((resolve, reject) => {
-      const proc = spawn(process.execPath, [bundle, home, "child-one", "150"], {
+      const proc = spawn(process.execPath, [bundle, home, "child-one", "400"], {
         stdio: ["ignore", "ignore", "pipe"],
         cwd: process.cwd(),
       });
@@ -362,8 +368,12 @@ describe("(s) the cross-process lock", () => {
       },
       result: undefined,
     }));
-    // It really waited: the child held the lock for 400ms and this acquire could not have been instant.
-    expect(Date.now() - waitedFrom).toBeGreaterThan(50);
+    // IT REALLY WAITED, and the floor is derived from the lock's own poll interval rather than from the
+    // child's hold. The lock existed when the parent started, so the parent's first claim had to fail
+    // and it had to pause at least once; anything at or below one poll is an acquire that never
+    // contended. Written this way the assertion holds for ANY hold length, so tuning the child cannot
+    // quietly turn this rail into a timing bet — and load only ever makes the wait longer.
+    expect(Date.now() - waitedFrom).toBeGreaterThanOrEqual(20);
     await spawned;
 
     // BOTH writes survived. Without the lock the second writer spreads a snapshot taken before the

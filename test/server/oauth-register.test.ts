@@ -218,6 +218,64 @@ describe("POST /oauth/register", () => {
     expect(redeemed.res.status).toBe(200);
   });
 
+  it("(f) an approved-but-unredeemed client survives a registration flood", async () => {
+    // The pin's EXISTENCE, and this rail is what protects it: remove the code from the pinned set and
+    // this goes red, because a client with a code but no grant is otherwise the oldest evictable entry.
+    //
+    // WHAT IT DOES NOT REACH, measured rather than assumed: whether the pinned set is read INSIDE the
+    // locked callback or snapshotted before it. Every registration here snapshots after the code was
+    // minted, so both forms pass. Reaching the difference needs a registration suspended at an await
+    // while a code is minted, and the only await in that path is a signed sqlite write whose duration
+    // is not controllable from a test — a rail built on that window would be a flake, which outranks
+    // the coverage it would buy. The read's position is argued in `postRegister`'s own comment instead.
+    await served.close();
+    served = await serveOAuth(home, { oauth: { maxClients: 2 } });
+    const session = await signIn(served.base);
+
+    // X registers first, so it is the OLDEST evictable entry.
+    const x = await register(served.base, { name: "Claude" });
+    expect(x.status).toBe(201);
+    // A second registration fills the table.
+    await register(served.base);
+    expect(readOAuthFile(home).clients.length).toBe(2);
+
+    // Now the operator approves X. A code exists; no grant does yet.
+    const secret = pkce();
+    const params = wellFormedAuthorize(x.clientId, secret.challenge);
+    const page = await getAuthorize(served.base, params, session.cookie);
+    const approved = await approve(served.base, params, {
+      cookie: session.cookie,
+      formToken: formTokenIn(page.body),
+    });
+    const code = codeFrom(approved)!;
+    expect(readOAuthFile(home).grants).toEqual([]);
+
+    // The flood arrives. X must survive every round of it.
+    for (let i = 0; i < 6; i += 1) await register(served.base);
+    expect(readOAuthFile(home).clients.map((c) => c.clientId)).toContain(x.clientId);
+
+    // And the approval still redeems — the object-level half of the same claim.
+    const redeemed = await redeem(served.base, {
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: CLAUDE_REDIRECT,
+      client_id: x.clientId,
+      code_verifier: secret.verifier,
+    });
+    expect(redeemed.res.status).toBe(200);
+  });
+
+  it("(f) a client with NO code in flight is still evictable — the pin is not a blanket", async () => {
+    // The other side. A pin that protected every registered client would be the lockout this eviction
+    // exists to prevent, so the rail above must not pass by pinning everything.
+    await served.close();
+    served = await serveOAuth(home, { oauth: { maxClients: 2 } });
+    const stranger = await register(served.base, { name: "no code, no grant" });
+    await register(served.base);
+    for (let i = 0; i < 3; i += 1) await register(served.base);
+    expect(readOAuthFile(home).clients.map((c) => c.clientId)).not.toContain(stranger.clientId);
+  });
+
   it("(g) a uri that is not an absolute URL, or carries a fragment, is refused", async () => {
     for (const bad of [
       "/api/mcp/auth_callback",
