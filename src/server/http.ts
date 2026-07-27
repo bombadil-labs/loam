@@ -1326,21 +1326,35 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     });
   });
 
+  // EVERY REFUSAL THAT IS A PURE FUNCTION OF THE OPTIONS HAPPENS BEFORE THE SOCKET BINDS. A throw
+  // after `listen` leaves an embedder that catches it holding a live listener with the mounts served
+  // and the login and connector doors absent — a strictly worse posture than not starting.
+  if (options.oauth !== undefined) {
+    if (options.users === undefined) {
+      // The consent page IS §36's session — there is no second authenticator, and building one would
+      // be a second thing to get wrong. Without the login doors there is nobody to ask, and the
+      // one-mount guard (which keeps a server-wide token off a world no role binding named) would not
+      // run at all.
+      throw new Error(
+        `loam serve: the connector doors (§37) ride the login doors (§36) — the consent page asks ` +
+          `the operator to sign in, and there is no other way in. Configure users, or leave §37 ` +
+          `closed.`,
+      );
+    }
+    // THE ALLOWLIST IS CHECKED AT BOOT, so an operator's typo is a startup error rather than a
+    // silently wider fence. `--oauth-allow-redirect http://claude.ai` would otherwise admit a
+    // downgraded target, and nothing downstream would ever say so.
+    for (const origin of options.oauth.allowRedirectOrigins) {
+      const defect = redirectOriginDefect(origin);
+      if (defect !== undefined) throw new Error(`loam serve: --oauth-allow-redirect ${defect}`);
+    }
+  }
+
   await new Promise<void>((resolve) => server.listen(options.port ?? 0, host, resolve));
   const address = server.address();
   const port = typeof address === "object" && address !== null ? address.port : 0;
   const url = `http://${host}:${port}`;
 
-  if (options.oauth !== undefined && options.users === undefined) {
-    // The consent page IS §36's session — there is no second authenticator, and building one would be
-    // a second thing to get wrong. Without the login doors there is nobody to ask, and the one-mount
-    // guard below (which is what keeps a server-wide token off a world no role binding named) would
-    // not run at all.
-    throw new Error(
-      `loam serve: the connector doors (§37) ride the login doors (§36) — the consent page asks the ` +
-        `operator to sign in, and there is no other way in. Configure users, or leave §37 closed.`,
-    );
-  }
   if (options.users !== undefined) {
     const forUsers = options.users;
     // ONE MOUNT, or no login doors. `/session/token` mints `{ operator: true }`, which is authority over
@@ -1376,15 +1390,6 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
 
     if (options.oauth !== undefined) {
       const forOauth = options.oauth;
-      // THE ALLOWLIST IS CHECKED AT BOOT, so an operator's typo is a startup error rather than a
-      // silently wider fence. `--oauth-allow-redirect http://claude.ai` would otherwise admit a
-      // downgraded target, and nothing downstream would ever say so.
-      for (const origin of forOauth.allowRedirectOrigins) {
-        const defect = redirectOriginDefect(origin);
-        if (defect !== undefined) {
-          throw new Error(`loam serve: --oauth-allow-redirect ${defect}`);
-        }
-      }
       oauthDoors = makeOAuthDoors({
         options: forOauth,
         // ONE public URL, shared with the login doors above. Two sources would let the discovery

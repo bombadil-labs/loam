@@ -44,12 +44,15 @@ import { authorForSeed } from "@bombadil/rhizomatic";
 import {
   EMPTY_OAUTH,
   clientFor,
+  clientNameDefect,
   grantFor,
+  grantForToken,
   oauthPath,
   readOAuthFile,
   writeOAuthFile,
   type OAuthClient,
   type OAuthFile,
+  type OAuthGrant,
 } from "./oauth-file.js";
 import { CSP, escapeHtml, page, sameSecret, type ConsentAuth } from "./session.js";
 
@@ -83,7 +86,6 @@ const DEFAULTS = {
 };
 
 const MAX_BODY = 16 * 1024; // a registration is a few hundred bytes; nothing here needs more
-const MAX_NAME = 200; // a client name is shown to a human, not stored as a document
 const MAX_URIS = 8;
 const MAX_URI = 2048;
 
@@ -101,10 +103,28 @@ export interface OAuthDeps {
   grantActor(actor: string): Promise<void>;
 }
 
-/** What a presented bearer token names, or undefined. `{ actor }` — there is no other shape. */
+/**
+ * What a presented bearer token names, or undefined. `{ actor }` — there is no other shape, and no
+ * branch anywhere in this module produces a second one.
+ *
+ * THE FIELD HOLDS A SEED, NOT AN AUTHOR, and the two are one line apart in `OAuthGrant`. The name is
+ * `actor` because that is what `TokenIdentity.actor` is called in http.ts, where a seed is what signs;
+ * `identityFor` below is the ONE place a grant becomes one of these, so the crossing happens once and a
+ * rail can see it.
+ */
 export interface ActorIdentity {
   readonly actor: string;
 }
+
+/**
+ * A grant, as the token table's identity. THE ONLY producer of an `ActorIdentity` in this module.
+ *
+ * One line, and it earns its own function: `grant.actorSeed` (the secret that signs) and `grant.actor`
+ * (the public author every delta carries) are both bare strings, so a swap between them type-checks
+ * and would authenticate the connector as an author whose key nothing holds. Written once, it is one
+ * line a rail covers rather than a line duplicated at each call site.
+ */
+export const identityFor = (grant: OAuthGrant): ActorIdentity => ({ actor: grant.actorSeed });
 
 export interface OAuthDoors {
   owns(pathname: string): boolean;
@@ -112,8 +132,11 @@ export interface OAuthDoors {
   /**
    * The identity a bearer token's digest names. Reads oauth.json ON THE ASK, never from a cache: a
    * `loam grant revoke` in another process must close the door on the very next request of this live
-   * one, and a cached table would keep it open until a restart. The file is small and this runs only
-   * for a token the static and session tables already declined.
+   * one, and a cached table would keep it open until a restart.
+   *
+   * It runs for any token the static and session tables declined — which is what an anonymous caller
+   * presents — so it reads through `grantForToken`, which finds the digest first and derives one public
+   * key at most. `readOAuthFile` would derive one per stored grant, per wrong guess.
    */
   identify(digestHex: string): ActorIdentity | undefined;
   /** The `WWW-Authenticate` value every refusal carries — blind to mount, verb and token. */
@@ -232,6 +255,13 @@ export function redirectUriDefect(uri: string, allowed: readonly string[]): stri
       `[${allowed.join(", ")}] with --oauth-allow-redirect.`
     );
   }
+  // THE SCHEME RULE IS CHECKED HERE TOO, not only against the configured list at boot. Membership in
+  // the allowlist is not a licence: an entry that was admitted at boot is re-tested per uri, so the
+  // https rule survives any future path that reaches this function with a list boot never vetted.
+  // One rule, asserted at both ends — the boot check turns a typo into a startup error, and this turns
+  // a bypass of that check into a refused registration.
+  const originDefect = redirectOriginDefect(url.origin);
+  if (originDefect !== undefined) return `"${uri}" is not a permitted target: ${originDefect}`;
   return undefined;
 }
 
@@ -246,15 +276,25 @@ interface AuthCode {
   readonly redirectUri: string;
   readonly challenge: string; // the S256 code_challenge, base64url
   readonly expiresAt: number; // monotonic
+  /**
+   * The client's `generation` at the moment consent was given. `loam grant revoke` bumps it in
+   * another process, and this map lives in this one — so without this a code minted a moment before a
+   * revocation would mint a working token a moment after it, and the CLI's report would be false.
+   */
+  readonly generation: number;
 }
 
-/** What a caller asked authorize for, once every field has been checked. */
+/**
+ * What a caller asked authorize for, once every field has been checked. There is no `scope` here on
+ * purpose: §37 grants exactly one, so the caller's scope text governs nothing and carrying it would
+ * put unvalidated caller text on the consent page and into the code for no gain. When a scope LIST
+ * exists this gains a field, and the page's plain-words line becomes that list.
+ */
 interface AuthorizeRequest {
   readonly client: OAuthClient;
   readonly redirectUri: string;
   readonly challenge: string;
   readonly state: string;
-  readonly scope: string;
 }
 
 const readBody = (req: IncomingMessage): Promise<string | undefined> =>
@@ -315,11 +355,22 @@ export function makeOAuthDoors(deps: OAuthDeps): OAuthDoors {
   // endpoint becomes an open redirect, because the earliest refusals are precisely the ones where the
   // redirect target has not been validated yet.
 
-  const jsonOut = (res: ServerResponse, status: number, body: unknown): void => {
+  // CORS RIDES THE COOKIELESS DOORS AND NOT THE COOKIE ONE, and the split is the whole rule.
+  //
+  // The preflight (http.ts) answers `OPTIONS` for every path with `allow-origin: *` before the router
+  // sees it, so a door that then answered without the header would have a browser discard a response
+  // its own preflight promised. The two well-known documents, registration and the token endpoint read
+  // NO cookie — their authority is the code and the verifier, presented explicitly — so a wildcard
+  // origin lends a caller nothing, exactly as it lends nothing on the data doors.
+  //
+  // `/oauth/authorize` is the exception and must stay one: it reads the session cookie, and a
+  // cross-origin page must not be able to READ the consent page or the redirect it answers with.
+  const jsonOut = (res: ServerResponse, status: number, body: unknown, cors = true): void => {
     res.writeHead(status, {
       "content-type": "application/json",
       "cache-control": "no-store",
       "referrer-policy": "no-referrer",
+      ...(cors ? { "access-control-allow-origin": "*" } : {}),
     });
     res.end(JSON.stringify(body));
   };
@@ -329,8 +380,19 @@ export function makeOAuthDoors(deps: OAuthDeps): OAuthDoors {
     status: number,
     error: string,
     description: string,
+    cors = true,
   ): void => {
-    jsonOut(res, status, { error, error_description: description });
+    jsonOut(res, status, { error, error_description: description }, cors);
+  };
+
+  /** The authorize door's refusals: JSON, and never readable cross-origin. It reads a cookie. */
+  const refuseConsent = (
+    res: ServerResponse,
+    status: number,
+    error: string,
+    description: string,
+  ): void => {
+    refuse(res, status, error, description, false);
   };
 
   const htmlOut = (res: ServerResponse, status: number, body: string, cookie?: string): void => {
@@ -356,6 +418,25 @@ export function makeOAuthDoors(deps: OAuthDeps): OAuthDoors {
 <p>Nothing was granted. Close this tab.</p>`,
       ),
     );
+  };
+
+  /** The file, or a refusal from the CONSENT door — JSON, and never readable cross-origin. */
+  const loadConsent = (res: ServerResponse): OAuthFile | undefined => {
+    try {
+      return readOAuthFile(home);
+    } catch (err) {
+      onFault(
+        `the connector doors cannot read ${oauthPath(home)}: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+      refuseConsent(
+        res,
+        503,
+        "temporarily_unavailable",
+        "this store cannot read its connector records, so it grants nothing",
+      );
+      return undefined;
+    }
   };
 
   /** The file, or a refusal. `undefined` means the door already answered. */
@@ -399,13 +480,16 @@ export function makeOAuthDoors(deps: OAuthDeps): OAuthDoors {
     }
     const body = parsed as Record<string, unknown>;
     const name = body["client_name"];
-    if (typeof name !== "string" || name.length === 0 || name.length > MAX_NAME) {
-      refuse(
-        res,
-        400,
-        "invalid_client_metadata",
-        `client_name is 1..${MAX_NAME} characters of text a person will read on the consent page`,
-      );
+    if (typeof name !== "string") {
+      refuse(res, 400, "invalid_client_metadata", "client_name is a string");
+      return;
+    }
+    // The name reaches the operator's TERMINAL through `loam grant list`, and this door takes no
+    // credential — so a newline in it forges a row in the operator's only view of what is registered.
+    // `clientNameDefect` is the one rule, shared with the file's own reader.
+    const nameDefect = clientNameDefect(name);
+    if (nameDefect !== undefined) {
+      refuse(res, 400, "invalid_client_metadata", nameDefect);
       return;
     }
     const uris = body["redirect_uris"];
@@ -445,16 +529,30 @@ export function makeOAuthDoors(deps: OAuthDeps): OAuthDoors {
         );
         return { kind: "unreadable" as const };
       }
-      if (file.clients.length >= maxClients) {
-        return { kind: "full" as const };
+      // AT THE CAP, EVICT THE OLDEST NEVER-APPROVED REGISTRATION rather than refuse.
+      //
+      // This door takes no credential, so a plain cap is a lockout: a stranger files `maxClients` junk
+      // registrations and the real connector is refused forever, with no command that removes one. An
+      // APPROVED connector is never evicted — the operator consented to it, and its seed signs deltas
+      // the store holds — so the pressure falls only on registrations nobody has agreed to, and a
+      // flood evicts its own earlier entries instead of the operator's connector.
+      const approved = new Set(file.grants.map((g) => g.clientId));
+      let clients = [...file.clients];
+      while (clients.length >= maxClients) {
+        const oldest = clients
+          .filter((c) => !approved.has(c.clientId))
+          .sort((a, b) => a.registeredAt - b.registeredAt)[0];
+        if (oldest === undefined) return { kind: "full" as const };
+        clients = clients.filter((c) => c.clientId !== oldest.clientId);
       }
       const client: OAuthClient = {
         clientId: `connector-${randomBytes(16).toString("hex")}`,
         clientName: name,
         redirectUris: checked,
         registeredAt: Date.now(),
+        generation: 1,
       };
-      writeOAuthFile(home, { ...file, clients: [...file.clients, client] });
+      writeOAuthFile(home, { ...file, clients: [...clients, client] });
       return { kind: "ok" as const, client };
     });
 
@@ -473,8 +571,8 @@ export function makeOAuthDoors(deps: OAuthDeps): OAuthDoors {
         res,
         400,
         "invalid_client_metadata",
-        `this store already holds ${maxClients} registered connectors, which is all it will hold. ` +
-          `\`loam grant list\` names them; revoking one does not remove it.`,
+        `this store already holds ${maxClients} APPROVED connectors, which is all it will hold. ` +
+          `\`loam grant list\` names them.`,
       );
       return;
     }
@@ -531,16 +629,9 @@ export function makeOAuthDoors(deps: OAuthDeps): OAuthDoors {
     if (!/^[A-Za-z0-9_-]{43}$/.test(challenge)) {
       return { ok: false, reason: "the code_challenge is not an S256 challenge" };
     }
-    const scope = field("scope");
     return {
       ok: true,
-      ask: {
-        client,
-        redirectUri,
-        challenge,
-        state: field("state"),
-        scope: scope === "" ? CONNECTOR_SCOPE : scope,
-      },
+      ask: { client, redirectUri, challenge, state: field("state") },
     };
   };
 
@@ -565,9 +656,14 @@ export function makeOAuthDoors(deps: OAuthDeps): OAuthDoors {
       "connect an application to a Loam store",
       `<h1>Connect ${escapeHtml(ask.client.clientName)}?</h1>
 <p>You are signed in as <code>${escapeHtml(user)}</code>.</p>
+<p>Its registered id is <code>${escapeHtml(ask.client.clientId)}</code>. A display name is whatever
+the application asked to be called, and anyone can ask; the id is this store's own.</p>
 <p><code>${escapeHtml(ask.client.clientName)}</code> asks to read the doors of this store and to
 write claims to it. It will write under its own name, as its own author — not as you, and not as
 this store's operator. Every claim it writes will say so.</p>
+<p>Writing includes RETRACTING. An author this store has granted may strike a claim, and a reader
+then stops seeing it — including claims you wrote yourself. It cannot change this store's law: it
+cannot register a schema, add a user, order an erasure, or federate.</p>
 <p>If you approve, this store sends the result to
 <code>${escapeHtml(ask.redirectUri)}</code>.</p>
 <p>You can withdraw this at any time with <code>loam grant revoke</code>.</p>
@@ -579,7 +675,6 @@ ${hidden("redirect_uri", ask.redirectUri)}
 ${hidden("code_challenge", ask.challenge)}
 ${hidden("code_challenge_method", "S256")}
 ${hidden("state", ask.state)}
-${hidden("scope", ask.scope)}
 ${hidden("approve", "yes")}
 <button type="submit">Approve</button>
 </form>`,
@@ -598,7 +693,14 @@ ${hidden("approve", "yes")}
       return;
     }
     if (who.kind === "none") {
-      const prompt = deps.consent.loginPrompt(req);
+      // THE AUTHORIZE QUERY DOES NOT SURVIVE THE LOGIN. `/login` answers its own signed-in page, so the
+      // `client_id` and the challenge are gone by then and the operator lands somewhere else. A
+      // `return_to` would carry them, and would be a new caller-supplied destination on the one door
+      // whose whole job is not to have one — so the page SAYS what to do instead of redirecting.
+      const prompt = deps.consent.loginPrompt(
+        req,
+        "Sign in first. Then open the application's connect link again — this page could not keep it.",
+      );
       htmlOut(res, 200, prompt.body, prompt.cookie);
       return;
     }
@@ -623,7 +725,7 @@ ${hidden("approve", "yes")}
     // The two same-origin signals BEFORE the body: a cross-site POST must not be able to make this
     // door do work, and it must not learn anything from how long the refusal took.
     if (!deps.consent.fromThisPage(req)) {
-      refuse(
+      refuseConsent(
         res,
         403,
         "access_denied",
@@ -634,15 +736,15 @@ ${hidden("approve", "yes")}
     const body = formFields(await readBody(req));
     const who = deps.consent.who(req);
     if (who.kind === "unreachable") {
-      refuse(res, 503, "temporarily_unavailable", "this store's ground is not reachable");
+      refuseConsent(res, 503, "temporarily_unavailable", "this store's ground is not reachable");
       return;
     }
     if (who.kind === "none") {
-      refuse(res, 401, "access_denied", "no live session is presented here");
+      refuseConsent(res, 401, "access_denied", "no live session is presented here");
       return;
     }
     if (!sameSecret(body.get("form_token") ?? "", who.formToken)) {
-      refuse(
+      refuseConsent(
         res,
         403,
         "access_denied",
@@ -651,7 +753,7 @@ ${hidden("approve", "yes")}
       return;
     }
     if (who.kind === "not-operator") {
-      refuse(
+      refuseConsent(
         res,
         403,
         "access_denied",
@@ -662,14 +764,14 @@ ${hidden("approve", "yes")}
     }
     // SILENCE IS NOT CONSENT. The page's own form always carries this field.
     if (body.get("approve") !== "yes") {
-      refuse(res, 400, "access_denied", "nothing here was approved");
+      refuseConsent(res, 400, "access_denied", "nothing here was approved");
       return;
     }
-    const file = load(res, false);
+    const file = loadConsent(res);
     if (file === undefined) return;
     const checked = checkAsk(fromBody(body), file);
     if (!checked.ok) {
-      refuse(res, 400, "invalid_request", checked.reason);
+      refuseConsent(res, 400, "invalid_request", checked.reason);
       return;
     }
     const ask = checked.ask;
@@ -679,7 +781,7 @@ ${hidden("approve", "yes")}
     const moment = now();
     for (const [code, held] of codes) if (held.expiresAt <= moment) codes.delete(code);
     if (codes.size >= maxCodes) {
-      refuse(
+      refuseConsent(
         res,
         503,
         "temporarily_unavailable",
@@ -693,6 +795,7 @@ ${hidden("approve", "yes")}
       redirectUri: ask.redirectUri,
       challenge: ask.challenge,
       expiresAt: moment + codeTtlMs,
+      generation: ask.client.generation,
     });
     // THE ONE LOCATION THIS MODULE SENDS, and it is a string that came out of the file after passing
     // both fences. `ask.state` is caller text, and URLSearchParams is what keeps it from becoming a
@@ -716,16 +819,19 @@ ${hidden("approve", "yes")}
    */
   const mintToken = async (
     clientId: string,
+    generation: number,
   ): Promise<
-    | { kind: "ok"; token: string; identity: ActorIdentity }
+    | { kind: "ok"; token: string }
     | { kind: "unreadable" }
     | { kind: "full" }
     | { kind: "gone" }
+    | { kind: "revoked" }
   > =>
     serialized(async () => {
+      const read = (): OAuthFile => readOAuthFile(home);
       let file: OAuthFile;
       try {
-        file = readOAuthFile(home);
+        file = read();
       } catch (err) {
         onFault(
           `the connector doors cannot read ${oauthPath(home)}: ` +
@@ -735,12 +841,22 @@ ${hidden("approve", "yes")}
       }
       // Re-read INSIDE the chain: a snapshot taken before the await is how two concurrent
       // first-grants each mint a seed.
-      if (clientFor(file, clientId) === undefined) return { kind: "gone" as const };
+      const client = clientFor(file, clientId);
+      if (client === undefined) return { kind: "gone" as const };
+      // A REVOCATION LANDED AFTER CONSENT WAS GIVEN. The consent is stale, so the code is dead.
+      if (client.generation !== generation) return { kind: "revoked" as const };
       if (file.tokens.filter((t) => t.clientId === clientId).length >= maxTokensPerClient) {
         return { kind: "full" as const };
       }
+
+      // THE SEED IS RECORDED BEFORE THE GRANT IS APPENDED, and the order is the recovery story.
+      //
+      // Appending first and recording after leaves the unrecoverable gap: a write that fails between
+      // the two puts a grant in the ground for a key nobody holds, and the NEXT redemption, finding no
+      // seed, mints a second one. This way round the file is the single answer to "which seed is this
+      // connector's", `standing: false` names the one gap that remains, and the retry below closes it
+      // with the SAME seed.
       let grant = grantFor(file, clientId);
-      let grants = file.grants;
       if (grant === undefined) {
         const actorSeed = randomBytes(32).toString("hex");
         grant = {
@@ -748,21 +864,26 @@ ${hidden("approve", "yes")}
           actorSeed,
           actor: authorForSeed(actorSeed),
           grantedAt: Date.now(),
+          standing: false,
         };
-        // THE GRANT LANDS IN THE GROUND FIRST. A token written beside a grant that never landed is a
-        // credential for an identity with no standing — it authenticates and then cannot write, which
-        // is a door reporting a success it did not achieve. A throw here refuses the redemption and
-        // leaves the file exactly as it was.
+        writeOAuthFile(home, { ...file, grants: [...file.grants, grant] });
+        file = read();
+      }
+      if (!grant.standing) {
+        // A throw here refuses the redemption and mints no token: a credential for an identity with no
+        // standing authenticates and then cannot write, which is a door reporting a success it did not
+        // achieve. The seed survives, flagged, and the next redemption arrives here again.
         await deps.grantActor(grant.actor);
-        grants = [...file.grants, grant];
+        grant = { ...grant, standing: true };
       }
       const token = opaque();
+      const standing = grant;
       writeOAuthFile(home, {
         ...file,
-        grants,
+        grants: [...file.grants.filter((g) => g.clientId !== clientId), standing],
         tokens: [...file.tokens, { digest: sha(token), clientId, issuedAt: Date.now() }],
       });
-      return { kind: "ok" as const, token, identity: { actor: grant.actorSeed } };
+      return { kind: "ok" as const, token };
     });
 
   const postToken = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
@@ -814,7 +935,7 @@ ${hidden("approve", "yes")}
       return;
     }
 
-    const minted = await mintToken(held.clientId);
+    const minted = await mintToken(held.clientId, held.generation);
     if (minted.kind === "unreadable") {
       refuse(
         res,
@@ -826,6 +947,10 @@ ${hidden("approve", "yes")}
     }
     if (minted.kind === "gone") {
       bad("that client is no longer registered here");
+      return;
+    }
+    if (minted.kind === "revoked") {
+      bad("this connector was revoked after that code was issued, so the code is dead");
       return;
     }
     if (minted.kind === "full") {
@@ -903,9 +1028,9 @@ ${hidden("approve", "yes")}
     challenge: challengeFor(deps.publicUrl),
     owns: (pathname) => PATHS.has(pathname),
     identify(digestHex) {
-      let file: OAuthFile;
+      let grant;
       try {
-        file = readOAuthFile(home);
+        grant = grantForToken(home, digestHex);
       } catch (err) {
         // CANNOT DECIDE IS NOT "THIS TOKEN IS GOOD". Refusing is the only safe answer, and the operator
         // is told rather than left with a door that mysteriously stopped opening.
@@ -915,13 +1040,9 @@ ${hidden("approve", "yes")}
         );
         return undefined;
       }
-      const entry = file.tokens.find((t) => t.digest === digestHex);
-      if (entry === undefined) return undefined;
-      const grant = grantFor(file, entry.clientId);
-      // A token whose grant is gone opens nothing. It should not be possible — revocation removes
-      // tokens and keeps grants — and failing closed is the answer either way.
-      if (grant === undefined) return undefined;
-      return { actor: grant.actorSeed };
+      // Undefined covers both "no such token" and "a token whose grant is gone". The second should not
+      // be possible — revocation removes tokens and keeps grants — and failing closed is right anyway.
+      return grant === undefined ? undefined : identityFor(grant);
     },
     async handle(pathname, req, res) {
       // ONE GUARD OVER ALL FIVE DOORS, for the reason session.ts states: a fault nobody anticipated

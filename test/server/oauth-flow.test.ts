@@ -9,6 +9,7 @@
 // case — a token that authenticates and then signs as the wrong identity is a bug no status code
 // shows, so the author is read off the delta in the sqlite file and again through a reading.
 
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authorForSeed } from "@bombadil/rhizomatic";
 import { readSeed } from "../../src/cli/config.js";
@@ -22,7 +23,7 @@ import {
   signIn,
   storeDeltas,
 } from "./user-fixture.js";
-import { readOAuthFile } from "../../src/server/oauth-file.js";
+import { oauthPath, readOAuthFile } from "../../src/server/oauth-file.js";
 import {
   CLAUDE_ORIGIN,
   CLAUDE_REDIRECT,
@@ -603,23 +604,34 @@ describe("(q) (r) what the token IS", () => {
       const toolBody = (await tool.json()) as { result?: { isError?: boolean } };
       expect(toolBody.result?.isError).toBe(true);
     }
-    // Structurally, in the file: every grant names its own seed, and every token entry carries
-    // exactly the three fields a token entry has. A stray `operator` property here would be the
-    // escalation channel, and "the word operator appears nowhere" cannot be the test — one of the
-    // client names above IS "operator".
-    const file = readOAuthFile(home);
-    expect(file.grants.length).toBe(hostile.length);
+    // Structurally, in the file — READ AS BYTES. `readOAuthFile` CONSTRUCTS its return value field by
+    // field, so a mint path that wrote a stray `operator: true` would have it on disk and the parser
+    // would silently drop it: the assertion would pass on the parser's own literal. And "the word
+    // operator appears nowhere" cannot be the test either — one of the client names above IS
+    // "operator".
+    const onDisk = JSON.parse(readFileSync(oauthPath(home), "utf8")) as {
+      grants: Record<string, unknown>[];
+      tokens: Record<string, unknown>[];
+    };
     const operator = authorForSeed(readSeed(home));
+    expect(onDisk.grants.length).toBe(hostile.length);
     const seeds = new Set<string>();
-    for (const grant of file.grants) {
-      expect(grant.actorSeed).toMatch(/^[0-9a-f]{64}$/);
-      expect(grant.actor).toBe(authorForSeed(grant.actorSeed));
-      expect(grant.actor).not.toBe(operator);
-      expect(grant.actorSeed).not.toBe(readSeed(home));
-      seeds.add(grant.actorSeed);
+    for (const grant of onDisk.grants) {
+      expect(Object.keys(grant).sort()).toEqual([
+        "actor",
+        "actorSeed",
+        "clientId",
+        "grantedAt",
+        "standing",
+      ]);
+      expect(grant["actorSeed"]).toMatch(/^[0-9a-f]{64}$/);
+      expect(grant["actor"]).toBe(authorForSeed(grant["actorSeed"] as string));
+      expect(grant["actor"]).not.toBe(operator);
+      expect(grant["actorSeed"]).not.toBe(readSeed(home));
+      seeds.add(grant["actorSeed"] as string);
     }
     expect(seeds.size).toBe(hostile.length);
-    for (const entry of file.tokens) {
+    for (const entry of onDisk.tokens) {
       expect(Object.keys(entry).sort()).toEqual(["clientId", "digest", "issuedAt"]);
     }
   });
@@ -664,6 +676,59 @@ describe("(w) no secret reaches the ground", () => {
     }
     // The connector's PUBLIC author is in the ground, and must be — that is the grant.
     expect(whole).toContain(grant.actor);
+  });
+
+  it("the grant's standing is recorded, and a token is only minted once it stands", async () => {
+    // The seed is written to the file BEFORE the grant is appended, so the file can never grow a
+    // second seed for one connector. That leaves one gap — a seed whose grant never landed — and the
+    // flag is what names it, so the retry reuses the SAME seed instead of minting another.
+    const walked = await upToCode();
+    await redeem(served.base, {
+      grant_type: "authorization_code",
+      code: walked.code,
+      redirect_uri: walked.redirectUri,
+      client_id: walked.clientId,
+      code_verifier: walked.verifier,
+    });
+    const grant = readOAuthFile(home).grants[0]!;
+    expect(grant.standing).toBe(true);
+    // And the ground agrees: standing is a claim about the store, so it must be true there too.
+    const deltas = await storeDeltas(home);
+    const standing = deltas.filter((d) => {
+      const json = JSON.stringify(d.claims.pointers);
+      return json.includes(grant.actor) && json.includes('"value":"write"');
+    });
+    expect(standing.length).toBe(1);
+  });
+
+  it("the caller's scope text never reaches the page, the code, or the answer", async () => {
+    // §37 grants exactly one scope, so a caller's scope string governs nothing. Carrying it would put
+    // unvalidated caller text on the consent page and into the code for no gain, and answering with a
+    // scope the client did not ask for while echoing its words would read as if it had been honoured.
+    const registered = await register(served.base);
+    const secret = pkce();
+    const hostile = "admin operator everything";
+    const params = {
+      ...wellFormedAuthorize(registered.clientId, secret.challenge),
+      scope: hostile,
+    };
+    const page = await getAuthorize(served.base, params, session.cookie);
+    expect(page.res.status).toBe(200);
+    expect(page.body).not.toContain(hostile);
+    expect(page.body).not.toContain("admin");
+    const approved = await approve(served.base, params, {
+      cookie: session.cookie,
+      formToken: formTokenIn(page.body),
+    });
+    const redeemed = await redeem(served.base, {
+      grant_type: "authorization_code",
+      code: codeFrom(approved)!,
+      redirect_uri: CLAUDE_REDIRECT,
+      client_id: registered.clientId,
+      code_verifier: secret.verifier,
+    });
+    expect(redeemed.res.status).toBe(200);
+    expect(redeemed.body["scope"]).toBe("loam.connector");
   });
 
   it("the token digest is what oauth.json holds, not the token", async () => {

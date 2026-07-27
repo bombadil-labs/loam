@@ -204,10 +204,14 @@ describe("GET /oauth/authorize — the consent page", () => {
     expect(asked.body).not.toContain(`"><`);
     expect(asked.body).not.toContain("<script>");
     expect(asked.body).not.toContain("<img");
-    // The state has to survive INTO the approval, or the redirect back loses it — so it is on the page
+    // The STATE has to survive INTO the approval, or the redirect back loses it — so it is on the page
     // in a hidden field, escaped. That is the value this rail proves is escaped rather than absent.
     expect(asked.body).toContain("&lt;script&gt;");
-    expect(asked.body).toContain("&quot;&gt;&lt;img");
+    // The SCOPE is a different case, and the stronger one: §37 grants exactly one scope, so the
+    // caller's scope text governs nothing and never reaches the page at all. Nothing to escape beats
+    // escaping — asserted as absence, including of its escaped form.
+    expect(asked.body).not.toContain("&lt;img");
+    expect(asked.body).not.toContain("onerror");
   });
 
   it("(j) the page carries a CSP that permits no script, and no framing", async () => {

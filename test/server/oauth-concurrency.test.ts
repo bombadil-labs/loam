@@ -11,6 +11,7 @@
 
 import { chmodSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { authorForSeed } from "@bombadil/rhizomatic";
 import { PASSWORD, bootStore, createUser, dropHome, makeHome, signIn } from "./user-fixture.js";
 import {
   OAuthFileUnreadable,
@@ -35,6 +36,9 @@ import {
 } from "./oauth-fixture.js";
 
 vi.setConfig({ testTimeout: 30000 });
+
+const SEED = "11".repeat(32);
+const SEED_AUTHOR = authorForSeed(SEED);
 
 let home: string;
 let served: ServedOAuth;
@@ -205,10 +209,20 @@ describe("(t) the write is atomic and 0600", () => {
     expect(readOAuthFile(home).clients.length).toBe(2);
   });
 
-  it("the file is never observed half-written, and the temp is not left behind", async () => {
-    // Temp-then-rename means a reader either sees the old whole file or the new whole file. Asserted
-    // the way a reader can: every intermediate state parses.
-    for (let i = 0; i < 6; i += 1) {
+  it("the write REPLACES the file rather than truncating it, and leaves no temp", async () => {
+    // The discriminating assertion, and the reason a "does it still parse" loop is not one: awaiting
+    // each write means no reader ever runs mid-write, so a plain `writeFileSync` + `chmod` would keep
+    // that loop green. `rename` puts a NEW inode at the path; truncate-in-place keeps the old one. So
+    // the inode moving is what proves the temp-then-rename, from outside, with no timing at all.
+    await register(served.base);
+    const first = statSync(oauthPath(home));
+    await register(served.base);
+    const second = statSync(oauthPath(home));
+    if (process.platform !== "win32") {
+      expect(second.ino).not.toBe(first.ino);
+    }
+    // Every state a reader could observe parses, and the temp is not left behind.
+    for (let i = 0; i < 4; i += 1) {
       await register(served.base);
       expect(() => readOAuthFile(home)).not.toThrow();
     }
@@ -216,6 +230,10 @@ describe("(t) the write is atomic and 0600", () => {
       (f) => f.startsWith("oauth.json.") && f.endsWith(".tmp"),
     );
     expect(leftovers).toEqual([]);
+    // WHAT THIS DOES NOT ASSERT: the fsync. Nothing observable from a test distinguishes a synced
+    // write from an unsynced one without a power cut, so durability across a crash rests on reading
+    // `writeOAuthFile`. The rail that would close it is a filesystem fault injector, which this suite
+    // does not have.
   });
 
   it("writeOAuthFile applies 0600 to a path that already exists at 0644", () => {
@@ -255,7 +273,32 @@ describe("(u) a file this door cannot read", () => {
       label: "a grant whose actor disagrees with its seed",
       bytes:
         `{"version":1,"clients":[],"grants":[{"clientId":"a","actorSeed":"${"11".repeat(32)}",` +
-        `"actor":"not-the-author-of-that-seed","grantedAt":1}],"tokens":[]}`,
+        `"actor":"not-the-author-of-that-seed","grantedAt":1,"standing":true}],"tokens":[]}`,
+    },
+    {
+      label: "a grant that does not say whether it stands",
+      bytes:
+        `{"version":1,"clients":[],"grants":[{"clientId":"a","actorSeed":"${SEED}",` +
+        `"actor":"${SEED_AUTHOR}","grantedAt":1}],"tokens":[]}`,
+    },
+    {
+      label: "a client with no generation",
+      bytes:
+        '{"version":1,"clients":[{"clientId":"a","clientName":"x","redirectUris":[],' +
+        '"registeredAt":1}],"grants":[],"tokens":[]}',
+    },
+    {
+      label: "a client whose generation is zero",
+      bytes:
+        '{"version":1,"clients":[{"clientId":"a","clientName":"x","redirectUris":[],' +
+        '"registeredAt":1,"generation":0}],"grants":[],"tokens":[]}',
+    },
+    {
+      // A file edited by hand must not be able to smuggle a forged row into `loam grant list`.
+      label: "a client whose name carries a newline",
+      bytes:
+        '{"version":1,"clients":[{"clientId":"a","clientName":"x\\n    client   forged",' +
+        '"redirectUris":[],"registeredAt":1,"generation":1}],"grants":[],"tokens":[]}',
     },
   ];
 

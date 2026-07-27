@@ -13,15 +13,22 @@
 
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PASSWORD, bootStore, createUser, dropHome, makeHome } from "./user-fixture.js";
+import { PASSWORD, bootStore, createUser, dropHome, makeHome, signIn } from "./user-fixture.js";
 import { oauthPath, readOAuthFile } from "../../src/server/oauth-file.js";
 import {
   CLAUDE_ORIGIN,
   CLAUDE_REDIRECT,
   OTHER_ORIGIN,
+  approve,
+  codeFrom,
+  formTokenIn,
+  getAuthorize,
+  pkce,
+  redeem,
   register,
   registerRaw,
   serveOAuth,
+  wellFormedAuthorize,
   type ServedOAuth,
 } from "./oauth-fixture.js";
 
@@ -59,23 +66,30 @@ describe("POST /oauth/register", () => {
 
     // And a NEW server over the same home still knows the client. This is the criterion: claude.ai
     // registers once and expects to keep its id across every restart of the store.
+    //
+    // IT MUST BE ASKED WITH A SESSION. `getAuthorize` resolves the session BEFORE it looks at the
+    // client, so a probe with no cookie gets the login form at 200 for a known id, an unknown id, and
+    // an oauth.json the restart lost — three states one assertion cannot separate.
     await served.close();
     served = await serveOAuth(home);
-    const secondBoot = await fetch(
-      `${served.base}/oauth/authorize?` +
-        new URLSearchParams({
-          response_type: "code",
-          client_id: first.clientId,
-          redirect_uri: CLAUDE_REDIRECT,
-          code_challenge: "x".repeat(43),
-          code_challenge_method: "S256",
-        }).toString(),
-      { redirect: "manual" },
+    const session = await signIn(served.base);
+    const reached = await getAuthorize(
+      served.base,
+      wellFormedAuthorize(first.clientId, pkce().challenge),
+      session.cookie,
     );
-    // No session, so it shows the login form — but it RECOGNISED the client, which an unknown id
-    // would not have. An unknown id refuses with a named error instead.
-    expect(secondBoot.status).toBe(200);
-    expect(await secondBoot.text()).toMatch(/Sign in/);
+    expect(reached.res.status).toBe(200);
+    expect(reached.body).toMatch(/Approve/);
+    expect(reached.body).toContain("Claude");
+    expect(reached.body).toContain(first.clientId);
+    // And the same server refuses an id it does not hold — so the line above is about THIS client
+    // rather than about any client at all.
+    const unknown = await getAuthorize(
+      served.base,
+      wellFormedAuthorize("connector-does-not-exist", pkce().challenge),
+      session.cookie,
+    );
+    expect(unknown.res.status).toBe(400);
   });
 
   it("(f) a second registration is a DIFFERENT client, not an overwrite", async () => {
@@ -177,14 +191,100 @@ describe("POST /oauth/register", () => {
 
   it("(f) registration is bounded: a flood cannot grow oauth.json without limit", async () => {
     // The endpoint takes no session by design, so the only thing between it and the disk is a cap.
-    // Without one, a stranger fills the operator's home one 201 at a time.
     await served.close();
     served = await serveOAuth(home, { oauth: { maxClients: 3 } });
-    const codes: number[] = [];
-    for (let i = 0; i < 5; i += 1) codes.push((await register(served.base)).status);
-    expect(codes.filter((c) => c === 201).length).toBe(3);
-    expect(codes.filter((c) => c === 400 || c === 429 || c === 503).length).toBe(2);
+    for (let i = 0; i < 8; i += 1) expect((await register(served.base)).status).toBe(201);
     expect(readOAuthFile(home).clients.length).toBe(3);
+  });
+
+  it("(f) at the cap the OLDEST NEVER-APPROVED registration is evicted, not the newest refused", async () => {
+    // A plain refusal at the cap is a LOCKOUT, and this door takes no credential: a stranger files
+    // maxClients junk registrations and the real connector is refused forever, with no command that
+    // removes one. So the flood evicts its own earlier entries and the newcomer always gets in.
+    await served.close();
+    served = await serveOAuth(home, { oauth: { maxClients: 2 } });
+    const first = await register(served.base, { name: "oldest" });
+    const second = await register(served.base, { name: "middle" });
+    const third = await register(served.base, { name: "newest" });
+    expect([first.status, second.status, third.status]).toEqual([201, 201, 201]);
+    const held = readOAuthFile(home).clients.map((c) => c.clientId);
+    expect(held).not.toContain(first.clientId);
+    expect(held).toContain(third.clientId);
+    // And the evicted id is really gone — authorize must not still recognise it.
+    const session = await signIn(served.base);
+    const stale = await getAuthorize(
+      served.base,
+      wellFormedAuthorize(first.clientId, pkce().challenge),
+      session.cookie,
+    );
+    expect(stale.res.status).toBe(400);
+  });
+
+  it("(f) an APPROVED connector is never evicted, and a full house then refuses", async () => {
+    // The other side of the eviction, and the one that matters: the operator consented to this
+    // connector and its seed signs deltas the store holds. A flood must not be able to displace it.
+    //
+    // maxClients is ONE here on purpose. With room to spare, a flood cycles through the unapproved
+    // slots forever and never sees a refusal — which is the design, not a gap. The refusal arrives only
+    // when every slot is approved, and that is the state this rail needs to reach.
+    await served.close();
+    served = await serveOAuth(home, { oauth: { maxClients: 1 } });
+    const session = await signIn(served.base);
+    const mine = await register(served.base, { name: "Claude" });
+    const secret = pkce();
+    const params = wellFormedAuthorize(mine.clientId, secret.challenge);
+    const page = await getAuthorize(served.base, params, session.cookie);
+    const approved = await approve(served.base, params, {
+      cookie: session.cookie,
+      formToken: formTokenIn(page.body),
+    });
+    const code = codeFrom(approved)!;
+    const redeemed = await redeem(served.base, {
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: CLAUDE_REDIRECT,
+      client_id: mine.clientId,
+      code_verifier: secret.verifier,
+    });
+    expect(redeemed.res.status).toBe(200);
+
+    // Now flood. Every round refuses, because the only slot is an approved connector's.
+    const outcomes: number[] = [];
+    for (let i = 0; i < 4; i += 1) outcomes.push((await register(served.base)).status);
+    expect(outcomes).toEqual([400, 400, 400, 400]);
+    const after = readOAuthFile(home);
+    expect(after.clients.map((c) => c.clientId)).toEqual([mine.clientId]);
+    expect(after.grants.map((g) => g.clientId)).toEqual([mine.clientId]);
+    // And the connector still works: a refusal storm must not have touched its token.
+    const listed = await fetch(`${served.base}/default/mcp`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${String(redeemed.body["access_token"])}`,
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+    expect(listed.status).toBe(200);
+  });
+
+  it("(f) a client_name carrying a newline or an escape is refused", async () => {
+    // The name reaches the operator's TERMINAL through `loam grant list`, and this door takes no
+    // credential — so a newline forges a whole row in the operator's only view of what is registered,
+    // and an ANSI escape erases the caller's own.
+    for (const hostile of [
+      "Claude\n    client   connector-forged",
+      "Claude\r\nEvil",
+      "Claude\u001b[2K\rEvil",
+      "Claude\u0000",
+      "Claude\u2028Evil",
+      "Claude\u009b2K",
+    ]) {
+      const res = await register(served.base, { name: hostile });
+      expect(res.status, `${JSON.stringify(hostile)} was admitted`).toBe(400);
+    }
+    expect(readOAuthFile(home).clients).toEqual([]);
+    // A name with punctuation and non-ASCII letters is fine — the rule is control bytes, not ASCII.
+    expect((await register(served.base, { name: "Claude — Myk's connector ✨" })).status).toBe(201);
   });
 
   it("(f) a client_name longer than the door allows is refused rather than stored", async () => {

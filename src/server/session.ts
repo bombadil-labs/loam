@@ -113,8 +113,15 @@ export interface ConsentAuth {
     | { readonly kind: "not-operator"; readonly user: string; readonly formToken: string }
     | { readonly kind: "unreachable" }
     | { readonly kind: "none" };
-  /** The login form, and the cookie carrying its stateless pre-session. */
-  loginPrompt(req: IncomingMessage): { readonly body: string; readonly cookie: string };
+  /**
+   * The login form, and the cookie carrying its stateless pre-session. `note` is one sentence shown
+   * above the form — §37 uses it to say that the connector's link must be opened again, because the
+   * authorize query cannot survive the POST to `/login`.
+   */
+  loginPrompt(
+    req: IncomingMessage,
+    note?: string,
+  ): { readonly body: string; readonly cookie: string };
   /** Did this POST come from this store's own page? `Origin` outranks `Sec-Fetch-Site`. */
   fromThisPage(req: IncomingMessage): boolean;
 }
@@ -496,10 +503,15 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
       errors: ["this request did not come from this store's own page, so it is refused"],
     });
 
-  const loginPage = (formToken: string): string =>
+  // `note` is one sentence a caller of this page may add above the form. §37's consent door uses it,
+  // because the authorize query cannot survive a POST to /login and the operator has to be told rather
+  // than redirected — a return_to would be a caller-supplied destination on the one door that must not
+  // have one. It is ESCAPED like every other string here, though today's only caller passes a constant.
+  const loginPage = (formToken: string, note?: string): string =>
     page(
       "sign in to a Loam store",
       `<h1>Sign in.</h1>
+${note === undefined ? "" : `<p>${escapeHtml(note)}</p>`}
 <form method="post" action="/login">
 <input type="hidden" name="form_token" value="${escapeHtml(formToken)}">
 <label>user<input name="user" autocomplete="username" autocapitalize="none" spellcheck="false"></label>
@@ -851,13 +863,13 @@ data doors on its own.</p>`,
         ? { kind: "operator", ...carried }
         : { kind: "not-operator", ...carried };
     },
-    loginPrompt(req) {
+    loginPrompt(req, note) {
       // Byte for byte what `GET /login` hands an anonymous visitor: the stateless pre-session, in its
       // OWN cookie. Reading or writing the SESSION cookie here would be the bug PRESESSION_COOKIE
       // exists to prevent — any page on the internet could point a browser at the consent URL and
       // overwrite the operator's live session id with a nonce.
       const nonce = preSessionIdFrom(req) ?? opaque();
-      return { body: loginPage(preSessionToken(nonce)), cookie: setPreCookie(nonce) };
+      return { body: loginPage(preSessionToken(nonce), note), cookie: setPreCookie(nonce) };
     },
     fromThisPage,
   };

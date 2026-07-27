@@ -250,6 +250,100 @@ describe("loam grant revoke", () => {
     expect(again.body["access_token"]).not.toBe(first.token);
   });
 
+  it("(v) a code issued BEFORE the revoke does not mint after it", async () => {
+    // The report `revoke` prints — "a serving process refuses the next request that presents one" — is
+    // false unless this holds. A code lives five minutes in the SERVING process's memory, which the CLI
+    // cannot reach; without the generation bump, a code issued a moment before the revoke mints a
+    // fresh working token a moment after it, on the same seed, and the door reopens.
+    const client = await register(served.base, { name: "Claude" });
+    const secret = pkce();
+    const params = wellFormedAuthorize(client.clientId, secret.challenge);
+    const page = await getAuthorize(served.base, params, session.cookie);
+    const approved = await approve(served.base, params, {
+      cookie: session.cookie,
+      formToken: formTokenIn(page.body),
+    });
+    const code = codeFrom(approved)!;
+
+    // The connector is approved but has not redeemed yet, so it holds no grant. Give it one first, so
+    // the revoke has something to revoke, then issue a SECOND code and revoke before redeeming it.
+    const firstSecret = pkce();
+    const firstParams = wellFormedAuthorize(client.clientId, firstSecret.challenge);
+    const firstPage = await getAuthorize(served.base, firstParams, session.cookie);
+    const firstApproved = await approve(served.base, firstParams, {
+      cookie: session.cookie,
+      formToken: formTokenIn(firstPage.body),
+    });
+    const firstRedeemed = await redeem(served.base, {
+      grant_type: "authorization_code",
+      code: codeFrom(firstApproved)!,
+      redirect_uri: CLAUDE_REDIRECT,
+      client_id: client.clientId,
+      code_verifier: firstSecret.verifier,
+    });
+    expect(firstRedeemed.res.status).toBe(200);
+
+    const revoked = await grant(["revoke", client.clientId]);
+    expect(revoked.code).toBe(0);
+    expect(revoked.out).toMatch(/in flight|already in flight|will not mint/);
+
+    // The code from before the revoke is dead.
+    const stale = await redeem(served.base, {
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: CLAUDE_REDIRECT,
+      client_id: client.clientId,
+      code_verifier: secret.verifier,
+    });
+    expect(stale.res.status).toBe(400);
+    expect(stale.body["access_token"]).toBeUndefined();
+    expect(readOAuthFile(home).tokens).toEqual([]);
+
+    // And a FRESH approval after the revoke still works — the generation moved, it did not seize up.
+    const afterSecret = pkce();
+    const afterParams = wellFormedAuthorize(client.clientId, afterSecret.challenge);
+    const afterPage = await getAuthorize(served.base, afterParams, session.cookie);
+    const afterApproved = await approve(served.base, afterParams, {
+      cookie: session.cookie,
+      formToken: formTokenIn(afterPage.body),
+    });
+    const afterRedeemed = await redeem(served.base, {
+      grant_type: "authorization_code",
+      code: codeFrom(afterApproved)!,
+      redirect_uri: CLAUDE_REDIRECT,
+      client_id: client.clientId,
+      code_verifier: afterSecret.verifier,
+    });
+    expect(afterRedeemed.res.status).toBe(200);
+  });
+
+  it("(v) revoking one connector does not kill another's code in flight", async () => {
+    // The two-sided form of the same law. A generation bumped on every client, or a code table cleared
+    // wholesale, would pass the rail above and break this one.
+    const mine = await connect("Claude");
+    const other = await register(served.base, { name: "Other" });
+    const secret = pkce();
+    const params = wellFormedAuthorize(other.clientId, secret.challenge);
+    const page = await getAuthorize(served.base, params, session.cookie);
+    const approved = await approve(served.base, params, {
+      cookie: session.cookie,
+      formToken: formTokenIn(page.body),
+    });
+    const code = codeFrom(approved)!;
+
+    await grant(["revoke", mine.clientId]);
+
+    const survives = await redeem(served.base, {
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: CLAUDE_REDIRECT,
+      client_id: other.clientId,
+      code_verifier: secret.verifier,
+    });
+    expect(survives.res.status).toBe(200);
+    expect(survives.body["access_token"]).toMatch(/.+/);
+  });
+
   it("(v) revoke names an unknown client rather than reporting a success it did not achieve", async () => {
     const res = await grant(["revoke", "not-a-client"]);
     expect(res.code).not.toBe(0);

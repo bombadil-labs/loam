@@ -22,6 +22,7 @@ import {
   type RegistrationInput,
 } from "../gateway/registration.js";
 import { serve, type ServerHandle } from "../server/http.js";
+import { redirectOriginDefect } from "../server/oauth.js";
 import {
   credentialsPath,
   entryFor,
@@ -542,6 +543,15 @@ async function cmdServe(
   // register. `repeated` rather than `flags` — the fence is the whole list, and reading the last value
   // would silently narrow it to one entry.
   const allowRedirect = parsed.repeated.get("oauth-allow-redirect") ?? [];
+  // A BAD VALUE IS A USAGE ERROR, like a bad --port: `serve()` throws on the same input as its own
+  // backstop, and a thrown stack is the wrong shape for a typo the operator can see and fix.
+  for (const origin of allowRedirect) {
+    const defect = redirectOriginDefect(origin);
+    if (defect !== undefined) {
+      io.err(`serve: --oauth-allow-redirect ${defect}`);
+      return 2;
+    }
+  }
   if (allowRedirect.length > 0 && !withUsers) {
     io.err(
       "serve: --oauth-allow-redirect opens the connector doors, and they ride the login doors — the " +
@@ -1235,12 +1245,19 @@ function cmdGrant(args: readonly string[], io: IO): number {
     for (const client of file.clients) {
       const grant = file.grants.find((g) => g.clientId === client.clientId);
       const held = file.tokens.filter((t) => t.clientId === client.clientId).length;
+      const author =
+        grant === undefined
+          ? "(not yet approved — no author minted)"
+          : grant.standing
+            ? grant.actor
+            : `${grant.actor} (its write grant never landed in the ground — the next approval retries)`;
       lines.push(
         `  ${client.clientName}\n` +
           `    client   ${client.clientId}\n` +
           // The public author, never the seed: this output goes to a terminal, a scrollback and
-          // sometimes a screenshot.
-          `    author   ${grant === undefined ? "(not yet approved — no author minted)" : grant.actor}\n` +
+          // sometimes a screenshot. The NAME above is the application's own word and is held to
+          // printable characters at registration, so it cannot forge a row here.
+          `    author   ${author}\n` +
           `    redirect ${client.redirectUris.join("\n             ")}\n` +
           `    ${held === 1 ? "1 live token" : `${held} live tokens`}`,
       );
@@ -1280,13 +1297,26 @@ function cmdGrant(args: readonly string[], io: IO): number {
   const client = byName[0]!;
   const kept = file.tokens.filter((t) => t.clientId !== client.clientId);
   const removed = file.tokens.length - kept.length;
+  // THE GENERATION BUMP IS THE OTHER HALF OF THE REVOCATION, and without it this report would be
+  // false. An authorization code lives for five minutes in the SERVING process's memory, which this
+  // command cannot reach; a code issued a moment ago would mint a fresh working token a moment from
+  // now. The token endpoint refuses a code whose generation has moved, so bumping it here kills every
+  // code already in flight for this connector.
+  //
   // The seed and the client record STAY. A re-approval must reuse the same author, or the connector's
   // history splits in two and the first half is signed by a key nothing accounts for.
-  writeOAuthFile(home, { ...file, tokens: kept });
+  writeOAuthFile(home, {
+    ...file,
+    clients: file.clients.map((c) =>
+      c.clientId === client.clientId ? { ...c, generation: c.generation + 1 } : c,
+    ),
+    tokens: kept,
+  });
   io.out(
     `loam: revoked ${client.clientName} (${client.clientId})\n` +
       `  ${removed === 1 ? "1 token" : `${removed} tokens`} removed — a serving process refuses the ` +
       `next request that presents one\n` +
+      `  any approval already in flight is dead too: a code issued before now will not mint\n` +
       `  its author and its past claims are untouched; approving it again reuses the same author`,
   );
   return 0;

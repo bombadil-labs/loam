@@ -46,6 +46,16 @@ export interface OAuthClient {
   readonly clientName: string;
   readonly redirectUris: readonly string[];
   readonly registeredAt: number; // wall clock, for `loam grant list`
+  /**
+   * BUMPED BY EVERY REVOCATION, and it is what makes revocation reach a code already in flight.
+   *
+   * An authorization code lives in the serving process's memory for five minutes; `loam grant revoke`
+   * runs in another process and cannot touch that map. Without this, a code minted a moment before the
+   * revoke would mint a fresh working token a moment after it, and the CLI's report that the next
+   * request is refused would be false. So a code records the generation it was minted under, and the
+   * token endpoint refuses one whose generation has moved.
+   */
+  readonly generation: number;
 }
 
 /**
@@ -58,6 +68,17 @@ export interface OAuthGrant {
   readonly actorSeed: string; // 64 hex
   readonly actor: string;
   readonly grantedAt: number;
+  /**
+   * Has the operator-signed write grant actually LANDED in the ground?
+   *
+   * The seed is recorded BEFORE the grant is appended, so this file is the one place that says which
+   * seed a connector owns and can never grow a second one. That ordering leaves exactly one recoverable
+   * gap — a seed recorded whose grant never landed — and this flag names it, so the next redemption
+   * re-appends for the SAME seed instead of minting another. Recording the seed after the append would
+   * leave the opposite gap, which is not recoverable: a grant standing in the ground for a key nobody
+   * holds, and a second seed minted beside it.
+   */
+  readonly standing: boolean;
 }
 
 /** An issued access token, by DIGEST. The token itself is handed to the client and never stored. */
@@ -111,12 +132,41 @@ const array = (raw: unknown, where: string): unknown[] => {
   return raw;
 };
 
+/**
+ * A client name reaches the operator's TERMINAL, through `loam grant list`, and registration takes no
+ * credential — so any caller on the internet writes this string. A newline in it forges a whole extra
+ * row in that listing; an ANSI escape erases the caller's own. It is the operator's only view of what
+ * is registered, so the name is held to printable characters with no control bytes at all.
+ */
+export const MAX_CLIENT_NAME = 200;
+
+export const clientNameDefect = (name: string): string | undefined => {
+  if (name.length === 0 || name.length > MAX_CLIENT_NAME) {
+    return `a client_name is 1..${MAX_CLIENT_NAME} characters`;
+  }
+  // C0, DEL and C1, plus the two Unicode separators a terminal also breaks a line on.
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(name)) {
+    return "a client_name carries no control character, escape, or line separator";
+  }
+  return undefined;
+};
+
 function checkClient(raw: unknown, where: string): OAuthClient {
   object(raw, where);
   const uris = array((raw as Record<string, unknown>)["redirectUris"], `${where}: redirectUris`);
+  const clientName = str(raw, where, "clientName");
+  const defect = clientNameDefect(clientName);
+  // Checked on the way IN as well as on the way out: a file edited by hand, or written by an older
+  // build, must not be able to smuggle a forged row into the operator's listing.
+  if (defect !== undefined) throw new OAuthFileUnreadable(`${where}: ${defect}`);
+  const generation = num(raw, where, "generation");
+  if (!Number.isInteger(generation) || generation < 1) {
+    throw new OAuthFileUnreadable(`${where} has a generation that is not a positive integer`);
+  }
   return {
     clientId: str(raw, where, "clientId"),
-    clientName: str(raw, where, "clientName"),
+    clientName,
     redirectUris: uris.map((uri, i) => {
       if (typeof uri !== "string" || uri === "") {
         throw new OAuthFileUnreadable(`${where}: redirect uri ${i} is not a string`);
@@ -124,6 +174,7 @@ function checkClient(raw: unknown, where: string): OAuthClient {
       return uri;
     }),
     registeredAt: num(raw, where, "registeredAt"),
+    generation,
   };
 }
 
@@ -139,11 +190,16 @@ function checkGrant(raw: unknown, where: string): OAuthGrant {
   if (actor !== authorForSeed(actorSeed)) {
     throw new OAuthFileUnreadable(`${where} names an actor its own seed does not derive`);
   }
+  const standing = (raw as Record<string, unknown>)["standing"];
+  if (typeof standing !== "boolean") {
+    throw new OAuthFileUnreadable(`${where} does not say whether its grant has standing`);
+  }
   return {
     clientId: str(raw, where, "clientId"),
     actorSeed,
     actor,
     grantedAt: num(raw, where, "grantedAt"),
+    standing,
   };
 }
 
@@ -255,3 +311,65 @@ export const clientFor = (file: OAuthFile, clientId: string): OAuthClient | unde
 
 export const grantFor = (file: OAuthFile, clientId: string): OAuthGrant | undefined =>
   file.grants.find((g) => g.clientId === clientId);
+
+/**
+ * The grant a token digest names — the ONE read on the request path, and the reason it is not
+ * `readOAuthFile`.
+ *
+ * `checkGrant` re-derives `authorForSeed(actorSeed)` for every grant, and that is an Ed25519 scalar
+ * multiplication in pure JS. `identify` runs for any bearer token the static and session tables
+ * declined — which is exactly what an anonymous caller on the public internet presents — so reading
+ * the whole file there would spend N derivations per wrong guess. This finds the token first and
+ * derives once, for the one grant it is about to return, so an unknown token costs zero.
+ *
+ * Still strict where it looks: a match whose grant is damaged throws rather than answering. And a
+ * file this cannot parse throws, because a token cannot be verified against a file of unknown shape.
+ *
+ * What it does NOT avoid, said out loud: one `readFileSync` and one `JSON.parse` per presented token.
+ * The file holds a handful of connectors, and the read is a few microseconds beside the request it
+ * serves — but it is per-request work an unauthenticated caller can ask for, and a cache keyed on
+ * mtime would be a stale-index trap on the exact table that decides who may write here.
+ */
+export function grantForToken(home: string, digest: string): OAuthGrant | undefined {
+  const path = oauthPath(home);
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw new OAuthFileUnreadable(
+      `${path} could not be read: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new OAuthFileUnreadable(
+      `${path} is not JSON: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new OAuthFileUnreadable(`${path} is not a connector file`);
+  }
+  const file = parsed as Record<string, unknown>;
+  if (file["version"] !== 1) {
+    throw new OAuthFileUnreadable(
+      `${path} is version ${String(file["version"])}, and this door reads version 1`,
+    );
+  }
+  const tokens = array(file["tokens"], `${path}: tokens`);
+  let clientId: string | undefined;
+  for (const [i, entry] of tokens.entries()) {
+    const checked = checkToken(entry, `${path}: token ${i}`);
+    if (checked.digest === digest) clientId = checked.clientId;
+  }
+  if (clientId === undefined) return undefined;
+  const grants = array(file["grants"], `${path}: grants`);
+  for (const [i, entry] of grants.entries()) {
+    // Shape only, until the clientId matches: the derivation is what this function exists to avoid.
+    const at = object(entry, `${path}: grant ${i}`);
+    if (at["clientId"] === clientId) return checkGrant(entry, `${path}: grant ${i}`);
+  }
+  return undefined;
+}

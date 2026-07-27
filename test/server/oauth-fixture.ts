@@ -183,12 +183,6 @@ export async function getAuthorize(
 }
 
 const FORM_TOKEN = /name="form_token" value="([^"]+)"/;
-const HIDDEN = (name: string): RegExp => new RegExp(`name="${name}" value="([^"]*)"`);
-
-/** The consent page's own hidden field, whatever it holds — how a rail reads what the page will POST. */
-export const hiddenField = (page: string, name: string): string | undefined =>
-  HIDDEN(name).exec(page)?.[1];
-
 export const formTokenIn = (page: string): string => FORM_TOKEN.exec(page)?.[1] ?? "";
 
 export interface ApproveOptions {
@@ -264,52 +258,6 @@ export async function redeem(
     parsed = { raw: text };
   }
   return { res, body: parsed };
-}
-
-/**
- * Register, authorize with a live session, approve, and redeem: the whole flow, as one call, for the
- * rails whose subject is what happens AFTER it. The rails whose subject is the flow itself walk the
- * four steps by hand.
- */
-export async function fullFlow(
-  base: string,
-  session: { cookie: string },
-  opts: { name?: string; redirectUri?: string } = {},
-): Promise<{ clientId: string; token: string; actor: string }> {
-  const client = await register(base, {
-    ...(opts.name === undefined ? {} : { name: opts.name }),
-    redirectUris: [opts.redirectUri ?? CLAUDE_REDIRECT],
-  });
-  if (client.status !== 201) throw new Error(`the fixture could not register: ${client.status}`);
-  const secret = pkce();
-  const params = {
-    ...wellFormedAuthorize(client.clientId, secret.challenge),
-    ...(opts.redirectUri === undefined ? {} : { redirect_uri: opts.redirectUri }),
-  };
-  const page = await getAuthorize(base, params, session.cookie);
-  if (page.res.status !== 200) {
-    throw new Error(`the fixture could not reach consent: ${page.res.status}`);
-  }
-  const approved = await approve(base, params, {
-    cookie: session.cookie,
-    formToken: formTokenIn(page.body),
-  });
-  const code = codeFrom(approved);
-  if (code === undefined) throw new Error(`the fixture got no code: ${approved.status}`);
-  const redeemed = await redeem(base, {
-    grant_type: "authorization_code",
-    code,
-    redirect_uri: params.redirect_uri,
-    client_id: client.clientId,
-    code_verifier: secret.verifier,
-  });
-  const token = redeemed.body["access_token"];
-  if (typeof token !== "string") {
-    throw new Error(
-      `the fixture got no token: ${redeemed.res.status} ${JSON.stringify(redeemed.body)}`,
-    );
-  }
-  return { clientId: client.clientId, token, actor: "" };
 }
 
 export const bearer = (token: string): Record<string, string> => ({

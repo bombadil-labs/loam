@@ -156,20 +156,75 @@ describe("the two well-known documents", () => {
     expect(doc["token_endpoint_auth_methods_supported"]).toEqual(["none"]);
   });
 
+  it("(c) the cookieless doors carry the CORS header the preflight promised — authorize does not", async () => {
+    // `OPTIONS` is answered before the router with `allow-origin: *` for every path. A door that then
+    // answered without the header would have a browser discard a response its own preflight promised.
+    // The two documents, registration and the token endpoint read NO cookie, so a wildcard origin
+    // lends a caller nothing. `/oauth/authorize` reads the session cookie and must stay unreadable.
+    for (const path of [
+      "/.well-known/oauth-protected-resource",
+      "/.well-known/oauth-authorization-server",
+    ]) {
+      const res = await fetch(`${served.base}${path}`);
+      expect(res.headers.get("access-control-allow-origin"), path).toBe("*");
+    }
+    const registered = await fetch(`${served.base}/oauth/register`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(registered.headers.get("access-control-allow-origin")).toBe("*");
+    const token = await fetch(`${served.base}/oauth/token`, { method: "POST", body: "" });
+    expect(token.headers.get("access-control-allow-origin")).toBe("*");
+
+    const authorize = await fetch(`${served.base}/oauth/authorize`, { redirect: "manual" });
+    expect(authorize.headers.get("access-control-allow-origin")).toBeNull();
+    const approvalRefused = await fetch(`${served.base}/oauth/authorize`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", origin: "https://evil.test" },
+      body: "",
+      redirect: "manual",
+    });
+    expect(approvalRefused.status).toBe(403);
+    expect(approvalRefused.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
   it("(c) the two documents AGREE: the resource's server is the document's issuer", async () => {
     const resource = await wellKnown("oauth-protected-resource");
     const as = await wellKnown("oauth-authorization-server");
     expect(resource["authorization_servers"]).toEqual([as["issuer"]]);
   });
 
-  it("(c) every advertised endpoint actually answers", async () => {
-    // A document is a promise about what exists. Three URLs that 404 would be the report overclaiming
-    // — and this rail is what stops a later rename from leaving the document behind.
+  it("(c) every advertised endpoint actually answers, in its OWN words", async () => {
+    // A document is a promise about what exists, and this rail is what stops a later rename from
+    // leaving the document behind. `not.toBe(404)` cannot do it: an unauthenticated caller NEVER gets
+    // a 404 here — an unknown path resolves no mount and is refused 401, uniformly and on purpose
+    // (§12/T78). So a document advertising `/oauth/tokenX` would pass that assertion. Each endpoint is
+    // therefore asked for the refusal only IT gives.
     const as = await wellKnown("oauth-authorization-server");
-    for (const key of ["authorization_endpoint", "token_endpoint", "registration_endpoint"]) {
-      const res = await fetch(as[key] as string, { method: "POST", body: "" });
-      expect(res.status, `${key} answered nothing`).not.toBe(404);
-    }
+    const form = { "content-type": "application/x-www-form-urlencoded" };
+
+    const token = await fetch(as["token_endpoint"] as string, {
+      method: "POST",
+      headers: form,
+      body: "grant_type=nonsense",
+    });
+    expect(((await token.json()) as { error?: string }).error).toBe("unsupported_grant_type");
+
+    const registration = await fetch(as["registration_endpoint"] as string, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(((await registration.json()) as { error?: string }).error).toBe(
+      "invalid_client_metadata",
+    );
+
+    // Authorize is the HTML door: with no session it answers this store's own login form.
+    const authorize = await fetch(as["authorization_endpoint"] as string, { redirect: "manual" });
+    expect(authorize.status).toBe(200);
+    expect(authorize.headers.get("content-type")).toMatch(/text\/html/);
+    expect(await authorize.text()).toMatch(/Sign in/);
   });
 
   it("(d) every URL comes from the configured public URL, not the request", async () => {
