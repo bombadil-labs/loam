@@ -49,10 +49,7 @@ export interface ServeOAuthOptions {
  * about a CONFIGURED one, so the rail that tests it must be able to name a different address than the
  * one it dials.
  */
-export async function serveOAuth(
-  home: string,
-  opts: ServeOAuthOptions = {},
-): Promise<ServedOAuth> {
+export async function serveOAuth(home: string, opts: ServeOAuthOptions = {}): Promise<ServedOAuth> {
   const gateway = await Gateway.boot(
     new SqliteBackend(storePath(home)),
     assembleGenesis({ operatorSeed: readSeed(home) }),
@@ -132,16 +129,25 @@ export function register(
   });
 }
 
-export interface AuthorizeParams {
-  readonly client_id?: string;
-  readonly redirect_uri?: string;
-  readonly response_type?: string;
-  readonly code_challenge?: string;
-  readonly code_challenge_method?: string;
-  readonly state?: string;
-  readonly scope?: string;
-  readonly resource?: string;
-}
+/**
+ * Every field is `string | undefined` rather than optional, so a rail may DROP one explicitly. Half of
+ * §37's authorize criteria are about a query with a field missing, and `exactOptionalPropertyTypes`
+ * would otherwise refuse to spell that.
+ */
+export type AuthorizeParams = {
+  readonly client_id?: string | undefined;
+  readonly redirect_uri?: string | undefined;
+  readonly response_type?: string | undefined;
+  readonly code_challenge?: string | undefined;
+  readonly code_challenge_method?: string | undefined;
+  readonly state?: string | undefined;
+  readonly scope?: string | undefined;
+  readonly resource?: string | undefined;
+};
+
+/** The fields a params object actually carries — a dropped one is absent, never an empty string. */
+export const paramEntries = (params: Record<string, string | undefined>): [string, string][] =>
+  Object.entries(params).filter((pair): pair is [string, string] => pair[1] !== undefined);
 
 /**
  * The authorize query as claude.ai builds it. Every field is overridable and any of them may be
@@ -149,9 +155,7 @@ export interface AuthorizeParams {
  */
 export function authorizeQuery(params: AuthorizeParams): string {
   const out = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined) out.set(key, value);
-  }
+  for (const [key, value] of paramEntries(params)) out.set(key, value);
   return out.toString();
 }
 
@@ -204,9 +208,7 @@ export function approve(
   opts: ApproveOptions = {},
 ): Promise<Response> {
   const body = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined) body.set(key, value);
-  }
+  for (const [key, value] of paramEntries(params)) body.set(key, value);
   body.set("approve", "yes");
   if (opts.formToken !== undefined) body.set("form_token", opts.formToken);
   for (const [key, value] of Object.entries(opts.fields ?? {})) body.set(key, value);
@@ -232,14 +234,15 @@ export function codeFrom(res: Response): string | undefined {
   return new URL(location).searchParams.get("code") ?? undefined;
 }
 
-export interface TokenBody {
-  readonly grant_type?: string;
-  readonly code?: string;
-  readonly redirect_uri?: string;
-  readonly client_id?: string;
-  readonly code_verifier?: string;
-  readonly resource?: string;
-}
+/** Same reason as `AuthorizeParams`: a rail must be able to send a body with a field missing. */
+export type TokenBody = {
+  readonly grant_type?: string | undefined;
+  readonly code?: string | undefined;
+  readonly redirect_uri?: string | undefined;
+  readonly client_id?: string | undefined;
+  readonly code_verifier?: string | undefined;
+  readonly resource?: string | undefined;
+};
 
 /** POST /oauth/token, form-encoded as RFC 6749 says. */
 export async function redeem(
@@ -247,9 +250,7 @@ export async function redeem(
   fields: TokenBody,
 ): Promise<{ res: Response; body: Record<string, unknown> }> {
   const body = new URLSearchParams();
-  for (const [key, value] of Object.entries(fields)) {
-    if (value !== undefined) body.set(key, value);
-  }
+  for (const [key, value] of paramEntries(fields)) body.set(key, value);
   const res = await fetch(`${base}/oauth/token`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -304,7 +305,9 @@ export async function fullFlow(
   });
   const token = redeemed.body["access_token"];
   if (typeof token !== "string") {
-    throw new Error(`the fixture got no token: ${redeemed.res.status} ${JSON.stringify(redeemed.body)}`);
+    throw new Error(
+      `the fixture got no token: ${redeemed.res.status} ${JSON.stringify(redeemed.body)}`,
+    );
   }
   return { clientId: client.clientId, token, actor: "" };
 }

@@ -26,10 +26,12 @@
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { type Delta, type Primitive } from "@bombadil/rhizomatic";
+import { authorForSeed, signClaims, type Delta, type Primitive } from "@bombadil/rhizomatic";
 import { Kind, OperationTypeNode, parse, type DocumentNode } from "graphql";
 import { fromWire, toWire, type WireDelta } from "../federation/wire.js";
 import { buildOpenApi, handleRest } from "../surface/rest.js";
+import { grantClaims } from "../gateway/accounts.js";
+import { STORE_ENTITY } from "../gateway/genesis.js";
 import {
   NothingPublic,
   type Gateway,
@@ -40,8 +42,15 @@ import { parseRegistrationInput, schemaEntityFor, type LensName } from "../gatew
 import { parseReadGesture, type ReadGesture } from "../gateway/renderers.js";
 import { makeMountTable, type ResolvedMount } from "./mounts.js";
 import { makeUserDoors, type UserDoorOptions, type UserDoors } from "./session.js";
+import {
+  makeOAuthDoors,
+  redirectOriginDefect,
+  type OAuthDoors,
+  type OAuthOptions,
+} from "./oauth.js";
 
 export { type UserDoorOptions } from "./session.js";
+export { type OAuthOptions } from "./oauth.js";
 
 export interface TokenIdentity {
   readonly actor?: string; // a signing seed: requests act as this identity
@@ -61,6 +70,14 @@ export interface ServeOptions {
    * name, exactly as it was before §36, and no request anywhere reads a cookie.
    */
   readonly users?: UserDoorOptions;
+  /**
+   * The connector doors (SPEC §37). Absent, this server has none: `/oauth/*` resolves no mount, the
+   * two well-known documents do not exist, and no refusal anywhere carries a `WWW-Authenticate`
+   * header. They REQUIRE `users` — the consent page's authenticator is §36's session, and the
+   * one-mount guard those doors carry is what keeps a server-wide token from reaching a world no role
+   * binding named.
+   */
+  readonly oauth?: OAuthOptions;
 }
 
 const DEFAULT_MAX_BODY = 4 * 1024 * 1024;
@@ -391,6 +408,11 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
 
   // The identity a presented token names, compared timing-safely; undefined = refuse. A cookie is
   // never consulted here, and that is §36's load-bearing invariant: authority is an explicit header.
+  //
+  // Three tables, in this order: the operator's configured tokens, the tokens a §36 session minted,
+  // and the tokens a §37 grant minted. The last one is read from `oauth.json` on the ask rather than
+  // from memory, so `loam grant revoke` closes the door on the next request of THIS process — and it
+  // runs only for a token the two cheaper tables already declined.
   const identify = (req: IncomingMessage): TokenIdentity | undefined => {
     const header = req.headers.authorization;
     if (header === undefined || !header.startsWith("Bearer ")) return undefined;
@@ -398,14 +420,16 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     for (const [expected, identity] of tokenEntries) {
       if (timingSafeEqual(presented, expected)) return identity;
     }
-    if (sessionTokens.size === 0) return undefined;
-    const minted = sessionTokens.get(presented.toString("hex"));
-    if (minted === undefined) return undefined;
-    if (minted.expiresAt <= clock()) {
-      sessionTokens.delete(presented.toString("hex"));
-      return undefined;
+    const digest = presented.toString("hex");
+    const minted = sessionTokens.get(digest);
+    if (minted !== undefined) {
+      if (minted.expiresAt <= clock()) {
+        sessionTokens.delete(digest);
+        return undefined;
+      }
+      return minted.identity;
     }
-    return minted.identity;
+    return oauthDoors?.identify(digest);
   };
 
   const contextFor = (identity: TokenIdentity): RequestContext | undefined =>
@@ -782,8 +806,25 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     }
   };
 
-  const refused = (res: ServerResponse): void =>
-    json(res, 401, { errors: ["a bearer token is required, and this one opens nothing"] });
+  // THE ONE REFUSAL, and it is byte-uniform across mounts, verbs and tokens — the whole reason an
+  // anonymous prober cannot learn which mounts exist.
+  //
+  // The `WWW-Authenticate` challenge (RFC 9728, §37) rides it as a CONSTANT of the server. It names
+  // where the authorization server is described, which is a fact about this store rather than about
+  // any mount, so attaching it here keeps the refusal uniform. Computing it per door — or only for the
+  // MCP door, which is the door that actually needs it — would make the header itself the
+  // mount-existence oracle the body pays to prevent.
+  const refused = (res: ServerResponse): void => {
+    const body = JSON.stringify({
+      errors: ["a bearer token is required, and this one opens nothing"],
+    });
+    res.writeHead(401, {
+      "content-type": "application/json",
+      ...CORS,
+      ...(oauthDoors === undefined ? {} : { "www-authenticate": oauthDoors.challenge }),
+    });
+    res.end(body);
+  };
 
   // The front door. The bare root is the one path with no world behind it, so it is the one path
   // that can afford a human answer — and the first thing anyone does with a served store's URL is
@@ -796,8 +837,10 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
   };
 
   // Assigned once the port is known, because the public URL defaults to the bound one. No request can
-  // arrive before `listen` resolves, so the doors are in place before anything can ask for them.
+  // arrive before `listen` resolves, and the assignments below it are one synchronous run, so the doors
+  // are in place before anything can ask for them.
   let userDoors: UserDoors | undefined;
+  let oauthDoors: OAuthDoors | undefined;
 
   const server = createServer((req, res) => {
     void (async () => {
@@ -827,6 +870,13 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       // cookie, and a cross-origin page must not be able to read their answers.
       if (userDoors?.owns(url.pathname) === true) {
         await userDoors.handle(url.pathname, req, res);
+        return;
+      }
+      // The connector doors (SPEC §37), on the same terms and for the same reason: they are the store's
+      // own, not any world's. The two well-known documents are the only ones a caller reaches with no
+      // credential at all, and they disclose nothing but this store's own address.
+      if (oauthDoors?.owns(url.pathname) === true) {
+        await oauthDoors.handle(url.pathname, req, res);
         return;
       }
       const [, mountName, verb] = url.pathname.split("/");
@@ -1281,6 +1331,16 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
   const port = typeof address === "object" && address !== null ? address.port : 0;
   const url = `http://${host}:${port}`;
 
+  if (options.oauth !== undefined && options.users === undefined) {
+    // The consent page IS §36's session — there is no second authenticator, and building one would be
+    // a second thing to get wrong. Without the login doors there is nobody to ask, and the one-mount
+    // guard below (which is what keeps a server-wide token off a world no role binding named) would
+    // not run at all.
+    throw new Error(
+      `loam serve: the connector doors (§37) ride the login doors (§36) — the consent page asks the ` +
+        `operator to sign in, and there is no other way in. Configure users, or leave §37 closed.`,
+    );
+  }
   if (options.users !== undefined) {
     const forUsers = options.users;
     // ONE MOUNT, or no login doors. `/session/token` mints `{ operator: true }`, which is authority over
@@ -1313,6 +1373,53 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       mint: mintSessionToken,
       revoke: revokeSessionTokens,
     });
+
+    if (options.oauth !== undefined) {
+      const forOauth = options.oauth;
+      // THE ALLOWLIST IS CHECKED AT BOOT, so an operator's typo is a startup error rather than a
+      // silently wider fence. `--oauth-allow-redirect http://claude.ai` would otherwise admit a
+      // downgraded target, and nothing downstream would ever say so.
+      for (const origin of forOauth.allowRedirectOrigins) {
+        const defect = redirectOriginDefect(origin);
+        if (defect !== undefined) {
+          throw new Error(`loam serve: --oauth-allow-redirect ${defect}`);
+        }
+      }
+      oauthDoors = makeOAuthDoors({
+        options: forOauth,
+        // ONE public URL, shared with the login doors above. Two sources would let the discovery
+        // documents advertise one address while the cookie and the Origin check used another.
+        publicUrl: forUsers.publicUrl ?? url,
+        consent: userDoors.consent,
+        grantActor: async (actor: string): Promise<void> => {
+          // Re-resolved per call for the reason `ground` above is: erase() re-seats the gateway, and a
+          // captured reference would append into a reactor the store has already replaced.
+          const gateway = mounts.resolve(forUsers.mount)?.gateway;
+          if (gateway === undefined) {
+            throw new Error(`the mount "${forUsers.mount}" is not answering, so no grant can land`);
+          }
+          const seed = gateway.options.seed;
+          if (seed === undefined) {
+            throw new Error("this gateway holds no signing seed, so it can grant nothing");
+          }
+          // ONE operator-signed write grant at the store entity — the same law `loam user` and the
+          // genesis assembly write, spelled the same way. The connector's own key signs its claims;
+          // this is the operator saying that key may publish here.
+          await gateway.append([
+            signClaims(
+              grantClaims(
+                STORE_ENTITY,
+                actor,
+                "write",
+                authorForSeed(seed),
+                gateway.nextTimestamp(),
+              ),
+              seed,
+            ),
+          ]);
+        },
+      });
+    }
   }
 
   return {

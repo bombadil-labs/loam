@@ -63,6 +63,10 @@ beforeEach(async () => {
   home = makeHome();
   await bootStore(home);
   await createUser(home, "myk", PASSWORD);
+  // A second, NON-operator user, planted before the server boots. The store is single-writer and a
+  // running server answers from the memory it booted with, so a user created mid-test would be
+  // invisible to the doors — which would make a rail about role checks pass for the wrong reason.
+  await createUser(home, "guest", PASSWORD, { operator: false });
   await boot();
 });
 afterEach(async () => {
@@ -133,7 +137,10 @@ describe("(l) the full flow mints a working token", () => {
         jsonrpc: "2.0",
         id: 2,
         method: "tools/call",
-        params: { name: "loam_query", arguments: { query: `{ plant(entity: "${MOSS}") { height } }` } },
+        params: {
+          name: "loam_query",
+          arguments: { query: `{ plant(entity: "${MOSS}") { height } }` },
+        },
       },
       bearer(token),
     );
@@ -236,9 +243,13 @@ describe("(m) authorize without a session", () => {
     expect(readOAuthFile(home).grants).toEqual([]);
   });
 
-  it("a session whose user lost the operator role cannot approve", async () => {
+  it("a session that is authenticated but not the operator cannot approve", async () => {
     // The consent decision is the operator's. §36 re-reads the role from the ground on every ask for
     // exactly this reason, and §37 must not be the door that trusts the session's stale copy.
+    //
+    // The guest is created BEFORE this server booted (see `boot`): the store is single-writer, and a
+    // running server answers from the memory it booted with, so a user planted now would be invisible
+    // to the very door under test.
     const registered = await register(served.base);
     const secret = pkce();
     const params = wellFormedAuthorize(registered.clientId, secret.challenge);
@@ -246,7 +257,6 @@ describe("(m) authorize without a session", () => {
     const formToken = formTokenIn(page.body);
 
     // A plain actor, signed in: authenticated, and not entitled to grant anything.
-    await createUser(home, "guest", PASSWORD, { operator: false });
     const guest = await signIn(served.base, "guest");
     const asGuest = await getAuthorize(served.base, params, guest.cookie);
     expect(asGuest.res.status).toBe(403);
@@ -436,7 +446,7 @@ describe("(p) a code expires on a monotonic clock", () => {
   it("a wall clock stepped FORWARD past the window does NOT kill it", async () => {
     // The discriminating direction. An expiry read from Date.now() passes both rails above and fails
     // this one, so this is what proves the clock is monotonic rather than merely injected.
-    let ticks = 0;
+    const ticks = 0;
     await served.close();
     served = await serveOAuth(home, {
       oauth: { codeTtlMs: 500, monotonicNow: () => ticks },

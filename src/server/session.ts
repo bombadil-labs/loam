@@ -82,6 +82,39 @@ export interface UserDoorDeps {
 export interface UserDoors {
   owns(pathname: string): boolean;
   handle(pathname: string, req: IncomingMessage, res: ServerResponse): Promise<void>;
+  /** The authenticator §37's consent page rides. */
+  readonly consent: ConsentAuth;
+}
+
+/**
+ * WHO IS ASKING, for a door that is not one of the four (SPEC §37's consent page).
+ *
+ * It is the §36 session, unchanged and unwidened: the same cookie, the same per-session form token,
+ * the same two independent same-origin signals. §37 gets a narrow window onto it rather than its own
+ * copy, because a second implementation of "is this the operator?" is a second thing to get wrong —
+ * and a session's authority is re-read from the GROUND on every ask, which is the part a copy would
+ * quietly drop.
+ */
+export interface ConsentAuth {
+  /**
+   * What the presented cookie names, right now, re-reading the role from the ground. Touching the
+   * session slides its idle window, exactly as a page load does.
+   *
+   * The four answers are separate because they get four different HTTP replies: `none` shows a login
+   * form, `not-operator` refuses, `unreachable` refuses without destroying the session, and `operator`
+   * carries the form token the consent page's own POST must present.
+   */
+  who(
+    req: IncomingMessage,
+  ):
+    | { readonly kind: "operator"; readonly user: string; readonly formToken: string }
+    | { readonly kind: "not-operator"; readonly user: string; readonly formToken: string }
+    | { readonly kind: "unreachable" }
+    | { readonly kind: "none" };
+  /** The login form, and the cookie carrying its stateless pre-session. */
+  loginPrompt(req: IncomingMessage): { readonly body: string; readonly cookie: string };
+  /** Did this POST come from this store's own page? `Origin` outranks `Sec-Fetch-Site`. */
+  fromThisPage(req: IncomingMessage): boolean;
 }
 
 // The `__Host-` prefix is load-bearing, not decoration: a browser refuses to store such a cookie
@@ -97,8 +130,9 @@ export const SESSION_COOKIE = "__Host-loam_session";
 const COOKIE_ATTRIBUTES = "HttpOnly; Secure; SameSite=Lax; Path=/";
 
 // No script, no styles from anywhere, no framing, no base rewriting. The pages carry no script at
-// all; the header is the belt to that braces.
-const CSP =
+// all; the header is the belt to that braces. Exported because §37's consent page is one of these
+// pages and must carry the SAME header — a second spelling would be a second thing to keep current.
+export const CSP =
   "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; " +
   "form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
 
@@ -125,7 +159,12 @@ interface Session {
 
 const opaque = (): string => randomBytes(32).toString("base64url");
 
-const sameSecret = (a: string, b: string): boolean => {
+/**
+ * Two secrets, compared in time that does not depend on where they first differ. Exported so §37's
+ * consent POST compares its form token the same way this file's three POST doors do — one
+ * implementation, because the second one is where somebody writes `===`.
+ */
+export const sameSecret = (a: string, b: string): boolean => {
   const left = Buffer.from(a, "utf8");
   const right = Buffer.from(b, "utf8");
   return left.length === right.length && left.length > 0 && timingSafeEqual(left, right);
@@ -151,11 +190,48 @@ export function sessionIdFrom(req: IncomingMessage): string | undefined {
   return values[0];
 }
 
-const escapeHtml = (raw: string): string =>
+export const escapeHtml = (raw: string): string =>
   raw.replace(
     /[&<>"']/g,
     (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!,
   );
+
+/**
+ * The store's own page shell — one look for every page the store serves to a person. §37's consent
+ * page is one of them, so this is module-level rather than a closure: the two pages must not drift
+ * into two designs, and neither of them closes over anything.
+ */
+export const page = (title: string, body: string): string => `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(title)}</title>
+<style>
+  body { margin: 0; font: 16px/1.65 ui-sans-serif, system-ui, sans-serif; color: #2b2620;
+         background: #faf7f1; display: grid; min-height: 100vh; place-items: center; }
+  main { max-width: 26rem; padding: 2rem 1.5rem 4rem; }
+  h1 { font-size: 1.35rem; font-weight: 650; margin: 0 0 1rem; }
+  label { display: block; margin: 0.75rem 0; }
+  input { display: block; width: 100%; padding: 0.5em; font: inherit; box-sizing: border-box; }
+  button { margin-top: 1rem; padding: 0.5em 1.2em; font: inherit; }
+  form + form { margin-top: 2rem; }
+  p { margin: 0.75rem 0; }
+  code { font: 0.92em ui-monospace, "Cascadia Mono", monospace; background: #00000012;
+         padding: 0.1em 0.4em; border-radius: 0.3em; word-break: break-all; }
+  @media (prefers-color-scheme: dark) {
+    body { color: #e6dfd4; background: #1f1b17; }
+    code { background: #ffffff1f; }
+  }
+</style>
+</head>
+<body>
+<main>
+${body}
+</main>
+</body>
+</html>
+`;
 
 const readBody = (req: IncomingMessage): Promise<string | undefined> =>
   new Promise((resolve) => {
@@ -386,38 +462,6 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
     json(res, 403, {
       errors: ["this request did not come from this store's own page, so it is refused"],
     });
-
-  const page = (title: string, body: string): string => `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(title)}</title>
-<style>
-  body { margin: 0; font: 16px/1.65 ui-sans-serif, system-ui, sans-serif; color: #2b2620;
-         background: #faf7f1; display: grid; min-height: 100vh; place-items: center; }
-  main { max-width: 26rem; padding: 2rem 1.5rem 4rem; }
-  h1 { font-size: 1.35rem; font-weight: 650; margin: 0 0 1rem; }
-  label { display: block; margin: 0.75rem 0; }
-  input { display: block; width: 100%; padding: 0.5em; font: inherit; box-sizing: border-box; }
-  button { margin-top: 1rem; padding: 0.5em 1.2em; font: inherit; }
-  form + form { margin-top: 2rem; }
-  p { margin: 0.75rem 0; }
-  code { font: 0.92em ui-monospace, "Cascadia Mono", monospace; background: #00000012;
-         padding: 0.1em 0.4em; border-radius: 0.3em; }
-  @media (prefers-color-scheme: dark) {
-    body { color: #e6dfd4; background: #1f1b17; }
-    code { background: #ffffff1f; }
-  }
-</style>
-</head>
-<body>
-<main>
-${body}
-</main>
-</body>
-</html>
-`;
 
   const loginPage = (formToken: string): string =>
     page(
@@ -730,7 +774,40 @@ data doors on its own.</p>`,
     return postToken(req, res);
   };
 
+  // §37's window onto the session. Every answer is computed HERE rather than handed out as state, so
+  // the consent page cannot hold a role that the ground has since withdrawn.
+  const consent: ConsentAuth = {
+    who(req) {
+      const held = touch(req);
+      if (held === undefined) return { kind: "none" };
+      const ground = deps.ground();
+      // CANNOT DECIDE IS NOT "NOT ENTITLED", and it is not "forgotten" either: the session survives a
+      // local condition it could not evaluate, exactly as GET /login treats it.
+      if (ground === undefined) return { kind: "unreachable" };
+      const role = roleOf(ground.reactor, ground.operator, held.session.user);
+      if (role === undefined) {
+        drop(held.id); // the ground answered, and it no longer holds this user
+        return { kind: "none" };
+      }
+      held.session.role = role;
+      // The form token rides BOTH answers: a door that skipped the same-origin proof for a caller it
+      // was going to refuse anyway would be answering a cross-site POST about the victim's own role.
+      const carried = { user: held.session.user, formToken: held.session.formToken };
+      return role === "operator"
+        ? { kind: "operator", ...carried }
+        : { kind: "not-operator", ...carried };
+    },
+    loginPrompt(req) {
+      // The same stateless pre-session GET /login hands out — no table grows, so a connector pointing a
+      // flood at the consent page cannot fill the seat a real login needs.
+      const nonce = sessionIdFrom(req) ?? opaque();
+      return { body: loginPage(preSessionToken(nonce)), cookie: setCookie(nonce) };
+    },
+    fromThisPage,
+  };
+
   return {
+    consent,
     owns: (pathname) =>
       pathname === "/login" || pathname === "/logout" || pathname === "/session/token",
     async handle(pathname, req, res) {

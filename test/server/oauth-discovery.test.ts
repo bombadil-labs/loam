@@ -118,7 +118,9 @@ describe("the challenge header", () => {
       const res = await fetch(`${plain.base}/default/mcp`, { method: "POST", body: "{}" });
       expect(res.status).toBe(401);
       expect(res.headers.get("www-authenticate")).toBeNull();
-      expect((await fetch(`${plain.base}/.well-known/oauth-authorization-server`)).status).toBe(401);
+      expect((await fetch(`${plain.base}/.well-known/oauth-authorization-server`)).status).toBe(
+        401,
+      );
     } finally {
       await plain.close();
     }

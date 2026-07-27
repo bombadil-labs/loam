@@ -29,6 +29,7 @@ import {
   codeFrom,
   formTokenIn,
   getAuthorize,
+  paramEntries,
   pkce,
   register,
   serveOAuth,
@@ -92,7 +93,11 @@ describe("GET /oauth/authorize — the redirect fence", () => {
       `${OTHER_ORIGIN}/api/mcp/auth_callback`, // another ALLOWLISTED origin
       "https://attacker.example/api/mcp/auth_callback",
     ]) {
-      const asked = await getAuthorize(served.base, { ...c.params, redirect_uri: near }, session.cookie);
+      const asked = await getAuthorize(
+        served.base,
+        { ...c.params, redirect_uri: near },
+        session.cookie,
+      );
       expect(asked.res.status, `${near} reached consent`).toBe(400);
       expect(asked.res.headers.get("location"), `${near} redirected`).toBeNull();
     }
@@ -116,11 +121,7 @@ describe("GET /oauth/authorize — the redirect fence", () => {
   it("(h) an unknown client_id, and a missing one, are refused before anything else", async () => {
     const c = await client();
     for (const id of ["", "not-a-client", `${c.id}x`, c.id.toUpperCase()]) {
-      const asked = await getAuthorize(
-        served.base,
-        { ...c.params, client_id: id },
-        session.cookie,
-      );
+      const asked = await getAuthorize(served.base, { ...c.params, client_id: id }, session.cookie);
       expect(asked.res.status, `client_id "${id}" reached consent`).toBe(400);
     }
     const none = await getAuthorize(
@@ -188,23 +189,25 @@ describe("GET /oauth/authorize — the consent page", () => {
   });
 
   it("(j) caller text in state and scope cannot reach the page unescaped", async () => {
+    // The precise property, rather than a blocklist of scary substrings: NO caller text appears
+    // verbatim. `onerror=alert(1)` is harmless once its surrounding quote and angle bracket are
+    // escaped, so a rail that banned that substring would be banning the safe rendering; a rail that
+    // bans the RAW STRING catches every way the escaping could fail, including one nobody listed.
     const c = await client();
-    const asked = await getAuthorize(
-      served.base,
-      {
-        ...c.params,
-        state: `"><script>alert('state')</script>`,
-        scope: `"><img src=x onerror=alert(1)>`,
-      },
-      session.cookie,
-    );
+    const state = `"><script>alert('state')</script>`;
+    const scope = `"><img src=x onerror=alert(1)>`;
+    const asked = await getAuthorize(served.base, { ...c.params, state, scope }, session.cookie);
     expect(asked.res.status).toBe(200);
+    expect(asked.body).not.toContain(state);
+    expect(asked.body).not.toContain(scope);
+    // Neither may a PREFIX that breaks out of the attribute it sits in.
+    expect(asked.body).not.toContain(`"><`);
     expect(asked.body).not.toContain("<script>");
     expect(asked.body).not.toContain("<img");
-    expect(asked.body).not.toContain("onerror=alert");
     // The state has to survive INTO the approval, or the redirect back loses it — so it is on the page
     // in a hidden field, escaped. That is the value this rail proves is escaped rather than absent.
     expect(asked.body).toContain("&lt;script&gt;");
+    expect(asked.body).toContain("&quot;&gt;&lt;img");
   });
 
   it("(j) the page carries a CSP that permits no script, and no framing", async () => {
@@ -334,9 +337,7 @@ describe("POST /oauth/authorize — the approval", () => {
     const c = await client();
     const page = await getAuthorize(served.base, c.params, session.cookie);
     const body = new URLSearchParams();
-    for (const [key, value] of Object.entries(c.params)) {
-      if (value !== undefined) body.set(key, value);
-    }
+    for (const [key, value] of paramEntries(c.params)) body.set(key, value);
     body.set("form_token", formTokenIn(page.body));
     // no `approve` field at all
     const res = await fetch(`${served.base}/oauth/authorize`, {
@@ -395,7 +396,8 @@ describe("(i) no OAuth response is an open redirect", () => {
     });
     responses.push({
       label: "unknown client",
-      res: (await getAuthorize(served.base, { ...c.params, client_id: "nope" }, session.cookie)).res,
+      res: (await getAuthorize(served.base, { ...c.params, client_id: "nope" }, session.cookie))
+        .res,
     });
     responses.push({
       label: "cross-site approval",

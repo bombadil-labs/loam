@@ -31,6 +31,7 @@ import {
   type ScryptParams,
 } from "../server/credentials.js";
 import { clearLock } from "../server/login-locks.js";
+import { oauthPath, readOAuthFile, writeOAuthFile } from "../server/oauth-file.js";
 import {
   resolveUserView,
   roleClaims,
@@ -66,7 +67,16 @@ export interface RunOptions {
 const VERSION = "0.1.0";
 
 type CommandName =
-  "init" | "serve" | "register" | "pull" | "migrate" | "store" | "repair" | "user" | "artifact";
+  | "init"
+  | "serve"
+  | "register"
+  | "pull"
+  | "migrate"
+  | "store"
+  | "repair"
+  | "user"
+  | "grant"
+  | "artifact";
 
 interface CommandSpec {
   readonly summary: string; // the line the top-level help shows
@@ -88,7 +98,17 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
   serve: {
     summary: "boot a store and serve it (GraphQL + SSE + MCP over HTTP)",
     usage: "loam serve --http [options]",
-    flags: new Set(["home", "store", "port", "token", "http", "archive", "host", "public-url"]),
+    flags: new Set([
+      "home",
+      "store",
+      "port",
+      "token",
+      "http",
+      "archive",
+      "host",
+      "public-url",
+      "oauth-allow-redirect",
+    ]),
     booleans: new Set(["http"]),
     notes: [
       "A fresh home self-initializes: it mints (or, via LOAM_SEED, imports) an operator identity,",
@@ -97,6 +117,12 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "A home holding a credentials.json also opens the login doors (/login, /logout,",
       "/session/token). Behind a proxy, name the outside address with --public-url: Host and",
       "X-Forwarded-* are the caller's to write, so this server never reads them.",
+      "",
+      "--oauth-allow-redirect opens the connector doors (SPEC §37), so a claude.ai custom connector",
+      "can sign in with OAuth instead of holding this store's token. Name it once per permitted",
+      "redirect origin; a connector may register no other target. It needs the login doors: the",
+      "consent page asks the operator to sign in. Approving mints the connector its OWN author, so",
+      "every claim it writes says so, and `loam grant revoke` withdraws it.",
     ],
   },
   register: {
@@ -154,6 +180,26 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "A token already minted keeps working until its short window ends. Erasure leaves",
       "credentials.json and login-locks.json alone. The health report names every one of these as a",
       "surface it does not sweep.",
+    ],
+  },
+  grant: {
+    summary: "list the connectors this store has granted, or withdraw one",
+    usage: "loam grant <list|revoke> [<client>] [options]",
+    flags: new Set(["home", "store"]),
+    notes: [
+      "subcommands:",
+      "  list             every connector, its client id, its author, and the tokens it holds",
+      "  revoke <client>  remove that connector's tokens — by client id, or by an unambiguous name",
+      "",
+      "A connector's grant (SPEC §37) is TWO things, and revoke touches only the first. The TOKEN is",
+      "the connector's way in; revoking removes it, and the next request it makes is refused by the",
+      "running server without a restart. The SEED is the connector's own signing identity, and it",
+      "stays: every claim the connector wrote names it, and history does not lose its author. A later",
+      "re-approval reuses the same seed, so one connector keeps one author for the life of the home.",
+      "",
+      "Revoking does NOT retire the connector's write standing as law. That standing is an",
+      "operator-signed grant delta in the ground, and striking it is a bigger decision than closing a",
+      "door. `loam store` shows it.",
     ],
   },
   artifact: {
@@ -217,6 +263,10 @@ const FLAG_HELP: Readonly<Record<string, { readonly arg: string; readonly note: 
   "public-url": {
     arg: "<url>",
     note: "the store's address as the outside world sees it (default: the bound URL)",
+  },
+  "oauth-allow-redirect": {
+    arg: "<origin>",
+    note: "permit a connector to register a redirect target here (repeatable; opens §37)",
   },
   url: { arg: "<base>", note: "the running gateway to ask (default http://127.0.0.1:4321)" },
   connector: { arg: "<name>", note: "the connector DISPLAY NAME a published page reads through" },
@@ -488,6 +538,17 @@ async function cmdServe(
   // is exactly the store it was before §36: /login resolves no mount, and no request reads a cookie.
   const publicUrl = parsed.flags.get("public-url");
   const withUsers = existsSync(credentialsPath(home));
+  // The connector doors (SPEC §37): opt-in, and opened by naming the redirect origins a connector may
+  // register. `repeated` rather than `flags` — the fence is the whole list, and reading the last value
+  // would silently narrow it to one entry.
+  const allowRedirect = parsed.repeated.get("oauth-allow-redirect") ?? [];
+  if (allowRedirect.length > 0 && !withUsers) {
+    io.err(
+      "serve: --oauth-allow-redirect opens the connector doors, and they ride the login doors — the " +
+        "consent page asks the operator to sign in. Run `loam user create <name> --operator` first.",
+    );
+    return 2;
+  }
   const server = await serve({
     mounts: { default: gateway },
     tokens: { [token]: { operator: true } },
@@ -505,11 +566,23 @@ async function cmdServe(
           },
         }
       : {}),
+    ...(allowRedirect.length > 0
+      ? {
+          oauth: {
+            home,
+            allowRedirectOrigins: allowRedirect,
+            onFault: (message: string) => io.err(`loam: ${message}`),
+          },
+        }
+      : {}),
   });
   recordServing(home, server.url, path);
   io.out(
     `loam: serving ${path} at ${server.url}/default${vault === undefined ? "" : `\n  archive ${vault}`}` +
-      (withUsers ? `\n  login at ${publicUrl ?? server.url}/login` : ""),
+      (withUsers ? `\n  login at ${publicUrl ?? server.url}/login` : "") +
+      (allowRedirect.length > 0
+        ? `\n  connectors may redirect to ${allowRedirect.join(", ")}`
+        : ""),
   );
 
   // Closing the server also releases the gateway (and its backend file) — one shutdown, whole.
@@ -1120,6 +1193,102 @@ function cmdUserUnlock(name: string, home: string, io: IO): number {
   return 0;
 }
 
+// `loam grant` (SPEC §37): the connectors this store has admitted, and the way out.
+//
+// It works on the FILE, not over HTTP, and that is what makes revocation immediate: the serving process
+// reads a connector token's entry from oauth.json on the ask, so a token removed here is refused by the
+// running server on its very next request. Home access is the proof of operatorship, as it is for
+// `loam user` and for erasure.
+function cmdGrant(args: readonly string[], io: IO): number {
+  const parsed = parseFor("grant", args);
+  const sub = parsed.positionals[0];
+  if (sub !== "list" && sub !== "revoke") {
+    io.err(
+      `grant wants a subcommand: \`loam grant list\` or \`loam grant revoke <client>\`` +
+        (sub === undefined ? "" : ` (not "${sub}")`),
+    );
+    return 2;
+  }
+  const home = parsed.flags.get("home") ?? defaultHome();
+  let file;
+  try {
+    file = readOAuthFile(home);
+  } catch (err) {
+    // A file this command cannot parse is a file it will not rewrite. Rewriting one would mean
+    // deciding what the unreadable part said, and the unreadable part holds connector seeds.
+    io.err(
+      `grant ${sub}: ${oauthPath(home)} is unreadable, so this command will not rewrite it: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    );
+    return 1;
+  }
+
+  if (sub === "list") {
+    if (file.clients.length === 0) {
+      io.out(`loam: no connector is registered in ${home}`);
+      return 0;
+    }
+    const lines: string[] = [];
+    for (const client of file.clients) {
+      const grant = file.grants.find((g) => g.clientId === client.clientId);
+      const held = file.tokens.filter((t) => t.clientId === client.clientId).length;
+      lines.push(
+        `  ${client.clientName}\n` +
+          `    client   ${client.clientId}\n` +
+          // The public author, never the seed: this output goes to a terminal, a scrollback and
+          // sometimes a screenshot.
+          `    author   ${grant === undefined ? "(not yet approved — no author minted)" : grant.actor}\n` +
+          `    redirect ${client.redirectUris.join("\n             ")}\n` +
+          `    ${held === 1 ? "1 live token" : `${held} live tokens`}`,
+      );
+    }
+    io.out(`loam: ${file.clients.length} connector(s) in ${home}\n${lines.join("\n")}`);
+    return 0;
+  }
+
+  const asked = parsed.positionals[1];
+  if (asked === undefined) {
+    io.err("grant revoke wants a client: `loam grant revoke <client-id|name>`");
+    return 2;
+  }
+  if (parsed.positionals.length > 2) {
+    io.err("grant revoke takes exactly one client");
+    return 2;
+  }
+  const byId = file.clients.filter((c) => c.clientId === asked);
+  // A NAME is accepted because a client id is 32 hex characters and an operator reads a name. Two
+  // clients may share one, and picking either would revoke the wrong connector — so it refuses.
+  const byName = byId.length === 1 ? byId : file.clients.filter((c) => c.clientName === asked);
+  if (byName.length === 0) {
+    io.err(
+      `grant revoke: no connector in ${home} is registered as "${asked}" — nothing was revoked. ` +
+        `\`loam grant list\` names them.`,
+    );
+    return 2;
+  }
+  if (byName.length > 1) {
+    io.err(
+      `grant revoke: more than one connector is named "${asked}", so this command will not guess ` +
+        `which one — nothing was revoked. Revoke by client id: ` +
+        `${byName.map((c) => c.clientId).join(", ")}`,
+    );
+    return 2;
+  }
+  const client = byName[0]!;
+  const kept = file.tokens.filter((t) => t.clientId !== client.clientId);
+  const removed = file.tokens.length - kept.length;
+  // The seed and the client record STAY. A re-approval must reuse the same author, or the connector's
+  // history splits in two and the first half is signed by a key nothing accounts for.
+  writeOAuthFile(home, { ...file, tokens: kept });
+  io.out(
+    `loam: revoked ${client.clientName} (${client.clientId})\n` +
+      `  ${removed === 1 ? "1 token" : `${removed} tokens`} removed — a serving process refuses the ` +
+      `next request that presents one\n` +
+      `  its author and its past claims are untouched; approving it again reuses the same author`,
+  );
+  return 0;
+}
+
 // `loam artifact pack` — a THIN HTTP CLIENT of `GET /:mount/artifact/<route>/<entity>`, and nothing
 // more. Every refusal and every word of the verdict comes from the door, so a refusal reads identically
 // here, over HTTP, and from a direct call. The one shape for every door.
@@ -1249,6 +1418,8 @@ export async function run(
         return await cmdRepair(rest, io);
       case "user":
         return await cmdUser(rest, io, options);
+      case "grant":
+        return cmdGrant(rest, io);
       case "artifact":
         return await cmdArtifact(rest, io);
       default:

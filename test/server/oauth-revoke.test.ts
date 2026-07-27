@@ -124,8 +124,13 @@ describe("loam grant revoke", () => {
     const connector = await connect();
     // It works first — otherwise "it stopped working" proves nothing.
     expect(
-      (await mcp(served.base, { jsonrpc: "2.0", id: 1, method: "tools/list" }, bearer(connector.token)))
-        .status,
+      (
+        await mcp(
+          served.base,
+          { jsonrpc: "2.0", id: 1, method: "tools/list" },
+          bearer(connector.token),
+        )
+      ).status,
     ).toBe(200);
 
     const revoked = await grant(["revoke", connector.clientId]);
@@ -173,7 +178,9 @@ describe("loam grant revoke", () => {
       `{ plant(entity: "${MOSS}") { height } }`,
       bearer("op-token"),
     );
-    expect(((await read.json()) as { data: { plant: { height: number } } }).data.plant.height).toBe(33);
+    expect(((await read.json()) as { data: { plant: { height: number } } }).data.plant.height).toBe(
+      33,
+    );
   });
 
   it("(v) revocation removes the TOKEN and keeps the seed — history does not lose its author", async () => {
@@ -277,9 +284,9 @@ describe("loam grant revoke", () => {
     const res = await grant(["revoke", "op-token"]);
     expect(res.code).not.toBe(0);
     // and the operator token still opens the operator's doors
-    expect((await fetch(`${served.base}/default/health`, { headers: bearer("op-token") })).status).toBe(
-      200,
-    );
+    expect(
+      (await fetch(`${served.base}/default/health`, { headers: bearer("op-token") })).status,
+    ).toBe(200);
   });
 
   it("(v) the grant delta in the ground is the operator's, and revoke leaves it alone", async () => {

@@ -136,7 +136,7 @@ describe("POST /oauth/register", () => {
       "/api/mcp/auth_callback",
       "claude.ai/cb",
       `${CLAUDE_ORIGIN}/cb#fragment`,
-      "javascript:alert(1)", // eslint-disable-line no-script-url
+      "javascript:alert(1)",
       "data:text/html,<script>1</script>",
       "",
     ]) {

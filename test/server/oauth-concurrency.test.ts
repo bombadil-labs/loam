@@ -212,11 +212,13 @@ describe("(t) the write is atomic and 0600", () => {
       await register(served.base);
       expect(() => readOAuthFile(home)).not.toThrow();
     }
-    const leftovers = readdirSync(home).filter((f) => f.startsWith("oauth.json.") && f.endsWith(".tmp"));
+    const leftovers = readdirSync(home).filter(
+      (f) => f.startsWith("oauth.json.") && f.endsWith(".tmp"),
+    );
     expect(leftovers).toEqual([]);
   });
 
-  it("writeOAuthFile applies 0600 to a path that already exists at 0644", async () => {
+  it("writeOAuthFile applies 0600 to a path that already exists at 0644", () => {
     // The unit-level statement of the same law, so the property is pinned where it lives rather than
     // only through the door that happens to call it today.
     const file = readOAuthFile(home);
@@ -241,7 +243,8 @@ describe("(u) a file this door cannot read", () => {
     { label: "clients not an array", bytes: '{"version":1,"clients":{},"grants":[],"tokens":[]}' },
     {
       label: "a client with no id",
-      bytes: '{"version":1,"clients":[{"clientName":"x","redirectUris":[]}],"grants":[],"tokens":[]}',
+      bytes:
+        '{"version":1,"clients":[{"clientName":"x","redirectUris":[]}],"grants":[],"tokens":[]}',
     },
     {
       label: "a grant whose seed is not hex",
