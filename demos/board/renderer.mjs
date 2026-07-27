@@ -22,11 +22,23 @@ export default (n) => {
     { key: "shipped", label: "shipped", hue: "#86b98d", holds: ["shipped"] },
     { key: "parked", label: "parked / blocked", hue: "#9c8f7a", holds: ["parked", "blocked"] },
   ];
+  // A brief is plain text; blank lines separate paragraphs. It expands under the card as a
+  // native <details> — no script, so the page stays inert under any CSP.
+  const brief = (x) =>
+    x.brief
+      ? `<details class="br"><summary>read the brief</summary>` +
+        String(x.brief)
+          .split(/\n{2,}/)
+          .map((p) => `<p>${esc(p.trim())}</p>`)
+          .join("") +
+        `</details>`
+      : "";
   const card = (x) =>
     `<div class="it" data-title="${esc(x.title)}">` +
     `<b>${x.url ? `<a href="${esc(x.url)}">${esc(x.title)}</a>` : esc(x.title)}</b>` +
     `${x.seam ? `<p>${esc(x.seam)}</p>` : ""}` +
     `<span class="st">${esc(x.kind)} · ${esc(x.status)}${x.est ? ` · ≈${esc(x.est)} min` : ""}</span>` +
+    brief(x) +
     `</div>`;
   const sec = ({ key, label, hue, holds }) => {
     const held = items.filter((x) => holds.includes(x.status));
@@ -47,6 +59,9 @@ export default (n) => {
   .it{border-top:1px solid #2f2819;padding:.5rem 0}.it:first-of-type{border-top:0}
   .it b{font-size:.95rem}.it p{margin:.2rem 0;color:#9c8f7a;font-size:.85rem}
   .st{font:600 .64rem ui-monospace,monospace;color:#57503f;text-transform:uppercase;letter-spacing:.1em}
+  .br{margin:.45rem 0 .15rem}.br summary{cursor:pointer;font:600 .64rem ui-monospace,monospace;
+    color:#82aedc;text-transform:uppercase;letter-spacing:.1em}
+  .br p{margin:.5rem 0 0;color:#cfc4ae;font-size:.85rem;max-width:38rem}
   a{color:#82aedc;text-decoration:none} footer{margin-top:1.4rem;font:.7rem ui-monospace,monospace;color:#57503f}</style>
   </head><body><main>
   <div class="k">bombadil labs · rendered live from the ground</div>
