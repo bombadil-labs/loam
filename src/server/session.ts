@@ -32,10 +32,10 @@ import {
 } from "./credentials.js";
 import {
   DEFAULT_LIMIT,
+  delayMs,
   forgetFailures,
-  lockedMs,
+  locksPath,
   noteFailure,
-  saturatedFor,
   type LimitPolicy,
 } from "./login-locks.js";
 import { roleOf, userNameDefect, type UserRole } from "./users.js";
@@ -57,6 +57,7 @@ export interface UserDoorOptions {
   readonly maxTokensPerSession?: number; // live tokens one session may hold (default 16)
   readonly maxConcurrentHashes?: number; // unauthenticated scrypt work in flight (default 4)
   readonly scrypt?: ScryptParams;
+  /** The failed-login DELAY: how a wrong password makes the next one cost. Never a refusal. */
   readonly limit?: LimitPolicy;
   /** A monotonic millisecond source. Injectable so a rail can drive it; never Date.now(). */
   readonly monotonicNow?: () => number;
@@ -114,6 +115,11 @@ const CSP =
   "form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
 
 const MAX_BODY = 8 * 1024; // a login form is a few hundred bytes; nothing here needs more
+
+// The wait a failed-login delay costs. The timer subsystem serves it, and Node drives timers from a
+// MONOTONIC clock — so a wall clock stepped backwards mid-wait cannot shorten it, and a step forwards
+// cannot skip it.
+const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 const DEFAULTS = {
   idleMs: 30 * 60_000,
@@ -299,6 +305,53 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
   // it happens. An availability dent is the cheaper failure; a confidentiality leak does not heal.
   const maxHashes = options.maxConcurrentHashes ?? DEFAULTS.maxConcurrentHashes;
   let hashesInFlight = 0;
+
+  // THE LIMITER'S WRITES FAIL OPEN, both of them, and the reason is the promise this door makes.
+  //
+  // login-locks.json is a work budget rather than an authorization surface, and `readLocks` already
+  // treats a file it cannot parse as no records at all. The writes have to agree. Unguarded they
+  // reach the door's outer guard, which answers 503 — so an unwritable home, ENOSPC, or the file
+  // replaced by a directory would refuse a CORRECT password, which is the one thing this design
+  // promises cannot happen. The fault goes to the operator's own channel, where a local condition
+  // belongs, and the caller's answer does not move.
+  //
+  // WHAT FAILING OPEN COSTS, stated so nobody has to derive it — and it is NOT "the limiter stops
+  // limiting". On a home this process cannot write, the file it already holds is still READ, so the
+  // effect splits by whether a name has a row:
+  //
+  //   - a name with NO row waits zero, for as long as the fault lasts. That is the budget gone.
+  //   - a name WITH a row keeps paying it, and the count can no longer grow OR be cleared. A correct
+  //     password does not clear it and `loam user unlock` cannot either — both need the same write.
+  //     So that name pays its accumulated wait, up to the cap, on every login until `forgetMs` of
+  //     silence retires the row on read.
+  //
+  // Measured on an unwritable home holding a six-failure row: 5000ms charged before the login, and
+  // 5000ms still charged after a successful login and after `unlock`. Slow, never shut — the login
+  // still succeeds, which is the promise that matters. The operator hears the fault on every attempt
+  // through `onFault`, and the cure is the disk rather than the door.
+  //
+  // Failing open is still right: the alternative hands a local disk fault the power to REFUSE a correct
+  // password, and no caller can reach this state.
+  const recordFailure = (user: string): void => {
+    try {
+      noteFailure(options.home, user, Date.now(), limit);
+    } catch (err) {
+      onFault(
+        `the login door could not record a failed attempt in ${locksPath(options.home)}: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  };
+  const forgetCount = (user: string): void => {
+    try {
+      forgetFailures(options.home, user);
+    } catch (err) {
+      onFault(
+        `the login door could not clear a failure count in ${locksPath(options.home)}: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  };
 
   const sweep = (): void => {
     const moment = now();
@@ -596,39 +649,41 @@ data doors on its own.</p>`,
       refuseLogin(res);
       return;
     }
-    // THE BUDGET COMES BEFORE THE LOCK FILE, and the order is the point: the lock check is a file read,
-    // so consulting it first would let a flood spend the box's disk before anything capped it. A refusal
-    // here is not a failed attempt, so it never fills the limiter either.
+    // THE WAIT COMES FIRST, BEFORE THE COMPARE, and the order is the whole design.
+    //
+    // A cost charged after the compare is no cost at all: the guess has already been evaluated, and a
+    // fast refusal beside a slow success tells the caller which they got just as plainly as the status
+    // would. So this is paid ahead of the hash budget, ahead of the credential read, ahead of any
+    // comparison.
+    //
+    // IT IS A WAIT, NEVER A REFUSAL. A correct password is admitted however many failures came before
+    // it, so nobody — including a stranger who knows the name — can shut the operator out of their own
+    // store by guessing at it. The cap on the wait is what keeps "slow" from becoming "shut".
+    //
+    // A WAITING ATTEMPT HOLDS NO HASH SLOT, and what buys that is the position of `hashesInFlight += 1`
+    // below — it is taken immediately before the hash, not here — rather than the position of the check.
+    // So another name gets in DURING the wait. It does NOT follow that a flood cannot draw a 503 for
+    // another name: the waits elapse together, the flood then spends the whole budget at once, and a
+    // name arriving in that window is refused. Login stays deliberately degradable under a flood.
+    //
+    // THE CHECK COMES AFTER THE WAIT for a different reason, and it is the load-bearing one: the check
+    // and the increment must have NO await between them. Check first and every waiting attempt would
+    // pass on the same free-budget snapshot, then all hash at once when their waits elapse — the cap
+    // would read as satisfied by a measurement taken seconds before the work.
+    //
+    // The read is ADVISORY — `noteFailure` re-reads and re-decides for itself, because the read and the
+    // write there must stay one synchronous step. What that costs, named rather than hidden: attempts
+    // arriving together all read the same count, so they all pay the same wait, and a caller buys
+    // `maxConcurrentHashes` guesses per wait instead of one. Re-reading after the wait would close that
+    // and open something far worse — a caller who keeps failing could then extend an honest attempt
+    // without limit, which is the lockout again under a different name.
+    const owed = delayMs(options.home, user, Date.now(), limit);
+    if (owed > 0) await wait(owed);
+    // A refusal here is not a failed attempt, so it never fills the limiter either.
     if (hashesInFlight >= maxHashes) {
       json(res, 503, {
         errors: ["the login door is busy: too much unauthenticated work is already in flight"],
       });
-      return;
-    }
-    // The lock check reads the table, and `noteFailure` below reads it AGAIN. That is deliberate:
-    // carrying a snapshot across the hash and writing it back is a LOST UPDATE — two overlapping attempts
-    // each increment from the same value, and the effective limit becomes maxFailures times the
-    // concurrency. One extra read on the failure path is the price of a limit that means what it says.
-    // ONE refusal for both reasons a login can be rate-limited: this name is locked, or the table is
-    // too saturated to account for the attempt. Same bytes, so neither is an oracle for the other.
-    const tooManyAttempts = (remainsMs: number): void => {
-      res.writeHead(429, {
-        "content-type": "application/json",
-        "retry-after": String(Math.max(1, Math.ceil(remainsMs / 1000))),
-        "cache-control": "no-store",
-      });
-      res.end(JSON.stringify({ errors: ["too many failed attempts: this login is locked"] }));
-    };
-    const lockRemains = lockedMs(options.home, user, Date.now());
-    if (lockRemains > 0) {
-      tooManyAttempts(lockRemains);
-      return;
-    }
-    // BEFORE the hash, not after. A table saturated with live locks cannot count a failure against this
-    // name, and an attempt nobody can count must not be evaluated at all — refusing after the compare
-    // would leak the answer through 429-versus-200 and leave guessing unbounded.
-    if (saturatedFor(options.home, user, Date.now(), limit)) {
-      tooManyAttempts(limit.lockMs);
       return;
     }
     let credentials;
@@ -669,12 +724,14 @@ data doors on its own.</p>`,
       hashesInFlight -= 1;
     }
     if (!matched) {
-      // A table saturated with live locks cannot account for this attempt. Refusing with the lock's
-      // own answer is the only safe direction: counting it as a plain miss would be unlimited guessing.
-      if (!noteFailure(options.home, user, Date.now(), limit)) {
-        tooManyAttempts(limit.lockMs);
-        return;
-      }
+      // The count grows, so the NEXT attempt for this name costs more. This attempt already paid.
+      //
+      // A WRITE FAULT MUST NOT CHANGE THE ANSWER. `readLocks` is fail-open by design, and the write
+      // has to match it: an unwritable home, ENOSPC, or login-locks.json replaced by a directory
+      // would otherwise reach the outer guard and turn this 401 into a 503. That direction gives a
+      // local disk fault a say in what the door answers, and a fault nobody can cause is still one
+      // nobody can clear. Failing open costs the count, which is a work budget, not authority.
+      recordFailure(user);
       refuseLogin(res);
       return;
     }
@@ -699,7 +756,12 @@ data doors on its own.</p>`,
       json(res, 503, { errors: ["this store is holding all the sessions it can"] });
       return;
     }
-    forgetFailures(options.home, user);
+    // THE CORRECT PASSWORD IS ALREADY ACCEPTED, so nothing after this line may refuse it. Clearing
+    // the count is a courtesy — it saves this name one wait next time — and a write fault must cost
+    // exactly that courtesy and nothing more. Unguarded, it reaches the outer guard as a 503, which
+    // refuses a correct password AND leaves the session `open` just seated with no cookie to reach
+    // it, burning one of `maxSessions` per retry.
+    forgetCount(user);
     // the nonce is spent: one login is all it was ever good for
     html(res, 200, signedInPage(user, role, opened.session.formToken), [
       setCookie(opened.id),
@@ -789,7 +851,7 @@ data doors on its own.</p>`,
       pathname === "/login" || pathname === "/logout" || pathname === "/session/token",
     async handle(pathname, req, res) {
       // ONE GUARD OVER ALL FOUR DOORS, because "the caller never sees the detail" has to hold for a
-      // fault nobody anticipated too. Without it an ENOSPC from the lock-file write, or a throw from the
+      // fault nobody anticipated too. Without it an ENOSPC from the login-locks.json write, or a throw from the
       // ground read, escapes to the server's generic handler — which answers 500 with the message, and
       // those messages carry the home's absolute path. Per-call-site try blocks would each be one
       // omission away from the same leak.

@@ -2,6 +2,65 @@
 
 **Ticket: T113.** Status: design approved in chat (Myk, 2026-07-26); implementation delegated.
 
+**Amended by T116** (Myk, 2026-07-27, in chat): the failed-login limiter DELAYS; it never locks. A
+lock is an off switch a stranger can pull — anyone who knows a username could hold the operator out
+of their own store. So each failure for a name makes the next attempt for that name wait longer, up
+to a cap, and the door always admits a correct password. Criteria (o) and (p) below are T116's.
+
+**The cost, named — four parts, and none of them is a bound to lean on.**
+
+1. A caller who grinds the operator's username makes the operator's own login slow, up to the cap,
+   once per login. Slow is not shut, and that is the whole trade.
+2. A waiting attempt spends no hash budget WHILE IT WAITS, so another name gets in during the wait.
+   That is all criterion (o3) proves, and the stronger reading is false: the waits then elapse
+   together, the flood spends the whole hash budget at once, and a name arriving in that window is
+   refused with 503. Login is deliberately degradable under a flood, and it still is. A waiting
+   attempt also pins one socket on the shared `node:http` server for up to `maxDelayMs`, and a caller
+   holding enough sockets exhausts descriptors for every door. Nothing caps how many attempts may
+   wait at once, and no such cap is safe — refusing past one is the lockout again, and serving past
+   one without the wait is free guessing. That exposure is unbounded here and is not railed.
+3. The delay bounds a SERIAL guesser only. Waits do not serialize — the pre-compare read is advisory
+   and the wait is a bare timer with no per-name queue — so a caller holding many connections has all
+   their waits elapse together, and their rate is the concurrent-hash cap divided by one hash. That
+   cap pre-dates this change. Do not read `maxDelayMs` as an attempts-per-second bound; against a
+   caller who opens more than one connection it is wrong by orders of magnitude. A per-name queue
+   would close it and reintroduce the lockout, so it stays open and named.
+4. **A SQUATTED TABLE CHARGES A TARGETED NAME NOTHING, and this one is Myk's to weigh.** The record
+   file is bounded by `maxTracked`, because an unauthenticated caller writes a row per name and every
+   write rewrites the file whole (H8). A row is seated at ONE failure, so a new row is always among the
+   weakest, and a caller who squats `maxTracked` rows keeps a chosen name out of the table. Two shapes,
+   both measured against the module at `maxTracked` 4 and 8, both charging the target 0ms every round:
+
+   The operative quantity is SEATINGS per round — rows added for a name not currently in the table — and
+   not fresh names: a name the flood evicted last round is absent now, so recycling one seats a row just
+   as a never-seen name does.
+
+   - NARROW: raise every squatted row to at least the target's count, then one seating per round.
+   - WIDE: `maxTracked` seatings per round, cycling the whole table. No setup, and it works under either
+     eviction tie-break order.
+
+   The boundary is exact: at `maxTracked − 1` seatings per round the tie-break holds and the target is
+   charged 0, 200, 400, 800, 1600ms. At `maxTracked` it is charged nothing.
+
+   **What each shape costs, and ONLY ONE OF THEM DECAYS.** The wide shape costs `maxTracked` requests per
+   guess — 512 at the shipped policy — and nothing standing, because every row it writes is seated in the
+   round it is used, so `forgetMs` has nothing to prune between guesses. Measured with a full `forgetMs`
+   of silence before EVERY guess: still 0ms charged. A caller guessing once a day pays 513 requests a day
+   and is charged nothing. The narrow shape costs one request per guess plus 511 refreshes per 15 minutes
+   whatever the guess rate, and its setup scales with the target's standing count — junk rows at two
+   failures do not flush a target at five. That shape does decay: measured 0, 0, 0 squatted, then 0, 200,
+   400, 800, 1600 after one idle window.
+
+   So the cheap shape is the one with no standing cost and no decay. Waiting is not on the defender's
+   side here, and any future claim that it is has to name which shape it means.
+
+   So the delay taxes a serial guesser against an UNSQUATTED table, and a caller willing to sustain a
+   squat can guess one chosen name at the concurrent-hash cap's rate — which is where the pre-T116 lock
+   also ended up, by a different route. Closing it needs a store that is not a bounded whole-file
+   rewrite, or per-name counters that collide and therefore slow innocent names, breaking criterion
+   (o3). **Recommendation: land T116 as it stands, and open a follow-up ticket for the store.** The
+   residual is strictly narrower than the lockout this section removes, and it refuses nobody.
+
 ## The problem
 
 Today one word, "token", does three jobs. A bearer token authenticates the caller, carries the
@@ -44,7 +103,9 @@ signed by a seed. The door token keeps working for API callers and never gains a
 - `GET /login` — a minimal HTML form. No script.
 - `POST /login` — verifies the password against `credentials.json` (scrypt, timing-safe
   compare), sets the session cookie on success, answers 401 on failure. Failed attempts are
-  rate-limited per source: after 5 failures in a minute, 429 with `Retry-After`.
+  DELAYED per username, never refused: each failure makes the next attempt for that name wait
+  longer, up to a cap. There is no lock and no `Retry-After`, because a correct password is
+  always admitted.
 - `POST /logout` — drops the session.
 - `POST /session/token` — with a session, answers a short-lived bearer token for the session
   user's identity. This is how a browser UI writes: JavaScript holds the token and sends it in
@@ -122,12 +183,38 @@ may do.
   does not extend it (expiry is monotonic) — `test/server/login.test.ts`
 - (n) A server restart invalidates all cookies: the same cookie that opened a door before the
   restart is refused after it — `test/server/login.test.ts`
-- (o) The failed-login limiter keys on the USERNAME, not on a caller-supplied source: six wrong
-  passwords for `myk` lock `myk` with 429 and `Retry-After`, while a second user's correct
-  password still succeeds — and rotating `X-Forwarded-For` does not reset the count —
+- (o) The failed-login limiter keys on the USERNAME, not on a caller-supplied source, and it DELAYS
+  rather than locks: twenty wrong passwords for `myk` never refuse `myk`, the right password still
+  answers 200 with a session cookie, and rotating `X-Forwarded-For` does not reset the count —
   `test/server/login-limit.test.ts`
-- (p) `loam user unlock <name>` clears the lock from the box, so a remote party cannot hold the
-  door shut — `test/server/login-limit.test.ts`
+- (o1) The wait grows with each failure and is CAPPED, so it cannot become a denial under another
+  name; `delayFor` saturates at the cap for any count — `test/server/login-limit.test.ts`
+- (o2) The wait is paid BEFORE the password comparison: a door with no hash budget at all still waits
+  it out before it answers 503 — `test/server/login-limit.test.ts`
+- (o3) A WAITING attempt holds no hash slot, so another name signs in while a flood waits; and the
+  concurrent-hash cap still refuses on the far side of the wait. The stronger reading — that a flood
+  cannot refuse another name at all — is false and is not claimed: once the waits elapse the flood
+  spends the whole budget at once — `test/server/login-limit.test.ts`
+- (o4) Concurrent attempts cannot lose an accumulated count: four overlapping misses record four, and
+  the next attempt is charged for all four — `test/server/login-limit.test.ts`
+- (o5) A wall clock stepped BACKWARDS cannot erase an accumulated wait, and silence past the forget
+  window does clear one — `test/server/login-limit.test.ts`
+- (o6) The record file holds no more than `maxTracked` rows, a flood of fresh names cannot flush a
+  record that holds more failures, and a tie is broken by the LAST FAILURE — oldest of equals goes
+  first, so a newly seated row survives to accumulate — `test/server/login-limit.test.ts`
+- (o7) BOTH writes to the record file fail open: a home the door cannot write leaves a failed attempt
+  answering 401 rather than 503, and still admits a correct password, reporting the fault to the
+  operator's channel instead of the caller. It does NOT keep the limiter working — a count already on
+  disk still charges its own accumulated wait, up to the cap, and can no longer grow OR be cleared, so
+  it stands until `forgetMs` of silence; and a record file that cannot be READ charges every name
+  nothing, self-repairing on the next failed login WHERE THE PATH CAN BE REPLACED and discarding the
+  records nobody could read. Readability and replaceability are independent: a directory at the path is
+  unreplaceable on a writable home (EISDIR), and damaged bytes on a home this process cannot write are
+  unreplaceable with nothing wrong with the path (EACCES). Neither self-repairs —
+  `test/server/login-limit.test.ts`
+- (p) `loam user unlock <name>` clears that name's accumulated wait from the box, `--all` clears every
+  record whatever name it holds, and the report names the COUNT rather than a wait the CLI's process
+  cannot know — `test/server/login-limit.test.ts`
 - (q) Unauthenticated scrypt work is globally capped: concurrent login attempts past the cap are
   refused without hashing — `test/server/login-limit.test.ts`
 - (r) The login page carries a `Content-Security-Policy` that permits no script —

@@ -579,7 +579,8 @@ export const UNSWEPT_SURFACES: readonly string[] = [
     "also leave a " +
     "credentials.json.<pid>-<hex>.tmp holding the same bytes; that copy is unswept too.",
   "login-locks.json in the loam home (SPEC §36) — per-user failed-login counts, keyed by user " +
-    "name, so a record outlives the user it names. Also never deltas, so also unreachable from here. " +
+    "name, so a record outlives the user it names. Each count only makes that name's next login " +
+    "attempt wait longer; it locks nothing. Also never deltas, so also unreachable from here. " +
     "`loam user unlock <name>` clears one entry and works whether or not the user still exists; " +
     "nothing in an erasure does. Its .tmp siblings are unswept on the same terms.",
   // Not data at rest, and named anyway: this list is what a reader consults to ask "is anything left?",
