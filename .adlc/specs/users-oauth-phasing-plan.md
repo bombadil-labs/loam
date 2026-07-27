@@ -161,7 +161,7 @@ write. Mode 0600. No doors. No CLI.
 
 **Delivers.** A user record and a role binding, both as claims in the ground. A HyperSchema that
 counts the operator's assertions only. A Schema that resolves latest-wins. `resolveUserView` and
-`roleOf`.
+`rolesOf`, which returns the SET of roles a user holds.
 
 **Merges alone.** Users become readable facts. No door consumes them yet.
 
@@ -174,23 +174,33 @@ counts the operator's assertions only. A Schema that resolves latest-wins. `reso
    standing may sign a claim at an ordinary context. So the select names the operator.
 3. A stranger's negation does not retract what the operator said. Assert at both levels.
 4. A store with no operator yields no user and no role. The door stays shut.
-5. A struck role binding leaves the user readable and the role absent. Assert both levels.
-6. A user name is safe in an entity id, a JSON key and an HTML page. One expression, stated once.
-7. **MANY USERS MAY HOLD THE OPERATOR ROLE.** Each user is its own entity, and its role binding is a
+5. A struck role binding leaves the user readable and that role absent from the set. Assert both
+   levels.
+6. **A USER HOLDS MANY ROLES. THE PROPERTY IS A SET, NOT A LATEST VALUE.** The Policy for the role
+   context is `all`, never `pick`. So the resolved value is every non-negated role claim, and two roles
+   coexist. Rail it: grant `operator` and `actor` to one user, and both resolve. `pickLatest` would let
+   the second grant silently displace the first, which is a permission bug wearing a data model's
+   clothes.
+7. A user with no grants resolves to an EMPTY SET, not to `undefined` and not to a default role. A
+   permission check asks MEMBERSHIP — does this user hold `operator` — never equality.
+8. The reading function is `rolesOf`, and it returns a set. There is no `roleOf` returning one role.
+   A singular name would invite the caller to compare rather than to test membership.
+9. A user name is safe in an entity id, a JSON key and an HTML page. One expression, stated once.
+10. **MANY USERS MAY HOLD THE OPERATOR ROLE.** Each user is its own entity, and its role binding is a
    claim at that entity. So the shape carries no limit of one. Rail it: assign the role to two users,
-   and `roleOf` answers `operator` for both. Rail the other side too: revoking one leaves the other.
-8. **THE TRUSTED SET ADMITS DELEGATION BY CONSTRUCTION, even before any key uses it.** Today the read
+   and `rolesOf` contains `operator` for both. Rail the other side: revoking one leaves the other.
+11. **THE TRUSTED SET ADMITS DELEGATION BY CONSTRUCTION, even before any key uses it.** Today the read
    is `authoredBy: <the one operator key>`. Phase 3 needs it to be {the genesis operator} ∪ {users the
    genesis operator granted the operator role}. Build that shape HERE, in phase 2. With zero grants it
    resolves to exactly today's behaviour, so it costs almost nothing now — and it means phase 3 adds
    keys without rewriting phase 2's rails. Rail the degenerate case: with no grants, the set is the
    genesis operator alone.
-9. **ONE LEVEL OF DELEGATION, and say why.** `lawfulStrikersJson` in `accounts.ts` already computes
+12. **ONE LEVEL OF DELEGATION, and say why.** `lawfulStrikersJson` in `accounts.ts` already computes
    this shape with `inView`, and stratification bans `inView` inside the sub-term. So the chain cannot
    recurse. A user the genesis operator trusted cannot extend that trust to a third party. That is a
    limit, not an oversight. State it where a reader meets the set.
-9. A role a user does not hold answers `undefined`, never a default. An unknown role name is refused
-   rather than guessed at.
+13. A role the user does not hold is simply absent from the set. An unknown role NAME is refused at the
+   write door rather than admitted into the set and guessed at on read.
 
 ### Phase 3 — Per-operator signing keys
 
@@ -220,8 +230,8 @@ being fine the moment a second person holds the role, which is what these phases
    are non-empty.
 4. The genesis operator remains trusted. An existing store's deltas were all signed by it, and they
    must keep resolving. Rail it against a store built before this phase.
-5. A granted operator's writes resolve for a governed reader. The trusted set from phase 2 admits
-   them, so their role bindings and their claims both count.
+5. A granted operator's writes resolve for a governed reader. The trusted set from phase 2 admits any
+   user whose role set CONTAINS `operator`, so their role bindings and their claims both count.
 6. **REVOKING A ROLE STOPS THE KEY GOING FORWARD AND KEEPS THE PAST.** After `remove-role`, that
    user's new writes no longer resolve for a governed reader. Their earlier deltas still do, and still
    name them. Two-sided, and it is the provenance win stated as a rail.
@@ -276,13 +286,19 @@ two deltas. The role commands change a role binding and nothing else.
     report a write it did not make.
 12. `remove-role` appends an operator-signed NEGATION of the role claim. It does not delete a delta.
     Only the operator's negation binds, so a stranger cannot revoke a role.
-13. **`remove-role` STRIKES ONE BINDING; it does not set a user roleless.** The property resolves
-    latest-wins over the surviving claims, so striking `operator` on a user who was earlier an `actor`
-    leaves them an `actor`. That is correct and it is surprising. Rail both outcomes: a user with one
-    binding becomes roleless, and a user with two becomes the earlier one.
-14. After `remove-role operator`, that user's session opens no operator door. Assert at both levels —
-    the negation is in the ground, and the door refuses.
-15. **THE LAST OPERATOR MAY REMOVE THEIR OWN ROLE, AND THE STORE STAYS RECOVERABLE.** These commands
+13. **`remove-role` STRIKES EVERY SURVIVING CLAIM OF THAT ROLE, not the latest one.** Roles resolve
+    with `all` (phase 2), so each grant is a distinct delta and all of them are live at once. One
+    strike therefore leaves a twice-granted role STILL HELD through its other grant. This repo already
+    paid for that hazard: `demos/board/vocabulary.mjs` records it for `items: {all}` — "a single strike
+    leaves a twice-added item listed through its other filing" (H4).
+    Rail it as the double-grant case: grant `operator` twice, remove it once, and assert the user no
+    longer holds it. A rail that grants once cannot see this defect.
+14. Removing one role leaves the user's OTHER roles intact. Two-sided: grant `operator` and `actor`,
+    remove `operator`, and `actor` survives. Removing every role leaves an empty set and a readable
+    user, never a deleted user.
+15. After `remove-role operator`, that user's session opens no operator door. Assert at both levels —
+    the negations are in the ground, and the door refuses.
+16. **THE LAST OPERATOR MAY REMOVE THEIR OWN ROLE, AND THE STORE STAYS RECOVERABLE.** These commands
     prove operatorship by HOME ACCESS and sign with the home's seed, exactly as `create` does. They
     need no session. So a store with no operator-role user is still repairable on the box. Rail it:
     remove the only operator, then assign it again, and the door opens. State this in the help text,
