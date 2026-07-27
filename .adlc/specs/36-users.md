@@ -207,9 +207,11 @@ may do.
   `test/server/login-limit.test.ts`
 - (o8) `loam user unlock` never reports an empty answer as a clean one. An ABSENT record file on a usable
   home reports an empty table and exits 0. An UNREADABLE file names the fault, says the door is charging
-  nobody, and warns the bytes are perishable rather than promising a repair the CLI cannot predict. A
-  home that is not a usable directory — missing, a dangling symlink, or a file — names that instead and
-  offers both cures, saying nothing about bytes it does not have. Each fault exits non-zero —
+  nobody, and warns the bytes are perishable rather than promising a repair the CLI cannot predict. A home
+  whose resolved target is not a traversable directory names THAT instead, says nothing about bytes it
+  does not have, and carries the cure for the fault it actually diagnosed — a missing path, a dangling
+  link, a non-directory, a symlink loop, a non-directory component, or unreachable permissions are six
+  faults with six cures, and no branch claims a diagnosis it did not make. Each fault exits non-zero —
   `test/server/login-limit.test.ts`
 - (p) `loam user unlock <name>` clears that name's accumulated wait from the box, `--all` clears every
   record whatever name it holds, and the report names the COUNT rather than a wait the CLI's process

@@ -166,22 +166,22 @@ export function readLocks(home: string): Map<string, FailureRecord> {
  * at all. Anything else that yields no records is: it cannot be read, or its bytes are not a record
  * table, and both mean the door is charging nobody.
  *
- * TWO SUBJECTS, TWO DIFFERENT CALLS, and they are opposites on purpose:
+ * TWO SUBJECTS, ASKED DIFFERENTLY, and the difference is which question each one answers:
  *
- *   - THE HOME is asked with `stat().isDirectory()` plus a traversal check. What matters is the RESOLVED
- *     target, so a symlinked home on a removed volume reads as broken while a healthy symlinked one
- *     reads as fine. See the body for why `lstat` cannot do this job and why the access mask is `X_OK`
- *     and not `W_OK`.
- *   - THE RECORD FILE is asked with `lstatSync`, NOT with the read's errno, and the reason is the
- *     DANGLING SYMLINK: `readFileSync` follows the link and answers `ENOENT`, indistinguishable from no
- *     file at all, so a read-errno test would call that healthy and stay silent while the door charges
- *     nobody. `lstat` because the link ITSELF is the thing at the path. It buys nothing on the other
- *     errnos, so the wording never claims the file EXISTS, only that it could not be read.
+ *   - THE HOME needs its RESOLVED target to be a directory it can traverse, so `stat().isDirectory()`
+ *     plus an `X_OK` check decides, and `lstat` is asked only to separate a dangling link from nothing
+ *     at all. See the body for why `lstat` cannot decide it alone and why the mask is not `W_OK`.
+ *   - THE RECORD FILE needs the LINK ITSELF, so `lstat` decides and the read's errno never does:
+ *     `readFileSync` follows a link and answers `ENOENT`, indistinguishable from no file at all, so a
+ *     read-errno test would call a dangling record file healthy and stay silent while the door charges
+ *     nobody. `lstat` buys nothing on the other errnos, so the wording never claims the file EXISTS.
  *
- * NEITHER CALL IS ATOMIC WITH WHAT FOLLOWS IT. A home removed between the two checks returns undefined
- * and prints the silent-clean answer this function exists to prevent. The window is microseconds, no
- * caller can steer it, and the cost is one misleading CLI line rather than any door behaviour — recorded
- * rather than closed.
+ * NOTHING HERE IS ATOMIC, and the honest account of that runs in both directions. A home removed between
+ * two calls can return undefined and print the silent-clean answer this function exists to prevent; it
+ * can also make `stat` and `lstat` disagree, which is why the ENOENT branch below asks
+ * `isSymbolicLink()` rather than inferring a link from `lstat` merely succeeding. The window is
+ * microseconds and no caller can steer it, so the misclassification is prevented and the silent answer
+ * is recorded rather than closed — it costs one CLI line and never any door behaviour.
  */
 export function unreadableRecordFile(home: string): string | undefined {
   const path = locksPath(home);
@@ -199,24 +199,24 @@ export function unreadableRecordFile(home: string): string | undefined {
   // has failed a login yet" — a tidy exit 0 over a path that holds nothing and never will. The door
   // charges nobody there and cannot self-repair either, since even the temp file cannot be created.
   //
-  // IT ASKS `stat`, WHICH IS THE OPPOSITE CALL FROM THE RECORD FILE BELOW, for the opposite reason. For
-  // the FILE the link itself is the thing at the path. For a HOME what matters is the RESOLVED TARGET: a
-  // symlinked home on a removed volume must read as broken, and a healthy symlinked home must read as
-  // fine. `lstat` cannot tell those apart — it SUCCEEDS on a dangling link and answers
-  // `isDirectory=false` for a healthy one — so `lstat` alone misses the dangling home and
-  // `lstat().isDirectory()` would condemn a working one.
+  // `stat` RESOLVES, WHICH IS WHAT A HOME NEEDS: a symlinked home on a removed volume must read as
+  // broken and a healthy symlinked one must read as fine. `lstat` cannot decide that on its own — it
+  // SUCCEEDS on a dangling link and answers `isDirectory=false` for a healthy one — so `lstat` alone
+  // misses the dangling home and `lstat().isDirectory()` would condemn a working one. It is still asked,
+  // for one narrow job: `stat` reports a dangling link and nothing-at-all with the same ENOENT, and
+  // those two want opposite cures, so `lstat().isSymbolicLink()` separates them.
   //
-  // AND `isDirectory` ALONE IS NECESSARY BUT NOT SUFFICIENT. A mode-0000 directory answers it happily —
-  // `stat` only needs a traversable PARENT — so the home would pass and the record-file branch below
-  // would then offer perishable-bytes advice for a file that can never exist there. So traversal is
-  // asked too. X_OK, NOT W_OK: a read-only home is a SUPPORTED state with its own criterion, where a
-  // row stays frozen at its accumulated wait, and demanding write here would condemn it.
-  // THE CURE IS PER FAULT, never one pair of cures for all of them. "Check --home or run `loam init`"
-  // is right for a path that does not exist and WRONG for most of the rest: an EACCES home was typed
-  // correctly, exists, and may hold a real record file, so that advice sends an operator hunting for a
-  // mistake they did not make. `stat` also collapses two opposite shapes onto one ENOENT — a dangling
-  // symlink and nothing at all — so `lstat` is asked to tell them apart, which is the one thing it is
-  // good for here.
+  // `isDirectory` ALONE IS NECESSARY AND NOT SUFFICIENT. A mode-0000 directory answers it happily —
+  // `stat` needs only a traversable PARENT — so the home would pass and the record-file branch below
+  // would offer perishable-bytes advice for a file that can never exist there. Traversal is asked too.
+  // X_OK, NOT W_OK: a read-only home is a SUPPORTED state with its own criterion, where a row stays
+  // frozen at its accumulated wait, and demanding write here would condemn a home the door reads.
+  //
+  // EVERY BRANCH NAMES A FAULT IT ACTUALLY DIAGNOSED. One pair of cures for all of them was wrong for
+  // most: "check --home or run `loam init`" fits a path that does not exist and misdirects an EACCES
+  // home, which was typed correctly and may hold a real record file. The same discipline applies to the
+  // evidence — a branch may not say "symlink" without asking, or "permissions" without reading the
+  // errno, because a confident wrong diagnosis costs more than a vague right one.
   const defect = ((): { why: string; cure: string } | undefined => {
     let stats;
     try {
@@ -225,25 +225,44 @@ export function unreadableRecordFile(home: string): string | undefined {
       const why = err instanceof Error ? err.message : String(err);
       const code = (err as { code?: string }).code;
       if (code === "ENOENT") {
-        let atPath = false;
+        // ASKED, NOT ASSUMED. `lstat` succeeding proves only that SOMETHING is here; the symlink cure
+        // needs `isSymbolicLink`. Without it a plain directory removed between the two calls is named a
+        // broken link and handed a link-repair cure — a fault the code never diagnosed.
+        let link: boolean | undefined;
         try {
-          lstatSync(home);
-          atPath = true;
+          link = lstatSync(home).isSymbolicLink();
         } catch {
           /* nothing at the path at all, not even a link */
         }
-        return atPath
-          ? {
-              why: `it is a symlink whose target is gone (${why})`,
-              cure: "Repair or remove the link.",
-            }
-          : {
-              why,
-              cure: "Check the --home path if you passed one, or run `loam init` if this home was never made.",
-            };
+        if (link === true) {
+          return {
+            why: `it is a symlink whose target is gone (${why})`,
+            cure: "Repair or remove the link.",
+          };
+        }
+        if (link === false) {
+          // Something is there and it is not a link, yet `stat` said ENOENT: the path changed under us.
+          return {
+            why: `${why} — the path changed while this command looked at it`,
+            cure: "Try again.",
+          };
+        }
+        return {
+          why,
+          cure: "Check the --home path if you passed one, or run `loam init` if this home was never made.",
+        };
       }
       if (code === "ELOOP") return { why, cure: "Repair or remove the symlink at that path." };
-      return { why, cure: "Check the --home path, and this command's permission to reach it." };
+      if (code === "ENOTDIR") {
+        return { why, cure: "Check the --home path: a component of it is not a directory." };
+      }
+      if (code === "EACCES" || code === "EPERM") {
+        return {
+          why,
+          cure: "Fix the permissions on that path, or run this as a user that can reach it.",
+        };
+      }
+      return { why, cure: "Check the --home path." };
     }
     if (!stats.isDirectory()) {
       return {
@@ -254,10 +273,13 @@ export function unreadableRecordFile(home: string): string | undefined {
     try {
       accessSync(home, constants.X_OK);
     } catch (err) {
-      return {
-        why: err instanceof Error ? err.message : String(err),
-        cure: "This command cannot traverse into it: fix the directory's permissions.",
-      };
+      const why = err instanceof Error ? err.message : String(err);
+      const code = (err as { code?: string }).code;
+      // The errno is READ before permissions are blamed. `access` answers ENOENT too, when the path goes
+      // away between the two calls, and prescribing chmod for that is a diagnosis nobody made.
+      return code === "EACCES" || code === "EPERM"
+        ? { why, cure: "This command cannot traverse into it: fix the directory's permissions." }
+        : { why, cure: "Check the --home path." };
     }
     return undefined;
   })();

@@ -962,16 +962,20 @@ describe("the failed-login delay", () => {
     expect(named.out.join("\n")).not.toMatch(/waits for nothing/);
   });
 
-  // POSIX only for the symlink shapes; Windows needs a privilege to make one. The predicate under test
-  // is `statSync(home).isDirectory()`, which is platform-agnostic.
+  // POSIX only for the symlink shapes; Windows needs a privilege to make one. The subject is the home
+  // classifier — `stat`, `isDirectory`, an `X_OK` check, and an errno split — all platform-agnostic.
   it.skipIf(process.platform === "win32")(
-    "(o8) an UNUSABLE HOME is named, whatever shape makes it unusable",
+    "(o8) an UNUSABLE HOME is named, and EVERY branch of the classifier is reached",
     () => {
-      // A TABLE RATHER THAN ONE CASE, because this check has now been wrong three times, each time on a
-      // shape the previous version did not consider. `lstat` alone misses a DANGLING home — it succeeds
-      // on the link. `lstat().isDirectory()` would condemn a HEALTHY symlinked home, the trap in the
-      // one-token fix. And `isDirectory` alone says yes to a mode-0000 home, because `stat` needs only a
-      // traversable parent. So every shape is asserted here together, healthy ones included.
+      // A TABLE RATHER THAN ONE CASE, because this check has been wrong three times, each time on a shape
+      // the previous version did not consider. `lstat` alone misses a DANGLING home — it succeeds on the
+      // link. `lstat().isDirectory()` would condemn a HEALTHY symlinked home, the trap in the one-token
+      // fix. And `isDirectory` alone says yes to a mode-0000 home, because `stat` needs only a traversable
+      // parent.
+      //
+      // SO IT COVERS EVERY BRANCH, not every shape it could imagine. Two branches were once deletable
+      // with this suite green — ELOOP and the fallback cure — which is the same hollowness a shape-shaped
+      // rail always risks: shapes are infinite and branches are not. The list below is the branch list.
       //
       // FUNCTION LEVEL ONLY, and named per the both-levels rule: this calls `unreadableRecordFile`
       // directly, while criterion (o8) is a claim about what `loam user unlock` PRINTS and EXITS. The
@@ -1000,10 +1004,20 @@ describe("the failed-login delay", () => {
         // EACH SHAPE GETS THE CURE THAT APPLIES TO IT. One unconditional pair of cures was wrong for
         // most of these: a dangling home was typed correctly and `loam init` is not its fix, and an
         // unreachable home is neither a typo nor a missing init. So the cure is asserted per shape.
+        // ELOOP needs a CYCLE, which no other shape here produces.
+        const loopA = join(root, "loop-a");
+        const loopB = join(root, "loop-b");
+        symlinkSync(loopB, loopA);
+        symlinkSync(loopA, loopB);
+        // ENOTDIR needs a path whose PARENT is a file — reached by neither the type test nor ELOOP.
+        const throughFile = join(asFile, "under-a-file");
+
         for (const [label, path, cure] of [
           ["missing", missing, /Check the --home path if you passed one, or run `loam init`/],
           ["dangling", dangling, /Repair or remove the link/],
           ["file", asFile, /a loam home is a directory/],
+          ["loop", loopA, /Repair or remove the symlink at that path/],
+          ["through a file", throughFile, /a component of it is not a directory/],
         ] as const) {
           const said = unreadableRecordFile(path);
           expect(said, label).toMatch(/is not a usable loam home/);
@@ -1011,6 +1025,18 @@ describe("the failed-login delay", () => {
           // and NOT the record-file advice: there are no bytes here to be perishable
           expect(said, label).not.toMatch(/copy it now/);
         }
+        // ELOOP and ENOTDIR each name their OWN errno rather than a shared fallback, so neither branch
+        // can be deleted into the generic one while this stays green. Probed by deleting each: both red.
+        expect(unreadableRecordFile(loopA)).toMatch(/ELOOP/);
+        expect(unreadableRecordFile(throughFile)).toMatch(/ENOTDIR/);
+        expect(unreadableRecordFile(loopA)).not.toMatch(/Check the --home path\./);
+
+        // NAMED GAP — one branch of the classifier is not reachable from here. The errno split inside the
+        // `accessSync` failure needs `access` to fail with something OTHER than EACCES, which means the
+        // directory vanishing between the `stat` and the `access` — a race no fixture can force. Probed
+        // by collapsing that split to always blame permissions: this rail stays GREEN, so it does not
+        // cover it. The branch exists anyway, because the alternative is a message that prescribes chmod
+        // for a path that disappeared. A rail would need an injectable clock-of-the-filesystem.
         // the two shapes `stat` reports identically are told apart, and only ONE is offered `loam init`
         expect(unreadableRecordFile(dangling)).toMatch(/symlink whose target is gone/);
         expect(unreadableRecordFile(dangling)).not.toMatch(/loam init/);
