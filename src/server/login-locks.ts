@@ -186,10 +186,14 @@ export function unreadableRecordFile(home: string): string | undefined {
   try {
     lstatSync(home);
   } catch (err) {
+    // It does NOT say "check --home": the default home reaches this too, on a box where nobody has run
+    // `loam init` yet, and a first-run reader who passed no flag would go looking for a typo they never
+    // made. Both cures are named instead, and the reader picks the one that applies to them.
     return (
       `${home} is not a directory this command can examine: ` +
-      `${err instanceof Error ? err.message : String(err)}. No login records can live there, so ` +
-      `check the --home path before reading anything into an empty answer.`
+      `${err instanceof Error ? err.message : String(err)}. No login records can live there, so do ` +
+      `not read an empty answer as a clean one. Check the --home path if you passed one, or run ` +
+      `\`loam init\` if this home was never made.`
     );
   }
   try {

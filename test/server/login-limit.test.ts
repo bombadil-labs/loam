@@ -951,13 +951,14 @@ describe("the failed-login delay", () => {
     const io = testIo();
     expect(await run(["user", "unlock", "--all", "--home", missing], io.io)).toBe(1);
     expect(io.err.join("\n")).toMatch(/no-such-home/);
-    expect(io.err.join("\n")).toMatch(/check the --home path/);
+    expect(io.err.join("\n")).toMatch(/Check the --home path if you passed one/);
+    expect(io.err.join("\n")).toMatch(/loam init/); // the first-run reader has a cure too
     expect(io.out.join("\n")).not.toMatch(/nothing to clear/);
 
     // and the per-name path says it too rather than "already waits for nothing"
     const named = testIo();
     expect(await run(["user", "unlock", "myk", "--home", missing], named.io)).toBe(1);
-    expect(named.err.join("\n")).toMatch(/check the --home path/);
+    expect(named.err.join("\n")).toMatch(/do not read an empty answer as a clean one/);
     expect(named.out.join("\n")).not.toMatch(/waits for nothing/);
   });
 
