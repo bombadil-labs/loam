@@ -23,7 +23,7 @@ over it ("replace" was the wrong word, and Myk corrected it at sign-off).
 
 Two lenses, in `demos/board/vocabulary.mjs`, registered through the ordinary `/register` door:
 
-- **`BoardItem`** — one entity per item (`board:pr-262`, `board:lane-t79`), six latest-wins props
+- **`BoardItem`** — one entity per item (`board:pr-262`, `board:lane-t79`), seven latest-wins props
   (`kind`, `title`, `seam`, `url`, `status`, `est`), all front-door writable. The **`boardEvent`**
   claim template makes a transition one authed call emitting ONE signed delta of exactly the
   declared shape — subject at `(item, status)`, one primitive value.
