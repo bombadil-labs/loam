@@ -20,11 +20,29 @@
 // derivation, and a cache that disagrees with its source is how a `grant list` comes to name one
 // author while the store's deltas name another.
 //
-// WHAT THIS FILE DOES NOT GUARD: two PROCESSES writing it. The write is atomic, so no reader ever
-// sees half a file, but `loam grant revoke` in one process and a token mint in the server are a
-// read-modify-write pair with no lock between them, and the loser's change is lost. The server
-// serialises its own writes (oauth.ts); across processes the operator is one person at a keyboard,
-// and a lock file is its own ticket rather than a line here.
+// EVERY READ-MODIFY-WRITE GOES THROUGH `withOAuthFile`, AND THAT IS A CROSS-PROCESS LOCK.
+//
+// The write itself is atomic, so no reader ever sees half a file — and that is not the property this
+// needs. `loam grant revoke` runs in a DIFFERENT process from the server, and the two are a
+// read-modify-write pair: whoever writes second spreads a snapshot taken before the other's change
+// and silently discards it. The tempting argument is that the operator is one person at a keyboard, so
+// the two never overlap. That argument is wrong, and the counterexample needs only two connectors:
+//
+//   - the server is minting a first token for connector D, and holds the file's contents while it
+//     awaits the operator-signed grant append for D;
+//   - the operator revokes connector C in the meantime, and the CLI reports it done;
+//   - the server writes its snapshot, and C's revoked token is back in the table with C's generation
+//     bump gone — so C's codes mint again too, while the CLI has already claimed otherwise.
+//
+// The mirror ordering is worse: the CLI's write lands second and erases D's grant record while the
+// ground already holds D's write grant, so the next redemption mints a SECOND seed for one connector
+// and strands the first — the exact outcome `standing` exists to prevent. Both are H7 at the process
+// layer against criterion (v)'s own promise, so the lock is not an optimisation.
+//
+// The lock is an `O_CREAT|O_EXCL` file, held for the whole read-modify-write, and the callback it wraps
+// is SYNCHRONOUS on purpose: an await inside would hold a cross-process lock across work of unbounded
+// length. The server's ground append therefore happens BETWEEN two locked phases rather than inside
+// one (oauth.ts, `mintToken`).
 
 import {
   chmodSync,
@@ -34,6 +52,7 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   writeSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -140,17 +159,34 @@ const array = (raw: unknown, where: string): unknown[] => {
  */
 export const MAX_CLIENT_NAME = 200;
 
+/**
+ * C0, DEL and C1, plus the two Unicode separators a terminal also breaks a line on.
+ *
+ * EVERY caller-supplied string that reaches `loam grant list` is held to this, and there are two of
+ * them: the client name AND each redirect uri. The uri is the one that hides — `new URL()` STRIPS tab,
+ * LF and CR while parsing, so a uri carrying them parses clean, passes the origin and
+ * percent-transparency checks, and keeps its raw bytes in the stored string. The operator's only view
+ * of what is registered is where they decide what to revoke, so a forged row there is worth refusing
+ * at the door rather than escaping at the printer.
+ */
+// eslint-disable-next-line no-control-regex
+const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+
 export const clientNameDefect = (name: string): string | undefined => {
   if (name.length === 0 || name.length > MAX_CLIENT_NAME) {
     return `a client_name is 1..${MAX_CLIENT_NAME} characters`;
   }
-  // C0, DEL and C1, plus the two Unicode separators a terminal also breaks a line on.
-  // eslint-disable-next-line no-control-regex
-  if (/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(name)) {
+  if (CONTROL.test(name)) {
     return "a client_name carries no control character, escape, or line separator";
   }
   return undefined;
 };
+
+/** The same rule for a redirect uri, which reaches the same listing. */
+export const uriTextDefect = (uri: string): string | undefined =>
+  CONTROL.test(uri)
+    ? "a redirect_uri carries no control character, escape, or line separator"
+    : undefined;
 
 function checkClient(raw: unknown, where: string): OAuthClient {
   object(raw, where);
@@ -171,6 +207,11 @@ function checkClient(raw: unknown, where: string): OAuthClient {
       if (typeof uri !== "string" || uri === "") {
         throw new OAuthFileUnreadable(`${where}: redirect uri ${i} is not a string`);
       }
+      // Symmetric with the name above, and for the same reason: a file edited by hand must not be
+      // able to smuggle a forged row into the operator's listing either.
+      const defect = uriTextDefect(uri);
+      if (defect !== undefined)
+        throw new OAuthFileUnreadable(`${where}: redirect uri ${i} — ${defect}`);
       return uri;
     }),
     registeredAt: num(raw, where, "registeredAt"),
@@ -303,6 +344,83 @@ export function writeOAuthFile(home: string, file: OAuthFile): void {
   } catch {
     // Windows refuses to fsync a directory handle. The rename is still atomic there; only the
     // durability of the directory entry across a power cut is weaker, and it is not ours to fix.
+  }
+}
+
+// --- the cross-process lock ---------------------------------------------------------------------
+
+export const oauthLockPath = (home: string): string => join(home, "oauth.json.lock");
+
+/** How long a held lock may be before a later writer treats it as a crashed one and breaks it. */
+export const LOCK_STALE_MS = 30_000;
+/** How long a writer waits for the lock before giving up. Longer than any honest hold. */
+const LOCK_WAIT_MS = 10_000;
+
+/** The lock is held and not stale. Never a licence to write anyway. */
+export class OAuthFileBusy extends Error {}
+
+// A SYNCHRONOUS sleep, because the whole point is that no other work in this process interleaves with
+// a held lock. `Atomics.wait` on a private buffer parks the thread without a busy loop.
+const pause = (ms: number): void => {
+  const buffer = new SharedArrayBuffer(4);
+  Atomics.wait(new Int32Array(buffer), 0, 0, ms);
+};
+
+/**
+ * Run `work` with `oauth.json` locked against every other process, and write what it returns.
+ *
+ * `work` is SYNCHRONOUS by signature, and that is the load-bearing part: a lock held across an await
+ * is a lock held for an unbounded time, and a caller that needs to await something does it between two
+ * calls to this rather than inside one. Returning `undefined` for `next` reads without writing.
+ *
+ * A lock older than `LOCK_STALE_MS` is broken and taken, because a crashed writer must not wedge the
+ * operator out of their own store forever. That is a real trade: a writer paused longer than the
+ * staleness window can have its lock stolen. It is bounded by making every hold short — which the
+ * synchronous signature is what enforces.
+ */
+export interface OAuthWrite<T> {
+  /** The file to write, or absent to read without writing. */
+  readonly next?: OAuthFile | undefined;
+  readonly result: T;
+}
+
+export function withOAuthFile<T>(home: string, work: (file: OAuthFile) => OAuthWrite<T>): T {
+  const lock = oauthLockPath(home);
+  const waitedFrom = Date.now();
+  let fd: number | undefined;
+  for (;;) {
+    try {
+      fd = openSync(lock, "wx", 0o600);
+      break;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      let heldSince: number;
+      try {
+        heldSince = statSync(lock).mtimeMs;
+      } catch {
+        continue; // it went away between the open and the stat: try to take it
+      }
+      if (Date.now() - heldSince > LOCK_STALE_MS) {
+        // A crashed writer. Remove and retry; if two writers race to break it, one wins the open.
+        rmSync(lock, { force: true });
+        continue;
+      }
+      if (Date.now() - waitedFrom > LOCK_WAIT_MS) {
+        throw new OAuthFileBusy(
+          `${lock} is held by another process, so this change was not made. Retry, or remove that ` +
+            `file if no loam process is running.`,
+        );
+      }
+      pause(25);
+    }
+  }
+  try {
+    const outcome = work(readOAuthFile(home));
+    if (outcome.next !== undefined) writeOAuthFile(home, outcome.next);
+    return outcome.result;
+  } finally {
+    closeSync(fd);
+    rmSync(lock, { force: true });
   }
 }
 

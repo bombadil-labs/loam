@@ -9,16 +9,30 @@
 // treating an unparseable oauth.json as an empty one would silently re-mint a seed for a connector
 // that already has one, and the old grant would stay in the ground with nobody holding its key.
 
-import { chmodSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authorForSeed } from "@bombadil/rhizomatic";
 import { PASSWORD, bootStore, createUser, dropHome, makeHome, signIn } from "./user-fixture.js";
 import {
+  LOCK_STALE_MS,
+  OAuthFileBusy,
   OAuthFileUnreadable,
+  oauthLockPath,
   oauthPath,
   readOAuthFile,
+  withOAuthFile,
   writeOAuthFile,
 } from "../../src/server/oauth-file.js";
+import { run } from "../../src/cli/cli.js";
 import {
   CLAUDE_REDIRECT,
   approve,
@@ -187,6 +201,110 @@ describe("(s) two concurrent first-grants", () => {
     const ids = new Set(results.map((r) => r.clientId));
     expect(ids.size).toBe(5);
     expect(new Set(readOAuthFile(home).clients.map((c) => c.clientId))).toEqual(ids);
+  });
+});
+
+describe("(s) the cross-process lock", () => {
+  // The interleaving no in-process rail can reach: `loam grant revoke` runs in ANOTHER process, and the
+  // server writes this file too. Whichever wrote second used to spread a snapshot taken before the
+  // other's change and silently discard it — and the direction that discards the REVOKE leaves the
+  // operator told a connector was closed while its token still opens the door.
+  //
+  // WHAT THESE RAILS DO AND DO NOT REACH, said plainly. They drive the lock PRIMITIVE, which is the
+  // fix: a held lock blocks, a stale lock is broken, and no read-modify-write inside it can be
+  // interleaved. They do NOT spawn a second OS process and race it, so a genuine two-process
+  // interleaving is proven by reading `withOAuthFile` rather than by a rail. The rail that would close
+  // that gap forks a child and contends for real; it is not here.
+
+  it("a held lock blocks a second writer rather than letting it overwrite", () => {
+    // The discriminating assertion for the lock's existence. Without it, `withOAuthFile` reads and
+    // writes straight through and this passes instantly with the other writer's change gone.
+    writeOAuthFile(home, readOAuthFile(home));
+    const before = readOAuthFile(home);
+    writeFileSync(oauthLockPath(home), `${process.pid}\n`);
+    try {
+      expect(() =>
+        withOAuthFile(home, (file) => ({
+          next: { ...file, clients: [] },
+          result: undefined,
+        })),
+      ).toThrow(OAuthFileBusy);
+      // And it wrote NOTHING while it waited — a lock that threw after writing would be worse than none.
+      expect(readOAuthFile(home)).toEqual(before);
+    } finally {
+      rmSync(oauthLockPath(home), { force: true });
+    }
+    // With the lock gone the same call succeeds, so the refusal above was the lock and not the payload.
+    expect(() => withOAuthFile(home, (file) => ({ next: file, result: undefined }))).not.toThrow();
+  });
+
+  it("a STALE lock is broken, so a crashed writer cannot wedge the store forever", () => {
+    writeFileSync(oauthLockPath(home), "1\n");
+    const past = Date.now() - LOCK_STALE_MS - 5_000;
+    utimesSync(oauthLockPath(home), new Date(past), new Date(past));
+    const seen = withOAuthFile(home, (file) => ({ result: file.clients.length }));
+    expect(seen).toBe(0);
+    // And the lock is released rather than left behind by the writer that broke it.
+    expect(existsSync(oauthLockPath(home))).toBe(false);
+  });
+
+  it("the lock is released even when the work throws", () => {
+    expect(() =>
+      withOAuthFile(home, () => {
+        throw new Error("the work failed");
+      }),
+    ).toThrow("the work failed");
+    expect(existsSync(oauthLockPath(home))).toBe(false);
+    // The next writer is not blocked by the failed one.
+    expect(() => withOAuthFile(home, (file) => ({ next: file, result: 0 }))).not.toThrow();
+  });
+
+  it("(v) a revoke and a mint do not lose each other's write", async () => {
+    // The end-to-end statement, through the doors rather than the primitive: two connectors, one
+    // revoked while the other is granted. Both changes must survive.
+    const one = await register(served.base);
+    const two = await register(served.base);
+    const first = await codeFor(one.clientId);
+    await redeem(served.base, {
+      grant_type: "authorization_code",
+      code: first.code,
+      redirect_uri: CLAUDE_REDIRECT,
+      client_id: one.clientId,
+      code_verifier: first.verifier,
+    });
+    const second = await codeFor(two.clientId);
+
+    // The revoke and the second mint, issued together.
+    const io = { out: () => {}, err: () => {} };
+    const [, minted] = await Promise.all([
+      run(["grant", "revoke", one.clientId, "--home", home], io),
+      redeem(served.base, {
+        grant_type: "authorization_code",
+        code: second.code,
+        redirect_uri: CLAUDE_REDIRECT,
+        client_id: two.clientId,
+        code_verifier: second.verifier,
+      }),
+    ]);
+    expect(minted.res.status).toBe(200);
+
+    const file = readOAuthFile(home);
+    // The revoke survived: no token for the revoked client, and its generation moved.
+    expect(file.tokens.filter((t) => t.clientId === one.clientId)).toEqual([]);
+    expect(file.clients.find((c) => c.clientId === one.clientId)!.generation).toBe(2);
+    // The mint survived: the other client holds its token and its grant stands.
+    expect(file.tokens.filter((t) => t.clientId === two.clientId).length).toBe(1);
+    expect(file.grants.find((g) => g.clientId === two.clientId)!.standing).toBe(true);
+    // And each token behaves accordingly at the door.
+    expect(
+      (
+        await mcp(
+          served.base,
+          { jsonrpc: "2.0", id: 1, method: "tools/list" },
+          bearer(minted.body["access_token"] as string),
+        )
+      ).status,
+    ).toBe(200);
   });
 });
 

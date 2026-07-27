@@ -49,10 +49,12 @@ import {
   grantForToken,
   oauthPath,
   readOAuthFile,
-  writeOAuthFile,
+  uriTextDefect,
+  withOAuthFile,
   type OAuthClient,
   type OAuthFile,
   type OAuthGrant,
+  type OAuthWrite,
 } from "./oauth-file.js";
 import { CSP, escapeHtml, page, sameSecret, type ConsentAuth } from "./session.js";
 
@@ -228,6 +230,10 @@ export function redirectUriDefect(uri: string, allowed: readonly string[]): stri
     );
   }
   if (uri.length === 0 || uri.length > MAX_URI) return `a redirect_uri is 1..${MAX_URI} characters`;
+  // BEFORE `new URL()`, which strips tab, LF and CR while parsing — so a uri carrying them would pass
+  // every check below and keep its raw bytes in the stored string, where `loam grant list` prints them.
+  const text = uriTextDefect(uri);
+  if (text !== undefined) return `"${uri}" is not a redirect target: ${text}`;
   let url: URL;
   try {
     url = new URL(uri);
@@ -518,42 +524,57 @@ export function makeOAuthDoors(deps: OAuthDeps): OAuthDoors {
       checked.push(uri);
     }
 
-    const outcome = await serialized(() => {
-      let file: OAuthFile;
+    type Registered =
+      { kind: "ok"; client: OAuthClient } | { kind: "full" } | { kind: "unreadable" };
+
+    const outcome: Registered = await serialized((): Registered => {
       try {
-        file = readOAuthFile(home);
+        return withOAuthFile<Registered>(home, (file) => {
+          // AT THE CAP, EVICT THE OLDEST EVICTABLE REGISTRATION rather than refuse.
+          //
+          // This door takes no credential, so a plain cap is a lockout: a stranger files `maxClients`
+          // junk registrations and the real connector is refused forever, with no command that removes
+          // one. So the pressure falls on registrations nobody is using, and a flood evicts its own
+          // earlier entries instead of the operator's connector.
+          //
+          // TWO KINDS OF CLIENT ARE NOT EVICTABLE, and the second is the subtle one:
+          //   - one the operator APPROVED (it holds a grant) — its seed signs deltas the store holds;
+          //   - one with a CODE IN FLIGHT. A grant appears only after a successful token mint, so the
+          //     whole interval from registration through the consent page to redemption would otherwise
+          //     be evictable — and a sustained flood always reaches the oldest, which is the pending
+          //     legitimate client. The operator's approval would then die at redemption. Consent
+          //     already given must not be discarded by a stranger's traffic.
+          const pinned = new Set([
+            ...file.grants.map((g) => g.clientId),
+            ...[...codes.values()].map((c) => c.clientId),
+          ]);
+          let clients = [...file.clients];
+          while (clients.length >= maxClients) {
+            const oldest = clients
+              .filter((c) => !pinned.has(c.clientId))
+              .sort((a, b) => a.registeredAt - b.registeredAt)[0];
+            if (oldest === undefined) return { result: { kind: "full" as const } };
+            clients = clients.filter((c) => c.clientId !== oldest.clientId);
+          }
+          const client: OAuthClient = {
+            clientId: `connector-${randomBytes(16).toString("hex")}`,
+            clientName: name,
+            redirectUris: checked,
+            registeredAt: Date.now(),
+            generation: 1,
+          };
+          return {
+            next: { ...file, clients: [...clients, client] },
+            result: { kind: "ok" as const, client },
+          };
+        });
       } catch (err) {
         onFault(
-          `the connector doors cannot read ${oauthPath(home)}: ` +
+          `the connector doors could not register a connector in ${oauthPath(home)}: ` +
             `${err instanceof Error ? err.message : String(err)}`,
         );
         return { kind: "unreadable" as const };
       }
-      // AT THE CAP, EVICT THE OLDEST NEVER-APPROVED REGISTRATION rather than refuse.
-      //
-      // This door takes no credential, so a plain cap is a lockout: a stranger files `maxClients` junk
-      // registrations and the real connector is refused forever, with no command that removes one. An
-      // APPROVED connector is never evicted — the operator consented to it, and its seed signs deltas
-      // the store holds — so the pressure falls only on registrations nobody has agreed to, and a
-      // flood evicts its own earlier entries instead of the operator's connector.
-      const approved = new Set(file.grants.map((g) => g.clientId));
-      let clients = [...file.clients];
-      while (clients.length >= maxClients) {
-        const oldest = clients
-          .filter((c) => !approved.has(c.clientId))
-          .sort((a, b) => a.registeredAt - b.registeredAt)[0];
-        if (oldest === undefined) return { kind: "full" as const };
-        clients = clients.filter((c) => c.clientId !== oldest.clientId);
-      }
-      const client: OAuthClient = {
-        clientId: `connector-${randomBytes(16).toString("hex")}`,
-        clientName: name,
-        redirectUris: checked,
-        registeredAt: Date.now(),
-        generation: 1,
-      };
-      writeOAuthFile(home, { ...file, clients: [...clients, client] });
-      return { kind: "ok" as const, client };
     });
 
     if (outcome.kind === "unreadable") {
@@ -682,11 +703,15 @@ ${hidden("approve", "yes")}
   };
 
   const getAuthorize = (req: IncomingMessage, res: ServerResponse, url: URL): void => {
-    const file = load(res, true);
-    if (file === undefined) return;
-    // WHO IS ASKING comes first, and the reason is the login form: a caller with no session must reach
-    // it whatever else is wrong with the query, or a connector's very first link is a dead end that
-    // says "unknown client" to a human who has simply not signed in yet.
+    // WHO IS ASKING COMES FIRST, for two reasons that happen to agree.
+    //
+    // The login form: a caller with no session must reach it whatever else is wrong with the query, or
+    // a connector's very first link is a dead end that says "unknown client" to a human who has simply
+    // not signed in yet.
+    //
+    // And the cost: reading the file derives one public key per stored grant, and this door is
+    // reachable with no credential. Asking the cookie first is free, so an anonymous caller cannot buy
+    // that work at all.
     const who = deps.consent.who(req);
     if (who.kind === "unreachable") {
       refusePage(res, 503, "This store's ground is not reachable, so this page cannot load.");
@@ -713,6 +738,8 @@ ${hidden("approve", "yes")}
       );
       return;
     }
+    const file = load(res, true);
+    if (file === undefined) return;
     const checked = checkAsk(fromQuery(url.searchParams), file);
     if (!checked.ok) {
       refusePage(res, 400, checked.reason);
@@ -826,65 +853,98 @@ ${hidden("approve", "yes")}
     | { kind: "full" }
     | { kind: "gone" }
     | { kind: "revoked" }
-  > =>
-    serialized(async () => {
-      const read = (): OAuthFile => readOAuthFile(home);
-      let file: OAuthFile;
+  > => {
+    type Refusal =
+      { kind: "unreadable" } | { kind: "full" } | { kind: "gone" } | { kind: "revoked" };
+
+    // Everything that must be true of the file before a token is minted, asked INSIDE the lock so a
+    // concurrent revoke cannot land between the check and the write.
+    const gate = (file: OAuthFile): Refusal | undefined => {
+      const client = clientFor(file, clientId);
+      if (client === undefined) return { kind: "gone" };
+      // A REVOCATION LANDED AFTER CONSENT WAS GIVEN. The consent is stale, so the code is dead.
+      if (client.generation !== generation) return { kind: "revoked" };
+      if (file.tokens.filter((t) => t.clientId === clientId).length >= maxTokensPerClient) {
+        return { kind: "full" };
+      }
+      return undefined;
+    };
+
+    const locked = <T>(work: (file: OAuthFile) => OAuthWrite<T | Refusal>): T | Refusal => {
       try {
-        file = read();
+        return withOAuthFile<T | Refusal>(home, work);
       } catch (err) {
         onFault(
-          `the connector doors cannot read ${oauthPath(home)}: ` +
+          `the connector doors could not update ${oauthPath(home)}: ` +
             `${err instanceof Error ? err.message : String(err)}`,
         );
         return { kind: "unreadable" as const };
       }
-      // Re-read INSIDE the chain: a snapshot taken before the await is how two concurrent
-      // first-grants each mint a seed.
-      const client = clientFor(file, clientId);
-      if (client === undefined) return { kind: "gone" as const };
-      // A REVOCATION LANDED AFTER CONSENT WAS GIVEN. The consent is stale, so the code is dead.
-      if (client.generation !== generation) return { kind: "revoked" as const };
-      if (file.tokens.filter((t) => t.clientId === clientId).length >= maxTokensPerClient) {
-        return { kind: "full" as const };
-      }
+    };
 
-      // THE SEED IS RECORDED BEFORE THE GRANT IS APPENDED, and the order is the recovery story.
+    // The whole mint is one link in the in-process chain, so two requests here never interleave; the
+    // LOCK is what makes each phase atomic against the CLI in another process.
+    return serialized(async () => {
+      // PHASE ONE, locked: decide the seed and record it. Synchronous, so the lock is held for
+      // microseconds.
       //
+      // THE SEED IS RECORDED BEFORE THE GRANT IS APPENDED, and the order is the recovery story.
       // Appending first and recording after leaves the unrecoverable gap: a write that fails between
       // the two puts a grant in the ground for a key nobody holds, and the NEXT redemption, finding no
       // seed, mints a second one. This way round the file is the single answer to "which seed is this
-      // connector's", `standing: false` names the one gap that remains, and the retry below closes it
-      // with the SAME seed.
-      let grant = grantFor(file, clientId);
-      if (grant === undefined) {
+      // connector's", `standing: false` names the one gap that remains, and phase three closes it with
+      // the SAME seed.
+      const phaseOne = locked<{ kind: "grant"; grant: OAuthGrant }>((file) => {
+        const refusal = gate(file);
+        if (refusal !== undefined) return { result: refusal };
+        const existing = grantFor(file, clientId);
+        if (existing !== undefined) return { result: { kind: "grant" as const, grant: existing } };
         const actorSeed = randomBytes(32).toString("hex");
-        grant = {
+        const grant: OAuthGrant = {
           clientId,
           actorSeed,
           actor: authorForSeed(actorSeed),
           grantedAt: Date.now(),
           standing: false,
         };
-        writeOAuthFile(home, { ...file, grants: [...file.grants, grant] });
-        file = read();
-      }
-      if (!grant.standing) {
-        // A throw here refuses the redemption and mints no token: a credential for an identity with no
-        // standing authenticates and then cannot write, which is a door reporting a success it did not
-        // achieve. The seed survives, flagged, and the next redemption arrives here again.
-        await deps.grantActor(grant.actor);
-        grant = { ...grant, standing: true };
-      }
-      const token = opaque();
-      const standing = grant;
-      writeOAuthFile(home, {
-        ...file,
-        grants: [...file.grants.filter((g) => g.clientId !== clientId), standing],
-        tokens: [...file.tokens, { digest: sha(token), clientId, issuedAt: Date.now() }],
+        return {
+          next: { ...file, grants: [...file.grants, grant] },
+          result: { kind: "grant" as const, grant },
+        };
       });
-      return { kind: "ok" as const, token };
+      if (phaseOne.kind !== "grant") return phaseOne;
+
+      // PHASE TWO, UNLOCKED: the ground append. A cross-process lock must never be held across this —
+      // it is a signed write to a sqlite store and its duration is not ours to bound.
+      //
+      // A throw here refuses the redemption and mints no token: a credential for an identity with no
+      // standing authenticates and then cannot write, which is a door reporting a success it did not
+      // achieve. The seed survives, flagged, and the next redemption arrives at phase one again.
+      if (!phaseOne.grant.standing) await deps.grantActor(phaseOne.grant.actor);
+
+      // PHASE THREE, locked: re-read, mark the grant standing, add the token. Re-gated on the FRESH
+      // file, because phase two was an await and a revoke may have landed inside it.
+      const token = opaque();
+      return locked<{ kind: "ok"; token: string }>((file) => {
+        const refusal = gate(file);
+        if (refusal !== undefined) return { result: refusal };
+        const grant = grantFor(file, clientId);
+        // The seed phase one recorded is gone from the file. Only another writer can have done that,
+        // and minting a fresh seed here would be the second-seed bug by another road.
+        if (grant === undefined) return { result: { kind: "gone" as const } };
+        return {
+          next: {
+            ...file,
+            grants: file.grants.map((g) =>
+              g.clientId === clientId ? { ...g, standing: true } : g,
+            ),
+            tokens: [...file.tokens, { digest: sha(token), clientId, issuedAt: Date.now() }],
+          },
+          result: { kind: "ok" as const, token },
+        };
+      });
     });
+  };
 
   const postToken = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const body = formFields(await readBody(req));

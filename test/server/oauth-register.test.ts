@@ -11,7 +11,7 @@
 //
 // Both levels: the answer the door gives, AND what oauth.json holds afterwards.
 
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PASSWORD, bootStore, createUser, dropHome, makeHome, signIn } from "./user-fixture.js";
 import { oauthPath, readOAuthFile } from "../../src/server/oauth-file.js";
@@ -143,6 +143,79 @@ describe("POST /oauth/register", () => {
       const res = await register(served.base, { redirectUris: [near] });
       expect(res.status, `${near} was admitted`).toBe(400);
     }
+  });
+
+  it("(g) a redirect_uri carrying a control byte is refused, at the door and in the file", async () => {
+    // `new URL()` STRIPS tab, LF and CR while parsing, so a hostile uri parses clean, passes the origin
+    // and percent-transparency checks, and keeps its raw bytes in the stored string — where
+    // `loam grant list` prints them and forges a whole connector row in the operator's only view of
+    // what is registered. The rule the client_name got has to cover its sibling.
+    for (const hostile of [
+      `${CLAUDE_ORIGIN}/cb\n    1 live token\n  Claude\n    client   connector-forged`,
+      `${CLAUDE_ORIGIN}/cb\r\nEvil`,
+      `${CLAUDE_ORIGIN}/cb\tEvil`,
+      `${CLAUDE_ORIGIN}/cb\u001b[2K`,
+      `${CLAUDE_ORIGIN}/cb\u0000`,
+      `${CLAUDE_ORIGIN}/cb\u2028`,
+    ]) {
+      const res = await register(served.base, { redirectUris: [hostile] });
+      expect(res.status, `${JSON.stringify(hostile)} was admitted`).toBe(400);
+    }
+    expect(readOAuthFile(home).clients).toEqual([]);
+    // And the file's own reader refuses one edited in by hand, symmetric with the name.
+    writeFileSync(
+      oauthPath(home),
+      JSON.stringify({
+        version: 1,
+        clients: [
+          {
+            clientId: "a",
+            clientName: "x",
+            redirectUris: [`${CLAUDE_ORIGIN}/cb\n forged`],
+            registeredAt: 1,
+            generation: 1,
+          },
+        ],
+        grants: [],
+        tokens: [],
+      }),
+    );
+    expect(() => readOAuthFile(home)).toThrow(/control character/);
+  });
+
+  it("(f) a client with a CODE IN FLIGHT is not evicted by a registration flood", async () => {
+    // A grant appears only after a successful token MINT, so the whole interval from registration
+    // through the consent page to redemption was evictable — and a sustained anonymous flood always
+    // reaches the oldest, which is the pending legitimate client. The operator's approval would then die
+    // at redemption. Consent already given must not be discarded by a stranger's traffic.
+    await served.close();
+    served = await serveOAuth(home, { oauth: { maxClients: 2 } });
+    const session = await signIn(served.base);
+    const mine = await register(served.base, { name: "Claude" });
+    const secret = pkce();
+    const params = wellFormedAuthorize(mine.clientId, secret.challenge);
+    const page = await getAuthorize(served.base, params, session.cookie);
+    const approved = await approve(served.base, params, {
+      cookie: session.cookie,
+      formToken: formTokenIn(page.body),
+    });
+    const code = codeFrom(approved)!;
+    // Myk has approved. Nothing is minted yet, so there is no grant to protect it.
+    expect(readOAuthFile(home).grants).toEqual([]);
+
+    // The flood.
+    for (let i = 0; i < 6; i += 1) await register(served.base);
+    expect(readOAuthFile(home).clients.map((c) => c.clientId)).toContain(mine.clientId);
+
+    // And the approval still redeems.
+    const redeemed = await redeem(served.base, {
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: CLAUDE_REDIRECT,
+      client_id: mine.clientId,
+      code_verifier: secret.verifier,
+    });
+    expect(redeemed.res.status).toBe(200);
   });
 
   it("(g) a uri that is not an absolute URL, or carries a fragment, is refused", async () => {

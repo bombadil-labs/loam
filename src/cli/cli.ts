@@ -32,7 +32,7 @@ import {
   type ScryptParams,
 } from "../server/credentials.js";
 import { clearAllLocks, clearLock } from "../server/login-locks.js";
-import { oauthPath, readOAuthFile, writeOAuthFile } from "../server/oauth-file.js";
+import { oauthPath, readOAuthFile, withOAuthFile } from "../server/oauth-file.js";
 import {
   resolveUserView,
   roleClaims,
@@ -1272,6 +1272,8 @@ function cmdGrant(args: readonly string[], io: IO): number {
     return 1;
   }
 
+  // `list` reads and never writes, so the snapshot above is all it needs. `revoke` re-reads INSIDE the
+  // lock below, because the serving process writes this file too.
   if (sub === "list") {
     if (file.clients.length === 0) {
       io.out(`loam: no connector is registered in ${home}`);
@@ -1330,24 +1332,52 @@ function cmdGrant(args: readonly string[], io: IO): number {
     );
     return 2;
   }
-  const client = byName[0]!;
-  const kept = file.tokens.filter((t) => t.clientId !== client.clientId);
-  const removed = file.tokens.length - kept.length;
-  // THE GENERATION BUMP IS THE OTHER HALF OF THE REVOCATION, and without it this report would be
-  // false. An authorization code lives for five minutes in the SERVING process's memory, which this
-  // command cannot reach; a code issued a moment ago would mint a fresh working token a moment from
-  // now. The token endpoint refuses a code whose generation has moved, so bumping it here kills every
-  // code already in flight for this connector.
-  //
-  // The seed and the client record STAY. A re-approval must reuse the same author, or the connector's
-  // history splits in two and the first half is signed by a key nothing accounts for.
-  writeOAuthFile(home, {
-    ...file,
-    clients: file.clients.map((c) =>
-      c.clientId === client.clientId ? { ...c, generation: c.generation + 1 } : c,
-    ),
-    tokens: kept,
-  });
+  const chosen = byName[0]!;
+  // UNDER THE LOCK, AND RE-READ INSIDE IT. The serving process writes this file whenever it mints a
+  // token, and it holds no snapshot across the write either. Without the lock, whichever process wrote
+  // second would spread a stale snapshot and silently discard the other's change — and the direction
+  // that discards THIS one leaves the operator told a connector was revoked while its token still
+  // opens the door.
+  let outcome;
+  try {
+    outcome = withOAuthFile(home, (fresh) => {
+      const client = fresh.clients.find((c) => c.clientId === chosen.clientId);
+      if (client === undefined) return { result: undefined };
+      const kept = fresh.tokens.filter((t) => t.clientId !== client.clientId);
+      // THE GENERATION BUMP IS THE OTHER HALF OF THE REVOCATION, and without it the report below would
+      // be false. An authorization code lives for five minutes in the SERVING process's memory, which
+      // this command cannot reach; a code issued a moment ago would mint a fresh working token a moment
+      // from now. The token endpoint refuses a code whose generation has moved.
+      //
+      // The seed and the client record STAY. A re-approval must reuse the same author, or the
+      // connector's history splits in two and the first half is signed by a key nothing accounts for.
+      return {
+        next: {
+          ...fresh,
+          clients: fresh.clients.map((c) =>
+            c.clientId === client.clientId ? { ...c, generation: c.generation + 1 } : c,
+          ),
+          tokens: kept,
+        },
+        result: { client, removed: fresh.tokens.length - kept.length },
+      };
+    });
+  } catch (err) {
+    io.err(
+      `grant revoke: ${oauthPath(home)} could not be updated, so nothing was revoked: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    );
+    return 1;
+  }
+  if (outcome === undefined) {
+    // It was there when this command listed it and gone by the time it held the lock.
+    io.err(
+      `grant revoke: "${asked}" is no longer registered in ${home} — nothing was revoked. ` +
+        `\`loam grant list\` names what is there now.`,
+    );
+    return 2;
+  }
+  const { client, removed } = outcome;
   io.out(
     `loam: revoked ${client.clientName} (${client.clientId})\n` +
       `  ${removed === 1 ? "1 token" : `${removed} tokens`} removed — a serving process refuses the ` +
