@@ -1,0 +1,14 @@
+{
+  "body": "FOUND BY T114's P5 round one, and left as a decision rather than resolved. An operator-GRANTED author joins this store's lawful-striker set, and that set is VERB-BLIND: it says who may strike, never what they may strike. So a connector minted by an OAuth consent (`connector:claude-ai`) can append negations that bind for governed readers — including negations of claims the OPERATOR wrote.\n\nWHAT LANDED IN T114, and why it was the right half to do without asking: the consent page said only 'write claims', which was a promise the model does not keep. The copy now matches the model. Making a statement honest is the self-mergeable direction — you cannot overclaim by claiming less — so the fix went in and this ticket carries the rest.\n\nTHE DECISION FOR MYK: should a granted connector be able to RETRACT?\n\n(a) Leave it. A connector is a first-class author with an author's full powers, and the consent page now says so. Simplest, and consistent with how a granted author already works everywhere else. The cost: a compromised or buggy connector can suppress the operator's own claims for every governed reader, and Loam's model means the strike is itself a signed fact rather than a deletion — recoverable, but only if somebody notices.\n\n(b) Narrow the striker set so a granted author may strike only what it AUTHORED. This is the model the consent copy originally implied, and the least surprising one for a tool the operator hands a key to. It is a change to SPEC §6/§7 — what the trust root delegates — so it needs Myk's word, and it wants care: 'authored it' must be decided from the delta's own author field, not from anything a striker supplies.\n\n(c) A per-grant scope, so consent chooses. Most flexible, most machinery, and it wants a vocabulary for scopes that v1 deliberately does not have (§37 ships ONE scope). Defer unless a second connector family needs it.\n\nRECOMMENDATION: (b). A connector is a writing tool, and retraction of somebody else's claim is a governance act. The blast radius of (a) is the whole store's readable state, reachable through a credential that lives in someone else's cloud. (b) costs one predicate and makes the consent page's plainest reading true.\n\nRAILS, both sides whichever is chosen: a granted connector's strike of ITS OWN claim still binds for a governed reader (or the change has broken authorship), AND its strike of an operator-authored claim does not (or the narrowing did nothing). Assert at both levels — the negation delta is in the ground either way; what changes is what a reader through a Schema resolves.\n\nDepends on nothing; T114 lands without it.",
+  "edges": [],
+  "id": "T118",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "src/gateway/",
+    "test/gateway/",
+    "spec/"
+  ],
+  "status": "todo",
+  "title": "A connector can retract claims the operator wrote — an operator-granted author is a lawful striker, verb-blind"
+}
