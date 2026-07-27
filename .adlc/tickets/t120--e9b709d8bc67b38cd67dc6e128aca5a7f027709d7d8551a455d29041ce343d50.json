@@ -1,0 +1,13 @@
+{
+  "body": "FOUND BY T116's round-ten review, out of that diff's scope and PRE-EXISTING. Measured:\nwith a FIFO at `<home>/login-locks.json`, `unreadableRecordFile` and `readLocks` — and therefore the\nLOGIN DOOR, which calls `readLocks` on every attempt — block forever. The reviewer's probe:\n`timeout 4 node … ; exit=124`.\n\nWHY IT MATTERS MORE THAN ITS LIKELIHOOD SUGGESTS: `login-locks.ts`'s header states \"No case refuses\na login\", and that sentence is the whole posture of the file — the record file fails OPEN because it\nis a work budget rather than an authorization surface, so a local disk fault must never become a\ntotal login outage. A FIFO does not refuse a login; it does something worse, which is never answer\none. The header's claim is therefore false for this shape, and it is false in the direction the file\nmost cares about.\n\nReachability is low and honest: it needs someone to create a FIFO at that exact path — a hostile\nlocal actor, or a restore/sync tool that recreates a special file. It is not remotely reachable. But\nthe cost when reached is a store whose browser login hangs with no error and no timeout, which is\nharder to diagnose than any refusal.\n\nTHE FIX has two candidate shapes and the ticket does not choose:\n(a) `statSync` the record path first and refuse anything that is not a regular file, with the same\n    per-fault message discipline the home check now uses (`isFile()` alongside the existing home\n    classifier). Cheap, and consistent with the code that just landed.\n(b) Open with a timeout / non-blocking read. More faithful to \"read what is there\", much more\n    machinery, and it does not obviously help — a FIFO that never yields is indistinguishable from a\n    slow disk.\n\nRECOMMEND (a): a record file that is not a regular file is not a record file, and saying so is the\nsame move the home classifier makes one function away.\n\nRAILS, both sides: a FIFO at the record path is NAMED (not hung, not silent) AND a healthy regular\nfile still reads its records — plus the door-level half, since the point is that the LOGIN DOOR keeps\nanswering. Bound the test with a real timeout so a regression hangs the suite visibly rather than\nsilently.\n\nRepair tier: it restores a promise the file already makes in its own header, so it is\nself-mergeable on a clean bar.",
+  "edges": [],
+  "id": "T120",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "src/server/login-locks.ts",
+    "test/server/login-limit.test.ts"
+  ],
+  "status": "todo",
+  "title": "A FIFO at login-locks.json blocks the login door forever — readLocks has no non-blocking read"
+}
