@@ -583,6 +583,11 @@ export const UNSWEPT_SURFACES: readonly string[] = [
     "attempt wait longer; it locks nothing. Also never deltas, so also unreachable from here. " +
     "`loam user unlock <name>` clears one entry and works whether or not the user still exists; " +
     "nothing in an erasure does. Its .tmp siblings are unswept on the same terms.",
+  "oauth.json in the loam home (SPEC §37) — registered connectors, the digests of the tokens they " +
+    "hold, and each connector's own SIGNING SEED. Never deltas, so no tombstone reaches them. " +
+    "`loam grant revoke <client>` removes a connector's tokens and deliberately keeps its seed, " +
+    "because the claims it already wrote name that author. No command removes the seed, and no " +
+    "erasure does either. Its .tmp siblings are unswept on the same terms.",
   // Not data at rest, and named anyway: this list is what a reader consults to ask "is anything left?",
   // and the answer they most need is the one thing that still carries AUTHORITY. A token minted before
   // an erasure keeps working until its own short window ends.

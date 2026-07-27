@@ -2,14 +2,23 @@
   "body": "The claude.ai custom-connector dialog speaks OAuth 2.1 for MCP servers. Loam grows the five pieces: (1) the MCP door's 401 names a resource-metadata URL (RFC 9728); (2) /.well-known/oauth-protected-resource; (3) /.well-known/oauth-authorization-server (RFC 8414) naming authorize/token/register; (4) dynamic client registration (RFC 7591, public client, PKCE S256 required); (5) authorize + token endpoints. The consent page rides T113's session — Myk logs in as the user 'myk', never pastes a token into a browser.\n\nDecisions already made in chat (2026-07-26, do not re-ask): a grant mints a NEW actor seed per connector (e.g. connector:claude-ai) — never the operator; one scope for v1 = granted-author rights (read doors, write claims); the operator role is NEVER mintable via OAuth, structurally.\n\nIssued tokens persist in the home (they must survive restarts) beside door.token — local secrets, never in the ground. Revocation: a CLI that lists and revokes grants. The working spec is .adlc/specs/37-oauth-connectors.md; its criteria are the rail list.\n\nDepends on T113 (the session is the consent authenticator). Design approved in chat; implementation delegated. Section 37 reserved.\n\nP1 PREMORTEM (independent, 2026-07-27) added 12 criteria. The design change: dynamic registration cannot require a session (claude.ai registers before any human is present), so the fence is a CONFIGURED allowlist of redirect origins — '--oauth-allow-redirect', enforced at registration AND at authorize, with exact-match on the registered uri. Without it, a stranger registers a client named 'Claude' pointing at their own host, sends Myk an authorize link, and holds a writing identity. The premortem's sharpest point: that attack never needs operator escalation, so 'the mint path cannot produce operator' is necessary and nowhere near sufficient. Also added: the WWW-Authenticate header must not become a mount-existence oracle (byte-identical refusal for an absent mount); discovery URLs come from --public-url, never the request; the consent page escapes the client name and shows the REGISTERED uri; codes bind to client_id AND redirect_uri; concurrent first-grants mint exactly one seed; oauth.json writes atomically at 0600; revocation binds in the same live process.",
   "edges": [],
   "id": "T114",
-  "phase": "P1",
-  "rails": [],
+  "phase": "P5",
+  "rails": [
+    "test/server/oauth-authorize.test.ts",
+    "test/server/oauth-concurrency.test.ts",
+    "test/server/oauth-discovery.test.ts",
+    "test/server/oauth-fixture.ts",
+    "test/server/oauth-flow.test.ts",
+    "test/server/oauth-register.test.ts",
+    "test/server/oauth-revoke.test.ts",
+    "test/server/oauth-serve.test.ts"
+  ],
   "scope": [
     "src/server/",
     "src/cli/",
     "test/server/",
     ".adlc/specs/37-oauth-connectors.md"
   ],
-  "status": "todo",
+  "status": "in-progress",
   "title": "OAuth for connectors: claude.ai logs in as a user, consent mints a per-connector seed"
 }

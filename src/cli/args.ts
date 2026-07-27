@@ -6,6 +6,13 @@ export interface Parsed {
   readonly flags: Map<string, string>;
   readonly booleans: Set<string>;
   readonly positionals: string[];
+  /**
+   * EVERY value a flag was given, in order. `flags` keeps the last one, which is what a single-valued
+   * flag wants; a REPEATABLE flag reads here instead. Both are filled for every flag, so a command
+   * chooses which question it is asking rather than the parser choosing for it — and a repeatable flag
+   * whose values were silently collapsed to the last one is a fence with one entry in it.
+   */
+  readonly repeated: Map<string, string[]>;
 }
 
 // A malformed invocation, not a malfunction. `run` maps it to exit 2 — the code every other refusal
@@ -14,8 +21,13 @@ export class UsageError extends Error {}
 
 export function parseArgs(args: readonly string[], booleanFlags: ReadonlySet<string>): Parsed {
   const flags = new Map<string, string>();
+  const repeated = new Map<string, string[]>();
   const booleans = new Set<string>();
   const positionals: string[] = [];
+  const give = (name: string, value: string): void => {
+    flags.set(name, value);
+    repeated.set(name, [...(repeated.get(name) ?? []), value]);
+  };
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i]!;
     if (arg.startsWith("--")) {
@@ -23,7 +35,7 @@ export function parseArgs(args: readonly string[], booleanFlags: ReadonlySet<str
       const eq = body.indexOf("=");
       if (eq >= 0) {
         // `--name=value`, the near-universal form, kept whole.
-        flags.set(body.slice(0, eq), body.slice(eq + 1));
+        give(body.slice(0, eq), body.slice(eq + 1));
       } else if (booleanFlags.has(body)) {
         booleans.add(body);
       } else {
@@ -31,14 +43,14 @@ export function parseArgs(args: readonly string[], booleanFlags: ReadonlySet<str
         if (value === undefined || value.startsWith("--")) {
           throw new UsageError(`flag --${body} needs a value`);
         }
-        flags.set(body, value);
+        give(body, value);
         i += 1;
       }
     } else {
       positionals.push(arg);
     }
   }
-  return { flags, booleans, positionals };
+  return { flags, booleans, positionals, repeated };
 }
 
 export function rejectUnknown(parsed: Parsed, allowed: ReadonlySet<string>, command: string): void {
