@@ -108,7 +108,8 @@ describe("T103(a) — pull and register into a served home say the server will n
     expect(out.join("\n")).toMatch(/accepted/);
     const warned = err.join("\n");
     expect(warned).toMatch(WARNING);
-    expect(warned).toMatch(/pid \d+/); // it names the server it found
+    expect(warned).toMatch(/pid \d+/); // it names the server it found...
+    expect(warned).toContain(server.url); // ...and where that server answers
 
     await server.close();
     quiet();
@@ -162,6 +163,22 @@ describe("T103(a) — pull and register into a served home say the server will n
     quiet();
     expect(await run(["pull", offer, "--home", home], io())).toBe(0);
     expect(err.join("\n")).toMatch(WARNING);
+
+    // JSON that parses to no object at all is the same maybe — warned, never thrown over.
+    writeFileSync(join(home, "serving.json"), "null");
+    quiet();
+    expect(await run(["pull", offer, "--home", home], io())).toBe(0);
+    expect(err.join("\n")).toMatch(WARNING);
+
+    // A pid no process table could hold, over THIS store: the record is garbage, and garbage
+    // must warn as a maybe rather than be probed into a confident silence.
+    writeFileSync(
+      join(home, "serving.json"),
+      JSON.stringify({ pid: -3, url: "http://127.0.0.1:1", store: resolve(storePath(home)) }),
+    );
+    quiet();
+    expect(await run(["pull", offer, "--home", home], io())).toBe(0);
+    expect(err.join("\n")).toMatch(/may be serving/);
   });
 
   it("a pull into a DIFFERENT store file in the same home is not the trap, and stays quiet", async () => {
