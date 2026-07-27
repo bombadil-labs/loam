@@ -164,12 +164,31 @@ describe("the cap on unauthenticated hashing", () => {
     expect((await tryPassword("myk", PASSWORD)).status).toBe(200);
   });
 
-  it("(q) concurrent attempts past the cap are refused while one is in flight", async () => {
-    served = await serveHome(home, { maxConcurrentHashes: 1 });
-    const flight = await Promise.all(Array.from({ length: 6 }, () => tryPassword("myk", PASSWORD)));
-    const statuses = flight.map((r) => r.status);
-    expect(statuses).toContain(503);
-    expect(statuses).toContain(200);
-    expect(statuses.filter((s) => s === 200).length).toBeLessThan(6);
+  it("(q) an attempt arriving while one is in flight is refused, and the first still succeeds", async () => {
+    // NOT a race between equals: this test makes ONE hash slow on purpose (N = 2^17, about a second)
+    // and issues the second attempt well inside that window. Six requests fired at once would need two
+    // of them to overlap a 1ms hash, which is a coin flip dressed as a rail — and a flaky gate is worse
+    // than no gate. The margin here is ~20x, the same order every fetch in this suite already assumes.
+    served = await serveHome(home, {
+      maxConcurrentHashes: 1,
+      scrypt: { N: 131072, r: 8, p: 1, keylen: 64 },
+    });
+    // The slow one names a user NOBODY HOLDS, because that is the path the door's own configured cost
+    // governs: an existing credential is always verified at the parameters ITS OWN entry carries, which
+    // is what lets an operator raise the cost without invalidating every password. So the decoy hash is
+    // the lever here, and it holds the budget for as long as it runs.
+    const holding = tryPassword("nobody-at-all", PASSWORD);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const turned = await tryPassword("myk", PASSWORD);
+    expect(turned.status).toBe(503);
+    expect((await turned.json()) as { errors: string[] }).toEqual({
+      errors: [expect.stringMatching(/busy/i) as unknown as string],
+    });
+    expect(cookieFrom(turned)).toBeUndefined();
+
+    // the one that held the budget was answered, not dropped — and the slot came back
+    expect((await holding).status).toBe(401);
+    expect((await tryPassword("myk", PASSWORD)).status).not.toBe(503);
   });
 });
