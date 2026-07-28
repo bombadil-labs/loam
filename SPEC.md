@@ -61,6 +61,7 @@ name begins with that number.
 | §29 | [Two-phase erasure — slating, the cut, and the graveyard](spec/29-slating-and-graveyards.md) |
 | §31 | [The mount table — which world answers at a name, asked per request](spec/31-mount-table.md) |
 | §34 | [The board — our status page as a Loam app](spec/34-the-board.md) |
+| §36 | [Users and sessions — credentials at rest](spec/36-users-and-sessions.md) *(phase 1 of 10; the section grows as later phases land)* |
 
 _**§21**, **§22**, **§25**, and **§26** are **landed** — design accepted and implemented (see each
 Provenance footer; §21.7's coexistence design is accepted with its implementation queued as ticket T2).
