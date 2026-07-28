@@ -394,7 +394,7 @@ describe("the lock primitive", () => {
     expect(() => withOAuthFile(home, (file) => ({ next: file, result: undefined }))).not.toThrow();
   });
 
-  it("(l) a STALE lock is broken, so a crashed writer cannot wedge the store forever", () => {
+  it("(l) a lock whose mtime is past LOCK_STALE_MS is reclaimed (staleness simulated by back-dating; no rail kills a real process and waits out the 30s window)", () => {
     writeFileSync(oauthLockPath(home), "1\n");
     const past = Date.now() - LOCK_STALE_MS - 5_000;
     utimesSync(oauthLockPath(home), new Date(past), new Date(past));
