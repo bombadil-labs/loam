@@ -30,7 +30,7 @@ import {
   readFileSync,
   renameSync,
   rmSync,
-  writeSync,
+  writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
 import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
@@ -223,7 +223,11 @@ export function writeCredentials(home: string, file: CredentialsFile): void {
   const body = `${JSON.stringify({ version: 1, users: { ...file.users } }, null, 2)}\n`;
   const fd = openSync(temp, "wx", 0o600);
   try {
-    writeSync(fd, body);
+    // `writeSync` returns the bytes actually written and does not guarantee the whole string lands
+    // in one call (a full disk can return a short write with no error). `writeFileSync` loops
+    // internally until every byte is written; a raw `writeSync` here would risk a truncated temp
+    // file getting renamed over a good one.
+    writeFileSync(fd, body);
     fsyncSync(fd);
   } finally {
     closeSync(fd);
