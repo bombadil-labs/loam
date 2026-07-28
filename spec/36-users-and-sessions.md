@@ -49,3 +49,26 @@ yet reads or writes one in the running server — that arrives with the bootstra
 proved by `test/server/credentials.test.ts`. Working spec:
 `.adlc/specs/36-01-credentials-at-rest.md`. Ticket T122, from the fifteen-phase plan at
 `.adlc/specs/users-oauth-phasing-plan.md`.
+
+### 36.2 A user is a fact
+
+A user is an entity. Its name and its roles resolve through a Schema over a HyperSchema, never as a
+delta read directly — a claim is one assertion, not the fact a reader resolves.
+
+A role binding is data, not a grant: nothing at the append door refuses an ordinary write from
+claiming a role at `user:<name>`. The read is the only defence. `userHyperSchema` selects claims
+authored by the store's own seed key (the file at `<home>/operator.seed`) and masks so that only the
+seed's own negations bind — a stranger's claim lands in the ground but never resolves, and a
+stranger's strike never retracts what the seed said.
+
+Roles resolve as a SET: the Policy for the role context is `all`, never `pick`, so a user may hold
+`operator` and `actor` at once, and each role strikes independently. `rolesOf` is the one reader,
+returning `ReadonlySet<UserRole>` — there is no singular `roleOf`, so a permission check always asks
+membership, never equality.
+
+Every operator with home access is equivalent — there is no senior "genesis operator" tier, only the
+one seed key every operator on the box shares.
+
+**Provenance.** [PR #285](https://github.com/bombadil-labs/loam/pull/285) — `src/server/users.ts`,
+`src/gateway/gather.ts`, proved by `test/server/users-ground.test.ts`. Working spec:
+`.adlc/specs/36-02-a-user-is-a-fact.md`. Ticket T123.

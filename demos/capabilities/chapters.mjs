@@ -1395,6 +1395,12 @@ export const CHAPTERS = [
             proof: "test/server/credentials.test.ts",
             door: null,
           },
+          {
+            says: "A user holds a SET of roles, not a single latest value — granting operator and actor both resolves, and revoking one leaves the other.",
+            spec: "spec/36-users-and-sessions.md",
+            proof: "test/server/users-ground.test.ts",
+            door: null,
+          },
         ],
       },
       {
