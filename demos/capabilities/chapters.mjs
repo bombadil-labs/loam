@@ -1424,4 +1424,33 @@ export const CHAPTERS = [
       },
     ],
   },
+  {
+    n: 14,
+    slug: "connectors",
+    title: "Connectors — letting an outside party in",
+    thesis:
+      "An outside party — claude.ai, or any MCP client — reaches a store over OAuth rather than as the operator at a keyboard, built in small phases that each land and merge alone.",
+    covers: ["spec/37-connectors.md"],
+    body: [
+      {
+        kind: "prose",
+        text: "A connector needs somewhere durable to keep what it knows before any door exists for it to use: which clients are registered, which one owns which signing seed, which tokens are still live. That record lives in the home, mode 0600, beside the operator's own seed — never in the ground, because the ground replicates under [[federation]] and a peer receiving it would receive a connector's signing key.",
+      },
+      {
+        kind: "prose",
+        text: "Two processes touch this record from outside each other's view — a revoke command and the running server — so a plain read-modify-write would let whichever writes second silently discard the other's change. A cross-process lock closes that, and the guarantee it makes is about the WRITE rather than about a caller's own work: breaking a lock left behind by a crashed process cannot be made fully race-free without a primitive the filesystem does not offer, so the design narrows the exposed gap to the syscall between one file read and the rename that publishes it, rather than pretending the gap is closed.",
+      },
+      {
+        kind: "claims",
+        claims: [
+          {
+            says: "A file this reader cannot fully parse refuses outright rather than reading as empty — a truncated file, a wrong version, a grant whose actor disagrees with its own signing seed, or a duplicate client id all throw, because treating damage as absence would let a later door mint a second seed for a connector that already has one.",
+            spec: "spec/37-connectors.md",
+            proof: "test/server/oauth-file.test.ts",
+            door: null,
+          },
+        ],
+      },
+    ],
+  },
 ];
