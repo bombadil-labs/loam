@@ -114,12 +114,16 @@ describe("every shape of damage refuses, by name", () => {
       '{"version":1,"users":{"myk":{"kind":"scrypt","salt":"","hash":"ab12","params":{"N":1024,"r":8,"p":1,"keylen":64}}}}',
     ],
     [
+      // The hash is the RIGHT length for its keylen (128 chars) and even, so the only check that
+      // can refuse it is the hex gate itself. Buffer.from(str, "hex") silently truncates at the
+      // first bad pair, so a rail that lets the length check answer for this proves nothing.
       "a non-hex hash",
-      `{"version":1,"users":{"myk":{"kind":"scrypt","salt":"${LONG_SALT}","hash":"zz","params":{"N":1024,"r":8,"p":1,"keylen":64}}}}`,
+      `{"version":1,"users":{"myk":{"kind":"scrypt","salt":"${LONG_SALT}","hash":"${"zz".repeat(64)}","params":{"N":1024,"r":8,"p":1,"keylen":64}}}}`,
     ],
     [
+      // 16 chars, even — clears the length floor and parity, so only the hex gate refuses.
       "a non-hex salt",
-      '{"version":1,"users":{"myk":{"kind":"scrypt","salt":"not-hex!","hash":"cd34","params":{"N":1024,"r":8,"p":1,"keylen":64}}}}',
+      `{"version":1,"users":{"myk":{"kind":"scrypt","salt":"${"zz".repeat(8)}","hash":"cd34","params":{"N":1024,"r":8,"p":1,"keylen":64}}}}`,
     ],
     [
       "a hash length that disagrees with its own keylen",
@@ -131,8 +135,12 @@ describe("every shape of damage refuses, by name", () => {
     ],
     ["an entry that is a string, not an object", '{"version":1,"users":{"myk":"just-a-string"}}'],
     [
+      // Every OTHER field is fully valid — salt long and hex, hash the right length, params
+      // complete — so the kind gate is the only check that can refuse. This is the gate that
+      // stops an unrecognised shape from being silently treated as scrypt; a fixture that is
+      // also broken elsewhere lets a different refusal answer for it.
       "an unknown credential kind",
-      '{"version":1,"users":{"myk":{"kind":"telepathy","salt":"ab12","hash":"cd34"}}}',
+      `{"version":1,"users":{"myk":{"kind":"telepathy","salt":"${LONG_SALT}","hash":"${"cd".repeat(64)}","params":{"N":1024,"r":8,"p":1,"keylen":64}}}}`,
     ],
   ];
 
@@ -335,6 +343,9 @@ describe("writing credentials.json", () => {
     async () => {
       const entry = await hashPassword(PASSWORD, TEST_SCRYPT);
       writeCredentials(home, { version: 1, users: { myk: entry } });
+      // The fresh-create path is its own claim: assert it BEFORE forcing the downgrade, or this
+      // rail only ever proves the rewrite half.
+      expect(statSync(path()).mode & 0o777).toBe(0o600);
       chmodSync(path(), 0o644);
       expect(statSync(path()).mode & 0o777).toBe(0o644);
       writeCredentials(home, { version: 1, users: { myk: entry, wren: entry } });
