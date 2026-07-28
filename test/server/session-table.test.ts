@@ -30,6 +30,27 @@ describe("§36 phase 4 — the session table", () => {
     expect(table.touch(id)).toBeUndefined();
   });
 
+  // Supports criterion 1 and 4: the documented defaults (`SessionTableOptions`'s docstrings) are
+  // pinned literals, not read back from the code under test.
+  it("defaults to a 30-minute idle window and a 4096-session cap", () => {
+    let clock = 0;
+    const table = createSessionTable({ now: () => clock });
+    const opened = table.open("default-idle");
+    const id = opened!.id;
+
+    clock = 30 * 60_000; // exactly the documented default — still within the window
+    expect(table.touch(id)).toEqual({ user: "default-idle" });
+    clock = 30 * 60_000 + 30 * 60_000 + 1; // one more full default window past the slide, plus 1ms
+    expect(table.touch(id)).toBeUndefined();
+
+    const capTable = createSessionTable({ now: () => 0 });
+    for (let i = 0; i < 4096; i++) {
+      expect(capTable.open(`user-${i}`)).toBeDefined();
+    }
+    expect(capTable.size).toBe(4096);
+    expect(capTable.open("one-too-many")).toBeUndefined();
+  });
+
   // Criterion 2
   it("does not let a wall-clock step backwards revive an expired session", () => {
     let clock = 1_000_000;
@@ -102,23 +123,40 @@ describe("§36 phase 4 — the session table", () => {
     const secret = table.mintToken(id, 100);
     expect(secret).toBeDefined();
 
-    // The table's own record is a digest, never the secret: shape and value both differ.
+    // The table's own record is a digest, never the secret: shape and value both differ. 32 random
+    // bytes as base64url is exactly 43 characters (pinned, not derived from `secret`'s own length —
+    // a caller minting the wrong byte count would not be caught by comparing the secret to itself).
     const digests = table.tokenDigests(id);
     expect(digests).toHaveLength(1);
     const digest = digests[0]!;
     expect(digest).not.toBe(secret);
     expect(digest).toBe(createHash("sha256").update(secret!).digest("hex")); // independent compute
     expect(digest).toHaveLength(64); // sha256 hex
-    expect(secret).not.toHaveLength(64); // base64url of 32 random bytes — a different shape
+    expect(secret).toHaveLength(43); // base64url of exactly 32 random bytes
 
     // Positive control: the freshly minted token resolves.
     expect(table.resolveToken(secret!)).toBe("dana");
 
-    // Negative, two-sided: past the TOKEN's own TTL but well inside the SESSION's idle window, the
-    // token no longer resolves even though the session itself is still open.
+    // touch() prunes a session's own expired digests as a side effect — but must not prune a digest
+    // that is NOT yet expired. Mint a second, long-lived token, touch the session while it is still
+    // good, and confirm it survived the prune (a mutated prune that deletes on PRESENCE rather than
+    // EXPIRY would fail this).
+    const longLived = table.mintToken(id, 10_000);
+    const longLivedDigest = table.tokenDigests(id).find((d) => d !== digest)!;
+    expect(table.touch(id)).toEqual({ user: "dana" });
+    expect(table.resolveToken(longLived!)).toBe("dana");
+    expect(table.tokenDigests(id)).toHaveLength(2);
+
+    // Negative, two-sided: past the FIRST token's own TTL but well inside the SESSION's idle window,
+    // it no longer resolves even though the session itself is still open. touch()'s prune must
+    // actually remove the expired digest (a mutated prune that never fires on expiry would leave it
+    // behind, even though resolveToken's own check would still refuse it) while leaving the still-
+    // good digest in place (a mutated prune that deletes on presence rather than expiry would not).
     clock = 101;
     expect(table.resolveToken(secret!)).toBeUndefined();
     expect(table.touch(id)).toEqual({ user: "dana" });
+    expect(table.tokenDigests(id)).toEqual([longLivedDigest]);
+    expect(table.resolveToken(longLived!)).toBe("dana");
   });
 
   // Criterion 6
