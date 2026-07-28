@@ -153,6 +153,11 @@ describe("§36 phase 2 — a user is a fact", () => {
     expect(userNameDefect("<script>")).toBeDefined();
     expect(userNameDefect("UPPER")).toBeDefined();
     expect(userNameDefect("ok-name_1.2")).toBeUndefined();
+    expect(userNameDefect("9lives")).toBeUndefined(); // any digit may start a name, not only 0-1
+    expect(userNameDefect("")).toBeDefined(); // the 1-64 floor: an empty name is refused
+    expect(userNameDefect("a".repeat(64))).toBeUndefined(); // the 64 ceiling: exactly 64 is fine
+    expect(userNameDefect("a".repeat(65))).toBeDefined(); // one past it is refused
+    expect(userNameDefect("bad name")).toContain("1–64 characters"); // the message names the floor
     expect(userEntity("wren")).toBe("user:wren");
   });
 
@@ -197,7 +202,7 @@ describe("§36 phase 2 — a user is a fact", () => {
 
   // Criterion 13
   it("an unknown role name is refused before assertion; a role not held is simply absent", () => {
-    expect(userRoleDefect("admin")).toBeDefined();
+    expect(userRoleDefect("admin")).toContain("operator or actor"); // a string naming the ships set
     expect(userRoleDefect("operator")).toBeUndefined();
     expect(userRoleDefect("actor")).toBeUndefined();
 
