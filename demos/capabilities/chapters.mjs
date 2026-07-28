@@ -1401,13 +1401,25 @@ export const CHAPTERS = [
             proof: "test/server/users-ground.test.ts",
             door: null,
           },
+          {
+            says: "A signed-in session lives only in server memory, past its idle window it refuses rather than resurrecting, and a wall clock stepped backward cannot extend it — the table reads a clock that only ever moves forward.",
+            spec: "spec/36-users-and-sessions.md",
+            proof: "test/server/session-table.test.ts",
+            door: null,
+          },
+          {
+            says: "A minted bearer token is held as a digest with its own expiry, never the plaintext and never borrowing its session's longer idle window — and dropping a session revokes every token it minted.",
+            spec: "spec/36-users-and-sessions.md",
+            proof: "test/server/session-table.test.ts",
+            door: null,
+          },
         ],
       },
       {
         kind: "notYet",
         items: [
-          "Nothing reads or writes this file yet — no door, no CLI command. The bootstrap and role commands (T124) and the login door are later phases of this same arc.",
-          "Sessions, cookies, cross-site defence, and a login delay that slows guessing without locking anyone out are designed as later phases and not yet built.",
+          "Nothing reads or writes the credential file yet — no door, no CLI command. The bootstrap and role commands (T124) and the login door are later phases of this same arc.",
+          "A login door, a cookie, cross-site defence, and a login delay that slows guessing without locking anyone out are designed as later phases and not yet built — the session table itself (an id, an idle window, a cap) is built, but nothing yet calls it.",
         ],
       },
     ],
