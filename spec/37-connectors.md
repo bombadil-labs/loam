@@ -41,7 +41,7 @@ rename, the narrowest placement possible, so a lock lost to a stale-break costs 
 rather than a silent lost update.
 
 **Provenance.** Working spec `.adlc/specs/37-11-connector-records-at-rest.md` (T132, phase 11 of
-the plan's fifteen). Landed [#PR_NUMBER](https://github.com/bombadil-labs/loam/pull/PR_NUMBER) —
+the plan's fifteen). Landed [#288](https://github.com/bombadil-labs/loam/pull/288) —
 `src/server/oauth-file.ts`, `test/server/oauth-file.test.ts`,
 `test/server/oauth-lock-child.mts`. No door, no CLI: the file and its lock are a unit that nothing
 serves yet.
