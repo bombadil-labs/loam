@@ -147,15 +147,15 @@ describe("§36 phase 4 — the session table", () => {
     expect(table.resolveToken(longLived!)).toBe("dana");
     expect(table.tokenDigests(id)).toHaveLength(2);
 
-    // Negative, two-sided: past the FIRST token's own TTL but well inside the SESSION's idle window,
-    // it no longer resolves even though the session itself is still open. touch()'s prune must
-    // actually remove the expired digest (a mutated prune that never fires on expiry would leave it
-    // behind, even though resolveToken's own check would still refuse it) while leaving the still-
-    // good digest in place (a mutated prune that deletes on presence rather than expiry would not).
+    // Negative, two-sided: past the FIRST token's own TTL but well inside the SESSION's idle window.
+    // `touch` runs BEFORE `resolveToken` is ever asked about the expired secret, so its own prune —
+    // not `resolveToken`'s independent expiry check — is what has to remove the stale digest; a
+    // mutated prune that never fires on expiry would leave it sitting in the table right here, and a
+    // mutated prune that fires on mere PRESENCE would take the still-good digest with it.
     clock = 101;
-    expect(table.resolveToken(secret!)).toBeUndefined();
     expect(table.touch(id)).toEqual({ user: "dana" });
     expect(table.tokenDigests(id)).toEqual([longLivedDigest]);
+    expect(table.resolveToken(secret!)).toBeUndefined();
     expect(table.resolveToken(longLived!)).toBe("dana");
   });
 
