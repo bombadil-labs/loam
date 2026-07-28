@@ -5,11 +5,14 @@
 // The working spec is `.adlc/specs/37-11-connector-records-at-rest.md`; each `describe` below
 // names the criterion letter(s) it proves.
 //
-// TWO MUTANTS `adlc hollow-test` FINDS ARE NOT RAILED, and cannot be: one is a numeral inside a
+// THREE MUTANTS `adlc hollow-test` FINDS ARE NOT RAILED. Two cannot be: one is a numeral inside a
 // COMMENT (`// 64 hex chars` beside `actorSeed`), which compiles to nothing a test can observe; the
 // other is `OAuthFile["version"]`'s literal TYPE `1`, which TypeScript erases before any test runs
-// — mutating it to `2` produces byte-identical JavaScript. Named here rather than chased with a
-// contrived assertion, per the same "state the gap" convention as the fsync note below.
+// — mutating it to `2` produces byte-identical JavaScript. The third IS observable (the digit in
+// `checkGrant`'s "not 32 hex bytes" error message) but no rail here pins the exact wording of a
+// diagnostic string, only that a bad seed refuses — named rather than chased with a message-content
+// assertion that would test prose, not behavior. Per the same "state the gap" convention as the
+// fsync note below.
 
 import {
   chmodSync,
