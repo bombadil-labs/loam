@@ -39,9 +39,11 @@ async function serveDetached(
 }
 
 describe("T133 — loam serve --public-url", () => {
-  it("the manual names the flag", async () => {
+  it("the manual names the flag, its argument, and what it opens", async () => {
     expect(await run(["serve", "--help"], io())).toBe(0);
-    expect(out.join("\n")).toContain("--public-url");
+    const help = out.join("\n");
+    expect(help).toContain("--public-url <url>");
+    expect(help).toContain("§37");
   });
 
   it("absent: no discovery door, no MCP challenge — unchanged from before this ticket", async () => {
