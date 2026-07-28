@@ -141,6 +141,10 @@ export function checkEntry(raw: unknown, where: string): CredentialEntry {
   if (salt.length < MIN_SALT_HEX_LEN) {
     throw new CredentialsUnreadable(`${where} has a salt shorter than the entropy floor`);
   }
+  // NAMED GAP, the same shape as the salt check above: swapping this `||` to `&&` is unreachable
+  // via JSON.parse output — a non-string hash always has `.length !== params.keylen * 2` on the
+  // next line (a non-string's `.length` is `undefined`, which is never `===` a number), so the
+  // hash-length check below refuses it regardless of whether this line's own logic is intact.
   if (typeof hash !== "string" || !HEX.test(hash)) {
     throw new CredentialsUnreadable(`${where} has no hex hash`);
   }
