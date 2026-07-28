@@ -26,7 +26,10 @@ import type { ScryptParams } from "../../src/server/credentials.js";
 let home: string;
 const io = () => ({ out: () => undefined, err: () => undefined });
 const CHEAP_SCRYPT: ScryptParams = { N: 16, r: 1, p: 1, keylen: 16 };
-const password = (value: string) => ({ readSecret: () => Promise.resolve(value), scrypt: CHEAP_SCRYPT });
+const password = (value: string) => ({
+  readSecret: () => Promise.resolve(value),
+  scrypt: CHEAP_SCRYPT,
+});
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "loam-operator-keys-"));
@@ -80,7 +83,10 @@ describe("A/H — a fresh keypair, local only", () => {
     await run(["init", "--home", home], io());
     const seed = readSeed(home);
     const operator = authorForSeed(seed);
-    const g2 = await Gateway.boot(new SqliteBackend(storePath(home)), assembleGenesis({ operatorSeed: seed }));
+    const g2 = await Gateway.boot(
+      new SqliteBackend(storePath(home)),
+      assembleGenesis({ operatorSeed: seed }),
+    );
     await g2.append([signClaims(userClaims("bob", operator, 10), seed)]);
     await g2.close();
     await run(["user", "assign-role", "bob", "--role=operator", "--home", home], io());
@@ -122,8 +128,14 @@ describe("C — two operators are distinguishable in the ground", () => {
     await run(["init", "--home", home], io());
     const seed = readSeed(home);
     const operator = authorForSeed(seed);
-    const g0 = await Gateway.boot(new SqliteBackend(storePath(home)), assembleGenesis({ operatorSeed: seed }));
-    await g0.append([signClaims(userClaims("alice", operator, 1), seed), signClaims(userClaims("bob", operator, 2), seed)]);
+    const g0 = await Gateway.boot(
+      new SqliteBackend(storePath(home)),
+      assembleGenesis({ operatorSeed: seed }),
+    );
+    await g0.append([
+      signClaims(userClaims("alice", operator, 1), seed),
+      signClaims(userClaims("bob", operator, 2), seed),
+    ]);
     await g0.close();
     await run(["user", "assign-role", "alice", "--role=operator", "--home", home], io());
     await run(["user", "assign-role", "bob", "--role=operator", "--home", home], io());
@@ -139,15 +151,18 @@ describe("C — two operators are distinguishable in the ground", () => {
     const g = await ground();
     const aliceGrant = g.reactor
       .arrivalLog()
-      .find(
-        (d) =>
-          d.claims.pointers.some((p) => p.role === "subject" && p.target.kind === "primitive" && p.target.value === aliceKey),
+      .find((d) =>
+        d.claims.pointers.some(
+          (p) =>
+            p.role === "subject" && p.target.kind === "primitive" && p.target.value === aliceKey,
+        ),
       );
     const bobGrant = g.reactor
       .arrivalLog()
-      .find(
-        (d) =>
-          d.claims.pointers.some((p) => p.role === "subject" && p.target.kind === "primitive" && p.target.value === bobKey),
+      .find((d) =>
+        d.claims.pointers.some(
+          (p) => p.role === "subject" && p.target.kind === "primitive" && p.target.value === bobKey,
+        ),
       );
     expect(aliceGrant).toBeDefined();
     expect(bobGrant).toBeDefined();
@@ -239,7 +254,10 @@ describe("13b — remove-role strikes the grant too: two-sided at the governed-r
     const operator = authorForSeed(seed);
     const finnDelta = signClaims(userClaims("finn2", operator, 5), seed);
     await g0.close();
-    const gAppend = await Gateway.boot(new SqliteBackend(storePath(home)), assembleGenesis({ operatorSeed: seed }));
+    const gAppend = await Gateway.boot(
+      new SqliteBackend(storePath(home)),
+      assembleGenesis({ operatorSeed: seed }),
+    );
     await gAppend.append([finnDelta]);
     await gAppend.close();
     await run(["user", "assign-role", "finn", "--role=operator", "--home", home], io());

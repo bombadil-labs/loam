@@ -20,8 +20,18 @@ import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { grantClaims } from "../../src/gateway/accounts.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
-import { credentialsPath, readCredentials, type ScryptParams } from "../../src/server/credentials.js";
-import { resolveUserView, roleClaims, rolesOf, userClaims, type UserRole } from "../../src/server/users.js";
+import {
+  credentialsPath,
+  readCredentials,
+  type ScryptParams,
+} from "../../src/server/credentials.js";
+import {
+  resolveUserView,
+  roleClaims,
+  rolesOf,
+  userClaims,
+  type UserRole,
+} from "../../src/server/users.js";
 
 let home: string;
 const out: string[] = [];
@@ -30,7 +40,10 @@ const io = () => ({ out: (s: string) => out.push(s), err: (s: string) => err.pus
 
 // A cheap, fixed cost so the suite does not pay the interactive scrypt floor per `create` call.
 const CHEAP_SCRYPT: ScryptParams = { N: 16, r: 1, p: 1, keylen: 16 };
-const password = (value: string) => ({ readSecret: () => Promise.resolve(value), scrypt: CHEAP_SCRYPT });
+const password = (value: string) => ({
+  readSecret: () => Promise.resolve(value),
+  scrypt: CHEAP_SCRYPT,
+});
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "loam-user-roles-"));
@@ -91,7 +104,11 @@ describe("loam user create", () => {
   it("--operator: three deltas (user, role, grant) and a 0600 seed file", async () => {
     await run(["init", "--home", home], io());
     const before = await deltaCount();
-    const code = await run(["user", "create", "bob", "--operator", "--home", home], io(), password("pw"));
+    const code = await run(
+      ["user", "create", "bob", "--operator", "--home", home],
+      io(),
+      password("pw"),
+    );
     expect(code).toBe(0);
     expect(await deltaCount()).toBe(before + 3);
     expect(readUserSeed(home, "bob").kind).toBe("present");
@@ -134,7 +151,11 @@ describe("loam user create", () => {
     await appendDirect(roleClaims("erin", "actor", operator, 11), seed);
     const before = await deltaCount();
 
-    const code = await run(["user", "create", "erin", "--operator", "--home", home], io(), password("pw"));
+    const code = await run(
+      ["user", "create", "erin", "--operator", "--home", home],
+      io(),
+      password("pw"),
+    );
     expect(code).toBe(2);
     expect(err.join("\n")).toMatch(/will not change a role/);
     expect(await deltaCount()).toBe(before);
@@ -147,10 +168,17 @@ describe("loam user create", () => {
     const operator = authorForSeed(seed);
     await appendDirect(userClaims("finn", operator, 10), seed);
     await appendDirect(roleClaims("finn", "operator", operator, 11), seed);
-    await appendDirect(grantClaims(STORE_ENTITY, "ed25519:not-a-real-key", "admin", operator, 12), seed);
+    await appendDirect(
+      grantClaims(STORE_ENTITY, "ed25519:not-a-real-key", "admin", operator, 12),
+      seed,
+    );
     const before = await deltaCount();
 
-    const code = await run(["user", "create", "finn", "--operator", "--home", home], io(), password("pw"));
+    const code = await run(
+      ["user", "create", "finn", "--operator", "--home", home],
+      io(),
+      password("pw"),
+    );
     expect(code).toBe(1);
     expect(err.join("\n")).toMatch(/remove-role finn --role=operator/);
     expect(await deltaCount()).toBe(before);
@@ -158,7 +186,11 @@ describe("loam user create", () => {
   });
 
   it("no delta anywhere contains the credential's salt or hash — and a planted leak proves the scan can fail", async () => {
-    await run(["user", "create", "gwen", "--operator", "--home", home], io(), password("s3cr3t-p4ss"));
+    await run(
+      ["user", "create", "gwen", "--operator", "--home", home],
+      io(),
+      password("s3cr3t-p4ss"),
+    );
     const entry = readCredentials(home).users["gwen"]!;
     const scanFor = (log: readonly { claims: unknown }[], needle: string): boolean =>
       log.some((d) => JSON.stringify(d.claims).includes(needle));
@@ -181,7 +213,11 @@ describe("loam user create", () => {
   it("--operator=true is a usage error and creates nothing", async () => {
     await run(["init", "--home", home], io());
     const before = await deltaCount();
-    const code = await run(["user", "create", "hank", "--operator=true", "--home", home], io(), password("pw"));
+    const code = await run(
+      ["user", "create", "hank", "--operator=true", "--home", home],
+      io(),
+      password("pw"),
+    );
     expect(code).toBe(2);
     expect(err.join("\n")).toMatch(/takes no value/);
     expect(await deltaCount()).toBe(before);
@@ -189,7 +225,11 @@ describe("loam user create", () => {
   });
 
   it("a name carrying a path separator refuses before any file is touched", async () => {
-    const code = await run(["user", "create", "../operator", "--operator", "--home", home], io(), password("pw"));
+    const code = await run(
+      ["user", "create", "../operator", "--operator", "--home", home],
+      io(),
+      password("pw"),
+    );
     expect(code).toBe(2);
     expect(err.join("\n")).toMatch(/not a user name/);
     expect(readUserSeed(home, "../operator").kind).toBe("absent");
@@ -210,26 +250,36 @@ describe("loam user create", () => {
       expect(err.join("\n")).toMatch(/is not a directory/);
     });
 
-    it.skipIf(process.platform === "win32")("a dangling symlink home refuses, naming the fault", async () => {
-      const link = join(home, "dangling");
-      symlinkSync(join(home, "nowhere"), link);
-      const code = await run(["user", "create", "kate", "--home", link], io(), password("pw"));
-      expect(code).toBe(1);
-      expect(err.join("\n")).toMatch(/symlink to a path that does not exist/);
-    });
-
-    it.skipIf(process.platform === "win32")("a sealed directory refuses, naming the fault", async () => {
-      const sealed = join(home, "sealed");
-      await run(["init", "--home", sealed], io());
-      chmodSync(sealed, 0o000);
-      try {
-        const code = await run(["user", "create", "liam", "--home", sealed], io(), password("pw"));
+    it.skipIf(process.platform === "win32")(
+      "a dangling symlink home refuses, naming the fault",
+      async () => {
+        const link = join(home, "dangling");
+        symlinkSync(join(home, "nowhere"), link);
+        const code = await run(["user", "create", "kate", "--home", link], io(), password("pw"));
         expect(code).toBe(1);
-        expect(err.join("\n")).toMatch(/sealed/);
-      } finally {
-        chmodSync(sealed, 0o700); // afterEach's rmSync needs to get back in
-      }
-    });
+        expect(err.join("\n")).toMatch(/symlink to a path that does not exist/);
+      },
+    );
+
+    it.skipIf(process.platform === "win32")(
+      "a sealed directory refuses, naming the fault",
+      async () => {
+        const sealed = join(home, "sealed");
+        await run(["init", "--home", sealed], io());
+        chmodSync(sealed, 0o000);
+        try {
+          const code = await run(
+            ["user", "create", "liam", "--home", sealed],
+            io(),
+            password("pw"),
+          );
+          expect(code).toBe(1);
+          expect(err.join("\n")).toMatch(/sealed/);
+        } finally {
+          chmodSync(sealed, 0o700); // afterEach's rmSync needs to get back in
+        }
+      },
+    );
   });
 });
 
@@ -254,7 +304,10 @@ describe("loam user assign-role", () => {
     await appendDirect(userClaims("olga", operator, 10), seed);
     const before = await deltaCount();
 
-    const code = await run(["user", "assign-role", "olga", "--role=operator", "--home", home], io());
+    const code = await run(
+      ["user", "assign-role", "olga", "--role=operator", "--home", home],
+      io(),
+    );
     expect(code).toBe(0);
     expect(await deltaCount()).toBe(before + 2);
     expect(readUserSeed(home, "olga").kind).toBe("present");
@@ -293,8 +346,12 @@ describe("loam user assign-role", () => {
     expect(firstKeyRead.kind).toBe("present");
     const firstKey = firstKeyRead.kind === "present" ? firstKeyRead.seed : "";
 
-    expect(await run(["user", "remove-role", "sam", "--role=operator", "--home", home], io())).toBe(0);
-    expect(await run(["user", "assign-role", "sam", "--role=operator", "--home", home], io())).toBe(0);
+    expect(await run(["user", "remove-role", "sam", "--role=operator", "--home", home], io())).toBe(
+      0,
+    );
+    expect(await run(["user", "assign-role", "sam", "--role=operator", "--home", home], io())).toBe(
+      0,
+    );
 
     const secondKeyRead = readUserSeed(home, "sam");
     expect(secondKeyRead.kind).toBe("present");
@@ -316,7 +373,8 @@ describe("loam user remove-role", () => {
       .find(
         (d) =>
           d.claims.pointers.some(
-            (p) => p.role === "role" && p.target.kind === "primitive" && p.target.value === "operator",
+            (p) =>
+              p.role === "role" && p.target.kind === "primitive" && p.target.value === "operator",
           ) &&
           d.claims.pointers.some(
             (p) => p.target.kind === "entity" && p.target.entity.id === "user:tara",
@@ -324,7 +382,10 @@ describe("loam user remove-role", () => {
       )!.id;
     await before.close();
 
-    const code = await run(["user", "remove-role", "tara", "--role=operator", "--home", home], io());
+    const code = await run(
+      ["user", "remove-role", "tara", "--role=operator", "--home", home],
+      io(),
+    );
     expect(code).toBe(0);
     const after = await ground();
     expect(after.reactor.get(roleDeltaId)).toBeDefined(); // the delta itself still exists
@@ -367,7 +428,9 @@ describe("loam user remove-role", () => {
     await run(["user", "create", "wade", "--operator", "--home", home], io(), password("pw"));
     await run(["user", "assign-role", "wade", "--role=actor", "--home", home], io());
     let g = await ground();
-    expect(rolesOf(g.reactor, g.operator, "wade")).toEqual(new Set<UserRole>(["operator", "actor"]));
+    expect(rolesOf(g.reactor, g.operator, "wade")).toEqual(
+      new Set<UserRole>(["operator", "actor"]),
+    );
     await g.close();
 
     await run(["user", "remove-role", "wade", "--role=operator", "--home", home], io());
@@ -384,12 +447,16 @@ describe("loam user remove-role", () => {
 
   it("the last operator may remove their own role and reassign it — home access alone", async () => {
     await run(["user", "create", "xena", "--operator", "--home", home], io(), password("pw"));
-    expect(await run(["user", "remove-role", "xena", "--role=operator", "--home", home], io())).toBe(0);
+    expect(
+      await run(["user", "remove-role", "xena", "--role=operator", "--home", home], io()),
+    ).toBe(0);
     let g = await ground();
     expect(rolesOf(g.reactor, g.operator, "xena").has("operator")).toBe(false);
     await g.close();
 
-    expect(await run(["user", "assign-role", "xena", "--role=operator", "--home", home], io())).toBe(0);
+    expect(
+      await run(["user", "assign-role", "xena", "--role=operator", "--home", home], io()),
+    ).toBe(0);
     g = await ground();
     expect(rolesOf(g.reactor, g.operator, "xena").has("operator")).toBe(true);
     await g.close();
@@ -399,7 +466,10 @@ describe("loam user remove-role", () => {
     await run(["user", "create", "yara", "--operator", "--home", home], io(), password("pw"));
     rmSync(userSeedPath(home, "yara"));
 
-    const code = await run(["user", "remove-role", "yara", "--role=operator", "--home", home], io());
+    const code = await run(
+      ["user", "remove-role", "yara", "--role=operator", "--home", home],
+      io(),
+    );
     expect(code).toBe(0);
     expect(out.join("\n")).toMatch(/could not be located/);
     const g = await ground();
@@ -414,7 +484,10 @@ describe("loam user remove-role", () => {
       chmodSync(userSeedPath(home, "zane"), 0o000);
       const before = await deltaCount();
       try {
-        const code = await run(["user", "remove-role", "zane", "--role=operator", "--home", home], io());
+        const code = await run(
+          ["user", "remove-role", "zane", "--role=operator", "--home", home],
+          io(),
+        );
         expect(code).toBe(1);
         expect(err.join("\n")).toMatch(/could not be read/);
         expect(await deltaCount()).toBe(before);

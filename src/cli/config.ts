@@ -64,7 +64,10 @@ export function initHome(home: string, suppliedSeed?: string): InitResult {
  * caller that must not create a home as a side effect of failing to find one (`assign-role`,
  * `remove-role`) passes `false`.
  */
-export function homeDefect(home: string, opts: { readonly allowMissing: boolean }): string | undefined {
+export function homeDefect(
+  home: string,
+  opts: { readonly allowMissing: boolean },
+): string | undefined {
   const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
   let link;
   try {

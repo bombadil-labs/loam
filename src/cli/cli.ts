@@ -86,15 +86,7 @@ export interface RunOptions {
 const VERSION = "0.1.0";
 
 type CommandName =
-  | "init"
-  | "serve"
-  | "register"
-  | "pull"
-  | "migrate"
-  | "store"
-  | "repair"
-  | "artifact"
-  | "user";
+  "init" | "serve" | "register" | "pull" | "migrate" | "store" | "repair" | "artifact" | "user";
 
 interface CommandSpec {
   readonly summary: string; // the line the top-level help shows
@@ -1100,7 +1092,9 @@ async function cmdUserCreate(
       if (role === "operator") {
         mintedKey = randomBytes(32).toString("hex");
         const subject = authorForSeed(mintedKey);
-        deltas.push(signClaims(grantClaims(STORE_ENTITY, subject, "admin", operator, at + 2), seed));
+        deltas.push(
+          signClaims(grantClaims(STORE_ENTITY, subject, "admin", operator, at + 2), seed),
+        );
       }
       await gateway.append(deltas);
     }
@@ -1191,7 +1185,9 @@ async function cmdUserCreate(
           `  the password hash is local to ${credentialsPath(home)} — it never enters the ground`
       : `loam: created ${name} with the ${role} role\n` +
           `  the user and role deltas are in ${path}` +
-          (mintedKey !== undefined ? `, with a grant trusting the fresh key at ${userSeedPath(home, name)}` : "") +
+          (mintedKey !== undefined
+            ? `, with a grant trusting the fresh key at ${userSeedPath(home, name)}`
+            : "") +
           `\n  the password hash is local to ${credentialsPath(home)} — it never enters the ground`,
   );
   const staleness = servingWarning(home, path);
@@ -1316,7 +1312,9 @@ async function cmdUserRole(
       if (role === "operator") {
         mintedKey = randomBytes(32).toString("hex");
         const subject = authorForSeed(mintedKey);
-        deltas.push(signClaims(grantClaims(STORE_ENTITY, subject, "admin", operator, at + 1), seed));
+        deltas.push(
+          signClaims(grantClaims(STORE_ENTITY, subject, "admin", operator, at + 1), seed),
+        );
       }
       try {
         await gateway.append(deltas);
@@ -1383,7 +1381,9 @@ async function cmdUserRole(
     const roleIds = survivingRoleClaimIds(gateway.reactor, operator, name, role);
     const at = Date.now();
     const targets = [...roleIds, ...grantIds];
-    const negations = targets.map((id, i) => signClaims(makeNegationClaims(operator, at + i, id), seed));
+    const negations = targets.map((id, i) =>
+      signClaims(makeNegationClaims(operator, at + i, id), seed),
+    );
     try {
       await gateway.append(negations);
     } catch (err) {

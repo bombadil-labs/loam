@@ -27,7 +27,9 @@ export function parseArgs(args: readonly string[], booleanFlags: ReadonlySet<str
         // this token used to fall through to `flags`, so a caller checking only `booleans` silently
         // read it as never having been passed). Refuse rather than guess which collection it meant.
         if (booleanFlags.has(name)) {
-          throw new UsageError(`flag --${name} takes no value (write --${name}, not --${name}=...)`);
+          throw new UsageError(
+            `flag --${name} takes no value (write --${name}, not --${name}=...)`,
+          );
         }
         // `--name=value`, the near-universal form, kept whole.
         flags.set(name, body.slice(eq + 1));
