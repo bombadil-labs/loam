@@ -30,9 +30,9 @@ describe("§36 phase 4 — the session table", () => {
     expect(table.touch(id)).toBeUndefined();
   });
 
-  // Supports criterion 1 and 4: the documented defaults (`SessionTableOptions`'s docstrings) are
+  // Supports criteria 1, 4 and 5: the documented defaults (`SessionTableOptions`'s docstrings) are
   // pinned literals, not read back from the code under test.
-  it("defaults to a 30-minute idle window and a 4096-session cap", () => {
+  it("defaults to a 30-minute idle window, a 4096-session cap, and a 16-token-per-session cap", () => {
     let clock = 0;
     const table = createSessionTable({ now: () => clock });
     const opened = table.open("default-idle");
@@ -49,6 +49,13 @@ describe("§36 phase 4 — the session table", () => {
     }
     expect(capTable.size).toBe(4096);
     expect(capTable.open("one-too-many")).toBeUndefined();
+
+    const tokenTable = createSessionTable({ now: () => 0 });
+    const tokenId = tokenTable.open("token-default")!.id;
+    for (let i = 0; i < 16; i++) {
+      expect(tokenTable.mintToken(tokenId, 1_000)).toBeDefined();
+    }
+    expect(tokenTable.mintToken(tokenId, 1_000)).toBeUndefined();
   });
 
   // Criterion 2
