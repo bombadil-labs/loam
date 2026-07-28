@@ -216,15 +216,18 @@ counts the operator's assertions only. A Schema that resolves latest-wins. `reso
 10. **MANY USERS MAY HOLD THE OPERATOR ROLE.** Each user is its own entity, and its role binding is a
    claim at that entity. So the shape carries no limit of one. Rail it: assign the role to two users,
    and `rolesOf` contains `operator` for both. Rail the other side: revoking one leaves the other.
-11. **THE ROLE READ NAMES THE GENESIS OPERATOR AND NOTHING ELSE.** It stays exactly as it is today:
-   `authoredBy: <the genesis operator key>`. Do not widen it to a trust set. Revision 1 did, and that
-   was an escalation — `users.ts` states that nothing refuses a role claim at the append door, so the
-   read-side select is the ONLY defence. Widening it lets any trusted party mint an operator. See §9.
+11. **THE ROLE READ NAMES THE STORE'S OWN SEED AND NOTHING ELSE.** It stays exactly as it is today:
+   `authoredBy: <the key in `<home>/operator.seed`>`. Do not widen it to a trust set. Revision 1 did,
+   and that was an escalation — `users.ts` states that nothing refuses a role claim at the append door,
+   so the read-side select is the ONLY defence.
+   **Name it the STORE'S seed, never "the genesis operator's".** That phrasing implies a senior operator,
+   and §9a says there is no such thing. The seed belongs to the store. Every operator with home access
+   uses the same one.
 12. **A ROLE CLAIM SIGNED BY ANY OTHER KEY RESOLVES TO NOTHING.** This is the rail that proves the
    escalation is closed, and it is two-sided. Append a role claim at `user:carol` signed by a key that
-   is NOT the genesis operator's, and `rolesOf("carol")` is empty. Append the same claim signed by the
-   genesis operator, and it contains `operator`. Assert at both levels: the stray delta IS in the
-   store, and no reading admits it.
+   is NOT the store's seed, and `rolesOf("carol")` is empty. Append the same claim signed by the store's
+   seed, and it contains `operator`. Assert at both levels: the stray delta IS in the store, and no
+   reading admits it.
 13. A role the user does not hold is simply absent from the set. An unknown role NAME is refused at the
    write door rather than admitted into the set and guessed at on read.
 
@@ -468,8 +471,10 @@ the session half of per-operator keys; phase 3 delivered the CLI half.
 **Merges alone.** Phase 3 made a user's key exist and be trusted. Phase 7 made a session able to write.
 This joins them. Both halves are useful without it, so it lands last of the three and lands small.
 
-**Must not.** It must not widen who may write. An operator-role user could already write everything
-through phase 7; this changes WHOSE NAME is on it. It must not change the shape of any delta.
+**Must not.** It must not widen who may write, and it must not NARROW it either. An operator-role user
+could already write everything through phase 7; this changes WHOSE NAME is on it. Per §9a every operator
+is equivalent, so a per-operator key is attribution and never a restriction. It must not change the
+shape of any delta.
 
 **Why this phase exists, in Myk's words.** He read phase 3's provenance limit and scoped it into the
 work rather than accepting it. Two operators writing as one author is fine for one person. It stops
@@ -899,10 +904,47 @@ delegated operator's own grant is not operator-authored, so it never widens the 
 stratification for a limit that authorship actually enforces.
 
 **THE LIMIT THIS ACCEPTS, written down so no phase silently removes it.** There is no remote path that
-mints an operator. A browser session, however privileged, cannot assign a role. Generalising this needs
-new append-door validation in `constitutionalDefect`, which today recognises only `loam.grants`,
-`loam.members` and `loam.tenant` shapes. **That is a separate ticket and Myk's decision, not a phase of
-this work.**
+mints an operator. A browser session, however privileged, cannot assign a role. **The transport is the
+limit, not the privilege** — §9a says every operator is equivalent, so the end state is that ANY
+operator may mint an operator, not that one senior operator may.
+
+Reaching that end state needs new append-door validation in `constitutionalDefect`, which today
+recognises only `loam.grants`, `loam.members` and `loam.tenant` shapes. Without it, widening the role
+read is the escalation of 8.1. **That is a separate ticket and Myk's decision, not a phase of this
+work.**
+
+---
+
+## 9a. Every operator is equivalent. Keys buy PROVENANCE, not privilege
+
+**Myk's ruling, 2026-07-27:** *"Any operator has equivalent operator privilege over the whole store."*
+
+So there are **no operator tiers**. There is no senior operator and no junior operator. The operator
+role grants total authority over the whole store, unscoped. The first operator is only the first, not
+the most powerful.
+
+**This corrects a phrase that ran through revision 2.** The plan kept saying "the genesis operator" as
+if it named a privilege level. It does not. It names ONE KEY — the one in `<home>/operator.seed` — and
+that key belongs to the STORE, not to a person. Every operator with home access signs with it. Say
+"the store's seed" and the tier disappears from the vocabulary.
+
+**WHAT PER-OPERATOR KEYS ACTUALLY BUY, stated plainly so no phase overclaims.** They buy ATTRIBUTION.
+Alice's key proves alice wrote a delta. It does not limit what alice may write. She holds the same total
+privilege as every other operator. A phase that describes a per-operator key as a restriction is wrong,
+and phase 8's `must not` now says so in both directions: the key must not widen who may write, and it
+must not narrow it either.
+
+**THE LIMIT THIS EXPOSES, and it must be written down rather than discovered later.** `remove-role` is a
+real privilege boundary **only against a remote user.** It does not bind against home access. Anyone who
+can read `<home>/operator.seed` can sign anything, including a fresh role binding for themselves. So:
+
+- Revoking a browser user's role STOPS them. Rail that.
+- Revoking the role of someone with filesystem access to the home stops nothing. **Do not rail a
+  guarantee here, and do not let the help text imply one.** State it in the command's help: revocation
+  governs remote access, and home access is total.
+
+That is not a defect. It is the same boundary §9 identifies — the filesystem is the trust root. It is a
+defect only if a message claims otherwise, which is the H7 shape.
 
 ---
 
