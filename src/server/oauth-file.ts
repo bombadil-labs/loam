@@ -38,6 +38,7 @@ import {
   renameSync,
   rmSync,
   statSync,
+  writeFileSync,
   writeSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -354,12 +355,24 @@ function performAtomicWrite(home: string, sound: OAuthFile, verifyOwnership: () 
     null,
     2,
   )}\n`;
-  const fd = openSync(temp, "wx", 0o600);
   try {
-    writeSync(fd, body);
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
+    const fd = openSync(temp, "wx", 0o600);
+    try {
+      // `writeFileSync` given a FILE DESCRIPTOR loops until every byte is written.
+      // `writeSync(fd, body)` binds directly to the `write` syscall and returns a byte count that
+      // can be short of the whole string — rare for a local regular file, but a short write here
+      // would fsync and rename a truncated JSON body over a good one, and there is no recovery
+      // once that lands.
+      writeFileSync(fd, body);
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+  } catch (err) {
+    // A throw anywhere above (open, write, fsync) leaves the temp orphaned unless this cleans it
+    // up — and this temp's body is the connector's actor seed in plaintext.
+    rmSync(temp, { force: true });
+    throw err;
   }
   try {
     verifyOwnership();

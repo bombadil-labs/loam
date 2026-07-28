@@ -57,7 +57,10 @@ vi.setConfig({ testTimeout: 30000 });
 // call in `src/` or `test/` — so for every OTHER rail in this file, the mocked module is
 // indistinguishable from the real one. The toggle is cleared in `afterEach`, so a throwing test
 // cannot leave it on for a later one.
-const lockFsControl = vi.hoisted(() => ({ failLinkWith: undefined as string | undefined }));
+const lockFsControl = vi.hoisted(() => ({
+  failLinkWith: undefined as string | undefined,
+  failFsyncOnce: false,
+}));
 
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
@@ -69,11 +72,25 @@ vi.mock("node:fs", async (importOriginal) => {
     }
     return actual.linkSync(existing, next);
   };
+  // Fires ONCE per toggle: the write path's own temp fsync, not the directory fsync or the lock's
+  // claim path, so the rail that uses this can pin exactly which cleanup it is testing.
+  const fsyncSync: typeof actual.fsyncSync = (fd) => {
+    if (lockFsControl.failFsyncOnce) {
+      lockFsControl.failFsyncOnce = false;
+      throw new Error("simulated ENOSPC");
+    }
+    return actual.fsyncSync(fd);
+  };
   // The DEFAULT export is overridden too, in case a future caller ever switches to
   // `import fs from "node:fs"; fs.linkSync(...)` — nothing does today, and a trap that costs one
   // line to close is worth closing.
   const asRecord = actual as unknown as Record<string, unknown>;
-  return { ...actual, linkSync, default: { ...(asRecord["default"] as object), linkSync } };
+  return {
+    ...actual,
+    linkSync,
+    fsyncSync,
+    default: { ...(asRecord["default"] as object), linkSync, fsyncSync },
+  };
 });
 
 let home: string;
@@ -697,5 +714,23 @@ describe("(r) a repeated key across a collection is refused, on read and on writ
   it("distinct keys in each collection are unaffected — the positive control", () => {
     writeOAuthFile(home, soundFile());
     expect(readOAuthFile(home)).toEqual(soundFile());
+  });
+});
+
+describe("(s) a write that fails mid-flight leaks no temp", () => {
+  // Uses the module-level `node:fs` mock's `fsyncSync` toggle. Before this rail, a throw between
+  // `openSync` and `closeSync` skipped the cleanup that runs only around the LATER ownership-check
+  // and rename steps — orphaning a temp file holding a plaintext actor seed.
+  afterEach(() => {
+    lockFsControl.failFsyncOnce = false;
+  });
+
+  it("a write that throws during its own fsync leaves no temp behind", () => {
+    lockFsControl.failFsyncOnce = true;
+    expect(() => writeOAuthFile(home, soundFile())).toThrow("simulated ENOSPC");
+    const leftovers = readdirSync(home).filter((f) => f.includes(".tmp"));
+    expect(leftovers).toEqual([]);
+    // And the store is untouched — no half-write landed at the real path.
+    expect(existsSync(oauthPath(home))).toBe(false);
   });
 });
