@@ -366,6 +366,15 @@ describe("writing credentials.json", () => {
     expect(readdirSync(home)).toContain("credentials.json.tmp");
   });
 
+  it("a failed rename leaves no temp file behind — a fault mid-write does not leak", async () => {
+    const entry = await hashPassword(PASSWORD, TEST_SCRYPT);
+    writeCredentials(home, { version: 1, users: { myk: entry } });
+    rmSync(path(), { force: true });
+    mkdirSync(path()); // rename onto an existing directory fails, forcing the catch path
+    expect(() => writeCredentials(home, { version: 1, users: { myk: entry } })).toThrow();
+    expect(readdirSync(home).filter((n) => n.endsWith(".tmp"))).toEqual([]);
+  });
+
   it("a completed write leaves parseable JSON with the same users", async () => {
     const entry = await hashPassword(PASSWORD, TEST_SCRYPT);
     writeCredentials(home, { version: 1, users: { myk: entry } });

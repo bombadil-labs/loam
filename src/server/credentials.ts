@@ -221,20 +221,22 @@ export function writeCredentials(home: string, file: CredentialsFile): void {
   const target = credentialsPath(home);
   const temp = `${target}.${process.pid}-${randomBytes(6).toString("hex")}.tmp`;
   const body = `${JSON.stringify({ version: 1, users: { ...file.users } }, null, 2)}\n`;
-  const fd = openSync(temp, "wx", 0o600);
   try {
-    // `writeSync` returns the bytes actually written and does not guarantee the whole string lands
-    // in one call (a full disk can return a short write with no error). `writeFileSync` loops
-    // internally until every byte is written; a raw `writeSync` here would risk a truncated temp
-    // file getting renamed over a good one.
-    writeFileSync(fd, body);
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
-  try {
+    const fd = openSync(temp, "wx", 0o600);
+    try {
+      // `writeSync` returns the bytes actually written and does not guarantee the whole string
+      // lands in one call (a full disk can return a short write with no error). `writeFileSync`
+      // loops internally until every byte is written; a raw `writeSync` here would risk a
+      // truncated temp file getting renamed over a good one.
+      writeFileSync(fd, body);
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
     renameSync(temp, target);
   } catch (err) {
+    // Covers every failure from `openSync` through `renameSync` — a short write, a failed fsync, a
+    // failed rename — so a fault never leaves the uniquely named temp file behind to accumulate.
     rmSync(temp, { force: true });
     throw err;
   }
