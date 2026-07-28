@@ -110,8 +110,8 @@ An unusable `--home` is refused with the fault named, not one message for every 
 missing (when a command must not bootstrap one, unlike `create`), a dangling symlink, a plain file
 where a directory was named, and a directory this process cannot read, write, or traverse.
 
-**Provenance.** [PR TBD] — `src/cli/cli.ts`, `src/cli/prompt.ts`, `src/cli/config.ts`,
-`src/cli/args.ts` (the T117 parser fix — a boolean flag given a value now refuses rather than
-reading as absent), proved by `test/cli/user-roles.test.ts`, `test/server/operator-keys.test.ts`, and
-`test/cli/prompt.test.ts`. Working spec:
+**Provenance.** [PR #290](https://github.com/bombadil-labs/loam/pull/290) — `src/cli/cli.ts`,
+`src/cli/prompt.ts`, `src/cli/config.ts`, `src/cli/args.ts` (the T117 parser fix — a boolean flag
+given a value now refuses rather than reading as absent), proved by `test/cli/user-roles.test.ts`,
+`test/server/operator-keys.test.ts`, and `test/cli/prompt.test.ts`. Working spec:
 `.adlc/specs/36-03-the-bootstrap-the-role-commands-and-per-operator-keys.md`. Ticket T124.
