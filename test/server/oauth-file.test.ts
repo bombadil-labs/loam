@@ -191,6 +191,12 @@ describe("(b)+(c) a file this reader cannot read", () => {
       label: "a client entry that is not an object",
       bytes: '{"version":1,"clients":["not-an-object"],"grants":[],"tokens":[]}',
     },
+    {
+      label: "a client with an empty-string redirect uri",
+      bytes:
+        '{"version":1,"clients":[{"clientId":"a","clientName":"x","redirectUris":[""],' +
+        '"registeredAt":1,"generation":1}],"grants":[],"tokens":[]}',
+    },
   ];
 
   it("refuses to parse, with a named error rather than an empty file", () => {
