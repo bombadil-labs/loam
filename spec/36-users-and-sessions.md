@@ -45,7 +45,7 @@ before any byte-comparison runs against it.
 yet reads or writes one in the running server — that arrives with the bootstrap and role commands
 (phase 3) and the login door (phase 5).
 
-**Provenance.** [PR #TBD](https://github.com/bombadil-labs/loam/pull/TBD) — `src/server/credentials.ts`,
+**Provenance.** [PR #286](https://github.com/bombadil-labs/loam/pull/286) — `src/server/credentials.ts`,
 proved by `test/server/credentials.test.ts`. Working spec:
 `.adlc/specs/36-01-credentials-at-rest.md`. Ticket T122, from the fifteen-phase plan at
 `.adlc/specs/users-oauth-phasing-plan.md`.
