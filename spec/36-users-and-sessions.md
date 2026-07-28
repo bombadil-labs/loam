@@ -115,3 +115,39 @@ where a directory was named, and a directory this process cannot read, write, or
 given a value now refuses rather than reading as absent), proved by `test/cli/user-roles.test.ts`,
 `test/server/operator-keys.test.ts`, and `test/cli/prompt.test.ts`. Working spec:
 `.adlc/specs/36-03-the-bootstrap-the-role-commands-and-per-operator-keys.md`. Ticket T124.
+
+### 36.4 The session table
+
+A signed-in session lives in the server's own memory, in a plain `Map` with no persistence: a
+restart forgets every session, which is deliberate for one operator on one box (§9a) rather than a
+gap this phase leaves open. A session id is 32 random bytes, base64url — never a counter, never
+derived from the user's name.
+
+Every session carries an idle window. Touching a session slides the window forward; touching it
+after the window has passed refuses the touch and deletes the row outright, so a later clock
+reading — even one that runs backward — has no live row left to revive. The table reads a monotonic
+clock (`performance.now()` by default, injectable for a test), never the wall clock: a wall clock a
+caller or the OS can step backward would let an already-expired session look like it had gained time
+back.
+
+Each minted bearer-token digest carries its OWN expiry, never the parent session's — a token that
+rode its session's much longer idle window past its own stated TTL was a defect an independent
+review caught before any code existed, and a second review caught the same shape again after the
+first fix: `resolveToken` now checks a session's idle expiry directly rather than trusting a row that
+sweeping has not yet reached. Dropping a session, or letting its idle window lapse, erases every
+digest it minted, so a login door's logout genuinely revokes what it claims to revoke. A session may
+hold at most 16 live token digests at once, so a rapid, long-TTL minting loop cannot grow one
+session's footprint without bound.
+
+A full table refuses a new session rather than evicting a live one: evicting a live session to admit
+a flood of new logins would trade one denial-of-service shape for a worse one, an attacker signing a
+real operator out. The table does reclaim a session already past its idle window the next time
+anyone logs in, so an abandoned session does not block a login slot forever — bounding how fast an
+attacker may open new sessions at all is the login door's concern (a later phase), not this table's.
+
+**This phase adds no door and reads no cookie.** The login door (phase 5) is the table's first
+caller.
+
+**Provenance.** [PR #289](https://github.com/bombadil-labs/loam/pull/289) — `src/server/session.ts`,
+proved by `test/server/session-table.test.ts`. Working spec:
+`.adlc/specs/36-04-the-session-table.md`. Ticket T125.

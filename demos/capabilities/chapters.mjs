@@ -1405,6 +1405,15 @@ export const CHAPTERS = [
             says: "Removing a role strikes EVERY surviving claim of it, not just the latest one — a role granted twice, once through the CLI and once by a hand-appended claim standing in for a federated pull, still comes off in one `remove-role` call. For the operator role, the same call strikes the signing grant it minted, and a fresh delta signed by that user's old key stops resolving for a governed reader while a different operator's key still does.",
             spec: "spec/36-users-and-sessions.md",
             proof: "test/cli/user-roles.test.ts",
+            says: "A signed-in session lives only in server memory, past its idle window it refuses rather than resurrecting, and a wall clock stepped backward cannot extend it — the table reads a clock that only ever moves forward.",
+            spec: "spec/36-users-and-sessions.md",
+            proof: "test/server/session-table.test.ts",
+            door: null,
+          },
+          {
+            says: "A minted bearer token is held as a digest with its own expiry, never the plaintext and never borrowing its session's longer idle window — and dropping a session revokes every token it minted.",
+            spec: "spec/36-users-and-sessions.md",
+            proof: "test/server/session-table.test.ts",
             door: null,
           },
         ],
@@ -1415,6 +1424,37 @@ export const CHAPTERS = [
           "The role commands (`loam user create`/`assign-role`/`remove-role`) are the only door onto a user or a role — nothing remote reads or writes one yet. The login door is a later phase of this same arc.",
           "Sessions, cookies, cross-site defence, and a login delay that slows guessing without locking anyone out are designed as later phases and not yet built.",
           "`loam user unlock` is deferred to the login-delay phase, which owns the file it would clear.",
+          "Nothing reads or writes the credential file yet — no door, no CLI command. The bootstrap and role commands (T124) and the login door are later phases of this same arc.",
+          "A login door, a cookie, cross-site defence, and a login delay that slows guessing without locking anyone out are designed as later phases and not yet built — the session table itself (an id, an idle window, a cap) is built, but nothing yet calls it.",
+        ],
+      },
+    ],
+  },
+  {
+    n: 14,
+    slug: "connectors",
+    title: "Connectors — letting an outside party in",
+    thesis:
+      "An outside party — claude.ai, or any MCP client — reaches a store over OAuth rather than as the operator at a keyboard, built in small phases that each land and merge alone.",
+    covers: ["spec/37-connectors.md"],
+    body: [
+      {
+        kind: "prose",
+        text: "A connector needs somewhere durable to keep what it knows before any door exists for it to use: which clients are registered, which one owns which signing seed, which tokens are still live. That record lives in the home, mode 0600, beside the operator's own seed — never in the ground, because the ground replicates under [[federation]] and a peer receiving it would receive a connector's signing key.",
+      },
+      {
+        kind: "prose",
+        text: "Two processes touch this record from outside each other's view — a revoke command and the running server — so a plain read-modify-write would let whichever writes second silently discard the other's change. A cross-process lock closes that, and the guarantee it makes is about the WRITE rather than about a caller's own work: breaking a lock left behind by a crashed process cannot be made fully race-free without a primitive the filesystem does not offer, so the design narrows the exposed gap to the syscall between one file read and the rename that publishes it, rather than pretending the gap is closed.",
+      },
+      {
+        kind: "claims",
+        claims: [
+          {
+            says: "A file this reader cannot fully parse refuses outright rather than reading as empty — a truncated file, a wrong version, a grant whose actor disagrees with its own signing seed, or a duplicate client id all throw, because treating damage as absence would let a later door mint a second seed for a connector that already has one.",
+            spec: "spec/37-connectors.md",
+            proof: "test/server/oauth-file.test.ts",
+            door: null,
+          },
         ],
       },
     ],
