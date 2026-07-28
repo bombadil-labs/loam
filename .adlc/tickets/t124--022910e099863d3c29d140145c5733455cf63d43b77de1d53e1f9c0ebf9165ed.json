@@ -14,7 +14,8 @@
   "phase": "P1",
   "rails": [
     "test/cli/user-roles.test.ts",
-    "test/server/operator-keys.test.ts"
+    "test/server/operator-keys.test.ts",
+    "test/cli/prompt.test.ts"
   ],
   "scope": [
     "src/cli/cli.ts",

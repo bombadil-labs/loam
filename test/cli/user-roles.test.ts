@@ -88,6 +88,14 @@ async function appendDirect(claims: Claims, seed: string): Promise<void> {
   await g.close();
 }
 
+describe("loam user — subcommand routing", () => {
+  it("refuses an unknown subcommand", async () => {
+    const code = await run(["user", "frobnicate", "alice", "--home", home], io());
+    expect(code).toBe(2);
+    expect(err.join("\n")).toMatch(/wants a subcommand/);
+  });
+});
+
 describe("loam user create", () => {
   it("actor: one credential at 0600, exactly two deltas, no seed file", async () => {
     await run(["init", "--home", home], io());
@@ -258,6 +266,21 @@ describe("loam user create", () => {
         const code = await run(["user", "create", "kate", "--home", link], io(), password("pw"));
         expect(code).toBe(1);
         expect(err.join("\n")).toMatch(/symlink to a path that does not exist/);
+      },
+    );
+
+    // Pins the `&&` in `homeDefect`, not `||`: a symlink LOOP (ELOOP) is a symlink AND a stat
+    // failure, exactly like a dangling one, but its target may well exist — reporting it as
+    // "does not exist" would be a wrong diagnosis for whoever has to fix it.
+    it.skipIf(process.platform === "win32")(
+      "a symlink LOOP reports the generic fault, never 'does not exist'",
+      async () => {
+        const loop = join(home, "loop");
+        symlinkSync(loop, loop); // a symlink pointing at itself: ELOOP, not ENOENT
+        const code = await run(["user", "create", "loki", "--home", loop], io(), password("pw"));
+        expect(code).toBe(1);
+        expect(err.join("\n")).not.toMatch(/does not exist/);
+        expect(err.join("\n")).toMatch(/could not be checked/);
       },
     );
 
