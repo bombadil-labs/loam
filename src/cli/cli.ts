@@ -66,7 +66,7 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
   serve: {
     summary: "boot a store and serve it (GraphQL + SSE + MCP over HTTP)",
     usage: "loam serve --http [options]",
-    flags: new Set(["home", "store", "port", "token", "http", "archive", "host"]),
+    flags: new Set(["home", "store", "port", "token", "http", "archive", "host", "public-url"]),
     booleans: new Set(["http"]),
     notes: [
       "A fresh home self-initializes: it mints (or, via LOAM_SEED, imports) an operator identity,",
@@ -162,6 +162,10 @@ const FLAG_HELP: Readonly<Record<string, { readonly arg: string; readonly note: 
   token: { arg: "<secret>", note: "the bearer token for the door ($LOAM_TOKEN)" },
   http: { arg: "", note: "serve over HTTP — the only transport today" },
   archive: { arg: "<dir>", note: "mirror every delta into a cold store, relative to the home" },
+  "public-url": {
+    arg: "<url>",
+    note: "the outside http(s) address this store is reached at — opens §37 discovery",
+  },
   out: { arg: "<file>", note: "write the output here (default stdout)" },
   url: { arg: "<base>", note: "the running gateway to ask (default http://127.0.0.1:4321)" },
   connector: { arg: "<name>", note: "the connector DISPLAY NAME a published page reads through" },
@@ -429,11 +433,13 @@ async function cmdServe(
   // Boot the store from its genesis (idempotent): a fresh store is born governed; an existing
   // one simply re-lands the same operator identity.
   const gateway = await Gateway.boot(backend, assembleGenesis({ operatorSeed: seed }));
+  const publicUrl = parsed.flags.get("public-url");
   const server = await serve({
     mounts: { default: gateway },
     tokens: { [token]: { operator: true } },
     port,
     host: parsed.flags.get("host") ?? "127.0.0.1",
+    ...(publicUrl === undefined ? {} : { publicUrl }),
   });
   recordServing(home, server.url, path);
   io.out(

@@ -89,7 +89,7 @@ describe("T133 — the discovery documents are pure functions of one configured 
   });
 
   it("(b) the protected-resource document: RFC 9728 shape, off ONE issuer", () => {
-    const doc = protectedResourceDocument(PUBLIC_URL) as Record<string, unknown>;
+    const doc = protectedResourceDocument(PUBLIC_URL);
     expect(doc["resource"]).toBe(issuerFor(PUBLIC_URL));
     expect(doc["authorization_servers"]).toEqual([issuerFor(PUBLIC_URL)]);
     expect(doc["bearer_methods_supported"]).toEqual(["header"]);
@@ -97,7 +97,7 @@ describe("T133 — the discovery documents are pure functions of one configured 
   });
 
   it("(c) the authorization-server document: RFC 8414 shape, pinned endpoint paths", () => {
-    const doc = authorizationServerDocument(PUBLIC_URL) as Record<string, unknown>;
+    const doc = authorizationServerDocument(PUBLIC_URL);
     const issuer = issuerFor(PUBLIC_URL);
     expect(doc["issuer"]).toBe(issuer);
     expect(doc["authorization_endpoint"]).toBe(`${issuer}/oauth/authorize`);
@@ -109,7 +109,7 @@ describe("T133 — the discovery documents are pure functions of one configured 
   });
 
   it("(d) PKCE S256 only, and a public client with no secret — EXACT lists, not a superset check", () => {
-    const doc = authorizationServerDocument(PUBLIC_URL) as Record<string, unknown>;
+    const doc = authorizationServerDocument(PUBLIC_URL);
     // toEqual, not toContain: a widened list that still permitted "plain" alongside "S256" would
     // pass a .toContain("S256") assertion while reopening exactly the hole PKCE closes.
     expect(doc["code_challenge_methods_supported"]).toEqual(["S256"]);
@@ -285,10 +285,14 @@ describe("T133 — the well-known documents are served, off configured publicUrl
   });
 
   it("(j) a tokenless graphql refusal carries NO www-authenticate — the header is the MCP door's alone", async () => {
-    const onPublicMount = await ask(base, "/garden/graphql", { method: "POST" });
+    // "garden" is skipped here: it declared a public surface, so a tokenless graphql POST there
+    // reaches the anonymous door itself (a 400 on the missing body) rather than the 401 this rail
+    // means to probe. "meadow" (no public surface) and "nowhere" (absent) both refuse outright.
+    const onPrivateMount = await ask(base, "/meadow/graphql", { method: "POST" });
     const onAbsentMount = await ask(base, "/nowhere/graphql", { method: "POST" });
-    expect(onPublicMount.status).toBe(401);
-    expect(onPublicMount.headers.get("www-authenticate")).toBeNull();
+    expect(onPrivateMount.status).toBe(401);
+    expect(onAbsentMount.status).toBe(401);
+    expect(onPrivateMount.headers.get("www-authenticate")).toBeNull();
     expect(onAbsentMount.headers.get("www-authenticate")).toBeNull();
   });
 });
