@@ -74,6 +74,7 @@ the header from becoming a second oracle beside the one the mount-refusal discip
 closed: the header answers who to ask, not what is here.
 
 **Provenance.** Working spec `.adlc/specs/37-12-discovery-and-the-401.md` (T133, phase 12 of the
-plan's fifteen). Landed [PR pending] — `src/server/oauth.ts` (new), plus the `--public-url` flag
+plan's fifteen). Landed [#291](https://github.com/bombadil-labs/loam/pull/291) —
+`src/server/oauth.ts` (new), plus the `--public-url` flag
 threaded through `src/server/http.ts` and `src/cli/cli.ts`. No client registers, no code or token
 is minted; a connector can find the store and nothing more.
