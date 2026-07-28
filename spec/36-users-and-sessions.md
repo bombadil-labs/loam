@@ -105,6 +105,6 @@ attacker may open new sessions at all is the login door's concern (a later phase
 **This phase adds no door and reads no cookie.** The login door (phase 5) is the table's first
 caller.
 
-**Provenance.** [PR #TODO](https://github.com/bombadil-labs/loam/pull/TODO) — `src/server/session.ts`,
+**Provenance.** [PR #289](https://github.com/bombadil-labs/loam/pull/289) — `src/server/session.ts`,
 proved by `test/server/session-table.test.ts`. Working spec:
 `.adlc/specs/36-04-the-session-table.md`. Ticket T125.
