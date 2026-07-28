@@ -967,6 +967,68 @@ it. That is the H7 shape at the process layer: a gate that gates nothing, report
 
 ---
 
+## 9c. Who merges each phase — Myk approved this split, 2026-07-27
+
+Every phase is ONE ticket and ONE pull request to `main`. That is the point of the plan, not
+bookkeeping. Each PR carries its own rails, its own source, and its own gate evidence.
+
+**The decisions are made HERE, at plan time.** Myk settled the trust model, CLI-only role assignment,
+equivalent operator privilege, roles as a set, and delay instead of deny. A phase that implements a
+settled decision is mechanics. A phase that faces the public internet, or that widens what an outside
+party may do, is a decision.
+
+**Myk reads and merges six.**
+
+| phase | why it is his |
+|---|---|
+| 3 | the trust surface, and the largest phase |
+| 5 | the login door faces the public internet |
+| 7 | it is the phase that lets a browser write |
+| 13 | the redirect-origin fence decides who may register |
+| 14 | its consent copy must state what a grant really carries |
+| 15 | it mints an actor seed per connector |
+
+**Nine self-merge on the ordinary bar** — `npm run check` green, P5 clean, post-work audit clean.
+Phases 1, 2, 4, 6, 8, 9, 10, 11 and 12. Each implements a decision already made. Phase 10 is erasure
+work that only makes a report more honest, which the standing erasure rule puts in this tier.
+
+**PHASE 14 CARRIES AN UNANSWERED QUESTION.** A granted connector becomes a lawful striker, so it can
+retract claims the operator wrote. Narrowing that is T118, which Myk scoped to a container. If T118 has
+not landed, phase 14 must say so in the consent copy or stop for Myk. It must not ship a consent page
+that understates the power it grants.
+
+---
+
+## 9d. How fifteen phases become two spec sections — Myk approved this, 2026-07-27
+
+`spec/` grows only at landing, and §36 and §37 are two reserved numbers for fifteen phases. So phases
+GROUP into sections rather than mapping one to one.
+
+- **§36 covers phases 1 through 10** — credentials, users, roles, keys, sessions, the login door, the
+  delay, erasure honesty.
+- **§37 covers phases 11 through 15** — connector records, discovery, registration, consent, tokens.
+
+**The FIRST phase of a group writes its `spec/NN-slug.md` file. Every later phase in that group EDITS
+it.** The standing rule calls editing an existing section file the rare exception, and this is a declared
+instance of it rather than a drift. Two sections mean two chapters in
+`demos/capabilities/chapters.mjs`, and `test/site/capabilities.test.ts` needs exactly two — not fifteen.
+
+**Each phase still adds its own `{says, spec, proof}` claim** to its group's chapter. So the book grows
+by one claim per phase and the coverage gate stays meaningful.
+
+---
+
+## 9e. THE TICKETS DECLARE NO RAILS, and that is the fix for §1
+
+CLAUDE.md is explicit: *"Declare `rails` when the tests EXIST, never in advance."* A rail declared before
+its subject lands binds two tickets together, which is exactly how #282 became one change.
+
+So **every ticket this plan creates has `rails: []`.** The rail files in section 3's table are **SCOPE,
+not rails.** Each phase declares its rails at P3, when the tests exist and are red. That single
+discipline prevents the coupling section 1 describes.
+
+---
+
 ## 10. What happens next
 
 1. Myk reads revision 2 and approves or redirects.
