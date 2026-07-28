@@ -668,13 +668,13 @@ phase 15.
 **Must not.** It must not mint a seed or a token.
 
 **Criteria.**
-1. The page requires a phase 6 session. Without one it shows the login form and mints nothing.
+1. The page requires a phase 5 session. Without one it shows the login form and mints nothing.
 2. `redirect_uri` must EXACTLY match one registered for that client. A different path, an added query
    and another port are all refused.
 3. No response carries a `Location` outside the allowlist, including on every refusal path.
 4. The page escapes `client_name`. It displays the REGISTERED uri, never caller text. It carries a
    no-script CSP.
-5. The approval POST carries phase 7's same-origin check and form token. A cross-site-shaped approval
+5. The approval POST carries phase 6's same-origin check and form token. A cross-site-shaped approval
    mints nothing.
 6. A minted code binds to `client_id` AND `redirect_uri`. Its expiry is monotonic, so a wall-clock step
    backwards does not extend it.
@@ -1032,10 +1032,11 @@ discipline prevents the coupling section 1 describes.
 ## 10. What happens next
 
 1. Myk reads revision 2 and approves or redirects.
-2. Fifteen tickets replace T113, T114, T116, T117, T118, T119 and T121. **Those seven shards exist only
-   on `origin/t113-users`, so `adlc ticket archive` cannot reach them from this branch.** Archive them
-   from a checkout that holds them, or land their shards to `main` first and archive there. Revision 1
-   said "twelve tickets" and would have failed on both counts.
+2. **Fifteen tickets replace T113, T114, T116, T117, T118, T119 and T121 — and there is nothing to
+   archive.** Measured: those seven shards exist ONLY on `origin/t113-users`. They were never on `main`.
+   So closing #282 and abandoning that branch disposes of them, and `adlc ticket archive` would fail if
+   run. Do not run it. Revision 1 said "archive them" and said "twelve tickets"; both were wrong.
+   T115 is live on `main` and stays — it is the erasure question awaiting Myk, not part of this work.
 3. T120 is NOT replaced. It folds into phase 9, which owns `login-locks.ts`. Archive it when phase 9
    lands.
 4. **Each phase lands one `spec/NN-slug.md` file, and §36 and §37 are two reserved numbers for fifteen
