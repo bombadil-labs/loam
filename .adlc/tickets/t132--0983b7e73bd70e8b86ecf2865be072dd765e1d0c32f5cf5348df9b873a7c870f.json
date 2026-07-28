@@ -7,8 +7,11 @@
     }
   ],
   "id": "T132",
-  "phase": "P1",
-  "rails": [],
+  "phase": "P3",
+  "rails": [
+    "test/server/oauth-file.test.ts",
+    "test/server/oauth-lock-child.mts"
+  ],
   "scope": [
     "src/server/oauth-file.ts",
     "test/server/oauth-file.test.ts",
