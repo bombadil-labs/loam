@@ -108,7 +108,7 @@ check which part produced the findings before you authorise another round.**
 
 ---
 
-## 3. The twelve phases
+## 3. The fifteen phases
 
 Each row states the deliverable and the rail files it owns. No file appears twice.
 
@@ -727,6 +727,12 @@ that cannot name an assertion in that file is not ready to build.
 
 ## 5. What we salvage
 
+**WHERE THE SALVAGE LIVES: the tag `salvage-282`** (pinned 2026-07-28, pointing at `origin/t113-users`'s
+tip — the branch may be deleted when #282 closes, and a tag cannot be swept by a branch cleanup). A
+builder reads salvage with `git show salvage-282:src/server/users.ts` and never checks the tag out into
+a working tree. The seven old ticket shards on that tag are HISTORY, not queue — the live queue is
+T122–T138 on `main`.
+
 **Most of the source survives.** The implementations were reviewed hard and the last rounds found only
 prose. I estimate 80% of `credentials.ts`, `users.ts`, `session.ts`, `login-locks.ts`, `oauth.ts` and
 `oauth-file.ts` transfers unchanged.
@@ -757,17 +763,18 @@ limit only bites when a second person holds the role, and these phases are what 
    supersedes T118, which lives only on the abandoned branch). Recorded in §9f and in T138's body.
    T138 is a prerequisite of phases 14 and 15.
 4. **T119 — ejection.** Myk's idea. Undesigned.
-5. **The order of phases 1 to 9 against 10 to 12.** The connector needs the login door, so 10 to 12
-   follow 5. Otherwise the two groups are independent.
+5. ~~The order of the two groups.~~ **ANSWERED by the edges (2026-07-28).** Phases 11 to 13 are
+   independent of the users group. Phase 14 needs phase 5's session and phase 6's cross-site defence,
+   and phases 14 and 15 need T138's design. Everything else is free to interleave.
 
-## 7. What happens next
+## 7. What happens next — SUPERSEDED, READ §10 INSTEAD
 
-1. Myk reads this plan.
-2. Myk answers section 6, question 1.
-3. I write twelve tickets. Each ticket carries its phase's criteria verbatim.
-4. I archive T113, T114, T116, T117, T118, T119 and T121 with a note naming this plan.
-5. `spec-lint` must pass on every new working spec before any build starts.
-6. #282 stays open until phase 1 lands. Then it closes, and its branch stays for salvage.
+This section predates the independent review and got three things wrong: it said twelve tickets
+(there are sixteen: T122–T136 plus T137, and T138 beside them), it said to archive seven old tickets
+(they were never on `main` — running the archive fails; §10 says do not), and it said #282's branch
+stays for salvage (the durable pin is the tag `salvage-282`; a branch can be swept). It stays only
+because sections cite each other by number. **§10 is the executable version.** One line here is still
+true and §10 repeats it: `spec-lint` must pass on every working spec before its build starts.
 
 ---
 
