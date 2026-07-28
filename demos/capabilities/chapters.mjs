@@ -1356,6 +1356,64 @@ export const CHAPTERS = [
   // ─────────────────────────────────────────────────────────────────────────
   {
     n: 13,
+    slug: "users-and-sessions",
+    title: "Users and sessions",
+    thesis:
+      "A password never enters the ground the store replicates — it lives in one plain file, checked whole, refusing to authenticate against itself the moment it cannot be fully trusted.",
+    covers: ["spec/36-users-and-sessions.md"],
+    body: [
+      {
+        kind: "prose",
+        text: "Everything else Loam holds is a signed claim, and a signed claim can travel: federation copies it, an offer file can carry it off the box. A password hash must never take that path, so it is the one part of a user that is not a [[delta]]. It lives in a plain file beside the store's own signing seed, at a permission mode that refuses every other account on the box.",
+      },
+      {
+        kind: "prose",
+        text: "The interesting property is not the format — a version number, a salt, a hash, the cost the hash was derived at — it is the refusal. A file this code cannot fully verify is a file it will not authenticate against, and the refusal covers the WHOLE file rather than the one damaged entry: a shape nobody can vouch for is not a shape to trust anyone against, including the users whose own entries are intact.",
+      },
+      {
+        kind: "prose",
+        text: "This is the first of ten phases building toward a full login story — a session table, a login door, cross-site defence, per-operator signing keys, and a delay that slows a guesser without ever locking a real user out. Each phase is a small pull request landing on its own; this one delivers the credential file every later phase writes to or reads from, and nothing yet does either.",
+      },
+      {
+        kind: "claims",
+        claims: [
+          {
+            says: "The same password hashed twice produces two different results, and each verifies only against its own salt — a hash checked against the wrong salt never matches.",
+            spec: "spec/36-users-and-sessions.md",
+            proof: "test/server/credentials.test.ts",
+            door: null,
+          },
+          {
+            says: "Every shape of damage to the credential file — truncated, not JSON, a wrong version, an empty or non-hex hash or salt, a hash whose length disagrees with its own parameters, an unknown entry kind — refuses rather than resolving to a match, and one damaged entry refuses the whole file.",
+            spec: "spec/36-users-and-sessions.md",
+            proof: "test/server/credentials.test.ts",
+            door: null,
+          },
+          {
+            says: "The file writes through a temp-then-rename, lands at an owner-only file mode even when an older copy sat looser, and a fault partway through the write leaves no temporary file behind.",
+            spec: "spec/36-users-and-sessions.md",
+            proof: "test/server/credentials.test.ts",
+            door: null,
+          },
+          {
+            says: "A user holds a SET of roles, not a single latest value — granting operator and actor both resolves, and revoking one leaves the other.",
+            spec: "spec/36-users-and-sessions.md",
+            proof: "test/server/users-ground.test.ts",
+            door: null,
+          },
+        ],
+      },
+      {
+        kind: "notYet",
+        items: [
+          "Nothing reads or writes this file yet — no door, no CLI command. The bootstrap and role commands (T124) and the login door are later phases of this same arc.",
+          "Sessions, cookies, cross-site defence, and a login delay that slows guessing without locking anyone out are designed as later phases and not yet built.",
+        ],
+      },
+    ],
+  },
+  {
+    n: 14,
     slug: "connectors",
     title: "Connectors — letting an outside party in",
     thesis:

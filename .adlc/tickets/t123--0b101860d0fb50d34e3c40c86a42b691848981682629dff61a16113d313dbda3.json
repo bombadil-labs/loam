@@ -11,14 +11,16 @@
     }
   ],
   "id": "T123",
-  "phase": "P1",
-  "rails": [],
+  "phase": "P3",
+  "rails": [
+    "test/server/users-ground.test.ts"
+  ],
   "scope": [
     "src/server/users.ts",
     "src/gateway/gather.ts",
     "test/server/users-ground.test.ts",
     ".adlc/specs/36-02-a-user-is-a-fact.md"
   ],
-  "status": "todo",
+  "status": "in-progress",
   "title": "§36 phase 2/15 — A user is a fact"
 }

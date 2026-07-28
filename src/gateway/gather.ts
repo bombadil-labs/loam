@@ -33,16 +33,31 @@ export interface GatherSpec {
    * ungoverned read and the one all but a handful of call sites in the tree ask for.
    */
   readonly mask?: GatherMask;
+  /**
+   * Gather only what THIS author asserted. The mask governs whose STRIKES bind (evaluated first,
+   * over the whole delta set); this governs whose CLAIMS are admitted at all (the outer `select`) —
+   * a different question, and the one a fact only one signer may state has to ask. Without it the
+   * select admits every author with write standing, and a resolution that picks the latest claim
+   * hands the field to whoever wrote last.
+   *
+   * Omit it for ordinary data, where any author with standing may speak and the reader's Schema
+   * decides who is heard.
+   */
+  readonly authoredBy?: string;
 }
 
 /** The plain-entity gather, in the at-rest JSON dialect. */
 export function entityGatherJson(spec: GatherSpec = {}): Record<string, unknown> {
+  const atRoot = { hasPointer: { targetEntity: { var: "root" } } };
   return {
     op: "group",
     key: "byTargetContext",
     in: {
       op: "select",
-      pred: { hasPointer: { targetEntity: { var: "root" } } },
+      pred:
+        spec.authoredBy === undefined
+          ? atRoot
+          : { and: [atRoot, { match: { field: "author", cmp: "eq", const: spec.authoredBy } }] },
       in: { op: "mask", policy: spec.mask ?? "drop", in: "input" },
     },
   };
