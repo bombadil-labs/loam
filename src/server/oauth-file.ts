@@ -114,11 +114,11 @@ const num = (raw: unknown, where: string, field: string): number => {
   return value;
 };
 
-const object = (raw: unknown, where: string): Record<string, unknown> => {
+/** Throws unless `raw` is a plain object. No caller uses a return value — this is a guard, not a cast. */
+const object = (raw: unknown, where: string): void => {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
     throw new OAuthFileUnreadable(`${where} is not an object`);
   }
-  return raw as Record<string, unknown>;
 };
 
 const array = (raw: unknown, where: string): unknown[] => {
@@ -261,9 +261,6 @@ export function readOAuthFile(home: string): OAuthFile {
     throw new OAuthFileUnreadable(
       `${path} is not JSON: ${err instanceof Error ? err.message : String(err)}`,
     );
-  }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new OAuthFileUnreadable(`${path} is not a connector file`);
   }
   return checkFileShape(parsed, path);
 }

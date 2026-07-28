@@ -4,6 +4,12 @@
 //
 // The working spec is `.adlc/specs/37-11-connector-records-at-rest.md`; each `describe` below
 // names the criterion letter(s) it proves.
+//
+// TWO MUTANTS `adlc hollow-test` FINDS ARE NOT RAILED, and cannot be: one is a numeral inside a
+// COMMENT (`// 64 hex chars` beside `actorSeed`), which compiles to nothing a test can observe; the
+// other is `OAuthFile["version"]`'s literal TYPE `1`, which TypeScript erases before any test runs
+// — mutating it to `2` produces byte-identical JavaScript. Named here rather than chased with a
+// contrived assertion, per the same "state the gap" convention as the fsync note below.
 
 import {
   chmodSync,
@@ -26,12 +32,16 @@ import * as esbuild from "esbuild";
 import {
   EMPTY_OAUTH,
   LOCK_STALE_MS,
+  MAX_CLIENT_NAME,
   OAuthFileBusy,
   OAuthFileUnlockable,
   OAuthFileUnreadable,
+  clientNameDefect,
+  idTextDefect,
   oauthLockPath,
   oauthPath,
   readOAuthFile,
+  uriTextDefect,
   withOAuthFile,
   writeOAuthFile,
   type OAuthFile,
@@ -177,6 +187,10 @@ describe("(b)+(c) a file this reader cannot read", () => {
       label: "a token with no issuedAt",
       bytes: `{"version":1,"clients":[],"grants":[],"tokens":[{"digest":"${"33".repeat(32)}","clientId":"a"}]}`,
     },
+    {
+      label: "a client entry that is not an object",
+      bytes: '{"version":1,"clients":["not-an-object"],"grants":[],"tokens":[]}',
+    },
   ];
 
   it("refuses to parse, with a named error rather than an empty file", () => {
@@ -198,6 +212,55 @@ describe("(b)+(c) a file this reader cannot read", () => {
     // proves the checker is not simply refusing everything.
     writeOAuthFile(home, soundFile());
     expect(readOAuthFile(home)).toEqual(soundFile());
+  });
+
+  it("a hex field containing a literal '0' digit is accepted — not just [1-9a-f]", () => {
+    // HEX64 is a character class; a fixture built entirely from non-zero digits (as SEED and the
+    // digests above are) cannot tell `[0-9a-f]` from `[1-9a-f]`.
+    const zeroSeed = "0".repeat(64);
+    const zeroAuthor = authorForSeed(zeroSeed);
+    const file: OAuthFile = {
+      ...EMPTY_OAUTH,
+      grants: [{ clientId: "c1", actorSeed: zeroSeed, actor: zeroAuthor, grantedAt: 1, standing: true }],
+    };
+    writeOAuthFile(home, file);
+    expect(readOAuthFile(home)).toEqual(file);
+  });
+
+  it("a non-finite numeric field refuses even though it can only arrive via an in-memory caller", () => {
+    // JSON's grammar has no NaN/Infinity token, so this path is unreachable from a file on disk —
+    // it is reachable only through `writeOAuthFile`'s validation (criterion (q)) of a caller-built
+    // object, which is exactly the bug class (q) exists to catch.
+    const file: OAuthFile = {
+      ...soundFile(),
+      clients: [{ ...soundFile().clients[0]!, registeredAt: NaN }],
+    };
+    expect(() => writeOAuthFile(home, file)).toThrow(OAuthFileUnreadable);
+  });
+});
+
+describe("the exported text-defect helpers, directly", () => {
+  // `checkClient` reaches `clientNameDefect` only after `str()` has already refused an empty
+  // string, which would mask a defect in `clientNameDefect`'s OWN empty-length branch. These
+  // helpers are exported for a future door to call directly (a client name is meant to reach an
+  // operator's terminal), so they earn direct rails rather than only the ones checkClient exercises
+  // secondhand.
+
+  it("clientNameDefect refuses empty, refuses over MAX_CLIENT_NAME, accepts the boundary", () => {
+    expect(clientNameDefect("")).toMatch(/1\.\.200/);
+    expect(clientNameDefect("a".repeat(MAX_CLIENT_NAME))).toBeUndefined();
+    expect(clientNameDefect("a".repeat(MAX_CLIENT_NAME + 1))).toMatch(/1\.\.200/);
+  });
+
+  it("clientNameDefect refuses a control character with its own message", () => {
+    expect(clientNameDefect("ok\nnot ok")).toMatch(/control character/);
+  });
+
+  it("uriTextDefect and idTextDefect refuse control characters and accept clean text", () => {
+    expect(uriTextDefect("https://claude.ai/cb")).toBeUndefined();
+    expect(uriTextDefect("https://claude.ai/\tcb")).toMatch(/control character/);
+    expect(idTextDefect("plain-id")).toBeUndefined();
+    expect(idTextDefect("id\u0007")).toMatch(/control character/);
   });
 });
 
