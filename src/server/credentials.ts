@@ -73,6 +73,11 @@ const isPowerOfTwo = (n: number): boolean =>
 // claim, and N*r*p bounds the CPU work. Neither implies the other — a large p can multiply CPU time
 // past the bound while N*r alone still sits under the memory bound, so a corrupted or hostile
 // parameter set cannot buy CPU time back that the memory bound denied it.
+// NAMED GAP: `r` is capped at 16 and `N` is a power of two, so the achievable N*r values jump in
+// steps no finer than N itself near this boundary — no combination lands strictly between this
+// constant and one ~1.5% larger. A test cannot pin this exact byte value without loosening the `r`
+// cap or the power-of-two constraint; it can only pin that a value AT the boundary is admitted and a
+// value well past it is refused, which test/server/credentials.test.ts does.
 const MAX_MEMORY_BYTES = 64 * 1024 * 1024; // 64 MiB
 const DEFAULT_COST = DEFAULT_SCRYPT.N * DEFAULT_SCRYPT.r * DEFAULT_SCRYPT.p;
 const MAX_CPU_COST = DEFAULT_COST * 8;
@@ -124,13 +129,15 @@ export function checkEntry(raw: unknown, where: string): CredentialEntry {
   }
   const params = checkParams(entry["params"], where);
   const { salt, hash } = entry;
-  if (typeof salt !== "string" || salt.length === 0 || !HEX.test(salt) || salt.length % 2 !== 0) {
+  // HEX (`+`, one or more) already refuses an empty string, so an explicit `.length === 0` check
+  // beside it is dead code that only adds an unkillable mutant — HEX.test("") is false on its own.
+  if (typeof salt !== "string" || !HEX.test(salt) || salt.length % 2 !== 0) {
     throw new CredentialsUnreadable(`${where} has no hex salt`);
   }
   if (salt.length < MIN_SALT_HEX_LEN) {
     throw new CredentialsUnreadable(`${where} has a salt shorter than the entropy floor`);
   }
-  if (typeof hash !== "string" || hash.length === 0 || !HEX.test(hash)) {
+  if (typeof hash !== "string" || !HEX.test(hash)) {
     throw new CredentialsUnreadable(`${where} has no hex hash`);
   }
   if (hash.length !== params.keylen * 2) {

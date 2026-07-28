@@ -129,6 +129,7 @@ describe("every shape of damage refuses, by name", () => {
       "an entry with no parameters",
       '{"version":1,"users":{"myk":{"kind":"scrypt","salt":"ab12","hash":"cd34"}}}',
     ],
+    ["an entry that is a string, not an object", '{"version":1,"users":{"myk":"just-a-string"}}'],
     [
       "an unknown credential kind",
       '{"version":1,"users":{"myk":{"kind":"telepathy","salt":"ab12","hash":"cd34"}}}',
@@ -202,6 +203,74 @@ describe("every shape of damage refuses, by name", () => {
       CredentialsUnreadable,
     );
     expect(() => checkEntry(withParams(TEST_SCRYPT), "test")).not.toThrow();
+  });
+
+  it("checkEntry pins the CPU bound precisely: 8x the default cost is refused, not 9x", async () => {
+    const base = await hashPassword(PASSWORD, TEST_SCRYPT);
+    const withParams = (params: ScryptParams): unknown => ({ ...base, params });
+    // N=8192, r=9: memory cost is 128*8192*9 = 9,437,184 bytes, comfortably under the 64 MiB memory
+    // bound. At p=16 the CPU cost (N*r*p = 1,179,648) sits strictly between the real 8x-default
+    // ceiling (1,048,576) and a hypothetical 9x-default ceiling (1,179,648) — so a boundary drawn one
+    // multiple too loose would admit this entry, and the real bound must not.
+    expect(() => checkEntry(withParams({ N: 8192, r: 9, p: 16, keylen: 32 }), "test")).toThrow(
+      CredentialsUnreadable,
+    );
+  });
+
+  it("checkEntry admits the memory bound's own exact edge, and refuses one N-step past it", async () => {
+    const base = await hashPassword(PASSWORD, TEST_SCRYPT);
+    const withParams = (params: ScryptParams): unknown => ({ ...base, params });
+    // N=32768, r=16: N*r=524,288, exactly the 64 MiB bound (128*524,288 = 67,108,864 bytes). This
+    // also pins the bound's own arithmetic (`MAX_MEMORY_BYTES / 128`, not `/ 129` or some other
+    // divisor) — a wrong divisor shifts this exact edge either open or closed.
+    expect(() =>
+      checkEntry(withParams({ N: 32768, r: 16, p: 1, keylen: 32 }), "test"),
+    ).not.toThrow();
+    // N=65536, r=16: doubles N*r to 1,048,576 — unambiguously past the bound from any direction.
+    expect(() => checkEntry(withParams({ N: 65536, r: 16, p: 1, keylen: 32 }), "test")).toThrow(
+      CredentialsUnreadable,
+    );
+  });
+
+  it("checkEntry's N floor is exactly 2, and N must be an integer to count as a power of two", async () => {
+    const base = await hashPassword(PASSWORD, TEST_SCRYPT);
+    const withParams = (params: ScryptParams): unknown => ({ ...base, params });
+    expect(() => checkEntry(withParams({ ...TEST_SCRYPT, N: 2 }), "test")).not.toThrow();
+    expect(() => checkEntry(withParams({ ...TEST_SCRYPT, N: 1 }), "test")).toThrow(
+      CredentialsUnreadable,
+    );
+    // Bitwise ops coerce to int32, so a non-integer that LOOKS power-of-two under that coercion
+    // (1024.5 truncates to 1024) must still be refused by the explicit Number.isInteger check.
+    expect(() => checkEntry(withParams({ ...TEST_SCRYPT, N: 1024.5 }), "test")).toThrow(
+      CredentialsUnreadable,
+    );
+    // A number that is simply not a power of two at all, regardless of the integer check.
+    expect(() => checkEntry(withParams({ ...TEST_SCRYPT, N: 1000 }), "test")).toThrow(
+      CredentialsUnreadable,
+    );
+  });
+
+  it("checkEntry refuses a non-integer r or keylen within their numeric range", async () => {
+    const base = await hashPassword(PASSWORD, TEST_SCRYPT);
+    const withParams = (params: ScryptParams): unknown => ({ ...base, params });
+    expect(() => checkEntry(withParams({ ...TEST_SCRYPT, r: 2.5 }), "test")).toThrow(
+      CredentialsUnreadable,
+    );
+    expect(() => checkEntry(withParams({ ...TEST_SCRYPT, keylen: 32.5 }), "test")).toThrow(
+      CredentialsUnreadable,
+    );
+  });
+
+  it("checkEntry's salt-length floor sits exactly at 16 hex characters", async () => {
+    const base = await hashPassword(PASSWORD, TEST_SCRYPT);
+    expect(() => checkEntry({ ...base, salt: LONG_SALT.slice(0, 16) }, "test")).not.toThrow();
+    expect(() => checkEntry({ ...base, salt: LONG_SALT.slice(0, 14) }, "test")).toThrow(
+      CredentialsUnreadable,
+    );
+  });
+
+  it("checkEntry refuses a raw entry that is a primitive, not an object", () => {
+    expect(() => checkEntry("just-a-string", "test")).toThrow(CredentialsUnreadable);
   });
 
   it("checkEntry refuses a hash whose length disagrees with its own keylen", async () => {
