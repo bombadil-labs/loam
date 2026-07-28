@@ -27,6 +27,13 @@ filesystem. A clock-skewed network mount is the same class of unsupported config
 here rather than solved: solving it would mean embedding a signed absolute expiry in the lock's
 own bytes, which is new design, not this ticket's `Delivers` line.
 
+The same `Date.now()` dependency means a local clock adjustment (an NTP step, not drift) can move
+the staleness computation either direction. A backward step delays a real crash's recovery — the
+lock outlives `LOCK_STALE_MS` in wall-clock terms before it reads as stale, which fails toward an
+extra `OAuthFileBusy` refusal, not toward a lost update. A forward step ages a live lock early,
+which is the ordinary stale-break race already named above, not a new one. Neither direction is
+fixed here, for the same reason the network-mount case is not.
+
 ## What this phase does not do
 
 No door reads or writes this file. No CLI command exists yet. The record shape (client, grant,
@@ -53,12 +60,12 @@ the file-layer version of the same "cannot determine" hazard the read side exist
 self-inflicted instead of arriving from outside. So the write path re-validates with the same
 checks before it serializes anything.
 
-**Named rather than fixed here, matching phase 1's own precedent for `credentials.json`:** a write
-always ends at 0600, but nothing on the READ path polices or refuses a file some other process left
+**Not implemented, matching phase 1's own precedent for `credentials.json`:** a write always ends
+at 0600, but nothing on the READ path checks or repairs a file some other process left
 world-readable — phase 1 asserts mode after a write and states the Windows gap; it does not add
-mode-on-read enforcement, and this phase does not either. A wider policy here (refuse an insecure
-mode on read, or actively repair it) is a real question but a new one, out of this ticket's scope;
-raising it again at prosecution time should point here rather than treat it as an overlooked gap.
+mode-on-read enforcement, and this phase does not either. Refusing or repairing an insecure mode on
+read is a real, undecided design question, separate from what this ticket's `Delivers` line asks
+for: read, validate the record's SHAPE, write atomically, lock. It is unbuilt, not overlooked.
 
 `oauth.json` is never in the ground: it holds a connector's actor seed, and the ground
 replicates under federation. It lives beside `operator.seed` and `credentials.json`.
