@@ -93,7 +93,13 @@ const SEED_AUTHOR = authorForSeed(SEED);
 const soundFile = (): OAuthFile => ({
   version: 1,
   clients: [
-    { clientId: "c1", clientName: "Claude", redirectUris: ["https://claude.ai/cb"], registeredAt: 1, generation: 1 },
+    {
+      clientId: "c1",
+      clientName: "Claude",
+      redirectUris: ["https://claude.ai/cb"],
+      registeredAt: 1,
+      generation: 1,
+    },
   ],
   grants: [{ clientId: "c1", actorSeed: SEED, actor: SEED_AUTHOR, grantedAt: 1, standing: true }],
   tokens: [{ digest: "22".repeat(32), clientId: "c1", issuedAt: 1 }],
@@ -177,7 +183,8 @@ describe("(b)+(c) a file this reader cannot read", () => {
     },
     {
       label: "a token whose digest is not 64 hex",
-      bytes: '{"version":1,"clients":[],"grants":[],"tokens":[{"digest":"zz","clientId":"a","issuedAt":1}]}',
+      bytes:
+        '{"version":1,"clients":[],"grants":[],"tokens":[{"digest":"zz","clientId":"a","issuedAt":1}]}',
     },
     {
       label: "a token with no clientId",
@@ -227,7 +234,9 @@ describe("(b)+(c) a file this reader cannot read", () => {
     const zeroAuthor = authorForSeed(zeroSeed);
     const file: OAuthFile = {
       ...EMPTY_OAUTH,
-      grants: [{ clientId: "c1", actorSeed: zeroSeed, actor: zeroAuthor, grantedAt: 1, standing: true }],
+      grants: [
+        { clientId: "c1", actorSeed: zeroSeed, actor: zeroAuthor, grantedAt: 1, standing: true },
+      ],
     };
     writeOAuthFile(home, file);
     expect(readOAuthFile(home)).toEqual(file);
@@ -610,7 +619,15 @@ describe("(q) writeOAuthFile validates before it serializes", () => {
     const before = readFileSync(oauthPath(home), "utf8");
     const badActor: OAuthFile = {
       ...soundFile(),
-      grants: [{ clientId: "c1", actorSeed: SEED, actor: "not-the-real-author", grantedAt: 1, standing: true }],
+      grants: [
+        {
+          clientId: "c1",
+          actorSeed: SEED,
+          actor: "not-the-real-author",
+          grantedAt: 1,
+          standing: true,
+        },
+      ],
     };
     expect(() => writeOAuthFile(home, badActor)).toThrow(OAuthFileUnreadable);
     // The file on disk is untouched — the temp-then-rename never got the chance to run.
@@ -649,7 +666,13 @@ describe("(r) a repeated key across a collection is refused, on read and on writ
       ...EMPTY_OAUTH,
       grants: [
         { clientId: "dup", actorSeed: SEED, actor: SEED_AUTHOR, grantedAt: 1, standing: true },
-        { clientId: "dup", actorSeed: secondSeed, actor: secondAuthor, grantedAt: 2, standing: true },
+        {
+          clientId: "dup",
+          actorSeed: secondSeed,
+          actor: secondAuthor,
+          grantedAt: 2,
+          standing: true,
+        },
       ],
     };
     expect(() => writeOAuthFile(home, duplicated)).toThrow(OAuthFileUnreadable);
