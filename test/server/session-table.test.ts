@@ -203,6 +203,27 @@ describe("§36 phase 4 — the session table", () => {
     expect(table.resolveToken(secret!)).toBeUndefined();
   });
 
+  it("refuses a token past its OWN ttl through resolveToken alone, while the session still lives", () => {
+    // The mirror of criterion 5's prune test, and the audit's one finding: in real bearer traffic
+    // nothing calls touch() between presentations, so resolveToken's own expiry branch is the ONLY
+    // thing enforcing a token's ttl. This rail makes that branch the determining cause: no touch,
+    // no mintToken, no sweep between the mint and the refusal.
+    let clock = 0;
+    const table = createSessionTable({ idleMs: 100_000, now: () => clock });
+    const opened = table.open("grace");
+    const id = opened!.id;
+    const secret = table.mintToken(id, 1_000); // the token dies long before its session
+
+    // Positive control: the token resolves inside its own ttl.
+    expect(table.resolveToken(secret!)).toBe("grace");
+
+    clock = 1_001; // past the token's ttl; the session's idle window is nowhere near over
+    expect(table.resolveToken(secret!)).toBeUndefined();
+
+    // Two-sided: only the token died. The session itself still answers.
+    expect(table.touch(id)).toEqual({ user: "grace" });
+  });
+
   // Same review: `mintToken` pruned only EXPIRED digests, so a session minting many long-TTL tokens
   // in a row grew its digest set without bound.
   it("refuses to mint past a session's live-token cap", () => {
