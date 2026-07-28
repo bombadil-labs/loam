@@ -12,7 +12,10 @@
   ],
   "id": "T124",
   "phase": "P1",
-  "rails": [],
+  "rails": [
+    "test/cli/user-roles.test.ts",
+    "test/server/operator-keys.test.ts"
+  ],
   "scope": [
     "src/cli/cli.ts",
     "src/cli/prompt.ts",

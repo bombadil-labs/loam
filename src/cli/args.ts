@@ -22,8 +22,15 @@ export function parseArgs(args: readonly string[], booleanFlags: ReadonlySet<str
       const body = arg.slice(2);
       const eq = body.indexOf("=");
       if (eq >= 0) {
+        const name = body.slice(0, eq);
+        // A boolean flag takes no value at all — `--operator=true` is not "operator absent" (T117:
+        // this token used to fall through to `flags`, so a caller checking only `booleans` silently
+        // read it as never having been passed). Refuse rather than guess which collection it meant.
+        if (booleanFlags.has(name)) {
+          throw new UsageError(`flag --${name} takes no value (write --${name}, not --${name}=...)`);
+        }
         // `--name=value`, the near-universal form, kept whole.
-        flags.set(body.slice(0, eq), body.slice(eq + 1));
+        flags.set(name, body.slice(eq + 1));
       } else if (booleanFlags.has(body)) {
         booleans.add(body);
       } else {

@@ -7,7 +7,16 @@
 // the seed on Windows should place the home on an access-restricted directory (or supply the
 // seed via the environment and keep the home ephemeral).
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  accessSync,
+  constants,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { authorForSeed } from "@bombadil/rhizomatic";
 import { randomBytes } from "node:crypto";
@@ -44,8 +53,83 @@ export function initHome(home: string, suppliedSeed?: string): InitResult {
   return { created: true, operator };
 }
 
+/**
+ * Is `home` a directory this process can actually work in? Names the fault, distinctly, rather
+ * than one message for every shape of "no" (§36 phase 3, T124): a plain `lstat` sees a symlink but
+ * not whether its target exists, and `lstat` + `isDirectory` would wrongly condemn a HEALTHY
+ * symlinked home (a symlink itself is never `isDirectory`). So `lstat` names the path itself first,
+ * `stat` (which follows a symlink) judges usability, and a working directory needs to be traversable
+ * as well as present — `access` with all three of R/W/X asks that. `allowMissing` lets a bootstrap
+ * caller (`create`, matching `serve`/`register`) treat "nothing here yet" as fine to build; a
+ * caller that must not create a home as a side effect of failing to find one (`assign-role`,
+ * `remove-role`) passes `false`.
+ */
+export function homeDefect(home: string, opts: { readonly allowMissing: boolean }): string | undefined {
+  const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+  let link;
+  try {
+    link = lstatSync(home);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return opts.allowMissing
+        ? undefined
+        : `${home} does not exist — \`loam init --home ${home}\` or \`loam user create\` makes one`;
+    }
+    return `${home} could not be checked: ${message(err)}`;
+  }
+  let target;
+  try {
+    target = statSync(home); // follows a symlink; a plain file or directory stats identically to lstat
+  } catch (err) {
+    if (link.isSymbolicLink() && (err as NodeJS.ErrnoException).code === "ENOENT") {
+      return `${home} is a symlink to a path that does not exist — point it at a real directory, or remove it`;
+    }
+    return `${home} could not be checked: ${message(err)}`;
+  }
+  if (!target.isDirectory()) {
+    return `${home} is not a directory — pass --home a directory, or remove the file at that path`;
+  }
+  try {
+    accessSync(home, constants.R_OK | constants.W_OK | constants.X_OK);
+  } catch {
+    return `${home} is sealed against this process — fix its permissions, or choose a home you own`;
+  }
+  return undefined;
+}
+
 export function readSeed(home: string): string {
   return readFileSync(seedPath(home), "utf8").trim();
+}
+
+// A per-operator signing key (§36 phase 3, T124): one file per user who has ever held the
+// `operator` role, beside `operator.seed`, at the same 0600 mode. It never enters the ground — the
+// ground replicates under federation, and a local secret must not.
+export const userSeedPath = (home: string, name: string): string => join(home, `user.${name}.seed`);
+
+/** Write (or overwrite) a user's seed. Always unconditional — see the working spec's §36.3.1.3: the
+ * file is not itself a source of truth, the ground's grant is, so nothing worth keeping is ever
+ * destroyed by replacing it. */
+export function writeUserSeed(home: string, name: string, seed: string): void {
+  writeFileSync(userSeedPath(home, name), `${seed}\n`, { mode: 0o600 });
+}
+
+/**
+ * `remove-role` must tell "no file" from "a file I could not read" apart (§36.3.1.7): only the
+ * first authorizes striking the role without its grant — the second may be hiding a key someone
+ * else can still use, and "cannot determine" must never read as "safe to proceed" (H9).
+ */
+export type UserSeedRead =
+  | { readonly kind: "present"; readonly seed: string }
+  | { readonly kind: "absent" }
+  | { readonly kind: "unreadable"; readonly detail: string };
+
+export function readUserSeed(home: string, name: string): UserSeedRead {
+  try {
+    return { kind: "present", seed: readFileSync(userSeedPath(home, name), "utf8").trim() };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { kind: "absent" };
+    return { kind: "unreadable", detail: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 export function readConfig(home: string): LoamConfig {

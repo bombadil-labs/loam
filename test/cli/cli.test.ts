@@ -67,6 +67,18 @@ describe("loam init", () => {
   });
 });
 
+// T124's fix for T117 lives in the shared parser (args.ts), not in `loam user` alone — this pins
+// it against a DIFFERENT command's boolean flag, so the fix is proven general rather than special-
+// cased to `--operator`. `--http` is `serve`'s only boolean; `=1` must refuse before any server
+// logic runs (parseFor throws before `cmdServe`'s body is reached).
+describe("the arg parser refuses a value on a boolean flag (T117)", () => {
+  it("`--http=1` is a usage error, not a silently-absent boolean", async () => {
+    const code = await run(["serve", "--http=1", "--home", home, "--token", "t"], io());
+    expect(code).toBe(2);
+    expect(err.join("\n")).toMatch(/--http takes no value/);
+  });
+});
+
 async function serveDetached(
   args: readonly string[],
 ): Promise<{ url: string; close(): Promise<void> }> {
