@@ -135,7 +135,9 @@ The documents:
   `X-Forwarded-Host`/`X-Forwarded-Proto` header answers byte-identical JSON to a request with
   neither — the documents are computed from `options.publicUrl` alone, never `req.headers`.
   Verified by `test/server/oauth-discovery.test.ts` (three requests, one baseline, two hostile
-  headers, `toBe` on the response text) and by `grep -n "req.headers" src/server/oauth.ts` finding
+  headers, `toBe` on the response text) and by test (e2) in the same file, which forges the raw
+`Host` header itself through `node:http` (WHATWG fetch cannot) and pins the bytes; formerly cited a
+grep that was never wired into any gate, which the audit caught, finding
   no match in the document-building functions (the discovery `handle` function never reads them).
 - (f) Neither well-known path answers anything but GET or HEAD: `POST`/`DELETE` answer 405 carrying
   `allow: GET, HEAD` (RFC 9110 §15.5.6 requires a 405 to name what IS allowed, not only refuse what

@@ -221,6 +221,68 @@ describe("T133 — the well-known documents are served, off configured publicUrl
     expect(hostileAs.text).toBe(baselineAs.text);
   });
 
+  it("(e3) a mount named .well-known cannot shadow discovery — precedence is pinned", async () => {
+    // The audit's second finding: the discovery check runs before mount resolution in http.ts, and
+    // no rail pinned that ordering — a refactor moving it after would have stayed green. This
+    // fixture constructs the collision outright.
+    const shadow = await boot();
+    const h2 = await serve({
+      mounts: { ".well-known": shadow },
+      tokens: { "op-token": { operator: true } },
+      port: 0,
+      host: "127.0.0.1",
+      publicUrl: PUBLIC_URL,
+    });
+    try {
+      const answer = await ask(h2.url, "/.well-known/oauth-protected-resource");
+      expect(answer.status).toBe(200);
+      expect(JSON.parse(answer.text)).toEqual(protectedResourceDocument(PUBLIC_URL));
+    } finally {
+      await h2.close();
+      await shadow.close();
+    }
+  });
+
+  it("(e2) a forged raw Host header — WITH forwarded headers beside it — changes nothing", async () => {
+    // The audit's finding: WHATWG fetch forbids setting Host, so the criterion's Host half went
+    // untested and its named fallback (a grep) existed only as prose. node:http CAN set Host, so
+    // the rail is closable in this harness — pin the bytes to the configured publicUrl under the
+    // most hostile spelling a proxy chain can deliver.
+    const { request } = await import("node:http");
+    const raw = (path: string, headers: Record<string, string>) =>
+      new Promise<string>((resolve, reject) => {
+        const u = new URL(base);
+        const req = request(
+          { host: u.hostname, port: u.port, path, headers },
+          (res) => {
+            let body = "";
+            res.on("data", (c) => (body += c));
+            res.on("end", () => resolve(body));
+          },
+        );
+        req.on("error", reject);
+        req.end();
+      });
+    for (const path of [
+      "/.well-known/oauth-protected-resource",
+      "/.well-known/oauth-authorization-server",
+    ]) {
+      const baseline = await raw(path, {});
+      const hostile = await raw(path, {
+        host: "evil.example:8443",
+        "x-forwarded-host": "evil.example",
+        "x-forwarded-proto": "https",
+      });
+      expect(hostile).toBe(baseline);
+      // Positive control: the baseline itself is the configured document, not some refusal both
+      // spellings share.
+      expect(JSON.parse(baseline).resource ?? JSON.parse(baseline).issuer).toContain(
+        new URL(PUBLIC_URL).host,
+      );
+      expect(hostile).not.toContain("evil.example");
+    }
+  });
+
   it("(f) neither well-known path answers anything but GET/HEAD", async () => {
     for (const path of [
       "/.well-known/oauth-protected-resource",
