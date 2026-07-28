@@ -227,8 +227,13 @@ The lock:
   `writeOAuthFile`).
 - (s) The temp file's body is written with `writeFileSync(fd, body)`, never the raw `writeSync`
   syscall binding — `writeSync` can return short of the whole string, and a short write here would
-  fsync and rename a truncated JSON body over a good one with no way back. Verified by
-  `grep -n "writeFileSync(fd, body)" src/server/oauth-file.ts` finding the call.
+  fsync and rename a truncated JSON body over a good one with no way back. The same holds for the
+  lock's own nonce (`writeFileSync(fd, nonce)` in `claimLock`), where a short write is worse: a
+  truncated nonce still gets hard-linked as a live lock, so `verifyOwnership` never recognizes it as
+  its own and the release in `withOAuthFile`'s `finally` cannot clean it up — orphaning the lock for
+  the full `LOCK_STALE_MS` window rather than merely failing one write. Verified by
+  `grep -n "writeFileSync(fd, body)" src/server/oauth-file.ts` and
+  `grep -n "writeFileSync(fd, nonce)" src/server/oauth-file.ts`, each finding its call.
 - (t) A throw during the temp's own open, write, or fsync leaves no temp file behind — before this,
   cleanup ran only around the later ownership-check and rename steps, so a fault in the write phase
   itself orphaned a temp holding a plaintext actor seed. Verified by `test/server/oauth-file.test.ts`

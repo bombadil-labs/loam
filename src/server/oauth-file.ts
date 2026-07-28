@@ -39,7 +39,6 @@ import {
   rmSync,
   statSync,
   writeFileSync,
-  writeSync,
 } from "node:fs";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -484,7 +483,13 @@ const claimLock = (lock: string, nonce: string): boolean => {
   try {
     const fd = openSync(temp, "wx", 0o600);
     try {
-      writeSync(fd, nonce);
+      // `writeFileSync` on a FD loops until the whole buffer lands — the same reason
+      // `performAtomicWrite` uses it rather than the raw `writeSync` binding. A short write here
+      // is worse than in the main file: the truncated nonce still gets hard-linked as a LIVE lock,
+      // so `verifyOwnership` never matches it, and the release in `withOAuthFile`'s `finally`
+      // refuses to delete a lock it does not recognize as its own — orphaning it for the full
+      // `LOCK_STALE_MS` window instead of merely failing this one write.
+      writeFileSync(fd, nonce);
     } finally {
       closeSync(fd);
     }
