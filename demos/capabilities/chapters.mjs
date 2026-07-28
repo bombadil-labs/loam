@@ -1402,6 +1402,12 @@ export const CHAPTERS = [
             door: null,
           },
           {
+            says: "Removing a role strikes EVERY surviving claim of it, not just the latest one — a role granted twice, once through the CLI and once by a hand-appended claim standing in for a federated pull, still comes off in one `remove-role` call. For the operator role, the same call strikes the signing grant it minted, and a fresh delta signed by that user's old key stops resolving for a governed reader while a different operator's key still does.",
+            spec: "spec/36-users-and-sessions.md",
+            proof: "test/cli/user-roles.test.ts",
+            door: null,
+          },
+          {
             says: "A signed-in session lives only in server memory, past its idle window it refuses rather than resurrecting, and a wall clock stepped backward cannot extend it — the table reads a clock that only ever moves forward.",
             spec: "spec/36-users-and-sessions.md",
             proof: "test/server/session-table.test.ts",
@@ -1418,7 +1424,10 @@ export const CHAPTERS = [
       {
         kind: "notYet",
         items: [
-          "Nothing reads or writes the credential file yet — no door, no CLI command. The bootstrap and role commands (T124) and the login door are later phases of this same arc.",
+          "The role commands (`loam user create`/`assign-role`/`remove-role`) are the only door onto a user or a role — nothing remote reads or writes one yet. The login door is a later phase of this same arc.",
+          "Sessions, cookies, cross-site defence, and a login delay that slows guessing without locking anyone out are designed as later phases and not yet built.",
+          "`loam user unlock` is deferred to the login-delay phase, which owns the file it would clear.",
+          "The bootstrap and role commands now read and write the credential file. No door serves it yet — the login door (T126) is a later phase of this same arc.",
           "A login door, a cookie, cross-site defence, and a login delay that slows guessing without locking anyone out are designed as later phases and not yet built — the session table itself (an id, an idle window, a cap) is built, but nothing yet calls it.",
         ],
       },

@@ -73,6 +73,49 @@ one seed key every operator on the box shares.
 `src/gateway/gather.ts`, proved by `test/server/users-ground.test.ts`. Working spec:
 `.adlc/specs/36-02-a-user-is-a-fact.md`. Ticket T123.
 
+### 36.3 The bootstrap, the role commands, and per-operator keys
+
+`loam user create <name> [--operator]` is the first door onto a store: it asks for a password twice
+with the terminal echo off, writes the credential, and plants the user and role deltas — signed with
+`<home>/operator.seed`, the same file `loam init`/`loam serve` already read. Proving operatorship is
+proving home access; there is no remote path that mints a role, and a browser session, however
+privileged once a later phase wires one up, cannot call these commands.
+
+`loam user assign-role <name> --role=<role>` and `loam user remove-role <name> --role=<role>` make a
+role a first-class, revisable fact rather than a flag `create` can only set once. `assign-role`
+appends one operator-signed role claim (or refuses if the role is already held); `remove-role`
+appends an operator-signed negation of **every surviving claim** of that role — never the latest
+one, since roles resolve with `all` (§36.2) and a second grant, however it arrived, keeps a struck
+role held through its own filing.
+
+**A `--role=operator` assignment also mints the user their own signing key**, beside
+`operator.seed`, at the same file mode, and never inside the ground — the same reason a credential
+never is. The key becomes trusted through the existing grant vocabulary (§7): the CLI files a
+`loam.grants` entry at the store's own entity, authored by the store's seed, naming the fresh public
+key as `subject`. `lawfulStrikersJson` — unmodified, and already governing every trust-aware read —
+already admits exactly that shape, and admits it only when the grant's author is the store's own
+seed. So a delegated operator's own grant for a third party never widens who is trusted: depth is
+bounded by authorship, not by how many links a chain can express. `remove-role operator` strikes the
+grant alongside the role, when the key file can still name it; when the key file was already lost,
+the command says so and leaves that lingering grant named as a residue, rather than guessing.
+
+Losing a user's own key file is not losing the role. Recovery is `remove-role` then `assign-role`
+again: the latter mints a fresh key and files a fresh grant regardless of what came before, and the
+user's past deltas keep their old author, so history never rewrites. The same home-access proof
+means even the LAST operator on a store may remove their own role and reassign it — both commands
+need no session and no live operator-role user in the ground at any point in between, so a store can
+never lock itself out from the box that holds its own seed.
+
+An unusable `--home` is refused with the fault named, not one message for every shape of "no":
+missing (when a command must not bootstrap one, unlike `create`), a dangling symlink, a plain file
+where a directory was named, and a directory this process cannot read, write, or traverse.
+
+**Provenance.** [PR #290](https://github.com/bombadil-labs/loam/pull/290) — `src/cli/cli.ts`,
+`src/cli/prompt.ts`, `src/cli/config.ts`, `src/cli/args.ts` (the T117 parser fix — a boolean flag
+given a value now refuses rather than reading as absent), proved by `test/cli/user-roles.test.ts`,
+`test/server/operator-keys.test.ts`, and `test/cli/prompt.test.ts`. Working spec:
+`.adlc/specs/36-03-the-bootstrap-the-role-commands-and-per-operator-keys.md`. Ticket T124.
+
 ### 36.4 The session table
 
 A signed-in session lives in the server's own memory, in a plain `Map` with no persistence: a

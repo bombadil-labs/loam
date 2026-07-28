@@ -6,9 +6,16 @@
 // live ServerHandle so a caller (a test, or a supervisor) can drive and close it. The default
 // `serve` blocks until the process is signalled.
 
+import { randomBytes } from "node:crypto";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { authorForSeed } from "@bombadil/rhizomatic";
+import {
+  authorForSeed,
+  makeNegationClaims,
+  signClaims,
+  type Delta,
+  type Reactor,
+} from "@bombadil/rhizomatic";
 import { Gateway, type FederationReport } from "../gateway/gateway.js";
 import { parseOffer } from "../federation/offer.js";
 import { toWire } from "../federation/wire.js";
@@ -16,12 +23,34 @@ import { migrate } from "../migrate/migrate.js";
 import { pullFrom } from "../federation/pull.js";
 import { tombstonesIn } from "../gateway/erase.js";
 import { assembleGenesis } from "../gateway/genesis.js";
+import { STORE_ENTITY } from "../gateway/genesis.js";
+import { CTX_GRANTS, grantClaims } from "../gateway/accounts.js";
 import {
   parseRegistrationInput,
   schemaEntityFor,
   type RegistrationInput,
 } from "../gateway/registration.js";
 import { serve, type ServerHandle } from "../server/http.js";
+import {
+  credentialsPath,
+  entryFor,
+  hashPassword,
+  readCredentials,
+  writeCredentials,
+  type ScryptParams,
+} from "../server/credentials.js";
+import {
+  CTX_ROLE,
+  resolveUserView,
+  roleClaims,
+  rolesOf,
+  userClaims,
+  userEntity,
+  userNameDefect,
+  userRoleDefect,
+  type UserRole,
+} from "../server/users.js";
+import { promptSecret } from "./prompt.js";
 import type { StoreBackend } from "../store/backend.js";
 import { ArchiveBackend } from "../store/archive.js";
 import { MirrorBackend } from "../store/mirror.js";
@@ -29,7 +58,16 @@ import { SqliteBackend } from "../store/sqlite.js";
 import { legibilityWarnings, reAdmit } from "../gateway/repair.js";
 import { strandedStrikeWarnings } from "../store/quarantine.js";
 import { parseArgs, rejectUnknown, UsageError, type Parsed } from "./args.js";
-import { archivePath, initHome, readSeed, storePath } from "./config.js";
+import {
+  archivePath,
+  homeDefect,
+  initHome,
+  readSeed,
+  readUserSeed,
+  storePath,
+  userSeedPath,
+  writeUserSeed,
+} from "./config.js";
 
 export interface IO {
   out(line: string): void;
@@ -39,12 +77,16 @@ export interface IO {
 export interface RunOptions {
   readonly detach?: boolean; // serve: return the handle instead of blocking
   readonly version?: string; // override the reported version (tests)
+  /** `user create`: ask for a secret some other way than the terminal (embedders; tests). */
+  readonly readSecret?: (prompt: string) => Promise<string>;
+  /** `user create`: the scrypt cost, for a caller that must not pay the interactive default (tests). */
+  readonly scrypt?: ScryptParams;
 }
 
 const VERSION = "0.1.0";
 
 type CommandName =
-  "init" | "serve" | "register" | "pull" | "migrate" | "store" | "repair" | "artifact";
+  "init" | "serve" | "register" | "pull" | "migrate" | "store" | "repair" | "artifact" | "user";
 
 interface CommandSpec {
   readonly summary: string; // the line the top-level help shows
@@ -145,6 +187,31 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "Repair is the operator's alone, like erasure (§11): it needs the home's seed.",
     ],
   },
+  user: {
+    summary: "provision a login user and manage role assignments (SPEC §36)",
+    usage: "loam user create|assign-role|remove-role <name> [options]",
+    flags: new Set(["home", "store", "role", "operator"]),
+    booleans: new Set(["operator"]),
+    notes: [
+      "subcommands:",
+      "  create <name> [--operator]        ask for a password twice, write the credential, plant",
+      "                                     the user and role deltas; --operator also mints a key",
+      "  assign-role <name> --role=<role>  grant a role (operator | actor); operator additionally",
+      "                                     mints a signing key and trusts it with a grant",
+      "  remove-role <name> --role=<role>  strike a role (and, for operator, its signing grant)",
+      "",
+      "PROOF OF OPERATORSHIP IS HOME ACCESS, ALONE. Every one of these commands signs with",
+      "<home>/operator.seed — the same file `loam init`/`loam serve` read. There is no remote path",
+      "that mints or changes a role; a browser session, however privileged, cannot call these.",
+      "",
+      "RECOVERY. Losing a user's own signing key is not losing the role: run `remove-role <name>",
+      "--role=operator` (it strikes the grant too, when the key file can still name it — a fault",
+      "reading that file refuses the whole command rather than guessing) then `assign-role <name>",
+      "--role=operator` again, which mints a fresh key and files a fresh grant. Even the LAST",
+      "operator may remove their own role this way and reassign it — both commands need only home",
+      "access, never a live session, so the store is never lockable from a terminal that can read it.",
+    ],
+  },
 };
 
 // One blurb per flag NAME — a name means the same thing in every command that takes it. The LIST a
@@ -177,6 +244,8 @@ const FLAG_HELP: Readonly<Record<string, { readonly arg: string; readonly note: 
     arg: "",
     note: "yes, I know only the schema\u2019s writable list binds on that host",
   },
+  role: { arg: "<role>", note: "operator | actor" },
+  operator: { arg: "", note: "give the new user the operator role (default: a plain actor)" },
 };
 
 function topHelp(): string {
@@ -910,6 +979,427 @@ async function cmdArtifact(args: readonly string[], io: IO): Promise<number> {
   return 0;
 }
 
+// `loam user` (SPEC §36 phase 3, T124): the bootstrap door for a person, and the role commands.
+// Home access is the proof of operatorship — the same authority erasure and repair need — so
+// there is no remote way in. See the working spec (.adlc/specs/36-03-*.md) for the full model;
+// comments here name only what would bite a future reader of THIS file.
+async function cmdUser(args: readonly string[], io: IO, options: RunOptions): Promise<number> {
+  const parsed = parseFor("user", args);
+  const sub = parsed.positionals[0];
+  if (sub !== "create" && sub !== "assign-role" && sub !== "remove-role") {
+    io.err(
+      "user wants a subcommand: `loam user create <name> [--operator]`, " +
+        "`loam user assign-role <name> --role=<role>`, or `loam user remove-role <name> --role=<role>`",
+    );
+    return 2;
+  }
+  const name = parsed.positionals[1];
+  if (name === undefined) {
+    io.err(`user ${sub} wants a name: \`loam user ${sub} <name>\``);
+    return 2;
+  }
+  if (parsed.positionals.length > 2) {
+    io.err(`user ${sub} takes exactly one name`);
+    return 2;
+  }
+  // Checked before ANY path is built from `name` — a name is a single path component (no `/`),
+  // never a traversal, whether it reaches a credential entry key or a seed file name.
+  const nameDefect = userNameDefect(name);
+  if (nameDefect !== undefined) {
+    io.err(`user ${sub}: ${nameDefect}`);
+    return 2;
+  }
+  const home = parsed.flags.get("home") ?? defaultHome();
+  if (sub === "create") return cmdUserCreate(name, parsed, home, io, options);
+  return cmdUserRole(name, parsed, home, io, sub === "assign-role" ? "assign" : "remove");
+}
+
+async function cmdUserCreate(
+  name: string,
+  parsed: Parsed,
+  home: string,
+  io: IO,
+  options: RunOptions,
+): Promise<number> {
+  if (parsed.flags.has("operator")) {
+    io.err("user create: --operator takes no value (write --operator, not --operator=...)");
+    return 2;
+  }
+  const role: UserRole = parsed.booleans.has("operator") ? "operator" : "actor";
+
+  const unusable = homeDefect(home, { allowMissing: true });
+  if (unusable !== undefined) {
+    io.err(`user create: ${unusable}`);
+    return 1;
+  }
+  const init = initHome(home);
+  if (init.created) io.out(`loam: initialized ${home}\n  operator ${init.operator}`);
+
+  // The credential-existence check runs BEFORE prompting: an existing credential means this name
+  // is fully provisioned already, and there is nothing a password prompt could accomplish.
+  let existing;
+  try {
+    existing = readCredentials(home);
+  } catch (err) {
+    io.err(
+      `user create: ${credentialsPath(home)} is unreadable, so this command will not overwrite it: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    );
+    return 1;
+  }
+  const credentialAlreadyPresent = entryFor(existing, name) !== undefined;
+  if (credentialAlreadyPresent) {
+    io.err(
+      `user create: ${name} already has a credential in ${home} — this command will not overwrite ` +
+        `one. Remove the entry from ${credentialsPath(home)} to set that user a new password.`,
+    );
+    return 2;
+  }
+
+  const ask = options.readSecret ?? promptSecret;
+  const password = await ask(`password for ${name}: `);
+  const again = await ask("the same password again: ");
+  if (password.length === 0) {
+    io.err("user create: a password is required");
+    return 2;
+  }
+  if (password !== again) {
+    io.err("user create: the two passwords did not match — nothing was written");
+    return 2;
+  }
+  const entry = await hashPassword(password, options.scrypt);
+
+  const path = storePath(home, parsed.flags.get("store"));
+  const seed = readSeed(home);
+  const operator = authorForSeed(seed);
+  const gateway = await Gateway.boot(openStore(path, io), assembleGenesis({ operatorSeed: seed }));
+  let known: boolean;
+  let already: ReadonlySet<UserRole>;
+  let mintedKey: string | undefined; // set only when this call just appended a fresh operator grant
+  try {
+    // ASK THE GROUND, not only the credential file — the two halves of a user can come apart (a
+    // credential removed by hand, or a write that failed after the deltas landed), and appending a
+    // SECOND user record for the same name is the shape that outlives that: `pickLatest` would
+    // resolve whichever record won, silently.
+    known = resolveUserView(gateway.reactor, gateway.operator, name) !== undefined;
+    already = known ? rolesOf(gateway.reactor, gateway.operator, name) : new Set<UserRole>();
+    if (!known) {
+      const at = Date.now();
+      const deltas: Delta[] = [
+        signClaims(userClaims(name, operator, at), seed),
+        signClaims(roleClaims(name, role, operator, at + 1), seed),
+      ];
+      if (role === "operator") {
+        mintedKey = randomBytes(32).toString("hex");
+        const subject = authorForSeed(mintedKey);
+        deltas.push(
+          signClaims(grantClaims(STORE_ENTITY, subject, "admin", operator, at + 2), seed),
+        );
+      }
+      await gateway.append(deltas);
+    }
+  } catch (err) {
+    await gateway.close().catch(() => {}); // never let a close failure mask the real refusal
+    throw err;
+  }
+  await gateway.close();
+
+  if (known && already.size === 0) {
+    // The record stands and no role reads from it. Repairing that means appending a role binding,
+    // which is a role decision — this command does not make one on the way to writing a password.
+    io.err(
+      `user create: the ground holds a record for ${name} but no readable role, and this ` +
+        `command will not add one. Nothing was written. \`loam store\` shows what is there.`,
+    );
+    return 2;
+  }
+  if (known && !already.has(role)) {
+    io.err(
+      `user create: the ground already binds ${name} to ${[...already].join(", ")}, and you asked ` +
+        `for ${role} — this command will not change a role. Nothing was written.`,
+    );
+    return 2;
+  }
+  // Past this point either a fresh user just landed (mintedKey set iff role is operator), or this
+  // is a REPAIR run: the ground already matches what was asked, and only the credential (never
+  // seen above, by the check at the top) — and, for operator, possibly the seed file too — is
+  // outstanding. `mintedKey` covers the fresh case; repair checks the seed file's own presence.
+  if (known && role === "operator") {
+    const seedRead = readUserSeed(home, name);
+    if (seedRead.kind !== "present") {
+      // Writing the credential here would report success while ${name} still cannot sign
+      // anything — the same lost-key shape the role commands already name a recovery for.
+      io.err(
+        `user create: the ground already binds ${name} to operator, but ${userSeedPath(home, name)} ` +
+          (seedRead.kind === "absent" ? "is missing" : `is unreadable (${seedRead.detail})`) +
+          ` — writing only a credential would leave ${name} unable to sign anything. Nothing was ` +
+          `written. Recover with \`loam user remove-role ${name} --role=operator\` then ` +
+          `\`loam user assign-role ${name} --role=operator\` once the fault clears.`,
+      );
+      return 1;
+    }
+  }
+
+  // The seed file lands BEFORE the credential (§36.3.1.3): if the credential write then fails, a
+  // re-run's repair path above finds the seed already present and only has the credential left to
+  // write. The other order would strand a fresh operator forever behind the top-of-command
+  // "credential already exists" refusal, with no seed file ever written.
+  if (mintedKey !== undefined) {
+    try {
+      writeUserSeed(home, name, mintedKey);
+    } catch (err) {
+      io.err(
+        `user create: ${name} now holds operator in the ground, but writing ` +
+          `${userSeedPath(home, name)} failed: ${err instanceof Error ? err.message : String(err)}. ` +
+          `The grant is live with no local key to use it yet — retry this command once the fault ` +
+          `clears, or recover with \`loam user remove-role ${name} --role=operator\` then ` +
+          `\`loam user assign-role ${name} --role=operator\`.`,
+      );
+      return 1;
+    }
+  }
+
+  // Re-read the file HERE rather than trusting the snapshot from before the prompts, the hash and
+  // the boot — another `user create` may have added an entry in that window.
+  let current;
+  try {
+    current = readCredentials(home);
+  } catch (err) {
+    io.err(
+      `user create: ${credentialsPath(home)} became unreadable while this ran, so nothing was ` +
+        `written: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return 1;
+  }
+  if (entryFor(current, name) !== undefined) {
+    io.err(
+      `user create: ${name} gained a credential while this ran, so no credential was overwritten — ` +
+        `but the deltas above DID land. Check \`loam store\` before running this again.`,
+    );
+    return 2;
+  }
+  writeCredentials(home, { version: 1, users: { ...current.users, [name]: entry } });
+  io.out(
+    known
+      ? `loam: repaired ${name}'s credential — the ground already held the ${role} role\n` +
+          `  the password hash is local to ${credentialsPath(home)} — it never enters the ground`
+      : `loam: created ${name} with the ${role} role\n` +
+          `  the user and role deltas are in ${path}` +
+          (mintedKey !== undefined
+            ? `, with a grant trusting the fresh key at ${userSeedPath(home, name)}`
+            : "") +
+          `\n  the password hash is local to ${credentialsPath(home)} — it never enters the ground`,
+  );
+  const staleness = servingWarning(home, path);
+  if (staleness !== undefined) io.err(`loam: ${staleness}`);
+  return 0;
+}
+
+// The surviving (non-negated-by-the-operator) claims at `entity`/`context` matching `matches` — the
+// primitive this file's role commands need and `rolesOf` does not expose: WHICH deltas to strike,
+// not just what a reader resolves. Single-level survival (does an OPERATOR-authored negation target
+// this id), matching the trust the substrate's own `mask: {trust: ...}` already applies when
+// resolving a role or a grant — this file does not re-derive a deeper chain.
+function survivingClaimIds(
+  reactor: Reactor,
+  operator: string,
+  entity: string,
+  context: string,
+  matches: (delta: Delta) => boolean,
+): string[] {
+  const out: string[] = [];
+  for (const id of reactor.byTarget(entity)) {
+    const delta = reactor.get(id);
+    if (delta === undefined) continue;
+    const filedHere = delta.claims.pointers.some(
+      (p) =>
+        p.target.kind === "entity" &&
+        p.target.entity.id === entity &&
+        p.target.entity.context === context,
+    );
+    if (!filedHere || !matches(delta)) continue;
+    const struck = reactor
+      .negationsOf(id)
+      .some((negId) => reactor.get(negId)?.claims.author === operator);
+    if (!struck) out.push(id);
+  }
+  return out;
+}
+
+const survivingRoleClaimIds = (
+  reactor: Reactor,
+  operator: string,
+  name: string,
+  role: UserRole,
+): string[] =>
+  survivingClaimIds(reactor, operator, userEntity(name), CTX_ROLE, (delta) =>
+    delta.claims.pointers.some(
+      (p) => p.role === "role" && p.target.kind === "primitive" && p.target.value === role,
+    ),
+  );
+
+// Every SURVIVING grant this store's own seed authored for `subject` — the CURRENT holder of a
+// name's seed file, never a historical one (the working spec's §36.3.1.7 names that residual).
+const survivingGrantClaimIds = (reactor: Reactor, operator: string, subject: string): string[] =>
+  survivingClaimIds(
+    reactor,
+    operator,
+    STORE_ENTITY,
+    CTX_GRANTS,
+    (delta) =>
+      delta.claims.author === operator &&
+      delta.claims.pointers.some(
+        (p) => p.role === "subject" && p.target.kind === "primitive" && p.target.value === subject,
+      ),
+  );
+
+async function cmdUserRole(
+  name: string,
+  parsed: Parsed,
+  home: string,
+  io: IO,
+  mode: "assign" | "remove",
+): Promise<number> {
+  const label = mode === "assign" ? "assign-role" : "remove-role";
+  const roleArg = parsed.flags.get("role");
+  if (roleArg === undefined) {
+    io.err(`user ${label}: wants --role=<role>`);
+    return 2;
+  }
+  const roleDefect = userRoleDefect(roleArg);
+  if (roleDefect !== undefined) {
+    io.err(`user ${label}: ${roleDefect}`);
+    return 2;
+  }
+  const role = roleArg as UserRole;
+
+  const unusable = homeDefect(home, { allowMissing: false });
+  if (unusable !== undefined) {
+    io.err(`user ${label}: ${unusable}`);
+    return 1;
+  }
+  let seed: string;
+  try {
+    seed = readSeed(home);
+  } catch (err) {
+    io.err(
+      `user ${label}: ${home} has no operator identity yet — \`loam init\` or ` +
+        `\`loam user create\` makes one: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return 1;
+  }
+  const operator = authorForSeed(seed);
+  const path = storePath(home, parsed.flags.get("store"));
+  const gateway = await Gateway.boot(openStore(path, io), assembleGenesis({ operatorSeed: seed }));
+  try {
+    const known = resolveUserView(gateway.reactor, gateway.operator, name) !== undefined;
+    if (!known) {
+      io.err(
+        `user ${label}: ${home}'s ground does not know ${name} — \`loam user create ${name}\` makes one`,
+      );
+      return 2;
+    }
+    const held = rolesOf(gateway.reactor, gateway.operator, name);
+
+    if (mode === "assign") {
+      if (held.has(role)) {
+        io.err(`user assign-role: ${name} already holds ${role} — nothing was appended`);
+        return 2;
+      }
+      const at = Date.now();
+      const deltas: Delta[] = [signClaims(roleClaims(name, role, operator, at), seed)];
+      let mintedKey: string | undefined;
+      if (role === "operator") {
+        mintedKey = randomBytes(32).toString("hex");
+        const subject = authorForSeed(mintedKey);
+        deltas.push(
+          signClaims(grantClaims(STORE_ENTITY, subject, "admin", operator, at + 1), seed),
+        );
+      }
+      try {
+        await gateway.append(deltas);
+      } catch (err) {
+        io.err(
+          `user assign-role: the ground refused this — nothing was appended: ` +
+            `${err instanceof Error ? err.message : String(err)}`,
+        );
+        return 1;
+      }
+      if (mintedKey !== undefined) {
+        try {
+          writeUserSeed(home, name, mintedKey);
+        } catch (err) {
+          io.err(
+            `user assign-role: ${name} now holds operator in the ground, but writing ` +
+              `${userSeedPath(home, name)} failed: ${err instanceof Error ? err.message : String(err)}. ` +
+              `The grant is live with no local key to use it — recover with \`loam user ` +
+              `remove-role ${name} --role=operator\` then \`loam user assign-role ${name} ` +
+              `--role=operator\` again once the fault clears.`,
+          );
+          return 1;
+        }
+      }
+      io.out(
+        `loam: ${name} now holds ${role}\n` +
+          (mintedKey !== undefined
+            ? `  a fresh signing key was minted at ${userSeedPath(home, name)}\n` +
+              `  the role binding and its grant are deltas in ${path}`
+            : `  the role binding is a delta in ${path}`),
+      );
+      return 0;
+    }
+
+    // mode === "remove"
+    if (!held.has(role)) {
+      io.out(`loam: ${name} does not hold ${role} — nothing was appended`);
+      return 0;
+    }
+    let grantIds: string[] = [];
+    let grantNote = "";
+    if (role === "operator") {
+      const seedRead = readUserSeed(home, name);
+      if (seedRead.kind === "unreadable") {
+        // "Cannot determine" must never read as "safe to proceed" (H9): the file may still be
+        // legible to someone else, so this refuses the WHOLE command rather than striking the
+        // role alone and reporting a partial success as if it were a complete one.
+        io.err(
+          `user remove-role: ${userSeedPath(home, name)} could not be read ` +
+            `(${seedRead.detail}) — this command will not guess whether that key is still live, ` +
+            `so nothing was struck. Fix the fault and retry.`,
+        );
+        return 1;
+      }
+      if (seedRead.kind === "present") {
+        const subject = authorForSeed(seedRead.seed);
+        grantIds = survivingGrantClaimIds(gateway.reactor, operator, subject);
+      } else {
+        grantNote =
+          ` (its signing grant could not be located — ${userSeedPath(home, name)} is missing — ` +
+          `and stays live; it is inert unless someone still holds that lost key)`;
+      }
+    }
+    const roleIds = survivingRoleClaimIds(gateway.reactor, operator, name, role);
+    const at = Date.now();
+    const targets = [...roleIds, ...grantIds];
+    const negations = targets.map((id, i) =>
+      signClaims(makeNegationClaims(operator, at + i, id), seed),
+    );
+    try {
+      await gateway.append(negations);
+    } catch (err) {
+      io.err(
+        `user remove-role: the ground refused this — nothing was appended: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+      return 1;
+    }
+    io.out(`loam: ${name} no longer holds ${role}${grantNote}`);
+    return 0;
+  } finally {
+    await gateway.close();
+  }
+}
+
 function defaultHome(): string {
   return process.env["LOAM_HOME"] ?? ".loam";
 }
@@ -963,6 +1453,8 @@ export async function run(
         return await cmdRepair(rest, io);
       case "artifact":
         return await cmdArtifact(rest, io);
+      case "user":
+        return await cmdUser(rest, io, options);
       default:
         io.err(`loam: unknown command "${command}" — run \`loam --help\``);
         return 2;
