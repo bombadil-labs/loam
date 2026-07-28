@@ -28,6 +28,8 @@ export interface SessionTableOptions {
   readonly idleMs?: number;
   /** How many signed-in sessions this table will hold at once (default 4096). */
   readonly maxSessions?: number;
+  /** How many live token digests one session may hold at once (default 16). */
+  readonly maxTokensPerSession?: number;
   /** A monotonic millisecond source. Injectable so a test can drive it; never `Date.now()`. */
   readonly now?: () => number;
 }
@@ -63,14 +65,21 @@ export interface SessionTable {
   drop(id: string): void;
   /**
    * Mint a bearer-token secret bound to `id`'s session, valid for `ttlMs` from now — its OWN expiry,
-   * never the session's idle expiry. Undefined when `id` names no live session. The table records
-   * only the secret's SHA-256 digest, never the secret itself.
+   * never the session's idle expiry. Undefined when `id` names no live session, or when that session
+   * already holds `maxTokensPerSession` live digests (a rapid, long-TTL minting loop cannot grow one
+   * session's digest set without bound — the table's own memory floor is `maxSessions`, and an
+   * unbounded per-session set would let one session alone defeat it).
    */
   mintToken(id: string, ttlMs: number): string | undefined;
   /**
-   * The user a live, unexpired token secret names, or undefined. Does NOT slide the named session's
-   * idle window — presenting a token is a read of this table, not the activity that keeps a session
-   * open; a caller that wants token traffic to do that calls `touch` itself (a phase 7 decision).
+   * The user a live, unexpired token secret names, or undefined — checked against BOTH the token's
+   * own expiry and its parent session's idle expiry. A session past its idle window is refused here
+   * exactly as `touch` would refuse it, even though nothing has swept the row out of the table yet:
+   * sweeping only runs on `open`/`touch`, so an unswept, idle-expired row must not go on
+   * authenticating a bearer token just because nobody has logged in since. Does NOT itself slide the
+   * named session's idle window — presenting a token is a read of this table, not the activity that
+   * keeps a session open; a caller that wants token traffic to do that calls `touch` itself (a phase
+   * 7 decision).
    */
   resolveToken(token: string): string | undefined;
   /** The digests `id`'s session currently holds, for observability and testing. Never the secrets. */
@@ -85,11 +94,13 @@ const digestOf = (secret: string): string => createHash("sha256").update(secret)
 const DEFAULTS = {
   idleMs: 30 * 60_000,
   maxSessions: 4096,
+  maxTokensPerSession: 16,
 };
 
 export function createSessionTable(options: SessionTableOptions = {}): SessionTable {
   const idleMs = options.idleMs ?? DEFAULTS.idleMs;
   const maxSessions = options.maxSessions ?? DEFAULTS.maxSessions;
+  const maxTokensPerSession = options.maxTokensPerSession ?? DEFAULTS.maxTokensPerSession;
   const now = options.now ?? ((): number => performance.now());
 
   const sessions = new Map<string, SessionRow>();
@@ -160,6 +171,7 @@ export function createSessionTable(options: SessionTableOptions = {}): SessionTa
         return undefined;
       }
       pruneTokens(row, moment);
+      if (row.tokenDigests.size >= maxTokensPerSession) return undefined;
       const secret = opaque();
       const digest = digestOf(secret);
       tokens.set(digest, { sessionId: id, expiresAt: moment + ttlMs });
@@ -177,7 +189,15 @@ export function createSessionTable(options: SessionTableOptions = {}): SessionTa
         sessions.get(entry.sessionId)?.tokenDigests.delete(digest);
         return undefined;
       }
-      return sessions.get(entry.sessionId)?.user;
+      const row = sessions.get(entry.sessionId);
+      if (row === undefined) return undefined;
+      if (moment > row.expiresAt) {
+        // The row has outlived its idle window but nothing has swept it out yet — sweeping only runs
+        // on `open`/`touch`. Erase it now rather than letting an unswept row keep authenticating.
+        erase(entry.sessionId, row);
+        return undefined;
+      }
+      return row.user;
     },
 
     tokenDigests(id) {

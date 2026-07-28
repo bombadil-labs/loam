@@ -174,4 +174,45 @@ describe("§36 phase 4 — the session table", () => {
     expect(table.resolveToken(secret!)).toBeUndefined();
     expect(table.touch(id)).toBeUndefined();
   });
+
+  // An independent review of the diff (not a numbered plan criterion, but a real gap in criterion
+  // 5/6's own guarantee): `resolveToken` checked only the TOKEN's own TTL, so a token minted with a
+  // long TTL kept authenticating past its SESSION's idle window for as long as nothing else
+  // triggered a sweep (sweeping only runs on `open`/`touch`) — a token's validity should never
+  // depend on whether some unrelated caller happened to log in recently.
+  it("refuses a token once its own session's idle window has passed, even before any sweep runs", () => {
+    let clock = 0;
+    const table = createSessionTable({ idleMs: 1_000, now: () => clock });
+    const opened = table.open("frank");
+    const id = opened!.id;
+    const secret = table.mintToken(id, 100_000); // the token's own TTL far outlives the session
+
+    // Positive control: resolves while the session is still within its idle window.
+    expect(table.resolveToken(secret!)).toBe("frank");
+
+    // Negative: past the SESSION's idle window (but nowhere near the token's own TTL), and with no
+    // `open` or `touch` call in between to sweep the row — `resolveToken` alone must refuse.
+    clock = 1_001;
+    expect(table.resolveToken(secret!)).toBeUndefined();
+  });
+
+  // Same review: `mintToken` pruned only EXPIRED digests, so a session minting many long-TTL tokens
+  // in a row grew its digest set without bound.
+  it("refuses to mint past a session's live-token cap", () => {
+    const table = createSessionTable({ idleMs: 60_000, maxTokensPerSession: 2 });
+    const opened = table.open("grace");
+    const id = opened!.id;
+
+    const first = table.mintToken(id, 10_000);
+    const second = table.mintToken(id, 10_000);
+    expect(first).toBeDefined();
+    expect(second).toBeDefined();
+
+    // Negative: the cap refuses a third live token.
+    expect(table.mintToken(id, 10_000)).toBeUndefined();
+
+    // Positive control: refusing a new token did not disturb the two already minted.
+    expect(table.resolveToken(first!)).toBe("grace");
+    expect(table.resolveToken(second!)).toBe("grace");
+  });
 });

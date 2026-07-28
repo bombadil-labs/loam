@@ -114,8 +114,13 @@ these tests exist and are red.
    alphabet) paired with its own `now() + ttlMs`. Two-sided rail on the TTL isolation: mint a token
    whose TTL is short and whose session's idle window is long; advance the clock past the token's TTL
    but not the session's; `resolveToken` answers `undefined` while `touch` on the same session still
-   succeeds — the token did not silently borrow the session's remaining idle time. Verified by
-   `test/server/session-table.test.ts`.
+   succeeds — the token did not silently borrow the session's remaining idle time. The reverse also
+   rails: a token minted with a TTL far longer than its session's idle window must NOT keep
+   authenticating past that session's own idle expiry, even when nothing has swept the row out of the
+   table yet — sweeping runs only on `open`/`touch`, so `resolveToken` checks the session's own
+   expiry directly rather than trusting an unswept row. `mintToken` also refuses past
+   `maxTokensPerSession` live digests (default 16), so a rapid, long-TTL minting loop cannot grow one
+   session's digest set without bound. Verified by `test/server/session-table.test.ts`.
 6. Dropping a session revokes the tokens it minted. Mint a token, confirm `resolveToken` answers the
    session's user (positive control — proves resolution works at all before proving revocation),
    `drop` the session, and confirm `resolveToken` of the same secret now answers `undefined`. A
@@ -141,3 +146,12 @@ than a finding). Five causes came back. Two restate findings already fixed or na
 leak, the slow-drip cap exhaustion) and are folded into the prose above. Three are addressed directly
 in prose: `resolveToken` does not touch (documented, a phase 7 decision), `ttlMs` is a duration
 (documented), and multi-process coherence is out of scope (documented, matches criterion 3).
+
+**A second review round ran on the built diff** (`adlc review --base origin/main --provider gemini
+--model gemini-pro-latest --timeout 900 --verify`), after P4. Two findings, both fixed in criterion
+5's text and in `src/server/session.ts` above: `resolveToken` authenticated an idle-expired session's
+token for as long as nothing else had triggered a sweep (high, confidence 1 — a token's validity must
+not depend on an unrelated caller happening to have logged in recently), and per-session token minting
+had no cap, so a rapid, long-TTL minting loop could grow one session's digest set without bound
+(medium). Both are fixed and railed; `npm run check` and `adlc hollow-test --target
+src/server/session.ts` both re-ran clean afterward.
