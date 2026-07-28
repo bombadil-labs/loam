@@ -269,6 +269,20 @@ export function readOAuthFile(home: string): OAuthFile {
 }
 
 /**
+ * Refuses a repeated key across a collection — one row per key is a shape invariant every later
+ * phase assumes (a client owns one grant, a token digest names one client), and nothing upstream
+ * of this check would otherwise catch a bug that appends a second row instead of replacing the
+ * first (criterion (r)).
+ */
+function checkUnique(keys: readonly string[], where: string, field: string): void {
+  const seen = new Set<string>();
+  for (const key of keys) {
+    if (seen.has(key)) throw new OAuthFileUnreadable(`${where} has more than one ${field} ${key}`);
+    seen.add(key);
+  }
+}
+
+/**
  * The shared shape check behind both `readOAuthFile` (over freshly-parsed JSON) and
  * `writeOAuthFile` (over an in-memory `OAuthFile`, criterion (q)) — one validator, so the two
  * paths cannot drift apart on what counts as sound.
@@ -281,18 +295,31 @@ function checkFileShape(parsed: unknown, where: string): OAuthFile {
       `${where} is version ${String(file["version"])}, and this reader reads version 1`,
     );
   }
-  return {
-    version: 1,
-    clients: array(file["clients"], `${where}: clients`).map((c, i) =>
-      checkClient(c, `${where}: client ${i}`),
-    ),
-    grants: array(file["grants"], `${where}: grants`).map((g, i) =>
-      checkGrant(g, `${where}: grant ${i}`),
-    ),
-    tokens: array(file["tokens"], `${where}: tokens`).map((t, i) =>
-      checkToken(t, `${where}: token ${i}`),
-    ),
-  };
+  const clients = array(file["clients"], `${where}: clients`).map((c, i) =>
+    checkClient(c, `${where}: client ${i}`),
+  );
+  const grants = array(file["grants"], `${where}: grants`).map((g, i) =>
+    checkGrant(g, `${where}: grant ${i}`),
+  );
+  const tokens = array(file["tokens"], `${where}: tokens`).map((t, i) =>
+    checkToken(t, `${where}: token ${i}`),
+  );
+  checkUnique(
+    clients.map((c) => c.clientId),
+    where,
+    "client with clientId",
+  );
+  checkUnique(
+    grants.map((g) => g.clientId),
+    where,
+    "grant with clientId",
+  );
+  checkUnique(
+    tokens.map((t) => t.digest),
+    where,
+    "token with digest",
+  );
+  return { version: 1, clients, grants, tokens };
 }
 
 /**

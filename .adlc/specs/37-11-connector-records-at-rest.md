@@ -18,6 +18,15 @@ plan's edges, phase 11 has no prerequisite among phases 1–10 and no phase abov
 file's rail file — so its tests import nothing from a door or a CLI, only `node:fs`,
 `node:child_process` and the module itself.
 
+**Named assumption, not a gap: ONE MACHINE, ONE FILESYSTEM CLOCK.** The lock's staleness test
+compares the lock file's `mtime` to `Date.now()` in the SAME process that reads it. `<home>` is a
+local directory the operator's own CLI and server share; this is not a design for a home mounted
+over a network filesystem with its own clock, and `OAuthFileUnlockable`'s own message already
+steers an operator whose filesystem lacks hard links (some SMB/FUSE mounts) onto a local
+filesystem. A clock-skewed network mount is the same class of unsupported configuration, named
+here rather than solved: solving it would mean embedding a signed absolute expiry in the lock's
+own bytes, which is new design, not this ticket's `Delivers` line.
+
 ## What this phase does not do
 
 No door reads or writes this file. No CLI command exists yet. The record shape (client, grant,
@@ -60,6 +69,13 @@ replicates under federation. It lives beside `operator.seed` and `credentials.js
 `work` returns — with the WRITE exclusive against every other process holding the same home. The
 lock is a hard link from a temp file that already holds the acquirer's nonce, because `link`
 fails atomically (`EEXIST`) when the target exists and create-then-write cannot promise that.
+
+**The nonce is `pid:32-hex-chars`, the hex from `randomBytes(16)` — 128 bits of randomness per
+acquire, freshly drawn every call.** Two acquirers landing on the same nonce is a collision in 128
+bits of CSPRNG output, not a design gap this working spec leaves open; the pid prefix is for a
+human reading the file during an incident, not for uniqueness, since two containers sharing a PID
+namespace already fail the "one machine" assumption above for reasons the pid could not fix
+either.
 
 `claimLock` runs ONLY in the acquire loop, before `work` is called. Nothing re-acquires the lock
 afterward. The ownership check runs INSIDE `performAtomicWrite` — after the temp file is written
@@ -196,3 +212,9 @@ The lock:
   with nothing left to repair it. Verified by `test/server/oauth-file.test.ts`, which hands
   `writeOAuthFile` an object failing each of (b)'s corruption shapes and asserts it throws
   `OAuthFileUnreadable` with the file on disk unchanged from before the call.
+- (r) A duplicate `clientId` across `clients`, a duplicate `clientId` across `grants` (one grant
+  per client), or a duplicate `digest` across `tokens` refuses on read AND on write, by the same
+  shared check — a later phase's bug that appends rather than replaces must not silently corrupt
+  the one-row-per-key shape every later phase assumes. Verified by `test/server/oauth-file.test.ts`
+  (three corruption-table rows, one per collection, each exercised through both `readOAuthFile` and
+  `writeOAuthFile`).

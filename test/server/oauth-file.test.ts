@@ -557,3 +557,53 @@ describe("(q) writeOAuthFile validates before it serializes", () => {
     expect(existsSync(oauthPath(home))).toBe(false);
   });
 });
+
+describe("(r) a repeated key across a collection is refused, on read and on write", () => {
+  const secondSeed = "44".repeat(32);
+  const secondAuthor = authorForSeed(secondSeed);
+
+  it("two clients sharing a clientId refuse, on both read and write", () => {
+    const duplicated: OAuthFile = {
+      ...EMPTY_OAUTH,
+      clients: [
+        { clientId: "dup", clientName: "one", redirectUris: [], registeredAt: 1, generation: 1 },
+        { clientId: "dup", clientName: "two", redirectUris: [], registeredAt: 2, generation: 1 },
+      ],
+    };
+    expect(() => writeOAuthFile(home, duplicated)).toThrow(OAuthFileUnreadable);
+    writeFileSync(oauthPath(home), `${JSON.stringify(duplicated)}\n`);
+    expect(() => readOAuthFile(home)).toThrow(OAuthFileUnreadable);
+  });
+
+  it("two grants sharing a clientId refuse — one grant per client", () => {
+    const duplicated: OAuthFile = {
+      ...EMPTY_OAUTH,
+      grants: [
+        { clientId: "dup", actorSeed: SEED, actor: SEED_AUTHOR, grantedAt: 1, standing: true },
+        { clientId: "dup", actorSeed: secondSeed, actor: secondAuthor, grantedAt: 2, standing: true },
+      ],
+    };
+    expect(() => writeOAuthFile(home, duplicated)).toThrow(OAuthFileUnreadable);
+    writeFileSync(oauthPath(home), `${JSON.stringify(duplicated)}\n`);
+    expect(() => readOAuthFile(home)).toThrow(OAuthFileUnreadable);
+  });
+
+  it("two tokens sharing a digest refuse — a digest names one client", () => {
+    const digest = "55".repeat(32);
+    const duplicated: OAuthFile = {
+      ...EMPTY_OAUTH,
+      tokens: [
+        { digest, clientId: "a", issuedAt: 1 },
+        { digest, clientId: "b", issuedAt: 2 },
+      ],
+    };
+    expect(() => writeOAuthFile(home, duplicated)).toThrow(OAuthFileUnreadable);
+    writeFileSync(oauthPath(home), `${JSON.stringify(duplicated)}\n`);
+    expect(() => readOAuthFile(home)).toThrow(OAuthFileUnreadable);
+  });
+
+  it("distinct keys in each collection are unaffected — the positive control", () => {
+    writeOAuthFile(home, soundFile());
+    expect(readOAuthFile(home)).toEqual(soundFile());
+  });
+});
