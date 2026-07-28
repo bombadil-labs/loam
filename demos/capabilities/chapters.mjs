@@ -1437,6 +1437,12 @@ export const CHAPTERS = [
             proof: "test/server/oauth-file.test.ts",
             door: null,
           },
+          {
+            says: "A connector finds the store through two RFC well-known documents and a WWW-Authenticate header on the MCP door's 401, every URL built from one configured --public-url and blind to a foreign Host or X-Forwarded-Host — and the same header is byte-identical whether the mount it names exists, has nothing public, or never existed at all, so it answers who to ask without becoming a second oracle.",
+            spec: "spec/37-connectors.md",
+            proof: "test/server/oauth-discovery.test.ts",
+            door: null,
+          },
         ],
       },
     ],
