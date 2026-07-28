@@ -7,8 +7,10 @@
     }
   ],
   "id": "T125",
-  "phase": "P1",
-  "rails": [],
+  "phase": "P3",
+  "rails": [
+    "test/server/session-table.test.ts"
+  ],
   "scope": [
     "src/server/session.ts",
     "test/server/session-table.test.ts",
