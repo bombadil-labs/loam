@@ -7,8 +7,10 @@
     }
   ],
   "id": "T122",
-  "phase": "P1",
-  "rails": [],
+  "phase": "P3",
+  "rails": [
+    "test/server/credentials.test.ts"
+  ],
   "scope": [
     "src/server/credentials.ts",
     "test/server/credentials.test.ts",
