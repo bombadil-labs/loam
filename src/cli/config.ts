@@ -78,6 +78,10 @@ export function homeDefect(
         ? undefined
         : `${home} does not exist — \`loam init --home ${home}\` or \`loam user create\` makes one`;
     }
+    // NAMED GAP: an `lstat` fault that is not `ENOENT` (a permission error on a PARENT directory,
+    // an I/O error) reaches this line and nothing here rails it — reproducing one portably needs
+    // a filesystem this process cannot traverse, not merely a target it cannot write. Named rather
+    // than faked with a mock, which would only prove the mock does what the mock says.
     return `${home} could not be checked: ${message(err)}`;
   }
   let target;

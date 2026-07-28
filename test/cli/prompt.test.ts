@@ -6,6 +6,13 @@ import { EventEmitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { promptSecret } from "../../src/cli/prompt.js";
 
+// Named rather than embedded literally, so a reviewer sees what each byte is (`prompt.ts` mirrors
+// these as its own private constants — this file cannot import them, so the values are repeated).
+const BACKSPACE = String.fromCharCode(0x08);
+const DELETE = String.fromCharCode(0x7f);
+const CTRL_C = String.fromCharCode(0x03);
+const CTRL_D = String.fromCharCode(0x04);
+
 class FakeTTY extends EventEmitter {
   isTTY = true;
   rawModeCalls: boolean[] = [];
@@ -70,17 +77,28 @@ describe("promptSecret", () => {
     const fake = useFakeStdin();
     const promise = promptSecret("password: ");
     for (const ch of "abc") fake.emit("data", ch);
-    fake.emit("data", ""); // backspace
+    fake.emit("data", BACKSPACE);
     fake.emit("data", "d");
     fake.emit("data", "\n");
     await expect(promise).resolves.toBe("abd");
+  });
+
+  // Both erasers name a DIFFERENT byte a terminal can send for the same key — a rail
+  // exercising only one cannot see a set narrowed to the other.
+  it("delete (the second eraser byte) also erases the last character", async () => {
+    const fake = useFakeStdin();
+    const promise = promptSecret("password: ");
+    for (const ch of "xyz") fake.emit("data", ch);
+    fake.emit("data", DELETE);
+    fake.emit("data", "\n");
+    await expect(promise).resolves.toBe("xy");
   });
 
   it("Ctrl+C rejects with 'cancelled' and still turns raw mode back off", async () => {
     const fake = useFakeStdin();
     const promise = promptSecret("password: ");
     fake.emit("data", "partial");
-    fake.emit("data", ""); // Ctrl+C
+    fake.emit("data", CTRL_C);
     await expect(promise).rejects.toThrow(/cancelled/);
     expect(fake.rawModeCalls).toEqual([true, false]);
   });
@@ -88,7 +106,7 @@ describe("promptSecret", () => {
   it("Ctrl+D also cancels", async () => {
     const fake = useFakeStdin();
     const promise = promptSecret("password: ");
-    fake.emit("data", ""); // Ctrl+D
+    fake.emit("data", CTRL_D);
     await expect(promise).rejects.toThrow(/cancelled/);
   });
 
