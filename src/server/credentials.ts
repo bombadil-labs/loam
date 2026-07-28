@@ -131,6 +131,10 @@ export function checkEntry(raw: unknown, where: string): CredentialEntry {
   const { salt, hash } = entry;
   // HEX (`+`, one or more) already refuses an empty string, so an explicit `.length === 0` check
   // beside it is dead code that only adds an unkillable mutant — HEX.test("") is false on its own.
+  // NAMED GAP: swapping this line's first `||` to `&&` is a real mutant no JSON-parseable value can
+  // reach — `salt.length % 2 !== 0` is true for every non-string JSON.parse can produce (a number or
+  // boolean has no `.length`, so it reads as `NaN !== 0`), so the swap is only visible through a
+  // hand-built object with a custom `.length` and `.toString()` that JSON.parse never yields.
   if (typeof salt !== "string" || !HEX.test(salt) || salt.length % 2 !== 0) {
     throw new CredentialsUnreadable(`${where} has no hex salt`);
   }

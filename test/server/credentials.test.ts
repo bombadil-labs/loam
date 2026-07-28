@@ -250,13 +250,32 @@ describe("every shape of damage refuses, by name", () => {
     );
   });
 
-  it("checkEntry refuses a non-integer r or keylen within their numeric range", async () => {
+  it("checkEntry refuses a non-integer r within its numeric range", async () => {
     const base = await hashPassword(PASSWORD, TEST_SCRYPT);
     const withParams = (params: ScryptParams): unknown => ({ ...base, params });
     expect(() => checkEntry(withParams({ ...TEST_SCRYPT, r: 2.5 }), "test")).toThrow(
       CredentialsUnreadable,
     );
-    expect(() => checkEntry(withParams({ ...TEST_SCRYPT, keylen: 32.5 }), "test")).toThrow(
+  });
+
+  // A fabricated entry whose hash length always matches its own keylen, so a keylen boundary test
+  // does not accidentally throw on the SEPARATE hash-length check instead of the one under test —
+  // that coupling is why a `keylen: 32.5` test against a fixed 64-hex-char hash could not
+  // distinguish the keylen check's own logic from the hash-length check downstream of it.
+  const fakeEntry = (params: ScryptParams): unknown => ({
+    kind: "scrypt",
+    salt: LONG_SALT,
+    hash: "ab".repeat(Math.max(0, Math.floor(params.keylen))),
+    params,
+  });
+
+  it("checkEntry's keylen floor sits exactly at 16 bytes", () => {
+    // A non-integer keylen is not separately rail-tested here: `hash.length` is always a whole
+    // number of hex characters, and `keylen * 2` for any non-integer keylen can never equal one —
+    // so the hash-length check (rail above) refuses every non-integer keylen on its own, making
+    // checkParams's own integer check defense-in-depth rather than the only guard.
+    expect(() => checkEntry(fakeEntry({ ...TEST_SCRYPT, keylen: 16 }), "test")).not.toThrow();
+    expect(() => checkEntry(fakeEntry({ ...TEST_SCRYPT, keylen: 15 }), "test")).toThrow(
       CredentialsUnreadable,
     );
   });
@@ -271,6 +290,13 @@ describe("every shape of damage refuses, by name", () => {
 
   it("checkEntry refuses a raw entry that is a primitive, not an object", () => {
     expect(() => checkEntry("just-a-string", "test")).toThrow(CredentialsUnreadable);
+  });
+
+  it('checkEntry refuses a raw entry that is null — typeof null is "object"', () => {
+    // `typeof null === "object"`, so the null check must stay a separate clause rather than folding
+    // into the typeof check — collapsing them would let a null entry fall through to a property
+    // access on null and crash with a bare TypeError instead of a named CredentialsUnreadable.
+    expect(() => checkEntry(null, "test")).toThrow(CredentialsUnreadable);
   });
 
   it("checkEntry refuses a hash whose length disagrees with its own keylen", async () => {
