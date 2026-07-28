@@ -47,6 +47,7 @@ import {
   uriTextDefect,
   withOAuthFile,
   writeOAuthFile,
+  type OAuthClient,
   type OAuthFile,
 } from "../../src/server/oauth-file.js";
 
@@ -660,6 +661,19 @@ describe("(q) writeOAuthFile validates before it serializes", () => {
       clients: [{ ...soundFile().clients[0]!, clientName: "forged\nrow" }],
     };
     expect(() => writeOAuthFile(home, badName)).toThrow(OAuthFileUnreadable);
+    expect(existsSync(oauthPath(home))).toBe(false);
+  });
+
+  it("refuses a SPARSE array — a hole must not validate as though it were not there", () => {
+    // `.map()` skips a hole silently; `Array.from` does not. This pins the difference: a caller
+    // that builds `clients` with a hole (e.g. `delete arr[0]`) must not have that hole validate
+    // clean and reach disk, where JSON.stringify would turn it into a `null` no read-time check
+    // was ever run against.
+    const sparse: OAuthClient[] = [];
+    sparse[1] = soundFile().clients[0]!;
+    expect(sparse.length).toBe(2); // index 0 is a genuine hole, not `undefined` at an index
+    const file: OAuthFile = { ...EMPTY_OAUTH, clients: sparse };
+    expect(() => writeOAuthFile(home, file)).toThrow(OAuthFileUnreadable);
     expect(existsSync(oauthPath(home))).toBe(false);
   });
 });

@@ -239,3 +239,10 @@ The lock:
   itself orphaned a temp holding a plaintext actor seed. Verified by `test/server/oauth-file.test.ts`
   ("a write that throws during its own fsync leaves no temp behind"), which mocks `fsyncSync` to
   throw once and asserts no `.tmp` file and no half-written `oauth.json` remain.
+- (u) A SPARSE array (a genuine hole, not an `undefined` element) in `clients`, `grants`, `tokens`,
+  or a client's `redirectUris` refuses rather than validating clean — `.map()` silently skips a
+  hole, which would let a caller-built sparse array reach disk with the hole turned into a JSON
+  `null` no check ever ran against. Every raw-collection walk uses `Array.from`, whose iteration
+  visits every index and hands a hole through as `undefined`. Verified by
+  `test/server/oauth-file.test.ts` ("refuses a SPARSE array — a hole must not validate as though it
+  were not there").

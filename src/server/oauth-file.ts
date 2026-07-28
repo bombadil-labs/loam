@@ -191,7 +191,11 @@ function checkClient(raw: unknown, where: string): OAuthClient {
   return {
     clientId,
     clientName,
-    redirectUris: uris.map((uri, i) => {
+    // `Array.from`, never `.map` — `.map` SKIPS a hole in a sparse array, so a caller-built
+    // sparse `redirectUris` would validate as if the hole were not there and still get persisted;
+    // `Array.from`'s iteration visits every index and hands a hole through as `undefined`, which
+    // the `typeof uri !== "string"` check below correctly refuses.
+    redirectUris: Array.from(uris, (uri, i) => {
       if (typeof uri !== "string" || uri === "") {
         throw new OAuthFileUnreadable(`${where}: redirect uri ${i} is not a string`);
       }
@@ -292,13 +296,17 @@ function checkFileShape(parsed: unknown, where: string): OAuthFile {
       `${where} is version ${String(file["version"])}, and this reader reads version 1`,
     );
   }
-  const clients = array(file["clients"], `${where}: clients`).map((c, i) =>
+  // `Array.from`, never `.map`, on every RAW collection below — the same sparse-array hole this
+  // file's `redirectUris` check names: `.map` skips a hole silently, letting a caller-built sparse
+  // array validate clean and get persisted, where `Array.from` visits every index and hands a hole
+  // through as `undefined`, which each `check*` function correctly refuses.
+  const clients = Array.from(array(file["clients"], `${where}: clients`), (c, i) =>
     checkClient(c, `${where}: client ${i}`),
   );
-  const grants = array(file["grants"], `${where}: grants`).map((g, i) =>
+  const grants = Array.from(array(file["grants"], `${where}: grants`), (g, i) =>
     checkGrant(g, `${where}: grant ${i}`),
   );
-  const tokens = array(file["tokens"], `${where}: tokens`).map((t, i) =>
+  const tokens = Array.from(array(file["tokens"], `${where}: tokens`), (t, i) =>
     checkToken(t, `${where}: token ${i}`),
   );
   checkUnique(
