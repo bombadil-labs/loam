@@ -217,6 +217,17 @@ export const entryFor = (file: CredentialsFile, name: string): CredentialEntry |
  * it and a crashed writer's leftover cannot block the next write. The descriptor is closed before the
  * rename, because an open handle held across a rename fails on Windows.
  */
+/** Run a cleanup step that must never be allowed to replace a real error already in flight. */
+const cleanupQuietly = (step: () => void): void => {
+  try {
+    step();
+  } catch {
+    // A cleanup failure here (the temp file already gone, a close on an already-broken fd) is
+    // never more informative than the fault that triggered the cleanup, and letting it throw
+    // would overwrite that fault's stack trace with a confusing, unrelated one.
+  }
+};
+
 export function writeCredentials(home: string, file: CredentialsFile): void {
   const target = credentialsPath(home);
   const temp = `${target}.${process.pid}-${randomBytes(6).toString("hex")}.tmp`;
@@ -231,13 +242,14 @@ export function writeCredentials(home: string, file: CredentialsFile): void {
       writeFileSync(fd, body);
       fsyncSync(fd);
     } finally {
-      closeSync(fd);
+      cleanupQuietly(() => closeSync(fd));
     }
     renameSync(temp, target);
   } catch (err) {
     // Covers every failure from `openSync` through `renameSync` — a short write, a failed fsync, a
     // failed rename — so a fault never leaves the uniquely named temp file behind to accumulate.
-    rmSync(temp, { force: true });
+    // The cleanup itself must not mask the real fault (`err`) with a cleanup-time error of its own.
+    cleanupQuietly(() => rmSync(temp, { force: true }));
     throw err;
   }
   // The rename carries the temp's own mode, so an old 0644 file cannot leave its mode behind. Said
@@ -248,11 +260,14 @@ export function writeCredentials(home: string, file: CredentialsFile): void {
     try {
       fsyncSync(dir); // the rename itself is only durable once the directory entry is
     } finally {
-      closeSync(dir);
+      cleanupQuietly(() => closeSync(dir));
     }
-  } catch {
-    // Windows refuses to fsync a directory handle. The rename is still atomic there; only the
-    // durability of the directory entry across a power cut is weaker, and it is not ours to fix.
+  } catch (err) {
+    // Windows refuses ANY fsync of a directory handle (ENOSYS/EPERM/EINVAL, depending on version) —
+    // the rename is still atomic there, only the directory entry's durability across a power cut is
+    // weaker, and that gap is not ours to fix. A POSIX fault here (EIO, a real disk error) is a
+    // different thing entirely and must not be swallowed the same way.
+    if (process.platform !== "win32") throw err;
   }
 }
 
