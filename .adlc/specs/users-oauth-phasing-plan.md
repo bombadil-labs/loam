@@ -678,9 +678,11 @@ phase 15.
    mints nothing.
 6. A minted code binds to `client_id` AND `redirect_uri`. Its expiry is monotonic, so a wall-clock step
    backwards does not extend it.
-7. The consent copy states the powers a grant really carries. **A granted author is a lawful striker,
-   so it can retract claims the operator wrote.** Say that, or narrow the model — and narrowing is
-   T118, not this phase.
+7. The consent copy states the powers a grant really carries. **Under the connection model (§9f) the
+   page NAMES THE CONTAINER the connection binds to, and the grant cannot exceed it** — honesty by
+   construction. T138 designs the binding; this phase's working spec transcribes it. If phase 14
+   reaches P1 before T138's design lands, it STOPS — a consent page that describes an unbounded grant
+   is the one thing this phase may not ship.
 
 ### Phase 15 — The token exchange and revocation
 
@@ -751,8 +753,9 @@ limit only bites when a second person holds the role, and these phases are what 
    and 15.
 2. **T115 — an erasure at a drilled-down entity.** Widen the purge, or document the limit. Both change
    §30's promise. Myk decides. Not in these phases.
-3. **T118 — scope a connector to a container.** Myk ruled on the model. It needs its own plan, after
-   these phases. §28 already commits to the shape.
+3. **T138 — a connection binds to a container.** Myk settled the model in chat 2026-07-28 (it
+   supersedes T118, which lives only on the abandoned branch). Recorded in §9f and in T138's body.
+   T138 is a prerequisite of phases 14 and 15.
 4. **T119 — ejection.** Myk's idea. Undesigned.
 5. **The order of phases 1 to 9 against 10 to 12.** The connector needs the login door, so 10 to 12
    follow 5. Otherwise the two groups are independent.
@@ -1026,6 +1029,33 @@ its subject lands binds two tickets together, which is exactly how #282 became o
 So **every ticket this plan creates has `rails: []`.** The rail files in section 3's table are **SCOPE,
 not rails.** Each phase declares its rails at P3, when the tests exist and are red. That single
 discipline prevents the coupling section 1 describes.
+
+---
+
+## 9f. The connection model — Myk settled it, 2026-07-28
+
+He walked it at the object level (Alice, Bob and Charlie) and these are the invariants. T138 carries
+the full record; this section exists so no phase designs against a stale model.
+
+- **A connection binds to exactly one container.** Reads gather that container. Writes land in it. The
+  binding is an UPPER BOUND: bound wide, a connection addresses sub-containers through query semantics;
+  bound narrow, it cannot reach outside. The owner chooses.
+- **The owner acts; the connection carries.** Every read and write through a connection is made by the
+  container's OWNER, as owner. The operator never appears on this path. (Not precluded — the store's
+  top level is just a container — but a guard, if wanted, is a later ticket.)
+- **Attribution is per-connection; authority is the owner's.** Each connection gets its own signing
+  key, provably the owner's. In Myk's words: "It's Alice (via MCP connection scoped to the folklore
+  container with id xyz)." Revoking one connection has a one-connection blast radius, and past deltas
+  keep their author.
+- **A negation is an ordinary delta, and MEMBERSHIP decides its reach.** If D1 and D2 are both in the
+  gathered set, D2 is in play against D1 — whoever wrote it. The Schema decides what in-play means. So
+  trust moves from read time to ADMISSION time, and per-container divergence (negated in one container,
+  preserved in another) falls out of membership alone. Verified: `containerScope` already reads this
+  way — a shared container's members are its membership Term's selection; a separate container's are
+  its own pool.
+- **Where H1 goes:** the bug class is a gather that includes a claim and drops an admitted negation of
+  it. A shared container's membership Term must admit a member's negations, or the read strands every
+  strike. T138's rails pin both levels, two-sided.
 
 ---
 
