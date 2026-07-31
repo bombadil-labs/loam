@@ -78,11 +78,16 @@ goes into the token table's identity; nothing about it reaches a response body, 
 including the refusal branch, which prints a fixed sentence rather than the file's bytes. A review
 found the residency argument weaker than the prose: the table was swept only when someone minted,
 so an abandoned session's entry — carrying that user's signing seed — could sit for the process's
-whole life waiting on the next login by anyone. The sweep now also runs on every revoke, which is
-every session ending, and it drops entries whose session is gone as well as those past their own
-window. What remains true and is stated rather than implied: an operator revoking a compromised
-user's role does not reach into this map; the copy goes when that session ends or the next sweep
-passes over it.
+whole life waiting on the next MINT by anyone. The sweep now also runs on every revoke, which
+tightens the bound to the next SESSION-ENDING EVENT by anyone — a logout, an idle expiry observed
+by a request, a re-login. THE BOUND IS TRAFFIC, NOT TIME, and that is stated plainly: every sweep
+path needs a request, so on a server nobody touches again the last entry sits until the process
+ends. It authenticates nothing there — `identify` checks the token's window, the session's window,
+and the stranger-world rule before answering — so the residue is a disclosure surface (a heap
+dump, a core file), never an authority one. Closing it fully would take a wall-clock timer, which
+is a decision this phase does not smuggle in. What remains true and is stated rather than implied:
+an operator revoking a compromised user's role does not reach into this map; the copy goes when
+that session ends or the next sweep passes over it.
 
 **The mint hands back the deadline it RECORDED.** Computing one at the door from a fresh clock
 read is strictly later than the table's own, so the response would promise a lifetime past the
