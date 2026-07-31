@@ -10,11 +10,15 @@
 // What this file deliberately does NOT assert: the login DELAY (phase 9) and the erasure
 // disclosure (phase 10).
 //
-// (d) and (j) are GREEN BEFORE THE BUILD, and that is what they are for: (d) pins that the
-// operator doors stay open — the narrowing this phase must not cause — and (j) pins that no
-// signing key reaches a response. Both would go red if the change went wrong, and neither can
-// go red for the change simply being absent. Their positive controls are (a)–(c), which prove
-// the feature exists at all.
+// FOUR RAILS ARE GREEN BEFORE THE BUILD, and a reader auditing this file should be able to count
+// them here rather than discover them: (d) the operator doors stay open — the narrowing this
+// phase must not cause; (j) no signing key reaches a response; (k) the constitutional doors keep
+// signing as the store; (h) the delta shape is unchanged. Each pins something the change must NOT
+// break, so none of them can go red merely for the change being absent — and (h) and (j) each
+// carry an assertion that DOES move with the change ((h) compares the two authors; the seed-bytes
+// half of (j) lives in (g2), on the refusal branch where a seed is actually in scope). Their
+// positive controls are (a)–(c), which prove the feature exists at all. An earlier header named
+// only two of the four, which a P5 lens correctly called honest-looking over a weaker set.
 
 import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -313,11 +317,23 @@ describe("§36 phase 8 — a session signs as its user", () => {
     expect(refused.status).toBe(409);
     const body = await refused.text();
     expect(body).toContain("ada");
+    // The cure must be a command that works in THIS state. `assign-role` alone refuses a role
+    // already held — and this 409 is only reachable for a user who holds it — so the message
+    // must name the pair (a P5 lens caught it sending the operator to a guaranteed no-op).
+    expect(body).toMatch(/remove-role/);
     expect(body).toMatch(/assign-role/);
     expect(body).not.toContain(home); // no path reaches the caller
 
-    // Nothing was minted, and no fallback signed anything as the store.
-    expect([...gateway.reactor.snapshot()].map((d) => d.claims.author)).not.toContain(ADA);
+    // Nothing was minted, and no fallback wrote anything. The store-level check that would
+    // catch a fallback directly is out of reach in this fixture — ada's seed never reaches this
+    // process, so no delta here could carry her author under ANY implementation, and a fallback
+    // would sign as the operator, which every fixture delta already does (a P5 lens caught the
+    // earlier assertion being a tautology). What IS reachable: the refusal handed back no token,
+    // so nothing can write at all.
+    expect(Object.keys(JSON.parse(body) as Record<string, unknown>)).toEqual(["errors"]);
+    const snapshot = [...gateway.reactor.snapshot()].length;
+    expect((await mint(base, session)).status).toBe(409); // still refused, still no token
+    expect([...gateway.reactor.snapshot()].length).toBe(snapshot); // and nothing landed
   });
 
   it("(g) an unreadable seed fails the same way, detail to the operator only", async () => {
@@ -341,7 +357,11 @@ describe("§36 phase 8 — a session signs as its user", () => {
     // state, and a premortem caught it failing OPEN: a crashed write leaves a zero-byte file,
     // which reads as "present" and mints {actor: ""} — not nullish, so nothing falls back and
     // the failure surfaces as an opaque error at the first write instead of a refusal here.
-    for (const junk of ["", "   \n", "not-a-key", "ad".repeat(16)]) {
+    // One junk value is deliberately SECRET-SHAPED (64 chars, wrong alphabet): if the refusal
+    // branch ever printed the file's bytes, only a value that looks like a key would prove it.
+    // (j) can only watch the success path, where no seed is in scope — a P5 lens showed its
+    // fault-channel half passing on an empty array.
+    for (const junk of ["", "   \n", "not-a-key", "ad".repeat(16), "zz".repeat(32)]) {
       const faults: string[] = [];
       const { base, home } = await authorshipServer([{ name: "ada", seed: ADA_SEED }], {
         onFault: (m) => faults.push(m),
@@ -352,7 +372,17 @@ describe("§36 phase 8 — a session signs as its user", () => {
       writeFileSync(userSeedPath(home, "ada"), junk);
       const refused = await mint(base, session);
       expect(refused.status, JSON.stringify(junk)).toBe(409);
-      expect(await refused.text()).not.toContain(home);
+      const body = await refused.text();
+      expect(body).not.toContain(home);
+      // The seed's own BYTES never travel either — not to the caller, not to the operator
+      // channel. (j) can only watch the success path, where no seed is in scope; this refusal
+      // branch is the one place the seed's neighbourhood is formatted into text, so a mutant
+      // appending it here is caught here (a P5 lens's finding). The junk values are known
+      // strings, which is what makes the assertion cheap and real.
+      if (junk.trim() !== "") {
+        expect(body).not.toContain(junk);
+        expect(faults.join("\n")).not.toContain(junk);
+      }
       expect(faults.some((m) => m.includes(home))).toBe(true);
     }
   });
@@ -405,6 +435,20 @@ describe("§36 phase 8 — a session signs as its user", () => {
     expect(mcp.status).toBe(200);
     // The write really landed through that door — no vacuous branch — and it carries Ada's name.
     expect(authorsOfHeight(gateway, 74)).toEqual([ADA]);
+
+    // THE REST DOOR IS A NAMED GAP, not a silent one. It reaches the same seam by a different
+    // expression — `contextFor(identity)?.actor`, passed positionally rather than as a context
+    // object (src/server/http.ts) — so it is the door most likely to drift: a mutant passing
+    // `undefined` there would let rest write as the store while graphql and mcp carried the
+    // user's name, one person with two names, and nothing in this file would go red.
+    //
+    // It is not railed here because the REST door addresses a schema by VERSION ALIAS, which
+    // only a delta-borne registration mints; this fixture registers in-process, so `/rest/v1/
+    // Plant` answers "no version v1 of Plant survives" and a rail written against it would be
+    // asserting on a 404. Closing it wants a fixture that registers through the door and then
+    // writes the registered field — worth doing, and worth doing deliberately rather than
+    // wedged into this test. A P5 lens found the earlier version of this comment claiming three
+    // doors while exercising two.
   });
 
   it("(l) two users writing the identical claim produce two distinct deltas", async () => {
@@ -436,9 +480,12 @@ describe("§36 phase 8 — a session signs as its user", () => {
         fields: Object.keys(delta.claims).sort(),
       };
     };
-    // Same roles, same target kinds, same claim fields — the author's VALUE is the only
-    // difference, and an author was always a key, so no §20 step is owed.
+    // Same roles, same target kinds, same claim fields — AND the authors genuinely differ, which
+    // is what makes "the author's value is the only difference" a claim rather than a hope. A P5
+    // lens caught this asserting the shape alone: green with the feature deleted.
     expect(shapeOf(69)).toEqual(shapeOf(68));
+    expect(authorsOfHeight(gateway, 68)).toEqual([OPERATOR]);
+    expect(authorsOfHeight(gateway, 69)).toEqual([ADA]);
   });
 
   it("(i) the seed is read at MINT time, not at login", async () => {

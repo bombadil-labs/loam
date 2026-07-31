@@ -71,11 +71,27 @@ authorization surface, and railing the two apart is how we prove neither is doin
 
 **The seed is read at MINT time, not at login.** A seed written between sign-in and mint is picked
 up on the next mint; one deleted is refused on the next mint. Reading it at login would cache a
-key across a window in which the operator may have changed it, and would put a signing key in the
-session row for its whole idle life.
+key across a window in which the operator may have changed it.
 
-**The key never leaves the process.** The seed goes into the token table's identity, which the
-doors already hold; nothing about it reaches the response body, the pages, or a log.
+**The key never leaves the process, and its RESIDENCY is bounded rather than assumed.** The seed
+goes into the token table's identity; nothing about it reaches a response body, a page, or a log —
+including the refusal branch, which prints a fixed sentence rather than the file's bytes. A review
+found the residency argument weaker than the prose: the table was swept only when someone minted,
+so an abandoned session's entry — carrying that user's signing seed — could sit for the process's
+whole life waiting on the next login by anyone. The sweep now also runs on every revoke, which is
+every session ending, and it drops entries whose session is gone as well as those past their own
+window. What remains true and is stated rather than implied: an operator revoking a compromised
+user's role does not reach into this map; the copy goes when that session ends or the next sweep
+passes over it.
+
+**The mint hands back the deadline it RECORDED.** Computing one at the door from a fresh clock
+read is strictly later than the table's own, so the response would promise a lifetime past the
+token's real death and the cap would count live a token the table had stopped honoring.
+
+**A refusal names a cure that works in that exact state.** The no-usable-seed 409 is reachable
+only for a user who already holds the operator role — so naming `assign-role` alone would send the
+operator to a command whose first check refuses. It names the `remove-role` then `assign-role`
+pair, which is what the CLI itself prescribes for the same half-failed shape.
 
 ## Acceptance criteria
 

@@ -283,7 +283,7 @@ export interface UserDoorDeps {
     identity: { actor?: string; operator?: true },
     ttlMs: number,
     stillLive: () => boolean,
-  ): string;
+  ): { readonly token: string; readonly expiresAt: number };
   /** Retire minted tokens by SHA-256 digest (hex) — the plaintext never leaves the response. */
   revoke(digests: readonly string[]): void;
   /**
@@ -1084,11 +1084,18 @@ page will offer.</p>`,
               : "it is present but is not a 64-character hex signing key"),
         );
       }
+      // THE CURE MUST BE A COMMAND THAT WORKS IN THIS EXACT STATE. This 409 is reachable only
+      // for a user who ALREADY holds the role (a role-less one was refused above), and
+      // `assign-role` refuses a role already held — so naming it alone would send the operator
+      // to a guaranteed no-op with no stated way forward. A P5 lens caught that. The pair below
+      // is what the CLI itself prescribes for the same half-failed shape.
       json(res, 409, {
         errors: [
-          `${session.user} holds the operator role but has no signing key on this box, so no ` +
-            `token is minted — a session must write under its own name, never the store's. ` +
-            `Run \`loam user assign-role ${session.user} --role=operator\` here to mint one.`,
+          `${session.user} holds the operator role but has no usable signing key on this box, ` +
+            `so no token is minted — a session must write under its own name, never the ` +
+            `store's. This user already holds the role, so mint a fresh key with ` +
+            `\`loam user remove-role ${session.user} --role=operator\` then ` +
+            `\`loam user assign-role ${session.user} --role=operator\`.`,
         ],
       });
       return;
@@ -1110,12 +1117,17 @@ page will offer.</p>`,
       const row = sessions.get(id);
       return row !== undefined && row.expiresAt > now();
     };
-    const token = deps.mint({ actor: seed.seed, operator: true }, tokenTtlMs, stillLive);
-    minted.set(id, [...held, { digest: digestOf(token), expiresAt: now() + tokenTtlMs }]);
-    // `expiresIn` is derived from the RECORDED deadline, not from the configured TTL: the
-    // table's clock read happened inside `mint`, before this line, so reporting the raw TTL
-    // would promise a lifetime past the token's real death by this request's own latency.
-    const expiresAt = now() + tokenTtlMs;
+    // The mint hands back the deadline IT recorded. Computing one here from a fresh clock read
+    // would be strictly later than the table's own — the door would promise a lifetime past the
+    // token's real death, and the cap would count a token live that the table had stopped
+    // honoring. A P5 lens caught the comment claiming the recorded deadline while the code
+    // inferred one.
+    const { token, expiresAt } = deps.mint(
+      { actor: seed.seed, operator: true },
+      tokenTtlMs,
+      stillLive,
+    );
+    minted.set(id, [...held, { digest: digestOf(token), expiresAt }]);
     json(res, 200, {
       token,
       expiresIn: Math.max(0, Math.floor((expiresAt - now()) / 1000)),
