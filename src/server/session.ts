@@ -44,6 +44,10 @@ import {
   type ScryptParams,
 } from "./credentials.js";
 import { rolesOf, userNameDefect, type UserRole } from "./users.js";
+// The home's layout — where a per-user signing seed lives — is `cli/config`'s to spell, and
+// spelling it a second time here is how two paths drift apart. Phase 3 writes these files; this
+// door only reads them.
+import { readUserSeed, userSeedPath } from "../cli/config.js";
 
 export interface SessionTableOptions {
   /** How long a session may sit untouched before `touch` refuses it (default 30 minutes). */
@@ -1055,13 +1059,49 @@ page will offer.</p>`,
       });
       return;
     }
-    // A user is not a seed (§36). The operator ROLE is what entitles this session to the store's
-    // signing identity, so the token names that identity and the store signs as it does for the
-    // operator's own bearer token. No new authority is created here.
+    // WHOSE NAME goes on this session's writes (SPEC §36 phase 8). The user's OWN seed, read
+    // HERE rather than at login: a seed written between sign-in and mint is picked up now, one
+    // deleted is refused now, and no signing key sits in a session row for its whole idle life.
     //
-    // WHAT THIS TOKEN IS, exactly: the operator's authority on this server, for `tokenTtlMs`.
-    // Dropping the session retires it early; nothing else does. So revoking a user's role closes
-    // the door to NEW tokens at once, and an already-minted one lives out its window.
+    // FAILING CLOSED IS THE WHOLE POINT. Falling back to the store's seed would attribute this
+    // person's writes to the store — the exact confusion this phase exists to end, and a lie
+    // about provenance no reader could detect afterwards. So an absent or unreadable seed
+    // refuses the mint by name.
+    // THREE STATES, not two. `readUserSeed` answers a two-state question — no file, or a file it
+    // could not read — and a seed file has a third: present, readable, and not a key (a crashed
+    // write leaves it zero-byte; a hand-edit truncates it). Treating that as `present` mints
+    // `{actor: ""}`, which is not nullish, so nothing downstream falls back and the failure
+    // surfaces as an opaque error at the first write instead of a refusal here. So the shape is
+    // checked at this door — the same 64-hex rule `initHome` writes.
+    const seed = readUserSeed(options.home, session.user);
+    const malformed = seed.kind === "present" && !/^[0-9a-f]{64}$/.test(seed.seed);
+    if (seed.kind !== "present" || malformed) {
+      if (seed.kind === "unreadable" || malformed) {
+        onFault(
+          `the login door cannot use ${userSeedPath(options.home, session.user)}: ` +
+            (seed.kind === "unreadable"
+              ? seed.detail
+              : "it is present but is not a 64-character hex signing key"),
+        );
+      }
+      json(res, 409, {
+        errors: [
+          `${session.user} holds the operator role but has no signing key on this box, so no ` +
+            `token is minted — a session must write under its own name, never the store's. ` +
+            `Run \`loam user assign-role ${session.user} --role=operator\` here to mint one.`,
+        ],
+      });
+      return;
+    }
+    // WHAT THIS TOKEN IS, exactly: the operator's authority on this server, for `tokenTtlMs`,
+    // signing as THIS USER. Both halves are deliberate — the `operator` flag opens the doors the
+    // role earns (register, health, federate, artifact), and the actor seed decides whose name
+    // goes on what the doors sign. Dropping the flag would be a silent NARROWING dressed as
+    // attribution; dropping the seed is the provenance lie above. Per §9a every operator is
+    // equivalent, so this buys attribution and never privilege separation.
+    //
+    // Dropping the session retires the token early; nothing else does. So revoking a user's role
+    // closes the door to NEW tokens at once, and an already-minted one lives out its window.
     // The liveness question the token table asks on every presentation. It reads the row
     // directly rather than through `peek`, because answering must not itself drop or slide
     // anything — and it must stay true to the rule the session table states: an unswept,
@@ -1070,7 +1110,7 @@ page will offer.</p>`,
       const row = sessions.get(id);
       return row !== undefined && row.expiresAt > now();
     };
-    const token = deps.mint({ operator: true }, tokenTtlMs, stillLive);
+    const token = deps.mint({ actor: seed.seed, operator: true }, tokenTtlMs, stillLive);
     minted.set(id, [...held, { digest: digestOf(token), expiresAt: now() + tokenTtlMs }]);
     // `expiresIn` is derived from the RECORDED deadline, not from the configured TTL: the
     // table's clock read happened inside `mint`, before this line, so reporting the raw TTL
