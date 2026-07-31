@@ -150,10 +150,11 @@ rode its session's much longer idle window past its own stated TTL was a defect 
 review caught before any code existed, and a second review caught the same shape again after the
 first fix. What ships closes it from the other side: the token table asks a `stillLive` callback on
 every presentation, so a session past its idle window stops authenticating the tokens it bought even
-when no traffic has swept its row. Dropping a session, or letting its idle window lapse, erases every
-digest it minted, so a login door's logout genuinely revokes what it claims to revoke. A session may
-hold at most 16 live token digests at once, so a rapid, long-TTL minting loop cannot grow one
-session's footprint without bound.
+when no traffic has swept its row. Dropping a session erases every digest it minted, so a login
+door's logout genuinely revokes what it claims to revoke. A lapse alone erases nothing: it withdraws
+the tokens' AUTHORITY at once through `stillLive`, and the digests go when the lapsed row is next
+touched or swept and dropped. A session may hold at most 16 live token digests at once, so a rapid,
+long-TTL minting loop cannot grow one session's footprint without bound.
 
 A full map refuses a new session rather than evicting a live one: evicting a live session to admit
 a flood of new logins would trade one denial-of-service shape for a worse one, an attacker signing a
@@ -168,7 +169,9 @@ both directions — a token dying inside its live session (e), and a lapsed sess
 whose own TTL has not run out (f) — and the per-session live-token cap, refusing and recovering, in
 (g).
 
-Three properties are NOT railed, and each is named here rather than left for a reader to assume.
+Five properties this section states are NOT railed. They are named here rather than left for a
+reader to assume, and the list is meant to be exhaustive — a claim in this section that appears in
+neither the paragraph above nor the five below is an omission worth reporting.
 
 *A restart invalidating every session* has no live rail. The map is a closure-local `Map` allocated
 per `serve()` call and no persistence path reaches it, so the property holds structurally. A door-level
@@ -187,6 +190,16 @@ now rests on reading them, not on a rail.
 The standalone table did it on both paths; the doors prune only when minting. The set stays bounded
 by the per-session cap and is cleared whenever a session drops, so the leak the original design
 guarded against is closed by other means rather than by that sweep.
+
+*The default clock's SOURCE* is unrailed, and it is the one gap here with a security edge. Every
+clock-bearing test injects `monotonicNow`, so nothing pins that the default is `performance.now()`
+rather than `Date.now()`: change both defaults to the wall clock and the whole suite stays green.
+What (o) proves is that a backward step does not extend a session — a property the delete-on-discovery
+rule holds under ANY clock. The paragraph above argues the monotonic source is what stops a backward
+step arising in the first place; only the second line of that defence is tested.
+
+*A session id's shape and entropy* are unrailed. No test asserts 32 random bytes, or base64url, or
+any distribution; (f) asserts only that a fresh login yields a different value than the one before it.
 
 **Provenance.** [PR #289](https://github.com/bombadil-labs/loam/pull/289) landed this design as
 `createSessionTable` in `src/server/session.ts`, proved by `test/server/session-table.test.ts`.

@@ -1408,7 +1408,7 @@ export const CHAPTERS = [
             door: null,
           },
           {
-            says: "A signed-in session lives only in server memory, past its idle window it refuses rather than resurrecting, and a wall clock stepped backward cannot extend it — the doors read a clock that only ever moves forward.",
+            says: "A signed-in session lives only in server memory, and past its idle window it refuses rather than resurrecting. A clock stepped backward cannot revive it either: a row found expired is deleted on discovery, so there is nothing left for a smaller later reading to bring back.",
             spec: "spec/36-users-and-sessions.md",
             proof: "test/server/login-door.test.ts",
             door: null,
