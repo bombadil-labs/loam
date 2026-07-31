@@ -120,8 +120,19 @@ given a value now refuses rather than reading as absent), proved by `test/cli/us
 
 A signed-in session lives in the server's own memory, in a plain `Map` with no persistence: a
 restart forgets every session, which is deliberate for one operator on one box (§9a) rather than a
-gap this phase leaves open. A session id is 32 random bytes, base64url — never a counter, never
+gap this section leaves open. A session id is 32 random bytes, base64url — never a counter, never
 derived from the user's name.
+
+**Where that map actually lives, corrected.** Phase 4 landed this design as a standalone
+`createSessionTable`, on the expectation that the login door (§36.5) would be its first caller. The
+door did not call it. It grew its own session map instead, because a door session carries two things
+a standalone table has no slot for — the user's `roles`, re-read from the ground on every ask, and
+the per-session `formToken` that §36.6 checks — and because the token half belongs one layer further
+out still: a session token names a server-wide IDENTITY rather than a user, and §36.7 re-checks it
+against the live mount set on every presentation, so its table lives in `http.ts` where the bearer
+header is read. The standalone table was therefore a second implementation that no request ever
+executed, and its test file was green about code the store did not run. It is deleted. Everything
+this section describes is true of what ships; only the claim that one object holds it was wrong.
 
 Every session carries an idle window. Touching a session slides the window forward; touching it
 after the window has passed refuses the touch and deletes the row outright, so a later clock
@@ -133,8 +144,9 @@ back.
 Each minted bearer-token digest carries its OWN expiry, never the parent session's — a token that
 rode its session's much longer idle window past its own stated TTL was a defect an independent
 review caught before any code existed, and a second review caught the same shape again after the
-first fix: `resolveToken` now checks a session's idle expiry directly rather than trusting a row that
-sweeping has not yet reached. Dropping a session, or letting its idle window lapse, erases every
+first fix. What ships closes it from the other side: the token table asks a `stillLive` callback on
+every presentation, so a session past its idle window stops authenticating the tokens it bought even
+when no traffic has swept its row. Dropping a session, or letting its idle window lapse, erases every
 digest it minted, so a login door's logout genuinely revokes what it claims to revoke. A session may
 hold at most 16 live token digests at once, so a rapid, long-TTL minting loop cannot grow one
 session's footprint without bound.
@@ -145,12 +157,21 @@ real operator out. The table does reclaim a session already past its idle window
 anyone logs in, so an abandoned session does not block a login slot forever — bounding how fast an
 attacker may open new sessions at all is the login door's concern (a later phase), not this table's.
 
-**This phase adds no door and reads no cookie.** The login door (phase 5) is the table's first
-caller.
+**One property here has no test, and that is said rather than implied.** A restart invalidating every
+session is structural — the map is a closure-local `Map` allocated per `serve()` call, reachable by
+no persistence path — so there is nothing to assert that would not merely restate `new Map()`. Every
+other property in this section is railed against live HTTP traffic: the idle window and the clock
+backstep in `test/server/login-door.test.ts` (o), the cap and the sweep in the same file (p), and the
+token half — digest storage, TTL isolation, the per-session cap, and revocation on all four drop
+paths — in `test/server/session-token.test.ts` (e), (f), (f2), (g).
 
-**Provenance.** [PR #289](https://github.com/bombadil-labs/loam/pull/289) — `src/server/session.ts`,
-proved by `test/server/session-table.test.ts`. Working spec:
-`.adlc/specs/36-04-the-session-table.md`. Ticket T125.
+**Provenance.** [PR #289](https://github.com/bombadil-labs/loam/pull/289) landed this design as
+`createSessionTable` in `src/server/session.ts`, proved by `test/server/session-table.test.ts`.
+Working spec: `.adlc/specs/36-04-the-session-table.md`. Ticket T125. Corrected by
+[PR #295](https://github.com/bombadil-labs/loam/pull/295), which deleted that table once §36.5–§36.7
+had shipped the behaviour elsewhere, retired its rail from T125 under `adlc ticket update
+--authorize`, and re-pointed this section at the rails that prove the shipping code. An independent
+premortem during §36.7 found the divergence.
 
 ### 36.5 The login door
 

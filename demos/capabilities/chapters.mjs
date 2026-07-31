@@ -1408,15 +1408,15 @@ export const CHAPTERS = [
             door: null,
           },
           {
-            says: "A signed-in session lives only in server memory, past its idle window it refuses rather than resurrecting, and a wall clock stepped backward cannot extend it — the table reads a clock that only ever moves forward.",
+            says: "A signed-in session lives only in server memory, past its idle window it refuses rather than resurrecting, and a wall clock stepped backward cannot extend it — the doors read a clock that only ever moves forward.",
             spec: "spec/36-users-and-sessions.md",
-            proof: "test/server/session-table.test.ts",
+            proof: "test/server/login-door.test.ts",
             door: null,
           },
           {
-            says: "A minted bearer token is held as a digest with its own expiry, never the plaintext and never borrowing its session's longer idle window — and dropping a session revokes every token it minted.",
+            says: "A minted bearer token is held as a digest with its own expiry, never the plaintext and never borrowing its session's longer idle window — and dropping a session revokes every token it minted, on all four paths that end one.",
             spec: "spec/36-users-and-sessions.md",
-            proof: "test/server/session-table.test.ts",
+            proof: "test/server/session-token.test.ts",
             door: null,
           },
           {
