@@ -437,25 +437,33 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     { identity: TokenIdentity; expiresAt: number; stillLive: () => boolean }
   >();
   const clock = options.users?.monotonicNow ?? ((): number => performance.now());
+  // Every entry the table no longer honors, dropped. Called on mint AND on revoke — revoke runs
+  // whenever a session ends, which is the event that bounds how long a lapsed entry can sit.
+  // Without it an abandoned session's entry (which carries the user's SIGNING SEED) stayed
+  // resident for the process's whole life, waiting on the next login by anyone: a retention the
+  // working spec's own argument for reading the seed late did not keep (a P5 lens's finding).
+  const sweepSessionTokens = (moment: number): void => {
+    for (const [key, minted] of sessionTokens) {
+      if (minted.expiresAt <= moment || !minted.stillLive()) sessionTokens.delete(key);
+    }
+  };
   const mintSessionToken = (
     identity: TokenIdentity,
     ttlMs: number,
     stillLive: () => boolean,
-  ): string => {
+  ): { token: string; expiresAt: number } => {
     const secret = randomBytes(32).toString("base64url");
     const moment = clock();
-    for (const [key, minted] of sessionTokens) {
-      if (minted.expiresAt <= moment) sessionTokens.delete(key);
-    }
-    sessionTokens.set(sha(secret).toString("hex"), {
-      identity,
-      expiresAt: moment + ttlMs,
-      stillLive,
-    });
-    return secret;
+    sweepSessionTokens(moment);
+    const expiresAt = moment + ttlMs;
+    sessionTokens.set(sha(secret).toString("hex"), { identity, expiresAt, stillLive });
+    return { token: secret, expiresAt };
   };
   const revokeSessionTokens = (digests: readonly string[]): void => {
     for (const digest of digests) sessionTokens.delete(digest);
+    // The named digests are this session's; the sweep clears every OTHER entry the table has
+    // stopped honoring, so a lapsed seed copy cannot outlive the next session ending.
+    sweepSessionTokens(clock());
   };
 
   // The identity a presented token names, compared timing-safely; undefined = refuse. A cookie
