@@ -286,3 +286,43 @@ script could obtain was a page.
 `src/server/http.ts`, `src/server/mounts.ts` (the live mount enumeration the mint door asks),
 proved by `test/server/session-token.test.ts`. Working spec:
 `.adlc/specs/36-07-the-bearer-bridge.md`. Ticket T128.
+
+### 36.8 A session signs as its user
+
+Phase 3 gave each operator-role user their own signing key in the home; phase 7 let a session
+write. This joins them: a session's writes carry that user's own author, not the store's. Two
+operators are now distinguishable in the ground — which is the whole point, because two people
+writing under one name is fine until the moment a second person holds the role.
+
+The minted identity carries both halves, and both are deliberate. The user's seed decides whose
+name goes on what the doors sign. The operator flag keeps the operator-gated doors open, because
+dropping it would be a silent NARROWING dressed up as attribution — every operator is equivalent
+(§9a), and a per-operator key buys attribution, never privilege separation. The seam is the
+request context every signing door shares, so `graphql`, `rest` and `mcp` agree on the name; a
+door-specific implementation would give one person two.
+
+A user holding the operator role with no USABLE key on this box is refused by name, and the refusal
+is the load-bearing part: falling back to the store's seed would put that person's writes under the
+store's name, a lie about provenance no later reader could detect. Three states, not two — a seed
+file can be absent, unreadable, or present and not a key (a crashed write leaves it zero-byte), and
+the third fails open unless the shape is checked, so it is. The key is read at mint time, never
+cached in a session, and never reaches a response, a page, or a log. Its one residency is the
+server's token table, and the bound on that copy is TRAFFIC, not time: the table is swept on every
+mint and every session-ending event, so on a busy server a lapsed seed goes promptly, but on a
+server nobody touches again the last copy sits until the process ends. It authenticates nothing
+there — the token check reads the token's window, the session's window, and the mount rule before
+answering — so the residue is a disclosure surface, never an authority one; a wall-clock timer to
+close it fully is a decision left to its own phase.
+
+Two limits are stated rather than left to be discovered. The constitutional doors — registration,
+the renderer's pen, artifact — still sign as the STORE, because publishing law refuses any author
+but the store's own; a session opens those doors and what they write still carries the store's
+name. And a session whose write GRANT was struck can still log in and still mint: authentication
+and authorization come apart on purpose, so the writes are refused at admission instead. Nothing
+about a delta's SHAPE changes, so no migration is owed — but the author is part of a delta's
+content address, so two people writing the identical claim now produce two deltas where they once
+produced one.
+
+**Provenance.** [PR #295](https://github.com/bombadil-labs/loam/pull/295) — `src/server/session.ts`,
+proved by `test/server/session-authorship.test.ts`. Working spec:
+`.adlc/specs/36-08-a-session-signs-as-its-user.md`. Ticket T129.

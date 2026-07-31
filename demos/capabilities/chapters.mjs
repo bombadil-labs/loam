@@ -1437,12 +1437,18 @@ export const CHAPTERS = [
             proof: "test/server/session-token.test.ts",
             door: null,
           },
+          {
+            says: "Two operators writing through their own sessions leave two different names in the ground — each write carries that user's own signing key, and a user holding the role with no key on this box is refused rather than quietly signing as the store.",
+            spec: "spec/36-users-and-sessions.md",
+            proof: "test/server/session-authorship.test.ts",
+            door: null,
+          },
         ],
       },
       {
         kind: "notYet",
         items: [
-          "A session's writes still carry the store's own signing identity. Per-user session authorship (phase 8) is a later phase of this same arc.",
+          "The constitutional writes — registering a schema, the renderer's pen — still sign as the store rather than as the person, because publishing law refuses any author but the store's own.",
           "The failed-login delay (phase 9) is not built: a wrong password costs a hash and fills no counter. `loam user unlock` is deferred to that phase, which owns the file it would clear.",
           "Erasure honesty for `credentials.json` (phase 10): the health report and compliance receipt do not yet name the credential file as a surface erasure does not sweep.",
         ],
