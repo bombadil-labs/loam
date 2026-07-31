@@ -25,6 +25,7 @@ import { roleClaims, userClaims } from "../../src/server/users.js";
 import { PRESESSION_COOKIE, SESSION_COOKIE } from "../../src/server/session.js";
 import { grantClaims } from "../../src/gateway/accounts.js";
 import { containerClaims } from "../../src/gateway/container.js";
+import { writeUserSeed } from "../../src/cli/config.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE, garden } from "./../gateway/fixtures.js";
 import { FERN, GARDENER, GARDENER_SEED, SURVEYOR, observed } from "../spike/garden.js";
@@ -52,6 +53,13 @@ interface Shape {
   readonly extraMount?: boolean;
 }
 
+// §36 phase 8 made a usable per-user signing seed a PRECONDITION of minting: a user holding the
+// operator role with no key on this box fails closed rather than signing as the store. These
+// fixtures predate that and gave their users a role and no key — a state phase 8 says must
+// refuse — so each one now writes a seed and the write grant `loam user assign-role` lands
+// beside it. FIXTURE ONLY: no assertion in this file was weakened, removed, or reordered.
+const SEED_FOR: Record<string, string> = { myk: "11".repeat(32), slow: "22".repeat(32) };
+
 async function plantedGateway(roles: readonly ("operator" | "actor")[]): Promise<{
   gateway: Gateway;
   roleDeltaIds: string[];
@@ -73,6 +81,17 @@ async function plantedGateway(roles: readonly ("operator" | "actor")[]): Promise
     roleDeltaIds.push(delta.id);
     await gateway.append([delta]);
   }
+  // The write standing that rides with the operator role (phase 8).
+  await gateway.append([
+    signClaims(
+      grantClaims(STORE_ENTITY, authorForSeed(SEED_FOR["myk"]!), "write", OPERATOR, ts++),
+      OPERATOR_SEED,
+    ),
+    signClaims(
+      grantClaims(STORE_ENTITY, authorForSeed(SEED_FOR["slow"]!), "write", OPERATOR, ts++),
+      OPERATOR_SEED,
+    ),
+  ]);
   return { gateway, roleDeltaIds };
 }
 
@@ -87,6 +106,7 @@ async function bridgeServer(shape: Shape = {}): Promise<{
   const home = mkdtempSync(join(tmpdir(), "loam-session-token-"));
   homes.push(home);
   writeCredentials(home, { version: 1, users: { myk: await hashPassword(PASSWORD, CHEAP) } });
+  for (const [name, seed] of Object.entries(SEED_FOR)) writeUserSeed(home, name, seed);
   const handle = await serve({
     mounts: { default: gateway },
     tokens: { "op-token": { operator: true } },
@@ -411,6 +431,7 @@ describe("§36 phase 7 — the bearer bridge", () => {
       const home = mkdtempSync(join(tmpdir(), "loam-session-token-"));
       homes.push(home);
       writeCredentials(home, { version: 1, users: { myk: await hashPassword(PASSWORD, CHEAP) } });
+      for (const [name, seed] of Object.entries(SEED_FOR)) writeUserSeed(home, name, seed);
       const handle = await serve({
         mounts: {},
         tokens: { "op-token": { operator: true } },
@@ -634,6 +655,7 @@ describe("§36 phase 7 — the bearer bridge", () => {
     const home = mkdtempSync(join(tmpdir(), "loam-session-token-"));
     homes.push(home);
     writeCredentials(home, { version: 1, users: { myk: await hashPassword(PASSWORD, CHEAP) } });
+    for (const [name, seed] of Object.entries(SEED_FOR)) writeUserSeed(home, name, seed);
 
     // The port is FREE and the fixture otherwise valid: one mount binds and answers.
     const ok = await serve({
