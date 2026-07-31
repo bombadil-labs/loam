@@ -1431,12 +1431,18 @@ export const CHAPTERS = [
             proof: "test/server/login-csrf.test.ts",
             door: null,
           },
+          {
+            says: "A browser crosses to the data doors by trading its session for a short-lived bearer token, never by its cookie — and the token dies with its window, dies with its session on every path that ends one, and is not minted at all while a world the role binding never named is answering beside it.",
+            spec: "spec/36-users-and-sessions.md",
+            proof: "test/server/session-token.test.ts",
+            door: null,
+          },
         ],
       },
       {
         kind: "notYet",
         items: [
-          "A session opens the store's own pages only. The bearer bridge a browser writes through (`POST /session/token`, phase 7) and per-user session authorship (phase 8) are later phases of this same arc.",
+          "A session's writes still carry the store's own signing identity. Per-user session authorship (phase 8) is a later phase of this same arc.",
           "The failed-login delay (phase 9) is not built: a wrong password costs a hash and fills no counter. `loam user unlock` is deferred to that phase, which owns the file it would clear.",
           "Erasure honesty for `credentials.json` (phase 10): the health report and compliance receipt do not yet name the credential file as a surface erasure does not sweep.",
         ],

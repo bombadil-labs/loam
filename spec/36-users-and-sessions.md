@@ -237,3 +237,52 @@ tab — is fixed by a fresh form.
 **Provenance.** [PR #293](https://github.com/bombadil-labs/loam/pull/293) — `src/server/session.ts`,
 proved by `test/server/login-csrf.test.ts` (phase 5's two rail files untouched, per the plan's
 freeze discipline). Working spec: `.adlc/specs/36-06-cross-site-defence.md`. Ticket T127.
+
+### 36.7 The bearer bridge
+
+A session opens the store's own pages and nothing else. `POST /session/token` is how a browser
+crosses to the JSON doors: it trades a live session for a short-lived bearer token the browser
+then presents in a header, like any other client. The cookie never crosses — a cookie is ambient,
+so a cookie-opened data door would be cross-site forgeable, and this is the whole reason cookie
+authority stays off them.
+
+The token names the operator's authority on this server, for its own window (five minutes by
+default), and it is held as a DIGEST on both sides — the doors keep no plaintext, because a
+session idles far longer than a token lives. One clock decides which tokens are live for both the
+server's table and the session's own cap, so the two can never disagree about what a cap slot
+means. A session may hold sixteen live tokens; a lapsed one frees its slot.
+
+The roles are re-read from the ground at every mint, never trusted from the session: a struck role
+closes the door to new tokens at once. An already-minted token still lives out its window, which
+is stated rather than implied — the alternative reading, that revocation is instant, would be a
+promise the bytes do not keep. And a session row and the tokens it bought die TOGETHER, through
+one function, because `drop` has four callers: signing out, the idle sweep, the ground losing the
+user, and the re-login that kills a fixated session. Attaching revocation to the logout door alone
+would have left an operator token alive across the other three.
+
+A session token is authority over the whole server, while the role binding that earns it is read
+from ONE mount's ground. So no world other than the doors' own may answer beside them: `serve()`
+refuses at boot before the socket binds, `addMount` refuses a stranger, and — because a container
+mounts ITSELF and boot never sees it — the mint door asks the LIVE mount table and refuses to mint
+while a second world is answering, naming it. That refusal is not the whole closure, because a
+container can attach AFTER a mint: an already-minted session token also stops being honored while
+a stranger answers, asked on every presentation, and starts again when the stranger goes. The
+narrowing is total for that token — it is refused even at the world it was legitimately minted
+for, since nothing can scope it to one mount today. Nothing is taken from the operator's own
+configured token; only the session's path to server-wide authority closes.
+
+A long-lived response is the one place authority outlives its own request, so an authenticated
+subscription re-asks on every event: a stream opened with a session token ends, saying so, the
+moment that token is revoked, lapses, or loses the session behind it. Without that, "signing out
+retires the tokens that session minted" would have been true only of new requests.
+
+One boundary is worth stating plainly, because this phase is what makes it consequential: the mint
+door's authority boundary is the ORIGIN. Anything a store serves script from on the same origin is
+inside it — a script on a rendered route can fetch the login page, read its form token, and mint.
+That is inherent to any cookie-anchored session, but before this phase the strongest thing such a
+script could obtain was a page.
+
+**Provenance.** [PR #294](https://github.com/bombadil-labs/loam/pull/294) — `src/server/session.ts`,
+`src/server/http.ts`, `src/server/mounts.ts` (the live mount enumeration the mint door asks),
+proved by `test/server/session-token.test.ts`. Working spec:
+`.adlc/specs/36-07-the-bearer-bridge.md`. Ticket T128.

@@ -431,15 +431,27 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
   // same monotonic source). Two would let the doors free a cap slot for a token this table still
   // honors — the cap would stop bounding live operator authority while its refusal kept
   // promising it did.
-  const sessionTokens = new Map<string, { identity: TokenIdentity; expiresAt: number }>();
+  const usersMount = options.users?.mount;
+  const sessionTokens = new Map<
+    string,
+    { identity: TokenIdentity; expiresAt: number; stillLive: () => boolean }
+  >();
   const clock = options.users?.monotonicNow ?? ((): number => performance.now());
-  const mintSessionToken = (identity: TokenIdentity, ttlMs: number): string => {
+  const mintSessionToken = (
+    identity: TokenIdentity,
+    ttlMs: number,
+    stillLive: () => boolean,
+  ): string => {
     const secret = randomBytes(32).toString("base64url");
     const moment = clock();
     for (const [key, minted] of sessionTokens) {
       if (minted.expiresAt <= moment) sessionTokens.delete(key);
     }
-    sessionTokens.set(sha(secret).toString("hex"), { identity, expiresAt: moment + ttlMs });
+    sessionTokens.set(sha(secret).toString("hex"), {
+      identity,
+      expiresAt: moment + ttlMs,
+      stillLive,
+    });
     return secret;
   };
   const revokeSessionTokens = (digests: readonly string[]): void => {
@@ -459,12 +471,33 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     const digest = presented.toString("hex");
     const minted = sessionTokens.get(digest);
     if (minted === undefined) return undefined;
-    if (minted.expiresAt <= clock()) {
+    // TWO expiries, and BOTH bind. The token's own window is the obvious one. The second is the
+    // parent SESSION's idle window: sweeping runs only when someone logs in or presents a
+    // cookie, so an abandoned session's already-minted operator token would otherwise go on
+    // authenticating for the rest of its TTL with nothing left to reach it. A P5 lens caught
+    // that; the session table's own header states the rule this now keeps.
+    if (minted.expiresAt <= clock() || !minted.stillLive()) {
       sessionTokens.delete(digest);
+      return undefined;
+    }
+    // AND the world it was minted into must still be the only one. Refusing to MINT while a
+    // second world answers is not enough on its own: a container attaches after the fact, and a
+    // token minted a moment earlier would open it — server-wide authority over a world no role
+    // binding named, for the rest of its window (a P5 lens caught the overclaim). So an
+    // already-minted session token stops being honored the instant a stranger appears, and
+    // resumes when it goes. The operator's own configured token is untouched: it is the
+    // operator's to spend, and nothing here revokes it.
+    if (usersMount !== undefined && mounts.live().some((name) => name !== usersMount)) {
       return undefined;
     }
     return minted.identity;
   };
+
+  // Is the credential that opened a long-lived response STILL live? For a configured operator
+  // token the answer is always yes (nothing revokes one). For a §36 session token it is the same
+  // question `identify` asks, re-asked: the digest still present, inside its own window, and its
+  // parent session still inside its idle window.
+  const stillAuthorized = (req: IncomingMessage): boolean => identify(req) !== undefined;
 
   const contextFor = (identity: TokenIdentity): RequestContext | undefined =>
     identity.actor === undefined ? undefined : { actor: identity.actor };
@@ -584,6 +617,22 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     });
     try {
       for await (const event of events) {
+        // AUTHORITY IS RE-ASKED PER EVENT, not only at dispatch. A stream is the one door that
+        // outlives its own request, so a token revoked by a logout — or lapsed, or orphaned by
+        // its session dying — would otherwise go on delivering the full surface indefinitely,
+        // and "signing out retires the tokens that session minted" would be true only of NEW
+        // requests (a P5 lens caught exactly that). Ending the generator makes the `finally`
+        // below run, so the socket closes the same way every other ending does.
+        // The PUBLIC door presents no credential by design, so there is nothing to re-ask
+        // there — its own surface is what bounds it.
+        if (door === "token" && !stillAuthorized(req)) {
+          res.write(
+            `event: error\ndata: ${JSON.stringify({
+              message: "the credential that opened this stream is no longer live",
+            })}\n\n`,
+          );
+          break;
+        }
         // JSON.stringify never emits a raw newline, so no payload can break the SSE framing.
         res.write(`data: ${JSON.stringify(event)}\n\n`);
       }
@@ -1377,6 +1426,11 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       // The worlds this server answers RIGHT NOW, other than the doors' own. A container mounts
       // itself (mounts.ts tier 3), so boot's guard cannot see it — the mint door asks here, at
       // the moment of minting, and refuses while any second world resolves.
+      //
+      // This compares NAMES where it means WORLDS, which is safe only because two names can
+      // never point at one gateway here: the boot guard above refuses any static name but the
+      // doors' own, and `addMount` refuses any runtime one — so an alias is unreachable, and
+      // containers (the one tier neither guard sees) are genuinely distinct gateways.
       otherWorlds: () => mounts.live().filter((name) => name !== forUsers.mount),
     });
   }

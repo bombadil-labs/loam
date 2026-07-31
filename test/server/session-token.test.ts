@@ -15,6 +15,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 import { authorForSeed, makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
@@ -260,17 +261,23 @@ describe("§36 phase 7 — the bearer bridge", () => {
   it("(e) the token dies with its window; the session survives it", async () => {
     let clock = 0;
     const { base } = await bridgeServer({
-      doorOptions: { monotonicNow: () => clock, tokenTtlMs: 1000, idleMs: 100_000 },
+      doorOptions: { monotonicNow: () => clock, tokenTtlMs: 3_600_000, idleMs: 100_000_000 },
     });
     const session = await signIn(base);
     const minted = (await (await mint(base, session)).json()) as { token: string };
     expect((await gql(base, minted.token)).status).toBe(200);
-    clock = 2000;
+    clock = 7_200_000;
     expect((await gql(base, minted.token)).status).toBe(401);
     // The session outlives the token it minted.
     expect(await signedInPage(base, session.sessionId)).toContain("Signed in");
   });
 
+  // TWO INDEPENDENT GUARANTEES hold (f), deliberately, and a reader should know which is which:
+  // `drop` revokes the digests (which also keeps the server's token map from retaining entries
+  // for sessions that no longer exist), and `identify()` asks the session's own liveness on
+  // every presentation. Either alone would satisfy every assertion below — so a mutant deleting
+  // just one SURVIVES this test, and that is stated rather than papered over. The belt is the
+  // memory hygiene; the braces are the authority. (f2) pins the digest form the belt uses.
   it("(f) every path that drops a session retires its tokens — all four", async () => {
     // 1. logout
     {
@@ -290,7 +297,10 @@ describe("§36 phase 7 — the bearer bridge", () => {
       expect(out.status).toBe(200);
       expect((await gql(base, minted.token)).status).toBe(401);
     }
-    // 2. the idle sweep
+    // 2. the session lapsing — on the LAPSE ITSELF, with no traffic sweeping the row first. A
+    //    P5 lens found the original here: sweeping runs only on open/peek, so an abandoned
+    //    session went on authenticating its operator token for the rest of its TTL with nothing
+    //    left to reach it. Presenting the token IS the request that must now refuse.
     {
       let clock = 0;
       const { base } = await bridgeServer({
@@ -300,6 +310,8 @@ describe("§36 phase 7 — the bearer bridge", () => {
       const minted = (await (await mint(base, session)).json()) as { token: string };
       expect((await gql(base, minted.token)).status).toBe(200);
       clock = 5000;
+      expect((await gql(base, minted.token)).status).toBe(401);
+      // And still refused once a sweep would have run, so the fix is not merely a race.
       await fetch(`${base}/login`, {
         headers: { cookie: `${SESSION_COOKIE}=${session.sessionId}` },
       });
@@ -349,8 +361,11 @@ describe("§36 phase 7 — the bearer bridge", () => {
       doorOptions: {
         monotonicNow: () => clock,
         maxTokensPerSession: 2,
-        tokenTtlMs: 1000,
-        idleMs: 100_000,
+        // An hour, stepped past by two: no REAL clock reaches it inside this test, so a server
+        // table reading its own clock provably does not expire the token and the one-clock
+        // claim is killed by construction rather than by scheduling luck.
+        tokenTtlMs: 3_600_000,
+        idleMs: 100_000_000,
       },
     });
     const session = await signIn(base);
@@ -362,7 +377,7 @@ describe("§36 phase 7 — the bearer bridge", () => {
 
     // Past the first token's TTL: a mint succeeds AND that token is refused, asserted at the
     // SAME instant — two clocks behind the pair could not satisfy both.
-    clock = 2000;
+    clock = 7_200_000;
     const recovered = await mint(base, session);
     expect(recovered.status).toBe(200);
     expect((await gql(base, first.token)).status).toBe(401);
@@ -388,6 +403,194 @@ describe("§36 phase 7 — the bearer bridge", () => {
       expect(refused.status).toBe(403);
       expect(await signedInPage(base, session.sessionId)).toContain("Signed in");
     }
+    // the ground cannot be READ → 503, session intact. Without this the cannot-decide branch is
+    // deletable: collapsing it into "gone" (drop + 401) would leave every other rail green, and
+    // that collapse is the exact distinction this door exists to keep.
+    {
+      const { gateway } = await plantedGateway(["operator"]);
+      const home = mkdtempSync(join(tmpdir(), "loam-session-token-"));
+      homes.push(home);
+      writeCredentials(home, { version: 1, users: { myk: await hashPassword(PASSWORD, CHEAP) } });
+      const handle = await serve({
+        mounts: {},
+        tokens: { "op-token": { operator: true } },
+        port: 0,
+        host: "127.0.0.1",
+        users: { home, mount: "dyn" },
+      });
+      handles.push(handle);
+      handle.addMount("dyn", gateway); // the doors' OWN mount, which is not a stranger
+      const session = await signIn(handle.url);
+      expect((await mint(handle.url, session)).status).toBe(200); // positive control
+
+      await handle.removeMount("dyn"); // the ground becomes unreachable
+      const undecidable = await mint(handle.url, session);
+      expect(undecidable.status).toBe(503);
+      expect((await undecidable.text()).toLowerCase()).toContain("ground");
+      // The session SURVIVES a condition the door could not evaluate.
+      handle.addMount("dyn", gateway);
+      expect(await signedInPage(handle.url, session.sessionId)).toContain("Signed in");
+      expect((await mint(handle.url, session)).status).toBe(200);
+    }
+  });
+
+  it("(l) a live stream dies with the credential that opened it", async () => {
+    // The one door that outlives its own request: identify() runs at dispatch, so without a
+    // per-event re-ask a revoked token keeps delivering the full surface indefinitely — past
+    // the logout, past the lapse, past its own TTL (a P5 lens caught it).
+    const { base } = await bridgeServer();
+    const session = await signIn(base);
+    const minted = (await (await mint(base, session)).json()) as { token: string };
+    const res = await fetch(
+      `${base}/default/subscribe?query=${encodeURIComponent(`subscription { plant(entity: "${FERN}") { _view } }`)}`,
+      { headers: { authorization: `Bearer ${minted.token}` } },
+    );
+    expect(res.status).toBe(200);
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+
+    // The stream is genuinely live: a write reaches it. (Positive control — without this the
+    // assertions below would pass on a stream that never worked.)
+    const seen = (async (): Promise<string> => {
+      let text = "";
+      while (!text.includes("\n\n")) {
+        const chunk = await reader.read();
+        if (chunk.done) return text;
+        text += decoder.decode(chunk.value, { stream: true });
+      }
+      return text;
+    })();
+    await fetch(`${base}/default/append`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${minted.token}` },
+      body: JSON.stringify({
+        deltas: [toWire(observed(FERN, "note", "live event", 41_200, GARDENER_SEED))],
+      }),
+    });
+    expect(await seen).toContain("data:");
+
+    // Sign out, then push another event: the stream must END rather than deliver it.
+    await fetch(`${base}/logout`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `${SESSION_COOKIE}=${session.sessionId}`,
+        ...SAME_ORIGIN,
+      },
+      body: new URLSearchParams({ form_token: session.sessionToken }).toString(),
+    });
+    await fetch(`${base}/default/append`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer op-token" },
+      body: JSON.stringify({
+        deltas: [toWire(observed(FERN, "note", "after the logout", 41_300, GARDENER_SEED))],
+      }),
+    });
+    let tail = "";
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      tail += decoder.decode(chunk.value, { stream: true });
+      if (tail.includes("no longer live")) break;
+    }
+    expect(tail).not.toContain("after the logout");
+    expect(tail).toContain("no longer live");
+  });
+
+  it("(i2) an ALREADY-MINTED token stops being honored while a stranger world answers", async () => {
+    // Refusing to mint is not enough on its own: a container attaches after the fact, and a
+    // token minted a moment earlier would open it with server-wide authority (a P5 lens caught
+    // the overclaim — the spec said the mint refusal "closes the hole", and it did not).
+    const { base, gateway } = await bridgeServer();
+    const session = await signIn(base);
+    const minted = (await (await mint(base, session)).json()) as { token: string };
+    expect((await gql(base, minted.token)).status).toBe(200); // positive control
+
+    await gateway.append([
+      signClaims(
+        containerClaims(
+          { container: "thicket", trust: "curated", posture: "separate" },
+          OPERATOR,
+          30_200,
+        ),
+        OPERATOR_SEED,
+      ),
+    ]);
+    const container = await gateway.openContainer({
+      name: "thicket",
+      backend: new MemoryBackend(),
+    });
+
+    // The token minted BEFORE the container is refused everywhere now — including the world it
+    // was legitimately minted for, because there is no way to scope it to one mount today.
+    expect((await gql(base, minted.token)).status).toBe(401);
+    const intoStranger = await fetch(`${base}/thicket/graphql`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${minted.token}` },
+      body: READ,
+    });
+    expect(intoStranger.status).toBe(401);
+    // The operator's own configured token is untouched — nothing here revokes what the operator
+    // configured.
+    const asOperator = await fetch(`${base}/thicket/graphql`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer op-token" },
+      body: READ,
+    });
+    expect(asOperator.status).toBe(200);
+
+    // And it resumes when the stranger goes: the refusal is a live property, not a scar.
+    await container.drop();
+    expect((await gql(base, minted.token)).status).toBe(200);
+  });
+
+  it("(d) login grows no key nobody granted", async () => {
+    const { base, gateway } = await bridgeServer();
+    const before = new Set([...gateway.reactor.snapshot()].map((d) => d.claims.author));
+    const session = await signIn(base);
+    const minted = (await (await mint(base, session)).json()) as { token: string };
+    const delta = observed(FERN, "note", "authored", 41_100, GARDENER_SEED);
+    const write = await fetch(`${base}/default/append`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${minted.token}` },
+      body: JSON.stringify({ deltas: [toWire(delta)] }),
+    });
+    expect(write.status).toBe(200);
+    // Every distinct author in the ground is one the home already held. Asserted as a SET
+    // against the fixture's own known authors — a count would pass while a stranger displaced
+    // a familiar name.
+    const after = new Set([...gateway.reactor.snapshot()].map((d) => d.claims.author));
+    const known = new Set([OPERATOR, GARDENER, SURVEYOR]);
+    for (const author of after) expect(known.has(author), author).toBe(true);
+    // Two-sided: signing in and writing genuinely CHANGED the ground, so the check above is not
+    // passing over an empty delta.
+    expect(after.size).toBeGreaterThanOrEqual(before.size);
+    expect([...after]).toContain(GARDENER);
+  });
+
+  it("(f2) the digest the doors record is the key the table revokes by", async () => {
+    // A hex/base64 mismatch across the two maps would make every revocation a silent no-op
+    // answering 200. (f) catches that in effect; this pins the encoding itself, so a future
+    // reader sees the contract rather than inferring it.
+    const { base } = await bridgeServer();
+    const session = await signIn(base);
+    const minted = (await (await mint(base, session)).json()) as { token: string };
+    const expected = createHash("sha256").update(minted.token).digest("hex");
+    expect(expected).toMatch(/^[0-9a-f]{64}$/); // hex, on both sides — never base64url
+    expect((await gql(base, minted.token)).status).toBe(200);
+    // Revoking by exactly that string is what the door does on drop; if the doors recorded a
+    // different form, this token would survive the logout below.
+    const out = await fetch(`${base}/logout`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `${SESSION_COOKIE}=${session.sessionId}`,
+        ...SAME_ORIGIN,
+      },
+      body: new URLSearchParams({ form_token: session.sessionToken }).toString(),
+    });
+    expect(out.status).toBe(200);
+    expect((await gql(base, minted.token)).status).toBe(401);
   });
 
   it("(j) the mint door is behind phase 6's guard, and wants a live session", async () => {
@@ -466,10 +669,24 @@ describe("§36 phase 7 — the bearer bridge", () => {
     });
     expect(refused).toBe("ECONNREFUSED");
 
-    // addMount refuses while the doors are open.
+    // addMount refuses a STRANGER while the doors are open — and admits the doors' OWN name,
+    // which is the carve-out that makes them answer at all. Without this positive control the
+    // conjunct is deletable: refusing every name would leave the negative assertion green.
     const live = await bridgeServer();
     const { gateway: third } = await plantedGateway(["operator"]);
     expect(() => live.handle.addMount("second", third)).toThrow(/login doors/i);
+
+    const { gateway: own } = await plantedGateway(["operator"]);
+    const late = await serve({
+      mounts: {},
+      tokens: { "op-token": { operator: true } },
+      port: 0,
+      host: "127.0.0.1",
+      users: { home, mount: "default" },
+    });
+    handles.push(late);
+    expect(() => late.addMount("default", own)).not.toThrow();
+    expect((await fetch(`${late.url}/login`)).status).toBe(200);
   });
 
   it("(i) a container's appearance closes the MINT door rather than widening the token", async () => {

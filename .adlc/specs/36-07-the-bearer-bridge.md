@@ -81,8 +81,14 @@ one that actually closes the hole:
    makes them answer at all.
 3. **`POST /session/token` refuses to MINT while the live mount table resolves any name other
    than the doors' own** — containers included, asked at the moment of minting rather than
-   remembered from boot. 503, naming the extra world. A token already minted lives out its
-   window; this closes the door to new ones the instant a second world appears.
+   remembered from boot. 503, naming the extra world.
+4. **And an ALREADY-MINTED session token stops being honored** while a stranger answers, asked
+   on every presentation. Refusal 3 alone is not the closure it first looked like: a container
+   attaches AFTER a mint, and a token issued a moment earlier would open it for the rest of its
+   window (a premortem's disclosure that this review turned into a defect). The narrowing is
+   total — the token is refused even for the world it was legitimately minted for, because there
+   is no way to scope it to one mount today — and it LIFTS when the stranger goes. The
+   operator's own configured token is untouched throughout: it is the operator's to spend.
 
 **The mint door's authority boundary is the ORIGIN, and that is stated rather than assumed.**
 Anything this store serves script from on this origin is inside the boundary: a script on a
@@ -157,6 +163,15 @@ All in `test/server/session-token.test.ts` against live `serve()` instances.
 - (h) **The ground is re-read at mint time, three ways.** Roles struck after sign-in → the next
   mint answers 401 and the session is dropped; a user holding only `actor` → 403 with the
   session intact; the mount unresolvable → 503 with the session intact. Verified by
+  `test/server/session-token.test.ts`.
+- (i2) **An already-minted token stops being honored while a stranger world answers, and
+  resumes when it goes.** Mint, attach a container, and the earlier token is refused at both the
+  doors' own mount and the stranger's — while the static operator token still answers the
+  stranger normally. Verified by `test/server/session-token.test.ts`.
+- (l) **A live stream dies with the credential that opened it.** A subscription opened with a
+  session token, proven live by an event, delivers nothing after a logout and ends saying so.
+  `identify` runs at dispatch, so without a per-event re-ask "signing out retires the tokens
+  that session minted" would be true only of NEW requests. Verified by
   `test/server/session-token.test.ts`.
 - (i) **A container's appearance closes the mint door rather than widening the token.** The
   plan's phase-7 line asked that a container mount answer a session token as it answers the

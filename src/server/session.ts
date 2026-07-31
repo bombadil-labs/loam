@@ -267,8 +267,19 @@ export interface UserDoorDeps {
   readonly publicUrl: string;
   /** The mount's ground, re-asked every request: a mount can vanish, and erase re-seats a reactor. */
   ground(): { reactor: Reactor; operator: string | undefined } | undefined;
-  /** Mint a short-lived bearer token for an identity the caller has already authorized. */
-  mint(identity: { actor?: string; operator?: true }, ttlMs: number): string;
+  /**
+   * Mint a short-lived bearer token for an identity the caller has already authorized.
+   *
+   * `stillLive` is asked on EVERY presentation of the token, not only at mint: a session that
+   * lapsed past its idle window must stop authenticating the tokens it bought even when no
+   * traffic has swept its row (sweeping runs on `open`/`peek`, so an abandoned session with no
+   * further requests would otherwise keep an operator token alive for the rest of its TTL).
+   */
+  mint(
+    identity: { actor?: string; operator?: true },
+    ttlMs: number,
+    stillLive: () => boolean,
+  ): string;
   /** Retire minted tokens by SHA-256 digest (hex) — the plaintext never leaves the response. */
   revoke(digests: readonly string[]): void;
   /**
@@ -588,11 +599,13 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
   // live operator tokens in the heap far longer than they are valid.
   const minted = new Map<string, { digest: string; expiresAt: number }[]>();
 
-  // A session row and the tokens it bought die TOGETHER, through this one function. `drop` has
-  // four callers — logout, the idle sweep, `getLogin` when the ground no longer holds a role,
-  // and `open(..., replacing)` on a re-login — and attaching revocation to the logout DOOR
-  // instead would leave an operator token alive across the other three, the last of which is the
-  // session-fixation drop.
+  // A session row and the tokens it bought die TOGETHER, through this one function — and the
+  // invariant is STRUCTURAL rather than an inventory: `sessions.delete` appears exactly once in
+  // this file, here, so every path that ends a session revokes by construction. (An earlier
+  // draft argued this by counting `drop`'s callers, and the count was already wrong the day it
+  // was written — a hand-enumeration is the shape that rots. `grep -c "sessions.delete"` is the
+  // check that does not.) Attaching revocation to the logout DOOR instead would leave an
+  // operator token alive across the idle sweep, a struck role, and the session-fixation drop.
   const drop = (id: string): void => {
     sessions.delete(id);
     const held = minted.get(id);
@@ -1049,11 +1062,23 @@ page will offer.</p>`,
     // WHAT THIS TOKEN IS, exactly: the operator's authority on this server, for `tokenTtlMs`.
     // Dropping the session retires it early; nothing else does. So revoking a user's role closes
     // the door to NEW tokens at once, and an already-minted one lives out its window.
-    const token = deps.mint({ operator: true }, tokenTtlMs);
+    // The liveness question the token table asks on every presentation. It reads the row
+    // directly rather than through `peek`, because answering must not itself drop or slide
+    // anything — and it must stay true to the rule the session table states: an unswept,
+    // idle-expired row does not go on authenticating just because nobody has logged in since.
+    const stillLive = (): boolean => {
+      const row = sessions.get(id);
+      return row !== undefined && row.expiresAt > now();
+    };
+    const token = deps.mint({ operator: true }, tokenTtlMs, stillLive);
     minted.set(id, [...held, { digest: digestOf(token), expiresAt: now() + tokenTtlMs }]);
+    // `expiresIn` is derived from the RECORDED deadline, not from the configured TTL: the
+    // table's clock read happened inside `mint`, before this line, so reporting the raw TTL
+    // would promise a lifetime past the token's real death by this request's own latency.
+    const expiresAt = now() + tokenTtlMs;
     json(res, 200, {
       token,
-      expiresIn: Math.floor(tokenTtlMs / 1000),
+      expiresIn: Math.max(0, Math.floor((expiresAt - now()) / 1000)),
       user: session.user,
       roles: [...roles].sort(),
     });
