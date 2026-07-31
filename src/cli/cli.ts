@@ -7,7 +7,7 @@
 // `serve` blocks until the process is signalled.
 
 import { randomBytes } from "node:crypto";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
   authorForSeed,
@@ -408,6 +408,27 @@ async function cmdServe(
     return 2;
   }
   const home = parsed.flags.get("home") ?? defaultHome();
+  // The login doors (SPEC §36 phase 5) open iff the home holds users, probed AT BOOT — a
+  // credentials.json written under a running server waits for the next serve. The Secure-cookie
+  // trap is refused before anything opens: the session cookie's `__Host-` prefix requires
+  // `Secure`, and a browser discards a Secure cookie from a non-TLS, non-loopback origin — so a
+  // LAN bind over plain HTTP would show a login form whose successful POST sets a cookie no
+  // browser keeps. An honest refusal beats that silent loop.
+  const withUsers = existsSync(credentialsPath(home));
+  const hostFlag = parsed.flags.get("host") ?? "127.0.0.1";
+  const publicUrlFlag = parsed.flags.get("public-url");
+  if (withUsers) {
+    const loopback = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
+    const tls = publicUrlFlag !== undefined && publicUrlFlag.toLowerCase().startsWith("https:");
+    if (!loopback.has(hostFlag) && !tls) {
+      io.err(
+        `serve: this home has users, and the login doors' session cookie needs https to reach a ` +
+          `browser — serve behind a TLS terminator and name it with --public-url https://…, or ` +
+          `keep the loopback bind`,
+      );
+      return 2;
+    }
+  }
   // Boot is turnkey: an uninitialized home mints (or imports via LOAM_SEED) an operator identity
   // now, so a fresh container serves without an out-of-band `loam init`. Idempotent.
   const init = initHome(home, process.env["LOAM_SEED"]);
@@ -502,15 +523,26 @@ async function cmdServe(
   // Boot the store from its genesis (idempotent): a fresh store is born governed; an existing
   // one simply re-lands the same operator identity.
   const gateway = await Gateway.boot(backend, assembleGenesis({ operatorSeed: seed }));
-  const publicUrl = parsed.flags.get("public-url");
   let server;
   try {
     server = await serve({
       mounts: { default: gateway },
       tokens: { [token]: { operator: true } },
       port,
-      host: parsed.flags.get("host") ?? "127.0.0.1",
-      ...(publicUrl === undefined ? {} : { publicUrl }),
+      host: hostFlag,
+      ...(publicUrlFlag === undefined ? {} : { publicUrl: publicUrlFlag }),
+      // A local fault the CALLER must never read (it names paths and other users) still has to
+      // reach the operator; the door's own channel is this log line.
+      ...(withUsers
+        ? {
+            users: {
+              home,
+              mount: "default",
+              ...(publicUrlFlag === undefined ? {} : { publicUrl: publicUrlFlag }),
+              onFault: (message: string) => io.err(`loam: ${message}`),
+            },
+          }
+        : {}),
     });
   } catch (err) {
     await gateway.close().catch(() => {}); // never let a close failure mask the real refusal
@@ -518,7 +550,8 @@ async function cmdServe(
   }
   recordServing(home, server.url, path);
   io.out(
-    `loam: serving ${path} at ${server.url}/default${vault === undefined ? "" : `\n  archive ${vault}`}`,
+    `loam: serving ${path} at ${server.url}/default${vault === undefined ? "" : `\n  archive ${vault}`}` +
+      (withUsers ? `\n  login at ${publicUrlFlag ?? server.url}/login` : ""),
   );
 
   // Closing the server also releases the gateway (and its backend file) — one shutdown, whole.
