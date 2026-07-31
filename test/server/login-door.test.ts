@@ -553,9 +553,9 @@ describe("§36 phase 5 — the login door", () => {
     expect(first.res.status).toBe(200);
 
     // The table is full: a second correct login refuses, and the FIRST session still lives —
-    // including the one it PRESENTED. A P5 lens caught the original ordering dropping the
-    // caller's live session before discovering the table was full, so the refusal concealed an
-    // erasure; the presented-session probe after the 503 is that finding's rail.
+    // an evicting implementation would answer 200 here. This login PRESENTS NO SESSION, so it
+    // cannot reach the drop-versus-cap ordering in `open`: a caller presenting a live session is
+    // always discounted a seat, so no 503 can co-occur with one. Only a unit rail pins that.
     const second = await attemptLogin(base, "myk", PASSWORD);
     expect(second.status).toBe(503);
     expect(
