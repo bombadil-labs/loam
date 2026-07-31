@@ -434,13 +434,19 @@ async function cmdServe(
   // one simply re-lands the same operator identity.
   const gateway = await Gateway.boot(backend, assembleGenesis({ operatorSeed: seed }));
   const publicUrl = parsed.flags.get("public-url");
-  const server = await serve({
-    mounts: { default: gateway },
-    tokens: { [token]: { operator: true } },
-    port,
-    host: parsed.flags.get("host") ?? "127.0.0.1",
-    ...(publicUrl === undefined ? {} : { publicUrl }),
-  });
+  let server;
+  try {
+    server = await serve({
+      mounts: { default: gateway },
+      tokens: { [token]: { operator: true } },
+      port,
+      host: parsed.flags.get("host") ?? "127.0.0.1",
+      ...(publicUrl === undefined ? {} : { publicUrl }),
+    });
+  } catch (err) {
+    await gateway.close().catch(() => {}); // never let a close failure mask the real refusal
+    throw err;
+  }
   recordServing(home, server.url, path);
   io.out(
     `loam: serving ${path} at ${server.url}/default${vault === undefined ? "" : `\n  archive ${vault}`}`,
