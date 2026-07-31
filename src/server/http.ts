@@ -24,7 +24,7 @@
 // presents them; each is authorized by its own verified author (Gateway.append), and the
 // server never holds the key. A future raw-append endpoint exposes that path over HTTP.
 
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { type Delta, type Primitive } from "@bombadil/rhizomatic";
 import { Kind, OperationTypeNode, parse, type DocumentNode } from "graphql";
@@ -388,7 +388,79 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
   // which is why the deps read a closure variable the post-listen block assigns.
   let userDoors: UserDoors | undefined;
 
-  // The identity a presented token names, compared timing-safely; undefined = refuse.
+  // ONE MOUNT, or no login doors (SPEC §36 phase 7). `/session/token` mints `{ operator: true }`,
+  // which is authority over this whole SERVER — every mount it hosts, now or later. The role
+  // binding that earns it is read from ONE mount's ground, so a second world would be handed
+  // authority nobody in it granted. There is no way to say "operator of this mount" today, so
+  // this refuses rather than quietly widening.
+  //
+  // BEFORE THE SOCKET BINDS, because it is a pure function of the options: a throw after `listen`
+  // leaves a caller that catches it holding a live listener with the mounts served and the login
+  // doors absent — strictly worse than not starting. It is not the whole guard: a CONTAINER
+  // mounts itself and these options never see it, which is why the mint door asks the LIVE table
+  // as well.
+  if (options.users !== undefined) {
+    // NO WORLD OTHER THAN THE DOORS' OWN — which is not the same as "exactly one mount". The
+    // doors' own mount arriving later (an `addMount` of that very name) widens nothing: it is
+    // the world the doors already read users from, and until it answers they honestly refuse
+    // with the cannot-decide 503. Stating the guard as "exactly one at boot" instead would
+    // forbid that shape, and phase 5 already rails it.
+    const strangers = Object.keys(options.mounts).filter((name) => name !== options.users!.mount);
+    if (strangers.length > 0) {
+      throw new Error(
+        `loam serve: the login doors mint an operator identity for the whole server, so they ` +
+          `cannot be opened beside a world they do not read users from — this server hosts ` +
+          `[${strangers.join(", ")}] and the doors name "${options.users.mount}". A session ` +
+          `token cannot be scoped to one mount yet, so opening them here would grant authority ` +
+          `over worlds no role binding named.`,
+      );
+    }
+  }
+
+  // The tokens a §36 session minted (phase 7): short-lived, retired early when the session that
+  // bought them is dropped. They are how a BROWSER writes — a session cookie never opens a door
+  // below, so the browser asks /session/token and then presents a header like any other client.
+  //
+  // Keyed by digest hex rather than scanned with timingSafeEqual, so a request pays one map
+  // lookup however many tokens are live. That is safe because the key is a SHA-256 OF the
+  // secret: timing on a digest lookup tells an attacker nothing they could not compute, and it
+  // would take a preimage to use. The static table above keeps its scan — a handful of entries
+  // the operator configured.
+  //
+  // ONE CLOCK for this table and for the doors' own cap (`users.monotonicNow`, defaulting to the
+  // same monotonic source). Two would let the doors free a cap slot for a token this table still
+  // honors — the cap would stop bounding live operator authority while its refusal kept
+  // promising it did.
+  const usersMount = options.users?.mount;
+  const sessionTokens = new Map<
+    string,
+    { identity: TokenIdentity; expiresAt: number; stillLive: () => boolean }
+  >();
+  const clock = options.users?.monotonicNow ?? ((): number => performance.now());
+  const mintSessionToken = (
+    identity: TokenIdentity,
+    ttlMs: number,
+    stillLive: () => boolean,
+  ): string => {
+    const secret = randomBytes(32).toString("base64url");
+    const moment = clock();
+    for (const [key, minted] of sessionTokens) {
+      if (minted.expiresAt <= moment) sessionTokens.delete(key);
+    }
+    sessionTokens.set(sha(secret).toString("hex"), {
+      identity,
+      expiresAt: moment + ttlMs,
+      stillLive,
+    });
+    return secret;
+  };
+  const revokeSessionTokens = (digests: readonly string[]): void => {
+    for (const digest of digests) sessionTokens.delete(digest);
+  };
+
+  // The identity a presented token names, compared timing-safely; undefined = refuse. A cookie
+  // is never consulted here, and that is §36's load-bearing invariant: authority on these doors
+  // is an explicit header.
   const identify = (req: IncomingMessage): TokenIdentity | undefined => {
     const header = req.headers.authorization;
     if (header === undefined || !header.startsWith("Bearer ")) return undefined;
@@ -396,8 +468,36 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     for (const [expected, identity] of tokenEntries) {
       if (timingSafeEqual(presented, expected)) return identity;
     }
-    return undefined;
+    const digest = presented.toString("hex");
+    const minted = sessionTokens.get(digest);
+    if (minted === undefined) return undefined;
+    // TWO expiries, and BOTH bind. The token's own window is the obvious one. The second is the
+    // parent SESSION's idle window: sweeping runs only when someone logs in or presents a
+    // cookie, so an abandoned session's already-minted operator token would otherwise go on
+    // authenticating for the rest of its TTL with nothing left to reach it. A P5 lens caught
+    // that; the session table's own header states the rule this now keeps.
+    if (minted.expiresAt <= clock() || !minted.stillLive()) {
+      sessionTokens.delete(digest);
+      return undefined;
+    }
+    // AND the world it was minted into must still be the only one. Refusing to MINT while a
+    // second world answers is not enough on its own: a container attaches after the fact, and a
+    // token minted a moment earlier would open it — server-wide authority over a world no role
+    // binding named, for the rest of its window (a P5 lens caught the overclaim). So an
+    // already-minted session token stops being honored the instant a stranger appears, and
+    // resumes when it goes. The operator's own configured token is untouched: it is the
+    // operator's to spend, and nothing here revokes it.
+    if (usersMount !== undefined && mounts.live().some((name) => name !== usersMount)) {
+      return undefined;
+    }
+    return minted.identity;
   };
+
+  // Is the credential that opened a long-lived response STILL live? For a configured operator
+  // token the answer is always yes (nothing revokes one). For a §36 session token it is the same
+  // question `identify` asks, re-asked: the digest still present, inside its own window, and its
+  // parent session still inside its idle window.
+  const stillAuthorized = (req: IncomingMessage): boolean => identify(req) !== undefined;
 
   const contextFor = (identity: TokenIdentity): RequestContext | undefined =>
     identity.actor === undefined ? undefined : { actor: identity.actor };
@@ -517,6 +617,22 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     });
     try {
       for await (const event of events) {
+        // AUTHORITY IS RE-ASKED PER EVENT, not only at dispatch. A stream is the one door that
+        // outlives its own request, so a token revoked by a logout — or lapsed, or orphaned by
+        // its session dying — would otherwise go on delivering the full surface indefinitely,
+        // and "signing out retires the tokens that session minted" would be true only of NEW
+        // requests (a P5 lens caught exactly that). Ending the generator makes the `finally`
+        // below run, so the socket closes the same way every other ending does.
+        // The PUBLIC door presents no credential by design, so there is nothing to re-ask
+        // there — its own surface is what bounds it.
+        if (door === "token" && !stillAuthorized(req)) {
+          res.write(
+            `event: error\ndata: ${JSON.stringify({
+              message: "the credential that opened this stream is no longer live",
+            })}\n\n`,
+          );
+          break;
+        }
         // JSON.stringify never emits a raw newline, so no payload can break the SSE framing.
         res.write(`data: ${JSON.stringify(event)}\n\n`);
       }
@@ -1305,6 +1421,17 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           ? undefined
           : { reactor: gateway.reactor, operator: gateway.operatorAuthor };
       },
+      mint: mintSessionToken,
+      revoke: revokeSessionTokens,
+      // The worlds this server answers RIGHT NOW, other than the doors' own. A container mounts
+      // itself (mounts.ts tier 3), so boot's guard cannot see it — the mint door asks here, at
+      // the moment of minting, and refuses while any second world resolves.
+      //
+      // This compares NAMES where it means WORLDS, which is safe only because two names can
+      // never point at one gateway here: the boot guard above refuses any static name but the
+      // doors' own, and `addMount` refuses any runtime one — so an alias is unreachable, and
+      // containers (the one tier neither guard sees) are genuinely distinct gateways.
+      otherWorlds: () => mounts.live().filter((name) => name !== forUsers.mount),
     });
   }
 
@@ -1313,6 +1440,17 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     port,
     url: `http://${host}:${port}`,
     addMount(name: string, gateway: Gateway): void {
+      // A session token is authority over the whole server, and the role binding that earned it
+      // was read from one world. Adding a STRANGER while the login doors are open would extend
+      // it to a mount no role binding named — the same rule boot applies. The doors' OWN mount
+      // is not a stranger: mounting it is what makes the doors answer at all.
+      if (userDoors !== undefined && name !== options.users?.mount) {
+        throw new Error(
+          `addMount refused: this server has the login doors open, and a session token is ` +
+            `server-wide authority — mounting "${name}" would extend it to a world no role ` +
+            `binding named. Take the login doors down, or run that world on its own server.`,
+        );
+      }
       mounts.add(name, gateway);
     },
     async removeMount(name: string): Promise<boolean> {

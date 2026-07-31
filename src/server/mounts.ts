@@ -98,6 +98,13 @@ export interface MountTable {
    * operator reads this to learn that a module they loaded is serving nowhere, and why.
    */
   unroutable(): string[];
+  /**
+   * Every name that ANSWERS right now, sorted — all three tiers, containers included. Asked at
+   * the moment a decision needs it rather than remembered from boot, because a container mounts
+   * ITSELF (tier 3) and boot never saw it. §36's mint door is the caller: a session token is
+   * server-wide authority, so it refuses while a world no role binding named is answering.
+   */
+  live(): string[];
 }
 
 export function makeMountTable(statics: Record<string, Gateway>): MountTable {
@@ -167,6 +174,20 @@ export function makeMountTable(statics: Record<string, Gateway>): MountTable {
       for (const host of hosts()) {
         for (const [name, attached] of host.attachedContainers) {
           if (mountNameDefect(name) !== undefined && host.quarantinePools.has(attached)) {
+            names.add(name);
+          }
+        }
+      }
+      return [...names].sort();
+    },
+    live() {
+      const names = new Set<string>([...fixed.keys(), ...dynamic.keys()]);
+      // Containers, by the same two questions `containerAt` asks: a routable name, and reach
+      // through the host's erasure registry. A name that would not RESOLVE must not appear
+      // here — a caller refusing on this list would otherwise refuse over a door nobody can open.
+      for (const host of hosts()) {
+        for (const [name, attached] of host.attachedContainers) {
+          if (mountNameDefect(name) === undefined && host.quarantinePools.has(attached)) {
             names.add(name);
           }
         }

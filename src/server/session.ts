@@ -247,6 +247,8 @@ export interface UserDoorOptions {
   readonly publicUrl?: string;
   readonly idleMs?: number; // session idle window (default 30 minutes)
   readonly maxSessions?: number; // signed-in sessions this server will hold (default 4096)
+  readonly tokenTtlMs?: number; // /session/token lifetime (default 5 minutes)
+  readonly maxTokensPerSession?: number; // live tokens one session may hold (default 16)
   readonly maxConcurrentHashes?: number; // unauthenticated scrypt work in flight (default 4)
   readonly scrypt?: ScryptParams;
   /** A monotonic millisecond source. Injectable so a rail can drive it; never `Date.now()`. */
@@ -265,6 +267,27 @@ export interface UserDoorDeps {
   readonly publicUrl: string;
   /** The mount's ground, re-asked every request: a mount can vanish, and erase re-seats a reactor. */
   ground(): { reactor: Reactor; operator: string | undefined } | undefined;
+  /**
+   * Mint a short-lived bearer token for an identity the caller has already authorized.
+   *
+   * `stillLive` is asked on EVERY presentation of the token, not only at mint: a session that
+   * lapsed past its idle window must stop authenticating the tokens it bought even when no
+   * traffic has swept its row (sweeping runs on `open`/`peek`, so an abandoned session with no
+   * further requests would otherwise keep an operator token alive for the rest of its TTL).
+   */
+  mint(
+    identity: { actor?: string; operator?: true },
+    ttlMs: number,
+    stillLive: () => boolean,
+  ): string;
+  /** Retire minted tokens by SHA-256 digest (hex) — the plaintext never leaves the response. */
+  revoke(digests: readonly string[]): void;
+  /**
+   * The worlds this server answers right now, other than the doors' own — asked at MINT time
+   * rather than remembered from boot, because a container mounts itself and boot never saw it.
+   * A session token is server-wide authority, so the mint door refuses while this is non-empty.
+   */
+  otherWorlds(): readonly string[];
 }
 
 export interface UserDoors {
@@ -304,7 +327,9 @@ const MAX_BODY = 8 * 1024; // a login form is a few hundred bytes; nothing here 
 
 const DOOR_DEFAULTS = {
   idleMs: 30 * 60_000,
+  tokenTtlMs: 5 * 60_000,
   maxSessions: 4096,
+  maxTokensPerSession: 16,
   maxConcurrentHashes: 4,
 };
 
@@ -455,7 +480,10 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
   const options = deps.options;
   const idleMs = options.idleMs ?? DOOR_DEFAULTS.idleMs;
   const maxSessions = options.maxSessions ?? DOOR_DEFAULTS.maxSessions;
+  const tokenTtlMs = options.tokenTtlMs ?? DOOR_DEFAULTS.tokenTtlMs;
+  const maxTokensPerSession = options.maxTokensPerSession ?? DOOR_DEFAULTS.maxTokensPerSession;
   const maxHashes = options.maxConcurrentHashes ?? DOOR_DEFAULTS.maxConcurrentHashes;
+  const digestOf = (token: string): string => createHash("sha256").update(token).digest("hex");
   const scryptParams = options.scrypt ?? DEFAULT_SCRYPT;
   const now = options.monotonicNow ?? ((): number => performance.now());
   const onFault = options.onFault ?? ((message: string): void => void message);
@@ -566,8 +594,38 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
   // through here. Phase 9 rails this cap's interplay with the delay exhaustively.
   let hashesInFlight = 0;
 
+  // Tokens this session minted, held as DIGESTS and never as the secret: a session idles six
+  // times a token's own life, so keeping the plaintext to hand back at revocation time would put
+  // live operator tokens in the heap far longer than they are valid.
+  const minted = new Map<string, { digest: string; expiresAt: number }[]>();
+
+  // A session row and the tokens it bought die TOGETHER, through this one function — and the
+  // invariant is STRUCTURAL rather than an inventory: `sessions.delete` appears exactly once in
+  // this file, here, so every path that ends a session revokes by construction. (An earlier
+  // draft argued this by counting `drop`'s callers, and the count was already wrong the day it
+  // was written — a hand-enumeration is the shape that rots. `grep -c "sessions.delete"` is the
+  // check that does not.) Attaching revocation to the logout DOOR instead would leave an
+  // operator token alive across the idle sweep, a struck role, and the session-fixation drop.
   const drop = (id: string): void => {
     sessions.delete(id);
+    const held = minted.get(id);
+    if (held !== undefined) {
+      minted.delete(id);
+      deps.revoke(held.map((m) => m.digest));
+    }
+  };
+
+  /**
+   * The tokens this session holds that are still WITHIN their window. Counting the ones it ever
+   * minted would make the cap permanent: a session that reached it could never mint again,
+   * however long it waited, while its own idle window kept it alive.
+   */
+  const liveTokens = (id: string): { digest: string; expiresAt: number }[] => {
+    const moment = now();
+    const held = (minted.get(id) ?? []).filter((m) => m.expiresAt > moment);
+    if (held.length === 0) minted.delete(id);
+    else minted.set(id, held);
+    return held;
   };
 
   const sweep = (): void => {
@@ -939,6 +997,93 @@ page will offer.</p>`,
     html(res, 200, signedOutPage(), [clearCookie(), clearPreCookie()]);
   };
 
+  const postToken = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    const guard = await guarded(req, res);
+    if (guard === undefined) return;
+    if (guard.held === undefined) {
+      // A stateless pre-session is enough to ATTEMPT a login. It is not enough to mint: there is
+      // no session behind it whose authority a token could carry.
+      json(res, 401, { errors: ["no live session is presented here"] });
+      return;
+    }
+    const { id, session } = guard.held;
+    // ONE MOUNT, asked NOW. A container mounts itself, so boot's guard never saw it; a token
+    // minted here is `{operator: true}` over the whole server, and handing that to a world no
+    // role binding named is the widening this refuses. Named, so the operator can act on it.
+    const others = deps.otherWorlds();
+    if (others.length > 0) {
+      json(res, 503, {
+        errors: [
+          `this server is answering ${others.length === 1 ? "another world" : "other worlds"} — ` +
+            `[${others.join(", ")}] — and a session token is authority over all of them, which ` +
+            `no role binding here granted. No token is minted while they are mounted.`,
+        ],
+      });
+      return;
+    }
+    // Re-read the roles rather than trusting the session's copy: a role revoked, or a user
+    // erased, after sign-in must stop minting on the next ask rather than the next restart.
+    const roles = groundRoles(session.user);
+    if (roles === undefined) {
+      cannotDecide(res, "this store's ground is not reachable, so no token is minted");
+      return;
+    }
+    if (roles.size === 0) {
+      // The ground answered and holds nothing for this user: the session goes, and with it every
+      // token it minted.
+      drop(id);
+      json(res, 401, { errors: ["this store no longer holds a record of that user"] });
+      return;
+    }
+    if (!roles.has("operator")) {
+      json(res, 403, {
+        errors: [
+          `${session.user} does not hold the operator role on this store, so no token is ` +
+            `minted — §36 ships the operator role only`,
+        ],
+      });
+      return;
+    }
+    // LIVE tokens, counted now — a lapsed one frees its slot, or the advice below is a lie.
+    const held = liveTokens(id);
+    if (held.length >= maxTokensPerSession) {
+      json(res, 429, {
+        errors: [
+          `this session already holds ${held.length} live tokens — sign out, or wait for one ` +
+            `to lapse`,
+        ],
+      });
+      return;
+    }
+    // A user is not a seed (§36). The operator ROLE is what entitles this session to the store's
+    // signing identity, so the token names that identity and the store signs as it does for the
+    // operator's own bearer token. No new authority is created here.
+    //
+    // WHAT THIS TOKEN IS, exactly: the operator's authority on this server, for `tokenTtlMs`.
+    // Dropping the session retires it early; nothing else does. So revoking a user's role closes
+    // the door to NEW tokens at once, and an already-minted one lives out its window.
+    // The liveness question the token table asks on every presentation. It reads the row
+    // directly rather than through `peek`, because answering must not itself drop or slide
+    // anything — and it must stay true to the rule the session table states: an unswept,
+    // idle-expired row does not go on authenticating just because nobody has logged in since.
+    const stillLive = (): boolean => {
+      const row = sessions.get(id);
+      return row !== undefined && row.expiresAt > now();
+    };
+    const token = deps.mint({ operator: true }, tokenTtlMs, stillLive);
+    minted.set(id, [...held, { digest: digestOf(token), expiresAt: now() + tokenTtlMs }]);
+    // `expiresIn` is derived from the RECORDED deadline, not from the configured TTL: the
+    // table's clock read happened inside `mint`, before this line, so reporting the raw TTL
+    // would promise a lifetime past the token's real death by this request's own latency.
+    const expiresAt = now() + tokenTtlMs;
+    json(res, 200, {
+      token,
+      expiresIn: Math.max(0, Math.floor((expiresAt - now()) / 1000)),
+      user: session.user,
+      roles: [...roles].sort(),
+    });
+  };
+
   const route = async (
     pathname: string,
     req: IncomingMessage,
@@ -957,11 +1102,13 @@ page will offer.</p>`,
       return;
     }
     if (pathname === "/login") return postLogin(req, res);
-    return postLogout(req, res);
+    if (pathname === "/logout") return postLogout(req, res);
+    return postToken(req, res);
   };
 
   return {
-    owns: (pathname) => pathname === "/login" || pathname === "/logout",
+    owns: (pathname) =>
+      pathname === "/login" || pathname === "/logout" || pathname === "/session/token",
     async handle(pathname, req, res) {
       // ONE GUARD OVER THE DOORS, because "the caller never sees the detail" has to hold for a
       // fault nobody anticipated too. Without it a throw from the ground read escapes to the
