@@ -1414,7 +1414,7 @@ export const CHAPTERS = [
             door: null,
           },
           {
-            says: "A minted bearer token is held as a digest with its own expiry, never the plaintext and never borrowing its session's longer idle window — and dropping a session revokes every token it minted, on all four paths that end one.",
+            says: "A minted bearer token carries its own expiry and never borrows its session's longer idle window — it dies on time inside a live session, and a lapsed session refuses it even while its own TTL has time left. Dropping a session retires the tokens it minted, on all four paths that end one.",
             spec: "spec/36-users-and-sessions.md",
             proof: "test/server/session-token.test.ts",
             door: null,

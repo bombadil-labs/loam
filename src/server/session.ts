@@ -22,6 +22,13 @@
 // (an injected test clock, or a future clock source with a weaker guarantee) has no live row left to
 // revive.
 //
+// AND AN UNSWEPT ROW DOES NOT GO ON AUTHENTICATING. Sweeping runs only when someone logs in or
+// presents a cookie, so a session nobody has touched since it lapsed is still SITTING in the map.
+// Every question asked of a row therefore compares its own idle expiry, rather than trusting that
+// something has already removed it — `peek` here, and `stillLive` on behalf of the token table in
+// http.ts, which would otherwise keep an abandoned session's operator token alive for the rest of
+// its TTL with no cookie left to reach it.
+//
 // `idleMs` and `ttlMs` are DURATIONS in milliseconds, always added to a `now()` reading inside this
 // file — never compared against one directly. A caller passing an absolute timestamp (a `Date.now()`
 // value) where a duration is expected would mint an effectively immortal session or token; nothing
@@ -153,9 +160,14 @@ const DOOR_DEFAULTS = {
  * THIS MAP IS THE ONLY SESSION TABLE. The token half it buys lives one layer up, in http.ts, where
  * the bearer header is read — a session token names a server-wide IDENTITY and is re-checked
  * against the live world set on every presentation, neither of which is a session's own business.
- * The two are joined by `deps.mint`/`deps.revoke` and nothing else. The clock-and-cap properties
- * are railed of this map in test/server/login-door.test.ts (o/p) and of the tokens in
- * test/server/session-token.test.ts (e/f/f2/g).
+ *
+ * The two are joined at three points, and the third is easy to miss: `deps.mint` and `deps.revoke`
+ * are calls OUT, while `stillLive` is a callback the token table holds and asks on every
+ * presentation — so this map keeps deciding a token's fate long after minting returned. Revocation
+ * and `stillLive` are independent guarantees, not one restated (session-token.test.ts (f) and (e)
+ * rail them separately). The clock-and-cap properties are railed of this map in
+ * test/server/login-door.test.ts (o/p) and of the tokens in test/server/session-token.test.ts
+ * (e/f/f2/g).
  */
 interface BrowserSession {
   readonly user: string;
@@ -420,8 +432,9 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
   // invariant is STRUCTURAL rather than an inventory: `sessions.delete` appears exactly once in
   // this file, here, so every path that ends a session revokes by construction. (An earlier
   // draft argued this by counting `drop`'s callers, and the count was already wrong the day it
-  // was written — a hand-enumeration is the shape that rots. `grep -c "sessions.delete"` is the
-  // check that does not.) Attaching revocation to the logout DOOR instead would leave an
+  // was written — a hand-enumeration is the shape that rots. `grep -cE '^\s+sessions\.delete\('`
+  // is the check that does not; it counts CALL SITES, so these sentences do not inflate their own
+  // answer.) Attaching revocation to the logout DOOR instead would leave an
   // operator token alive across the idle sweep, a struck role, and the session-fixation drop.
   const drop = (id: string): void => {
     sessions.delete(id);
@@ -924,8 +937,8 @@ page will offer.</p>`,
     // closes the door to NEW tokens at once, and an already-minted one lives out its window.
     // The liveness question the token table asks on every presentation. It reads the row
     // directly rather than through `peek`, because answering must not itself drop or slide
-    // anything — and it must stay true to the rule the session table states: an unswept,
-    // idle-expired row does not go on authenticating just because nobody has logged in since.
+    // anything — and it keeps this file's header rule: an unswept, idle-expired row does not go
+    // on authenticating just because nobody has logged in since.
     const stillLive = (): boolean => {
       const row = sessions.get(id);
       return row !== undefined && row.expiresAt > now();

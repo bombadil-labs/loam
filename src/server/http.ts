@@ -483,7 +483,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     // parent SESSION's idle window: sweeping runs only when someone logs in or presents a
     // cookie, so an abandoned session's already-minted operator token would otherwise go on
     // authenticating for the rest of its TTL with nothing left to reach it. A P5 lens caught
-    // that; the session table's own header states the rule this now keeps.
+    // that; session.ts's own header states the rule this now keeps.
     if (minted.expiresAt <= clock() || !minted.stillLive()) {
       sessionTokens.delete(digest);
       return undefined;
