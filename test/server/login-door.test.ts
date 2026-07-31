@@ -16,7 +16,7 @@
 // rest of this file: (a)–(s) prove the doors exist and act, (i) proves what they must not touch.
 
 import { request } from "node:http";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -24,7 +24,14 @@ import { authorForSeed, makeNegationClaims, signClaims } from "@bombadil/rhizoma
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { serve, type ServerHandle } from "../../src/server/http.js";
-import { hashPassword, writeCredentials, type ScryptParams } from "../../src/server/credentials.js";
+import {
+  decoyParamsFor,
+  hashPassword,
+  paramsDisagree,
+  spendDecoyHash,
+  writeCredentials,
+  type ScryptParams,
+} from "../../src/server/credentials.js";
 import { roleClaims, userClaims } from "../../src/server/users.js";
 import {
   COOKIE_ATTRIBUTES,
@@ -320,9 +327,13 @@ describe("§36 phase 5 — the login door", () => {
     expect(second).toBeDefined();
     expect(valueOf(second!)).not.toBe(first.sessionId);
 
-    // The old id is dead — session fixation dies at login.
+    // The old id is dead — session fixation dies at login — and the NEW id genuinely lives: a
+    // rotation that mints-and-loses its row would pass the two assertions above (a P5 lens's
+    // finding), so the second id is presented and must open the page.
     const stale = await getLogin(base, { cookie: `${SESSION_COOKIE}=${first.sessionId}` });
     expect(await stale.text()).not.toContain("Signed in");
+    const fresh = await getLogin(base, { cookie: `${SESSION_COOKIE}=${valueOf(second!)}` });
+    expect(await fresh.text()).toContain("Signed in");
   });
 
   it("(g) one refusal for three causes, with the positive control", async () => {
@@ -527,7 +538,10 @@ describe("§36 phase 5 — the login door", () => {
     const first = await signIn(base, "myk", PASSWORD);
     expect(first.res.status).toBe(200);
 
-    // The table is full: a second correct login refuses, and the FIRST session still lives.
+    // The table is full: a second correct login refuses, and the FIRST session still lives —
+    // including the one it PRESENTED. A P5 lens caught the original ordering dropping the
+    // caller's live session before discovering the table was full, so the refusal concealed an
+    // erasure; the presented-session probe after the 503 is that finding's rail.
     const form = await getLogin(base);
     const token = /name="form_token" value="([^"]+)"/.exec(await form.text())?.[1];
     const second = await postLogin(
@@ -538,6 +552,18 @@ describe("§36 phase 5 — the login door", () => {
     expect(
       await (await getLogin(base, { cookie: `${SESSION_COOKIE}=${first.sessionId}` })).text(),
     ).toContain("Signed in");
+
+    // At the cap, a re-login PRESENTING the live session still succeeds: it replaces its own
+    // seat, so the displaced row is discounted from the cap rather than double-counted.
+    const replaced = await postLogin(
+      base,
+      new URLSearchParams({ form_token: token!, user: "myk", password: PASSWORD }).toString(),
+      { cookie: `${SESSION_COOKIE}=${first.sessionId}` },
+    );
+    expect(replaced.status).toBe(200);
+    const replacedCookie = cookiesOf(replaced).find((c) => c.startsWith(`${SESSION_COOKIE}=`));
+    expect(replacedCookie).toBeDefined();
+    expect(valueOf(replacedCookie!)).not.toBe(first.sessionId);
 
     // Let the seat lapse: the sweep on open reclaims it and the login succeeds.
     clock = 5000;
@@ -647,6 +673,9 @@ describe("§36 phase 5 — the login door", () => {
     // Two-sided: the ground ANSWERS and the roles are struck — the session drops.
     const struck = await loginServer();
     const live = await signIn(struck.base, "myk", PASSWORD);
+    // Positive control INSIDE this fixture: the login genuinely worked here, or the two negative
+    // assertions below pass vacuously on a login that never opened (a P5 lens's finding).
+    expect(live.sessionId).not.toBe("");
     expect(struck.roleDeltaIds.length).toBeGreaterThan(0);
     for (const id of struck.roleDeltaIds) {
       await struck.gateway.append([
@@ -658,5 +687,65 @@ describe("§36 phase 5 — the login door", () => {
     expect(
       await (await getLogin(struck.base, { cookie: `${SESSION_COOKIE}=${live.sessionId}` })).text(),
     ).not.toContain("Signed in");
+  });
+
+  it("(u) the decoy machinery is not deletable whole: parameter borrowing, disagreement, and its one warning", async () => {
+    // Pure functions, unit-railed here because the phase-1 rail file is frozen on the base and
+    // these arrived with this phase. A P5 lens showed all three could be replaced by constants
+    // under a green bar; these assertions are what a `return fallback` / `return false` now dies
+    // on.
+    const cheapEntry = await hashPassword("x", CHEAP);
+    const dearEntry = await hashPassword("y", { ...CHEAP, N: 2048 });
+    const uniform = {
+      version: 1 as const,
+      users: { a: cheapEntry, b: await hashPassword("z", CHEAP) },
+    };
+    const mixed = { version: 1 as const, users: { a: cheapEntry, b: dearEntry } };
+    const empty = { version: 1 as const, users: {} };
+    const FALLBACK: ScryptParams = { N: 4096, r: 8, p: 1, keylen: 32 };
+    // Borrowing: a populated file's own (first-sorted) entry, never the door's fallback.
+    expect(decoyParamsFor(uniform, FALLBACK)).toEqual(CHEAP);
+    expect(decoyParamsFor(empty, FALLBACK)).toEqual(FALLBACK);
+    // Disagreement: both answers, so a constant in either direction dies.
+    expect(paramsDisagree(uniform)).toBe(false);
+    expect(paramsDisagree(mixed)).toBe(true);
+    // The decoy spends and never matches.
+    expect(await spendDecoyHash("anything", CHEAP)).toBe(false);
+
+    // The door says the disagreement ONCE PER TRANSITION on the operator channel — not per
+    // attempt (a stranger-fillable log), and not only at boot (the file mutates under a running
+    // server, and a boot-only check leaves the operator untold until restart).
+    const faults: string[] = [];
+    const { base, home } = await loginServer(
+      { ground: { myk: ["operator"] }, passwords: { myk: PASSWORD } },
+      { onFault: (m: string) => faults.push(m) },
+    );
+    expect(faults.filter((m) => m.includes("scrypt"))).toEqual([]);
+    writeCredentials(home, mixed);
+    await postLogin(base, new URLSearchParams({ user: "a", password: "x" }).toString());
+    await postLogin(base, new URLSearchParams({ user: "a", password: "x" }).toString());
+    expect(faults.filter((m) => m.includes("scrypt cost")).length).toBe(1);
+  });
+
+  it("(v) a fault's detail reaches the operator channel and never the caller", async () => {
+    const faults: string[] = [];
+    const { base, home } = await loginServer(
+      { ground: { myk: ["operator"] }, passwords: { myk: PASSWORD } },
+      { onFault: (m: string) => faults.push(m) },
+    );
+    // Break the credential file where the per-attempt read will find it: a directory where the
+    // file should be is a real read fault, never "empty".
+    rmSync(join(home, "credentials.json"));
+    mkdirSync(join(home, "credentials.json"));
+    const refused = await postLogin(
+      base,
+      new URLSearchParams({ user: "myk", password: PASSWORD }).toString(),
+    );
+    expect(refused.status).toBe(503);
+    const body = await refused.text();
+    // The caller's copy names no path — the home's absolute path stays on the operator channel.
+    expect(body).not.toContain(home);
+    expect(body).not.toContain("credentials.json");
+    expect(faults.some((m) => m.includes(home))).toBe(true);
   });
 });

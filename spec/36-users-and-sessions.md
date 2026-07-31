@@ -151,3 +151,53 @@ caller.
 **Provenance.** [PR #289](https://github.com/bombadil-labs/loam/pull/289) — `src/server/session.ts`,
 proved by `test/server/session-table.test.ts`. Working spec:
 `.adlc/specs/36-04-the-session-table.md`. Ticket T125.
+
+### 36.5 The login door
+
+Three routes, two cookies, and nothing else: `GET /login` shows the form, `POST /login` trades a
+password for a session, `POST /logout` ends one. The doors open only when the home holds a
+`credentials.json` — a store with no users is byte-for-byte the store it was before §36, `/login`
+resolving as any unresolvable name does, no request anywhere reading a cookie.
+
+A session cookie is ambient — the browser attaches it to any request any page makes — so cookie
+authority is confined to these pages and opens no data door: a cookie attached to `graphql`,
+`append` or `mcp` earns exactly the bytes a credential-less request earns. The bearer bridge a
+browser writes through is phase 7's.
+
+The signed-in session and the not-yet-signed-in form use two different cookies, both `__Host-`
+prefixed, and the split is a security property: `SameSite=Lax` withholds a cookie on a cross-site
+subresource request, so a shared name would let any page on the internet fetch `/login` and
+overwrite the operator's live session id with a fresh nonce — a forced sign-out whose orphaned row
+idles out with no cookie left to reach it. The pre-session is stateless (a nonce cookie, its form
+token an HMAC under a boot-minted key), so `GET /login` allocates nothing a flood could fill. The
+cookie attribute string is one pinned literal — `HttpOnly; Secure; SameSite=Lax; Path=/`, no
+`Domain` — computed from no request header, identical under any `Host` or `X-Forwarded-*` a caller
+writes. Every page carries one pinned `Content-Security-Policy` literal permitting no script, no
+framing and no form retargeting, and carries no script.
+
+A login refuses one way. A wrong password, a name nobody holds, and a credential whose user holds
+no role in the ground answer the same status and byte-identical bodies; the unknown-name path
+spends a decoy hash at the credential file's own parameters so a miss and an absent name cost the
+same time. What went wrong in detail — an unreadable credential file, entries disagreeing about
+scrypt cost — reaches the operator's own channel, never the caller. Unauthenticated hash work is
+capped by an in-flight counter that refuses the surplus attempt outright (login is deliberately
+degradable; the API does not pass through it), and the failed-login delay is phase 9's.
+
+A correct password is not enough: the GROUND must still hold the user, read through `rolesOf` at
+the door, so erasing a user record genuinely shuts the door the credential file cannot know was
+shut. The read distinguishes "gone" from "cannot decide" — an unresolvable mount or a ground that
+cannot name its operator answers 503 with the session untouched, because destroying an
+authenticated session over a local fault would be the store lying downward. Logging in over a live
+session mints a NEW id and drops the old one (a planted cookie value must not become a live session
+when the victim signs in), and the sessions here obey the same discipline as the phase-4 table:
+monotonic clock, idle expiry that deletes on discovery, a cap that refuses rather than evicts.
+
+The CLI opens the doors at boot iff the home holds users, and refuses one trap by name: a
+non-loopback bind over plain HTTP would set a `Secure` cookie no browser keeps — a login loop with
+no error anywhere — so `loam serve` demands an `https` `--public-url` in front of a wide bind, or
+the loopback default.
+
+**Provenance.** [PR #292](https://github.com/bombadil-labs/loam/pull/292) — `src/server/session.ts`
+(the doors beside the table), `src/server/credentials.ts` (the decoy hash), `src/server/http.ts`,
+`src/cli/cli.ts`, proved by `test/server/login-door.test.ts` and `test/cli/serve-login.test.ts`.
+Working spec: `.adlc/specs/36-05-the-login-door.md`. Ticket T126.

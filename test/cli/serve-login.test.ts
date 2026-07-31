@@ -98,4 +98,14 @@ describe("T126 — loam serve and the login doors", () => {
     expect((await fetch(`${local.url}/login`)).status).toBe(200);
     await local.close();
   });
+
+  it("(t2) the refusal keys on the credentials, not on the bind: a users-less wide bind still boots", async () => {
+    // Without this, a mutant refusing EVERY non-loopback plain-HTTP bind — a regression for every
+    // pre-§36 --host deployment — stays green in this file (a P5 lens's finding).
+    const wide = await serveDetached(["--host", "0.0.0.0"]);
+    expect((await fetch(`${wide.url.replace("0.0.0.0", "127.0.0.1")}/zzz`)).status).toBeGreaterThan(
+      0,
+    );
+    await wide.close();
+  });
 });

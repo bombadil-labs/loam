@@ -40,6 +40,7 @@ import {
   readCredentials,
   spendDecoyHash,
   verifyPassword,
+  type CredentialsFile,
   type ScryptParams,
 } from "./credentials.js";
 import { rolesOf, userNameDefect, type UserRole } from "./users.js";
@@ -448,18 +449,27 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
   const now = options.monotonicNow ?? ((): number => performance.now());
   const onFault = options.onFault ?? ((message: string): void => void message);
 
-  // Said ONCE, at the door's own opening, because it is a property of the credential file rather
-  // than of any one attempt — and because a warning per attempt on an unauthenticated path is a
-  // log a stranger can fill. See `decoyParamsFor`: disagreeing costs leave a timing distinction
-  // the decoy hash cannot cover.
-  try {
-    if (paramsDisagree(readCredentials(options.home))) {
+  // Said on TRANSITION, not once at boot and not per attempt. The file mutates under a running
+  // server (`loam user create`, a hand edit — the exact way uniformity breaks), so a boot-only
+  // check would leave the operator untold until the next restart (H7: boot-time silence standing
+  // in for present-tense health). Per-attempt would hand a stranger a log to fill on an
+  // unauthenticated path. Reporting only when the answer CHANGES is both: at most one line per
+  // state change, and no state change a stranger can cause. See `decoyParamsFor`: disagreeing
+  // costs leave a timing distinction the decoy hash cannot cover.
+  let costDisagreed = false;
+  const noteCostAgreement = (file: CredentialsFile): void => {
+    const disagree = paramsDisagree(file);
+    if (disagree && !costDisagreed) {
       onFault(
         `the entries in ${credentialsPath(options.home)} disagree about scrypt cost, so login ` +
           `timing can tell some of those names apart from an absent one. Re-create those users to ` +
           `even it out.`,
       );
     }
+    costDisagreed = disagree;
+  };
+  try {
+    noteCostAgreement(readCredentials(options.home));
   } catch {
     // an unreadable file is the login door's own refusal to make, per attempt, in its own words
   }
@@ -505,13 +515,22 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
    * Open a SIGNED-IN session. Nothing unauthenticated reaches this, which is what makes
    * `maxSessions` a real limit rather than a lever: filling it costs a correct password per seat.
    * A full table refuses; it never evicts a LIVE session to make room.
+   *
+   * `replacing` is the session the caller presented while re-authenticating (session fixation
+   * dies at login). It is dropped HERE, after the cap has answered but discounted from it —
+   * dropping it before knowing a seat exists destroyed the caller's live session on a full
+   * table's 503, a refusal that concealed an erasure (a P5 lens caught it); and not discounting
+   * it would refuse the one login that frees a seat by replacing its own.
    */
   const open = (
     user: string,
     roles: ReadonlySet<UserRole>,
+    replacing?: string,
   ): { id: string; session: BrowserSession } | undefined => {
     sweep(); // every open, not only a full table: a lapsed session is not something to hold on to
-    if (sessions.size >= maxSessions) return undefined;
+    const displaced = replacing !== undefined && sessions.has(replacing) ? 1 : 0;
+    if (sessions.size - displaced >= maxSessions) return undefined;
+    if (replacing !== undefined) drop(replacing);
     const id = opaqueId();
     const moment = now();
     sessions.set(id, { formToken: opaqueId(), expiresAt: moment + idleMs, user, roles });
@@ -642,7 +661,7 @@ page will offer.</p>`,
         html(res, 200, signedInPage(held.session.user, roles, held.session.formToken));
         return;
       }
-      drop(held.id); // the ground answered, and it no longer holds this user
+      drop(held.id); // the ground answered, and it holds no role for this user (or no user at all)
     }
     // The form, on a stateless pre-session. An EXISTING cookie value is reused as the nonce, so
     // reloading the page does not change the token a half-filled form already carries; otherwise a
@@ -683,6 +702,7 @@ page will offer.</p>`,
       cannotDecide(res, "the login door cannot read its credentials, so it refuses every login");
       return;
     }
+    noteCostAgreement(credentials);
     const entry = entryFor(credentials, user);
     let matched: boolean;
     hashesInFlight += 1;
@@ -707,8 +727,10 @@ page will offer.</p>`,
       refuseLogin(res);
       return;
     }
-    // The password was right. The GROUND still has to say this user exists — erasing a user record
-    // must actually shut the door, and the credential file cannot know that it was erased.
+    // The password was right. The GROUND still has to hold a role for this user — `rolesOf`
+    // answers empty both for an erased user record and for a live record with no role binding,
+    // and the door refuses both the same way (erasing a user must actually shut the door, and the
+    // credential file cannot know that it was erased).
     const roles = groundRoles(user);
     if (roles === undefined) {
       cannotDecide(res, "this store's ground is not reachable, so no session opens");
@@ -720,15 +742,17 @@ page will offer.</p>`,
     }
     // A NEW id, and any session presented dies with the old cookie value: a session must never
     // survive its own authentication (session fixation — an attacker who plants a cookie value
-    // would otherwise be holding a live session id once the victim signs in).
+    // would otherwise be holding a live session id once the victim signs in). The drop happens
+    // INSIDE open, only once a seat is certain — a full table's refusal must leave the presented
+    // session exactly as it was.
     const held = touch(req);
-    if (held !== undefined) drop(held.id);
-    const opened = open(user, roles);
+    const opened = open(user, roles, held?.id);
     if (opened === undefined) {
       cannotDecide(res, "this store is holding all the sessions it can");
       return;
     }
-    // the nonce is spent: one login is all it was ever good for
+    // The browser is told to drop the nonce cookie; the pair itself stays verifiable until the
+    // process restarts — the pre-session is stateless, so nothing can spend it server-side.
     html(res, 200, signedInPage(user, roles, opened.session.formToken), [
       setCookie(opened.id),
       clearPreCookie(),
