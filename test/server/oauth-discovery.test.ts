@@ -252,14 +252,11 @@ describe("T133 — the well-known documents are served, off configured publicUrl
     const raw = (path: string, headers: Record<string, string>) =>
       new Promise<string>((resolve, reject) => {
         const u = new URL(base);
-        const req = request(
-          { host: u.hostname, port: u.port, path, headers },
-          (res) => {
-            let body = "";
-            res.on("data", (c) => (body += c));
-            res.on("end", () => resolve(body));
-          },
-        );
+        const req = request({ host: u.hostname, port: u.port, path, headers }, (res) => {
+          let body = "";
+          res.on("data", (c) => (body += c));
+          res.on("end", () => resolve(body));
+        });
         req.on("error", reject);
         req.end();
       });
@@ -276,9 +273,8 @@ describe("T133 — the well-known documents are served, off configured publicUrl
       expect(hostile).toBe(baseline);
       // Positive control: the baseline itself is the configured document, not some refusal both
       // spellings share.
-      expect(JSON.parse(baseline).resource ?? JSON.parse(baseline).issuer).toContain(
-        new URL(PUBLIC_URL).host,
-      );
+      const doc = JSON.parse(baseline) as { resource?: string; issuer?: string };
+      expect(doc.resource ?? doc.issuer).toContain(new URL(PUBLIC_URL).host);
       expect(hostile).not.toContain("evil.example");
     }
   });
