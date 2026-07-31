@@ -8,12 +8,16 @@
   ],
   "id": "T128",
   "phase": "P1",
-  "rails": [],
+  "rails": [
+    "test/server/session-token.test.ts"
+  ],
   "scope": [
     "src/server/session.ts",
     "src/gateway/http.ts",
     "test/server/session-token.test.ts",
-    ".adlc/specs/36-07-the-bearer-bridge.md"
+    ".adlc/specs/36-07-the-bearer-bridge.md",
+    "src/server/http.ts",
+    "src/server/mounts.ts"
   ],
   "status": "todo",
   "title": "§36 phase 7/15 — The bearer bridge"

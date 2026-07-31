@@ -71,10 +71,14 @@ a container attached after boot answers at its own name with its write doors ope
 `serve()`'s options nor `addMount` ever sees it. So there are three refusals, and the third is the
 one that actually closes the hole:
 
-1. `serve()` refuses at boot when the login doors are open and `options.mounts` is anything other
-   than exactly the doors' own mount — before the socket binds, because a refusal that leaves a
-   listening socket with no doors is strictly worse than not starting.
-2. `addMount` refuses while the doors are open.
+1. `serve()` refuses at boot when the login doors are open and `options.mounts` names any world
+   OTHER than the doors' own — before the socket binds, because a refusal that leaves a listening
+   socket with no doors is strictly worse than not starting. "No stranger", not "exactly one":
+   the doors' own mount arriving later widens nothing (it is the world they already read users
+   from, and until it answers they honestly refuse with the cannot-decide 503), and phase 5
+   already rails that shape.
+2. `addMount` refuses a STRANGER while the doors are open — mounting the doors' own name is what
+   makes them answer at all.
 3. **`POST /session/token` refuses to MINT while the live mount table resolves any name other
    than the doors' own** — containers included, asked at the moment of minting rather than
    remembered from boot. 503, naming the extra world. A token already minted lives out its
@@ -169,7 +173,8 @@ All in `test/server/session-token.test.ts` against live `serve()` instances.
   `test/server/session-token.test.ts`.
 - (k) **The one-mount guard throws BEFORE the socket binds, on a port proven free.** On one
   EXPLICIT port: first a single-mount `serve()` binds and answers (proving the port was free and
-  the fixture otherwise valid), and is closed; then the two-mount call on that same port throws
+  the fixture otherwise valid), and is closed; then a call adding a STRANGER mount on that same
+  port throws
   with the guard's own message (asserted by text, so an unrelated early throw cannot satisfy it)
   and leaves that port refusing a connection. `addMount` while the doors are open also throws.
   Verified by `test/server/session-token.test.ts`.
