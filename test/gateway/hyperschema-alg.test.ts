@@ -10,17 +10,20 @@
 //   it is in the definition delta's bytes and therefore in that delta's content address.
 //   `loadHyperSchema` reads it back out.
 //
-//   OBJECT LEVEL — Loam folds it into the law addresses adopt-law does arithmetic on
-//   (`loam.law.hyperschema|name|alg|body` and `loam.law.schema|…`). The entity-capture guard
-//   compares those addresses, so `alg` decides whether a door ACCEPTS or REFUSES a stranger's
-//   blessing at one of the operator's own definition entities.
+//   OBJECT LEVEL — Loam folds it into BOTH law addresses adopt-law does arithmetic on, and they sit
+//   on different roads through the same door. `hyperschemaAddress` (`loam.law.hyperschema`) is what
+//   the entity-capture guard compares, so `alg` decides whether a blessing at one of the operator's
+//   own definition entities is refused as a capture. `schemaLawAddress` (`loam.law.schema`) is what
+//   `boundElsewhere` compares, so `alg` decides whether law shipped at an entity the operator does
+//   NOT use is already bound here — a silent witness — or a publish. Both are asserted below.
 //
 // WHY THIS FILE EXISTS: the mutation gate flipped `TENANT.alg` 1 → 2 (accounts.ts:91) and the whole
 // suite stayed green — `alg` was round-tripped everywhere and compared nowhere. `gather.test.ts`
 // named that gap and correctly declined to close it with `expect(TENANT.alg).toBe(1)`, which
 // asserts a constant against itself. The rails below go the other way: they publish the shipped
 // constants into a real store and read the algebra version back out of the DELTAS, then make a door
-// decide on it. `tenantSchemaFor`'s `alg` (accounts.ts:183) is pinned the same way.
+// decide on it. `tenantSchemaFor`'s `alg` (accounts.ts:183) is pinned at the delta and reader levels;
+// the door legs run on `TENANT`, since the two share an entity and a door cannot hold both at once.
 //
 // NAMED GAP — no door SERVES `alg` to a client. `POST /schemas` accepts it (http.ts) and nothing
 // reads it back out over the wire, so "what a reader resolves through a Schema" is genuinely
@@ -28,6 +31,10 @@
 // LAW door (adoptLaw), which is the surface that does read it. The rail that would close the
 // remaining gap is a schema-describe endpoint that reports a lens's algebra version; nothing needs
 // one yet.
+//
+// NAMED GAP — `src/server/users.ts:131` ships a third `alg: 1` constant that nothing observes. It is
+// the next mutant of this family and is out of scope here; the rail that closes it is this one's
+// shape pointed at the users lens.
 //
 // NAMED GAP — the entity-capture refusal says "with a DIFFERENT gather body" while the bodies here
 // are byte-identical and only `alg` differs. The guard is right to refuse; its sentence is narrower
@@ -148,7 +155,14 @@ describe("a reader resolves the algebra version back", () => {
 // is one of that address's four fields — so the SAME bytes at a DIFFERENT algebra version is a
 // capture, and the door must refuse it.
 
-async function moduleShipping(gw: Gateway, alg: number): Promise<ReturnType<Gateway["freeze"]>> {
+// `at` defaults to the operator's OWN definition entity and lens, which is the capture case. Point
+// it elsewhere and the capture guard has nothing to compare, so the SECOND address decides instead:
+// `boundElsewhere`'s `loam.law.schema`. `alg` is the only value that varies on either road.
+async function moduleShipping(
+  gw: Gateway,
+  alg: number,
+  at: { entity: string; lens: string } = { entity: TENANT_ENTITY, lens: "Tenant" },
+): Promise<ReturnType<Gateway["freeze"]>> {
   await gw.append([
     signClaims(
       containerClaims(
@@ -161,13 +175,13 @@ async function moduleShipping(gw: Gateway, alg: number): Promise<ReturnType<Gate
   ]);
   const wall = await gw.openContainer({ name: "container:tenancy", backend: new MemoryBackend() });
   const definition = signClaims(
-    publishHyperSchemaClaims({ ...TENANT, alg }, TENANT_ENTITY, STRANGER, 41_000),
+    publishHyperSchemaClaims({ ...TENANT, alg }, at.entity, STRANGER, 41_000),
     STRANGER_SEED,
   );
   let t = 41_001;
   const reg = registrationDeltaClaims(
-    TENANT_ENTITY,
-    "Tenant",
+    at.entity,
+    at.lens,
     TENANT_POLICY,
     [STORE_ENTITY],
     STRANGER,
@@ -175,7 +189,7 @@ async function moduleShipping(gw: Gateway, alg: number): Promise<ReturnType<Gate
   );
   const manifest = signClaims(
     manifestExportClaims(
-      { alias: "Tenant", targetEntity: TENANT_ENTITY, kind: "schema" },
+      { alias: "Tenant", targetEntity: at.entity, kind: "schema" },
       STRANGER,
       41_020,
     ),
@@ -208,5 +222,28 @@ describe("the law door refuses a capture that differs only in algebra version", 
     const version = await moduleShipping(gw, SHIPPED_ALG);
     const outcome = await gw.adoptLaw(version, "Tenant");
     expect(outcome.kind).toBe("witnessed");
+  });
+});
+
+// The OTHER law address. `schemaLawAddress` ("loam.law.schema") carries `alg` too, and it is a
+// different function on a different road: `boundElsewhere` asks it whether this exact law is
+// ALREADY BOUND here under any name. The capture guard runs first and would short-circuit both legs
+// below, so these ship at an entity the operator does not use — and then the algebra version is the
+// only thing left that can decide bound from unbound.
+const ELSEWHERE = { entity: "hyperschema:TenantMirror", lens: "TenantMirror" };
+
+describe("the already-bound address carries the algebra version too", () => {
+  it("witnesses a module whose law matches the operator's, at the shipped alg", async () => {
+    const gw = await boot(TENANT);
+    const version = await moduleShipping(gw, SHIPPED_ALG, ELSEWHERE);
+    const outcome = await gw.adoptLaw(version, "Tenant");
+    expect(outcome.kind).toBe("witnessed");
+  });
+
+  it("publishes the same law at another alg — a different address, so nothing is bound", async () => {
+    const gw = await boot(TENANT);
+    const version = await moduleShipping(gw, SHIPPED_ALG + 1, ELSEWHERE);
+    const outcome = await gw.adoptLaw(version, "Tenant");
+    expect(outcome.kind).toBe("adopted-from");
   });
 });
