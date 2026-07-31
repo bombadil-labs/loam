@@ -84,11 +84,12 @@ file (directly or after the repo's own prettier). Two PRs, mechanically enforced
 declaration, then land the rename. A red gate always means stop; no future context window needs
 lore about which red was blessed.
 
-**TWO adlc CLIs are broken on Windows and both run via LOCAL PATCHES — re-apply after any adlc
-upgrade with `npm run adlc:patch`.** They patch a GLOBAL package, so `npm i -g @adlc/cli` wipes
-them; that is why they are scripts and not hand-edits. Both are idempotent, both count call sites
-rather than testing presence, both read the file back, and both REFUSE rather than guess if upstream
-restructures the call. Delete each once a released `@adlc/cli` works on Windows.
+**THREE adlc gates run via LOCAL PATCHES — re-apply after any adlc upgrade with `npm run
+adlc:patch`.** They patch a GLOBAL package, so `npm i -g @adlc/cli` wipes them; that is why they are
+scripts and not hand-edits. Each is idempotent, each counts call sites rather than testing presence,
+each reads the file back, and each REFUSES rather than guessing if upstream restructures the call.
+The first two are Windows spawn/flag bugs; the third is platform-independent and was the more
+expensive one. Delete each once a released `@adlc/cli` no longer needs it.
 
 - **`adlc review`** (`scripts/patch-adlc-npx.mjs`) — `runExternal` spawns bare `npx`, which Node
   will not resolve without PATHEXT, so the reviewer died `ENOENT`. Naming `npx.cmd` turns that into
@@ -101,6 +102,19 @@ restructures the call. Delete each once a released `@adlc/cli` works on Windows.
   `O_CREAT|O_EXCL` branch works, so init cheerfully CREATES what is missing and dies on the first
   file that already exists — which is why this repo had a hand-written `.gitignore` and no
   `config.json`. The patch adds `O_CREAT` **on win32 only**, leaving POSIX flags byte-identical.
+- **`adlc hollow-test`** (`scripts/patch-adlc-hollow-ts.mjs`) — **it could not mutate TypeScript, on
+  any platform.** `SOURCE_EXT_RE` in `@adlc/hollow-test/lib/targets.mjs` is an include-list reading
+  `/\.(?:mjs|cjs|js)$/i`, and `.ts` is simply absent. Loam's `src/` is entirely TypeScript, so the
+  gate this file calls the shipped detector for our worst recurring bug had **never mutated a line of
+  Loam source**. It failed in two shapes: `--target foo.ts` exited 1 refusing the "unsupported source
+  language" (while the message insisted the operators are "JS/TS-shaped" — they are), and a
+  diff-scoped run dropped every `.ts` file silently, mutating whatever `.mjs` happened to share the
+  diff and reporting that as coverage. Measured on one diff of three changed `.ts` files: **zero
+  TypeScript lines mutated, exit 0.** The patch admits `ts/mts/cts/tsx/jsx`, and guards
+  `invert-comparison` in `@adlc/core` — its bare `<`/`>` swaps turn `Record<string, Gateway>` into
+  `Record>=string, Gateway>`, and since the runner scores `killed = status !== 0`, a mutant that
+  breaks the build is credited as killed by the tests. Admitting TS without that guard would trade a
+  gate that refuses for a gate that inflates its own kill rate.
 
 **`.adlc/` is an ALLOWLIST and `adlc init` owns it.** Committed: `config.json`, `tickets/`,
 `ticket-archive/`, `specs/` — the CONTRACT. Local, per-worktree, never committed: `findings.jsonl`,
