@@ -4,7 +4,8 @@
   "id": "T103",
   "phase": "P1",
   "rails": [
-    "test/cli/serve-staleness-warning.test.ts"
+    "test/cli/serve-staleness-warning.test.ts",
+    "test/cli/serve-host.test.ts"
   ],
   "scope": [
     "src/cli/cli.ts",
