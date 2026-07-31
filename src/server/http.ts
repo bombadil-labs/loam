@@ -39,6 +39,7 @@ import {
 import { parseRegistrationInput, schemaEntityFor, type LensName } from "../gateway/registration.js";
 import { parseReadGesture, type ReadGesture } from "../gateway/renderers.js";
 import { makeMountTable, type ResolvedMount } from "./mounts.js";
+import { canonicalPublicUrl, makeOAuthDoors, publicUrlDefect, type OAuthDoors } from "./oauth.js";
 
 export interface TokenIdentity {
   readonly actor?: string; // a signing seed: requests act as this identity
@@ -53,6 +54,15 @@ export interface ServeOptions {
   readonly maxBodyBytes?: number; // reject a request body larger than this (default 4 MiB)
   readonly maxStreams?: number; // refuse a new SSE stream past this many live (default 1024)
   readonly maxPublicStreams?: number; // the anonymous door's own smaller stream budget (default 256)
+  /**
+   * The outside address this store is reached at (SPEC §37 phase 12). OPT-IN: absent, the two
+   * `.well-known` discovery paths resolve as an ordinary unmounted path always did, and the MCP
+   * door's 401 gains no `WWW-Authenticate` header — a store an operator has not configured for
+   * connectors advertises nothing about them. `Host` and `X-Forwarded-*` never affect what a
+   * configured store advertises: nothing downstream of this option ever reads a request header to
+   * build a URL.
+   */
+  readonly publicUrl?: string;
 }
 
 const DEFAULT_MAX_BODY = 4 * 1024 * 1024;
@@ -192,9 +202,14 @@ const preflight = (res: ServerResponse): void => {
   res.end();
 };
 
-const json = (res: ServerResponse, status: number, body: unknown): void => {
+const json = (
+  res: ServerResponse,
+  status: number,
+  body: unknown,
+  extraHeaders?: Record<string, string>,
+): void => {
   const text = JSON.stringify(body);
-  res.writeHead(status, { "content-type": "application/json", ...CORS });
+  res.writeHead(status, { "content-type": "application/json", ...CORS, ...extraHeaders });
   res.end(text);
 };
 
@@ -349,6 +364,14 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
   );
   if (tokenEntries.length === 0) {
     throw new Error("loam serve: no tokens configured — an unlockable door is a wall");
+  }
+
+  // Discovery (SPEC §37 phase 12), opt-in: absent publicUrl means absent doors and absent header.
+  let discovery: OAuthDoors | undefined;
+  if (options.publicUrl !== undefined) {
+    const defect = publicUrlDefect(options.publicUrl);
+    if (defect !== undefined) throw new Error(`loam serve: --public-url ${defect}`);
+    discovery = makeOAuthDoors({ publicUrl: canonicalPublicUrl(options.publicUrl) });
   }
 
   // The identity a presented token names, compared timing-safely; undefined = refuse.
@@ -736,8 +759,22 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     }
   };
 
-  const refused = (res: ServerResponse): void =>
-    json(res, 401, { errors: ["a bearer token is required, and this one opens nothing"] });
+  // `verb` is passed ONLY at the two call sites that can answer the MCP door specifically (SPEC
+  // §37 phase 12) — every other refusal in this file calls `refused(res)` with no verb, and stays
+  // exactly as it was. A header keyed on anything but the verb (the mount, whether one resolved,
+  // the token presented) would reopen the mount-existence oracle T78/§12 already closed.
+  const refused = (res: ServerResponse, verb?: string): void =>
+    json(
+      res,
+      401,
+      { errors: ["a bearer token is required, and this one opens nothing"] },
+      verb === "mcp" && discovery !== undefined
+        ? {
+            "www-authenticate": discovery.challenge,
+            "access-control-expose-headers": "www-authenticate",
+          }
+        : undefined,
+    );
 
   // The front door. The bare root is the one path with no world behind it, so it is the one path
   // that can afford a human answer — and the first thing anyone does with a served store's URL is
@@ -770,6 +807,13 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       if (req.method === "GET" && url.pathname === "/favicon.ico") {
         res.writeHead(204, CORS);
         res.end();
+        return;
+      }
+      // Discovery (SPEC §37 phase 12): the two well-known documents route ahead of mount
+      // resolution — they are server-level, not mount-level — and only when configured. Absent
+      // `publicUrl`, these paths fall through to the ordinary "no such mount" the name always got.
+      if (discovery !== undefined && discovery.owns(url.pathname)) {
+        discovery.handle(url.pathname, req, res);
         return;
       }
       const [, mountName, verb] = url.pathname.split("/");
@@ -811,7 +855,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           (resolved.host !== undefined && !resolved.host.hasPublicSurface()) ||
           !gateway.hasPublicSurface()
         ) {
-          refused(res);
+          refused(res, verb);
           return;
         }
         switch (verb) {
@@ -918,7 +962,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             return;
           }
           default:
-            refused(res);
+            refused(res, verb);
             return;
         }
       }

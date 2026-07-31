@@ -45,3 +45,36 @@ the plan's fifteen). Landed [#288](https://github.com/bombadil-labs/loam/pull/28
 `src/server/oauth-file.ts`, `test/server/oauth-file.test.ts`,
 `test/server/oauth-lock-child.mts`. No door, no CLI: the file and its lock are a unit that nothing
 serves yet.
+
+### 37.2 Discovery and the 401
+
+The first door: a connector needs to find this store before any human is present. Two RFC
+well-known documents answer that — `GET /.well-known/oauth-protected-resource` (RFC 9728) and
+`GET /.well-known/oauth-authorization-server` (RFC 8414) — and the MCP door's existing 401 gains a
+`WWW-Authenticate` header pointing at the first of them. Nothing here mints a client, a code, or a
+token; those are later phases of the same plan.
+
+Every URL either document advertises comes from ONE configured value, `--public-url`, opt-in like
+the redirect fence a later phase adds: absent, neither well-known path exists and the MCP door's
+401 carries no header, exactly as before this phase. `Host` and `X-Forwarded-*` never reach the
+document-building functions at all — there is nothing in them for a forwarded header to act on,
+which is a stronger guarantee than "tested to agree": the code cannot disagree with itself. A
+single function, `issuerFor`, normalizes the configured string, and every document, and the
+challenge header, call it rather than re-deriving the issuer a second way.
+
+`--public-url` admits only a bare `http(s)` origin — no path, no query, no fragment beyond a single
+trailing slash, compared case-insensitively so an operator's own capitalization never matters, and
+refusing a default-port spelling (`https://x:443`) on purpose, since the WHATWG parser's own
+`.origin` would silently drop it. A malformed value refuses at boot rather than guessing.
+
+The `WWW-Authenticate` header is scoped to exactly the request shape that can answer 401 on `mcp` —
+never a different verb, and never varying by whether the mount named in the URL exists, has a
+public surface, or never existed at all. A byte-identical challenge across all three is what keeps
+the header from becoming a second oracle beside the one the mount-refusal discipline (§12) already
+closed: the header answers who to ask, not what is here.
+
+**Provenance.** Working spec `.adlc/specs/37-12-discovery-and-the-401.md` (T133, phase 12 of the
+plan's fifteen). Landed [#291](https://github.com/bombadil-labs/loam/pull/291) —
+`src/server/oauth.ts` (new), plus the `--public-url` flag
+threaded through `src/server/http.ts` and `src/cli/cli.ts`. No client registers, no code or token
+is minted; a connector can find the store and nothing more.
