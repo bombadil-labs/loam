@@ -1,14 +1,36 @@
 // T103(b) — `loam serve --host`: ServeOptions.host existed and the CLI hardcoded the default, so
 // a LAN-reachable store (the phone case) could not be served by the CLI at all. This rail proves
 // the BIND, not the flag parse: it connects through 127.0.0.2 — an address inside the loopback
-// range that a 127.0.0.1 socket provably refuses (both CI platforms answer all of 127/8) — so the
-// same test holds both sides without depending on the machine having a LAN interface.
+// range that a 127.0.0.1 socket provably refuses — so the same test holds both sides without
+// depending on the machine having a LAN interface.
+//
+// That trick needs the whole 127.0.0.0/8 block to reach this host, and that is a PLATFORM
+// property: Linux routes the block, macOS aliases only 127.0.0.1 on lo0. Where it does not hold,
+// the two address-dependent tests SKIP with a stated reason rather than weaken their assertion.
+// Both of them skip, not just the wide one: an unroutable 127.0.0.2 also makes the default-bind
+// test vacuous, since it would then pass on a connect timeout instead of on the refusal it claims
+// to observe.
 
 import { mkdtempSync, rmSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { run } from "../../src/cli/cli.js";
+
+// Bindability is the exact question: an address the kernel refuses a listen on is an address no
+// packet of ours reaches either. It answers in microseconds, where a connect probe would have to
+// spend the same 10s timeout the failure did.
+const secondLoopbackIsLocal = await new Promise<boolean>((resolve) => {
+  const probe = createServer();
+  probe.once("error", () => resolve(false));
+  probe.listen(0, "127.0.0.2", () => probe.close(() => resolve(true)));
+});
+
+const UNROUTABLE =
+  "127.0.0.2 is not a local address on this host. Linux routes all of 127.0.0.0/8; macOS aliases " +
+  "only 127.0.0.1 on lo0. The bind property this test states is real and unprovable here — CI " +
+  "(Linux) proves it. The hole: on this platform nothing checks that --host widens the bind.";
 
 vi.setConfig({ testTimeout: 15000 }); // real listening servers
 
@@ -46,7 +68,8 @@ const askTypename = (origin: string): Promise<Response> =>
   });
 
 describe("T103(b) — loam serve --host widens the bind on purpose, and only on purpose", () => {
-  it("the default stays loopback-only: 127.0.0.2 is refused", async () => {
+  it("the default stays loopback-only: 127.0.0.2 is refused", async (ctx) => {
+    if (!secondLoopbackIsLocal) ctx.skip(UNROUTABLE);
     const server = await serveDetached([]);
     const port = new URL(server.url).port;
     // The control first — the port is real and answering on the bound address...
@@ -56,7 +79,8 @@ describe("T103(b) — loam serve --host widens the bind on purpose, and only on 
     await server.close();
   });
 
-  it("--host 0.0.0.0 answers a connection the default bind refuses", async () => {
+  it("--host 0.0.0.0 answers a connection the default bind refuses", async (ctx) => {
+    if (!secondLoopbackIsLocal) ctx.skip(UNROUTABLE);
     const server = await serveDetached(["--host", "0.0.0.0"]);
     const port = new URL(server.url).port;
     const res = await askTypename(`http://127.0.0.2:${port}`);
