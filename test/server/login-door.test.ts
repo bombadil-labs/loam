@@ -134,6 +134,12 @@ async function getLogin(base: string, headers: Record<string, string> = {}): Pro
   return fetch(`${base}/login`, { headers, redirect: "manual" });
 }
 
+// EVERY POST IN THIS FILE SENDS A SAME-ORIGIN SIGNAL, and every login POST a valid nonce+token
+// pair, whether or not phase 5 checks them — the plan's clause: phase 6 turns absence and forgery
+// into refusals "without touching one assertion here." A rail that leaned on phase 5's
+// ignore-behavior would be the frozen assertion phase 6 has to break.
+const SAME_ORIGIN = { "sec-fetch-site": "same-origin" } as const;
+
 async function postLogin(
   base: string,
   body: string,
@@ -141,9 +147,29 @@ async function postLogin(
 ): Promise<Response> {
   return fetch(`${base}/login`, {
     method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded", ...headers },
+    headers: { "content-type": "application/x-www-form-urlencoded", ...SAME_ORIGIN, ...headers },
     body,
   });
+}
+
+/** A fresh stateless pre-session: the nonce cookie to present and the token that matches it. */
+async function formPair(base: string): Promise<{ token: string; nonceCookie: string }> {
+  const form = await getLogin(base);
+  const nonceCookie = cookiesOf(form).find((c) => c.startsWith(`${PRESESSION_COOKIE}=`));
+  expect(nonceCookie).toBeDefined();
+  const token = /name="form_token" value="([^"]+)"/.exec(await form.text())?.[1];
+  expect(token).toBeTruthy();
+  return { token: token!, nonceCookie: `${PRESESSION_COOKIE}=${valueOf(nonceCookie!)}` };
+}
+
+/** POST a credential with a fresh, valid nonce+token pair — the shape a real browser sends. */
+async function attemptLogin(base: string, user: string, password: string): Promise<Response> {
+  const pair = await formPair(base);
+  return postLogin(
+    base,
+    new URLSearchParams({ form_token: pair.token, user, password }).toString(),
+    { cookie: pair.nonceCookie },
+  );
 }
 
 /** GET the form, then POST the credential with the token and nonce the form issued. */
@@ -152,23 +178,35 @@ async function signIn(
   user: string,
   password: string,
 ): Promise<{ res: Response; sessionId: string; formToken: string }> {
-  const form = await getLogin(base);
-  const nonceCookie = cookiesOf(form).find((c) => c.startsWith(`${PRESESSION_COOKIE}=`));
-  expect(nonceCookie).toBeDefined();
-  const html = await form.text();
-  const token = /name="form_token" value="([^"]+)"/.exec(html)?.[1];
-  expect(token).toBeTruthy();
+  const pair = await formPair(base);
   const res = await postLogin(
     base,
-    new URLSearchParams({ form_token: token!, user, password }).toString(),
-    { cookie: `${PRESESSION_COOKIE}=${valueOf(nonceCookie!)}` },
+    new URLSearchParams({ form_token: pair.token, user, password }).toString(),
+    { cookie: pair.nonceCookie },
   );
   const sessionCookie = cookiesOf(res).find((c) => c.startsWith(`${SESSION_COOKIE}=`));
+  // The token handed back is the SESSION's own (parsed from the signed-in page), not the spent
+  // pre-session one — it is what the session's later POSTs (logout) must present under phase 6.
+  const body = await res.clone().text();
+  const sessionToken = /name="form_token" value="([^"]+)"/.exec(body)?.[1];
   return {
     res,
     sessionId: sessionCookie === undefined ? "" : valueOf(sessionCookie),
-    formToken: token!,
+    formToken: sessionToken ?? pair.token,
   };
+}
+
+/** POST /logout as the store's own page would: session cookie, its form token, same-origin. */
+async function postLogout(base: string, sessionId: string, formToken: string): Promise<Response> {
+  return fetch(`${base}/logout`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      cookie: `${SESSION_COOKIE}=${sessionId}`,
+      ...SAME_ORIGIN,
+    },
+    body: new URLSearchParams({ form_token: formToken }).toString(),
+  });
 }
 
 describe("§36 phase 5 — the login door", () => {
@@ -187,14 +225,11 @@ describe("§36 phase 5 — the login door", () => {
     expect(withToken.res.status).toBe(200);
     expect(await withToken.res.text()).toContain("Signed in");
 
-    // WITHOUT the token: phase 5 refuses nothing about it — the "before" side of phase 6's
-    // transition rail. Positive, not vacuous: the login itself succeeds.
-    const bare = await postLogin(
-      base,
-      new URLSearchParams({ user: "myk", password: PASSWORD }).toString(),
-    );
-    expect(bare.status).toBe(200);
-    expect(await bare.text()).toContain("Signed in");
+    // NO assertion about a token-less POST, deliberately: phase 5 ignores absence, but railing
+    // that behavior here would freeze the exact assertion phase 6 exists to flip — the plan's
+    // phase-5 clause is "every rail in this file sends a valid token, so phase 6 can turn
+    // absence into a refusal without touching one assertion here." The transition itself is
+    // phase 6's criterion 0, railed in its own file.
   });
 
   it("(b) the pre-session has its own cookie, and a nonce write cannot orphan a session", async () => {
@@ -241,14 +276,7 @@ describe("§36 phase 5 — the login door", () => {
       expect(header).not.toContain("Domain");
     }
     // The two clears on logout carry Max-Age=0 after the same literal.
-    const out = await fetch(`${base}/logout`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/x-www-form-urlencoded",
-        cookie: `${SESSION_COOKIE}=${sessionId}`,
-      },
-      body: new URLSearchParams({ form_token: formToken }).toString(),
-    });
+    const out = await postLogout(base, sessionId, formToken);
     const clears = cookiesOf(out);
     expect(clears.length).toBe(2);
     for (const header of clears)
@@ -342,7 +370,7 @@ describe("§36 phase 5 — the login door", () => {
       passwords: { myk: PASSWORD, norole: "quiet water" },
     });
     const attempt = (user: string, password: string): Promise<Response> =>
-      postLogin(base, new URLSearchParams({ user, password }).toString());
+      attemptLogin(base, user, password);
 
     const wrongPassword = await attempt("myk", "not it");
     const unknownName = await attempt("ghost", "anything");
@@ -367,14 +395,7 @@ describe("§36 phase 5 — the login door", () => {
     );
     const form = await getLogin(base);
     const { res, sessionId, formToken } = await signIn(base, "myk", PASSWORD);
-    const out = await fetch(`${base}/logout`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/x-www-form-urlencoded",
-        cookie: `${SESSION_COOKIE}=${sessionId}`,
-      },
-      body: new URLSearchParams({ form_token: formToken }).toString(),
-    });
+    const out = await postLogout(base, sessionId, formToken);
     for (const page of [form, res, out]) {
       expect(page.headers.get("content-security-policy")).toBe(CSP);
     }
@@ -460,14 +481,7 @@ describe("§36 phase 5 — the login door", () => {
   it("(k) logout ends the session; logout with no session answers 401", async () => {
     const { base } = await loginServer();
     const { sessionId, formToken } = await signIn(base, "myk", PASSWORD);
-    const out = await fetch(`${base}/logout`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/x-www-form-urlencoded",
-        cookie: `${SESSION_COOKIE}=${sessionId}`,
-      },
-      body: new URLSearchParams({ form_token: formToken }).toString(),
-    });
+    const out = await postLogout(base, sessionId, formToken);
     expect(out.status).toBe(200);
     expect(await out.text()).toContain("Signed out");
     const clears = cookiesOf(out);
@@ -477,7 +491,7 @@ describe("§36 phase 5 — the login door", () => {
     const stale = await getLogin(base, { cookie: `${SESSION_COOKIE}=${sessionId}` });
     expect(await stale.text()).not.toContain("Signed in");
 
-    const orphan = await fetch(`${base}/logout`, { method: "POST" });
+    const orphan = await fetch(`${base}/logout`, { method: "POST", headers: SAME_ORIGIN });
     expect(orphan.status).toBe(401);
   });
 
@@ -542,22 +556,22 @@ describe("§36 phase 5 — the login door", () => {
     // including the one it PRESENTED. A P5 lens caught the original ordering dropping the
     // caller's live session before discovering the table was full, so the refusal concealed an
     // erasure; the presented-session probe after the 503 is that finding's rail.
-    const form = await getLogin(base);
-    const token = /name="form_token" value="([^"]+)"/.exec(await form.text())?.[1];
-    const second = await postLogin(
-      base,
-      new URLSearchParams({ form_token: token!, user: "myk", password: PASSWORD }).toString(),
-    );
+    const second = await attemptLogin(base, "myk", PASSWORD);
     expect(second.status).toBe(503);
     expect(
       await (await getLogin(base, { cookie: `${SESSION_COOKIE}=${first.sessionId}` })).text(),
     ).toContain("Signed in");
 
     // At the cap, a re-login PRESENTING the live session still succeeds: it replaces its own
-    // seat, so the displaced row is discounted from the cap rather than double-counted.
+    // seat, so the displaced row is discounted from the cap rather than double-counted. It rides
+    // the SESSION's own form token — what the signed-in page's form would send.
     const replaced = await postLogin(
       base,
-      new URLSearchParams({ form_token: token!, user: "myk", password: PASSWORD }).toString(),
+      new URLSearchParams({
+        form_token: first.formToken,
+        user: "myk",
+        password: PASSWORD,
+      }).toString(),
       { cookie: `${SESSION_COOKIE}=${first.sessionId}` },
     );
     expect(replaced.status).toBe(200);
@@ -583,11 +597,15 @@ describe("§36 phase 5 — the login door", () => {
       },
       { maxConcurrentHashes: 1 },
     );
+    // One stateless pair serves every POST here — reusable by design, and reused so the probe
+    // loop pays no per-probe page load.
+    const pair = await formPair(base);
+    const withPair = (user: string, password: string): Promise<Response> =>
+      postLogin(base, new URLSearchParams({ form_token: pair.token, user, password }).toString(), {
+        cookie: pair.nonceCookie,
+      });
     let slowSettled = false;
-    const slowLogin = postLogin(
-      base,
-      new URLSearchParams({ user: "slow", password: "ponderous" }).toString(),
-    ).then((res) => {
+    const slowLogin = withPair("slow", "ponderous").then((res) => {
       slowSettled = true;
       return res;
     });
@@ -596,10 +614,7 @@ describe("§36 phase 5 — the login door", () => {
     // this fixture proved nothing and must SAY so rather than pass.
     let sawBusy: Response | undefined;
     while (sawBusy === undefined && !slowSettled) {
-      const probe = await postLogin(
-        base,
-        new URLSearchParams({ user: "myk", password: PASSWORD }).toString(),
-      );
+      const probe = await withPair("myk", PASSWORD);
       if (probe.status === 503) sawBusy = probe;
     }
     expect(sawBusy, "the slow hash settled before any probe met the cap").toBeDefined();
@@ -607,10 +622,7 @@ describe("§36 phase 5 — the login door", () => {
 
     // Drained, the same correct password is admitted.
     expect((await slowLogin).status).toBe(200);
-    const recovered = await postLogin(
-      base,
-      new URLSearchParams({ user: "myk", password: PASSWORD }).toString(),
-    );
+    const recovered = await withPair("myk", PASSWORD);
     expect(recovered.status).toBe(200);
   });
 
@@ -621,16 +633,24 @@ describe("§36 phase 5 — the login door", () => {
       passwords: { myk: tricky },
     });
     // The literal bytes a browser sends for that password: + stays encoded, space becomes +,
-    // ö becomes UTF-8 percent-escapes.
-    const wire = `user=myk&password=${encodeURIComponent(tricky).replace(/%20/g, "+")}`;
+    // ö becomes UTF-8 percent-escapes. The valid pair rides along, as every POST here does.
+    const pair = await formPair(base);
+    const wire = `form_token=${encodeURIComponent(pair.token)}&user=myk&password=${encodeURIComponent(
+      tricky,
+    ).replace(/%20/g, "+")}`;
     expect(wire).toContain("+"); // the fixture really does exercise the ambiguity
-    const good = await postLogin(base, wire);
+    const good = await postLogin(base, wire, { cookie: pair.nonceCookie });
     expect(good.status).toBe(200);
 
     const page = await getLogin(base);
     expect(page.headers.get("content-type")).toContain("charset=utf-8");
 
-    const mangled = await postLogin(base, "user=myk&password=%zz%");
+    const mangledPair = await formPair(base);
+    const mangled = await postLogin(
+      base,
+      `form_token=${encodeURIComponent(mangledPair.token)}&user=myk&password=%zz%`,
+      { cookie: mangledPair.nonceCookie },
+    );
     expect(mangled.status).toBe(401);
   });
 
@@ -641,10 +661,7 @@ describe("§36 phase 5 — the login door", () => {
       ground: {},
       passwords: { myk: PASSWORD },
     });
-    const refused = await postLogin(
-      seedless.base,
-      new URLSearchParams({ user: "myk", password: PASSWORD }).toString(),
-    );
+    const refused = await attemptLogin(seedless.base, "myk", PASSWORD);
     expect(refused.status).toBe(503);
 
     // A vanished mount: 503 with the session intact; the mount's return revives the page. The
@@ -722,8 +739,8 @@ describe("§36 phase 5 — the login door", () => {
     );
     expect(faults.filter((m) => m.includes("scrypt"))).toEqual([]);
     writeCredentials(home, mixed);
-    await postLogin(base, new URLSearchParams({ user: "a", password: "x" }).toString());
-    await postLogin(base, new URLSearchParams({ user: "a", password: "x" }).toString());
+    await attemptLogin(base, "a", "x");
+    await attemptLogin(base, "a", "x");
     expect(faults.filter((m) => m.includes("scrypt cost")).length).toBe(1);
   });
 
@@ -734,12 +751,15 @@ describe("§36 phase 5 — the login door", () => {
       { onFault: (m: string) => faults.push(m) },
     );
     // Break the credential file where the per-attempt read will find it: a directory where the
-    // file should be is a real read fault, never "empty".
+    // file should be is a real read fault, never "empty". The pair is taken first — the form is
+    // stateless and owes the credential file nothing.
+    const pair = await formPair(base);
     rmSync(join(home, "credentials.json"));
     mkdirSync(join(home, "credentials.json"));
     const refused = await postLogin(
       base,
-      new URLSearchParams({ user: "myk", password: PASSWORD }).toString(),
+      new URLSearchParams({ form_token: pair.token, user: "myk", password: PASSWORD }).toString(),
+      { cookie: pair.nonceCookie },
     );
     expect(refused.status).toBe(503);
     const body = await refused.text();
