@@ -4,10 +4,19 @@
 // every phase-5 POST already sends the token and the same-origin signal this phase starts
 // refusing without.
 //
-// What this file deliberately does not assert: the failure COUNTER a cross-site POST must not
-// fill — no counter exists until phase 9; (g) rails the property that implies it (the refusal
-// evaluates no password), and phase 9 owns the counter proper.
+// What this file deliberately does not assert, and why:
+//   - the failure COUNTER a cross-site POST must not fill: no counter exists until phase 9.
+//     (g) rails the property that implies it (the refusal evaluates no password); phase 9 owns
+//     the counter proper.
+//   - THE DRAIN ITSELF. (b4) proves the socket is reusable after an early refusal, but Node's
+//     server auto-dumps an unread request body when the response finishes, so deleting the
+//     door's own `readDoorBody` on the refusal path leaves this rail — and every other one —
+//     green. Measured, not assumed: that mutant survives. The drain is kept as the explicit
+//     guarantee (auto-dump is a runtime behavior, not a contract this door should lean on) and
+//     is named here rather than dressed in a test that cannot see it. A rail could only reach
+//     it by holding a body open mid-stream, which is a timing fixture and therefore a flake.
 
+import { Agent, request } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -172,6 +181,24 @@ describe("§36 phase 6 — cross-site defence", () => {
     clock = 1500;
     expect(await signedInPage(base, first.sessionId)).not.toContain("Signed in");
 
+    // The other refusal path: a login that CLEARS the guard (same-origin, valid token) and is
+    // then refused on its merits — a wrong password. Clearing the guard is not admission, so it
+    // must not have slid the window on its way to the 401 (a P5 lens caught the original
+    // ordering doing exactly that).
+    clock = 0;
+    const wrong = await signIn(base);
+    clock = 900;
+    // Presenting the session means the SESSION's own token binds (criterion (f)), so this is
+    // the shape that clears the guard and is then refused on its merits.
+    const refusedLogin = await postLogin(
+      base,
+      { form_token: wrong.sessionToken, user: "myk", password: "not it" },
+      { cookie: `${SESSION_COOKIE}=${wrong.sessionId}`, ...SAME_ORIGIN },
+    );
+    expect(refusedLogin.status).toBe(401);
+    clock = 1500;
+    expect(await signedInPage(base, wrong.sessionId)).not.toContain("Signed in");
+
     // Two-sided: an ADMITTED request at 900 does slide the window to 1900.
     clock = 0;
     const second = await signIn(base);
@@ -191,10 +218,44 @@ describe("§36 phase 6 — cross-site defence", () => {
     expect(await orphan.text()).toContain("no live session");
   });
 
-  it("(b4) an early refusal leaves a clean keep-alive socket", async () => {
+  it("(b4) an early refusal drains the body and leaves the SAME socket reusable", async () => {
     const { base } = await csrfServer();
+    const u = new URL(base);
     const big = "x".repeat(8 * 1024 - 64);
-    const refused = await fetch(`${base}/login`, {
+    // A pinned single-socket agent, so "the next request reuses this connection" is a fact
+    // rather than a hope: undici would silently open a fresh socket if the first were torn, and
+    // a P5 lens showed the pooled-fetch version passed with the drain deleted.
+    const agent = new Agent({ keepAlive: true, maxSockets: 1 });
+    const raw = (
+      path: string,
+      init: { method?: string; headers?: Record<string, string>; body?: string } = {},
+    ): Promise<{ status: number; body: string; socket: string }> =>
+      new Promise((resolve, reject) => {
+        const req = request(
+          {
+            agent,
+            host: u.hostname,
+            port: u.port,
+            path,
+            method: init.method ?? "GET",
+            headers: { connection: "keep-alive", ...init.headers },
+          },
+          (res) => {
+            // The socket identity is read HERE — by `end` the reference is already null on a
+            // keep-alive response. Local port is unique per connection, so equality across two
+            // responses means the same connection carried both.
+            const socket = `${res.socket.localAddress ?? ""}:${res.socket.localPort ?? 0}`;
+            let body = "";
+            res.on("data", (c) => (body += c));
+            res.on("end", () => resolve({ status: res.statusCode ?? 0, body, socket }));
+          },
+        );
+        req.on("error", reject);
+        if (init.body !== undefined) req.write(init.body);
+        req.end();
+      });
+
+    const refused = await raw("/login", {
       method: "POST",
       headers: {
         "content-type": "application/x-www-form-urlencoded",
@@ -203,10 +264,12 @@ describe("§36 phase 6 — cross-site defence", () => {
       body: new URLSearchParams({ user: "myk", password: big }).toString(),
     });
     expect(refused.status).toBe(403);
-    await refused.text(); // fully readable
-    // The next request on the same pooled connection answers normally.
-    const next = await fetch(`${base}/login`);
+    expect(refused.body).toContain("reload");
+
+    const next = await raw("/login");
     expect(next.status).toBe(200);
+    expect(next.socket, "the second request did not reuse the first socket").toBe(refused.socket);
+    agent.destroy();
   });
 
   it("(c) Origin outranks the fetch-site hint, both directions", async () => {
@@ -385,7 +448,10 @@ describe("§36 phase 6 — cross-site defence", () => {
         const probe = await withPair({ user: "myk", password: PASSWORD }, SAME_ORIGIN);
         if (probe.status === 503) sawBusy = true;
       }
-      if (crossDuring === undefined) {
+      // The cross-site probe is recorded ONLY once the busy gate has been witnessed — a probe
+      // captured before the slow hash occupied the seat would answer 403 under the reordered
+      // mutant too, making the kill probabilistic (a P5 lens's finding).
+      if (sawBusy && crossDuring === undefined) {
         const cross = await withPair(
           { user: "myk", password: PASSWORD },
           { "sec-fetch-site": "cross-site" },
@@ -452,6 +518,27 @@ describe("§36 phase 6 — cross-site defence", () => {
     };
     expect(await v6attempt("http://localhost:9443")).toBe(200);
     expect(await v6attempt("http://localhost:1")).toBe(403);
+
+    // "AND NOTHING ELSE" needs the non-loopback side, or the branch that BOUNDS the widening is
+    // deletable under a green bar (a P5 lens's finding): a public store must refuse a loopback
+    // Origin, which only the early return at the top of ownOrigins provides.
+    const { base: wide } = await csrfServer({ publicUrl: "https://loam.example" });
+    const wideAttempt = async (origin: string): Promise<number> => {
+      const pair = await formPair(wide);
+      const res = await postLogin(
+        wide,
+        { form_token: pair.token, user: "myk", password: PASSWORD },
+        { cookie: `${PRESESSION_COOKIE}=${pair.nonce}`, origin },
+      );
+      return res.status;
+    };
+    // The spellings the widening WOULD mint for this URL if the bounding return were deleted —
+    // same scheme, no port, since https carries none. Probing any other spelling would leave
+    // the mutant alive (it did, on the first pass).
+    expect(await wideAttempt("https://localhost")).toBe(403);
+    expect(await wideAttempt("https://127.0.0.1")).toBe(403);
+    expect(await wideAttempt("https://[::1]")).toBe(403);
+    expect(await wideAttempt("https://loam.example")).toBe(200); // the positive control
   });
 
   it("(l) an unroutable public URL is a loud fault, not a silent universal 403", async () => {
@@ -481,13 +568,32 @@ describe("§36 phase 6 — cross-site defence", () => {
       publicUrl: "https://[half-open",
       onFault: (m: string) => faults.push(m),
     });
-    const pair = await formPair(base);
-    const res = await postLogin(
+    // The requests only a FAIL-CLOSED set refuses: the store's OWN bound origin, and its
+    // loopback siblings. A foreign origin is refused under any configuration, so asserting on
+    // one agrees with a mutant that falls back to a populated set (a P5 lens's finding) — and
+    // the sibling spellings catch a fallback that widens the bound URL rather than emptying.
+    const port = new URL(base).port;
+    const attempt = async (origin: string): Promise<number> => {
+      const pair = await formPair(base);
+      const res = await postLogin(
+        base,
+        { form_token: pair.token, user: "myk", password: PASSWORD },
+        { cookie: `${PRESESSION_COOKIE}=${pair.nonce}`, origin },
+      );
+      return res.status;
+    };
+    expect(await attempt(base)).toBe(403);
+    expect(await attempt(`http://localhost:${port}`)).toBe(403);
+    expect(await attempt(`http://[::1]:${port}`)).toBe(403);
+    // And the same request with a same-origin HINT still succeeds — the empty set refuses only
+    // Origin-BEARING posts, so this rail cannot pass by the doors being shut altogether.
+    const control = await formPair(base);
+    const hinted = await postLogin(
       base,
-      { form_token: pair.token, user: "myk", password: PASSWORD },
-      { cookie: `${PRESESSION_COOKIE}=${pair.nonce}`, origin: "https://loam.example" },
+      { form_token: control.token, user: "myk", password: PASSWORD },
+      { cookie: `${PRESESSION_COOKIE}=${control.nonce}`, ...SAME_ORIGIN },
     );
-    expect(res.status).toBe(403);
+    expect(hinted.status).toBe(200);
     expect(faults.filter((m) => m.includes("public URL")).length).toBe(1);
   });
 });

@@ -464,8 +464,15 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
    * The origins this store answers its own forms from (SPEC §36 phase 6). Exactly the settled
    * public URL's origin — EXCEPT when that URL is loopback, where the equivalent spellings on
    * the SAME port are the same store: a browser at `http://localhost:4321` sends that spelling,
-   * and a default of `127.0.0.1` would refuse the operator's own form. The widening is bounded
-   * to loopback literals on the same port, so it can never admit a foreign host. Two loud
+   * and a default of `127.0.0.1` would refuse the operator's own form.
+   *
+   * WHAT THE WIDENING ADMITS, exactly, because the obvious phrasing overclaims: the same
+   * SPELLING on the same port, not necessarily the same PROCESS. `127.0.0.1:P` and `[::1]:P`
+   * are distinct bindable sockets, so a store bound to one leaves the other free for a
+   * co-resident process, whose page a browser may reach at `http://localhost:P`. Provenance
+   * alone does not exclude that page — the form token does (it cannot read this store's form or
+   * plant its `__Host-` nonce), which is why both signals are required rather than either. No
+   * REMOTE host is ever admitted. Two loud
    * faults, each said once: an UNPARSEABLE public URL yields an empty set (every Origin-bearing
    * POST refuses — failing closed), and an UNROUTABLE one (0.0.0.0, ::) would be a silent
    * universal 403 nobody could diagnose, so the door names --public-url the moment it opens.
@@ -475,8 +482,13 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
     try {
       url = new URL(deps.publicUrl);
     } catch {
+      // Precisely what an empty set costs, because the door only consults it when an Origin is
+      // PRESENT: a POST naming any origin refuses, and one carrying no Origin still rides the
+      // `Sec-Fetch-Site` hint. Saying "every POST refuses" would be a claim the code does not
+      // keep (a P5 lens caught the overclaim).
       onFault(
-        `the login doors cannot parse the public URL "${deps.publicUrl}", so every POST refuses`,
+        `the login doors cannot parse the public URL "${deps.publicUrl}", so every POST that ` +
+          `names an Origin refuses; only a same-origin fetch-site hint still passes`,
       );
       return new Set();
     }
@@ -713,7 +725,12 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
         notThisPage(res);
         return undefined;
       }
-      held.session.expiresAt = now() + idleMs; // admitted — only now does the window slide
+      // NO SLIDE HERE. Clearing the guard is not admission — `postLogin` can still answer 401
+      // (wrong password, no role) or 503 (busy, unreadable credentials, unreachable ground,
+      // full table) behind it, and a request the door REFUSES must not have extended the
+      // session's life on its way to being refused (a P5 lens caught this contradicting the
+      // invariant the peek/touch split exists for). The doors that genuinely admit slide it
+      // themselves: `getLogin` through `touch`, and a successful login opens a NEW row.
       return { held, body };
     }
     const nonce = preSessionIdFrom(req);
