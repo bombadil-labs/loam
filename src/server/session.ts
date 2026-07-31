@@ -61,8 +61,11 @@ export interface UserDoorOptions {
   /** The mount whose ground holds the user records and role bindings. */
   readonly mount: string;
   /**
-   * The store's address as the outside world sees it. Phase 6 builds the same-origin check from
-   * it; this phase stores it and consults it for nothing. Defaults to the bound URL.
+   * The store's address as the outside world sees it. Defaults to the bound URL. This is the
+   * SOLE source of `ownOrigins`, the set every POST door's provenance check consults, so what
+   * this holds decides which POSTs are refused: name an address a browser will never send as an
+   * `Origin` (a bind-any `0.0.0.0`, an unparseable string) and real pages get a universal 403.
+   * See `ownOrigins` for the loopback widening and for the two faults that say so out loud.
    */
   readonly publicUrl?: string;
   readonly idleMs?: number; // session idle window (default 30 minutes)
@@ -522,8 +525,8 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
    * came from this store's own page. Neither needs a row in a table: the cookie carries a random
    * nonce, and the form token is an HMAC of that nonce under a key minted at boot. `GET /login`
    * therefore allocates nothing a flood could fill. The key dies with the process, which is also
-   * what makes a restart invalidate every form in flight. Phase 6 is where the token becomes a
-   * refusal; this phase issues and carries it so phase 6 changes only what the door REFUSES.
+   * what makes a restart invalidate every form in flight. The token becomes a REFUSAL in the POST
+   * doors' preamble, which recomputes this HMAC over the cookie's nonce and compares it.
    */
   const formKey = randomBytes(32);
   const preSessionToken = (nonce: string): string =>
