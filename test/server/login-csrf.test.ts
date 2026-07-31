@@ -1,0 +1,599 @@
+// §36 phase 6 — cross-site defence (T127). Criteria (a)–(k) of
+// .adlc/specs/36-06-cross-site-defence.md, transcribed. Phase 5's rail files are UNTOUCHED by
+// this phase (criterion (j) is that claim, checked as a git diff in review and by rails-guard);
+// every phase-5 POST already sends the token and the same-origin signal this phase starts
+// refusing without.
+//
+// What this file deliberately does not assert, and why:
+//   - the failure COUNTER a cross-site POST must not fill: no counter exists until phase 9.
+//     (g) rails the property that implies it (the refusal evaluates no password); phase 9 owns
+//     the counter proper.
+//   - THE DRAIN ITSELF. (b4) proves the socket is reusable after an early refusal, but Node's
+//     server auto-dumps an unread request body when the response finishes, so deleting the
+//     door's own `readDoorBody` on the refusal path leaves this rail — and every other one —
+//     green. Measured, not assumed: that mutant survives. The drain is kept as the explicit
+//     guarantee (auto-dump is a runtime behavior, not a contract this door should lean on) and
+//     is named here rather than dressed in a test that cannot see it. A rail could only reach
+//     it by holding a body open mid-stream, which is a timing fixture and therefore a flake.
+
+import { Agent, request } from "node:http";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
+import { createHash } from "node:crypto";
+import { Gateway } from "../../src/gateway/gateway.js";
+import { MemoryBackend } from "../../src/store/memory.js";
+import { serve, type ServerHandle } from "../../src/server/http.js";
+import { hashPassword, writeCredentials, type ScryptParams } from "../../src/server/credentials.js";
+import { roleClaims, userClaims } from "../../src/server/users.js";
+import { PRESESSION_COOKIE, SESSION_COOKIE } from "../../src/server/session.js";
+
+vi.setConfig({ testTimeout: 20000 }); // real listening servers
+
+const OPERATOR_SEED = "0e".repeat(32);
+const OPERATOR = authorForSeed(OPERATOR_SEED);
+const CHEAP: ScryptParams = { N: 1024, r: 8, p: 1, keylen: 32 };
+const PASSWORD = "correct horse";
+
+const homes: string[] = [];
+const handles: ServerHandle[] = [];
+afterEach(async () => {
+  while (handles.length > 0) await handles.pop()!.close();
+  while (homes.length > 0) rmSync(homes.pop()!, { recursive: true, force: true });
+});
+
+async function csrfServer(doorOptions: Record<string, unknown> = {}): Promise<{
+  base: string;
+  handle: ServerHandle;
+}> {
+  const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
+  await gateway.append([signClaims(userClaims("myk", OPERATOR, 9001), OPERATOR_SEED)]);
+  await gateway.append([signClaims(roleClaims("myk", "operator", OPERATOR, 9002), OPERATOR_SEED)]);
+  const home = mkdtempSync(join(tmpdir(), "loam-login-csrf-"));
+  homes.push(home);
+  writeCredentials(home, { version: 1, users: { myk: await hashPassword(PASSWORD, CHEAP) } });
+  const handle = await serve({
+    mounts: { default: gateway },
+    tokens: { "op-token": { operator: true } },
+    port: 0,
+    host: "127.0.0.1",
+    users: { home, mount: "default", ...doorOptions },
+  });
+  handles.push(handle);
+  return { base: handle.url, handle };
+}
+
+const cookiesOf = (res: Response): string[] => res.headers.getSetCookie();
+const valueOf = (header: string): string => {
+  const eq = header.indexOf("=");
+  return header.slice(eq + 1, header.indexOf(";"));
+};
+const SAME_ORIGIN = { "sec-fetch-site": "same-origin" } as const;
+
+async function formPair(base: string): Promise<{ token: string; nonce: string }> {
+  const form = await fetch(`${base}/login`);
+  const nonceCookie = cookiesOf(form).find((c) => c.startsWith(`${PRESESSION_COOKIE}=`));
+  expect(nonceCookie).toBeDefined();
+  const token = /name="form_token" value="([^"]+)"/.exec(await form.text())?.[1];
+  expect(token).toBeTruthy();
+  return { token: token!, nonce: valueOf(nonceCookie!) };
+}
+
+function postLogin(
+  base: string,
+  fields: Record<string, string>,
+  headers: Record<string, string>,
+): Promise<Response> {
+  return fetch(`${base}/login`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded", ...headers },
+    body: new URLSearchParams(fields).toString(),
+  });
+}
+
+/** A full, valid, same-origin sign-in; returns the session id and ITS page's form token. */
+async function signIn(base: string): Promise<{ sessionId: string; sessionToken: string }> {
+  const pair = await formPair(base);
+  const res = await postLogin(
+    base,
+    { form_token: pair.token, user: "myk", password: PASSWORD },
+    { cookie: `${PRESESSION_COOKIE}=${pair.nonce}`, ...SAME_ORIGIN },
+  );
+  expect(res.status).toBe(200);
+  const sessionCookie = cookiesOf(res).find((c) => c.startsWith(`${SESSION_COOKIE}=`));
+  expect(sessionCookie).toBeDefined();
+  const sessionToken = /name="form_token" value="([^"]+)"/.exec(await res.text())?.[1];
+  expect(sessionToken).toBeTruthy();
+  return { sessionId: valueOf(sessionCookie!), sessionToken: sessionToken! };
+}
+
+const signedInPage = async (base: string, sessionId: string): Promise<string> =>
+  (await fetch(`${base}/login`, { headers: { cookie: `${SESSION_COOKIE}=${sessionId}` } })).text();
+
+describe("§36 phase 6 — cross-site defence", () => {
+  it("(a) the transition: a token-less login phase 5 admitted is now refused; the valid one succeeds", async () => {
+    const { base } = await csrfServer();
+    const pair = await formPair(base);
+    const bare = await postLogin(
+      base,
+      { user: "myk", password: PASSWORD },
+      { cookie: `${PRESESSION_COOKIE}=${pair.nonce}`, ...SAME_ORIGIN },
+    );
+    expect(bare.status).toBe(403);
+    expect(cookiesOf(bare)).toEqual([]);
+    const full = await postLogin(
+      base,
+      { form_token: pair.token, user: "myk", password: PASSWORD },
+      { cookie: `${PRESESSION_COOKIE}=${pair.nonce}`, ...SAME_ORIGIN },
+    );
+    expect(full.status).toBe(200);
+  });
+
+  it("(b) six cross-site shapes refuse logout, set no cookie, and change no session state", async () => {
+    const { base } = await csrfServer();
+    const { sessionId, sessionToken } = await signIn(base);
+    const shapes: Record<string, string>[] = [
+      {}, // no Origin, no Sec-Fetch-Site
+      { "sec-fetch-site": "cross-site" },
+      { "sec-fetch-site": "none" },
+      { origin: "https://evil.example" },
+      { origin: "null" }, // a sandboxed context: refused outright, never a fall-through
+      { origin: "null", "sec-fetch-site": "same-origin" },
+    ];
+    for (const shape of shapes) {
+      const out = await fetch(`${base}/logout`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          cookie: `${SESSION_COOKIE}=${sessionId}`,
+          ...shape,
+        },
+        body: new URLSearchParams({ form_token: sessionToken }).toString(),
+      });
+      expect(out.status, JSON.stringify(shape)).toBe(403);
+      expect(cookiesOf(out), JSON.stringify(shape)).toEqual([]);
+    }
+    // The state control: the session survived all six.
+    expect(await signedInPage(base, sessionId)).toContain("Signed in");
+  });
+
+  it("(b2) a refused request slides no idle window; an admitted one does", async () => {
+    let clock = 0;
+    const { base } = await csrfServer({ idleMs: 1000, monotonicNow: () => clock });
+    const first = await signIn(base);
+    // Refused traffic at 900 must not extend the session past its 1000-tick window. The shape
+    // matters: a SAME-ORIGIN request with a FORGED token is the one refusal that reads the
+    // session row before refusing (a cross-site shape refuses before any session read), so it
+    // is the path that could slide the window if peeking slid.
+    clock = 900;
+    const refused = await fetch(`${base}/logout`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `${SESSION_COOKIE}=${first.sessionId}`,
+        ...SAME_ORIGIN,
+      },
+      body: new URLSearchParams({ form_token: "forged" }).toString(),
+    });
+    expect(refused.status).toBe(403);
+    clock = 1500;
+    expect(await signedInPage(base, first.sessionId)).not.toContain("Signed in");
+
+    // The other refusal path: a login that CLEARS the guard (same-origin, valid token) and is
+    // then refused on its merits — a wrong password. Clearing the guard is not admission, so it
+    // must not have slid the window on its way to the 401 (a P5 lens caught the original
+    // ordering doing exactly that).
+    clock = 0;
+    const wrong = await signIn(base);
+    clock = 900;
+    // Presenting the session means the SESSION's own token binds (criterion (f)), so this is
+    // the shape that clears the guard and is then refused on its merits.
+    const refusedLogin = await postLogin(
+      base,
+      { form_token: wrong.sessionToken, user: "myk", password: "not it" },
+      { cookie: `${SESSION_COOKIE}=${wrong.sessionId}`, ...SAME_ORIGIN },
+    );
+    expect(refusedLogin.status).toBe(401);
+    clock = 1500;
+    expect(await signedInPage(base, wrong.sessionId)).not.toContain("Signed in");
+
+    // Two-sided: an ADMITTED request at 900 does slide the window to 1900.
+    clock = 0;
+    const second = await signIn(base);
+    clock = 900;
+    expect(await signedInPage(base, second.sessionId)).toContain("Signed in");
+    clock = 1500;
+    expect(await signedInPage(base, second.sessionId)).toContain("Signed in");
+  });
+
+  it("(b3) the /logout precedence phase 5 froze survives: same-origin orphan is 401, not 403", async () => {
+    const { base } = await csrfServer();
+    const orphan = await fetch(`${base}/logout`, {
+      method: "POST",
+      headers: { "sec-fetch-site": "same-origin" },
+    });
+    expect(orphan.status).toBe(401);
+    expect(await orphan.text()).toContain("no live session");
+  });
+
+  it("(b4) an early refusal drains the body and leaves the SAME socket reusable", async () => {
+    const { base } = await csrfServer();
+    const u = new URL(base);
+    const big = "x".repeat(8 * 1024 - 64);
+    // A pinned single-socket agent, so "the next request reuses this connection" is a fact
+    // rather than a hope: undici would silently open a fresh socket if the first were torn, and
+    // a P5 lens showed the pooled-fetch version passed with the drain deleted.
+    const agent = new Agent({ keepAlive: true, maxSockets: 1 });
+    const raw = (
+      path: string,
+      init: { method?: string; headers?: Record<string, string>; body?: string } = {},
+    ): Promise<{ status: number; body: string; socket: string }> =>
+      new Promise((resolve, reject) => {
+        const req = request(
+          {
+            agent,
+            host: u.hostname,
+            port: u.port,
+            path,
+            method: init.method ?? "GET",
+            headers: { connection: "keep-alive", ...init.headers },
+          },
+          (res) => {
+            // The socket identity is read HERE — by `end` the reference is already null on a
+            // keep-alive response. Local port is unique per connection, so equality across two
+            // responses means the same connection carried both.
+            const socket = `${res.socket.localAddress ?? ""}:${res.socket.localPort ?? 0}`;
+            let body = "";
+            res.on("data", (c) => (body += c));
+            res.on("end", () => resolve({ status: res.statusCode ?? 0, body, socket }));
+          },
+        );
+        req.on("error", reject);
+        if (init.body !== undefined) req.write(init.body);
+        req.end();
+      });
+
+    const refused = await raw("/login", {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        "sec-fetch-site": "cross-site",
+      },
+      body: new URLSearchParams({ user: "myk", password: big }).toString(),
+    });
+    expect(refused.status).toBe(403);
+    expect(refused.body).toContain("reload");
+
+    const next = await raw("/login");
+    expect(next.status).toBe(200);
+    expect(next.socket, "the second request did not reuse the first socket").toBe(refused.socket);
+    agent.destroy();
+  });
+
+  it("(c) Origin outranks the fetch-site hint, both directions", async () => {
+    const { base } = await csrfServer();
+    const pair = await formPair(base);
+    const attempt = (headers: Record<string, string>): Promise<Response> =>
+      postLogin(
+        base,
+        { form_token: pair.token, user: "myk", password: PASSWORD },
+        { cookie: `${PRESESSION_COOKIE}=${pair.nonce}`, ...headers },
+      );
+    const foreign = await attempt({
+      origin: "https://evil.example",
+      "sec-fetch-site": "same-origin",
+    });
+    expect(foreign.status).toBe(403);
+    // Positive control: the store's own origin beside the same hint succeeds.
+    const { base: base2 } = await csrfServer();
+    const pair2 = await formPair(base2);
+    const own = await postLogin(
+      base2,
+      { form_token: pair2.token, user: "myk", password: PASSWORD },
+      {
+        cookie: `${PRESESSION_COOKIE}=${pair2.nonce}`,
+        origin: base2,
+        "sec-fetch-site": "same-origin",
+      },
+    );
+    expect(own.status).toBe(200);
+  });
+
+  it("(d) forged tokens die: nonce itself, keyless digest, wrong-nonce token, empty, truncated", async () => {
+    const { base } = await csrfServer();
+    const pair = await formPair(base);
+    const other = await formPair(base);
+    const candidates: [string, string][] = [
+      ["the nonce itself", pair.nonce],
+      [
+        "a keyless SHA-256 of the nonce",
+        createHash("sha256").update(pair.nonce).digest("base64url"),
+      ],
+      ["a token minted for a different nonce", other.token],
+      ["the empty string", ""],
+      ["a valid token truncated by one", pair.token.slice(0, -1)],
+    ];
+    for (const [name, forged] of candidates) {
+      const res = await postLogin(
+        base,
+        { form_token: forged, user: "myk", password: PASSWORD },
+        { cookie: `${PRESESSION_COOKIE}=${pair.nonce}`, ...SAME_ORIGIN },
+      );
+      expect(res.status, name).toBe(403);
+      expect(cookiesOf(res), name).toEqual([]);
+    }
+    // Positive control: the genuine pair still opens.
+    const good = await postLogin(
+      base,
+      { form_token: pair.token, user: "myk", password: PASSWORD },
+      { cookie: `${PRESESSION_COOKIE}=${pair.nonce}`, ...SAME_ORIGIN },
+    );
+    expect(good.status).toBe(200);
+  });
+
+  it("(e) a token issued for one cookie does not open another", async () => {
+    const { base } = await csrfServer();
+    const a = await formPair(base);
+    const b = await formPair(base);
+    const crossed = await postLogin(
+      base,
+      { form_token: a.token, user: "myk", password: PASSWORD },
+      { cookie: `${PRESESSION_COOKIE}=${b.nonce}`, ...SAME_ORIGIN },
+    );
+    expect(crossed.status).toBe(403);
+    const matched = await postLogin(
+      base,
+      { form_token: a.token, user: "myk", password: PASSWORD },
+      { cookie: `${PRESESSION_COOKIE}=${a.nonce}`, ...SAME_ORIGIN },
+    );
+    expect(matched.status).toBe(200);
+  });
+
+  it("(f) once a session exists, its OWN token binds — the spent pre-session token does not", async () => {
+    const { base } = await csrfServer();
+    const pair = await formPair(base);
+    const res = await postLogin(
+      base,
+      { form_token: pair.token, user: "myk", password: PASSWORD },
+      { cookie: `${PRESESSION_COOKIE}=${pair.nonce}`, ...SAME_ORIGIN },
+    );
+    expect(res.status).toBe(200);
+    const sessionId = valueOf(cookiesOf(res).find((c) => c.startsWith(`${SESSION_COOKIE}=`))!);
+    const sessionToken = /name="form_token" value="([^"]+)"/.exec(await res.text())?.[1];
+
+    const withPreToken = await fetch(`${base}/logout`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `${SESSION_COOKIE}=${sessionId}`,
+        ...SAME_ORIGIN,
+      },
+      body: new URLSearchParams({ form_token: pair.token }).toString(),
+    });
+    expect(withPreToken.status).toBe(403);
+    expect(await signedInPage(base, sessionId)).toContain("Signed in");
+
+    const withSessionToken = await fetch(`${base}/logout`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `${SESSION_COOKIE}=${sessionId}`,
+        ...SAME_ORIGIN,
+      },
+      body: new URLSearchParams({ form_token: sessionToken! }).toString(),
+    });
+    expect(withSessionToken.status).toBe(200);
+  });
+
+  it("(g) a cross-site POST never reaches the hash gate — proven with the gate held shut", async () => {
+    // Byte-identity alone is satisfied by hash-then-refuse (the premortem's point); parking a
+    // slow scrypt on a cap of 1 makes the order observable: a cross-site POST that reached the
+    // gate would answer the 503 busy body, not the provenance 403.
+    const SLOW: ScryptParams = { N: 65536, r: 8, p: 2, keylen: 32 };
+    const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
+    await gateway.append([signClaims(userClaims("myk", OPERATOR, 9001), OPERATOR_SEED)]);
+    await gateway.append([
+      signClaims(roleClaims("myk", "operator", OPERATOR, 9002), OPERATOR_SEED),
+    ]);
+    await gateway.append([signClaims(userClaims("slow", OPERATOR, 9003), OPERATOR_SEED)]);
+    await gateway.append([
+      signClaims(roleClaims("slow", "operator", OPERATOR, 9004), OPERATOR_SEED),
+    ]);
+    const home = mkdtempSync(join(tmpdir(), "loam-login-csrf-"));
+    homes.push(home);
+    writeCredentials(home, {
+      version: 1,
+      users: {
+        myk: await hashPassword(PASSWORD, CHEAP),
+        slow: await hashPassword("ponderous", SLOW),
+      },
+    });
+    const handle = await serve({
+      mounts: { default: gateway },
+      tokens: { "op-token": { operator: true } },
+      port: 0,
+      host: "127.0.0.1",
+      users: { home, mount: "default", maxConcurrentHashes: 1 },
+    });
+    handles.push(handle);
+    const base = handle.url;
+
+    const pair = await formPair(base);
+    const withPair = (
+      fields: Record<string, string>,
+      headers: Record<string, string>,
+    ): Promise<Response> =>
+      postLogin(
+        base,
+        { form_token: pair.token, ...fields },
+        {
+          cookie: `${PRESESSION_COOKIE}=${pair.nonce}`,
+          ...headers,
+        },
+      );
+
+    let slowSettled = false;
+    const slowLogin = withPair({ user: "slow", password: "ponderous" }, SAME_ORIGIN).then((res) => {
+      slowSettled = true;
+      return res;
+    });
+    // Witness that a same-origin probe DOES meet the busy gate, then that a cross-site probe
+    // answers 403 in the same window — the refusal precedes the gate.
+    let sawBusy = false;
+    let crossDuring: Response | undefined;
+    while ((!sawBusy || crossDuring === undefined) && !slowSettled) {
+      if (!sawBusy) {
+        const probe = await withPair({ user: "myk", password: PASSWORD }, SAME_ORIGIN);
+        if (probe.status === 503) sawBusy = true;
+      }
+      // The cross-site probe is recorded ONLY once the busy gate has been witnessed — a probe
+      // captured before the slow hash occupied the seat would answer 403 under the reordered
+      // mutant too, making the kill probabilistic (a P5 lens's finding).
+      if (sawBusy && crossDuring === undefined) {
+        const cross = await withPair(
+          { user: "myk", password: PASSWORD },
+          { "sec-fetch-site": "cross-site" },
+        );
+        if (cross.status !== 200) crossDuring = cross;
+      }
+    }
+    expect(sawBusy, "the busy gate was never witnessed — the fixture proved nothing").toBe(true);
+    expect(crossDuring, "no cross-site probe landed inside the window").toBeDefined();
+    expect(crossDuring!.status).toBe(403);
+    await slowLogin;
+
+    // The byte-identity control rides along: wrong and correct password, identical 403s.
+    const wrong = await withPair(
+      { user: "myk", password: "not it" },
+      { "sec-fetch-site": "cross-site" },
+    );
+    const right = await withPair(
+      { user: "myk", password: PASSWORD },
+      { "sec-fetch-site": "cross-site" },
+    );
+    expect(wrong.status).toBe(403);
+    expect(await wrong.text()).toBe(await right.text());
+  });
+
+  it("(h) GET /login allocates nothing: a thousand of them leave the one seat open", async () => {
+    const { base } = await csrfServer({ maxSessions: 1 });
+    for (let i = 0; i < 1000; i += 1) {
+      const res = await fetch(`${base}/login`);
+      if (i === 0) expect(res.status).toBe(200);
+      await res.body?.cancel();
+    }
+    const { sessionId } = await signIn(base);
+    expect(sessionId).not.toBe("");
+  });
+
+  it("(i) the loopback widening admits the sibling spellings and nothing else", async () => {
+    const { base } = await csrfServer();
+    const port = new URL(base).port;
+    const attempt = async (origin: string): Promise<number> => {
+      const pair = await formPair(base);
+      const res = await postLogin(
+        base,
+        { form_token: pair.token, user: "myk", password: PASSWORD },
+        { cookie: `${PRESESSION_COOKIE}=${pair.nonce}`, origin },
+      );
+      return res.status;
+    };
+    // The bound URL is http://127.0.0.1:<port>; localhost on the SAME port is the same store.
+    expect(await attempt(`http://localhost:${port}`)).toBe(200);
+    expect(await attempt(`http://localhost:1`)).toBe(403);
+    expect(await attempt("https://evil.example")).toBe(403);
+
+    // The IPv6 spelling is real: URL.hostname keeps the brackets, and the widening must too.
+    const { base: v6 } = await csrfServer({ publicUrl: "http://[::1]:9443" });
+    const v6attempt = async (origin: string): Promise<number> => {
+      const pair = await formPair(v6);
+      const res = await postLogin(
+        v6,
+        { form_token: pair.token, user: "myk", password: PASSWORD },
+        { cookie: `${PRESESSION_COOKIE}=${pair.nonce}`, origin },
+      );
+      return res.status;
+    };
+    expect(await v6attempt("http://localhost:9443")).toBe(200);
+    expect(await v6attempt("http://localhost:1")).toBe(403);
+
+    // "AND NOTHING ELSE" needs the non-loopback side, or the branch that BOUNDS the widening is
+    // deletable under a green bar (a P5 lens's finding): a public store must refuse a loopback
+    // Origin, which only the early return at the top of ownOrigins provides.
+    const { base: wide } = await csrfServer({ publicUrl: "https://loam.example" });
+    const wideAttempt = async (origin: string): Promise<number> => {
+      const pair = await formPair(wide);
+      const res = await postLogin(
+        wide,
+        { form_token: pair.token, user: "myk", password: PASSWORD },
+        { cookie: `${PRESESSION_COOKIE}=${pair.nonce}`, origin },
+      );
+      return res.status;
+    };
+    // The spellings the widening WOULD mint for this URL if the bounding return were deleted —
+    // same scheme, no port, since https carries none. Probing any other spelling would leave
+    // the mutant alive (it did, on the first pass).
+    expect(await wideAttempt("https://localhost")).toBe(403);
+    expect(await wideAttempt("https://127.0.0.1")).toBe(403);
+    expect(await wideAttempt("https://[::1]")).toBe(403);
+    expect(await wideAttempt("https://loam.example")).toBe(200); // the positive control
+  });
+
+  it("(l) an unroutable public URL is a loud fault, not a silent universal 403", async () => {
+    const faults: string[] = [];
+    await csrfServer({
+      publicUrl: "http://0.0.0.0:8080",
+      onFault: (m: string) => faults.push(m),
+    });
+    expect(faults.filter((m) => m.includes("--public-url")).length).toBe(1);
+  });
+
+  it("(m) the 403 names the cure", async () => {
+    const { base } = await csrfServer();
+    const pair = await formPair(base);
+    const refused = await postLogin(
+      base,
+      { form_token: pair.token, user: "myk", password: PASSWORD },
+      { cookie: `${PRESESSION_COOKIE}=${pair.nonce}`, "sec-fetch-site": "cross-site" },
+    );
+    expect(refused.status).toBe(403);
+    expect((await refused.text()).toLowerCase()).toContain("reload");
+  });
+
+  it("(k) an unparseable public URL fails closed on every Origin-bearing POST, and says so once", async () => {
+    const faults: string[] = [];
+    const { base } = await csrfServer({
+      publicUrl: "https://[half-open",
+      onFault: (m: string) => faults.push(m),
+    });
+    // The requests only a FAIL-CLOSED set refuses: the store's OWN bound origin, and its
+    // loopback siblings. A foreign origin is refused under any configuration, so asserting on
+    // one agrees with a mutant that falls back to a populated set (a P5 lens's finding) — and
+    // the sibling spellings catch a fallback that widens the bound URL rather than emptying.
+    const port = new URL(base).port;
+    const attempt = async (origin: string): Promise<number> => {
+      const pair = await formPair(base);
+      const res = await postLogin(
+        base,
+        { form_token: pair.token, user: "myk", password: PASSWORD },
+        { cookie: `${PRESESSION_COOKIE}=${pair.nonce}`, origin },
+      );
+      return res.status;
+    };
+    expect(await attempt(base)).toBe(403);
+    expect(await attempt(`http://localhost:${port}`)).toBe(403);
+    expect(await attempt(`http://[::1]:${port}`)).toBe(403);
+    // And the same request with a same-origin HINT still succeeds — the empty set refuses only
+    // Origin-BEARING posts, so this rail cannot pass by the doors being shut altogether.
+    const control = await formPair(base);
+    const hinted = await postLogin(
+      base,
+      { form_token: control.token, user: "myk", password: PASSWORD },
+      { cookie: `${PRESESSION_COOKIE}=${control.nonce}`, ...SAME_ORIGIN },
+    );
+    expect(hinted.status).toBe(200);
+    expect(faults.filter((m) => m.includes("public URL")).length).toBe(1);
+  });
+});

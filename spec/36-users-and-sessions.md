@@ -201,3 +201,39 @@ the loopback default.
 (the doors beside the table), `src/server/credentials.ts` (the decoy hash), `src/server/http.ts`,
 `src/cli/cli.ts`, proved by `test/server/login-door.test.ts` and `test/cli/serve-login.test.ts`.
 Working spec: `.adlc/specs/36-05-the-login-door.md`. Ticket T126.
+
+### 36.6 Cross-site defence
+
+Phase 5 issued the form token and checked nothing; this phase is the enforcement, and it adds
+exactly one precondition to the POST doors: provenance. A cookie is ambient and a form POST is a
+simple request no preflight guards, so before this phase any page on the internet could sign the
+operator out, or seat them in an attacker-chosen session.
+
+The preamble runs in a pinned order. First provenance: `Origin`, when present, must be one of the
+store's own origins, and it outranks `Sec-Fetch-Site` — a header that names a specific foreign
+page is believed over a browser hint, and `Origin: null` (a sandboxed context) refuses like any
+foreign origin rather than falling through, since the pages forbid framing and null is exactly
+the origin an attacker can select. With no `Origin`, the browser's `Sec-Fetch-Site` must say
+`same-origin`. Second, the body is drained regardless — an early refusal must not leave bytes on
+a keep-alive socket. Third, on `/logout` only, session presence: a same-origin caller with no
+session gets the 401 phase 5 always gave. Last, the form token, compared timing-safely
+(`sameSecret`, one implementation): the session's own token when a session is presented, else the
+HMAC of the presented pre-session nonce under the boot key.
+
+Two properties of that order are load-bearing. A refused request slides no idle window — the
+session row is peeked, never touched, until every check passes, so refused traffic cannot keep a
+victim's session alive. And the provenance refusal fires before the hash gate, so a cross-site
+POST spends no scrypt and, once the phase-9 limiter exists, fills no counter.
+
+The recognised origins come from the settled public URL, widened only across the loopback
+spellings (`127.0.0.1`, `localhost`, bracketed `[::1]`) on the same port — a browser at
+`localhost` names the same store as the bound `127.0.0.1`. Two faults are loud at door opening:
+an unparseable public URL empties the set (every Origin-bearing POST refuses, closed and said
+so), and an unroutable one (`0.0.0.0`) names `--public-url` — the alternative was a silent
+universal 403 after every deploy behind a proxy. The refusal itself names its cure ("reload the
+page and try again"): every non-attack path to it — a form issued before a restart, a stale
+tab — is fixed by a fresh form.
+
+**Provenance.** [PR #293](https://github.com/bombadil-labs/loam/pull/293) — `src/server/session.ts`,
+proved by `test/server/login-csrf.test.ts` (phase 5's two rail files untouched, per the plan's
+freeze discipline). Working spec: `.adlc/specs/36-06-cross-site-defence.md`. Ticket T127.

@@ -28,7 +28,7 @@
 // value) where a duration is expected would mint an effectively immortal session or token; nothing
 // in this file's own defaults does that, but nothing type-checks it away either.
 
-import { createHash, createHmac, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { type IncomingMessage, type ServerResponse } from "node:http";
 import { type Reactor } from "@bombadil/rhizomatic";
 import {
@@ -440,6 +440,17 @@ function formFields(
   return out;
 }
 
+/**
+ * Two secrets, compared in time that does not depend on where they first differ. Exported so a
+ * later phase's doors compare their tokens the same way — one implementation, because the second
+ * one is where somebody writes `===`.
+ */
+export const sameSecret = (a: string, b: string): boolean => {
+  const left = Buffer.from(a, "utf8");
+  const right = Buffer.from(b, "utf8");
+  return left.length === right.length && left.length > 0 && timingSafeEqual(left, right);
+};
+
 export function makeUserDoors(deps: UserDoorDeps): UserDoors {
   const options = deps.options;
   const idleMs = options.idleMs ?? DOOR_DEFAULTS.idleMs;
@@ -448,6 +459,77 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
   const scryptParams = options.scrypt ?? DEFAULT_SCRYPT;
   const now = options.monotonicNow ?? ((): number => performance.now());
   const onFault = options.onFault ?? ((message: string): void => void message);
+
+  /**
+   * The origins this store answers its own forms from (SPEC §36 phase 6). Exactly the settled
+   * public URL's origin — EXCEPT when that URL is loopback, where the equivalent spellings on
+   * the SAME port are the same store: a browser at `http://localhost:4321` sends that spelling,
+   * and a default of `127.0.0.1` would refuse the operator's own form.
+   *
+   * WHAT THE WIDENING ADMITS, exactly, because the obvious phrasing overclaims: the same
+   * SPELLING on the same port, not necessarily the same PROCESS. `127.0.0.1:P` and `[::1]:P`
+   * are distinct bindable sockets, so a store bound to one leaves the other free for a
+   * co-resident process, whose page a browser may reach at `http://localhost:P`. Provenance
+   * alone does not exclude that page — the form token does (it cannot read this store's form or
+   * plant its `__Host-` nonce), which is why both signals are required rather than either. No
+   * REMOTE host is ever admitted. Two loud
+   * faults, each said once: an UNPARSEABLE public URL yields an empty set (every Origin-bearing
+   * POST refuses — failing closed), and an UNROUTABLE one (0.0.0.0, ::) would be a silent
+   * universal 403 nobody could diagnose, so the door names --public-url the moment it opens.
+   */
+  const ownOrigins = ((): ReadonlySet<string> => {
+    let url: URL;
+    try {
+      url = new URL(deps.publicUrl);
+    } catch {
+      // Precisely what an empty set costs, because the door only consults it when an Origin is
+      // PRESENT: a POST naming any origin refuses, and one carrying no Origin still rides the
+      // `Sec-Fetch-Site` hint. Saying "every POST refuses" would be a claim the code does not
+      // keep (a P5 lens caught the overclaim).
+      onFault(
+        `the login doors cannot parse the public URL "${deps.publicUrl}", so every POST that ` +
+          `names an Origin refuses; only a same-origin fetch-site hint still passes`,
+      );
+      return new Set();
+    }
+    if (url.hostname === "0.0.0.0" || url.hostname === "[::]") {
+      onFault(
+        `the login doors' public URL "${deps.publicUrl}" names a bind-any address no browser ` +
+          `ever sends as an Origin, so every POST from a real page would refuse — name the ` +
+          `outside address with --public-url`,
+      );
+    }
+    const loopback = new Set(["127.0.0.1", "localhost", "[::1]"]);
+    if (!loopback.has(url.hostname)) return new Set([url.origin]);
+    const port = url.port === "" ? "" : `:${url.port}`;
+    return new Set([
+      url.origin,
+      `${url.protocol}//127.0.0.1${port}`,
+      `${url.protocol}//localhost${port}`,
+      `${url.protocol}//[::1]${port}`,
+    ]);
+  })();
+
+  /**
+   * Did this POST come from this store's own page? `Origin`, when present and non-empty, is
+   * decisive and OUTRANKS `Sec-Fetch-Site` — a caller that names a specific foreign page is
+   * believed over a browser hint, and pinning the precedence is what keeps the two checks from
+   * being quietly reordered. `Origin: null` refuses OUTRIGHT rather than falling through: the
+   * pages forbid framing (`frame-ancestors 'none'`), so no legitimate flow reaches these doors
+   * from a sandboxed context, and null is exactly the origin an attacker can select. With no
+   * Origin at all, the browser's own Sec-Fetch-Site must say same-origin.
+   */
+  const fromThisPage = (req: IncomingMessage): boolean => {
+    const origin = req.headers.origin;
+    if (typeof origin === "string" && origin !== "") {
+      // `Origin: null` (a sandboxed context) lands here and refuses like any foreign origin —
+      // "null" can never be in the set. It must NOT fall through to the fetch-site hint: the
+      // hint says same-origin for a sandboxed same-origin iframe, and null is exactly the
+      // origin an attacker can select.
+      return ownOrigins.has(origin);
+    }
+    return req.headers["sec-fetch-site"] === "same-origin";
+  };
 
   // Said on TRANSITION, not once at boot and not per attempt. The file mutates under a running
   // server (`loam user create`, a hand edit — the exact way uniformity breaks), so a boot-only
@@ -493,22 +575,31 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
     for (const [id, session] of sessions) if (session.expiresAt <= moment) drop(id);
   };
 
-  // The presented session, if it is live. Touching it slides the idle window forward — which is
-  // the only place `expiresAt` moves, so a session's death is a property of INACTIVITY and nothing
-  // else. A row past its window is DELETED on discovery, never merely reported absent, so a later,
-  // smaller clock reading cannot revive it.
-  const touch = (req: IncomingMessage): { id: string; session: BrowserSession } | undefined => {
+  // The presented session, if it is live, WITHOUT sliding its window — a REFUSED request must
+  // not extend a session's life (refused traffic sliding windows would let a cross-site page
+  // keep a victim's session alive forever; a premortem caught the salvage doing exactly that).
+  // A row past its window is still DELETED on discovery, never merely reported absent, so a
+  // later, smaller clock reading cannot revive it.
+  const peek = (req: IncomingMessage): { id: string; session: BrowserSession } | undefined => {
     const id = sessionIdFrom(req);
     if (id === undefined) return undefined;
     const session = sessions.get(id);
     if (session === undefined) return undefined;
-    const moment = now();
-    if (session.expiresAt <= moment) {
+    if (session.expiresAt <= now()) {
       drop(id);
       return undefined;
     }
-    session.expiresAt = moment + idleMs;
     return { id, session };
+  };
+
+  // The presented session, ADMITTED: sliding the idle window is what admission means, and this
+  // is the only place `expiresAt` moves — a session's death is a property of inactivity and of
+  // nothing else.
+  const touch = (req: IncomingMessage): { id: string; session: BrowserSession } | undefined => {
+    const held = peek(req);
+    if (held === undefined) return undefined;
+    held.session.expiresAt = now() + idleMs;
+    return held;
   };
 
   /**
@@ -586,6 +677,69 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
   // password, a user the ground holds no role for. Anything finer would be an oracle.
   const refuseLogin = (res: ServerResponse): void =>
     json(res, 401, { errors: ["the login was refused"] });
+
+  // The provenance refusal (SPEC §36 phase 6) — its own shape, distinct from the login refusal:
+  // it refuses the REQUEST's origin, not the credential, and it fires before any credential is
+  // read. It names the cure because every NON-attack path to it — a form issued before a
+  // restart (the boot key died with the process), a stale tab — is fixed by a fresh form, and
+  // an operator reading a bare attack accusation after a deploy files an outage.
+  const notThisPage = (res: ServerResponse): void =>
+    json(res, 403, {
+      errors: [
+        "this request did not come from this store's own page, so it is refused — reload the " +
+          "page and try again",
+      ],
+    });
+
+  /**
+   * The POST doors' shared preamble (SPEC §36 phase 6), in a pinned order:
+   *   1. provenance — refused before any session read, any hash, any parse;
+   *   2. drain — the body is read regardless, so an early refusal leaves no bytes on a
+   *      keep-alive socket for the next request to trip over (draining is not parsing);
+   *   3. the token compare, timing-safe: the session's own token when a live session is
+   *      presented (peeked, not slid), else the HMAC of the presented pre-session nonce.
+   * Only a caller that clears every step is ADMITTED — and admission, not presentation, is what
+   * slides a session's idle window. It answers the refusals itself, so no door can skip a step
+   * by forgetting one.
+   */
+  const guarded = async (
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<
+    | {
+        readonly held: { id: string; session: BrowserSession } | undefined;
+        readonly body: Map<string, string>;
+      }
+    | undefined
+  > => {
+    if (!fromThisPage(req)) {
+      await readDoorBody(req); // drain: the refusal must not leave the socket dirty
+      notThisPage(res);
+      return undefined;
+    }
+    const body = formFields(await readDoorBody(req), req.headers["content-type"]);
+    const presented = body.get("form_token") ?? "";
+    const held = peek(req);
+    if (held !== undefined) {
+      if (!sameSecret(presented, held.session.formToken)) {
+        notThisPage(res);
+        return undefined;
+      }
+      // NO SLIDE HERE. Clearing the guard is not admission — `postLogin` can still answer 401
+      // (wrong password, no role) or 503 (busy, unreadable credentials, unreachable ground,
+      // full table) behind it, and a request the door REFUSES must not have extended the
+      // session's life on its way to being refused (a P5 lens caught this contradicting the
+      // invariant the peek/touch split exists for). The doors that genuinely admit slide it
+      // themselves: `getLogin` through `touch`, and a successful login opens a NEW row.
+      return { held, body };
+    }
+    const nonce = preSessionIdFrom(req);
+    if (nonce === undefined || !sameSecret(presented, preSessionToken(nonce))) {
+      notThisPage(res);
+      return undefined;
+    }
+    return { held: undefined, body };
+  };
 
   const cannotDecide = (res: ServerResponse, what: string): void =>
     json(res, 503, { errors: [what] });
@@ -671,9 +825,12 @@ page will offer.</p>`,
   };
 
   const postLogin = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    // Phase 5 PARSES the form token and refuses nothing about it — phase 6 owns the enforcement
-    // transition, and builds the comparison the day its verdict becomes a refusal.
-    const body = formFields(await readDoorBody(req), req.headers["content-type"]);
+    // The phase-6 preamble: provenance, drain, token — refused before the name is read, before
+    // the hash gate, before the ground. A cross-site POST can therefore neither spend a hash
+    // nor (once phase 9 lands) fill a counter.
+    const guard = await guarded(req, res);
+    if (guard === undefined) return;
+    const body = guard.body;
     const user = body.get("user") ?? "";
     const password = body.get("password") ?? "";
     if (userNameDefect(user) !== undefined) {
@@ -745,8 +902,7 @@ page will offer.</p>`,
     // would otherwise be holding a live session id once the victim signs in). The drop happens
     // INSIDE open, only once a seat is certain — a full table's refusal must leave the presented
     // session exactly as it was.
-    const held = touch(req);
-    const opened = open(user, roles, held?.id);
+    const opened = open(user, roles, guard.held?.id);
     if (opened === undefined) {
       cannotDecide(res, "this store is holding all the sessions it can");
       return;
@@ -760,12 +916,23 @@ page will offer.</p>`,
   };
 
   const postLogout = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    // The body is read (and discarded) so the socket drains cleanly; phase 6 is where its form
-    // token becomes a requirement.
-    await readDoorBody(req);
-    const held = touch(req);
+    // The same pinned order as `guarded`, with one door-specific step between drain and token:
+    // SESSION PRESENCE ANSWERS FIRST, with phase 5's exact 401 — session absence outranks token
+    // absence once provenance has passed (the frozen phase-5 rail pins it, and the caller has
+    // already proved same-origin, so the 401 reveals nothing it should not).
+    if (!fromThisPage(req)) {
+      await readDoorBody(req); // drain: the refusal must not leave the socket dirty
+      notThisPage(res);
+      return;
+    }
+    const body = formFields(await readDoorBody(req), req.headers["content-type"]);
+    const held = peek(req);
     if (held === undefined) {
       json(res, 401, { errors: ["no live session is presented here"] });
+      return;
+    }
+    if (!sameSecret(body.get("form_token") ?? "", held.session.formToken)) {
+      notThisPage(res);
       return;
     }
     drop(held.id);

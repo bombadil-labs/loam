@@ -1425,12 +1425,17 @@ export const CHAPTERS = [
             proof: "test/server/login-door.test.ts",
             door: null,
           },
+          {
+            says: "A POST the store's own page did not make is refused before anything else happens: a foreign or null Origin, a missing same-origin signal, or a wrong form token answers 403 having read no password, spent no hash, and slid no session's idle window — and the refusal names its cure.",
+            spec: "spec/36-users-and-sessions.md",
+            proof: "test/server/login-csrf.test.ts",
+            door: null,
+          },
         ],
       },
       {
         kind: "notYet",
         items: [
-          "The login door issues and carries a form token but refuses nothing about it yet, and checks no same-origin signal — cross-site defence (phase 6) is the enforcement half, designed and not yet built.",
           "A session opens the store's own pages only. The bearer bridge a browser writes through (`POST /session/token`, phase 7) and per-user session authorship (phase 8) are later phases of this same arc.",
           "The failed-login delay (phase 9) is not built: a wrong password costs a hash and fills no counter. `loam user unlock` is deferred to that phase, which owns the file it would clear.",
           "Erasure honesty for `credentials.json` (phase 10): the health report and compliance receipt do not yet name the credential file as a surface erasure does not sweep.",
