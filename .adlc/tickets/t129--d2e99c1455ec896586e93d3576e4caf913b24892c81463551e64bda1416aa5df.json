@@ -3,12 +3,15 @@
   "edges": [],
   "id": "T129",
   "phase": "P1",
-  "rails": [],
+  "rails": [
+    "test/server/session-authorship.test.ts"
+  ],
   "scope": [
     "src/server/session.ts",
     "src/server/users.ts",
     "test/server/session-authorship.test.ts",
-    ".adlc/specs/36-08-a-session-signs-as-its-user.md"
+    ".adlc/specs/36-08-a-session-signs-as-its-user.md",
+    "test/server/session-token.test.ts"
   ],
   "status": "todo",
   "title": "§36 phase 8/15 — A session signs as its user"
