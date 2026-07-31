@@ -19,5 +19,24 @@
     "Remove entries once the rename that consumed them has merged; a spent entry is inert",
     "(the substitution no longer produces the base) but tidiness keeps this file reviewable."
   ],
-  "renames": []
+  "renames": [
+    {
+      "from": "//   - `createSessionTable`'s own semantics: it is a SECOND, unused implementation (see the",
+      "to": "//   - Any door beyond `/session/token`. Phase 14's consent page rides this session through its",
+      "files": ["test/server/session-token.test.ts"],
+      "authorized": "Myk, 2026-07-31 — merging this entry authorizes the edit. T128's rail header names a gap that createSessionTable's deletion removes; the three pairs replace that bullet with a gap that is still true. Line 1 of 3."
+    },
+    {
+      "from": "//     working spec's named gap and its ticket). test/server/session-table.test.ts is green about",
+      "to": "//     own window; this file rails the mint door only, and asserts nothing about the shape of",
+      "files": ["test/server/session-token.test.ts"],
+      "authorized": "Myk, 2026-07-31 — merging this entry authorizes the edit. Line 2 of 3."
+    },
+    {
+      "from": "//     code no request in this file executes.",
+      "to": "//     the consent that window carries.",
+      "files": ["test/server/session-token.test.ts"],
+      "authorized": "Myk, 2026-07-31 — merging this entry authorizes the edit. Line 3 of 3."
+    }
+  ]
 }
