@@ -120,37 +120,95 @@ given a value now refuses rather than reading as absent), proved by `test/cli/us
 
 A signed-in session lives in the server's own memory, in a plain `Map` with no persistence: a
 restart forgets every session, which is deliberate for one operator on one box (§9a) rather than a
-gap this phase leaves open. A session id is 32 random bytes, base64url — never a counter, never
+gap this section leaves open. A session id is 32 random bytes, base64url — never a counter, never
 derived from the user's name.
+
+**Where that map actually lives, corrected.** Phase 4 landed this design as a standalone
+`createSessionTable`, on the expectation that the login door (§36.5) would be its first caller. The
+door did not call it. It grew its own session map instead, because a door session carries two things
+a standalone table has no slot for — the user's `roles`, re-read from the ground on every ask, and
+the per-session `formToken` that §36.6 checks — and because the token half belongs one layer further
+out still: a session token names a server-wide IDENTITY rather than a user, and §36.7 re-checks it
+against the live mount set on every presentation, so its table lives in `http.ts` where the bearer
+header is read. The standalone table was therefore a second implementation that no request ever
+executed, and its test file was green about code the store did not run. It is deleted. The behaviour
+this section describes is what ships; what was wrong was the claim that one object held it, and the
+closing paragraphs name the three places where the standalone table proved or did something the
+shipped doors do not.
 
 Every session carries an idle window. Touching a session slides the window forward; touching it
 after the window has passed refuses the touch and deletes the row outright, so a later clock
-reading — even one that runs backward — has no live row left to revive. The table reads a monotonic
+reading — even one that runs backward — has no live row left to revive. The doors read a monotonic
 clock (`performance.now()` by default, injectable for a test), never the wall clock: a wall clock a
 caller or the OS can step backward would let an already-expired session look like it had gained time
-back.
+back. Sweeping runs only on a login or a presented cookie, so a lapsed row may still be sitting in
+the map; every question asked of a row therefore checks that row's own expiry rather than trusting
+that something has already removed it.
 
 Each minted bearer-token digest carries its OWN expiry, never the parent session's — a token that
 rode its session's much longer idle window past its own stated TTL was a defect an independent
 review caught before any code existed, and a second review caught the same shape again after the
-first fix: `resolveToken` now checks a session's idle expiry directly rather than trusting a row that
-sweeping has not yet reached. Dropping a session, or letting its idle window lapse, erases every
-digest it minted, so a login door's logout genuinely revokes what it claims to revoke. A session may
-hold at most 16 live token digests at once, so a rapid, long-TTL minting loop cannot grow one
-session's footprint without bound.
+first fix. What ships closes it from the other side: the token table asks a `stillLive` callback on
+every presentation, so a session past its idle window stops authenticating the tokens it bought even
+when no traffic has swept its row. Dropping a session erases every digest it minted, so a login
+door's logout genuinely revokes what it claims to revoke. A lapse alone erases nothing: it withdraws
+the tokens' AUTHORITY at once through `stillLive`, and the digests go when the lapsed row is next
+touched or swept and dropped. A session may hold at most 16 live token digests at once, so a rapid,
+long-TTL minting loop cannot grow one session's footprint without bound.
 
-A full table refuses a new session rather than evicting a live one: evicting a live session to admit
+A full map refuses a new session rather than evicting a live one: evicting a live session to admit
 a flood of new logins would trade one denial-of-service shape for a worse one, an attacker signing a
-real operator out. The table does reclaim a session already past its idle window the next time
-anyone logs in, so an abandoned session does not block a login slot forever — bounding how fast an
-attacker may open new sessions at all is the login door's concern (a later phase), not this table's.
+real operator out. A session already past its idle window is reclaimed the next time anyone logs in,
+so an abandoned session does not block a login slot forever — bounding how fast an attacker may open
+new sessions at all is a later phase's concern.
 
-**This phase adds no door and reads no cookie.** The login door (phase 5) is the table's first
-caller.
+**What is railed, and what is not.** The idle window and the clock backstep are proved in
+`test/server/login-door.test.ts` (o); the cap, the refusal to evict a live session, and the sweep in
+the same file (p). On the token half, `test/server/session-token.test.ts` proves TTL isolation in
+both directions — a token dying inside its live session (e), and a lapsed session refusing a token
+whose own TTL has not run out (f) — and the per-session live-token cap, refusing and recovering, in
+(g).
 
-**Provenance.** [PR #289](https://github.com/bombadil-labs/loam/pull/289) — `src/server/session.ts`,
-proved by `test/server/session-table.test.ts`. Working spec:
-`.adlc/specs/36-04-the-session-table.md`. Ticket T125.
+Five properties this section states are NOT railed. They are named here rather than left for a
+reader to assume, and the list is meant to be exhaustive — a claim in this section that appears in
+neither the paragraph above nor the five below is an omission worth reporting.
+
+*A restart invalidating every session* has no live rail. The map is a closure-local `Map` allocated
+per `serve()` call and no persistence path reaches it, so the property holds structurally. A door-level
+rail is writable — sign in against one `serve()`, present the cookie to a second — and none is added
+here; it would go red only the day someone gives sessions a persistence path, which is the regression
+worth catching.
+
+*A token being held as a DIGEST rather than the plaintext* is unobservable from outside. Both the
+doors and the token table would behave identically if each held the secret instead, so no test
+driving real HTTP can distinguish them. The standalone table's own unit test could see it, by asking
+the table for its stored digests, and that observability went with the table. The property still
+holds in the code — `src/server/session.ts` and `src/server/http.ts` both hash before storing — but it
+now rests on reading them, not on a rail.
+
+*Pruning a session's expired digests on `touch` as well as on mint* is not a property of what ships.
+The standalone table did it on both paths; the doors prune only when minting. The set stays bounded
+by the per-session cap and is cleared whenever a session drops, so the leak the original design
+guarded against is closed by other means rather than by that sweep.
+
+*The default clock's SOURCE* is unrailed, and it is the one gap here with a security edge. Every
+clock-bearing test injects `monotonicNow`, so nothing pins that the default is `performance.now()`
+rather than `Date.now()`: change both defaults to the wall clock and the whole suite stays green.
+What (o) proves is that a backward step does not extend a session — a property the delete-on-discovery
+rule holds under ANY clock. The paragraph above argues the monotonic source is what stops a backward
+step arising in the first place; only the second line of that defence is tested.
+
+*A session id's shape and entropy* are unrailed. No test asserts 32 random bytes, or base64url, or
+any distribution; (f) asserts only that a fresh login yields a different value than the one before it.
+
+**Provenance.** [PR #289](https://github.com/bombadil-labs/loam/pull/289) landed this design as
+`createSessionTable` in `src/server/session.ts`, proved by `test/server/session-table.test.ts`.
+Working spec: `.adlc/specs/36-04-the-session-table.md`. Ticket T125. Corrected by
+[PR #297](https://github.com/bombadil-labs/loam/pull/297) and
+[PR #298](https://github.com/bombadil-labs/loam/pull/298), which deleted that table once §36.5–§36.7
+had shipped the behaviour elsewhere, retired its rail from T125 under `adlc ticket update
+--authorize`, and re-pointed this section at the rails that prove the shipping code. An independent
+premortem during §36.7 found the divergence.
 
 ### 36.5 The login door
 

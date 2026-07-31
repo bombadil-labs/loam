@@ -205,6 +205,11 @@ which is an authorized change of its own rather than something to do inside this
 its own ticket; stated here so a reader of a green `session-table` run knows what it does and
 does not prove about the shipped door.
 
+**CLOSED** by T-01KYWJ1MGR18HGBRERJDSHC2WQ: `createSessionTable` is deleted and
+`test/server/session-table.test.ts` is retired, its rail dropped from T125 under `--authorize`.
+Every property that rail proved is proved of the shipped path in `test/server/login-door.test.ts`
+(o/p) and `test/server/session-token.test.ts` (e/f/f2/g). See §36.4 for the corrected record.
+
 ## What phase 8 inherits
 
 `mint` names an identity (`{operator: true}` today). Phase 8 changes WHAT identity a session's
