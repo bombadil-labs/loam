@@ -498,16 +498,23 @@ describe("§36 phase 5 — the login door", () => {
       await (await getLogin(base, { cookie: `${SESSION_COOKIE}=${sessionId}` })).text(),
     ).toContain("Signed in");
 
-    // Past the slid window: the form. And after the clock steps BACK below the old expiry, still
-    // the form — the row was deleted on discovery, not merely reported absent.
+    // Past the slid window: the form, asserted as NOT the signed-in page — both pages carry a
+    // form_token (the signed-in page's logout form has one), so `toContain("form_token")` here
+    // was a rail a hand-mutant survived: it agreed with both outcomes (plan §2.2). And after the
+    // clock steps BACK below the old expiry, still the form — the row was deleted on discovery,
+    // not merely reported absent.
     clock = 3000;
-    expect(
-      await (await getLogin(base, { cookie: `${SESSION_COOKIE}=${sessionId}` })).text(),
-    ).toContain("form_token");
+    const lapsed = await (
+      await getLogin(base, { cookie: `${SESSION_COOKIE}=${sessionId}` })
+    ).text();
+    expect(lapsed).not.toContain("Signed in");
+    expect(lapsed).toContain("Sign in.");
     clock = 100;
-    expect(
-      await (await getLogin(base, { cookie: `${SESSION_COOKIE}=${sessionId}` })).text(),
-    ).toContain("form_token");
+    const revenant = await (
+      await getLogin(base, { cookie: `${SESSION_COOKIE}=${sessionId}` })
+    ).text();
+    expect(revenant).not.toContain("Signed in");
+    expect(revenant).toContain("Sign in.");
   });
 
   it("(p) the table refuses past its cap, never evicts a live session, and sweeps lapsed rows", async () => {
