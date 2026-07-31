@@ -6,9 +6,9 @@
 //     authorship; (c) rails only that the write lands and resolves, because a rail here would
 //     freeze exactly what that phase must change.
 //   - The failed-login delay's interaction with minting: phase 9.
-//   - `createSessionTable`'s own semantics: it is a SECOND, unused implementation (see the
-//     working spec's named gap and its ticket). test/server/session-table.test.ts is green about
-//     code no request in this file executes.
+//   - Any door beyond `/session/token`. Phase 14's consent page rides this session through its
+//     own window; this file rails the mint door only, and asserts nothing about the shape of
+//     the consent that window carries.
 
 import { request } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
