@@ -12,7 +12,9 @@
   ],
   "id": "T127",
   "phase": "P1",
-  "rails": [],
+  "rails": [
+    "test/server/login-csrf.test.ts"
+  ],
   "scope": [
     "src/server/session.ts",
     "test/server/login-csrf.test.ts",
