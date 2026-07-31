@@ -16,11 +16,17 @@
   ],
   "id": "T126",
   "phase": "P1",
-  "rails": [],
+  "rails": [
+    "test/server/login-door.test.ts",
+    "test/cli/serve-login.test.ts"
+  ],
   "scope": [
     "src/server/session.ts",
-    "src/gateway/http.ts",
+    "src/server/http.ts",
+    "src/server/credentials.ts",
+    "src/cli/cli.ts",
     "test/server/login-door.test.ts",
+    "test/cli/serve-login.test.ts",
     ".adlc/specs/36-05-the-login-door.md"
   ],
   "status": "todo",
