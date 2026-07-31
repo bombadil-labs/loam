@@ -19,5 +19,25 @@
     "Remove entries once the rename that consumed them has merged; a spent entry is inert",
     "(the substitution no longer produces the base) but tidiness keeps this file reviewable."
   ],
-  "renames": []
+  "renames": [
+    {
+      "//": "T126 rail comment correction. The (p) test's comment claims the refused login's own PRESENTED session survives, and calls the probe after the 503 the rail for a drop-versus-cap ordering bug. The refusing call is attemptLogin, which sends no session cookie, so `replacing` is undefined and the probe cannot fail under any ordering mutation. Three pairs rewrite the three comment lines to state what the assertions reach. Line 1 of the comment is untouched. No assertion is touched.",
+      "from": "including the one it PRESENTED. A P5 lens caught the original ordering dropping the",
+      "to": "an evicting implementation would answer 200 here. This login PRESENTS NO SESSION, so it",
+      "files": ["test/server/login-door.test.ts"],
+      "authorized": "Myk, 2026-07-31 — correct an overclaiming comment in T126's frozen rail"
+    },
+    {
+      "from": "caller's live session before discovering the table was full, so the refusal concealed an",
+      "to": "cannot reach the drop-versus-cap ordering in `open`: a caller presenting a live session is",
+      "files": ["test/server/login-door.test.ts"],
+      "authorized": "Myk, 2026-07-31 — correct an overclaiming comment in T126's frozen rail"
+    },
+    {
+      "from": "erasure; the presented-session probe after the 503 is that finding's rail.",
+      "to": "always discounted a seat, so no 503 can co-occur with one. Only a unit rail pins that.",
+      "files": ["test/server/login-door.test.ts"],
+      "authorized": "Myk, 2026-07-31 — correct an overclaiming comment in T126's frozen rail"
+    }
+  ]
 }
