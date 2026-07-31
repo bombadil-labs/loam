@@ -23,6 +23,11 @@ beforeEach(() => {
   err.length = 0;
 });
 afterEach(() => {
+  // This rmSync is a RAIL, not just hygiene: a refused serve must release the store it already
+  // opened, and on Windows a leaked sqlite handle turns this removal into EPERM. POSIX cannot see
+  // the leak (unlink succeeds past an open handle), so windows-latest CI is the only place this
+  // asserts. Do not wrap it in try/catch or move the home somewhere shared — either change
+  // silently deletes the only red the refusal path has.
   rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
