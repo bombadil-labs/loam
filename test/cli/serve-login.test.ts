@@ -86,7 +86,12 @@ describe("T126 — loam serve and the login doors", () => {
     expect(said).toMatch(/--public-url|loopback/i);
 
     // Both cures boot: an https public URL in front, or the loopback default.
-    const proxied = await serveDetached(["--host", "0.0.0.0", "--public-url", "https://loam.example"]);
+    const proxied = await serveDetached([
+      "--host",
+      "0.0.0.0",
+      "--public-url",
+      "https://loam.example",
+    ]);
     expect((await fetch(`${proxied.url}/login`)).status).toBe(200);
     await proxied.close();
     const local = await serveDetached();

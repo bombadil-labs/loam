@@ -305,3 +305,53 @@ export async function verifyPassword(entry: unknown, password: string): Promise<
   const expected = Buffer.from(checked.hash, "hex");
   return computed.length === expected.length && timingSafeEqual(computed, expected);
 }
+
+/**
+ * WHICH COST a decoy hash should pay: the cost a REAL verify on this file would pay.
+ *
+ * `verifyPassword` derives at the parameters the ENTRY carries. So a decoy at the DOOR's configured
+ * cost would take a different time from a real miss the moment those two differ — and that
+ * difference is a username oracle measured with a stopwatch instead of a status code. The decoy
+ * therefore borrows an existing entry's parameters, and falls back to the door's own only when there
+ * is no entry to imitate, in which case no name exists and there is nothing to tell apart.
+ *
+ * WHAT THIS DOES NOT CLOSE, stated rather than implied: it borrows ONE entry's parameters, so if the
+ * entries in a file disagree, every name whose cost differs from the borrowed one is still
+ * distinguishable by time. Uniform parameters across the file are the invariant the no-oracle
+ * property rests on — which the shipped write path maintains, since `loam user create` always writes
+ * `DEFAULT_SCRYPT`. A file that has been edited by hand, or written by a caller passing its own
+ * `scrypt`, can break it; `paramsDisagree` below is how the door notices and says so. Closing it
+ * properly wants a constant-time floor on the response, or a re-hash on login when an entry's cost
+ * is stale. Both are their own ticket.
+ */
+export function decoyParamsFor(file: CredentialsFile, fallback: ScryptParams): ScryptParams {
+  const names = Object.keys(file.users).sort();
+  return names.length === 0 ? fallback : (file.users[names[0]!] as CredentialEntry).params;
+}
+
+const sameParams = (a: ScryptParams, b: ScryptParams): boolean =>
+  a.N === b.N && a.r === b.r && a.p === b.p && a.keylen === b.keylen;
+
+/**
+ * Do this file's entries disagree about scrypt cost? A `true` here means the decoy hash can only
+ * imitate one of them, so the login door's timing tells an attacker which names cost something else —
+ * see `decoyParamsFor`. Reported rather than repaired, because repairing it means re-hashing a
+ * password the door does not have.
+ */
+export function paramsDisagree(file: CredentialsFile): boolean {
+  const entries = Object.values(file.users);
+  return entries.some((entry) => !sameParams(entry.params, entries[0]!.params));
+}
+
+// A decoy the door hashes against when no entry exists, so an unknown user costs the same time as a
+// wrong password. Its salt is random per process: nothing ever verifies against it successfully.
+const DECOY_SALT = randomBytes(16);
+
+/** Spend one hash and return false — the unknown-user path, kept indistinguishable from a miss. */
+export async function spendDecoyHash(
+  password: string,
+  params: ScryptParams = DEFAULT_SCRYPT,
+): Promise<false> {
+  await derive(password, DECOY_SALT, params);
+  return false;
+}

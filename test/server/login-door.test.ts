@@ -24,11 +24,7 @@ import { authorForSeed, makeNegationClaims, signClaims } from "@bombadil/rhizoma
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { serve, type ServerHandle } from "../../src/server/http.js";
-import {
-  hashPassword,
-  writeCredentials,
-  type ScryptParams,
-} from "../../src/server/credentials.js";
+import { hashPassword, writeCredentials, type ScryptParams } from "../../src/server/credentials.js";
 import { roleClaims, userClaims } from "../../src/server/users.js";
 import {
   COOKIE_ATTRIBUTES,
@@ -161,7 +157,11 @@ async function signIn(
     { cookie: `${PRESESSION_COOKIE}=${valueOf(nonceCookie!)}` },
   );
   const sessionCookie = cookiesOf(res).find((c) => c.startsWith(`${SESSION_COOKIE}=`));
-  return { res, sessionId: sessionCookie === undefined ? "" : valueOf(sessionCookie), formToken: token! };
+  return {
+    res,
+    sessionId: sessionCookie === undefined ? "" : valueOf(sessionCookie),
+    formToken: token!,
+  };
 }
 
 describe("§36 phase 5 — the login door", () => {
@@ -182,7 +182,10 @@ describe("§36 phase 5 — the login door", () => {
 
     // WITHOUT the token: phase 5 refuses nothing about it — the "before" side of phase 6's
     // transition rail. Positive, not vacuous: the login itself succeeds.
-    const bare = await postLogin(base, new URLSearchParams({ user: "myk", password: PASSWORD }).toString());
+    const bare = await postLogin(
+      base,
+      new URLSearchParams({ user: "myk", password: PASSWORD }).toString(),
+    );
     expect(bare.status).toBe(200);
     expect(await bare.text()).toContain("Signed in");
   });
@@ -225,7 +228,8 @@ describe("§36 phase 5 — the login door", () => {
     expect(setters.length).toBeGreaterThan(0);
     for (const header of setters) {
       expect(
-        header.endsWith(`; ${COOKIE_ATTRIBUTES}`) || header.endsWith(`; ${COOKIE_ATTRIBUTES}; Max-Age=0`),
+        header.endsWith(`; ${COOKIE_ATTRIBUTES}`) ||
+          header.endsWith(`; ${COOKIE_ATTRIBUTES}; Max-Age=0`),
       ).toBe(true);
       expect(header).not.toContain("Domain");
     }
@@ -240,7 +244,8 @@ describe("§36 phase 5 — the login door", () => {
     });
     const clears = cookiesOf(out);
     expect(clears.length).toBe(2);
-    for (const header of clears) expect(header.endsWith(`; ${COOKIE_ATTRIBUTES}; Max-Age=0`)).toBe(true);
+    for (const header of clears)
+      expect(header.endsWith(`; ${COOKIE_ATTRIBUTES}; Max-Age=0`)).toBe(true);
   });
 
   it("(d) the cookie string is header-blind, raw Host included", async () => {
@@ -379,9 +384,22 @@ describe("§36 phase 5 — the login door", () => {
     handles.push(bare);
 
     const probes: (readonly [string, RequestInit?])[] = [
-      ["/default/graphql", { method: "POST", headers: { "content-type": "application/json" }, body: '{"query":"{ __typename }"}' }],
-      ["/default/append", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }],
-      ["/default/mcp", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }],
+      [
+        "/default/graphql",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: '{"query":"{ __typename }"}',
+        },
+      ],
+      [
+        "/default/append",
+        { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
+      ],
+      [
+        "/default/mcp",
+        { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
+      ],
     ];
     for (const [path, init] of probes) {
       const a = await fetch(`${withUsers.base}${path}`, init);
@@ -400,9 +418,22 @@ describe("§36 phase 5 — the login door", () => {
     const { base } = await loginServer();
     const { sessionId } = await signIn(base, "myk", PASSWORD);
     const probes: (readonly [string, RequestInit])[] = [
-      ["/default/graphql", { method: "POST", headers: { "content-type": "application/json" }, body: '{"query":"{ __typename }"}' }],
-      ["/default/append", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }],
-      ["/default/mcp", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }],
+      [
+        "/default/graphql",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: '{"query":"{ __typename }"}',
+        },
+      ],
+      [
+        "/default/append",
+        { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
+      ],
+      [
+        "/default/mcp",
+        { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
+      ],
     ];
     for (const [path, init] of probes) {
       const anonymous = await fetch(`${base}${path}`, init);
@@ -459,24 +490,24 @@ describe("§36 phase 5 — the login door", () => {
 
     // Inside the window, activity slides it: touch at 900, then the window reaches 1900.
     clock = 900;
-    expect(await (await getLogin(base, { cookie: `${SESSION_COOKIE}=${sessionId}` })).text()).toContain(
-      "Signed in",
-    );
+    expect(
+      await (await getLogin(base, { cookie: `${SESSION_COOKIE}=${sessionId}` })).text(),
+    ).toContain("Signed in");
     clock = 1800;
-    expect(await (await getLogin(base, { cookie: `${SESSION_COOKIE}=${sessionId}` })).text()).toContain(
-      "Signed in",
-    );
+    expect(
+      await (await getLogin(base, { cookie: `${SESSION_COOKIE}=${sessionId}` })).text(),
+    ).toContain("Signed in");
 
     // Past the slid window: the form. And after the clock steps BACK below the old expiry, still
     // the form — the row was deleted on discovery, not merely reported absent.
     clock = 3000;
-    expect(await (await getLogin(base, { cookie: `${SESSION_COOKIE}=${sessionId}` })).text()).toContain(
-      "form_token",
-    );
+    expect(
+      await (await getLogin(base, { cookie: `${SESSION_COOKIE}=${sessionId}` })).text(),
+    ).toContain("form_token");
     clock = 100;
-    expect(await (await getLogin(base, { cookie: `${SESSION_COOKIE}=${sessionId}` })).text()).toContain(
-      "form_token",
-    );
+    expect(
+      await (await getLogin(base, { cookie: `${SESSION_COOKIE}=${sessionId}` })).text(),
+    ).toContain("form_token");
   });
 
   it("(p) the table refuses past its cap, never evicts a live session, and sweeps lapsed rows", async () => {
@@ -508,8 +539,9 @@ describe("§36 phase 5 — the login door", () => {
   });
 
   it("(q) the hash cap refuses the surplus with no hash spent, and recovers", async () => {
-    // A deliberately expensive credential holds the one hash slot long enough to witness.
-    const SLOW: ScryptParams = { N: 262144, r: 8, p: 1, keylen: 32 };
+    // The most expensive credential the file itself admits (readCredentials bounds N·r and
+    // N·r·p) holds the one hash slot for hundreds of milliseconds on any current machine.
+    const SLOW: ScryptParams = { N: 65536, r: 8, p: 2, keylen: 32 };
     const { base } = await loginServer(
       {
         ground: { myk: ["operator"], slow: ["operator"] },
@@ -526,17 +558,19 @@ describe("§36 phase 5 — the login door", () => {
       slowSettled = true;
       return res;
     });
-    // Give the slow request time to reach its scrypt, then probe while it holds the slot.
-    await new Promise((r) => setTimeout(r, 150));
-    const surplus = await postLogin(
-      base,
-      new URLSearchParams({ user: "myk", password: PASSWORD }).toString(),
-    );
-    // The in-flight witness (plan §2.4): if the slow hash had already settled, this fixture
-    // proved nothing and must say so rather than pass.
-    expect(slowSettled).toBe(false);
-    expect(surplus.status).toBe(503);
-    expect((await surplus.text()).toLowerCase()).toContain("busy");
+    // Probe until the cap refuses or the window closes — no fixed sleep, no timing assumption.
+    // The in-flight witness (plan §2.4): if the slow hash settled before any probe met the cap,
+    // this fixture proved nothing and must SAY so rather than pass.
+    let sawBusy: Response | undefined;
+    while (sawBusy === undefined && !slowSettled) {
+      const probe = await postLogin(
+        base,
+        new URLSearchParams({ user: "myk", password: PASSWORD }).toString(),
+      );
+      if (probe.status === 503) sawBusy = probe;
+    }
+    expect(sawBusy, "the slow hash settled before any probe met the cap").toBeDefined();
+    expect((await sawBusy!.text()).toLowerCase()).toContain("busy");
 
     // Drained, the same correct password is admitted.
     expect((await slowLogin).status).toBe(200);
@@ -580,15 +614,27 @@ describe("§36 phase 5 — the login door", () => {
     );
     expect(refused.status).toBe(503);
 
-    // A vanished mount: 503 with the session intact; the mount's return revives the page.
-    const healthy = await loginServer();
-    const { sessionId } = await signIn(healthy.base, "myk", PASSWORD);
-    const removed = await healthy.handle.removeMount("default");
+    // A vanished mount: 503 with the session intact; the mount's return revives the page. The
+    // doors read a DYNAMIC mount here because a static one refuses removal — boot's word is not
+    // revocable at runtime, and this fixture needs a ground that can genuinely go away.
+    const { gateway: dynGateway } = await userGateway({ ground: { myk: ["operator"] } });
+    const dynHome = await makeHome({ passwords: { myk: PASSWORD } });
+    const dynHandle = await serve({
+      mounts: {},
+      tokens: { "op-token": { operator: true } },
+      port: 0,
+      host: "127.0.0.1",
+      users: { home: dynHome, mount: "dyn" },
+    });
+    handles.push(dynHandle);
+    dynHandle.addMount("dyn", dynGateway);
+    const { sessionId } = await signIn(dynHandle.url, "myk", PASSWORD);
+    const removed = await dynHandle.removeMount("dyn");
     expect(removed).toBe(true);
-    const during = await getLogin(healthy.base, { cookie: `${SESSION_COOKIE}=${sessionId}` });
+    const during = await getLogin(dynHandle.url, { cookie: `${SESSION_COOKIE}=${sessionId}` });
     expect(during.status).toBe(503);
-    healthy.handle.addMount("default", healthy.gateway);
-    const after = await getLogin(healthy.base, { cookie: `${SESSION_COOKIE}=${sessionId}` });
+    dynHandle.addMount("dyn", dynGateway);
+    const after = await getLogin(dynHandle.url, { cookie: `${SESSION_COOKIE}=${sessionId}` });
     expect(await after.text()).toContain("Signed in");
 
     // Two-sided: the ground ANSWERS and the roles are struck — the session drops.
@@ -602,8 +648,8 @@ describe("§36 phase 5 — the login door", () => {
     }
     const dropped = await getLogin(struck.base, { cookie: `${SESSION_COOKIE}=${live.sessionId}` });
     expect(await dropped.text()).not.toContain("Signed in");
-    expect(await (await getLogin(struck.base, { cookie: `${SESSION_COOKIE}=${live.sessionId}` })).text()).not.toContain(
-      "Signed in",
-    );
+    expect(
+      await (await getLogin(struck.base, { cookie: `${SESSION_COOKIE}=${live.sessionId}` })).text(),
+    ).not.toContain("Signed in");
   });
 });

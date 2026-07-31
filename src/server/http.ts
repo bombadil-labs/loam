@@ -40,6 +40,9 @@ import { parseRegistrationInput, schemaEntityFor, type LensName } from "../gatew
 import { parseReadGesture, type ReadGesture } from "../gateway/renderers.js";
 import { makeMountTable, type ResolvedMount } from "./mounts.js";
 import { canonicalPublicUrl, makeOAuthDoors, publicUrlDefect, type OAuthDoors } from "./oauth.js";
+import { makeUserDoors, type UserDoorOptions, type UserDoors } from "./session.js";
+
+export { type UserDoorOptions } from "./session.js";
 
 export interface TokenIdentity {
   readonly actor?: string; // a signing seed: requests act as this identity
@@ -63,6 +66,11 @@ export interface ServeOptions {
    * build a URL.
    */
   readonly publicUrl?: string;
+  /**
+   * The login doors (SPEC §36 phase 5). Absent, this server has none — `/login` is an
+   * unresolvable name, exactly as it was before §36, and no request anywhere reads a cookie.
+   */
+  readonly users?: UserDoorOptions;
 }
 
 const DEFAULT_MAX_BODY = 4 * 1024 * 1024;
@@ -373,6 +381,12 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     if (defect !== undefined) throw new Error(`loam serve: --public-url ${defect}`);
     discovery = makeOAuthDoors({ publicUrl: canonicalPublicUrl(options.publicUrl) });
   }
+
+  // The login doors (SPEC §36 phase 5), opt-in the same way: absent `users` means absent doors,
+  // and no request anywhere reads a cookie. Built here (before listen) because they are a pure
+  // function of the options — the bound-URL default for `publicUrl` is filled in after listen,
+  // which is why the deps read a closure variable the post-listen block assigns.
+  let userDoors: UserDoors | undefined;
 
   // The identity a presented token names, compared timing-safely; undefined = refuse.
   const identify = (req: IncomingMessage): TokenIdentity | undefined => {
@@ -814,6 +828,14 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       // `publicUrl`, these paths fall through to the ordinary "no such mount" the name always got.
       if (discovery !== undefined && discovery.owns(url.pathname)) {
         discovery.handle(url.pathname, req, res);
+        return;
+      }
+      // The login doors (SPEC §36 phase 5), answered before mount routing — they are the store's
+      // own pages, not a mount's. A bare `/login` never resolved to anything (mount doors live at
+      // /:mount/:verb), so claiming the exact path shadows nobody. Absent `users`, the name falls
+      // through untouched.
+      if (userDoors !== undefined && userDoors.owns(url.pathname)) {
+        void userDoors.handle(url.pathname, req, res);
         return;
       }
       const [, mountName, verb] = url.pathname.split("/");
@@ -1266,6 +1288,25 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
   await new Promise<void>((resolve) => server.listen(options.port ?? 0, host, resolve));
   const address = server.address();
   const port = typeof address === "object" && address !== null ? address.port : 0;
+
+  if (options.users !== undefined) {
+    const forUsers = options.users;
+    userDoors = makeUserDoors({
+      options: forUsers,
+      // Named, or the bound address — which is right for a loopback store and wrong the moment a
+      // proxy is in front. A caller's Host and X-Forwarded-* are never consulted for it.
+      publicUrl: forUsers.publicUrl ?? `http://${host}:${port}`,
+      ground: () => {
+        const gateway = mounts.resolve(forUsers.mount)?.gateway;
+        // `reactor` is read through the getter every call: erase() re-seats the gateway on a
+        // fresh one, and a captured reference would keep answering from the ground before the
+        // purge.
+        return gateway === undefined
+          ? undefined
+          : { reactor: gateway.reactor, operator: gateway.operatorAuthor };
+      },
+    });
+  }
 
   return {
     server,
