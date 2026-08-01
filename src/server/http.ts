@@ -39,7 +39,14 @@ import {
 import { parseRegistrationInput, schemaEntityFor, type LensName } from "../gateway/registration.js";
 import { parseReadGesture, type ReadGesture } from "../gateway/renderers.js";
 import { makeMountTable, type ResolvedMount } from "./mounts.js";
-import { canonicalPublicUrl, makeOAuthDoors, publicUrlDefect, type OAuthDoors } from "./oauth.js";
+import {
+  canonicalPublicUrl,
+  makeOAuthDoors,
+  publicUrlDefect,
+  redirectOriginDefect,
+  type ConnectorRegistration,
+  type OAuthDoors,
+} from "./oauth.js";
 import { makeUserDoors, type UserDoorOptions, type UserDoors } from "./session.js";
 
 export { type UserDoorOptions } from "./session.js";
@@ -66,6 +73,14 @@ export interface ServeOptions {
    * build a URL.
    */
   readonly publicUrl?: string;
+  /**
+   * Connector registration (SPEC §37 phase 13), opt-in. Absent, `POST /oauth/register` resolves as
+   * it did after phase 12 (an unrouted OAuth path). Present, it needs `publicUrl` too — a connector
+   * finds this endpoint through the discovery document, which only exists when `publicUrl` is set —
+   * and every configured redirect origin is validated at boot, so an operator's typo is a startup
+   * error rather than a store where every registration silently refuses.
+   */
+  readonly connectors?: ConnectorRegistration;
   /**
    * The login doors (SPEC §36 phase 5). Absent, this server has none — `/login` is an
    * unresolvable name, exactly as it was before §36, and no request anywhere reads a cookie.
@@ -374,12 +389,36 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     throw new Error("loam serve: no tokens configured — an unlockable door is a wall");
   }
 
-  // Discovery (SPEC §37 phase 12), opt-in: absent publicUrl means absent doors and absent header.
+  // Discovery (SPEC §37 phase 12) and connector registration (phase 13), opt-in: absent publicUrl
+  // means absent doors and absent header. Registration (phase 13) rides the same doors object and
+  // needs publicUrl too — a connector reaches `/oauth/register` only through the discovery document
+  // that publicUrl builds.
   let discovery: OAuthDoors | undefined;
+  if (options.connectors !== undefined && options.publicUrl === undefined) {
+    throw new Error(
+      `loam serve: connector registration (--oauth-allow-redirect) needs --public-url — a ` +
+        `connector finds the registration endpoint through the discovery document, which only ` +
+        `exists when the store's public URL is configured`,
+    );
+  }
   if (options.publicUrl !== undefined) {
     const defect = publicUrlDefect(options.publicUrl);
     if (defect !== undefined) throw new Error(`loam serve: --public-url ${defect}`);
-    discovery = makeOAuthDoors({ publicUrl: canonicalPublicUrl(options.publicUrl) });
+    if (options.connectors !== undefined) {
+      // Boot-validate every configured origin: a default-port spelling (`https://x:443`) that
+      // `url.origin` would silently drop and never match, a path, or a non-https non-loopback
+      // origin, is a startup error rather than a store that refuses every registration.
+      for (const origin of options.connectors.allowRedirectOrigins) {
+        const originDefect = redirectOriginDefect(origin);
+        if (originDefect !== undefined) {
+          throw new Error(`loam serve: --oauth-allow-redirect ${originDefect}`);
+        }
+      }
+    }
+    discovery = makeOAuthDoors({
+      publicUrl: canonicalPublicUrl(options.publicUrl),
+      ...(options.connectors === undefined ? {} : { registration: options.connectors }),
+    });
   }
 
   // The login doors (SPEC §36 phase 5), opt-in the same way: absent `users` means absent doors,

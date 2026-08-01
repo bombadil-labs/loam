@@ -8,7 +8,10 @@
   ],
   "id": "T134",
   "phase": "P1",
-  "rails": [],
+  "rails": [
+    "test/server/oauth-register.test.ts",
+    "test/cli/serve-oauth-register.test.ts"
+  ],
   "scope": [
     "src/server/oauth.ts",
     "test/server/oauth-register.test.ts",

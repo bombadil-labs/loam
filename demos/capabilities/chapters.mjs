@@ -1486,6 +1486,12 @@ export const CHAPTERS = [
             proof: "test/server/oauth-discovery.test.ts",
             door: null,
           },
+          {
+            says: "A connector registers itself with no session, because claude.ai registers before any human is present — so a configured allowlist of redirect origins is the whole fence, and a redirect target outside it is refused at registration, not only at authorize. The registration door mints nothing: no code, no token, no signing seed. When it is full it EVICTS the oldest registration nobody has approved rather than refusing, so a stranger cannot lock the real connector out, and a client the operator approved is never the one evicted.",
+            spec: "spec/37-connectors.md",
+            proof: "test/server/oauth-register.test.ts",
+            door: null,
+          },
         ],
       },
     ],
