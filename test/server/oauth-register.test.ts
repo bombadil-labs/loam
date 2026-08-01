@@ -224,6 +224,19 @@ describe("T134 — (1) registration is fenced by a configured allowlist and need
     expect(over.body["error"]).toBe("invalid_redirect_uri");
   });
 
+  it("a single redirect_uri longer than the door holds is refused (MAX_URI edge)", async () => {
+    // The per-uri length bound. An otherwise valid allowlisted uri padded past the cap is refused;
+    // one at the cap is admitted, so the rail pins the exact edge.
+    const home = makeHome();
+    const served = await serveOAuth(home);
+    const pad = (n: number): string => `${CLAUDE_ORIGIN}/${"a".repeat(n)}`;
+    const prefix = `${CLAUDE_ORIGIN}/`.length;
+    expect((await register(served.base, { redirectUris: [pad(2048 - prefix)] })).status).toBe(201);
+    const tooLong = await register(served.base, { redirectUris: [pad(2049 - prefix)] });
+    expect(tooLong.status).toBe(400);
+    expect(tooLong.body["error"]).toBe("invalid_redirect_uri");
+  });
+
   it("only POST is answered — GET/DELETE get a 405, not a registration", async () => {
     const home = makeHome();
     const served = await serveOAuth(home);
@@ -469,7 +482,12 @@ describe("T134 — (8) the allowlist is boot-validated, and registration needs a
     const home = makeHome();
     // A default-port spelling that url.origin would silently drop and never match; a path; a
     // non-https non-loopback origin. Each is a startup error, not a silent all-refuse.
-    for (const origin of ["https://claude.ai:443", "https://claude.ai/cb", "http://claude.ai"]) {
+    for (const origin of [
+      "https://claude.ai:443",
+      "https://claude.ai/cb",
+      "http://claude.ai",
+      "not a url at all", // unparseable: the defect must be reported, not swallowed as valid
+    ]) {
       await expect(
         serveOAuth(home, { allowRedirectOrigins: [origin] }),
         `${origin} booted`,
