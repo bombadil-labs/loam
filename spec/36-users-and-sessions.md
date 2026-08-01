@@ -458,7 +458,7 @@ stays a separate ticket. Clearing a `login-locks.json` record is likewise separa
 
 This phase widened no purge. It changed only what the report SAYS.
 
-**Provenance.** [PR #326](https://github.com/bombadil-labs/loam/pull/326) — the `nonSwept` disclosure
+**Provenance.** [PR #320](https://github.com/bombadil-labs/loam/pull/320) — the `nonSwept` disclosure
 and shared `UNSWEPT_AUTH_SURFACES` constant in `src/gateway/erase.ts`, carried into the receipt's
 `nonClaim` in `src/gateway/slate.ts`, proved by `test/server/users-erasure.test.ts`. Working spec:
 `.adlc/specs/36-10-erasure-honesty.md`. Ticket T131.
