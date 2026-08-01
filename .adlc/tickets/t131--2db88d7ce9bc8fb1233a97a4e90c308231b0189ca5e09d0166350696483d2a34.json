@@ -3,7 +3,9 @@
   "edges": [],
   "id": "T131",
   "phase": "P1",
-  "rails": [],
+  "rails": [
+    "test/server/users-erasure.test.ts"
+  ],
   "scope": [
     "src/gateway/erase.ts",
     "src/gateway/slate.ts",
