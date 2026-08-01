@@ -1443,13 +1443,18 @@ export const CHAPTERS = [
             proof: "test/server/session-authorship.test.ts",
             door: null,
           },
+          {
+            says: "A wrong password never locks a name out — it makes the NEXT attempt for that same name wait a little longer, up to a cap, and a correct password is admitted after any number of failures. The wait keys on the username, never a caller-supplied address, so a rotated forwarding header cannot reset it; it is paid before the password is even checked, so a fast refusal cannot leak which guess was close; and it fails open, so a disk fault slows nothing and locks no one out. `loam user unlock` clears the record it writes.",
+            spec: "spec/36-users-and-sessions.md",
+            proof: "test/server/login-delay.test.ts",
+            door: null,
+          },
         ],
       },
       {
         kind: "notYet",
         items: [
           "The constitutional writes — registering a schema, the renderer's pen — still sign as the store rather than as the person, because publishing law refuses any author but the store's own.",
-          "The failed-login delay (phase 9) is not built: a wrong password costs a hash and fills no counter. `loam user unlock` is deferred to that phase, which owns the file it would clear.",
           "Erasure honesty for `credentials.json` (phase 10): the health report and compliance receipt do not yet name the credential file as a surface erasure does not sweep.",
         ],
       },
