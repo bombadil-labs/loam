@@ -1,9 +1,8 @@
 # §39 — A connection binds to a container
 
-**Ticket.** T138. **Status.** Working spec, design-stage. Myk settled the model in chat on
-2026-07-28 and pre-blessed this spec on the same day, on two conditions: it conforms to his
-Alice/Bob/Charlie walkthrough, and it surfaces no surprises. Section 39.6 answers both conditions
-explicitly. The landing PR is his merge.
+**Ticket.** T138. **Status.** Working spec, design-stage. Myk settled the model on 2026-07-28 and
+chose the write path (39.3d, the inbox) on 2026-08-01. Section 39.6 records the one place the spec
+changed after its first blessing. The landing PR is his merge.
 
 **One sentence.** An MCP connection binds to exactly one container; reads gather that container,
 writes land in it as the owner, and each connection signs with its own key that is provably the
@@ -69,14 +68,16 @@ automatic.
 Myk chose per-connection keys, in his words: *"It's Alice (via MCP connection scoped to the folklore
 container with id xyz)."* This spec rides the arc's existing mechanism rather than inventing one:
 phase 15 already states "a grant mints a NEW actor seed per client, never the operator's." A
-connection key IS that actor seed. What this spec adds is the grant's TARGET: today a grant targets
-the store entity (`STORE_ENTITY` at `loam.grants`); a connection grant targets the CONTAINER entity
-instead. The two shapes are unambiguously distinct (the §20 corollary is satisfied by the target
-alone), and `loam.grants` is already recognised at the append door.
+connection key IS that actor seed. What this spec adds is the grant's TARGET and its LOCATION: today
+a grant targets the store entity (`STORE_ENTITY` at `loam.grants`); a connection grant targets the
+INBOX entity, and it is the inbox pool's genesis delta (39.3d). The two shapes are unambiguously
+distinct (the §20 corollary is satisfied by the target alone), and `loam.grants` is already
+recognised at the append door.
 
-So the binding delta says three things at once: this key exists (subject), it is this container's
-(target), and the owner authorised it (author). Forensics reads the key → the connection; the door
-reads the target → the bound container; authority is the owner's signature.
+So the genesis delta says three things at once: this key exists (subject), it may write this inbox
+(target), and the owner authorised it (author). Forensics reads the key → the connection AND the
+inbox that holds the delta → the connection; the door reads the genesis grant → may this key write;
+authority is the owner's signature.
 
 ### (c) Revocation: strike the grant
 
@@ -85,26 +86,45 @@ deltas keep their author — history does not rewrite, and the forensic value of
 revocation. Other connections are untouched: one-connection blast radius. Two-sided by construction,
 and railed that way.
 
-### (d) The write path: membership by authorship, self-maintaining
+### (d) The write path: a per-connection inbox pool
 
-The question was where the door refuses an out-of-container write, given that a shared container's
-membership is a Term that cannot be pre-tested against arbitrary content. The recommendation
-dissolves the question: **a shared container's membership Term includes an `inView` clause over the
-container's own grants — "deltas authored by any key granted to this container."** Then:
+**Settled by Myk 2026-08-01, superseding the membership-by-authorship recommendation this section
+first carried.** The two answers agreed on everything but this section; the inbox was chosen because
+it makes the two operations most dangerous to get wrong — revocation and erasure — structural
+rather than computed.
 
-- A connection write is a member BY AUTHORSHIP, mechanically, the moment it lands. No filing step,
-  no second delta, no Term edit per write.
-- Granting a new connection extends membership automatically; revoking one stops future membership
-  automatically. The Term never changes — the grants it reads do.
-- This is the same one-level `inView`-over-grants shape `lawfulStrikersJson` already uses, so
-  stratification bounds it identically and no new predicate machinery is owed.
-- A separate-posture container needs none of this: writes physically enter its pool through the
-  connection's door, and the pool IS the membership.
+A membership Term selects over the primary ground (`gw.select(term)`); a separate pool is not in
+that ground, so a Term cannot reach it and "file a write into a Term-defined container" has no
+mechanism. The inbox is that mechanism.
 
-The door-level check remains, and it is one comparison: a connection-signed write must name its
-bound container, and the door refuses a mismatch between the signing key's grant target and the
-container being written. Verified before drafting: only `trust` and `posture` are immutable on a
-container declaration, so containers whose Terms predate this pattern can re-declare membership.
+A container SPAWNS AN INBOX ON DEMAND — a fresh pool, one per connection. A connection's writes land
+in its inbox. The inbox is a MEMBER of the container: reading the container gathers it, so the
+connection reads back what it wrote and anyone reading the container sees it too.
+
+The inbox is SELF-AUTHORIZING. Its GENESIS DELTA — the first delta in the pool — is the grant that
+names the connection's key and permits it to write there. The door decides "may this key write into
+this inbox?" by reading the inbox's own first delta, not root and not the parent. Authority and
+writes live in one pool, and three properties fall out of that single fact:
+
+- **Write enforcement is structural.** A connection write goes to its inbox and nowhere else.
+  Nothing tests the write against a Term; "outside the bound container" cannot be expressed.
+- **Revocation is a negation of the genesis grant.** Strike it and the door refuses further writes;
+  the inbox and its past deltas remain, keeping their author. No membership recomputation, and none
+  of the tension a current-grants membership read would have with keeping past writes readable.
+- **A per-connection drop is a total forget.** Dropping the inbox erases the grant AND every delta
+  the connection wrote, with nothing promoted out to leave a trace. Both a leaked credential's blast
+  radius and an erasure's are exactly one inbox.
+
+A separate-posture container needs none of this: writes physically enter its pool through the
+connection's door, and the pool IS the membership — so a fully isolated connection binds to a fresh
+empty separate container, which is at once its read scope and its write destination. The inbox
+exists only for the shared/wide case, where the bound container has no pool of its own.
+
+The costs, named rather than hidden: a pool per live connection; the parent container's gather now
+composes its inbox pools alongside its Term selection (a change in Loam's `containerScopeImpl`, not
+a Term, and not frozen rhizomatic); and erasing the parent must reach its inboxes — a WIDENING of
+what gets purged, which is Myk's merge, its direction settled (2026-08-01) and its implementation PR
+still owing the one-line statement of what can now be deleted.
 
 ## 39.4 What this spec does NOT do
 
@@ -142,9 +162,11 @@ red.
 6. Two connections owned by the same user are distinguishable at the delta level: one write through
    each, two different authors, each equal to its own connection's key. Assert they DIFFER — not
    merely that both are non-empty. Verified in `test/server/connection-container.test.ts`.
-7. The connection grant targets the CONTAINER entity at `loam.grants`, and the store-targeting grant
-   shape still validates unchanged beside it. Both shapes in one store, both recognised, neither
-   confused for the other. Verified in `test/server/connection-container.test.ts`.
+7. Binding spawns a per-connection INBOX pool whose GENESIS DELTA is the connection grant: the
+   grant's subject is the connection key, its target is the inbox entity at `loam.grants`, its
+   author is the owner. The store-targeting grant shape still validates unchanged beside it —
+   both shapes in one store, neither confused for the other. Two connections to one container get
+   two distinct inbox pools. Verified in `test/server/connection-container.test.ts`.
 8. NEGATION BY MEMBERSHIP, the divergence rail: D1 admitted to folklore and friends; D2 negating D1
    admitted to folklore only. The folklore View resolves without D1; the friends View still shows
    D1; a bystander claim in folklore survives. Assert at both levels in both containers — D2's
@@ -163,35 +185,46 @@ red.
 12. A store with no user-made containers (Charlie's) serves a connection bound to its root container
     with no additional setup: one bind, reads and writes work. Verified in
     `test/server/connection-container.test.ts`.
-13. REVOCATION, two-sided: after the folklore grant is struck, a write signed by that connection's
-    key refuses; a SECOND connection's write still lands; every delta the revoked connection wrote
-    keeps its author and stays readable. Verified in `test/server/connection-container.test.ts`.
-14. The door refuses a connection-signed write whose named container does not match the signing
-    key's grant target. The refusal names the mismatch class without echoing the container id of the
-    grant. Verified in `test/server/connection-container.test.ts`.
+13. REVOCATION, two-sided: negating the inbox's genesis grant refuses the next write signed by that
+    connection's key; a SECOND connection's write still lands; every delta the revoked connection
+    wrote keeps its author and stays a member of the container. Verified in
+    `test/server/connection-container.test.ts`.
+14. WRITE ENFORCEMENT is structural: a connection write lands in its own inbox pool and no other
+    ground. A key granted to inbox-1 cannot write into inbox-2 (its genesis grant does not target
+    inbox-2), and a connection write never reaches the primary ground directly. Assert the delta's
+    pool membership at the delta level. Verified in `test/server/connection-container.test.ts`.
 15. The connection's seed never enters the ground. Scan the whole store after a full
     grant-write-revoke cycle; plant a leak first and prove the scan sees it (the H7 discipline: an
     instrument must fail before it is trusted). Verified in
     `test/server/connection-container.test.ts`.
 16. No existing delta changes shape and no §20 migration is owed: a store created before this work
-    reads identically after it. The new grant shape is additive and distinguishable by its target.
-    Verified in `test/server/connection-container.test.ts`.
-17. The membership Term's `inView`-over-grants clause is one level deep and stratification-bounded,
-    same as `lawfulStrikersJson`; a grant filed by a NON-owner key does not extend membership.
-    Verified in `test/server/connection-container.test.ts`.
+    reads identically after it. The connection grant reuses the `loam.grants` shape with an
+    inbox-entity target (a value change on an existing shape); the inbox reuses the container
+    declaration shape. Verified in `test/server/connection-container.test.ts` and by
+    `grep -rn "39-connection" src/migrate` finding nothing.
+17. A PER-CONNECTION DROP IS A TOTAL FORGET, two-sided: dropping one connection's inbox removes its
+    genesis grant AND every delta that connection wrote from every ground; a named live bystander —
+    a second connection's write, and the container's own direct members — survives, readable and
+    unchanged. Assert at both levels: the connection's ids are gone from every ground (delta level)
+    and a read of the container no longer resolves them (object level). No delta is promoted out of
+    the inbox before the drop. Verified in `test/server/connection-container.test.ts`.
 
 ## 39.6 The two pre-blessing conditions, answered
 
 **Conformance to Alice/Bob/Charlie:** the walkthrough IS the fixture plan. Criteria 1–8 are Alice
 (narrow bindings, divergent containers, per-connection attribution). Criterion 11 is Bob (wide
 binding, sub-container addressing). Criterion 12 is Charlie (root heap, no containers). Criteria
-13–15 are the lifecycle all three share.
+13, 14, 17 are the lifecycle all three share — revocation, write enforcement, total forget.
 
-**Surprises: none.** Two findings from verification, both conveniences rather than surprises:
-(1) the per-connection key converges with phase 15's existing "actor seed per client" criterion — the
-arc already mints the right object, this spec binds it to a container; (2) `containerScope` already
-implements membership-decides-reach, so the read half of the model is landed substrate, not new
-work. One item is flagged for the builder rather than decided here: containers declared before this
-pattern may carry membership Terms without the grants clause; membership is re-declarable (verified:
-only trust and posture are immutable), and criterion 16 pins that nothing existing breaks either
-way.
+**Surprises: one, surfaced late and settled.** The write path (39.3d) was first drafted as
+membership-by-authorship and pre-blessed on 2026-07-28. On 2026-08-01 Myk chose the inbox instead,
+because it makes revocation and erasure structural rather than computed — the two operations the
+erasure standing rule exists to protect. Everything else in this spec was unaffected. Two
+verification findings remain conveniences rather than surprises: (1) the per-connection key
+converges with phase 15's existing "actor seed per client" criterion — the arc already mints the
+right object, this spec spawns it an inbox and binds it there; (2) `containerScope` already
+implements membership-decides-reach, so the read half of the model is landed substrate. The one
+new mechanism is the inbox: a container spawning per-connection pools and `containerScopeImpl`
+composing them into the gather. That is Loam-side, verified feasible (pools spawn through
+`openContainer`, and the gather already composes multiple grounds), and its cost — a pool per
+connection, and erasure reaching inboxes — is named in 39.3d.
