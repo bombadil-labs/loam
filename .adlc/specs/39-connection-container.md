@@ -126,6 +126,19 @@ a Term, and not frozen rhizomatic); and erasing the parent must reach its inboxe
 what gets purged, which is Myk's merge, its direction settled (2026-08-01) and its implementation PR
 still owing the one-line statement of what can now be deleted.
 
+**THREE OF THOSE COSTS ARE OPEN DECISIONS, NOT MECHANISMS — see §39.7.** An independent premortem
+(2026-08-01) showed the inbox's three hardest seams are not "small Loam-side changes" but decisions
+on the trust root and the erasure path, the two surfaces the standing rules guard most: (1) the
+read-time negation closure runs PER GROUND, so a strike written into an inbox cannot suppress its
+target in the primary ground — the exact "in the gathered set = in play" invariant, broken across
+the new boundary; (2) the append door hardcodes `STORE_ENTITY`, so authorizing an inbox-scoped write
+without also granting the key store-wide is a new door path that must bind write DESTINATION to
+grant target — new trust-root code; (3) a per-connection pool that disconnects becomes an unattached
+separate container, which faults `unreachableStoreReport` and deadlocks EVERY erasure on the store,
+and throws in `membersOf` and crashes EVERY read of the container — so the disconnect lifecycle
+(drop vs detach) is load-bearing and unspecified. §39.7 records all eight premortem findings and
+their disposition; these three are held for Myk.
+
 ## 39.4 What this spec does NOT do
 
 - It does not touch `lawfulStrikersJson` or any root/governed-read mechanism. The first draft's
@@ -228,3 +241,83 @@ new mechanism is the inbox: a container spawning per-connection pools and `conta
 composing them into the gather. That is Loam-side, verified feasible (pools spawn through
 `openContainer`, and the gather already composes multiple grounds), and its cost — a pool per
 connection, and erasure reaching inboxes — is named in 39.3d.
+
+## 39.7 Premortem findings — three decisions for Myk, five folded
+
+An independent premortem (2026-08-01, read-only, grounded in `container.ts`, `accounts.ts`,
+`erase.ts`, and `SUBSTRATE-HAZARDS.md`) returned eight causes. Five are folded into the spec above;
+three are DESIGN DECISIONS on the trust root and the erasure path and are held for Myk, because the
+standing rules make those surfaces his and because the naive build of each is — per the premortem —
+an escalation or a deadlock, not a bug.
+
+**Held for Myk (the three hard seams):**
+
+- **H1 across the inbox boundary.** `containerScopeImpl` applies `withNegationClosure` PER GROUND. An
+  inbox is its own ground, so a negation written through a connection cannot suppress a target in the
+  container's primary ground. Criterion 9 as first written puts both deltas in one ground and passes
+  with this bug present. The fix is to close over the UNION of a container's admitted deltas across
+  all its grounds — a change to the substrate's negation-closure semantics, which is exactly the H1
+  surface the rules say to assert at both levels. RECOMMENDATION: make closure container-wide, and
+  add the cross-ground strand rail (D1 in primary, D2 in inbox → D1 absent from the View). This is
+  the load-bearing decision; the whole inbox model rests on membership-decides-reach holding here.
+
+- **The append-door authorization path.** `authorize` checks `grantHeld(reactor, STORE_ENTITY, …)`
+  only. A connection's grant targets its inbox, not the store. Admitting the write either grants the
+  key store-wide (an escalation that destroys "nothing outside the inbox is expressible") or needs a
+  NEW door path that binds three things at once: subject = connection key, grant target = this inbox
+  entity, AND the delta physically lands in that inbox's pool (ids are unowned — a key could sign a
+  delta aimed anywhere). This is new trust-root code. RECOMMENDATION: a write into a separate pool is
+  already authorized by that POOL's own `authorize` against the pool's own store entity, so the
+  clean form is: the inbox pool's operator is the OWNER, the genesis grant is an ordinary write grant
+  in the pool's own ground, and the connection writes INTO the pool — no change to root's `authorize`
+  at all. This needs Myk's read because it decides who the pool's operator is and couples the bind to
+  the §36 session that carries the owner's seed.
+
+- **The disconnect lifecycle (H9).** A per-connection pool that closes on disconnect becomes a
+  declared-but-unattached separate container. `unreachableStoreReport` faults on exactly that, and
+  `eraseImpl` refuses up front when it does — so accumulated dead inboxes deadlock ALL erasure; and
+  `membersOf` throws for an unattached separate member, crashing every read of the container. A busy
+  MCP endpoint accumulates these. So disconnect must DROP (total forget) or DETACH (kept, recorded),
+  never leak — and which it is decides both the erasure blast radius and whether "drop = total
+  forget" is the default. RECOMMENDATION: disconnect DETACHES (the writes are the owner's data, kept
+  and recorded), and an explicit revoke DROPS (total forget). Myk's call, because it sets the erasure
+  default.
+
+**Folded into the spec above (the five that were mine to answer):**
+
+- **The genesis grant's signer is the OWNER, via their §36 session (phase 8), not the operator.** At
+  consent time the owner is signed in and their seed is in the home (`user.<name>.seed`, phase 3);
+  the session carries it (phase 8). So 39.1 point 3 holds — the operator never signs this path — and
+  39.3b is corrected to name the owner's session seed. The pool's operator is the owner (see the
+  authorization recommendation above), which is what makes the genesis grant effective under
+  `grantHeld`.
+- **The inbox grant gets its OWN vocabulary, not a value swap.** The §20 corollary wants a changed
+  delta shape-distinguishable, and `lawfulStrikersJson` keys on `targetEntity === STORE_ENTITY`; a
+  store grant and an inbox grant that differ only by an id value are a fragile distinction. The inbox
+  grant carries a distinct context (a connection-grant marker), so shape-detection and every grant
+  filter tell store authority from inbox authority without inspecting an id. Criterion 16 is adjusted.
+- **"Total forget" is scoped to THIS STORE's grounds.** The inbox is a container member, so the
+  container's read is federatable and renderable; a copy that left before the drop lives beyond the
+  inbox's reach (H7). The spec claims total forget WITHIN this store's grounds and says so; reaching
+  federated-out copies is erasure's existing cross-tier problem, not this phase's new promise.
+- **The operator-level binding's blast radius is railed even though the guard is deferred.** 39.1
+  point 5 defers a guard on binding to root; criterion adds that a root-bound connection's write
+  still lands only in its inbox and cannot reach the root primary ground — so "no guard on binding"
+  never silently means "no bound on writes."
+- **The cross-write refusal is asserted at the door, not only at pool membership.** Criterion 14 is
+  strengthened: a key granted to inbox-1 is REFUSED writing into inbox-2 and into the primary ground
+  by the door, not merely observed absent from a pool.
+
+## 39.8 Sequencing recommendation
+
+The premortem shows the ISOLATED connection — bound to a separate container, reads and writes both in
+its own pool — needs none of the three held decisions except the disconnect lifecycle, and even that
+is simplest there (a pre-existing container that persists across connections sidesteps the
+accumulation problem). That path proves the whole OAuth → bound-MCP-connection flow end to end with
+almost no new trust-root code. The INBOX (wide-read, narrow-write) is the harder tier and waits on
+Myk's three decisions. Recommended order: land the isolated-connection path first as the testable
+milestone; build the inbox on top once the three seams are decided.
+
+This spec is design-stage and its landing is Myk's merge. It is not built. The premortem is why: it
+found that building the inbox's trust-root and erasure seams autonomously would be exactly the
+reckless move the design-stage gate exists to prevent.
