@@ -216,10 +216,12 @@ export function redirectUriDefect(uri: string, allowed: readonly string[]): stri
     );
   }
   if (!allowed.includes(url.origin)) {
-    return (
-      `"${uri}" is not at an origin this store permits. Its operator named ` +
-      `[${allowed.join(", ")}] with --oauth-allow-redirect.`
-    );
+    // Say only that this origin is not permitted — NOT the whole allowlist, and NOT the flag name.
+    // This door is unauthenticated and answers with a wildcard CORS origin, so echoing the
+    // operator's trust list or their config flag hands an anonymous caller store recon for free.
+    // The EMPTY-allowlist case above names the flag deliberately (a store where nothing works, an
+    // operator-facing hint); an off-origin refusal is an ordinary caller error and stays generic.
+    return `"${uri}" is not at an origin this store permits`;
   }
   // The scheme rule again, per uri — membership in the allowlist is not a licence, so the https
   // rule survives any future path that reaches here with a list boot never vetted.

@@ -259,6 +259,13 @@ describe("T134 — (2) a redirect_uri outside the allowlist is refused AT REGIST
     expect(evil.body["error"]).toBe("invalid_redirect_uri");
     // A refusal that still recorded the client would leave the attacker an id.
     expect(readOAuthFile(home).clients).toEqual([]);
+    // This door is unauthenticated and answers with a wildcard CORS origin, so an off-origin
+    // refusal must not hand an anonymous caller the operator's whole trust list or the config flag.
+    // The positive control is the EMPTY-allowlist test below, which DOES name the flag on purpose —
+    // so this negative is the redaction working, not an unrelated 400.
+    const wire = JSON.stringify(evil.body);
+    expect(wire).not.toContain(OTHER_ORIGIN); // the other allowlisted origin, not echoed
+    expect(wire).not.toContain("--oauth-allow-redirect");
   });
 
   it("ALL the redirect uris must pass, not just the first", async () => {
