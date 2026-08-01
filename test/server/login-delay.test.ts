@@ -48,6 +48,7 @@ vi.mock("../../src/server/login-locks.js", async (importOriginal) => {
 // Imported AFTER the mock so the unit calls route through the (delegating) mock — proving the door
 // and the units share one module surface.
 import {
+  DEFAULT_LIMIT,
   delayFor,
   delayMs,
   delayMsIn,
@@ -244,14 +245,66 @@ describe("§36 phase 9 — the login delay (unit: the delay functions)", () => {
     expect(delayMs(home, "target", T + P.forgetMs + 1, P)).toBe(200);
   });
 
-  it("the table is bounded at maxTracked and evicts the weakest", () => {
+  it("the table is bounded at maxTracked", () => {
     const home = scratchHome();
-    // Five distinct names, one failure each, seated oldest-first. maxTracked is 4.
+    // Five distinct names, one failure each. maxTracked is 4, so one is evicted. This pins the BOUND;
+    // the tie-break that CHOOSES which row goes is pinned by the next test (all timestamps equal here,
+    // so this fixture cannot — and does not claim to — distinguish oldest from first-inserted).
     for (const name of ["a", "b", "c", "d", "e"]) noteFailure(home, name, T, P);
+    expect(readLocks(home).size).toBe(4); // bounded — never a fifth row
+  });
+
+  it("eviction takes the OLDEST among equal-failure rows, not the first inserted", () => {
+    const home = scratchHome();
+    // Insertion order DISAGREES with age, so only the `lastFailureAt` tie-break can decide correctly.
+    // "newer" is inserted first but is younger; "older" is inserted second but is older. maxTracked 4.
+    noteFailure(home, "newer", T + 100, P);
+    noteFailure(home, "older", T, P);
+    noteFailure(home, "keepA", T + 100, P);
+    noteFailure(home, "keepB", T + 100, P); // table full, every row at failures 1
+    noteFailure(home, "fresh", T + 200, P); // forces exactly one eviction
     const locks = readLocks(home);
-    expect(locks.size).toBe(4); // bounded
-    expect(locks.has("a")).toBe(false); // the oldest, weakest row was evicted
-    expect(locks.has("e")).toBe(true); // the newest survives
+    // The oldest by lastFailureAt goes, though it was NOT inserted first. Dropping the secondary sort
+    // term would fall back to insertion order and evict "newer" instead — this is the rail that sees it.
+    expect(locks.has("older")).toBe(false);
+    expect(locks.has("newer")).toBe(true);
+  });
+
+  it("DEFAULT_LIMIT pins the shipped policy constants", () => {
+    // The tuning an operator actually runs under, pinned against the literals so a silent edit to the
+    // shipped delay, cap, forget window, or table size is caught rather than absorbed.
+    expect(DEFAULT_LIMIT).toEqual({
+      baseDelayMs: 250,
+      maxDelayMs: 5_000,
+      forgetMs: 900_000,
+      maxTracked: 512,
+    });
+  });
+
+  it("readLocks keeps a well-formed row and drops every malformed entry shape", () => {
+    const home = scratchHome();
+    // A hand-edited or corrupted file can hold any shape. `isRecord` is the validator, and each clause
+    // is load-bearing: a non-object, a missing/non-numeric lastFailureAt, or a non-integer/negative
+    // failures count is not a record and must be dropped — not read, and never a throw.
+    writeFileSync(
+      locksPath(home),
+      JSON.stringify({
+        users: {
+          good: { failures: 3, lastFailureAt: T },
+          zero: { failures: 0, lastFailureAt: T }, // 0 is well-formed (>= 0), delayFor(0) === 0
+          nullEntry: null,
+          notObject: 5,
+          noStamp: { failures: 2 },
+          stringStamp: { failures: 2, lastFailureAt: "soon" },
+          floatFailures: { failures: 1.5, lastFailureAt: T },
+          negFailures: { failures: -1, lastFailureAt: T },
+        },
+      }),
+      "utf8",
+    );
+    const locks = readLocks(home);
+    expect([...locks.keys()].sort()).toEqual(["good", "zero"]); // only the two valid shapes survive
+    expect(locks.get("good")?.failures).toBe(3);
   });
 
   it("a wide squat holds a chosen name at zero and does not decay", () => {
@@ -319,8 +372,11 @@ describe("§36 phase 9 — the login delay (door: what it answers)", () => {
     const miss = track(attemptLogin(base, "myk", "wrong"));
     await gate.untilEntered(2);
     await flush();
-    // WITNESS: neither has answered. If the wait were paid AFTER the compare, the miss (or the hit)
-    // would already carry its status — which is the timing leak criterion 3 forbids.
+    // The wait is a function of the COUNT read before the compare, never of the compare's OUTCOME:
+    // both the hit and the miss owe the identical wait and both are still parked in it. A hit computed
+    // AFTER its success cleared the count would owe 0 and settle here — that is the timing oracle
+    // criterion 3 forbids, and this witness (hit parked, and both owed values equal) is what sees it.
+    expect(gate.owed).toEqual([DOOR_LIMIT.baseDelayMs, DOOR_LIMIT.baseDelayMs]);
     expect(hit.isSettled()).toBe(false);
     expect(miss.isSettled()).toBe(false);
     gate.release();
@@ -419,6 +475,24 @@ describe("§36 phase 9 — the login delay (door: what it answers)", () => {
     expect(back.owed).toEqual([DOOR_LIMIT.baseDelayMs]); // same wait, unmoved by the backward step
     back.release();
     await q.promise;
+  });
+
+  it("any positive owed wait is served, down to a single millisecond", async () => {
+    // The gate is `owed > 0`, not `owed > 1`: a 1ms owed wait is a wait owed, and it is served. A base
+    // of 1ms makes delayFor(1) === 1, the smallest owed value a policy can produce.
+    const gate = makeGate();
+    const { base, home } = await loginServer(
+      { ground: { myk: ["operator"] }, passwords: { myk: PASSWORD } },
+      { waitFor: gate.waitFor, limit: { ...DOOR_LIMIT, baseDelayMs: 1 } },
+    );
+    noteFailure(home, "myk", T, { ...DOOR_LIMIT, baseDelayMs: 1 }); // count 1 → owes exactly 1ms
+    const p = track(attemptLogin(base, "myk", PASSWORD));
+    await gate.untilEntered(1);
+    expect(gate.owed).toEqual([1]); // the 1ms wait was served, not skipped
+    await flush();
+    expect(p.isSettled()).toBe(false);
+    gate.release();
+    await p.promise;
   });
 
   it("a write fault on record still admits a correct password (fail-open, no budget)", async () => {
