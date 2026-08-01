@@ -209,6 +209,21 @@ describe("T134 — (1) registration is fenced by a configured allowlist and need
     expect(readOAuthFile(home).clients).toEqual([]);
   });
 
+  it("more redirect_uris than the door holds is refused; exactly the bound is admitted", async () => {
+    // The array-length bound (MAX_URIS). A registration is a handful of callbacks; a caller sending
+    // hundreds is padding the stored record, not describing a client. The positive control sits one
+    // below the bound so the rail pins the exact edge rather than "some large number".
+    const home = makeHome();
+    const served = await serveOAuth(home);
+    const uri = (i: number): string => `${CLAUDE_ORIGIN}/cb${i}`;
+    const atBound = Array.from({ length: 8 }, (_, i) => uri(i));
+    expect((await register(served.base, { redirectUris: atBound })).status).toBe(201);
+    const overBound = Array.from({ length: 9 }, (_, i) => uri(i));
+    const over = await register(served.base, { redirectUris: overBound });
+    expect(over.status).toBe(400);
+    expect(over.body["error"]).toBe("invalid_redirect_uri");
+  });
+
   it("only POST is answered — GET/DELETE get a 405, not a registration", async () => {
     const home = makeHome();
     const served = await serveOAuth(home);
