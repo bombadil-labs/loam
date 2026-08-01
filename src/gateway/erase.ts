@@ -577,11 +577,14 @@ export interface ErasureHealth {
 // report that read as exhaustive while a forgotten user's password hash still sat in
 // `credentials.json` would be H7 wearing letterhead — the honesty §11 owes named plainly.
 //
-// COMPLETE-BY-CONSTRUCTION, not by guess: this list is every home file §36 writes that holds a data
-// SUBJECT's per-user data outside the ground. On `main` that rule resolves to exactly these two. A
-// seed file holds the store's own signing key (not a subject's data) and is deliberately not here.
-// `oauth.json` is a §37 surface not written on `main`; when §37 lands it, that phase OWES this list an
-// entry — the disclosure is the one place that must never itself omit a surface (T131 criterion 7).
+// COMPLETE-BY-CONSTRUCTION, not by guess: this list is every home file that holds a data SUBJECT's
+// per-user data — keyed by the human's user name — outside the ground. That rule resolves to exactly
+// these two. A seed file holds the store's own signing key, not a subject's data, so it is not here.
+// `oauth.json` is a home file too, and erasure does not sweep it either, but it is keyed by CONNECTOR
+// (clientId): its grants and token digests are a connector's identity, not a human user's record, so
+// erasing a user's record leaves no subject-keyed bytes there and it is off THIS list. If a later
+// surface ever holds subject per-user data, it OWES this list an entry — the disclosure is the one
+// place that must never itself omit a surface (T131 criterion 7).
 //
 // ONE source, read by BOTH the live `health()` report and the re-issuable compliance receipt
 // (`deriveReceiptImpl`), so the two surfaces can never drift on what erasure does not reach. Each line

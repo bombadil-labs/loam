@@ -35,12 +35,15 @@ sentences that say "erasure did NOT reach here". It removes no guarantee and del
 
 **The scoping principle, so the disclosure is not the next H7.** A disclosure that itself omits a home
 surface recreates the exact hazard it cures, one layer up. So the list is defined by a RULE, not by a
-guess: it names every home file §36 writes that holds a DATA SUBJECT's per-user data outside the
-ground. On `main` that rule resolves to exactly two — `credentials.json` and `login-locks.json`. Seed
-files in the home hold the store's own signing keys, not a subject's data, so they are not on this
-list. `oauth.json` is a §37 surface and is not written on `main`, so naming it now would be a false
-claim; when §37 lands it, that phase OWES this list an entry — stated here so the obligation is not
-lost. The list is a shared constant read by both surfaces, so "complete" is checked in one place.
+guess: it names every home file that holds a DATA SUBJECT's per-user data — keyed by the human's user
+name — outside the ground. That rule resolves to exactly two: `credentials.json` and
+`login-locks.json`. Seed files in the home hold the store's own signing keys, not a subject's data, so
+they are not on this list. `oauth.json` is a home file too and erasure does not sweep it either, but it
+is keyed by CONNECTOR (`clientId`) — its grants and token digests are a connector's identity, not a
+human user's record — so erasing a user's record leaves no subject-keyed bytes there and it is off THIS
+list. If a later surface ever holds subject per-user data, that phase OWES this list an entry — stated
+here so the obligation is not lost. The list is a shared constant read by both surfaces, so "complete"
+is checked in one place.
 
 ## The one behaviour this phase also rails (it does not add it)
 

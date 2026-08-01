@@ -112,8 +112,9 @@ describe("T131 criterion 2 — the disclosure reaches the compliance receipt", (
     const receipt = await gw.receipt(report.graveyard, { now: BEFORE_DEADLINE });
     expect(namesUnswept(receipt.nonClaim, CREDENTIALS_FILE)).toBe(true);
     expect(namesUnswept(receipt.nonClaim, LOCKS_FILE)).toBe(true);
-    // Two-sided: the bystander survived the cut at the bytes — the disclosure did not come at the cost
-    // of over-purging.
+    // Two-sided, both bytes checked: the member IS gone and the bystander SURVIVES — the disclosure
+    // rides a real cut, and it did not come at the cost of over-purging.
+    expect(await gw.backend.holds(member.id)).toBe(false);
     expect(await gw.backend.holds(bystander.id)).toBe(true);
   });
 });
@@ -283,13 +284,14 @@ describe("T131 criterion 7 — both surfaces disclose the same two files, and on
     const receipt = await gw.receipt(report.graveyard, { now: BEFORE_DEADLINE });
     const health = await gw.health();
 
-    // Every home file the disclosure names, from each surface — pulled by the file-name markers the
-    // criterion fixes, so a report growing a THIRD file goes red here rather than passing silently.
+    // EVERY file-shaped token the disclosure names, extracted rather than looked up in a fixed
+    // universe — so ANY third file (a future sessions.json, oauth.json, a stray path) goes red here,
+    // not only the two this criterion happened to anticipate. The receipt's other nonClaim lines name
+    // containers, not files, so this reduces each surface to exactly its file mentions.
     const named = (list: readonly string[]): string[] =>
-      [CREDENTIALS_FILE, LOCKS_FILE, "oauth.json", "operator.seed"].filter((f) =>
-        list.some((line) => line.includes(f)),
-      );
-    expect(named(receipt.nonClaim).sort()).toEqual([CREDENTIALS_FILE, LOCKS_FILE].sort());
-    expect(named(nonSweptOf(health)!).sort()).toEqual([CREDENTIALS_FILE, LOCKS_FILE].sort());
+      [...new Set(list.flatMap((line) => line.match(/[\w-]+\.(?:json|seed)/g) ?? []))].sort();
+    const both = [CREDENTIALS_FILE, LOCKS_FILE].sort();
+    expect(named(receipt.nonClaim)).toEqual(both);
+    expect(named(nonSweptOf(health)!)).toEqual(both);
   });
 });
