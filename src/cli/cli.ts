@@ -108,7 +108,17 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
   serve: {
     summary: "boot a store and serve it (GraphQL + SSE + MCP over HTTP)",
     usage: "loam serve --http [options]",
-    flags: new Set(["home", "store", "port", "token", "http", "archive", "host", "public-url"]),
+    flags: new Set([
+      "home",
+      "store",
+      "port",
+      "token",
+      "http",
+      "archive",
+      "host",
+      "public-url",
+      "oauth-allow-redirect",
+    ]),
     booleans: new Set(["http"]),
     notes: [
       "A fresh home self-initializes: it mints (or, via LOAM_SEED, imports) an operator identity,",
@@ -232,6 +242,10 @@ const FLAG_HELP: Readonly<Record<string, { readonly arg: string; readonly note: 
   "public-url": {
     arg: "<url>",
     note: "the outside http(s) address this store is reached at — opens §37 discovery",
+  },
+  "oauth-allow-redirect": {
+    arg: "<origins>",
+    note: "comma-separated origins a connector may redirect to — opens §37 registration (needs --public-url)",
   },
   out: { arg: "<file>", note: "write the output here (default stdout)" },
   url: { arg: "<base>", note: "the running gateway to ask (default http://127.0.0.1:4321)" },
@@ -417,6 +431,7 @@ async function cmdServe(
   const withUsers = existsSync(credentialsPath(home));
   const hostFlag = parsed.flags.get("host") ?? "127.0.0.1";
   const publicUrlFlag = parsed.flags.get("public-url");
+  const allowRedirectFlag = parsed.flags.get("oauth-allow-redirect");
   if (withUsers) {
     const loopback = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
     const tls = publicUrlFlag !== undefined && publicUrlFlag.toLowerCase().startsWith("https:");
@@ -531,6 +546,22 @@ async function cmdServe(
       port,
       host: hostFlag,
       ...(publicUrlFlag === undefined ? {} : { publicUrl: publicUrlFlag }),
+      // Connector registration (SPEC §37 phase 13), opt-in: absent, POST /oauth/register resolves
+      // as an unrouted path. serve() refuses this beside no --public-url, and boot-validates each
+      // origin. The door's own fault channel is this log line — its detail names the home's path
+      // and must never reach an unauthenticated caller.
+      ...(allowRedirectFlag === undefined
+        ? {}
+        : {
+            connectors: {
+              home,
+              allowRedirectOrigins: allowRedirectFlag
+                .split(",")
+                .map((o) => o.trim())
+                .filter((o) => o.length > 0),
+              onFault: (message: string) => io.err(`loam: ${message}`),
+            },
+          }),
       // A local fault the CALLER must never read (it names paths and other users) still has to
       // reach the operator; the door's own channel is this log line.
       ...(withUsers
