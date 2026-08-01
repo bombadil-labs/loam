@@ -121,7 +121,7 @@ channel, because the door answers an unauthenticated caller with a wildcard CORS
 derived from a local error would put the home's absolute path on the open internet.
 
 **Provenance.** Working spec `.adlc/specs/37-13-connector-registration.md` (T134, phase 13 of the
-plan's fifteen). Landed [#PR](https://github.com/bombadil-labs/loam/pull/PR) — the registration door
+plan's fifteen). Landed [#317](https://github.com/bombadil-labs/loam/pull/317) — the registration door
 and the redirect fence in `src/server/oauth.ts`, threaded through `ServeOptions.connectors` in
 `src/server/http.ts` and the `--oauth-allow-redirect` flag in `src/cli/cli.ts`. No code, token, or
 seed is minted; a connector can find the store and register, and nothing more.
