@@ -15,13 +15,15 @@ at landing. Every criterion below names its verification — a test title in
 
 ## What this phase delivers
 
-The **unswept-surface disclosure**. §36 keeps two pieces of user data OUTSIDE the delta store, in
-the home: password hashes in `credentials.json` (§36.1) and per-username failure records in
-`login-locks.json` (§36.9). Erasure purges DELTAS from every tier; it never touches a home file. So
-an erasure report that reads as exhaustive is dishonest by omission — the H7 shape, on the one
-surface whose report is a legal claim.
+The **unswept-surface disclosure**. §36 keeps three pieces of a user OUTSIDE the delta store, in the
+home: password hashes in `credentials.json` (§36.1), per-username failure records in `login-locks.json`
+(§36.9), and each operator-role user's own signing key in `user.<name>.seed` (§36.3/§36.8). Erasure
+purges DELTAS from every tier; it never touches a home file. So an erasure report that reads as
+exhaustive is dishonest by omission — the H7 shape, on the one surface whose report is a legal claim.
+The per-user seed is the sharpest case: it is a SUBJECT's key, more sensitive than the password hash,
+because home access can still sign AS that user while the file stands.
 
-This phase makes the report NAME those two files as surfaces erasure does not sweep. The disclosure
+This phase makes the report NAME those files as surfaces erasure does not sweep. The disclosure
 reaches BOTH the live health report (`gateway.health()`, served at `/health`) and the re-issuable
 compliance receipt (`gateway.receipt()`), because the receipt is the document a reader treats as
 proof and its list must read as exhaustive.
@@ -36,13 +38,17 @@ sentences that say "erasure did NOT reach here". It removes no guarantee and del
 **The scoping principle, so the disclosure is not the next H7.** A disclosure that itself omits a home
 surface recreates the exact hazard it cures, one layer up. So the list is defined by a RULE, not by a
 guess: it names every home file that holds a DATA SUBJECT's per-user data — keyed by the human's user
-name — outside the ground. That rule resolves to exactly two: `credentials.json` and
-`login-locks.json`. Seed files in the home hold the store's own signing keys, not a subject's data, so
-they are not on this list. `oauth.json` is a home file too and erasure does not sweep it either, but it
-is keyed by CONNECTOR (`clientId`) — its grants and token digests are a connector's identity, not a
-human user's record — so erasing a user's record leaves no subject-keyed bytes there and it is off THIS
-list. If a later surface ever holds subject per-user data, that phase OWES this list an entry — stated
-here so the obligation is not lost. The list is a shared constant read by both surfaces, so "complete"
+name — outside the ground. That rule resolves to exactly three, one per home path function §36 writes:
+`credentialsPath` (`credentials.json`), `locksPath` (`login-locks.json`), and `userSeedPath`
+(`user.<name>.seed`). NOT every seed file is store infrastructure — the distinction is WHOSE key it
+is: `operator.seed` holds the store's own signing key, so it is off this list, but `user.<name>.seed`
+holds a subject's key, so it is on it. `oauth.json` is a home file too and erasure does not sweep it
+either, but it is keyed by CONNECTOR (`clientId`) — its grants and token digests are a connector's
+identity, not a human user's record — so erasing a user's record leaves no subject-keyed bytes there
+and it is off THIS list. If a later surface ever holds subject per-user data, that phase OWES this list
+an entry — stated here so the obligation is not lost. Criterion 7 derives its expected set from the
+path functions, so a missing surface or a drift goes red. The list is a shared constant read by both
+surfaces, so "complete"
 is checked in one place.
 
 ## The one behaviour this phase also rails (it does not add it)
@@ -77,20 +83,21 @@ Each criterion is proved by the named `it(...)` in `test/server/users-erasure.te
 criterion 6, which is a `grep` command. The disclosure text is a single shared constant
 (`UNSWEPT_AUTH_SURFACES` in `src/gateway/erase.ts`) read by both surfaces, so the two can never drift.
 
-1. **The health report NAMES both files as surfaces it does not sweep.** `gateway.health()` returns a
-   top-level `nonSwept` list, and that list contains one entry naming `credentials.json` and one
-   naming `login-locks.json`, each stating erasure does not reach it. The expected file names are
-   hand-written in the assertion, not read from the report (H10). Positive control: the same entries
-   state that erasure DOES purge deltas, so "unswept" is a claim about these two files and not a
+1. **The health report NAMES every home auth surface as one it does not sweep.** `gateway.health()`
+   returns a top-level `nonSwept` list, and that list contains one entry naming `credentials.json`, one
+   naming `login-locks.json`, and one naming `user.<name>.seed`, each stating erasure does not reach it.
+   The expected surfaces are DERIVED from the path functions (`credentialsPath`, `locksPath`,
+   `userSeedPath`), not hand-copied literals and not read from the report (H10). Positive control: the
+   entries state that erasure DOES purge deltas, so "unswept" is a claim about these files and not a
    blanket disclaimer that would be satisfied by any prose. Verified by
-   `it("health() names credentials.json and login-locks.json as surfaces erasure does not sweep")`.
+   `it("health() names credentials.json, login-locks.json and user.<name>.seed as unswept")`.
 
 2. **The disclosure reaches the RECEIPT, not only `health()`.** A re-issued `gateway.receipt()` for a
-   real graveyard carries the SAME two named entries in its `nonClaim` list. The two files are named
-   by hand in the assertion. This is the exhaustiveness fix: a receipt whose `nonClaim` omitted the
-   two home files would read as complete while a forgotten user's hash sat in `credentials.json`.
-   Verified by
-   `it("the receipt's nonClaim names credentials.json and login-locks.json")`.
+   real graveyard carries the SAME named entries in its `nonClaim` list — including `user.<name>.seed`.
+   This is the exhaustiveness fix: a receipt whose `nonClaim` omitted a home surface would read as
+   complete while a forgotten user's hash sat in `credentials.json` or their signing key in
+   `user.<name>.seed`. Verified by
+   `it("the receipt's nonClaim names credentials.json, login-locks.json and user.<name>.seed")`.
 
 3. **A login for a user whose RECORD DELTA is absent is refused — asserted at BOTH levels.** Erase a
    user's record delta while a valid `credentials.json` entry for that user still stands. Verified by
@@ -114,13 +121,13 @@ criterion 6, which is a `grep` command. The disclosure text is a single shared c
 
 5. **The disclosure survives every erasure path**, so it cannot become conditional on outcome —
    verified by `it("the unswept disclosure is present on a zero-erasure, a partial, and a refused path")`.
-   The two named entries are present on the report after each of four distinct paths:
-   - a **zero-erasure** store (`health().nonSwept` names both files with `promised === 0`);
+   Every named entry is present on the report after each of four distinct paths:
+   - a **zero-erasure** store (`health().nonSwept` names every surface with `promised === 0`);
    - a **partial / unproven** erasure (a tier that cannot be proven clean leaves `health().status`
-     `settling` or `unproven`, and `nonSwept` still names both files);
+     `settling` or `unproven`, and `nonSwept` still names every surface);
    - a **refused** erasure (an `erase` that throws leaves the store unchanged, and a following
-     `health()` still names both files);
-   - the **two-phase cut** (the receipt derived from a graveyard names both files, criterion 2).
+     `health()` still names every surface);
+   - the **two-phase cut** (the receipt derived from a graveyard names every surface, criterion 2).
    Verified by
    `it("the unswept disclosure is present on a zero-erasure, a partial, and a refused path")`
    and criterion 2 for the cut.
@@ -131,12 +138,14 @@ criterion 6, which is a `grep` command. The disclosure text is a single shared c
    no line that adds an id to a purge, and by review of the diff confirming every `+` line is a
    disclosure string, a `nonSwept` field, or a shared constant — never a removal.
 
-7. **The two surfaces read from ONE source, so they cannot drift, and the source is exactly the two
-   scoped files.** The `nonSwept` list from `health()` and the two named entries in the receipt's
-   `nonClaim` are the SAME strings, and there are exactly two of them, each naming one file. A third
-   entry, or a mismatch between the surfaces, fails the rail — this is the completeness guard for
-   finding A, so the disclosure cannot silently grow a guess or drop a file. Verified by
-   `it("both surfaces disclose the same two named files, and only those two")`.
+7. **The two surfaces read from ONE source, and it equals the path-function-derived surface set.** The
+   file-shaped tokens in `health().nonSwept` and in the receipt's `nonClaim` each reduce to exactly
+   `MUST_DISCLOSE` — `{credentials.json, login-locks.json, user.<name>.seed}`, built in the test from
+   `credentialsPath`/`locksPath`/`userSeedPath`, never a frozen literal. So THREE failures go red: a
+   surface OMITTING one file (the per-user seed H7), a surface GROWING an undeclared file, and the two
+   surfaces DISAGREEING (drift, finding A). A two-literal expectation could not have caught the missing
+   seed; deriving from the path functions is what makes the exhaustiveness real. Verified by
+   `it("both surfaces disclose the same set, and it equals the path-function-derived MUST_DISCLOSE")`.
 
 ## Premortem — what revision 2 answers
 

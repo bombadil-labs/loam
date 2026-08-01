@@ -1450,7 +1450,7 @@ export const CHAPTERS = [
             door: null,
           },
           {
-            says: "Erasure forgets DELTAS, and it names what it does not reach: the health report and the compliance receipt both name credentials.json and login-locks.json — the two auth files the server keeps outside the ground — as surfaces erasure never sweeps. Forgetting a user's record delta still shuts the login door, because the ground holds the role and the credential file cannot vouch for a user the ground no longer names; the credential entry itself stays, and removing it is a separate operation.",
+            says: "Erasure forgets DELTAS, and it names what it does not reach: the health report and the compliance receipt both name credentials.json, login-locks.json, and each user's own signing key user.<name>.seed — the auth surfaces the server keeps outside the ground — as ones erasure never sweeps. Forgetting a user's record delta still shuts the login door, because the ground holds the role and the credential file cannot vouch for a user the ground no longer names; the credential entry and the seed file themselves stay, and removing each is a separate operation.",
             spec: "spec/36-users-and-sessions.md",
             proof: "test/server/users-erasure.test.ts",
             door: null,

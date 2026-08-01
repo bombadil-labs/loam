@@ -1,9 +1,9 @@
 // §36 phase 10 — Erasure honesty (T131). Criteria 1–7 of
 // `.adlc/specs/36-10-erasure-honesty.md`, transcribed. The phase makes the erasure report NAME the
-// two §36 home files it does not sweep — `credentials.json` and `login-locks.json` — on BOTH the live
-// health report and the re-issuable compliance receipt, and rails the security counterpart: a login
-// for a user whose RECORD DELTA was erased is refused, because the GROUND (not the unswept credential
-// file) is the authority the door trusts.
+// §36 home files it does not sweep — `credentials.json`, `login-locks.json`, and the per-user signing
+// key `user.<name>.seed` — on BOTH the live health report and the re-issuable compliance receipt, and
+// rails the security counterpart: a login for a user whose RECORD DELTA was erased is refused, because
+// the GROUND (not the unswept credential file) is the authority the door trusts.
 //
 // IT CHANGES NO PURGE. Every assertion here is about what the report SAYS or what the door REFUSES;
 // none removes a byte. The two-sided erasure discipline still holds throughout: the target is gone AND
@@ -21,18 +21,21 @@
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { serve, type ServerHandle } from "../../src/server/http.js";
 import {
+  credentialsPath,
   hashPassword,
   readCredentials,
   writeCredentials,
   type ScryptParams,
 } from "../../src/server/credentials.js";
+import { locksPath } from "../../src/server/login-locks.js";
+import { userSeedPath } from "../../src/cli/config.js";
 import { roleClaims, rolesOf, userClaims, resolveUserView } from "../../src/server/users.js";
 import { SESSION_COOKIE, PRESESSION_COOKIE } from "../../src/server/session.js";
 import { bootSlateStore, standSlate, BEFORE_DEADLINE } from "../gateway/slating.js";
@@ -43,19 +46,30 @@ const OPERATOR = authorForSeed(OPERATOR_SEED);
 const CHEAP: ScryptParams = { N: 1024, r: 8, p: 1, keylen: 32 };
 const PASSWORD = "correct horse";
 
-// The two files the disclosure must NAME. Hand-written, never read from the report — a rail whose
-// expectation comes from the code under test measures nothing (H10). These are the acceptance
-// criterion's own words, so a report that dropped one goes red here.
-const CREDENTIALS_FILE = "credentials.json";
-const LOCKS_FILE = "login-locks.json";
+// The home auth surfaces the disclosure MUST name, DERIVED from each surface's own path function —
+// the source of truth §36 writes through — never a hardcoded copy that a hollow rail could satisfy
+// (H10). A rail whose expected set came from the report itself would measure nothing; a rail whose
+// expected set was two frozen literals could not have caught the per-user seed that was missing.
+// So the expectation is the basenames these functions produce. WHEN §36 ADDS A HOME FILE that holds
+// a subject's per-user data, wire its path function in HERE; the mutual-coverage assertions in
+// criterion 7 then force the disclosure to grow with it, on both surfaces.
+const SURFACE_HOME = "/loam-home";
+const CREDENTIALS_FILE = basename(credentialsPath(SURFACE_HOME)); // credentials.json
+const LOCKS_FILE = basename(locksPath(SURFACE_HOME)); // login-locks.json
+const SEED_FAMILY = basename(userSeedPath(SURFACE_HOME, "<name>")); // user.<name>.seed
+const MUST_DISCLOSE = [CREDENTIALS_FILE, LOCKS_FILE, SEED_FAMILY].sort();
 
 /** Does `list` carry, for `file`, an entry that names it AND says erasure does not reach it? */
 const namesUnswept = (list: readonly string[], file: string): boolean =>
   list.some((line) => line.includes(file) && /not\b|never\b|outside\b/i.test(line));
 
-/** The two named entries a report must carry — exactly, and only, these two files. */
-const disclosesBoth = (list: readonly string[] | undefined): boolean =>
-  list !== undefined && namesUnswept(list, CREDENTIALS_FILE) && namesUnswept(list, LOCKS_FILE);
+/** Does the report name EVERY home auth surface as unswept? (Its list reads as exhaustive.) */
+const disclosesAll = (list: readonly string[] | undefined): boolean =>
+  list !== undefined && MUST_DISCLOSE.every((file) => namesUnswept(list, file));
+
+/** Every file-shaped token a surface names — credentials.json, login-locks.json, user.<name>.seed. */
+const fileTokens = (list: readonly string[]): string[] =>
+  [...new Set(list.flatMap((line) => line.match(/[\w.<>-]+\.(?:json|seed)/g) ?? []))].sort();
 
 const nonSweptOf = (health: unknown): readonly string[] | undefined =>
   (health as { nonSwept?: readonly string[] }).nonSwept;
@@ -81,19 +95,22 @@ async function plainStore(): Promise<{ gw: Gateway; backend: MemoryBackend }> {
   return { gw, backend };
 }
 
-// --- criterion 1: health() names both files ------------------------------------------------------
+// --- criterion 1: health() names every home auth surface -----------------------------------------
 
 describe("T131 criterion 1 — the health report names the surfaces erasure does not sweep", () => {
-  it("health() names credentials.json and login-locks.json as surfaces erasure does not sweep", async () => {
+  it("health() names credentials.json, login-locks.json and user.<name>.seed as unswept", async () => {
     const { gw } = await plainStore();
     const health = await gw.health();
     const list = nonSweptOf(health);
     expect(list).toBeDefined();
-    // The two files, each named and marked unswept. Hand-written expectation (H10).
+    // Each home auth surface, named and marked unswept — including the per-user SIGNING KEY, whose
+    // omission was the H7 hole a two-file expectation could not see. Expectation derived from the
+    // path functions (H10), not from the report.
     expect(namesUnswept(list!, CREDENTIALS_FILE)).toBe(true);
     expect(namesUnswept(list!, LOCKS_FILE)).toBe(true);
+    expect(namesUnswept(list!, SEED_FAMILY)).toBe(true);
     // Positive control against a blanket disclaimer: the report also says erasure DOES purge deltas,
-    // so "unswept" is a claim about these two files and not a catch-all that any prose would satisfy.
+    // so "unswept" is a claim about these files and not a catch-all that any prose would satisfy.
     expect(list!.join("\n")).toMatch(/delta/i);
   });
 });
@@ -101,7 +118,7 @@ describe("T131 criterion 1 — the health report names the surfaces erasure does
 // --- criterion 2: the disclosure reaches the receipt ---------------------------------------------
 
 describe("T131 criterion 2 — the disclosure reaches the compliance receipt", () => {
-  it("the receipt's nonClaim names credentials.json and login-locks.json", async () => {
+  it("the receipt's nonClaim names credentials.json, login-locks.json and user.<name>.seed", async () => {
     const gw = await bootSlateStore();
     gateways.push(gw);
     const member = observed(FERN, "height", 30, 1000, "6c".repeat(32));
@@ -110,8 +127,11 @@ describe("T131 criterion 2 — the disclosure reaches the compliance receipt", (
     const stood = await standSlate(gw, { members: [member], closes: ["egress"] });
     const report = await gw.cut(stood.container, { now: BEFORE_DEADLINE });
     const receipt = await gw.receipt(report.graveyard, { now: BEFORE_DEADLINE });
+    // The RECEIPT, the document a reader treats as proof, must carry every surface too — the per-user
+    // seed included, or the nonClaim list reads as exhaustive while a subject's key sits in the home.
     expect(namesUnswept(receipt.nonClaim, CREDENTIALS_FILE)).toBe(true);
     expect(namesUnswept(receipt.nonClaim, LOCKS_FILE)).toBe(true);
+    expect(namesUnswept(receipt.nonClaim, SEED_FAMILY)).toBe(true);
     // Two-sided, both bytes checked: the member IS gone and the bystander SURVIVES — the disclosure
     // rides a real cut, and it did not come at the cost of over-purging.
     expect(await gw.backend.holds(member.id)).toBe(false);
@@ -239,18 +259,18 @@ describe("T131 criteria 3 & 4 — a login whose user record delta was erased is 
 
 describe("T131 criterion 5 — the disclosure is not conditional on the erasure outcome", () => {
   it("the unswept disclosure is present on a zero-erasure, a partial, and a refused path", async () => {
-    // Zero-erasure: a store that has forgotten nothing still names both files.
+    // Zero-erasure: a store that has forgotten nothing still names every home auth surface.
     const fresh = await plainStore();
     const zero = await fresh.gw.health();
     expect(zero.erasure.promised).toBe(0);
-    expect(disclosesBoth(nonSweptOf(zero))).toBe(true);
+    expect(disclosesAll(nonSweptOf(zero))).toBe(true);
     const zeroList = nonSweptOf(zero)!;
 
     // Refused path: an erase of an id nothing holds THROWS and changes nothing; a following health()
-    // still names both files, byte-identical to the zero-erasure list.
+    // still names every surface, byte-identical to the zero-erasure list.
     await expect(fresh.gw.erase("delta:nothing-here")).rejects.toThrow();
     const afterRefusal = await fresh.gw.health();
-    expect(disclosesBoth(nonSweptOf(afterRefusal))).toBe(true);
+    expect(disclosesAll(nonSweptOf(afterRefusal))).toBe(true);
     expect(nonSweptOf(afterRefusal)).toEqual(zeroList);
 
     // Partial / unproven path: a real erasure leaves a surviving tombstone (a promise), then a tier
@@ -263,18 +283,21 @@ describe("T131 criterion 5 — the disclosure is not conditional on the erasure 
     backend.holds = () => Promise.reject(new Error("this tier is offline"));
     const partial = await gw.health();
     expect(partial.status).not.toBe("ok"); // unproven or settling — a partial state, not clean
-    expect(disclosesBoth(nonSweptOf(partial))).toBe(true);
+    expect(disclosesAll(nonSweptOf(partial))).toBe(true);
     expect(nonSweptOf(partial)).toEqual(zeroList);
   });
 });
 
-// --- criterion 7: one source, exactly the two scoped files ---------------------------------------
+// --- criterion 7: one source, exactly the home auth surfaces the path functions define -------------
 
-describe("T131 criterion 7 — both surfaces disclose the same two files, and only those two", () => {
-  it("both surfaces disclose the same two named files, and only those two", async () => {
-    // The receipt path (a real cut) and the health path must carry the SAME named entries, from ONE
-    // source — a drift between them is the finding-A failure. And the list is exactly two files: a
-    // third would be an unnamed guess, a second omission would reopen the H7 this phase closes.
+describe("T131 criterion 7 — both surfaces disclose exactly the derived home auth surfaces", () => {
+  it("both surfaces disclose the same set, and it equals the path-function-derived MUST_DISCLOSE", async () => {
+    // Two failures this rail must catch, and both bit: DRIFT between the surfaces (finding A), and an
+    // OMISSION on both (the per-user seed H7). So the check reduces each surface to its file-shaped
+    // tokens and requires them to equal MUST_DISCLOSE — the set DERIVED from the path functions, not a
+    // frozen literal. A surface omitting the seed goes red; a surface growing an undeclared file goes
+    // red; the two disagreeing goes red. The receipt's other nonClaim lines name containers, not
+    // files, so each surface reduces to exactly its auth-surface mentions.
     const gw = await bootSlateStore();
     gateways.push(gw);
     const member = observed(FERN, "height", 30, 1000, "6c".repeat(32));
@@ -284,14 +307,8 @@ describe("T131 criterion 7 — both surfaces disclose the same two files, and on
     const receipt = await gw.receipt(report.graveyard, { now: BEFORE_DEADLINE });
     const health = await gw.health();
 
-    // EVERY file-shaped token the disclosure names, extracted rather than looked up in a fixed
-    // universe — so ANY third file (a future sessions.json, oauth.json, a stray path) goes red here,
-    // not only the two this criterion happened to anticipate. The receipt's other nonClaim lines name
-    // containers, not files, so this reduces each surface to exactly its file mentions.
-    const named = (list: readonly string[]): string[] =>
-      [...new Set(list.flatMap((line) => line.match(/[\w-]+\.(?:json|seed)/g) ?? []))].sort();
-    const both = [CREDENTIALS_FILE, LOCKS_FILE].sort();
-    expect(named(receipt.nonClaim)).toEqual(both);
-    expect(named(nonSweptOf(health)!)).toEqual(both);
+    expect(MUST_DISCLOSE).toEqual([CREDENTIALS_FILE, LOCKS_FILE, SEED_FAMILY].sort()); // the derived set
+    expect(fileTokens(receipt.nonClaim)).toEqual(MUST_DISCLOSE);
+    expect(fileTokens(nonSweptOf(health)!)).toEqual(MUST_DISCLOSE);
   });
 });

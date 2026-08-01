@@ -579,17 +579,22 @@ export interface ErasureHealth {
 //
 // COMPLETE-BY-CONSTRUCTION, not by guess: this list is every home file that holds a data SUBJECT's
 // per-user data — keyed by the human's user name — outside the ground. That rule resolves to exactly
-// these two. A seed file holds the store's own signing key, not a subject's data, so it is not here.
-// `oauth.json` is a home file too, and erasure does not sweep it either, but it is keyed by CONNECTOR
-// (clientId): its grants and token digests are a connector's identity, not a human user's record, so
-// erasing a user's record leaves no subject-keyed bytes there and it is off THIS list. If a later
-// surface ever holds subject per-user data, it OWES this list an entry — the disclosure is the one
-// place that must never itself omit a surface (T131 criterion 7).
+// three, one per home path function §36 writes: `credentialsPath`, `locksPath`, and `userSeedPath`.
+//
+// NOT EVERY seed file is store infrastructure — the distinction is WHOSE key it is. `operator.seed`
+// holds the STORE's own signing key, so it is off this list. But `user.<name>.seed` (`userSeedPath`)
+// holds a SUBJECT's signing key, more sensitive than the password hash, because home access can still
+// sign AS that user while the file stands — so it IS here. `oauth.json` is a home file too, and
+// erasure does not sweep it either, but it is keyed by CONNECTOR (clientId): its grants and token
+// digests are a connector's identity, not a human user's record, so erasing a user's record leaves no
+// subject-keyed bytes there and it is off THIS list. If a later surface ever holds subject per-user
+// data, it OWES this list an entry — the disclosure is the one place that must never itself omit a
+// surface (T131 criterion 7 derives its expected set from the path functions to force exactly that).
 //
 // ONE source, read by BOTH the live `health()` report and the re-issuable compliance receipt
 // (`deriveReceiptImpl`), so the two surfaces can never drift on what erasure does not reach. Each line
 // names its file and says erasure does not reach it; the set as a whole affirms what erasure DOES
-// forget (deltas), so "unswept" reads as a claim about these two files and not a blanket disclaimer.
+// forget (deltas), so "unswept" reads as a claim about these files and not a blanket disclaimer.
 export const UNSWEPT_AUTH_SURFACES: readonly string[] = [
   "credentials.json IS NOT SWEPT: the server keeps per-user password hashes in the home's " +
     "credentials.json, OUTSIDE the delta store. Erasure purges deltas, so forgetting a user's " +
@@ -599,6 +604,11 @@ export const UNSWEPT_AUTH_SURFACES: readonly string[] = [
   "login-locks.json IS NOT SWEPT: the login delay keeps per-username failure records in the home's " +
     "login-locks.json, OUTSIDE the delta store. Erasure does not touch it; a record decays on its " +
     "own, and `loam user unlock` is its separate cure.",
+  "user.<name>.seed IS NOT SWEPT: each operator-role user's OWN signing key lives in the home, in " +
+    "user.<name>.seed, OUTSIDE the delta store. Erasure purges deltas, so forgetting a user's record " +
+    "delta shuts their login door, but the seed file itself stays — and its signature keeps resolving " +
+    "for a governed reader until its grant is struck. Removing the seed file, and striking its " +
+    "signing grant (`loam user remove-role`), is a separate operation, out of erasure's scope.",
 ];
 
 export interface StoreHealth {
