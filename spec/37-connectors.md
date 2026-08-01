@@ -78,3 +78,50 @@ plan's fifteen). Landed [#291](https://github.com/bombadil-labs/loam/pull/291) �
 `src/server/oauth.ts` (new), plus the `--public-url` flag
 threaded through `src/server/http.ts` and `src/cli/cli.ts`. No client registers, no code or token
 is minted; a connector can find the store and nothing more.
+
+### 37.3 Connector registration
+
+The next door: `POST /oauth/register` (RFC 7591 dynamic registration). A connector registers itself
+before any human is present — claude.ai has no browser, no cookie, and nobody at a keyboard when it
+does this — so the door CANNOT require a session, and the only thing between it and the disk is a
+CONFIGURED allowlist of redirect origins (`--oauth-allow-redirect <origins>`, opt-in like
+`--public-url` and closed by default). Without that fence a stranger registers a client named
+"Claude" pointing at a host they run, sends the operator a plausible authorize link, and walks away
+holding a writing identity in the store — an attack that never needs to become the operator, which
+is why "the mint path cannot produce operator" (a later phase's property) is necessary and nowhere
+near sufficient. An empty allowlist refuses every registration and names the flag that opens §37;
+there is no "allow anything" spelling. Every configured origin is validated at boot — a default-port
+spelling `url.origin` would silently drop, a path, or a non-https non-loopback origin is a startup
+error rather than a store that refuses every registration — and registration needs `--public-url`,
+since a connector reaches this endpoint only through the discovery document that flag builds.
+
+A `redirect_uri` is refused AT REGISTRATION, not only at authorize: it must be an absolute URL at an
+allowlisted origin, with no fragment, percent-transparent (so a later phase's exact-match compare
+cannot be reached under a second spelling), and carrying no control byte. That last check runs
+BEFORE `new URL()`, which strips tab, LF and CR while parsing — a uri carrying them would parse
+clean, pass every origin check, and keep its raw bytes in the stored record, where a future
+`loam grant list` prints them and forges a row. It is the same rule the client name already gets
+(phase 11's `clientNameDefect`/`uriTextDefect`), applied to its sibling field — the defect that
+escaped once was a rule written for one field that did not cover the other. Every entry of
+`redirect_uris` is checked, not the first that passes, because one honest uri carrying a hostile
+sibling means the client holds both.
+
+The door mints NOTHING — no code, no token, no actor seed; it records a public client and answers
+201. It is unauthenticated, so a plain cap would be a lockout: a stranger files the maximum junk
+registrations and the real connector is refused forever, with no command that removes one. So at the
+cap the door EVICTS the oldest EVICTABLE registration (by `registeredAt`) and admits the newcomer —
+the pressure falls on registrations nobody is using. A client the operator APPROVED is never
+evicted; in this phase "approved" means it holds a grant record in `oauth.json`, and the door that
+produces one is a later phase, so the eviction pin reads exactly one source here. Later phases each
+ADD a pin source (a live code; a redemption in flight), and adding a source only makes eviction more
+conservative, which is what lets the grant flow be three separate phases without any of them
+rewriting another's rails. On any fault reading or locking `oauth.json` the caller receives a fixed
+`503` string; the detail (the home path, the errno, the flag) goes only to the operator's `onFault`
+channel, because the door answers an unauthenticated caller with a wildcard CORS origin and anything
+derived from a local error would put the home's absolute path on the open internet.
+
+**Provenance.** Working spec `.adlc/specs/37-13-connector-registration.md` (T134, phase 13 of the
+plan's fifteen). Landed [#PR](https://github.com/bombadil-labs/loam/pull/PR) — the registration door
+and the redirect fence in `src/server/oauth.ts`, threaded through `ServeOptions.connectors` in
+`src/server/http.ts` and the `--oauth-allow-redirect` flag in `src/cli/cli.ts`. No code, token, or
+seed is minted; a connector can find the store and register, and nothing more.
