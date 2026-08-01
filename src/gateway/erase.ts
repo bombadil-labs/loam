@@ -572,6 +572,32 @@ export interface ErasureHealth {
   readonly unproven: boolean; // some tier could not be examined: not settled, not failed (H9)
 }
 
+// The home files §36 keeps OUTSIDE the delta store, and therefore outside erasure's reach (T131,
+// SPEC §36 phase 10). Erasure purges DELTAS from every tier; it never touches a home file, so a
+// report that read as exhaustive while a forgotten user's password hash still sat in
+// `credentials.json` would be H7 wearing letterhead — the honesty §11 owes named plainly.
+//
+// COMPLETE-BY-CONSTRUCTION, not by guess: this list is every home file §36 writes that holds a data
+// SUBJECT's per-user data outside the ground. On `main` that rule resolves to exactly these two. A
+// seed file holds the store's own signing key (not a subject's data) and is deliberately not here.
+// `oauth.json` is a §37 surface not written on `main`; when §37 lands it, that phase OWES this list an
+// entry — the disclosure is the one place that must never itself omit a surface (T131 criterion 7).
+//
+// ONE source, read by BOTH the live `health()` report and the re-issuable compliance receipt
+// (`deriveReceiptImpl`), so the two surfaces can never drift on what erasure does not reach. Each line
+// names its file and says erasure does not reach it; the set as a whole affirms what erasure DOES
+// forget (deltas), so "unswept" reads as a claim about these two files and not a blanket disclaimer.
+export const UNSWEPT_AUTH_SURFACES: readonly string[] = [
+  "credentials.json IS NOT SWEPT: the server keeps per-user password hashes in the home's " +
+    "credentials.json, OUTSIDE the delta store. Erasure purges deltas, so forgetting a user's " +
+    "record delta shuts the login door — the ground then holds no role for them, and the credential " +
+    "file cannot know the delta was erased — but the credential entry itself stays. Removing a " +
+    "credential entry is a separate operation, out of erasure's scope.",
+  "login-locks.json IS NOT SWEPT: the login delay keeps per-username failure records in the home's " +
+    "login-locks.json, OUTSIDE the delta store. Erasure does not touch it; a record decays on its " +
+    "own, and `loam user unlock` is its separate cure.",
+];
+
 export interface StoreHealth {
   // "ok"       — every promise settled, nothing lagging.
   // "settling" — converging, not broken: erasure debt outstanding somewhere in reach, or a mirror
@@ -589,6 +615,11 @@ export interface StoreHealth {
   readonly slates: SlateHealth;
   readonly forgiven: ForgivenHealth;
   readonly lagging?: boolean; // present when the backend exposes mirror lag (MirrorBackend)
+  // The surfaces erasure does NOT reach (T131) — the two §36 home files, disclosed unconditionally so
+  // the report is honest about its own edges whatever the erasure state. A top-level field, never a
+  // field of `ErasureHealth`: that interface is pinned by a `toEqual` rail (T70), and this fact is
+  // about the report's scope rather than any one promise's settling.
+  readonly nonSwept: readonly string[];
 }
 
 // The whole promised set, asked everywhere at once — `erasureOutstanding` above is this same fault
@@ -656,5 +687,9 @@ export async function healthImpl(gw: Gateway, now = Date.now()): Promise<StoreHe
     slates: slateHealth(gw, now),
     forgiven: forgivenHealth(gw),
     ...(typeof lagging === "boolean" && { lagging }),
+    // The unswept-surface disclosure (T131), unconditional: these home files are outside erasure's
+    // reach whether the store has forgotten nothing, something, or is mid-settle. The receipt reads
+    // the SAME constant, so the two surfaces cannot drift.
+    nonSwept: [...UNSWEPT_AUTH_SURFACES],
   };
 }

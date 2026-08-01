@@ -53,6 +53,7 @@ import {
   unreachableStoreReport,
 } from "./container.js";
 import {
+  UNSWEPT_AUTH_SURFACES,
   eraseImpl,
   erasureOutstanding,
   isTombstone,
@@ -1759,6 +1760,10 @@ export async function deriveReceiptImpl(
       ),
       "A RESTORED BACKUP CAN RESURFACE BYTES, and this document is RE-ISSUABLE to prove present " +
         "state — every per-tier verdict above was probed at the issue moment, never reprinted.",
+      // The unswept §36 home surfaces (T131), from the SAME constant `health()` reads — so the receipt
+      // and the live report cannot drift on what erasure does not reach. Without these two lines the
+      // list reads as exhaustive while a forgotten user's password hash still sits in credentials.json.
+      ...UNSWEPT_AUTH_SURFACES,
     ],
   };
 }

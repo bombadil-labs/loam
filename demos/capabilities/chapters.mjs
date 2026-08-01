@@ -1449,13 +1449,18 @@ export const CHAPTERS = [
             proof: "test/server/login-delay.test.ts",
             door: null,
           },
+          {
+            says: "Erasure forgets DELTAS, and it names what it does not reach: the health report and the compliance receipt both name credentials.json and login-locks.json — the two auth files the server keeps outside the ground — as surfaces erasure never sweeps. Forgetting a user's record delta still shuts the login door, because the ground holds the role and the credential file cannot vouch for a user the ground no longer names; the credential entry itself stays, and removing it is a separate operation.",
+            spec: "spec/36-users-and-sessions.md",
+            proof: "test/server/users-erasure.test.ts",
+            door: null,
+          },
         ],
       },
       {
         kind: "notYet",
         items: [
           "The constitutional writes — registering a schema, the renderer's pen — still sign as the store rather than as the person, because publishing law refuses any author but the store's own.",
-          "Erasure honesty for `credentials.json` (phase 10): the health report and compliance receipt do not yet name the credential file as a surface erasure does not sweep.",
         ],
       },
     ],

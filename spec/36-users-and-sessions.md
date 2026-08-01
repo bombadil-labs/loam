@@ -428,3 +428,37 @@ per-second figure would be wrong by orders of magnitude.
 and the `postLogin` wiring in `src/server/session.ts`, proved by `test/server/login-delay.test.ts`.
 Working spec: `.adlc/specs/36-09-the-login-delay.md`. Tickets T130 and T120 (the non-regular-file
 refusal, folded in here).
+
+### 36.10 Erasure honesty
+
+Two parts of a user live OUTSIDE the delta store, in the home: the password hash in `credentials.json`
+(§36.1) and the per-username failure record in `login-locks.json` (§36.9). Erasure purges DELTAS from
+every tier, so it never touches a home file. An erasure report that read as exhaustive would therefore
+be dishonest by omission — the exact H7 shape, on the one surface whose report is a legal claim. So the
+report NAMES the two files. `gateway.health()` carries a top-level `nonSwept` list, and the re-issuable
+compliance receipt carries the same two entries in its `nonClaim`, from ONE shared constant so the two
+surfaces cannot drift. Each entry names its file and says erasure does not reach it; the set as a whole
+still affirms what erasure DOES forget, so "unswept" reads as a claim about these two files and not a
+blanket disclaimer.
+
+The list is complete by a RULE, not a guess: it names every home file §36 writes that holds a data
+subject's per-user data outside the ground. On this store that rule resolves to exactly two. A seed
+file holds the store's own signing key, not a subject's data, so it is not on the list. A later phase
+that adds such a home file owes the list an entry — the disclosure is the one place that must never
+itself omit a surface.
+
+This honesty has a security counterpart that the store already enforces. Because `credentials.json` is
+unswept, the GROUND — not the credential file — must be the authority the login door trusts. Forgetting
+a user's RECORD DELTA makes `resolveUserView` resolve to nothing, so `rolesOf` is empty, so a login
+with that user's still-valid password is refused with the door's ordinary refusal. The credential file
+cannot know the record was erased; the ground can, and it shuts the door. Erasing a user record does
+not remove that user's credential entry — removing a credential entry is a separate operation, and it
+stays a separate ticket. Clearing a `login-locks.json` record is likewise separate (`loam user unlock`,
+§36.9); a forgotten user's failure record simply decays.
+
+This phase widened no purge. It changed only what the report SAYS.
+
+**Provenance.** [PR #326](https://github.com/bombadil-labs/loam/pull/326) — the `nonSwept` disclosure
+and shared `UNSWEPT_AUTH_SURFACES` constant in `src/gateway/erase.ts`, carried into the receipt's
+`nonClaim` in `src/gateway/slate.ts`, proved by `test/server/users-erasure.test.ts`. Working spec:
+`.adlc/specs/36-10-erasure-honesty.md`. Ticket T131.
