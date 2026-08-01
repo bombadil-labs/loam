@@ -424,7 +424,7 @@ pretends to be the other. There is deliberately no guesses-per-second number her
 read one count and pay one wait, so a caller buys the hash cap's worth of guesses per wait, and a
 per-second figure would be wrong by orders of magnitude.
 
-**Provenance.** [PR #296](https://github.com/bombadil-labs/loam/pull/296) — `src/server/login-locks.ts`
+**Provenance.** [PR #319](https://github.com/bombadil-labs/loam/pull/319) — `src/server/login-locks.ts`
 and the `postLogin` wiring in `src/server/session.ts`, proved by `test/server/login-delay.test.ts`.
 Working spec: `.adlc/specs/36-09-the-login-delay.md`. Tickets T130 and T120 (the non-regular-file
 refusal, folded in here).
