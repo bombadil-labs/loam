@@ -384,3 +384,47 @@ produced one.
 **Provenance.** [PR #295](https://github.com/bombadil-labs/loam/pull/295) — `src/server/session.ts`,
 proved by `test/server/session-authorship.test.ts`. Working spec:
 `.adlc/specs/36-08-a-session-signs-as-its-user.md`. Ticket T129.
+
+### 36.9 The login delay
+
+A wrong password must cost something, or a store whose operator name is known is a store anyone may
+guess at until they are in. The cost here is a WAIT, never a lock: each failure makes the next
+attempt FOR THAT NAME wait longer — the base doubled once per failure, capped so "slow" never becomes
+"shut" — and a correct password is admitted however many failures came before it. A lock would be an
+off switch a stranger could pull with a handful of wrong guesses at a name they already know; a delay
+taxes the guesser and never touches the operator's own way in.
+
+It keys on the USERNAME, never on a caller-supplied source. Behind a proxy every request arrives from
+127.0.0.1, and `X-Forwarded-For` is the caller's own to write, so a per-source counter is a remote
+lever pointed at the operator's login. Keying on the name puts the one lever that clears a record —
+`loam user unlock`, which this phase makes meaningful — where only the box can reach it. The state
+lives in a plain file in the home, `login-locks.json`, for the same reason: the unlock command is a
+separate process, and a record in server memory is one it could never clear.
+
+The wait is paid BEFORE the password is compared. A cost charged after the check is no cost at all — a
+fast refusal beside a slow success tells a caller which guess was close as plainly as the status would
+— so the door reads the owed wait, serves it, and only then spends a hash. A waiting attempt holds no
+hash slot, so a flood against one name never freezes another name out, and the global cap on
+unauthenticated hash work (§36.5) is re-read AFTER the wait, never before it, so a burst cannot pass
+one stale free-budget reading and then hash all at once when its waits elapse together.
+
+Both writes fail OPEN, and that is the whole promise restated: a home this process cannot write, or a
+record path replaced by a directory, must never turn a correct password into an error. Fail-open means
+no budget at all — a name with no row waits zero until the disk is fixed — which is the safe
+direction, because a work budget is not an authorization surface and a local fault has no business
+refusing a login. A record path that is not a regular FILE is refused before it is opened: a FIFO left
+at `login-locks.json` would otherwise park `readFileSync`, and with it the whole single-threaded login
+door, forever.
+
+The table is bounded, because an unauthenticated caller drives every write to it, and the bound has an
+honest cost stated rather than hidden: a caller who floods the table can keep a chosen name's row out
+of it and pay that name's delay nothing. The eviction order is not a defence and is not sold as one —
+the delay taxes a serial guesser against one name, the hash cap bounds the parallel one, and neither
+pretends to be the other. There is deliberately no guesses-per-second number here: concurrent attempts
+read one count and pay one wait, so a caller buys the hash cap's worth of guesses per wait, and a
+per-second figure would be wrong by orders of magnitude.
+
+**Provenance.** [PR #319](https://github.com/bombadil-labs/loam/pull/319) — `src/server/login-locks.ts`
+and the `postLogin` wiring in `src/server/session.ts`, proved by `test/server/login-delay.test.ts`.
+Working spec: `.adlc/specs/36-09-the-login-delay.md`. Tickets T130 and T120 (the non-regular-file
+refusal, folded in here).

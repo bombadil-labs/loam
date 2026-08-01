@@ -50,6 +50,14 @@ import {
   type ScryptParams,
 } from "./credentials.js";
 import { rolesOf, userNameDefect, type UserRole } from "./users.js";
+import {
+  DEFAULT_LIMIT,
+  delayMs,
+  forgetFailures,
+  locksPath,
+  noteFailure,
+  type LimitPolicy,
+} from "./login-locks.js";
 // The home's layout — where a per-user signing seed lives — is `cli/config`'s to spell, and
 // spelling it a second time here is how two paths drift apart. Phase 3 writes these files; this
 // door only reads them.
@@ -74,6 +82,21 @@ export interface UserDoorOptions {
   readonly maxTokensPerSession?: number; // live tokens one session may hold (default 16)
   readonly maxConcurrentHashes?: number; // unauthenticated scrypt work in flight (default 4)
   readonly scrypt?: ScryptParams;
+  /** The failed-login delay policy (SPEC §36 phase 9). Defaults to `DEFAULT_LIMIT`. */
+  readonly limit?: LimitPolicy;
+  /**
+   * The WALL clock the failed-login delay reads and writes into `login-locks.json` — separate from
+   * `monotonicNow`, which times the session table. It is wall clock on purpose: the record outlives
+   * the process and `loam user unlock` reads it from another one, so a monotonic origin would mean
+   * nothing to either. Injectable so a rail can step it; defaults to `Date.now`.
+   */
+  readonly limitNow?: () => number;
+  /**
+   * How the pre-compare wait is served. Defaults to a bare monotonic timer (`setTimeout`), which is
+   * driven by a monotonic clock so a wall-clock step cannot shorten a wait in flight. Injectable so
+   * a rail can gate it and prove a waiting attempt is in flight without a real sleep.
+   */
+  readonly waitFor?: (ms: number) => Promise<void>;
   /** A monotonic millisecond source. Injectable so a rail can drive it; never `Date.now()`. */
   readonly monotonicNow?: () => number;
   /**
@@ -319,6 +342,15 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
   const scryptParams = options.scrypt ?? DEFAULT_SCRYPT;
   const now = options.monotonicNow ?? ((): number => performance.now());
   const onFault = options.onFault ?? ((message: string): void => void message);
+  const limit = options.limit ?? DEFAULT_LIMIT;
+  // The WALL clock the delay writes into login-locks.json, distinct from `now` (the session table's
+  // monotonic source). See the option's doc for why it must be wall clock.
+  const limitNow = options.limitNow ?? ((): number => Date.now());
+  // A bare monotonic timer, so a wall-clock step cannot shorten a wait already in flight. It serves
+  // no queue: a caller holding many sockets has all their waits elapse together — see DEFAULT_LIMIT.
+  const waitFor =
+    options.waitFor ??
+    ((ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms)));
 
   /**
    * The origins this store answers its own forms from (SPEC §36 phase 6). Exactly the settled
@@ -425,6 +457,37 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
   // shares run out at different times. Login is deliberately degradable; the API does not pass
   // through here. Phase 9 rails this cap's interplay with the delay exhaustively.
   let hashesInFlight = 0;
+
+  // THE FAILED-LOGIN DELAY'S WRITES FAIL OPEN, both of them, because this door promises a correct
+  // password is always admitted. `readLocks` treats a file it cannot read as no records; the writes
+  // have to agree. Unguarded a write throws to the outer handler, which answers 503 — so an
+  // unwritable home, ENOSPC, or a directory at login-locks.json would refuse a CORRECT password,
+  // the one thing this design forbids. FAIL-OPEN MEANS NO BUDGET AT ALL: a name with no row waits
+  // zero for as long as the fault lasts, and a name with a row keeps paying its wait but can no
+  // longer grow OR clear it, until `forgetMs` of silence retires the row on read. The fault goes to
+  // the operator's own channel; the caller's answer does not move. Never `await` here: the read,
+  // increment and write in `noteFailure` are one synchronous step by design (H1-shaped: a snapshot
+  // carried across an await would let two overlapping attempts share one count).
+  const recordFailure = (name: string): void => {
+    try {
+      noteFailure(options.home, name, limitNow(), limit);
+    } catch (err) {
+      onFault(
+        `the login door could not record a failed attempt in ${locksPath(options.home)}: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  };
+  const forgetCount = (name: string): void => {
+    try {
+      forgetFailures(options.home, name);
+    } catch (err) {
+      onFault(
+        `the login door could not clear a failure count in ${locksPath(options.home)}: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  };
 
   // Tokens this session minted, held as DIGESTS and never as the secret: a session idles six
   // times a token's own life, so keeping the plaintext to hand back at revocation time would put
@@ -729,8 +792,34 @@ page will offer.</p>`,
       refuseLogin(res);
       return;
     }
+    // THE WAIT COMES FIRST, BEFORE THE COMPARE, and the order is the whole design (SPEC §36 phase 9).
+    // A cost charged after the compare is no cost at all: the guess is already evaluated, and a fast
+    // refusal beside a slow success tells the caller which they got just as plainly as the status
+    // would. So the wait is paid ahead of the hash budget, the credential read, and any comparison.
+    //
+    // IT IS A WAIT, NEVER A REFUSAL. A correct password is admitted however many failures came before
+    // it — the cap on the wait keeps "slow" from becoming "shut". The delay keys on the USERNAME
+    // (never a caller-supplied address), read from `login-locks.json`; `limitNow` is the wall clock
+    // the record decays against.
+    //
+    // A WAITING ATTEMPT HOLDS NO HASH SLOT: `hashesInFlight += 1` is taken immediately before the
+    // hash below, not here, so another name gets in DURING the wait. It does NOT follow that a flood
+    // cannot draw a 503 for another name — the waits elapse together, the flood spends the whole
+    // budget at once, and a name arriving in that window is refused. Login stays deliberately
+    // degradable under a flood.
+    //
+    // THE CAP CHECK COMES AFTER THE WAIT for the load-bearing reason: the check and the increment
+    // must have NO await between them. Checking before the wait would let every waiting attempt pass
+    // one free-budget snapshot, then all hash at once when their waits elapse — the cap read as
+    // satisfied by a measurement taken seconds before the work. The read is ADVISORY: `noteFailure`
+    // re-reads and re-decides for itself, so attempts arriving together pay the same wait and a
+    // caller buys `maxConcurrentHashes` guesses per wait rather than one. Re-reading after the wait
+    // would let a caller who keeps failing extend an honest attempt without limit — the lockout again.
+    const owed = delayMs(options.home, user, limitNow(), limit);
+    if (owed > 0) await waitFor(owed);
     // THE CHECK AND THE INCREMENT HAVE NO AWAIT BETWEEN THEM: a cap read before an await would be
-    // a measurement taken before the work it authorizes. A refusal here spends no hash.
+    // a measurement taken before the work it authorizes. A refusal here spends no hash, and a
+    // refusal here is not a failed attempt, so it never fills the delay either.
     if (hashesInFlight >= maxHashes) {
       json(res, 503, {
         errors: ["the login door is busy: too much unauthenticated work is already in flight"],
@@ -772,6 +861,10 @@ page will offer.</p>`,
       hashesInFlight -= 1;
     }
     if (!matched) {
+      // The count grows, so the NEXT attempt for this name costs more; this one already paid its
+      // wait. `recordFailure` fails open — a write fault must not turn this 401 into a 503 (see its
+      // definition), because a local disk fault has no say in what this door answers.
+      recordFailure(user);
       refuseLogin(res);
       return;
     }
@@ -798,6 +891,12 @@ page will offer.</p>`,
       cannotDecide(res, "this store is holding all the sessions it can");
       return;
     }
+    // THE CORRECT PASSWORD IS ALREADY ACCEPTED, so nothing after the seat may refuse it. Clearing
+    // the count is a COURTESY — it saves this name one wait next time — and `forgetCount` fails open
+    // so a write fault costs exactly that courtesy and nothing more. Unguarded, a throw here would
+    // reach the outer handler as a 503, refusing a correct password AND leaving the session just
+    // seated with no cookie to reach it, burning one of `maxSessions` per retry.
+    forgetCount(user);
     // The browser is told to drop the nonce cookie; the pair itself stays verifiable until the
     // process restarts — the pre-session is stateless, so nothing can spend it server-side.
     html(res, 200, signedInPage(user, roles, opened.session.formToken), [
