@@ -55,6 +55,7 @@ import { grantClaims } from "../gateway/accounts.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
 import { readSeed } from "../cli/config.js";
 import { makeUserDoors, type UserDoorOptions, type UserDoors } from "./session.js";
+import { makeAdminDoor, type AdminDoor } from "./admin.js";
 
 export { type UserDoorOptions } from "./session.js";
 
@@ -440,6 +441,11 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
   // function of the options — the bound-URL default for `publicUrl` is filled in after listen,
   // which is why the deps read a closure variable the post-listen block assigns.
   let userDoors: UserDoors | undefined;
+
+  // The admin page (SPEC §40 phase A1), opt-in with `users` alone: it reads the session gate and
+  // the users mount's containers, so `connectors` is not required. Built post-listen with
+  // `userDoors.gate`, routed before mount resolution.
+  let admin: AdminDoor | undefined;
 
   // The consent page (SPEC §37 phase 14), opt-in: it exists only where BOTH a login session (`users`)
   // and registered connectors (`connectors`, whose home holds `oauth.json`) are configured — one
@@ -1032,6 +1038,12 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         void userDoors.handle(url.pathname, req, res);
         return;
       }
+      // The admin page (SPEC §40 phase A1), answered before mount routing — the store's own page
+      // over the signed-in user's containers. Absent `users`, `/admin` falls through untouched.
+      if (admin !== undefined && admin.owns(url.pathname)) {
+        void admin.handle(url.pathname, req, res);
+        return;
+      }
       // The consent page (SPEC §37 phase 14), answered before mount routing — a store's own page, not
       // a mount's. Absent `users` or `connectors`, `/oauth/authorize` falls through untouched.
       if (consent !== undefined && consent.owns(url.pathname)) {
@@ -1522,6 +1534,14 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       // doors' own, and `addMount` refuses any runtime one — so an alias is unreachable, and
       // containers (the one tier neither guard sees) are genuinely distinct gateways.
       otherWorlds: () => mounts.live().filter((name) => name !== forUsers.mount),
+    });
+    // The admin page reuses the login doors' session gate and the users mount's live gateway —
+    // re-asked per request, never captured, for the same reasons the doors' own ground is.
+    admin = makeAdminDoor({
+      gate: userDoors.gate,
+      home: forUsers.home,
+      ground: () => mounts.resolve(forUsers.mount)?.gateway,
+      ...(forUsers.onFault === undefined ? {} : { onFault: forUsers.onFault }),
     });
     // The consent page reuses the login doors' session gate, and reads/writes the connectors' own
     // `oauth.json` — so it opens only where both are configured. Its clock is the login doors' own
