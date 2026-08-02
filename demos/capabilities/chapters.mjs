@@ -1471,11 +1471,15 @@ export const CHAPTERS = [
     title: "Connectors — letting an outside party in",
     thesis:
       "An outside party — claude.ai, or any MCP client — reaches a store over OAuth rather than as the operator at a keyboard, built in small phases that each land and merge alone.",
-    covers: ["spec/37-connectors.md"],
+    covers: ["spec/37-connectors.md", "spec/39-connection-container.md"],
     body: [
       {
         kind: "prose",
         text: "A connector needs somewhere durable to keep what it knows before any door exists for it to use: which clients are registered, which one owns which signing seed, which tokens are still live. That record lives in the home, mode 0600, beside the operator's own seed — never in the ground, because the ground replicates under [[federation]] and a peer receiving it would receive a connector's signing key.",
+      },
+      {
+        kind: "prose",
+        text: "Once it is in, a connection binds to exactly one [[container]]: reads GATHER that container — everything in it, wherever a delta came from — and writes LAND in it, through a per-connection INBOX pool the connection signs with its own key. The key is the owner's, so the operator never appears on the read or write path; it appears once, to provision the owner's authority over the owner's own inbox. Revoking strikes the connection's grant; dropping the inbox is a total forget of everything that connection wrote.",
       },
       {
         kind: "prose",
@@ -1500,6 +1504,12 @@ export const CHAPTERS = [
             says: "A connector registers itself with no session, because claude.ai registers before any human is present — so a configured allowlist of redirect origins is the whole fence, and a redirect target outside it is refused at registration, not only at authorize. The registration door mints nothing: no code, no token, no signing seed. When it is full it EVICTS the oldest registration nobody has approved rather than refusing, so a stranger cannot lock the real connector out, and a client the operator approved is never the one evicted.",
             spec: "spec/37-connectors.md",
             proof: "test/server/oauth-register.test.ts",
+            door: null,
+          },
+          {
+            says: "A connection binds to one container: it reads that container's whole membership and its writes land in a per-connection inbox pool the connection signs with its own key. A strike admitted to the gather suppresses its target whoever wrote it and wherever in the container's grounds it sits — negation binds by MEMBERSHIP, closed across every ground at once, so a retraction written into an inbox cannot be stranded away from the primary claim it strikes. Revoking the connection strikes its grant and the door refuses the next write while past writes keep their author; dropping the inbox purges every byte it wrote, and a named live bystander survives both.",
+            spec: "spec/39-connection-container.md",
+            proof: "test/server/connection-container.test.ts",
             door: null,
           },
         ],
