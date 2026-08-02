@@ -95,7 +95,7 @@ owner), or a guard on binding a connection to the store's root. It does not narr
 carries: a granted author is a lawful author within its inbox. Narrowing is a later section.
 
 **Provenance.** Working spec `.adlc/specs/39-connection-container.md` (T138). Landed
-[#PENDING](https://github.com/bombadil-labs/loam/pull/PENDING) — the inbox model in
+[#321](https://github.com/bombadil-labs/loam/pull/321) — the inbox model in
 `src/gateway/container.ts` (`bindConnectionImpl`, `revokeConnectionImpl`, `connectionScopeImpl`, the
 `inboxOf` declaration field, and `containerScopeImpl`'s inbox composition), the union closure
 `withNegationClosureAcross` in `src/gateway/ingest.ts`, and the `bindConnection` / `revokeConnection`
