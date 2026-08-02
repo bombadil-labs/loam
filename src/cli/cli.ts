@@ -31,6 +31,8 @@ import {
   type RegistrationInput,
 } from "../gateway/registration.js";
 import { serve, type ServerHandle } from "../server/http.js";
+import { revokeConnector } from "../server/oauth.js";
+import { grantFor, readOAuthFile, type OAuthGrant } from "../server/oauth-file.js";
 import {
   credentialsPath,
   entryFor,
@@ -86,7 +88,16 @@ export interface RunOptions {
 const VERSION = "0.1.0";
 
 type CommandName =
-  "init" | "serve" | "register" | "pull" | "migrate" | "store" | "repair" | "artifact" | "user";
+  | "init"
+  | "serve"
+  | "register"
+  | "pull"
+  | "migrate"
+  | "store"
+  | "repair"
+  | "artifact"
+  | "user"
+  | "grant";
 
 interface CommandSpec {
   readonly summary: string; // the line the top-level help shows
@@ -220,6 +231,22 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "--role=operator` again, which mints a fresh key and files a fresh grant. Even the LAST",
       "operator may remove their own role this way and reassign it — both commands need only home",
       "access, never a live session, so the store is never lockable from a terminal that can read it.",
+    ],
+  },
+  grant: {
+    summary: "list or revoke the OAuth connectors this store has granted (SPEC §37)",
+    usage: "loam grant list|revoke <client_id> [options]",
+    flags: new Set(["home", "store"]),
+    notes: [
+      "subcommands:",
+      "  list                  the connectors this store holds — id, name, generation, standing",
+      "  revoke <client_id>    bump the connector's generation and strike its write grant",
+      "",
+      "REVOKE BINDS AT ONCE. Bumping the generation makes every live token and in-flight code stop",
+      "matching, so a running server refuses that connector on its next request with no restart. It",
+      "also strikes the operator-signed write grant in the ground. It NEVER erases the connector's",
+      "past deltas — those keep naming their author and keep resolving. Like every role command, this",
+      "signs with <home>/operator.seed and needs only home access, never a live session.",
     ],
   },
 };
@@ -1476,6 +1503,128 @@ async function cmdUserRole(
   }
 }
 
+async function cmdGrant(args: readonly string[], io: IO): Promise<number> {
+  const parsed = parseFor("grant", args);
+  const sub = parsed.positionals[0];
+  if (sub !== "list" && sub !== "revoke") {
+    io.err("grant wants a subcommand: `loam grant list` or `loam grant revoke <client_id>`");
+    return 2;
+  }
+  const home = parsed.flags.get("home") ?? defaultHome();
+  const unusable = homeDefect(home, { allowMissing: false });
+  if (unusable !== undefined) {
+    io.err(`grant ${sub}: ${unusable}`);
+    return 1;
+  }
+  if (sub === "list") return cmdGrantList(home, io);
+
+  const clientId = parsed.positionals[1];
+  if (clientId === undefined) {
+    io.err("grant revoke wants a client id: `loam grant revoke <client_id>`");
+    return 2;
+  }
+  if (parsed.positionals.length > 2) {
+    io.err("grant revoke takes exactly one client id");
+    return 2;
+  }
+  return cmdGrantRevoke(clientId, parsed, home, io);
+}
+
+function cmdGrantList(home: string, io: IO): number {
+  let file;
+  try {
+    file = readOAuthFile(home);
+  } catch (err) {
+    io.err(
+      `grant list: ${home}'s connector records are unreadable, so this will not guess what is ` +
+        `granted: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return 1;
+  }
+  if (file.clients.length === 0) {
+    io.out("loam: this store has granted no connectors");
+    return 0;
+  }
+  io.out(`loam: ${file.clients.length} connector${file.clients.length === 1 ? "" : "s"}`);
+  for (const client of file.clients) {
+    const grant = grantFor(file, client.clientId);
+    const tokens = file.tokens.filter((t) => t.clientId === client.clientId).length;
+    // The standing line is the honest one: a client with no grant has registered but never
+    // completed a token exchange, so it can act nowhere yet.
+    const standing =
+      grant === undefined
+        ? "no grant yet"
+        : grant.standing
+          ? `acts as ${grant.actor}`
+          : "grant pending";
+    io.out(
+      `  ${client.clientId}  ${client.clientName}\n` +
+        `    generation ${client.generation} · ${standing} · ${tokens} live token${tokens === 1 ? "" : "s"}`,
+    );
+  }
+  return 0;
+}
+
+async function cmdGrantRevoke(
+  clientId: string,
+  parsed: Parsed,
+  home: string,
+  io: IO,
+): Promise<number> {
+  let seed: string;
+  try {
+    seed = readSeed(home);
+  } catch (err) {
+    io.err(
+      `grant revoke: ${home} has no operator identity — \`loam init\` makes one: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    );
+    return 1;
+  }
+  const operator = authorForSeed(seed);
+  const path = storePath(home, parsed.flags.get("store"));
+  const gateway = await Gateway.boot(openStore(path, io), assembleGenesis({ operatorSeed: seed }));
+  try {
+    // Strike every SURVIVING write grant this store's seed signed for the connector's actor. This is
+    // cleanup after the file's generation bump, which is what actually kills the connector's tokens.
+    const strike = async (grant: OAuthGrant): Promise<void> => {
+      const ids = survivingGrantClaimIds(gateway.reactor, operator, grant.actor);
+      if (ids.length === 0) return;
+      const at = Date.now();
+      await gateway.append(
+        ids.map((id, i) => signClaims(makeNegationClaims(operator, at + i, id), seed)),
+      );
+    };
+    const outcome = await revokeConnector(home, clientId, strike, (m) => io.err(`loam: ${m}`));
+    switch (outcome.kind) {
+      case "no-such-client":
+        io.err(`grant revoke: this store holds no connector ${clientId} — \`loam grant list\``);
+        return 2;
+      case "locked":
+        io.err(
+          `grant revoke: this store's connector records are locked by another process, so ` +
+            `nothing was revoked. Retry once it is idle.`,
+        );
+        return 1;
+      case "unreadable":
+        io.err(
+          `grant revoke: this store's connector records are unreadable, so nothing was revoked.`,
+        );
+        return 1;
+      case "revoked":
+        io.out(
+          `loam: revoked ${clientId}\n` +
+            `  its tokens and codes no longer match (generation ${outcome.generation}), and its ` +
+            `write grant is struck in ${path}\n` +
+            `  its past deltas are untouched — they keep naming their author`,
+        );
+        return 0;
+    }
+  } finally {
+    await gateway.close();
+  }
+}
+
 function defaultHome(): string {
   return process.env["LOAM_HOME"] ?? ".loam";
 }
@@ -1531,6 +1680,8 @@ export async function run(
         return await cmdArtifact(rest, io);
       case "user":
         return await cmdUser(rest, io, options);
+      case "grant":
+        return await cmdGrant(rest, io);
       default:
         io.err(`loam: unknown command "${command}" — run \`loam --help\``);
         return 2;

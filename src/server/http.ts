@@ -26,7 +26,7 @@
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { type Delta, type Primitive } from "@bombadil/rhizomatic";
+import { authorForSeed, signClaims, type Delta, type Primitive } from "@bombadil/rhizomatic";
 import { Kind, OperationTypeNode, parse, type DocumentNode } from "graphql";
 import { fromWire, toWire, type WireDelta } from "../federation/wire.js";
 import { buildOpenApi, handleRest } from "../surface/rest.js";
@@ -43,12 +43,17 @@ import {
   canonicalPublicUrl,
   makeConsentDoor,
   makeOAuthDoors,
+  makeTokenDoor,
   publicUrlDefect,
   redirectOriginDefect,
   type ConnectorRegistration,
   type ConsentDoor,
   type OAuthDoors,
+  type TokenDoor,
 } from "./oauth.js";
+import { grantClaims } from "../gateway/accounts.js";
+import { STORE_ENTITY } from "../gateway/genesis.js";
+import { readSeed } from "../cli/config.js";
 import { makeUserDoors, type UserDoorOptions, type UserDoors } from "./session.js";
 
 export { type UserDoorOptions } from "./session.js";
@@ -395,6 +400,11 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
   // means absent doors and absent header. Registration (phase 13) rides the same doors object and
   // needs publicUrl too — a connector reaches `/oauth/register` only through the discovery document
   // that publicUrl builds.
+  // ClientIds with a token redemption IN FLIGHT — the eviction pin's third source (SPEC §37 phase 15,
+  // criterion 3), SHARED between the register door (which reads it) and the token door (which counts
+  // into it). One map, so the two doors cannot disagree about who is mid-redemption.
+  const redeeming = new Map<string, number>();
+
   let discovery: OAuthDoors | undefined;
   if (options.connectors !== undefined && options.publicUrl === undefined) {
     throw new Error(
@@ -419,7 +429,9 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     }
     discovery = makeOAuthDoors({
       publicUrl: canonicalPublicUrl(options.publicUrl),
-      ...(options.connectors === undefined ? {} : { registration: options.connectors }),
+      ...(options.connectors === undefined
+        ? {}
+        : { registration: { ...options.connectors, redeeming } }),
     });
   }
 
@@ -434,6 +446,12 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
   // supplies the phase-5 session it sits behind, the other the clients it grants and the code table
   // it mints into. Built post-listen with `userDoors.gate`, routed before mount resolution.
   let consent: ConsentDoor | undefined;
+
+  // The token exchange (SPEC §37 phase 15), opt-in the same way: it redeems a code for a
+  // per-connector seed and a bearer token, and its `resolve` is what `identify` consults to
+  // authenticate that token. Built post-listen with the live gateway (it appends the operator-signed
+  // write grant) and routed before mount resolution.
+  let tokenExchange: TokenDoor | undefined;
 
   // ONE MOUNT, or no login doors (SPEC §36 phase 7). `/session/token` mints `{ operator: true }`,
   // which is authority over this whole SERVER — every mount it hosts, now or later. The role
@@ -525,7 +543,12 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     }
     const digest = presented.toString("hex");
     const minted = sessionTokens.get(digest);
-    if (minted === undefined) return undefined;
+    if (minted === undefined) {
+      // A connector's bearer token (SPEC §37 phase 15): resolved by the token door, which is BOUNDED
+      // — an unknown token is one in-memory miss with no file read behind it, so a flood of bogus
+      // tokens costs no key derivation. It resolves ONLY to `{ actor }`, never an operator identity.
+      return tokenExchange?.resolve(digest);
+    }
     // TWO expiries, and BOTH bind. The token's own window is the obvious one. The second is the
     // parent SESSION's idle window: sweeping runs only when someone logs in or presents a
     // cookie, so an abandoned session's already-minted operator token would otherwise go on
@@ -1013,6 +1036,12 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       // a mount's. Absent `users` or `connectors`, `/oauth/authorize` falls through untouched.
       if (consent !== undefined && consent.owns(url.pathname)) {
         void consent.handle(url.pathname, req, res);
+        return;
+      }
+      // The token exchange (SPEC §37 phase 15): a server-level door, answered before mount routing.
+      // Absent `users` or `connectors`, `/oauth/token` falls through untouched.
+      if (tokenExchange !== undefined && tokenExchange.owns(url.pathname)) {
+        void tokenExchange.handle(url.pathname, req, res);
         return;
       }
       const [, mountName, verb] = url.pathname.split("/");
@@ -1503,6 +1532,48 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         home: options.connectors.home,
         ...(forUsers.monotonicNow === undefined ? {} : { now: forUsers.monotonicNow }),
       });
+      // The token exchange signs the operator-signed write grant with the home's own operator seed —
+      // the same key `loam serve` opened the gateway with (cmdServe reads it from here). Read once, at
+      // boot: a home whose seed is unreadable can register and consent but never mint a token, so the
+      // door FAILS CLOSED (it is not opened) rather than throwing on the first redemption.
+      const connectorHome = options.connectors.home;
+      const connectorFault =
+        options.connectors.onFault ?? ((message: string): void => void message);
+      let operatorSeed: string | undefined;
+      try {
+        operatorSeed = readSeed(connectorHome);
+      } catch (err) {
+        connectorFault(
+          `the token exchange is not open: this store's operator seed is unreadable, so it cannot ` +
+            `sign a connector's write grant (${err instanceof Error ? err.message : String(err)})`,
+        );
+      }
+      if (operatorSeed !== undefined) {
+        const seed = operatorSeed;
+        const operator = authorForSeed(seed);
+        tokenExchange = makeTokenDoor({
+          home: connectorHome,
+          redeeming,
+          ...(forUsers.monotonicNow === undefined ? {} : { now: forUsers.monotonicNow }),
+          onFault: connectorFault,
+          // Land the operator-signed write grant in the connector's mount ground. The gateway is
+          // re-asked per call (erase re-seats a reactor, a mount can vanish), never captured.
+          grantStanding: async (actor: string): Promise<string> => {
+            const gateway = mounts.resolve(forUsers.mount)?.gateway;
+            if (gateway === undefined) {
+              throw new Error(
+                "the connector's mount is not resolvable, so no write grant was landed",
+              );
+            }
+            const delta = signClaims(
+              grantClaims(STORE_ENTITY, actor, "write", operator, Date.now()),
+              seed,
+            );
+            await gateway.append([delta]);
+            return delta.id;
+          },
+        });
+      }
     }
   }
 

@@ -14,17 +14,24 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { type IncomingMessage, type ServerResponse } from "node:http";
+import { authorForSeed } from "@bombadil/rhizomatic";
 import {
   OAuthFileBusy,
   OAuthFileUnlockable,
   clientFor,
   clientNameDefect,
+  codeFor,
+  grantFor,
   oauthPath,
   readOAuthFile,
+  tokenFor,
   uriTextDefect,
   withOAuthFile,
   type OAuthClient,
   type OAuthCode,
+  type OAuthFile,
+  type OAuthGrant,
+  type OAuthToken,
 } from "./oauth-file.js";
 import { CSP, escapeHtml, page, sameSecret, type SessionGate } from "./session.js";
 
@@ -133,6 +140,14 @@ export interface ConnectorRegistration {
   readonly maxClients?: number;
   /** Where a local fault goes. The CALLER never sees it — it names the home's path. */
   readonly onFault?: (message: string) => void;
+  /**
+   * ClientIds with a token redemption IN FLIGHT right now — the third eviction-pin source (SPEC §37
+   * phase 15, criterion 3). Shared with the token door: redemption deletes the code before it writes
+   * the grant, so between those points the client holds neither, and only this in-memory count keeps
+   * a flood in that window from evicting an approved connector. Absent, the pin reads the two durable
+   * sources (grants and live codes) alone.
+   */
+  readonly redeeming?: ReadonlyMap<string, number>;
 }
 
 export interface OAuthOptions {
@@ -310,6 +325,7 @@ export function makeOAuthDoors(options: OAuthOptions): OAuthDoors {
   const allowed = registration === undefined ? [] : [...registration.allowRedirectOrigins];
   const maxClients = registration?.maxClients ?? DEFAULT_MAX_CLIENTS;
   const onFault = registration?.onFault ?? ((message: string): void => void message);
+  const redeeming = registration?.redeeming;
 
   const jsonOut = (res: ServerResponse, status: number, body: unknown): void => {
     res.writeHead(status, {
@@ -388,11 +404,19 @@ export function makeOAuthDoors(options: OAuthOptions): OAuthDoors {
         // refused forever, with no command that removes one. So the pressure falls on registrations
         // nobody is using, and a flood evicts its own earlier entries.
         //
-        // THE PIN READS ONE SOURCE THIS PHASE: a grant record (an APPROVED connector's seed signs
-        // deltas the store holds). The doors that produce a grant are phases 14/15. Phase 14 adds a
-        // live-code source and phase 15 a redemption-in-flight source; adding a pin source only
-        // makes eviction MORE conservative, so this phase's eviction rails stay green when they land.
-        const pinned = new Set(file.grants.map((g) => g.clientId));
+        // THE PIN READS THREE SOURCES (SPEC §37 phase 15, criterion 3): a grant record (an APPROVED
+        // connector's seed signs deltas the store holds), a LIVE CODE (an approved connector whose
+        // token exchange has not yet run), and a redemption IN FLIGHT (the window where the code is
+        // already burnt and the grant not yet written — the client holds neither durably, so only
+        // this in-memory count keeps a flood from evicting it). Adding a source only makes eviction
+        // MORE conservative.
+        const pinned = new Set<string>([
+          ...file.grants.map((g) => g.clientId),
+          ...(file.codes ?? []).map((c) => c.clientId),
+          ...(redeeming === undefined
+            ? []
+            : [...redeeming].filter(([, n]) => n > 0).map(([clientId]) => clientId)),
+        ]);
         let clients = [...file.clients];
         while (clients.length >= maxClients) {
           const oldest = clients
@@ -531,6 +555,35 @@ export const CODE_TTL_MS = 60_000;
 
 const MAX_STATE = 2048; // the client's opaque round-trip value; a few hundred bytes in practice
 
+// --- PKCE (RFC 7636), S256 only -----------------------------------------------------------------
+//
+// The discovery document advertises S256 and only S256, so the token exchange verifies exactly one
+// way: `challenge === base64url(sha256(verifier))`. `plain` is never honoured — a `plain` challenge
+// simply fails the S256 comparison at redemption. A challenge/verifier is 43..128 characters of the
+// unreserved set, which carries no control byte, so a stored challenge can never forge a listing row.
+
+const PKCE_SHAPE = /^[A-Za-z0-9._~-]{43,128}$/;
+
+/**
+ * Is `challenge` acceptable at consent? EMPTY is allowed here (the consent GET does not require PKCE,
+ * so a caller that sends none still gets a page) — but the token exchange refuses a code whose
+ * challenge is empty, so PKCE is mandatory for any flow that actually redeems.
+ */
+export function pkceChallengeDefect(challenge: string): string | undefined {
+  if (challenge === "") return undefined;
+  if (!PKCE_SHAPE.test(challenge)) {
+    return "The PKCE code_challenge must be 43–128 characters of A–Z, a–z, 0–9, dot, dash, underscore or tilde.";
+  }
+  return undefined;
+}
+
+/** RFC 7636 S256: does `verifier` hash to `challenge`? Constant-time on the digest comparison. */
+export function pkceVerifies(verifier: string, challenge: string): boolean {
+  if (!PKCE_SHAPE.test(verifier) || challenge === "") return false;
+  const computed = createHash("sha256").update(verifier).digest("base64url");
+  return sameSecret(computed, challenge);
+}
+
 export interface ConsentOptions {
   /** The session machinery this page sits behind — the login doors' own, reused whole. */
   readonly gate: SessionGate;
@@ -580,6 +633,7 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
     client: OAuthClient,
     registeredUri: string,
     state: string,
+    codeChallenge: string,
     formToken: string,
   ): string =>
     page(
@@ -593,6 +647,7 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
 <input type="hidden" name="client_id" value="${escapeHtml(client.clientId)}">
 <input type="hidden" name="redirect_uri" value="${escapeHtml(registeredUri)}">
 <input type="hidden" name="state" value="${escapeHtml(state)}">
+<input type="hidden" name="code_challenge" value="${escapeHtml(codeChallenge)}">
 <button type="submit">approve</button>
 </form>`,
     );
@@ -628,8 +683,14 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
     const clientId = params.get("client_id") ?? "";
     const redirectUri = params.get("redirect_uri") ?? "";
     const state = params.get("state") ?? "";
+    const codeChallenge = params.get("code_challenge") ?? "";
     if (state.length > MAX_STATE) {
       refuse(res, 400, "The state value is too long.");
+      return;
+    }
+    const challengeDefect = pkceChallengeDefect(codeChallenge);
+    if (challengeDefect !== undefined) {
+      refuse(res, 400, challengeDefect);
       return;
     }
     // The exact-match fence, on the GET as on the POST: an unknown client or a uri no registration
@@ -640,8 +701,9 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
       return;
     }
     // Display the REGISTERED uri (`redirectUri` here is byte-equal to it, having matched), never the
-    // caller's own text. `state` rides the form so the approval echoes it back to the client.
-    htmlOut(res, 200, consentPage(client, redirectUri, state, session.formToken));
+    // caller's own text. `state` and the PKCE `code_challenge` ride the form so the approval echoes
+    // the state back to the client and binds the code to the challenge.
+    htmlOut(res, 200, consentPage(client, redirectUri, state, codeChallenge, session.formToken));
   };
 
   const handlePost = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
@@ -668,8 +730,14 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
     const clientId = fields.get("client_id") ?? "";
     const redirectUri = fields.get("redirect_uri") ?? "";
     const state = fields.get("state") ?? "";
+    const codeChallenge = fields.get("code_challenge") ?? "";
     if (state.length > MAX_STATE) {
       refuse(res, 400, "The state value is too long.");
+      return;
+    }
+    const challengeDefect = pkceChallengeDefect(codeChallenge);
+    if (challengeDefect !== undefined) {
+      refuse(res, 400, challengeDefect);
       return;
     }
     // Re-run the exact-match fence on the POST's OWN fields — the hidden field is a caller's to
@@ -679,8 +747,9 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
       refuse(res, 400, "This store holds no connector that may be reached at that address.");
       return;
     }
-    // Mint the code: a secret to the client, its DIGEST to the file — bound to the client and to the
-    // exact uri, with a monotonic deadline recorded now. No seed, no token, no grant.
+    // Mint the code: a secret to the client, its DIGEST to the file — bound to the client, the exact
+    // uri, the PKCE challenge, and the client's current generation, with a monotonic deadline recorded
+    // now. No seed, no token, no grant (that is phase 15's redemption).
     const secret = randomBytes(32).toString("base64url");
     const record: OAuthCode = {
       digest: digestOf(secret),
@@ -688,6 +757,8 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
       redirectUri,
       expiresAt: now() + CODE_TTL_MS,
       issuedAt: Date.now(),
+      codeChallenge,
+      generation: client.generation,
     };
     try {
       withOAuthFile<void>(home, (file) => ({
@@ -752,4 +823,421 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
       }
     },
   };
+}
+
+// --- POST /oauth/token (RFC 6749 §4.1.3) and revocation (SPEC §37 phase 15) ----------------------
+//
+// The token exchange redeems a single-use authorization code for a per-connector actor seed and a
+// bearer token. The seed is a FRESH random key — NEVER the operator's — so there is no code path
+// from any input here to `{ operator: true }` (criterion 7): the mint only ever calls `authorForSeed`
+// on a key it just generated, and the resolver returns `{ actor: <seed> }` and nothing else.
+//
+// Custody: the seed lives in `oauth.json` (mode 0600, never in the ground, like the operator seed) so
+// this server signs the connector's writes on its behalf — the same custodial trade the login doors
+// make for a browser session. The token itself is handed to the client and only its DIGEST is stored.
+//
+// Revocation is a GENERATION bump on the client. A token and a code each remember the generation they
+// were minted under; a bump makes both stop matching at once, so revocation binds on the next request
+// of the same live process with no restart, and it strikes the ground write-grant so the actor loses
+// standing too. It never touches the connector's past deltas — they keep naming their author.
+
+export const TOKEN_PATH = "/oauth/token";
+
+/** The connector identity a presented bearer token resolves to. The `actor` is a SIGNING SEED. */
+export interface ConnectorIdentity {
+  readonly actor: string; // the grant's actorSeed — never the operator's, never `operator: true`
+}
+
+export interface TokenDoorOptions {
+  /** Where `oauth.json` lives — the clients, codes, grants and tokens. */
+  readonly home: string;
+  /**
+   * A monotonic millisecond source for the code-expiry check, the login doors' own so a code's
+   * deadline and a session's window step together under a rail. Defaults to `performance.now()`.
+   */
+  readonly now?: () => number;
+  /**
+   * ClientIds redeeming right now — SHARED with the register door's eviction pin (criterion 3/4).
+   * A count, not a flag: two concurrent redemptions for one client each hold it, so the first to
+   * finish cannot clear a pin the second still needs.
+   */
+  readonly redeeming: Map<string, number>;
+  /**
+   * Land the operator-signed write grant for `actor` in the ground, returning the delta's id. This is
+   * the seam that needs the operator's signing authority and the live gateway; the door itself holds
+   * neither. Called AFTER the seed is durably written (criterion 5), so a retry reuses the seed.
+   */
+  readonly grantStanding: (actor: string) => Promise<string>;
+  /** Where a local fault goes. The CALLER never sees it — it may name the home's path. */
+  readonly onFault?: (message: string) => void;
+  /**
+   * The file reader, injectable so a rail can COUNT reads and prove the unknown-token path is bounded
+   * (criterion 11): an unknown bearer token is one in-memory index miss, with no file read behind it.
+   */
+  readonly readFile?: (home: string) => OAuthFile;
+}
+
+export interface TokenDoor {
+  owns(pathname: string): boolean;
+  handle(pathname: string, req: IncomingMessage, res: ServerResponse): Promise<void>;
+  /**
+   * Resolve a presented bearer token DIGEST (sha-256 hex) to its connector identity, or undefined.
+   * BOUNDED (criterion 11): an unknown digest is a single in-memory Set miss — no file read, and so
+   * no per-grant key derivation. Only a digest this door has minted (or read from the file at boot)
+   * pays a file read, to re-check the generation so a cross-process revoke binds at once.
+   */
+  resolve(digestHex: string): ConnectorIdentity | undefined;
+}
+
+const digestHex = (secret: string): string => createHash("sha256").update(secret).digest("hex");
+
+const MAX_TOKEN_BODY_FIELD = 4096; // a code, a verifier, an id — none is large
+
+export function makeTokenDoor(options: TokenDoorOptions): TokenDoor {
+  const home = options.home;
+  const now = options.now ?? ((): number => performance.now());
+  const redeeming = options.redeeming;
+  const onFault = options.onFault ?? ((message: string): void => void message);
+  const readFile = options.readFile ?? readOAuthFile;
+
+  // The bounded index: digests this door will bother reading the file for. Seeded from the file at
+  // creation (so a restart still authenticates a live token) and grown on every mint. A stale entry
+  // costs one file read that then refuses; a MISS costs nothing — which is the whole point.
+  const known = new Set<string>();
+  try {
+    for (const token of readFile(home).tokens) known.add(token.digest);
+  } catch (err) {
+    // A file this door cannot read at boot means no digests are known — every token then refuses,
+    // failing closed, until the file is readable again. The operator's channel hears why.
+    onFault(
+      `the token door could not read ${oauthPath(home)} at startup, so no connector token ` +
+        `authenticates yet: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  const inc = (clientId: string): void => {
+    redeeming.set(clientId, (redeeming.get(clientId) ?? 0) + 1);
+  };
+  const dec = (clientId: string): void => {
+    const n = (redeeming.get(clientId) ?? 0) - 1;
+    if (n <= 0) redeeming.delete(clientId);
+    else redeeming.set(clientId, n);
+  };
+
+  const jsonOut = (res: ServerResponse, status: number, body: unknown): void => {
+    res.writeHead(status, {
+      "content-type": "application/json",
+      "cache-control": "no-store",
+      "referrer-policy": "no-referrer",
+      "access-control-allow-origin": "*",
+    });
+    res.end(JSON.stringify(body));
+  };
+  // RFC 6749 §5.2 token-error shape. NEVER the home path or a flag name (criterion 13): a lock fault
+  // is a fixed 503 whose body says "lock", an ordinary caller error a 400 that names only itself.
+  const refuse = (res: ServerResponse, status: number, error: string, description: string): void =>
+    jsonOut(res, status, { error, error_description: description });
+
+  const field = (fields: Map<string, string>, name: string): string => {
+    const value = fields.get(name) ?? "";
+    return value.length > MAX_TOKEN_BODY_FIELD ? "" : value;
+  };
+
+  const resolve = (digest: string): ConnectorIdentity | undefined => {
+    // The bounded gate: an unknown digest returns here, having read no file and derived no key.
+    if (!known.has(digest)) return undefined;
+    let file: OAuthFile;
+    try {
+      file = readFile(home);
+    } catch {
+      return undefined; // cannot decide is never "authenticated"
+    }
+    const token = tokenFor(file, digest);
+    if (token === undefined) {
+      known.delete(digest); // the file no longer holds it; stop paying a read for a dead digest
+      return undefined;
+    }
+    const client = clientFor(file, token.clientId);
+    // The generation gate — a revoke bumped the client past this token's mint generation, so it is
+    // refused on the very next request (criterion 9), and it STAYS refused across a later re-grant:
+    // a fresh grant does not lower the generation, so an old token never resurrects. An absent
+    // generation never equals a client's.
+    if (client === undefined || token.generation !== client.generation) return undefined;
+    const grant = grantFor(file, token.clientId);
+    if (grant === undefined || !grant.standing) return undefined;
+    return { actor: grant.actorSeed };
+  };
+
+  // The redemption itself, one attempt. Every early return is a refusal that MINTS NOTHING.
+  const redeem = async (fields: Map<string, string>, res: ServerResponse): Promise<void> => {
+    if (field(fields, "grant_type") !== "authorization_code") {
+      refuse(res, 400, "unsupported_grant_type", "this token endpoint answers authorization_code");
+      return;
+    }
+    const codeSecret = field(fields, "code");
+    const clientId = field(fields, "client_id");
+    const redirectUri = field(fields, "redirect_uri");
+    const verifier = field(fields, "code_verifier");
+    if (codeSecret === "" || clientId === "" || redirectUri === "" || verifier === "") {
+      refuse(
+        res,
+        400,
+        "invalid_request",
+        "a redemption needs code, client_id, redirect_uri and code_verifier",
+      );
+      return;
+    }
+    const codeDigest = digestHex(codeSecret);
+
+    // BURN FIRST, and atomically: one locked read-modify-write finds the code and deletes it in the
+    // same turn, returning what it was. A code is single-use on ANY attempt (criterion 1) — a wrong
+    // verifier below still leaves it gone — and two concurrent redemptions cannot both burn one code,
+    // because only the write that removed it sees a non-undefined code here.
+    let burnt: OAuthCode | undefined;
+    try {
+      burnt = withOAuthFile<OAuthCode | undefined>(home, (file) => {
+        const code = codeFor(file, codeDigest);
+        if (code === undefined) return { result: undefined };
+        return {
+          next: { ...file, codes: (file.codes ?? []).filter((c) => c.digest !== codeDigest) },
+          result: code,
+        };
+      });
+    } catch (err) {
+      lockFaultOrRethrow(res, err, "redeemed nothing");
+      return;
+    }
+    if (burnt === undefined) {
+      refuse(res, 400, "invalid_grant", "this code is unknown, already redeemed, or expired");
+      return;
+    }
+    const code = burnt;
+
+    // The pin covers the WINDOW the code just left open: from here (code burnt) until the grant is
+    // written, the client holds neither, so only this count keeps a register flood from evicting it
+    // (criterion 3). Released in `finally` so a throw cannot leak it (criterion 4).
+    inc(code.clientId);
+    try {
+      // The bindings, expiry, generation and PKCE — the code is already burnt, so every refusal below
+      // is terminal for it. `sameSecret` on the two id/uri strings keeps a length-independent compare.
+      if (!sameSecret(clientId, code.clientId) || !sameSecret(redirectUri, code.redirectUri)) {
+        refuse(res, 400, "invalid_grant", "this code was not issued to that client or address");
+        return;
+      }
+      if (code.expiresAt <= now()) {
+        refuse(res, 400, "invalid_grant", "this code has expired");
+        return;
+      }
+      if (code.codeChallenge === undefined || code.codeChallenge === "") {
+        refuse(
+          res,
+          400,
+          "invalid_grant",
+          "this code was issued without PKCE and cannot be redeemed",
+        );
+        return;
+      }
+      if (!pkceVerifies(verifier, code.codeChallenge)) {
+        refuse(res, 400, "invalid_grant", "the PKCE code_verifier does not match the challenge");
+        return;
+      }
+
+      // The generation gate at redemption (criterion 8): a code minted before a revoke carries the
+      // old generation and mints nothing after it. Read the CURRENT client generation.
+      const file = readFile(home);
+      const client = clientFor(file, code.clientId);
+      if (client === undefined) {
+        refuse(res, 400, "invalid_grant", "the connector this code named is no longer registered");
+        return;
+      }
+      if (code.generation !== client.generation) {
+        refuse(res, 400, "invalid_grant", "this code was issued before the connector was revoked");
+        return;
+      }
+
+      // The seed: reuse the client's existing grant seed, or mint a fresh one and WRITE IT FIRST
+      // (standing false) so a retry after a failed ground append reuses it rather than minting a
+      // second and stranding the first (criterion 5). Never the operator's — a fresh random key.
+      const existing = grantFor(file, code.clientId);
+      let grant: OAuthGrant;
+      if (existing !== undefined) {
+        grant = existing;
+      } else {
+        const actorSeed = randomBytes(32).toString("hex");
+        grant = {
+          clientId: code.clientId,
+          actorSeed,
+          actor: authorForSeed(actorSeed),
+          grantedAt: Date.now(),
+          standing: false,
+        };
+        withOAuthFile<void>(home, (f) => ({
+          next:
+            grantFor(f, code.clientId) === undefined ? { ...f, grants: [...f.grants, grant] } : f,
+          result: undefined,
+        }));
+      }
+
+      // Land the operator-signed write grant in the ground (unless it already stands), then record
+      // its standing. The ground is the authority on whether the connector may write; `oauth.json`
+      // caches that so the resolver need not re-derive it per request.
+      if (!grant.standing) {
+        const grantDeltaId = await options.grantStanding(grant.actor);
+        withOAuthFile<void>(home, (f) => ({
+          next: {
+            ...f,
+            grants: f.grants.map((g) =>
+              g.clientId === code.clientId ? { ...g, standing: true, grantDeltaId } : g,
+            ),
+          },
+          result: undefined,
+        }));
+        grant = { ...grant, standing: true, grantDeltaId };
+      }
+
+      // Mint the bearer token: a secret to the client, its DIGEST plus the mint generation to the
+      // file. The plaintext never touches disk. Register the digest so the resolver will read for it.
+      const tokenSecret = randomBytes(32).toString("base64url");
+      const digest = digestHex(tokenSecret);
+      const record: OAuthToken = {
+        digest,
+        clientId: code.clientId,
+        issuedAt: Date.now(),
+        generation: client.generation,
+      };
+      withOAuthFile<void>(home, (f) => ({
+        next: { ...f, tokens: [...f.tokens, record] },
+        result: undefined,
+      }));
+      known.add(digest);
+
+      jsonOut(res, 200, {
+        access_token: tokenSecret,
+        token_type: "Bearer",
+        scope: CONNECTOR_SCOPE,
+      });
+    } catch (err) {
+      lockFaultOrRethrow(res, err, "granted nothing");
+    } finally {
+      dec(code.clientId);
+    }
+  };
+
+  // A lock this store could not take, or a file it could not read, is a fixed 503 whose body says
+  // "lock" or "records" and NEVER the home path (criterion 13). Anything else re-throws to the
+  // handler's own guard, which answers a generic 503 the same knowledge-free way.
+  function lockFaultOrRethrow(res: ServerResponse, err: unknown, what: string): void {
+    if (err instanceof OAuthFileBusy || err instanceof OAuthFileUnlockable) {
+      onFault(`the token door could not take the lock on ${oauthPath(home)}: ${err.message}`);
+      refuse(
+        res,
+        503,
+        "temporarily_unavailable",
+        `this store cannot take the lock on its connector records, so it ${what}`,
+      );
+      return;
+    }
+    throw err;
+  }
+
+  const readBodyFields = (req: IncomingMessage): Promise<Map<string, string>> =>
+    readBody(req).then((body) => {
+      const out = new Map<string, string>();
+      if (body === undefined) return out;
+      for (const [k, v] of new URLSearchParams(body)) out.set(k, v);
+      return out;
+    });
+
+  return {
+    owns: (pathname) => pathname === TOKEN_PATH,
+    resolve,
+    async handle(pathname, req, res) {
+      if (req.method !== "POST") {
+        refuse(res, 405, "invalid_request", "the token endpoint answers POST");
+        return;
+      }
+      try {
+        await redeem(await readBodyFields(req), res);
+      } catch (err) {
+        onFault(
+          `a connector door failed answering ${TOKEN_PATH}: ` +
+            `${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
+        );
+        if (!res.headersSent) {
+          refuse(
+            res,
+            503,
+            "temporarily_unavailable",
+            "this store could not answer, and it says no rather than why",
+          );
+        } else {
+          res.end();
+        }
+      }
+    },
+  };
+}
+
+// --- revocation ---------------------------------------------------------------------------------
+
+export type RevokeOutcome =
+  | { readonly kind: "revoked"; readonly clientId: string; readonly generation: number }
+  | { readonly kind: "no-such-client" }
+  | { readonly kind: "locked" }
+  | { readonly kind: "unreadable" };
+
+/**
+ * Revoke a connector (SPEC §37 phase 15, criteria 8–10). Bumps the client's generation and drops its
+ * grant record in one locked write — that alone makes every live token and in-flight code stop
+ * matching, so access is gone on the next request with no restart — then strikes the ground
+ * write-grant so the actor loses standing at the source too. It NEVER touches the connector's past
+ * deltas: those keep naming their author and keep resolving (the surviving-bystander half).
+ *
+ * `strikeStanding` is the seam that needs the operator's signing authority and the live reactor; it
+ * is called AFTER the file write, so a strike failure leaves access already gone rather than a client
+ * whose token still authenticates. Both the CLI (its own gateway) and the server (its live one) pass it.
+ */
+export async function revokeConnector(
+  home: string,
+  clientId: string,
+  strikeStanding: (grant: OAuthGrant) => Promise<void>,
+  onFault: (message: string) => void = () => {},
+): Promise<RevokeOutcome> {
+  let struckGrant: OAuthGrant | undefined;
+  let outcome: RevokeOutcome;
+  try {
+    outcome = withOAuthFile<RevokeOutcome>(home, (file) => {
+      const client = clientFor(file, clientId);
+      if (client === undefined) return { result: { kind: "no-such-client" } };
+      struckGrant = grantFor(file, clientId);
+      return {
+        next: {
+          ...file,
+          clients: file.clients.map((c) =>
+            c.clientId === clientId ? { ...c, generation: c.generation + 1 } : c,
+          ),
+          grants: file.grants.filter((g) => g.clientId !== clientId),
+        },
+        result: { kind: "revoked", clientId, generation: client.generation + 1 },
+      };
+    });
+  } catch (err) {
+    if (err instanceof OAuthFileBusy || err instanceof OAuthFileUnlockable) {
+      return { kind: "locked" };
+    }
+    return { kind: "unreadable" };
+  }
+  // The ground strike is cleanup after the authoritative access-kill above. A failure here leaves the
+  // token dead (generation bumped) and only the ground grant lingering, reachable by nothing.
+  if (outcome.kind === "revoked" && struckGrant !== undefined) {
+    try {
+      await strikeStanding(struckGrant);
+    } catch (err) {
+      onFault(
+        `revoked ${clientId} in ${oauthPath(home)} (its tokens are dead) but could not strike its ` +
+          `ground write grant: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+  return outcome;
 }
