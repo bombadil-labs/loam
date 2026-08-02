@@ -1,0 +1,17 @@
+{
+  "body": "Myk commissioned this in chat (2026-08-02): loam serve should serve an admin page scoped to the container associated with the logged-in user and its children, supporting all the major operations a user would want through the browser — defining hyperschemas and schemas, creating/detaching/destroying containers, promoting deltas, federation, and managing MCP connections. Needed to test the MCP integration.\n\nTHE WORKING SPEC IS .adlc/specs/40-admin-page.md — the model (a user's world is the container named <username> plus descendants by parent edge; the session is the authority, the server signs; scope enforced at the door), the operations table, the five phases A1-A5, and the 14 acceptance criteria, each naming its rail file.\n\nPROCESS (Myk, same message): base branch admin-page; each phase is a feature branch PR'd and merged into admin-page by the model; the whole branch is Myk's morning P6 into main. Rails declared at P3 per phase as the tests exist.\n\nRuled the same night: actor-role users manage their own connections (consent gating stays session-only); the admin page shows YOUR subtree to every role, one shape for everyone.",
+  "id": "T141",
+  "phase": "p3",
+  "rails": [],
+  "scope": [
+    "src/server/admin.ts",
+    "src/server/http.ts",
+    "test/server/admin-door.test.ts",
+    "test/server/admin-containers.test.ts",
+    "test/server/admin-schemas.test.ts",
+    "test/server/admin-promote.test.ts",
+    "test/server/admin-connections.test.ts"
+  ],
+  "status": "todo",
+  "title": "§40 — the admin page: a user's containers, through the browser"
+}
