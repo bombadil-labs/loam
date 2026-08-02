@@ -1513,6 +1513,12 @@ export const CHAPTERS = [
             door: null,
           },
           {
+            says: "The exchange redeems a single-use PKCE code — it burns on any attempt, so a wrong verifier kills it and the right one afterwards is refused — for a bearer token and a FRESH per-connector signing seed that is never the operator's and never enters the ground; the store keeps only the token's digest and the seed in a 0600 file. There is no path from any input to an operator identity. An unknown token costs one in-memory miss, no key derivation. Revoking bumps a generation that makes the token and any outstanding code stop matching at once — it binds on the next request with no restart, a later re-grant cannot resurrect an old token, and past writes keep their author.",
+            spec: "spec/37-connectors.md",
+            proof: "test/server/oauth-token.test.ts",
+            door: null,
+          },
+          {
             says: "A connection binds to one container: it reads that container's whole membership and its writes land in a per-connection inbox pool the connection signs with its own key. A strike admitted to the gather suppresses its target whoever wrote it and wherever in the container's grounds it sits — negation binds by MEMBERSHIP, closed across every ground at once, so a retraction written into an inbox cannot be stranded away from the primary claim it strikes. Revoking the connection strikes its grant and the door refuses the next write while past writes keep their author; dropping the inbox purges every byte it wrote, and a named live bystander survives both.",
             spec: "spec/39-connection-container.md",
             proof: "test/server/connection-container.test.ts",

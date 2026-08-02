@@ -153,3 +153,43 @@ and no migration is owed.
 fifteen). Landed [#322](https://github.com/bombadil-labs/loam/pull/322) — the consent door
 (`makeConsentDoor` in `src/server/oauth.ts`), the `OAuthCode` record in `src/server/oauth-file.ts`,
 the `SessionGate` seam in `src/server/session.ts`, and the wiring in `src/server/http.ts`.
+
+### 37.5 The token exchange and revocation
+
+`POST /oauth/token` redeems a single-use authorization code for a per-connector actor seed and a
+bearer token. The exchange is PKCE-S256: the code carries the `code_challenge` captured at consent,
+and redemption must present a `code_verifier` that hashes to it, compared on the digest. The code
+BURNS on any redemption attempt — a wrong verifier kills it, and the right verifier afterwards is
+refused too — and it is bound to the client and the exact redirect URI it was minted for.
+
+The mint derives a FRESH random 32-byte seed and its author; the connector writes as that actor,
+never as the operator. There is no code path from any input here to an operator identity: the seed
+lives only in `oauth.json` (mode 0600, never in the ground), the store holds only the token's digest,
+and the resolver a presented bearer resolves through returns `{ actor }` and nothing else. The seed is
+written before the ground append, so a retried redemption reuses it rather than minting a second.
+
+An unknown bearer token costs nothing on the event loop: the door keeps an in-memory set of known
+digests, so a flood of bogus tokens is one miss each, with no file read and no key derivation behind
+it. Only a known digest pays a read, and that read re-checks the client's generation.
+
+Revocation is a GENERATION bump on the client, and it strikes the connector's ground write-grant. A
+token and a code each remember the generation they were minted under, so a bump makes both stop
+matching at once — revocation binds on the very next request of the same live process, with no
+restart, and a later re-grant does not resurrect an old token (a fresh grant never lowers the
+generation). It is two-sided: access is gone, and every delta the connector already wrote keeps its
+author. `loam grant list` shows the operator what is connected; `loam grant revoke` is the kill
+switch.
+
+The eviction pin the registration door reads (§37.3) now unions three sources — a grant in the file,
+a live code, and a redemption IN FLIGHT — because redemption deletes the code before it writes the
+grant, and in that window a flood must not evict the approved connector. The in-flight source is a
+shared count, incremented before the awaited mint and released in a `finally`, so a throw cannot leak
+it and two concurrent redemptions for one client are safe. No seed, token, or PKCE material ever
+enters a delta.
+
+**Provenance.** Working spec `.adlc/specs/37-15-the-token-exchange-and-revocation.md` (T136, phase 15
+of the plan's fifteen — the last, completing §37). Landed
+[#PENDING15](https://github.com/bombadil-labs/loam/pull/PENDING15) — the token door (`makeTokenDoor`
+in `src/server/oauth.ts`), the seed/token/generation fields on `OAuthGrant`/`OAuthToken`/`OAuthCode`
+in `src/server/oauth-file.ts`, the bearer-resolving `identify` wiring in `src/server/http.ts`, and
+`loam grant list` / `revoke` in `src/cli/cli.ts`.
