@@ -614,8 +614,11 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
     });
 
   const handleGet = (req: IncomingMessage, res: ServerResponse): void => {
-    // Behind a phase-5 session. No session → the login form, and nothing minted.
-    const session = gate.admit(req);
+    // Behind a phase-5 session. No session → the login form, and nothing minted. READ, don't slide:
+    // a bare GET here can be a SameSite=Lax cross-site top-level nav carrying the victim's cookie, and
+    // rendering the consent page must not extend their session's idle window. `peek` reads without
+    // touching — the same choice handlePost makes, so refused traffic never slides (session.ts).
+    const session = gate.peek(req);
     if (session === undefined) {
       const form = gate.loginForm(req);
       htmlOut(res, 200, form.body, form.cookie);

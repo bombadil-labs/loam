@@ -125,3 +125,31 @@ plan's fifteen). Landed [#317](https://github.com/bombadil-labs/loam/pull/317) �
 and the redirect fence in `src/server/oauth.ts`, threaded through `ServeOptions.connectors` in
 `src/server/http.ts` and the `--oauth-allow-redirect` flag in `src/cli/cli.ts`. No code, token, or
 seed is minted; a connector can find the store and register, and nothing more.
+
+### 37.4 The consent page
+
+`GET /oauth/authorize` renders a consent page behind a phase-5 session; without one it renders the
+login form and mints nothing. The page is a READ — it uses `peek`, never sliding the session, so a
+SameSite=Lax cross-site navigation carrying a victim's cookie cannot extend their session. It
+displays the connector's `client_name` and the redirect URI, both HTML-escaped, under a
+script-forbidding CSP, and it states plainly what the grant carries: a connected author is a lawful
+author, so it can retract claims the operator wrote.
+
+The approval `POST` carries phase 6's defence — a same-origin check and a session-bound form token,
+compared in constant time — so a cross-site-shaped approval mints nothing. On success it mints ONE
+authorization code and redirects to the registered URI with `code` and `state`. The `redirect_uri`
+must match a registered one BYTE for byte: a different path, an added query, or another port is
+refused, and no refusal path — bad parameters, a forged token, no session, a lock fault — ever
+carries a `Location` outside the registered origins.
+
+The code is a high-entropy secret handed to the client and stored only by its digest, bound to both
+the `client_id` and the exact `redirect_uri`, with a monotonic deadline recorded at mint (a wall-clock
+step backwards cannot extend it). The consent door mints NOTHING else: no actor seed and no access
+token — those are the token exchange (§37.5). The `codes` collection is an optional field on the
+connector record, absent-when-empty, so a store written before this phase round-trips byte-identical
+and no migration is owed.
+
+**Provenance.** Working spec `.adlc/specs/37-14-the-consent-page.md` (T135, phase 14 of the plan's
+fifteen). Landed [#PENDING14](https://github.com/bombadil-labs/loam/pull/PENDING14) — the consent door
+(`makeConsentDoor` in `src/server/oauth.ts`), the `OAuthCode` record in `src/server/oauth-file.ts`,
+the `SessionGate` seam in `src/server/session.ts`, and the wiring in `src/server/http.ts`.
