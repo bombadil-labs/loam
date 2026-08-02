@@ -242,46 +242,53 @@ composing them into the gather. That is Loam-side, verified feasible (pools spaw
 `openContainer`, and the gather already composes multiple grounds), and its cost — a pool per
 connection, and erasure reaching inboxes — is named in 39.3d.
 
-## 39.7 Premortem findings — three decisions for Myk, five folded
+## 39.7 Premortem findings — three decisions settled, five folded
 
 An independent premortem (2026-08-01, read-only, grounded in `container.ts`, `accounts.ts`,
-`erase.ts`, and `SUBSTRATE-HAZARDS.md`) returned eight causes. Five are folded into the spec above;
-three are DESIGN DECISIONS on the trust root and the erasure path and are held for Myk, because the
-standing rules make those surfaces his and because the naive build of each is — per the premortem —
-an escalation or a deadlock, not a bug.
+`erase.ts`, and `SUBSTRATE-HAZARDS.md`) returned eight causes. Five were folded into the spec above;
+three were DESIGN DECISIONS on the trust root and the erasure path. **Myk settled all three in chat
+on 2026-08-01.** The build is unblocked.
 
-**Held for Myk (the three hard seams):**
+**Settled by Myk (the three hard seams):**
 
-- **H1 across the inbox boundary.** `containerScopeImpl` applies `withNegationClosure` PER GROUND. An
-  inbox is its own ground, so a negation written through a connection cannot suppress a target in the
-  container's primary ground. Criterion 9 as first written puts both deltas in one ground and passes
-  with this bug present. The fix is to close over the UNION of a container's admitted deltas across
-  all its grounds — a change to the substrate's negation-closure semantics, which is exactly the H1
-  surface the rules say to assert at both levels. RECOMMENDATION: make closure container-wide, and
-  add the cross-ground strand rail (D1 in primary, D2 in inbox → D1 absent from the View). This is
-  the load-bearing decision; the whole inbox model rests on membership-decides-reach holding here.
+- **H1 across the inbox boundary — SETTLED: closure is container-wide.** `containerScopeImpl` applied
+  `withNegationClosure` PER GROUND, so a negation written through a connection could not suppress a
+  target in the container's primary ground. Myk's ruling: the inbox is always in the container's
+  membership, so a strike written there is always in the gathered set, so it holds — "in the gathered
+  set = in play." IMPLEMENTATION: gather the container's admitted deltas across ALL its grounds
+  (primary + every inbox), then run negation closure ONCE over that union — not per ground. The
+  cross-ground strand rail is required and load-bearing: D1 admitted to the primary ground, D2
+  (negating D1) admitted to an inbox, the container View must resolve WITHOUT D1. Criterion 9 is
+  strengthened to place the strike across the boundary, not within one ground.
 
-- **The append-door authorization path.** `authorize` checks `grantHeld(reactor, STORE_ENTITY, …)`
-  only. A connection's grant targets its inbox, not the store. Admitting the write either grants the
-  key store-wide (an escalation that destroys "nothing outside the inbox is expressible") or needs a
-  NEW door path that binds three things at once: subject = connection key, grant target = this inbox
-  entity, AND the delta physically lands in that inbox's pool (ids are unowned — a key could sign a
-  delta aimed anywhere). This is new trust-root code. RECOMMENDATION: a write into a separate pool is
-  already authorized by that POOL's own `authorize` against the pool's own store entity, so the
-  clean form is: the inbox pool's operator is the OWNER, the genesis grant is an ordinary write grant
-  in the pool's own ground, and the connection writes INTO the pool — no change to root's `authorize`
-  at all. This needs Myk's read because it decides who the pool's operator is and couples the bind to
-  the §36 session that carries the owner's seed.
+- **The append-door authorization path — SETTLED: the pool's own door, via the existing grant
+  chain.** No change to root's `authorize`, and — refining the premortem's recommendation — no change
+  to pool seeding either. A verified substrate fact (`container.ts`, `openContainerImpl`) is that a
+  spawned pool is opened with the STORE's operator seed, so "the pool's operator is the owner" would
+  need new seeding code AND an audit of every lifecycle-retraction signing site. It is not needed. The
+  inbox pool keeps the store operator as its operator (existing machinery, every signing site stays
+  valid), and authority is established by the grant chain `grantHeld` ALREADY resolves recursively
+  (`accounts.ts`, verified 2026-08-01): (1) at PROVISIONING, the store operator authors an admin grant
+  naming the OWNER in the inbox pool's own ground — effective because the store operator is the pool's
+  operator; (2) at CONSENT, the OWNER authors the connection's write grant in that same ground —
+  effective because the owner holds admin via (1); (3) the connection writes INTO the pool, and the
+  pool's own `authorize` admits it because `grantHeld` walks connection-write → owner-admin → operator
+  and resolves. The operator does ONE administrative act — provisioning the owner's authority over
+  their own inbox, which 39.1 point 3 names as the operator's proper administrative capacity — and
+  NEVER appears on the read/write data path. 39.1 point 3 holds: the owner authors the connection
+  grant, the connection signs every write, the operator signs neither. Revocation (39.3c) strikes the
+  owner-authored connection grant; the door refuses; the store operator is not involved.
 
-- **The disconnect lifecycle (H9).** A per-connection pool that closes on disconnect becomes a
-  declared-but-unattached separate container. `unreachableStoreReport` faults on exactly that, and
-  `eraseImpl` refuses up front when it does — so accumulated dead inboxes deadlock ALL erasure; and
-  `membersOf` throws for an unattached separate member, crashing every read of the container. A busy
-  MCP endpoint accumulates these. So disconnect must DROP (total forget) or DETACH (kept, recorded),
-  never leak — and which it is decides both the erasure blast radius and whether "drop = total
-  forget" is the default. RECOMMENDATION: disconnect DETACHES (the writes are the owner's data, kept
-  and recorded), and an explicit revoke DROPS (total forget). Myk's call, because it sets the erasure
-  default.
+- **The disconnect lifecycle (H9) — SETTLED: the inbox is durable; only an explicit drop removes
+  it.** Myk's ruling, near-verbatim: a random disconnection must not permanently nuke the container;
+  the binding is robust to connect/disconnect/connect; only an explicit drop drops it. IMPLEMENTATION:
+  the inbox pool STAYS ATTACHED as a container member across a disconnect — it never becomes an
+  unattached separate container, so `unreachableStoreReport` never faults and `membersOf` never
+  throws (the premortem's deadlock and read-crash are structurally impossible, not merely handled).
+  The inbox is keyed to the connection identity, so a reconnect with the same identity resumes the
+  SAME inbox rather than spawning a second. Only an explicit REVOKE (strike the grant — writes
+  refused, deltas kept) or DROP (erase the pool — total forget) changes the inbox's state. So the
+  erasure default is: disconnect keeps everything; drop is the deliberate, explicit, two-sided act.
 
 **Folded into the spec above (the five that were mine to answer):**
 
@@ -311,13 +318,14 @@ an escalation or a deadlock, not a bug.
 ## 39.8 Sequencing recommendation
 
 The premortem shows the ISOLATED connection — bound to a separate container, reads and writes both in
-its own pool — needs none of the three held decisions except the disconnect lifecycle, and even that
-is simplest there (a pre-existing container that persists across connections sidesteps the
-accumulation problem). That path proves the whole OAuth → bound-MCP-connection flow end to end with
-almost no new trust-root code. The INBOX (wide-read, narrow-write) is the harder tier and waits on
-Myk's three decisions. Recommended order: land the isolated-connection path first as the testable
-milestone; build the inbox on top once the three seams are decided.
+its own pool — needs none of the three decisions except the disconnect lifecycle, and even that is
+simplest there (a pre-existing container that persists across connections sidesteps the accumulation
+problem). That path proves the whole OAuth → bound-MCP-connection flow end to end with almost no new
+trust-root code. The INBOX (wide-read, narrow-write) is the harder tier. **All three seams are now
+decided (39.7), so both tiers are buildable.** Recommended order holds: land the isolated-connection
+path first as the testable milestone; build the inbox on top, since its three seams resolved to
+existing-machinery changes rather than new trust-root code.
 
-This spec is design-stage and its landing is Myk's merge. It is not built. The premortem is why: it
-found that building the inbox's trust-root and erasure seams autonomously would be exactly the
-reckless move the design-stage gate exists to prevent.
+This spec was design-stage. Myk blessed the model on 2026-07-28, the write path on 2026-08-01, and
+the three premortem seams on 2026-08-01 — all in chat. The design gate is passed. The build proceeds
+on the standard bar (green + P5 + independent audit), and the landing writes `spec/39-*.md`.
