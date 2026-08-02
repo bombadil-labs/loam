@@ -1,5 +1,11 @@
 // `oauth.json` (SPEC §37): the durable half of a connector grant — registered clients, the actor
-// seed each connector signs with, and the digests of the tokens that reach it.
+// seed each connector signs with, the digests of the tokens that reach it, and the short-lived
+// authorization codes a consent grant mints (phase 14) for a token exchange to redeem (phase 15).
+//
+// `codes` is OPTIONAL in the file's shape: a store written before phase 14 has no `codes` key, and
+// this reader treats its absence as an empty list rather than a version bump — an authorization code
+// lives seconds, so nothing durable rides across the change, and omitting the key when it is empty
+// keeps a phase-13 file byte-identical on round-trip.
 //
 // It lives in the home, mode 0600, beside the operator seed. It is NEVER in the ground, for the
 // same reason a password hash is not: the ground REPLICATES, and a federated peer would receive a
@@ -82,11 +88,31 @@ export interface OAuthToken {
   readonly issuedAt: number;
 }
 
+/**
+ * An authorization code, by DIGEST (SPEC §37 phase 14). The code secret itself rides the redirect to
+ * the client and is never stored, exactly as a token's is not. It is BOUND to the client and to the
+ * one exact `redirectUri` the grant was approved for — a token exchange (phase 15) redeems it only on
+ * a byte-for-byte match of both.
+ *
+ * `expiresAt` is a deadline recorded at MINT from a monotonic clock, never re-read from the wall
+ * clock at check time: a clock step backwards must not extend a code's life (the §36 phase-8
+ * `expiresAt` lesson). `issuedAt` is wall clock, kept only for a future `loam grant list` row.
+ */
+export interface OAuthCode {
+  readonly digest: string; // sha256 hex of the code secret
+  readonly clientId: string;
+  readonly redirectUri: string; // the EXACT registered uri this code is bound to
+  readonly expiresAt: number; // monotonic deadline, recorded at mint
+  readonly issuedAt: number; // wall clock, for a future `loam grant list`
+}
+
 export interface OAuthFile {
   readonly version: 1;
   readonly clients: readonly OAuthClient[];
   readonly grants: readonly OAuthGrant[];
   readonly tokens: readonly OAuthToken[];
+  /** Authorization codes in flight (phase 14). Absent in a file written before phase 14. */
+  readonly codes?: readonly OAuthCode[];
 }
 
 /** The caller could not decide what is registered. Never a licence to mint. */
@@ -243,6 +269,26 @@ function checkToken(raw: unknown, where: string): OAuthToken {
   return { digest, clientId: str(raw, where, "clientId"), issuedAt: num(raw, where, "issuedAt") };
 }
 
+function checkCode(raw: unknown, where: string): OAuthCode {
+  object(raw, where);
+  const digest = str(raw, where, "digest");
+  if (!HEX64.test(digest)) {
+    throw new OAuthFileUnreadable(`${where} has a digest that is not a sha-256 hex digest`);
+  }
+  const redirectUri = str(raw, where, "redirectUri");
+  // The same control-byte rule the redirect uri passed at registration: a hand-edited file must not
+  // smuggle a forged `loam grant list` row through the code table either.
+  const defect = uriTextDefect(redirectUri);
+  if (defect !== undefined) throw new OAuthFileUnreadable(`${where}: ${defect}`);
+  return {
+    digest,
+    clientId: str(raw, where, "clientId"),
+    redirectUri,
+    expiresAt: num(raw, where, "expiresAt"),
+    issuedAt: num(raw, where, "issuedAt"),
+  };
+}
+
 /**
  * The whole file, checked. An ABSENT file is an empty one — a home with no connectors is not
  * damaged. Anything present but unparseable throws `OAuthFileUnreadable`.
@@ -309,6 +355,16 @@ function checkFileShape(parsed: unknown, where: string): OAuthFile {
   const tokens = Array.from(array(file["tokens"], `${where}: tokens`), (t, i) =>
     checkToken(t, `${where}: token ${i}`),
   );
+  // OPTIONAL: absent `codes` reads as no codes, and the returned object OMITS the key so a phase-13
+  // file round-trips byte-identical. Present, it is validated whole, exactly as every other
+  // collection is.
+  const codesRaw = file["codes"];
+  const codes =
+    codesRaw === undefined
+      ? undefined
+      : Array.from(array(codesRaw, `${where}: codes`), (c, i) =>
+          checkCode(c, `${where}: code ${i}`),
+        );
   checkUnique(
     clients.map((c) => c.clientId),
     where,
@@ -324,7 +380,14 @@ function checkFileShape(parsed: unknown, where: string): OAuthFile {
     where,
     "token with digest",
   );
-  return { version: 1, clients, grants, tokens };
+  if (codes !== undefined) {
+    checkUnique(
+      codes.map((c) => c.digest),
+      where,
+      "code with digest",
+    );
+  }
+  return { version: 1, clients, grants, tokens, ...(codes === undefined ? {} : { codes }) };
 }
 
 /**
@@ -358,6 +421,9 @@ function performAtomicWrite(home: string, sound: OAuthFile, verifyOwnership: () 
       clients: sound.clients,
       grants: sound.grants,
       tokens: sound.tokens,
+      // Only when non-empty: an empty code list writes no key, so a phase-13 store stays byte-for-byte
+      // what it was.
+      ...(sound.codes === undefined ? {} : { codes: sound.codes }),
     },
     null,
     2,
