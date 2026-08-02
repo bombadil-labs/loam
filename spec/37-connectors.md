@@ -150,6 +150,6 @@ connector record, absent-when-empty, so a store written before this phase round-
 and no migration is owed.
 
 **Provenance.** Working spec `.adlc/specs/37-14-the-consent-page.md` (T135, phase 14 of the plan's
-fifteen). Landed [#PENDING14](https://github.com/bombadil-labs/loam/pull/PENDING14) — the consent door
+fifteen). Landed [#322](https://github.com/bombadil-labs/loam/pull/322) — the consent door
 (`makeConsentDoor` in `src/server/oauth.ts`), the `OAuthCode` record in `src/server/oauth-file.ts`,
 the `SessionGate` seam in `src/server/session.ts`, and the wiring in `src/server/http.ts`.
