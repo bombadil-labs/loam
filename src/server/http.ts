@@ -1542,6 +1542,11 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       home: forUsers.home,
       ground: () => mounts.resolve(forUsers.mount)?.gateway,
       ...(forUsers.onFault === undefined ? {} : { onFault: forUsers.onFault }),
+      // The connections panel joins oauth.json where a connector flow exists; absent, the panel
+      // lists the subtree's inbox pools alone and says the store has no connector flow configured.
+      ...(options.connectors === undefined
+        ? {}
+        : { connectors: { home: options.connectors.home } }),
     });
     // The consent page reuses the login doors' session gate, and reads/writes the connectors' own
     // `oauth.json` — so it opens only where both are configured. Its clock is the login doors' own
