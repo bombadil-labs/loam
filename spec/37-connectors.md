@@ -189,7 +189,7 @@ enters a delta.
 
 **Provenance.** Working spec `.adlc/specs/37-15-the-token-exchange-and-revocation.md` (T136, phase 15
 of the plan's fifteen — the last, completing §37). Landed
-[#PENDING15](https://github.com/bombadil-labs/loam/pull/PENDING15) — the token door (`makeTokenDoor`
+[#323](https://github.com/bombadil-labs/loam/pull/323) — the token door (`makeTokenDoor`
 in `src/server/oauth.ts`), the seed/token/generation fields on `OAuthGrant`/`OAuthToken`/`OAuthCode`
 in `src/server/oauth-file.ts`, the bearer-resolving `identify` wiring in `src/server/http.ts`, and
 `loam grant list` / `revoke` in `src/cli/cli.ts`.
