@@ -55,10 +55,14 @@ import {
   type Claims,
   type Delta,
   type Reactor,
+  evalTerm,
+  DeltaSet,
 } from "@bombadil/rhizomatic";
-import { readUserSeed, userSeedPath } from "../cli/config.js";
+import { readUserSeed, userSeedPath, writeUserSeed } from "../cli/config.js";
 import { parseOffer } from "../federation/offer.js";
-import { CTX_GRANTS, holdsGrant } from "../gateway/accounts.js";
+import { CTX_GRANTS, grantClaims, holdsGrant } from "../gateway/accounts.js";
+import { withBatchNegationClosure } from "../gateway/ingest.js";
+import { rolesOf } from "./users.js";
 import {
   containerClaims,
   detachClaims,
@@ -141,6 +145,35 @@ export interface AdminDoor {
  * inbox pool (`inboxOf`, §39) hanging off a reachable container. A fixpoint rather than one pass,
  * because an edge can hang off an inbox pool and the table's iteration order guarantees nothing.
  */
+// The membership Term a SHARED container resolves right now — inline, or from its published
+// address. `undefined` where it resolves none (H9: the caller must refuse, never treat that as
+// "everything" or "nothing").
+function membershipTermOf(
+  gw: Gateway,
+  rec: ResolvedContainer,
+): ReturnType<typeof parseTerm> | undefined {
+  let raw: unknown = rec.membership;
+  if (raw === undefined && rec.membershipAt !== undefined) {
+    const published = gw.reactor.get(rec.membershipAt);
+    if (published === undefined) return undefined;
+    const text = published.claims.pointers.find(
+      (p) => p.role === "term" && p.target.kind === "primitive",
+    );
+    if (text === undefined || text.target.kind !== "primitive") return undefined;
+    try {
+      raw = JSON.parse(String(text.target.value));
+    } catch {
+      return undefined;
+    }
+  }
+  if (raw === undefined) return undefined;
+  try {
+    return parseTerm(raw);
+  } catch {
+    return undefined;
+  }
+}
+
 export function subtreeOf(table: ContainerTable, root: string): ReadonlySet<string> {
   const reach = new Set<string>();
   if (!table.containers.has(root)) return reach;
@@ -1384,40 +1417,73 @@ ${hiddenPair(formToken, name)}
       return;
     }
     // The root gathers what its owner AUTHORED, so the membership Term needs the user's own
-    // public key — and that key comes from their signing seed, or from nowhere. FAILING CLOSED IS
-    // THE POINT: an operator-authored fallback Term would be a root that silently gathers under
-    // the wrong name, a lie no later reader could detect.
+    // public key. An ACTOR created at the CLI has none (`user create` mints keys only with
+    // --operator — T124's pinned design), and no command provisions one later — so a tenant who
+    // can already log in would dead-end here. The door PROVISIONS instead (Myk, 2026-08-02: tenant
+    // actor users act through their own containers): mint the key, write it 0600 beside the
+    // others, and trust it with a WRITE grant, all before the declaration. A seed file that
+    // EXISTS but cannot be used still fails closed — overwriting a key file because it read
+    // wrong would destroy a credential this door cannot prove dead.
+    if (gw.options.seed === undefined || gw.operatorAuthor === undefined) {
+      refuse(res, 503, "This store cannot sign a declaration right now, so nothing was made.");
+      return;
+    }
     const seed = readUserSeed(options.home, user);
-    const usable = seed.kind === "present" && /^[0-9a-f]{64}$/.test(seed.seed);
-    if (!usable) {
-      if (seed.kind !== "absent") {
+    let userKey: string;
+    if (seed.kind === "present" && /^[0-9a-f]{64}$/.test(seed.seed)) {
+      userKey = seed.seed;
+    } else if (seed.kind === "absent") {
+      const minted = randomBytes(32).toString("hex");
+      try {
+        writeUserSeed(options.home, user, minted);
+        await gw.append([
+          signClaims(
+            grantClaims(
+              STORE_ENTITY,
+              authorForSeed(minted),
+              "write",
+              gw.operatorAuthor,
+              gw.nextTimestamp(),
+            ),
+            gw.options.seed,
+          ),
+        ]);
+      } catch (err) {
         onFault(
-          `the admin page cannot use ${userSeedPath(options.home, user)}: ` +
-            (seed.kind === "unreadable"
-              ? seed.detail
-              : "it is present but is not a 64-character hex signing key"),
+          `the admin page could not provision a signing key for ${user}: ` +
+            `${err instanceof Error ? err.message : String(err)}`,
         );
+        refuse(
+          res,
+          503,
+          "Your signing key could not be provisioned, so no container was made. Nothing partial " +
+            "was kept.",
+        );
+        return;
       }
+      userKey = minted;
+    } else {
+      onFault(
+        `the admin page cannot use ${userSeedPath(options.home, user)}: ` +
+          (seed.kind === "unreadable"
+            ? seed.detail
+            : "it is present but is not a 64-character hex signing key"),
+      );
       refuse(
         res,
         409,
-        "This user has no signing key on this store, so no container was made — a root gathers " +
-          "what you author, and this store cannot yet name you as an author. Ask the store's " +
-          "operator to provision your key.",
+        "This user's signing key exists on this store but cannot be used, so no container was " +
+          "made. Ask the store's operator to repair it.",
       );
       return;
     }
     // Operator law: the declaration is signed by the store, once the door has proven the target
     // is the session user's own name — which it is by construction here.
-    if (gw.options.seed === undefined || gw.operatorAuthor === undefined) {
-      refuse(res, 503, "This store cannot sign a declaration right now, so nothing was made.");
-      return;
-    }
     const spec = {
       container: user,
       trust: "curated" as const,
       posture: "shared" as const,
-      membership: authoredBy(authorForSeed(seed.seed)),
+      membership: authoredBy(authorForSeed(userKey)),
     };
     try {
       await gw.append([
@@ -1436,13 +1502,27 @@ ${hiddenPair(formToken, name)}
 
   // Register a lens through the browser (§40 criterion 8): the SAME body `loam register` and
   // `POST /:mount/register` take, parsed by the same parser, landed by the same publish.
-  // Registration is store law, operator-signed by the server — the door's authority is the
-  // session and the operator's seed, exactly as declare's is.
+  //
+  // REGISTRATION IS CONSTITUTIONAL AND STORE-WIDE, so this door asks for the OPERATOR role — the
+  // one operation here that is not bounded by a subtree. A lens is not per-user: publishing under
+  // a live name EVOLVES it for every reader and every mount, so a tenant session reaching this
+  // would hold store-wide power the sibling doors already refuse it (`POST /:mount/register` and
+  // the `loam_register` tool both require an operator). The role is read from the GROUND, which is
+  // where roles live — a session carries a name, never a privilege.
   const postRegister = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const gated = await postGate(req, res, REGISTER_MAX_BODY);
     if (gated === undefined) return;
     const gw = signerGround(res);
     if (gw === undefined) return;
+    if (!rolesOf(gw.reactor, gw.operatorAuthor, gated.user).has("operator")) {
+      refuse(
+        res,
+        403,
+        "Registering a schema is store-wide law, so it asks for the operator role. Your own " +
+          "containers are yours; this one names what every reader sees.",
+      );
+      return;
+    }
     const raw = (gated.fields.get("registration") ?? "").trim();
     // The defect is named; the defective bytes are never echoed back into the DOM.
     if (raw.length === 0) {
@@ -1675,8 +1755,38 @@ forever; the value now survives even if its container is dropped.</p>
         report = await pool.federate(deltas); // no override: the pool's own admission decides
         door = "its own store";
       } else {
-        report = await gw.federate(deltas); // no override: the primary's own admission decides
-        door = "the primary ground";
+        // A SHARED container has no store of its own: its deltas live in the primary ground, which
+        // every other user's containers also cut. So the write is BOUNDED TO WHAT THIS CONTAINER
+        // GATHERS — the subtree gate authorizes landing bytes in ada's world, not in the store at
+        // large, and an unbounded `federate` here would let any tenant seed the primary with
+        // deltas another user's membership Term happens to select. The bound is the container's
+        // own membership, evaluated over the OFFER, plus the offer-local negation closure (H1: a
+        // subset that drops an admitted delta's strike revives it).
+        const term = membershipTermOf(gw, rec);
+        if (term === undefined) {
+          refuse(
+            res,
+            409,
+            "This container resolves no membership just now, so there is nothing to land into. " +
+              "Nothing landed.",
+          );
+          return;
+        }
+        const result = evalTerm(term, DeltaSet.from(deltas));
+        if (result.sort !== "dset") {
+          refuse(
+            res,
+            409,
+            "This container's membership does not select a delta set, so there is nothing to " +
+              "land into. Nothing landed.",
+          );
+          return;
+        }
+        const admitted = new Set(
+          withBatchNegationClosure(deltas, [...result.set]).map((d) => d.id),
+        );
+        report = await gw.federate(deltas, { admit: (d) => admitted.has(d.id) });
+        door = "the primary ground, bounded to this container's membership";
       }
     } catch (err) {
       onFault(

@@ -189,6 +189,31 @@ async function adaSession(base: string): Promise<{ ada: string; token: string }>
 }
 
 describe("§40 phase A4 — federate in (criterion 11)", () => {
+  it("(11) a tenant cannot seed ANOTHER user's container through their own federate form", async () => {
+    // The attack the bound exists to stop: ada pastes an offer of deltas that BEA's membership
+    // selects, targeting her own container (where the subtree gate passes trivially). Landing them
+    // in the shared primary would put them inside bea's world without bea ever admitting them.
+    const { base, gateway } = await promoteServer();
+    const { ada, token } = await adaSession(base);
+    const forBea = observed(FERN, "tag", "meant-for-bea", 9600, SEEDS.bea);
+
+    const res = await federate(base, ada, token, "ada", offerOf(forBea));
+    expect(res.status).toBe(200);
+
+    // It never landed in the primary at all, so no container cutting that ground can gather it —
+    // the store-level fact, which is stronger than checking one container's view.
+    expect(gateway.reactor.get(forBea.id)).toBeUndefined();
+    expect(gateway.containerScope({ containers: ["ada"] }).map((d) => d.id)).not.toContain(
+      forBea.id,
+    );
+    // Positive control: ada's OWN delta, through the same form, does land and does gather.
+    const mine = observed(FERN, "tag", ADA_TAG, 9601, SEEDS.ada);
+    const ok = await federate(base, ada, token, "ada", offerOf(mine));
+    expect(ok.status).toBe(200);
+    expect(gateway.reactor.get(mine.id)).toBeDefined();
+    expect(gateway.containerScope({ containers: ["ada"] }).map((d) => d.id)).toContain(mine.id);
+  });
+
   it("(11) shared: the offer lands in the primary, the membership gathers only its own — two numbers, both levels", async () => {
     const { base, gateway } = await promoteServer();
     const { ada, token } = await adaSession(base);
@@ -199,12 +224,16 @@ describe("§40 phase A4 — federate in (criterion 11)", () => {
     expect(res.status).toBe(200);
     const html = await res.text();
     // The two numbers, both true: what LANDED and what the membership GATHERS.
-    expect(html).toContain("2 landed newly");
+    expect(html).toContain("1 landed newly");
     expect(html).toContain("gathers 1 of the 2 offered");
 
-    // Delta level: both landed in the primary; only ada's is in the container's gather.
+    // Delta level, and the SECURITY property: a shared container has no store of its own, so this
+    // write goes to the primary ground — the ground every other user's containers also cut. The
+    // door therefore bounds it to what THIS container's membership selects. ada's own delta lands;
+    // the stranger-authored one the membership refuses never enters the store at all. Without that
+    // bound, any tenant could seed the primary with deltas another user's Term happens to select.
     expect(gateway.reactor.get(adaTag.id)).toBeDefined();
-    expect(gateway.reactor.get(height.id)).toBeDefined();
+    expect(gateway.reactor.get(height.id)).toBeUndefined();
     const gathered = gateway.containerScope({ containers: ["ada"] }).map((d) => d.id);
     expect(gathered).toContain(adaTag.id);
     expect(gathered).not.toContain(height.id);
