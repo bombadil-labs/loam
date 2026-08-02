@@ -109,6 +109,9 @@ async function schemaServer(): Promise<{
     await op(userClaims(name, OPERATOR, ts++));
     await op(roleClaims(name, "actor", OPERATOR, ts++));
   }
+  // Registering a lens is store-wide law, so the door asks for the OPERATOR role. ada holds it
+  // here; bea stays a pure actor, which is what the refusal rail below needs.
+  await op(roleClaims("ada", "operator", OPERATOR, ts++));
   await op(
     containerClaims(
       { container: "ada", trust: "curated", posture: "shared", membership: authoredBy(KEYS.ada) },
@@ -227,6 +230,28 @@ const register = (
   post(base, "/admin/register", sessionId, { form_token: token, registration });
 
 describe("§40 phase A3 — the schema panel", () => {
+  it("(8) registering is CONSTITUTIONAL: an actor session is refused, an operator session is not", async () => {
+    // A lens is not per-user — publishing under a live name evolves it for every reader and every
+    // mount. The sibling doors (`POST /:mount/register`, the loam_register tool) both require an
+    // operator, so this one does too; the role is read from the GROUND, never from the session.
+    const { base, gateway } = await schemaServer();
+    const bea = await signIn(base, "bea"); // actor only
+    const page = await (await getPage(base, bea)).text();
+    const before = readRegistrations(gateway.reactor, gateway.operatorAuthor).length;
+
+    const refused = await register(base, bea, tokenOf(page), JSON.stringify(plantRegistration()));
+    expect(refused.status).toBe(403);
+    expect(await refused.text()).toContain("operator role");
+    expect(readRegistrations(gateway.reactor, gateway.operatorAuthor).length).toBe(before);
+
+    // The positive control: the SAME body from an operator session lands.
+    const ada = await signIn(base, "ada");
+    const adaPage = await (await getPage(base, ada)).text();
+    const ok = await register(base, ada, tokenOf(adaPage), JSON.stringify(plantRegistration()));
+    expect(ok.status).toBe(303);
+    expect(readRegistrations(gateway.reactor, gateway.operatorAuthor).length).toBe(before + 1);
+  });
+
   it("(8) the register form lands the same body as `loam register`; the panel lists it; the sibling door still works", async () => {
     const { base, gateway } = await schemaServer();
     const ada = await signIn(base, "ada");

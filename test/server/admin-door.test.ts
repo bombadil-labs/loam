@@ -10,7 +10,7 @@
 //   - Schema registration and resolved views — phase A3; promotion/federation — A4; connections — A5.
 //   - The login doors' own refusals (wrong password, delay) — the frozen §36 rails.
 
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -22,7 +22,7 @@ import { hashPassword, writeCredentials, type ScryptParams } from "../../src/ser
 import { roleClaims, userClaims } from "../../src/server/users.js";
 import { CSP, PRESESSION_COOKIE, SESSION_COOKIE } from "../../src/server/session.js";
 import { containerClaims, detachClaims, CTX_CONTAINER } from "../../src/gateway/container.js";
-import { grantClaims } from "../../src/gateway/accounts.js";
+import { grantClaims, holdsGrant } from "../../src/gateway/accounts.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { writeUserSeed, userSeedPath } from "../../src/cli/config.js";
 
@@ -63,7 +63,7 @@ afterEach(async () => {
  * gather is non-empty (the positive control for the members list).
  */
 async function adminServer(
-  opts: { monotonicNow?: () => number; calSeed?: "present" | "unreadable" } = {},
+  opts: { monotonicNow?: () => number; calSeed?: "present" | "unreadable" | "none" } = {},
 ): Promise<{ base: string; home: string; gateway: Gateway; adaNoteId: string }> {
   const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
   let ts = 9001;
@@ -436,11 +436,40 @@ describe("§40 phase A1 — the admin door", () => {
     const res = await postCreate(base, cal, tokenOf(offer)!);
     expect(res.status).toBe(409);
     const body = await res.text();
-    expect(body).toContain("no signing key");
+    expect(body).toContain("cannot be used");
     expect(body).not.toContain(home);
     expect(body).not.toContain("user.cal");
     expect(body).not.toContain("seed");
     expect(body).not.toContain("--");
     expect(declCount(gateway)).toBe(before);
+  });
+
+  it("(provisioning) a keyless actor's create MINTS their signing key: 0600 file, write grant, their Term", async () => {
+    // The CLI mints keys only for operators (T124's pinned design), so a tenant actor arrives
+    // here keyless. The door provisions rather than dead-ending them (Myk, 2026-08-02): the seed
+    // file lands 0600, its key gains WRITE standing operator-signed, and the root's membership
+    // Term carries that key. The seed itself never enters the ground.
+    const { base, home, gateway } = await adminServer({ calSeed: "none" });
+    const cal = await signIn(base, "cal");
+    const offer = await (await getAdmin(base, cal)).text();
+
+    const ok = await postCreate(base, cal, tokenOf(offer)!);
+    expect(ok.status).toBe(303);
+
+    const seedPath = userSeedPath(home, "cal");
+    const raw = readFileSync(seedPath, "utf8").trim();
+    expect(raw).toMatch(/^[0-9a-f]{64}$/);
+    expect(statSync(seedPath).mode & 0o777).toBe(0o600);
+    const mintedKey = authorForSeed(raw);
+
+    // The write grant, operator-signed, on the minted key.
+    expect(holdsGrant(gateway.reactor, STORE_ENTITY, mintedKey, "write", OPERATOR)).toBe(true);
+    // The root's Term names the minted key — the container gathers what CAL authors.
+    expect(gateway.containers().containers.get("cal")!.membership).toEqual(authoredBy(mintedKey));
+    // The SECRET never entered the ground (the H7 discipline: prove the scan can see, then clean).
+    const scan = (needle: string): boolean =>
+      [...gateway.reactor.snapshot()].some((d) => JSON.stringify(d.claims).includes(needle));
+    expect(scan(mintedKey)).toBe(true); // the PUBLIC key is visible — the scan works
+    expect(scan(raw)).toBe(false); // the SEED is not
   });
 });
