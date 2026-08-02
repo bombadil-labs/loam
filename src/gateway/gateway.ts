@@ -105,9 +105,13 @@ import {
   type QuarantinePool,
 } from "./quarantine-pool.js";
 import {
+  bindConnectionImpl,
+  connectionScopeImpl,
   containerScopeImpl,
   openContainerImpl,
   readContainerTable,
+  revokeConnectionImpl,
+  type BindConnectionOptions,
   type Container,
   type ContainerOptions,
   type ContainerTable,
@@ -737,6 +741,12 @@ export class Gateway {
   /** @internal — T19 seam (container.ts) */
   readonly attachedContainers = new Map<string, Gateway>();
 
+  // The live per-connection inbox handles (SPEC §39), keyed by inbox name. A binding is DURABLE: a
+  // second bindConnection of the same (container, connection key) resumes the same handle rather than
+  // spawning a new pool. Cleared only by a drop().
+  /** @internal — T138 seam (container.ts) */
+  readonly connectionInboxes = new Map<string, Container>();
+
   // Open a QUARANTINE POOL over this store (SPEC §24): the body lives in quarantine-pool.ts,
   // which re-expresses it as the untrusted-and-separate PRESET of the container primitive below.
   async openQuarantine(opts: QuarantineOptions = {}): Promise<QuarantinePool> {
@@ -762,6 +772,29 @@ export class Gateway {
   // QUERY time — this never rewrites the default door reads.
   containerScope(opts: { containers?: readonly string[] } = {}): Delta[] {
     return containerScopeImpl(this, opts);
+  }
+
+  // Bind a connection to a container (SPEC §39): spawn a per-connection inbox pool and provision its
+  // owner-authored grant chain. Reads gather the container; writes land in the returned inbox as the
+  // owner. Idempotent on (container, connectionKey) — a second bind resumes the same inbox.
+  async bindConnection(opts: BindConnectionOptions): Promise<Container> {
+    return bindConnectionImpl(this, opts);
+  }
+
+  // A connection's bounded read (SPEC §39.1.2): gather the bound container (or a named descendant of
+  // it), refusing any target outside the binding's subtree. The binding is an upper bound.
+  connectionScope(opts: { bound: string; containers?: readonly string[] }): Delta[] {
+    return connectionScopeImpl(this, opts);
+  }
+
+  // Revoke a connection (SPEC §39.3c): strike its owner-authored write grant in the inbox. New writes
+  // signed by that key refuse; its past deltas keep their author and stay readable.
+  async revokeConnection(opts: {
+    inbox: Container;
+    connectionKey: string;
+    ownerSeed: string;
+  }): Promise<void> {
+    return revokeConnectionImpl(opts);
   }
 
   // Promote a delta a quarantine produced into THIS store (SPEC §24.3 — promote-outputs): the body
