@@ -41,10 +41,12 @@ import { parseReadGesture, type ReadGesture } from "../gateway/renderers.js";
 import { makeMountTable, type ResolvedMount } from "./mounts.js";
 import {
   canonicalPublicUrl,
+  makeConsentDoor,
   makeOAuthDoors,
   publicUrlDefect,
   redirectOriginDefect,
   type ConnectorRegistration,
+  type ConsentDoor,
   type OAuthDoors,
 } from "./oauth.js";
 import { makeUserDoors, type UserDoorOptions, type UserDoors } from "./session.js";
@@ -426,6 +428,12 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
   // function of the options — the bound-URL default for `publicUrl` is filled in after listen,
   // which is why the deps read a closure variable the post-listen block assigns.
   let userDoors: UserDoors | undefined;
+
+  // The consent page (SPEC §37 phase 14), opt-in: it exists only where BOTH a login session (`users`)
+  // and registered connectors (`connectors`, whose home holds `oauth.json`) are configured — one
+  // supplies the phase-5 session it sits behind, the other the clients it grants and the code table
+  // it mints into. Built post-listen with `userDoors.gate`, routed before mount resolution.
+  let consent: ConsentDoor | undefined;
 
   // ONE MOUNT, or no login doors (SPEC §36 phase 7). `/session/token` mints `{ operator: true }`,
   // which is authority over this whole SERVER — every mount it hosts, now or later. The role
@@ -1001,6 +1009,12 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         void userDoors.handle(url.pathname, req, res);
         return;
       }
+      // The consent page (SPEC §37 phase 14), answered before mount routing — a store's own page, not
+      // a mount's. Absent `users` or `connectors`, `/oauth/authorize` falls through untouched.
+      if (consent !== undefined && consent.owns(url.pathname)) {
+        void consent.handle(url.pathname, req, res);
+        return;
+      }
       const [, mountName, verb] = url.pathname.split("/");
       // A malformed percent-escape resolves no mount — it must fall into the same uniform
       // refusal as any other unresolvable name, never a 500 that marks the input special.
@@ -1480,6 +1494,16 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       // containers (the one tier neither guard sees) are genuinely distinct gateways.
       otherWorlds: () => mounts.live().filter((name) => name !== forUsers.mount),
     });
+    // The consent page reuses the login doors' session gate, and reads/writes the connectors' own
+    // `oauth.json` — so it opens only where both are configured. Its clock is the login doors' own
+    // monotonic source, so a code's deadline and a session's idle window step together under a rail.
+    if (options.connectors !== undefined) {
+      consent = makeConsentDoor({
+        gate: userDoors.gate,
+        home: options.connectors.home,
+        ...(forUsers.monotonicNow === undefined ? {} : { now: forUsers.monotonicNow }),
+      });
+    }
   }
 
   return {

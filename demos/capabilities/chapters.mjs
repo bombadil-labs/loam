@@ -1507,6 +1507,12 @@ export const CHAPTERS = [
             door: null,
           },
           {
+            says: "Approving a connector happens on a consent page behind a login session, and the page reads that session without extending it — a cross-site navigation cannot slide it. The redirect target must match a registered one byte for byte, and no refusal path ever sends a Location elsewhere; the connector's name and URI are escaped under a script-forbidding policy. Approving carries a same-origin, session-bound form token, and mints ONE authorization code — bound to the client and that exact URI, stored only by digest, expiring on a deadline a backward clock cannot extend — and no seed and no token, which arrive only at the exchange.",
+            spec: "spec/37-connectors.md",
+            proof: "test/server/oauth-consent.test.ts",
+            door: null,
+          },
+          {
             says: "A connection binds to one container: it reads that container's whole membership and its writes land in a per-connection inbox pool the connection signs with its own key. A strike admitted to the gather suppresses its target whoever wrote it and wherever in the container's grounds it sits — negation binds by MEMBERSHIP, closed across every ground at once, so a retraction written into an inbox cannot be stranded away from the primary claim it strikes. Revoking the connection strikes its grant and the door refuses the next write while past writes keep their author; dropping the inbox purges every byte it wrote, and a named live bystander survives both.",
             spec: "spec/39-connection-container.md",
             proof: "test/server/connection-container.test.ts",

@@ -12,17 +12,21 @@
 // call sites inside its existing uniform 401 (T78/§12) — a header that differed by mount would
 // reopen exactly the oracle that discipline exists to prevent.
 
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { type IncomingMessage, type ServerResponse } from "node:http";
 import {
   OAuthFileBusy,
   OAuthFileUnlockable,
+  clientFor,
   clientNameDefect,
   oauthPath,
+  readOAuthFile,
   uriTextDefect,
   withOAuthFile,
   type OAuthClient,
+  type OAuthCode,
 } from "./oauth-file.js";
+import { CSP, escapeHtml, page, sameSecret, type SessionGate } from "./session.js";
 
 /** The one scope §37 ships. A scope LIST replaces it when a second one exists. */
 export const CONNECTOR_SCOPE = "loam.connector";
@@ -500,6 +504,252 @@ export function makeOAuthDoors(options: OAuthOptions): OAuthDoors {
         return;
       }
       wellKnown(pathname, req, res);
+    },
+  };
+}
+
+// --- GET /oauth/authorize and its approval POST (SPEC §37 phase 14) -----------------------------
+//
+// The consent page sits behind a phase-5 session and behind phase-6's provenance + form-token
+// check — it REUSES the login doors' machinery through a `SessionGate` rather than re-deciding any
+// of it. It MINTS ONLY A CODE: no seed, no token, no grant. Redemption is phase 15.
+//
+// THE OPEN-REDIRECT FENCE IS THE WHOLE POINT. A `redirect_uri` must EXACTLY match one the client
+// registered — byte for byte, so a different path, an added query, or another port each refuse. No
+// refusal ever writes a `Location`: the only response that redirects is a granted approval, and it
+// redirects to the REGISTERED uri alone. A caller-supplied uri that failed the match is never a
+// redirect target and never reaches the page as displayed text either.
+
+export const AUTHORIZE_PATH = "/oauth/authorize";
+
+/**
+ * How long a minted authorization code lives. RFC 6749 §4.1.2 recommends a 10-minute maximum; a Loam
+ * code is redeemed at once, so it is tighter. The deadline is recorded at MINT from a monotonic
+ * clock (see `OAuthCode.expiresAt`), never re-read from the wall clock at check time.
+ */
+export const CODE_TTL_MS = 60_000;
+
+const MAX_STATE = 2048; // the client's opaque round-trip value; a few hundred bytes in practice
+
+export interface ConsentOptions {
+  /** The session machinery this page sits behind — the login doors' own, reused whole. */
+  readonly gate: SessionGate;
+  /** Where `oauth.json` lives (the connectors' home) — the registered clients and the code table. */
+  readonly home: string;
+  /**
+   * A monotonic millisecond source for the code's deadline. Injectable so a rail can step it;
+   * defaults to `performance.now()`. NEVER `Date.now()`: a wall-clock step backwards must not extend
+   * a code's life.
+   */
+  readonly now?: () => number;
+}
+
+export interface ConsentDoor {
+  owns(pathname: string): boolean;
+  handle(pathname: string, req: IncomingMessage, res: ServerResponse): Promise<void>;
+}
+
+/** The one warning the consent copy MUST carry — a grant's real power (SPEC §37 phase 14, criterion 7). */
+const STRIKER_WARNING =
+  "A granted connector signs under its own name. As a lawful striker it can retract claims the " +
+  "operator wrote — a strike it signs suppresses them for any reader.";
+
+export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
+  const gate = options.gate;
+  const home = options.home;
+  const now = options.now ?? ((): number => performance.now());
+  const digestOf = (secret: string): string => createHash("sha256").update(secret).digest("hex");
+
+  const htmlOut = (res: ServerResponse, status: number, body: string, cookie?: string): void => {
+    res.writeHead(status, {
+      "content-type": "text/html; charset=utf-8",
+      "content-security-policy": CSP,
+      "cache-control": "no-store",
+      "referrer-policy": "no-referrer",
+      ...(cookie === undefined ? {} : { "set-cookie": cookie }),
+    });
+    res.end(body);
+  };
+
+  // Every REFUSAL is a page with no `Location` — the open-redirect fence. It reflects no caller text,
+  // so a bad `client_id` or `redirect_uri` cannot ride back into the DOM.
+  const refuse = (res: ServerResponse, status: number, message: string): void =>
+    htmlOut(res, status, page("this request was refused", `<h1>Refused.</h1>\n<p>${message}</p>`));
+
+  const consentPage = (
+    client: OAuthClient,
+    registeredUri: string,
+    state: string,
+    formToken: string,
+  ): string =>
+    page(
+      "approve a connector",
+      `<h1>Approve a connector?</h1>
+<p><code>${escapeHtml(client.clientName)}</code> asks to act in this store under its own name.</p>
+<p>If you approve, this store will send it back to <code>${escapeHtml(registeredUri)}</code>.</p>
+<p><strong>${escapeHtml(STRIKER_WARNING)}</strong></p>
+<form method="post" action="${AUTHORIZE_PATH}">
+<input type="hidden" name="form_token" value="${escapeHtml(formToken)}">
+<input type="hidden" name="client_id" value="${escapeHtml(client.clientId)}">
+<input type="hidden" name="redirect_uri" value="${escapeHtml(registeredUri)}">
+<input type="hidden" name="state" value="${escapeHtml(state)}">
+<button type="submit">approve</button>
+</form>`,
+    );
+
+  // A registered uri EXACTLY equal to the presented one, byte for byte — never a normalized or
+  // reparsed form. `undefined` when the client is unknown or nothing matches.
+  const exactMatch = (clientId: string, uri: string): OAuthClient | undefined => {
+    const client = clientFor(readOAuthFile(home), clientId);
+    if (client === undefined) return undefined;
+    return client.redirectUris.includes(uri) ? client : undefined;
+  };
+
+  const readBodyFields = (req: IncomingMessage): Promise<Map<string, string>> =>
+    readBody(req).then((body) => {
+      const out = new Map<string, string>();
+      if (body === undefined) return out;
+      for (const [k, v] of new URLSearchParams(body)) out.set(k, v);
+      return out;
+    });
+
+  const handleGet = (req: IncomingMessage, res: ServerResponse): void => {
+    // Behind a phase-5 session. No session → the login form, and nothing minted. READ, don't slide:
+    // a bare GET here can be a SameSite=Lax cross-site top-level nav carrying the victim's cookie, and
+    // rendering the consent page must not extend their session's idle window. `peek` reads without
+    // touching — the same choice handlePost makes, so refused traffic never slides (session.ts).
+    const session = gate.peek(req);
+    if (session === undefined) {
+      const form = gate.loginForm(req);
+      htmlOut(res, 200, form.body, form.cookie);
+      return;
+    }
+    const params = new URL(req.url ?? "", "http://loam.invalid").searchParams;
+    const clientId = params.get("client_id") ?? "";
+    const redirectUri = params.get("redirect_uri") ?? "";
+    const state = params.get("state") ?? "";
+    if (state.length > MAX_STATE) {
+      refuse(res, 400, "The state value is too long.");
+      return;
+    }
+    // The exact-match fence, on the GET as on the POST: an unknown client or a uri no registration
+    // holds is refused with no `Location` and no caller text reflected.
+    const client = exactMatch(clientId, redirectUri);
+    if (client === undefined) {
+      refuse(res, 400, "This store holds no connector that may be reached at that address.");
+      return;
+    }
+    // Display the REGISTERED uri (`redirectUri` here is byte-equal to it, having matched), never the
+    // caller's own text. `state` rides the form so the approval echoes it back to the client.
+    htmlOut(res, 200, consentPage(client, redirectUri, state, session.formToken));
+  };
+
+  const handlePost = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    // Phase-6 provenance FIRST, before any session read — and drain the body so a refusal leaves no
+    // bytes on a keep-alive socket. A cross-site-shaped approval mints nothing.
+    if (!gate.fromThisPage(req)) {
+      await readBody(req);
+      refuse(res, 403, "This request did not come from this store's own page.");
+      return;
+    }
+    const fields = await readBodyFields(req);
+    // A live session, WITHOUT sliding it — a refused approval must not extend a session's life.
+    const session = gate.peek(req);
+    if (session === undefined) {
+      refuse(res, 401, "No live session is presented here.");
+      return;
+    }
+    // The form token, compared timing-safely against the session's own (the login doors' own
+    // `sameSecret`) — the second half of the phase-6 check. A missing or forged token mints nothing.
+    if (!sameSecret(fields.get("form_token") ?? "", session.formToken)) {
+      refuse(res, 403, "This request did not come from this store's own page.");
+      return;
+    }
+    const clientId = fields.get("client_id") ?? "";
+    const redirectUri = fields.get("redirect_uri") ?? "";
+    const state = fields.get("state") ?? "";
+    if (state.length > MAX_STATE) {
+      refuse(res, 400, "The state value is too long.");
+      return;
+    }
+    // Re-run the exact-match fence on the POST's OWN fields — the hidden field is a caller's to
+    // forge, so the registration is re-read and re-checked here, never trusted from the GET.
+    const client = exactMatch(clientId, redirectUri);
+    if (client === undefined) {
+      refuse(res, 400, "This store holds no connector that may be reached at that address.");
+      return;
+    }
+    // Mint the code: a secret to the client, its DIGEST to the file — bound to the client and to the
+    // exact uri, with a monotonic deadline recorded now. No seed, no token, no grant.
+    const secret = randomBytes(32).toString("base64url");
+    const record: OAuthCode = {
+      digest: digestOf(secret),
+      clientId,
+      redirectUri,
+      expiresAt: now() + CODE_TTL_MS,
+      issuedAt: Date.now(),
+    };
+    try {
+      withOAuthFile<void>(home, (file) => ({
+        next: { ...file, codes: [...(file.codes ?? []), record] },
+        result: undefined,
+      }));
+    } catch (err) {
+      // A lock this store could not take, or a file it could not read, mints nothing and writes no
+      // `Location` — the same failing-closed the register door does.
+      const temporary = err instanceof OAuthFileBusy || err instanceof OAuthFileUnlockable;
+      refuse(
+        res,
+        503,
+        temporary
+          ? "This store cannot take the lock on its connector records, so it approved nothing."
+          : "This store cannot read its connector records, so it approved nothing.",
+      );
+      return;
+    }
+    // The ONLY response that redirects, and only ever to the REGISTERED uri. The code and the
+    // client's opaque `state` ride the query; the registered uri is preserved byte-for-byte and the
+    // parameters are appended, never reparsed.
+    const sep = redirectUri.includes("?") ? "&" : "?";
+    const stateParam = state === "" ? "" : `&state=${encodeURIComponent(state)}`;
+    const location = `${redirectUri}${sep}code=${encodeURIComponent(secret)}${stateParam}`;
+    res.writeHead(302, {
+      location,
+      "cache-control": "no-store",
+      "referrer-policy": "no-referrer",
+    });
+    res.end();
+  };
+
+  return {
+    owns: (pathname) => pathname === AUTHORIZE_PATH,
+    async handle(pathname, req, res) {
+      try {
+        if (req.method === "GET") {
+          handleGet(req, res);
+          return;
+        }
+        if (req.method === "POST") {
+          await handlePost(req, res);
+          return;
+        }
+        htmlOut(
+          res,
+          405,
+          page(
+            "method not allowed",
+            `<h1>Refused.</h1>\n<p>${AUTHORIZE_PATH} answers GET and POST.</p>`,
+          ),
+        );
+      } catch {
+        // A fault nobody anticipated must not escape to the server's generic 500, whose message can
+        // carry the home's absolute path. It says no rather than why, and writes no `Location`.
+        if (!res.headersSent) {
+          refuse(res, 503, "This store could not answer, and it says no rather than why.");
+        } else {
+          res.end();
+        }
+      }
     },
   };
 }

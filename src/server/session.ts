@@ -136,9 +136,36 @@ export interface UserDoorDeps {
   otherWorlds(): readonly string[];
 }
 
+/** What a live session tells another of this store's own pages about the person behind it. */
+export interface SessionView {
+  readonly user: string;
+  /** The session's form token — a later phase's POST presents it under the same phase-6 check. */
+  readonly formToken: string;
+}
+
+/**
+ * The session machinery another of this store's own pages reuses (SPEC §37 phase 14 — the consent
+ * page). It exposes exactly what a second page needs to sit behind the SAME phase-5 session and the
+ * SAME phase-6 provenance check, and nothing that would let it mint or slide a session it should not.
+ * It is a READ of the login doors' state; it adds no precondition to `/login`, `/logout` or
+ * `/session/token`.
+ */
+export interface SessionGate {
+  /** The live session for this request, WITHOUT sliding its window — a refused POST must not extend it. */
+  peek(req: IncomingMessage): SessionView | undefined;
+  /** The live session, ADMITTED — reaching a page is activity, so this slides the idle window. */
+  admit(req: IncomingMessage): SessionView | undefined;
+  /** Phase-6 provenance: did this request come from this store's own page? */
+  fromThisPage(req: IncomingMessage): boolean;
+  /** The stateless login form to render when no session is presented, and the pre-session cookie to set. */
+  loginForm(req: IncomingMessage): { readonly body: string; readonly cookie: string };
+}
+
 export interface UserDoors {
   owns(pathname: string): boolean;
   handle(pathname: string, req: IncomingMessage, res: ServerResponse): Promise<void>;
+  /** The session gate a sibling page (the §37 consent page) reuses. */
+  readonly gate: SessionGate;
 }
 
 // The `__Host-` prefix is load-bearing, not decoration: a browser refuses to store such a cookie
@@ -1086,7 +1113,33 @@ page will offer.</p>`,
     return postToken(req, res);
   };
 
+  // The gate a sibling page reuses (SPEC §37 phase 14). Every method reads the SAME closures the
+  // login doors use — `peek`/`touch` for the session, `fromThisPage` for phase-6 provenance, and the
+  // stateless pre-session for the login form — so the consent page cannot drift from what `/login`
+  // enforces. `loginForm` mirrors the tail of `getLogin`: an existing nonce cookie is reused so a
+  // reload keeps its form token, else a fresh one, and no table grows.
+  const gate: SessionGate = {
+    peek: (req) => {
+      const held = peek(req);
+      return held === undefined
+        ? undefined
+        : { user: held.session.user, formToken: held.session.formToken };
+    },
+    admit: (req) => {
+      const held = touch(req);
+      return held === undefined
+        ? undefined
+        : { user: held.session.user, formToken: held.session.formToken };
+    },
+    fromThisPage,
+    loginForm: (req) => {
+      const nonce = preSessionIdFrom(req) ?? opaqueId();
+      return { body: loginPage(preSessionToken(nonce)), cookie: setPreCookie(nonce) };
+    },
+  };
+
   return {
+    gate,
     owns: (pathname) =>
       pathname === "/login" || pathname === "/logout" || pathname === "/session/token",
     async handle(pathname, req, res) {

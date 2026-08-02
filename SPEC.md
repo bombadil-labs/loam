@@ -62,7 +62,7 @@ name begins with that number.
 | §31 | [The mount table — which world answers at a name, asked per request](spec/31-mount-table.md) |
 | §34 | [The board — our status page as a Loam app](spec/34-the-board.md) |
 | §36 | [Users and sessions — credentials at rest](spec/36-users-and-sessions.md) *(phases 1, 2 and 4 of 10 landed; the section grows as later phases land)* |
-| §37 | [Connectors — OAuth-based access for MCP clients](spec/37-connectors.md) *(phase 11 of 15 landed)* |
+| §37 | [Connectors — OAuth-based access for MCP clients](spec/37-connectors.md) *(phases 11–14 of 15 landed)* |
 | §39 | [A connection binds to a container — the inbox model](spec/39-connection-container.md) |
 
 _**§21**, **§22**, **§25**, and **§26** are **landed** — design accepted and implemented (see each
