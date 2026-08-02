@@ -1,0 +1,11 @@
+{
+  "body": "Observed 2026-08-02 during §40 A5's gate runs, MEASURED BOTH DIRECTIONS per the flaky-test standing rule: `npm run check` intermittently dies with a vitest worker OOM (heap-limit crash, `Worker exited unexpectedly`) and the failure REPRODUCES ON THE CLEAN BASE COMMIT a5ec377 under `check`, while bare `npm test` passes on base and branch alike. The signature matches test/gateway/render-sandbox.test.ts's deliberate memory hog (`new Array(8e6)` loop) — the T73/T75 surface — under the build+test memory peak `check` produces. The phase-14 build agent hit the same shape earlier the same night (worker fork crash under check, tests green in isolation).\n\nThe file is a FROZEN RAIL (archived T73/T75 name it), so any fix must go through the authorized rename/repair path, not a drive-by edit. Per the standing rule the fix is NOT widening an assertion and NOT a retry: determine whether the hog's size can pin the same behavior within a bounded heap (a rail bug — fixture more forceful than needed), or whether the check pipeline's concurrency needs a memory budget (an environment bug). A load-flake trains readers to re-run past red; it outranks feature work once someone observes it on their own branch's gate.",
+  "id": "T142",
+  "phase": "p0",
+  "rails": [],
+  "scope": [
+    "test/gateway/render-sandbox.test.ts"
+  ],
+  "status": "todo",
+  "title": "render-sandbox is load-marginal under `npm run check` — worker OOM, pre-existing, frozen rail"
+}
