@@ -1,8 +1,10 @@
-// The admin page (SPEC §40, phases A1 + A2) — the door, the read surface, and the container
-// lifecycle. `GET /admin` renders the signed-in user's container subtree with the declare form;
-// `GET /admin/container` renders one container's members and its lifecycle forms; and the POSTs
-// are `create-root`, `declare`, `detach`, `reattach`, and the two-step `drop` → `drop-confirm`.
-// Schemas, promotion and connections are later phases, each a new exact path in `owns`.
+// The admin page (SPEC §40, phases A1 + A2 + A3) — the door, the read surface, the container
+// lifecycle, and the schema panel. `GET /admin` renders the signed-in user's container subtree
+// with the declare form and the registered lenses; `GET /admin/container` renders one container's
+// members and its lifecycle forms; `GET /admin/view` resolves a container's gather through a
+// registered lens; and the POSTs are `create-root`, `declare`, `detach`, `reattach`, the two-step
+// `drop` → `drop-confirm`, and `register`. Promotion and connections are later phases, each a new
+// exact path in `owns`.
 //
 // THE LIFECYCLE ACTS ONLY WHERE IT CAN TELL THE TRUTH. A shared container is all at-rest law, so
 // every act on it is a delta: detach lands the record, reattach negates it, drop strikes the
@@ -28,7 +30,13 @@
 
 import { randomBytes } from "node:crypto";
 import { type IncomingMessage, type ServerResponse } from "node:http";
-import { authorForSeed, parseTerm, signClaims, type Claims } from "@bombadil/rhizomatic";
+import {
+  authorForSeed,
+  parseTerm,
+  signClaims,
+  type Claims,
+  type Delta,
+} from "@bombadil/rhizomatic";
 import { readUserSeed, userSeedPath } from "../cli/config.js";
 import {
   containerClaims,
@@ -38,7 +46,16 @@ import {
   type ContainerTable,
   type ResolvedContainer,
 } from "../gateway/container.js";
-import { type Gateway } from "../gateway/gateway.js";
+import { Gateway } from "../gateway/gateway.js";
+import { queryFieldFor } from "../gateway/gql.js";
+import {
+  lensOf,
+  parseRegistrationInput,
+  readRegistrations,
+  type Registration,
+  type RegistrationInput,
+} from "../gateway/registration.js";
+import { MemoryBackend } from "../store/memory.js";
 import { CSP, escapeHtml, page, sameSecret, type SessionGate } from "./session.js";
 
 export const ADMIN_PATH = "/admin";
@@ -49,8 +66,12 @@ export const ADMIN_DETACH_PATH = "/admin/detach";
 export const ADMIN_REATTACH_PATH = "/admin/reattach";
 export const ADMIN_DROP_PATH = "/admin/drop";
 export const ADMIN_DROP_CONFIRM_PATH = "/admin/drop-confirm";
+export const ADMIN_REGISTER_PATH = "/admin/register";
+export const ADMIN_VIEW_PATH = "/admin/view";
 
 const MAX_BODY = 8 * 1024; // tokens, a name, a membership Term; nothing here needs more
+// A registration carries a hyperschema body and a resolution schema — real JSON, not a name.
+const REGISTER_MAX_BODY = 64 * 1024;
 
 /** How many pending drop confirmations this door remembers. Oldest-out; each is single-use. */
 const CONFIRM_CAP = 64;
@@ -111,7 +132,7 @@ const authoredBy = (publicKey: string): unknown => ({
   in: "input",
 });
 
-const readBody = (req: IncomingMessage): Promise<string | undefined> =>
+const readBody = (req: IncomingMessage, max = MAX_BODY): Promise<string | undefined> =>
   new Promise((resolve) => {
     const chunks: Buffer[] = [];
     let size = 0;
@@ -119,7 +140,7 @@ const readBody = (req: IncomingMessage): Promise<string | undefined> =>
     req.on("data", (chunk: Buffer) => {
       if (over) return;
       size += chunk.length;
-      if (size > MAX_BODY) {
+      if (size > max) {
         over = true;
         return;
       }
@@ -169,6 +190,13 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
 
   const detailHref = (name: string): string =>
     `${ADMIN_CONTAINER_PATH}?name=${encodeURIComponent(name)}`;
+
+  // The view page's address: a container, optionally a lens, optionally an entity. The page asks
+  // for whichever part is missing.
+  const viewHref = (container: string, entity?: string, lens?: string): string =>
+    `${ADMIN_VIEW_PATH}?container=${encodeURIComponent(container)}` +
+    (lens === undefined ? "" : `&lens=${encodeURIComponent(lens)}`) +
+    (entity === undefined ? "" : `&entity=${encodeURIComponent(entity)}`);
 
   const stateOf = (table: ContainerTable, name: string, rec: ResolvedContainer): string =>
     [
@@ -237,7 +265,38 @@ ${parents}
 </form>`;
   };
 
+  // The schema panel (§40 phase A3): the registered lenses, read live under the store's law, and
+  // the register form. Registration is deliberately STORE-WIDE — a lens is how this store reads,
+  // for every reader — so the panel is the same for every user and takes no subtree gate.
+  const schemaPanelHtml = (gw: Gateway, formToken: string): string => {
+    const regs = readRegistrations(gw.reactor, gw.operatorAuthor);
+    const listing =
+      regs.length === 0
+        ? "<p>No lens is registered on this store yet.</p>"
+        : `<ul>\n${regs
+            .map(
+              (r) =>
+                `<li><code>${escapeHtml(lensOf(r))}</code> — roots: ` +
+                (r.roots.length === 0
+                  ? "none"
+                  : r.roots.map((root) => `<code>${escapeHtml(root)}</code>`).join(", ")) +
+                `</li>`,
+            )
+            .join("\n")}\n</ul>`;
+    return `<h2>Schemas.</h2>
+<p>A registered lens is how this store reads: a hyperschema that gathers, a schema that resolves.
+Registration is store law — every reader here reads through the same lenses. The body below is the
+same JSON <code>loam register</code> takes.</p>
+${listing}
+<form method="post" action="${ADMIN_REGISTER_PATH}">
+<input type="hidden" name="form_token" value="${escapeHtml(formToken)}">
+<p><label>registration <textarea name="registration" rows="12" cols="72"></textarea></label></p>
+<button type="submit">register</button>
+</form>`;
+  };
+
   const dashboardPage = (
+    gw: Gateway,
     user: string,
     table: ContainerTable,
     reach: ReadonlySet<string>,
@@ -249,7 +308,8 @@ ${parents}
 <p>You are <code>${escapeHtml(user)}</code>. Below is your subtree: the container that bears your
 name, and everything declared inside it. Each name opens its own page.</p>
 ${treeHtml(table, reach, user)}
-${declareFormHtml(user, reach, formToken)}`,
+${declareFormHtml(user, reach, formToken)}
+${schemaPanelHtml(gw, formToken)}`,
     );
 
   const createOfferPage = (user: string, formToken: string): string =>
@@ -278,23 +338,30 @@ you author — one container, named after you; everything you later make will li
       htmlOut(res, 200, createOfferPage(session.user, session.formToken));
       return;
     }
-    htmlOut(res, 200, dashboardPage(session.user, table, reach, session.formToken));
+    htmlOut(res, 200, dashboardPage(gw, session.user, table, reach, session.formToken));
   };
 
   // One member, rendered: the id, the author, the moment, and each pointer's role (with its
-  // context where the pointer names an entity).
-  const memberHtml = (gw: Gateway, id: string): string => {
+  // context where the pointer names an entity). Each entity target links into the view page, so
+  // the members list is the entity picker — a reader walks from a raw pointer to a resolved read.
+  const memberHtml = (gw: Gateway, container: string, id: string): string => {
     const delta = gw.reactor.get(id);
     if (delta === undefined) return "";
     const claims = delta.claims;
     const roles = claims.pointers
-      .map((p) => (p.target.kind === "entity" ? `${p.role} @ ${p.target.entity.context}` : p.role))
+      .map((p) =>
+        p.target.kind === "entity"
+          ? `${escapeHtml(p.role)} @ ${escapeHtml(p.target.entity.context ?? "")} → ` +
+            `<a href="${escapeHtml(viewHref(container, p.target.entity.id))}">` +
+            `<code>${escapeHtml(p.target.entity.id)}</code></a>`
+          : escapeHtml(p.role),
+      )
       .join(" · ");
     return (
       `<li><code>${escapeHtml(delta.id)}</code><br>` +
       `by <code>${escapeHtml(claims.author)}</code> at ` +
       `${escapeHtml(new Date(claims.timestamp).toISOString())}<br>` +
-      `${escapeHtml(roles)}</li>`
+      `${roles}</li>`
     );
   };
 
@@ -397,7 +464,7 @@ ${back}`,
         ? "<p>Nothing has gathered here yet.</p>"
         : `<p>${members.length} member${members.length === 1 ? "" : "s"}.</p>
 <ul>
-${members.map((m) => memberHtml(gw, m.id)).join("\n")}
+${members.map((m) => memberHtml(gw, name, m.id)).join("\n")}
 </ul>`;
     return page(name, `${head}\n${listing}\n${forms}\n${back}`);
   };
@@ -421,6 +488,190 @@ ${members.map((m) => memberHtml(gw, m.id)).join("\n")}
     htmlOut(res, 200, detailPage(gw, table, name, table.containers.get(name)!, session.formToken));
   };
 
+  // --- the resolved view (phase A3) --------------------------------------------------------------
+
+  // Resolve one entity of one lens over exactly a container's gather: federate the gather into a
+  // scratch store, register the lens there, and ask GraphQL — the same read any door serves,
+  // scoped to this one container. The scratch is CLOSED on every path. "Reads nothing" is measured
+  // at the EVIDENCE, not the value: the resolved node's hyperview hash is compared against the
+  // same lens over an empty ground, so a schema whose defaults synthesize values (absentAs) cannot
+  // make an unread container look read.
+  const resolveThrough = async (
+    regs: readonly Registration[],
+    reg: Registration,
+    members: readonly Delta[],
+    entity: string,
+  ): Promise<{ view: Record<string, unknown>; empty: boolean }> => {
+    const dest = await Gateway.open(new MemoryBackend(), {});
+    try {
+      // Install every registered lens in fixpoint rounds (a lens's expand may read a sibling),
+      // exactly as replay installs them: the chosen lens takes the entity as its root; the rest
+      // bind rootless, present only so references resolve. One that never binds is left out.
+      let pending = regs.map((r) => ({ r, roots: r === reg ? [entity] : [] }));
+      for (;;) {
+        const next: typeof pending = [];
+        for (const p of pending) {
+          try {
+            dest.register(p.r.hyperschema, p.r.schema, p.roots, undefined, p.r.writable);
+          } catch {
+            next.push(p);
+          }
+        }
+        if (next.length === pending.length) break;
+        pending = next;
+      }
+      if (pending.some((p) => p.r === reg)) {
+        throw new Error(`the lens "${lensOf(reg)}" did not bind in the scratch store`);
+      }
+      const field = queryFieldFor(lensOf(reg));
+      const q = `query($e: ID!) { ${field}(entity: $e) { _hviewHex _view } }`;
+      // The baseline FIRST, before any evidence lands: what this lens gathers of nothing.
+      const blank = await dest.query(q, { e: entity });
+      await dest.federate(members, { admit: () => true });
+      const read = await dest.query(q, { e: entity });
+      if (read.errors !== undefined) throw new Error(read.errors.join(", "));
+      type Node = { _hviewHex?: string; _view?: unknown } | null;
+      const nodeOf = (data: Record<string, unknown> | null | undefined): Node => {
+        const v = data?.[field] ?? null;
+        return typeof v === "object" ? v : null;
+      };
+      const node = nodeOf(read.data);
+      const blankNode = nodeOf(blank.data);
+      if (node === null) return { view: {}, empty: true };
+      const view = (node._view ?? {}) as Record<string, unknown>;
+      return { view, empty: node._hviewHex === blankNode?._hviewHex };
+    } finally {
+      await dest.close();
+    }
+  };
+
+  const viewFieldsHtml = (view: Record<string, unknown>): string => {
+    const entries = Object.entries(view);
+    if (entries.length === 0) return "<p>The view resolved, and every field of it is absent.</p>";
+    return `<dl>\n${entries
+      .map(
+        ([k, v]) =>
+          `<dt><code>${escapeHtml(k)}</code></dt>` +
+          `<dd><code>${escapeHtml(JSON.stringify(v) ?? "")}</code></dd>`,
+      )
+      .join("\n")}\n</dl>`;
+  };
+
+  const getView = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    const session = loginOrUndefined(req, res);
+    if (session === undefined) return;
+    const gw = options.ground();
+    if (gw === undefined) {
+      refuse(res, 503, "This store's ground is not reachable, so this page cannot load.");
+      return;
+    }
+    const url = new URL(req.url ?? "", "http://loam.invalid");
+    const container = url.searchParams.get("container") ?? "";
+    const lens = url.searchParams.get("lens") ?? "";
+    const entity = url.searchParams.get("entity") ?? "";
+    const table = gw.containers();
+    // The door's gate, on the CONTAINER the read would gather: outside the subtree — foreign or
+    // absent alike — is one uniform refusal.
+    if (!subtreeOf(table, session.user).has(container)) {
+      notYours(res);
+      return;
+    }
+    const back =
+      `<p><a href="${escapeHtml(detailHref(container))}">Back to ` +
+      `<code>${escapeHtml(container)}</code>.</a></p>`;
+    let members: readonly Delta[];
+    try {
+      members = gw.containerScope({ containers: [container] });
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      if (detail.includes("is not attached")) {
+        htmlOut(
+          res,
+          200,
+          page(
+            "nothing to read",
+            `<h1>Nothing to read.</h1>
+<p><code>${escapeHtml(container)}</code> is declared, not attached — its bytes are not readable
+from here, so no lens can be resolved over it.</p>
+${back}`,
+          ),
+        );
+        return;
+      }
+      onFault(`the admin view page could not read container "${container}": ${detail}`);
+      refuse(res, 503, "This container's contents cannot be read right now.");
+      return;
+    }
+    const regs = readRegistrations(gw.reactor, gw.operatorAuthor);
+    if (lens === "") {
+      // The lens picker: honestly cheap — every registered lens, as a link into this same page.
+      const choices =
+        regs.length === 0
+          ? `<p>No lens is registered on this store yet, so there is nothing to read through.
+Register one <a href="${ADMIN_PATH}">from your page</a>.</p>`
+          : `<ul>\n${regs
+              .map(
+                (r) =>
+                  `<li><a href="${escapeHtml(viewHref(container, entity === "" ? undefined : entity, lensOf(r)))}">` +
+                  `<code>${escapeHtml(lensOf(r))}</code></a></li>`,
+              )
+              .join("\n")}\n</ul>`;
+      htmlOut(
+        res,
+        200,
+        page(
+          "choose a lens",
+          `<h1>Choose a lens.</h1>
+<p>A view is a reading: a container's gather, resolved through one registered lens.</p>
+${choices}
+${back}`,
+        ),
+      );
+      return;
+    }
+    const reg = regs.find((r) => lensOf(r) === lens);
+    if (reg === undefined) {
+      refuse(res, 404, "No registered lens bears that name, so there is nothing to read through.");
+      return;
+    }
+    if (entity === "") {
+      htmlOut(
+        res,
+        200,
+        page(
+          "name an entity",
+          `<h1>Name an entity.</h1>
+<p>A view resolves at one entity. The members of
+<a href="${escapeHtml(detailHref(container))}"><code>${escapeHtml(container)}</code></a> link
+each entity they point at straight to this page.</p>`,
+        ),
+      );
+      return;
+    }
+    let resolved: { view: Record<string, unknown>; empty: boolean };
+    try {
+      resolved = await resolveThrough(regs, reg, members, entity);
+    } catch (err) {
+      onFault(
+        `the admin view page could not resolve "${entity}" through "${lens}": ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+      refuse(res, 503, "This view could not be resolved right now.");
+      return;
+    }
+    const count = members.length;
+    const head =
+      `<h1>Reading <code>${escapeHtml(entity)}</code> through <code>${escapeHtml(lens)}</code>.</h1>\n` +
+      `<p>Over the gather of <code>${escapeHtml(container)}</code> — ` +
+      `${count} raw member${count === 1 ? "" : "s"} beside this resolved view.</p>`;
+    const bodyHtml = resolved.empty
+      ? `<p>This lens reads nothing here. No claim in this container's gather is evidence for this
+entity under this lens — not an empty record, but the absence of one. The container may hold data
+this lens does not gather; the lens may read ground this container does not hold.</p>`
+      : viewFieldsHtml(resolved.view);
+    htmlOut(res, 200, page("a resolved view", `${head}\n${bodyHtml}\n${back}`));
+  };
+
   // --- the lifecycle POSTs (phase A2) ------------------------------------------------------------
 
   // The phase-6 provenance + form-token pair, shared by every POST on this door. Returns the
@@ -430,14 +681,17 @@ ${members.map((m) => memberHtml(gw, m.id)).join("\n")}
   const postGate = async (
     req: IncomingMessage,
     res: ServerResponse,
+    maxBody = MAX_BODY,
   ): Promise<{ fields: Map<string, string>; user: string; formToken: string } | undefined> => {
     if (!gate.fromThisPage(req)) {
-      await readBody(req);
+      await readBody(req, maxBody);
       refuse(res, 403, "This request did not come from this store's own page.");
       return undefined;
     }
     const fields = new Map<string, string>();
-    for (const [k, v] of new URLSearchParams((await readBody(req)) ?? "")) fields.set(k, v);
+    for (const [k, v] of new URLSearchParams((await readBody(req, maxBody)) ?? "")) {
+      fields.set(k, v);
+    }
     const session = gate.peek(req);
     if (session === undefined) {
       refuse(res, 401, "No live session is presented here.");
@@ -932,6 +1186,64 @@ ${hiddenPair(formToken, name)}
     seeOther(res);
   };
 
+  // Register a lens through the browser (§40 criterion 8): the SAME body `loam register` and
+  // `POST /:mount/register` take, parsed by the same parser, landed by the same publish.
+  // Registration is store law, operator-signed by the server — the door's authority is the
+  // session and the operator's seed, exactly as declare's is.
+  const postRegister = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    const gated = await postGate(req, res, REGISTER_MAX_BODY);
+    if (gated === undefined) return;
+    const gw = signerGround(res);
+    if (gw === undefined) return;
+    const raw = (gated.fields.get("registration") ?? "").trim();
+    // The defect is named; the defective bytes are never echoed back into the DOM.
+    if (raw.length === 0) {
+      refuse(res, 400, "The registration is empty, so nothing was registered.");
+      return;
+    }
+    let body: unknown;
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      refuse(res, 400, "The registration is not valid JSON, so nothing was registered.");
+      return;
+    }
+    let input: RegistrationInput;
+    try {
+      input = parseRegistrationInput(body);
+    } catch (err) {
+      // The parser names the defective FIELD in plain English, and its message can quote a name
+      // the caller typed — so it is escaped before it rides into the DOM. No path, no flag.
+      const detail = err instanceof Error ? err.message : String(err);
+      refuse(res, 400, `${escapeHtml(detail)} — so nothing was registered.`);
+      return;
+    }
+    try {
+      await gw.publishRegistration(
+        input.hyperschema,
+        input.schema,
+        input.roots,
+        undefined,
+        input.entity,
+        input.mutations,
+        input.writable,
+        input.resolvers,
+      );
+    } catch (err) {
+      onFault(
+        `the admin page could not register "${input.hyperschema.name}": ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+      refuse(
+        res,
+        400,
+        "The store refused this registration, and it says no rather than why. Nothing was registered.",
+      );
+      return;
+    }
+    seeOther(res);
+  };
+
   const OWNED = new Set([
     ADMIN_PATH,
     ADMIN_CREATE_ROOT_PATH,
@@ -941,6 +1253,8 @@ ${hiddenPair(formToken, name)}
     ADMIN_REATTACH_PATH,
     ADMIN_DROP_PATH,
     ADMIN_DROP_CONFIRM_PATH,
+    ADMIN_REGISTER_PATH,
+    ADMIN_VIEW_PATH,
   ]);
 
   const POSTS = new Map([
@@ -950,6 +1264,7 @@ ${hiddenPair(formToken, name)}
     [ADMIN_REATTACH_PATH, postReattach],
     [ADMIN_DROP_PATH, postDrop],
     [ADMIN_DROP_CONFIRM_PATH, postDropConfirm],
+    [ADMIN_REGISTER_PATH, postRegister],
   ]);
 
   return {
@@ -971,6 +1286,10 @@ ${hiddenPair(formToken, name)}
         }
         if (pathname === ADMIN_CONTAINER_PATH) {
           getContainer(req, res);
+          return;
+        }
+        if (pathname === ADMIN_VIEW_PATH) {
+          await getView(req, res);
           return;
         }
         getDashboard(req, res);
