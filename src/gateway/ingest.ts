@@ -206,6 +206,37 @@ export function withNegationClosure(
   return [...out.values()];
 }
 
+// The same closure, but over SEVERAL grounds at once (SPEC §39): a container's gather may compose
+// deltas from more than one store — a parent's own ground plus each of its inbox pools — and a
+// strike of an admitted delta can live in ANY of them. A per-ground closure treats each store as a
+// closure boundary, so it returns a claim from one ground while its strike sits in another. This one
+// asks EVERY ground `negationsOf`/`get`, so a strand across the pool boundary cannot survive.
+//
+// Direction and monotonicity are identical to `withNegationClosure`: it only ADDS negations of what
+// is already admitted, never drops a member and never revives a struck claim (more strikes in play
+// means more suppression). Terminates for the same reason — the output set only grows and is bounded
+// by the union of the grounds.
+export function withNegationClosureAcross(
+  grounds: readonly { readonly reactor: Reactor }[],
+  admitted: readonly Delta[],
+): Delta[] {
+  const out = new Map(admitted.map((d) => [d.id, d]));
+  const pending = [...out.keys()];
+  while (pending.length > 0) {
+    const id = pending.pop() as string;
+    for (const g of grounds) {
+      for (const negId of g.reactor.negationsOf(id)) {
+        if (out.has(negId)) continue;
+        const neg = g.reactor.get(negId);
+        if (neg === undefined) continue; // purged (§11) — the hole is the point
+        out.set(negId, neg);
+        pending.push(negId);
+      }
+    }
+  }
+  return [...out.values()];
+}
+
 // The same closure over a BATCH that is not local yet — the inbound federation door's remedy. A
 // peer's offer carries its own negations, so the ground to close over is the offer itself: no store
 // scan, no index, cost bounded by the batch's pointers rather than by the store.

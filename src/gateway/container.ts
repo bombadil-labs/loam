@@ -21,12 +21,21 @@
 // Admission resolves from the subject declaration and never from the knob; posture legality
 // gates on the knob and never from the roster.
 
-import { parseTerm, signClaims, type Claims, type Delta, type Reactor } from "@bombadil/rhizomatic";
+import {
+  authorForSeed,
+  parseTerm,
+  signClaims,
+  type Claims,
+  type Delta,
+  type Reactor,
+} from "@bombadil/rhizomatic";
 import type { StoreBackend } from "../store/backend.js";
 import { MemoryBackend } from "../store/memory.js";
 import { isRepairable } from "../store/quarantine.js";
+import { CTX_GRANTS, grantClaims, holdsGrant, revocationClaims } from "./accounts.js";
+import { STORE_ENTITY } from "./genesis.js";
 import { isTombstone, readTombstones } from "./erase.js";
-import { withNegationClosure } from "./ingest.js";
+import { withNegationClosure, withNegationClosureAcross } from "./ingest.js";
 import { lawfulNegated, lawfulSnapshot } from "./registration.js";
 import { readTrustPolicyAt, type TrustPolicy } from "./trust.js";
 import { Gateway, type FederationReport } from "./gateway.js";
@@ -86,6 +95,13 @@ export interface ContainerSpec {
   readonly membershipAt?: string;
   /** A ModuleVersion address citation (SPEC §27.2) — provenance, no runtime effect yet. */
   readonly version?: string;
+  /**
+   * This container is the INBOX POOL of the named parent container (SPEC §39). A separate pool that
+   * a connection's writes land in; its members compose into the parent's gather. The pointer is what
+   * makes an inbox declaration shape-distinguishable from a plain one (no §20 migration owed — an old
+   * declaration simply has no `inboxOf`).
+   */
+  readonly inboxOf?: string;
 }
 
 const entityPtr = (role: string, id: string, context: string): Claims["pointers"][number] => ({
@@ -111,6 +127,7 @@ export function containerClaims(spec: ContainerSpec, author: string, timestamp: 
         : [primPtr("membership", JSON.stringify(spec.membership))]),
       ...(spec.membershipAt === undefined ? [] : [primPtr("membershipAt", spec.membershipAt)]),
       ...(spec.version === undefined ? [] : [primPtr("version", spec.version)]),
+      ...(spec.inboxOf === undefined ? [] : [primPtr("inboxOf", spec.inboxOf)]),
     ],
   };
 }
@@ -273,6 +290,15 @@ export function containerDefect(
     );
   }
 
+  const inboxOfs = primitives(claims, "inboxOf");
+  if (inboxOfs.length > 1) return "a container declaration carries at most one inboxOf pointer";
+  if (inboxOfs.length === 1) {
+    const parentName = inboxOfs[0];
+    if (typeof parentName !== "string" || parentName.length === 0 || parentName.includes(NUL)) {
+      return "a container's inboxOf names one parent container and must not contain NUL";
+    }
+  }
+
   const parents = claims.pointers.filter(
     (p) =>
       p.role === "parent" &&
@@ -341,6 +367,8 @@ export interface ResolvedContainer {
   readonly membership?: unknown;
   readonly membershipAt?: string;
   readonly version?: string;
+  /** Set on an INBOX pool (SPEC §39): the parent container whose gather this pool composes into. */
+  readonly inboxOf?: string;
 }
 
 export interface DetachRecord {
@@ -368,6 +396,7 @@ interface Decl {
   readonly membershipRaw?: string;
   readonly membershipAt?: string;
   readonly version?: string;
+  readonly inboxOf?: string;
 }
 
 const byAge = (a: { ts: number; id: string }, b: { ts: number; id: string }): number =>
@@ -439,6 +468,7 @@ export function readContainerTable(reactor: Reactor, operator: string | undefine
     const membershipRaw = primitives(claims, "membership")[0];
     const membershipAt = primitives(claims, "membershipAt")[0];
     const version = primitives(claims, "version")[0];
+    const inboxOf = primitives(claims, "inboxOf")[0];
     const list = decls.get(name) ?? [];
     list.push({
       id: delta.id,
@@ -449,6 +479,7 @@ export function readContainerTable(reactor: Reactor, operator: string | undefine
       ...(typeof membershipRaw === "string" ? { membershipRaw } : {}),
       ...(typeof membershipAt === "string" ? { membershipAt } : {}),
       ...(typeof version === "string" ? { version } : {}),
+      ...(typeof inboxOf === "string" ? { inboxOf } : {}),
     });
     decls.set(name, list);
   }
@@ -495,6 +526,7 @@ export function readContainerTable(reactor: Reactor, operator: string | undefine
       ...(membership !== undefined ? { membership } : {}),
       ...(latest.membershipAt !== undefined ? { membershipAt: latest.membershipAt } : {}),
       ...(latest.version !== undefined ? { version: latest.version } : {}),
+      ...(latest.inboxOf !== undefined ? { inboxOf: latest.inboxOf } : {}),
     });
     if (latest.parent !== undefined) {
       edges.set(name, { parent: latest.parent, ts: latest.ts, id: latest.id });
@@ -641,14 +673,32 @@ export function containerScopeImpl(
     return { deltas: gw.select(term), ground: gw };
   };
 
-  // EVERY contributing ground is remembered per delta, never a first-wins home (the suppression
-  // lens's finding): a separate store's snapshot and a shared query can admit the SAME id, and only
-  // one of their grounds may hold the strike — the snapshot is point-in-time, the primary is
-  // live. Closing over one arbitrary contributor made the reader's verdict depend on the
-  // lexicographic sort of container names; closing over every contributor cannot.
-  const contributions = new Map<Gateway, Map<string, Delta>>();
+  // The gather is the requested ACTIVE containers PLUS every active inbox pool bound to one of them
+  // (SPEC §39): an inbox is a separate container whose declaration marks its parent with `inboxOf`,
+  // and a connection's writes land in that pool. The pool stays a container in its own right — drop()
+  // and forensics still reach it — but its members COMPOSE into the parent's gather here. An inbox
+  // that is active yet unattached faults through membersOf like any separate container (H9): a
+  // parent read must never silently drop a connection's writes.
+  const toGather: string[] = [];
+  const seenGather = new Set<string>();
+  const addGather = (name: string): void => {
+    if (seenGather.has(name)) return;
+    seenGather.add(name);
+    toGather.push(name);
+  };
   for (const name of requested) {
     if (!isActive(name)) continue; // a detach cover contributes NOTHING, without any exclusion
+    addGather(name);
+    for (const [inboxName, rec] of table.containers) {
+      if (rec.inboxOf === name && isActive(inboxName)) addGather(inboxName);
+    }
+  }
+
+  // EVERY contributing ground is remembered per delta, never a first-wins home (the suppression
+  // lens's finding): a separate store's snapshot and a shared query can admit the SAME id, and only
+  // one of their grounds may hold the strike — the snapshot is point-in-time, the primary is live.
+  const contributions = new Map<Gateway, Map<string, Delta>>();
+  for (const name of toGather) {
     const { deltas, ground } = membersOf(name);
     const per = contributions.get(ground) ?? new Map<string, Delta>();
     for (const d of deltas) if (!per.has(d.id)) per.set(d.id, d);
@@ -663,15 +713,61 @@ export function containerScopeImpl(
     for (const d of membersOf(name).deltas) minus.add(d.id);
   }
 
-  // Subtract, THEN close: the closure re-admits any negation whose target survives the
-  // subtraction — from admitted deltas to the negations OF them, over EVERY ground that admitted
-  // the delta, never the reverse (narrowing may drop a claim; it must never revive one).
-  const out = new Map<string, Delta>();
-  for (const [ground, per] of contributions) {
-    const survivors = [...per.values()].filter((d) => !minus.has(d.id));
-    for (const d of withNegationClosure(ground, survivors)) if (!out.has(d.id)) out.set(d.id, d);
+  // Subtract, THEN close — over the UNION of every contributing ground, not per-ground (SPEC §39,
+  // decision 1). A parent composes its own ground with each inbox pool, and a strike of an admitted
+  // delta can live in ANY of them; a per-ground closure treats a separate pool as a closure boundary
+  // and hands the reader a claim while its strike sits one ground over. Union closure re-admits any
+  // negation whose target survives the subtraction, across every ground, never the reverse
+  // (narrowing may drop a claim; it must never revive one).
+  const grounds = [...contributions.keys()];
+  const admitted: Delta[] = [];
+  const seen = new Set<string>();
+  for (const per of contributions.values()) {
+    for (const d of per.values()) {
+      if (minus.has(d.id) || seen.has(d.id)) continue;
+      seen.add(d.id);
+      admitted.push(d);
+    }
   }
-  return [...out.values()];
+  return withNegationClosureAcross(grounds, admitted);
+}
+
+// A connection's read (SPEC §39.1.2): the binding is an UPPER BOUND, not a routing rule. A
+// connection bound to `bound` reaches that container and its descendants by naming them (nesting is
+// addressing, §39.3a); it cannot reach outside its own subtree. With no explicit names it reads its
+// bound container. Reaching a container outside the subtree refuses — the owner chooses the width by
+// choosing the binding.
+export function connectionScopeImpl(
+  gw: Gateway,
+  opts: { bound: string; containers?: readonly string[] },
+): Delta[] {
+  const table = readContainerTable(gw.reactor, gw.operatorAuthor);
+  if (!table.containers.has(opts.bound)) {
+    throw new Error(
+      `connectionScope refused: no surviving declaration names the bound container "${opts.bound}"`,
+    );
+  }
+  const within = (target: string): boolean => {
+    let cursor: string | undefined = target;
+    const seen = new Set<string>();
+    while (cursor !== undefined && !seen.has(cursor)) {
+      if (cursor === opts.bound) return true;
+      seen.add(cursor);
+      cursor = table.containers.get(cursor)?.parent;
+    }
+    return false;
+  };
+  const targets = opts.containers ?? [opts.bound];
+  for (const t of targets) {
+    if (!within(t)) {
+      throw new Error(
+        `connectionScope refused: the connection is bound to "${opts.bound}" and cannot reach ` +
+          `"${t}" — the binding is an upper bound, not a routing rule (§39.1.2), and "${t}" is ` +
+          `outside its subtree`,
+      );
+    }
+  }
+  return containerScopeImpl(gw, { containers: targets });
 }
 
 // --- the runtime handle ---------------------------------------------------------------------------
@@ -1136,6 +1232,176 @@ async function openSeparate(
       await pool.close();
     },
   };
+}
+
+// --- the connection binding (SPEC §39: a connection binds to a container) ------------------------
+
+export interface BindConnectionOptions {
+  /** The parent container this connection is bound to. Its gather composes the inbox pool. */
+  readonly container: string;
+  /** The connection's actor public key — provably the owner's, signs every connection write. */
+  readonly connectionKey: string;
+  /** The owner's signing seed (their §36 session in the real flow). Authors the connection grant. */
+  readonly ownerSeed: string;
+  /** The inbox pool's own store. Defaults to a fresh in-memory backend. */
+  readonly backend?: StoreBackend;
+}
+
+// The inbox's deterministic name from (parent, connection key). A second bind of the same pair
+// resumes the SAME inbox rather than spawning a new one — the inbox is durable (decision 3).
+export function inboxName(container: string, connectionKey: string): string {
+  return `inbox:${container}:${connectionKey}`;
+}
+
+// The surviving WRITE grant ids naming `subject` at this pool's store entity — what a revocation
+// strikes. "Surviving" is no standing negation; effectiveness is grantHeld's concern, not this.
+function survivingWriteGrantIds(reactor: Reactor, subject: string): string[] {
+  const out: string[] = [];
+  for (const id of reactor.byTarget(STORE_ENTITY)) {
+    const delta = reactor.get(id);
+    if (delta === undefined) continue;
+    const ptrs = delta.claims.pointers;
+    const atGrants = ptrs.some(
+      (p) =>
+        p.target.kind === "entity" &&
+        p.target.entity.id === STORE_ENTITY &&
+        p.target.entity.context === CTX_GRANTS,
+    );
+    if (!atGrants) continue;
+    let subj: string | undefined;
+    let verb: string | undefined;
+    for (const p of ptrs) {
+      if (p.target.kind !== "primitive") continue;
+      if (p.role === "subject" && typeof p.target.value === "string") subj = p.target.value;
+      if (p.role === "verb" && typeof p.target.value === "string") verb = p.target.value;
+    }
+    if (subj !== subject || verb !== "write") continue;
+    if (reactor.negationsOf(id).some((n) => reactor.get(n) !== undefined)) continue; // already struck
+    out.push(id);
+  }
+  return out;
+}
+
+// Spawn (or resume) a per-connection inbox pool for `container` and provision its authority chain.
+// The pool is a SEPARATE container marked `inboxOf: container`, so its members compose into the
+// parent's gather (containerScopeImpl). Its seeding scope selects only this connection's own deltas,
+// so it starts clean and only connection writes land in it. Idempotent on (container, connectionKey):
+// a live handle resumes untouched, and a re-open never double-grants (holdsGrant guards both grants).
+export async function bindConnectionImpl(
+  gw: Gateway,
+  opts: BindConnectionOptions,
+): Promise<Container> {
+  if (gw.options.seed === undefined) {
+    throw new Error(
+      "bindConnection: only an operated store can bind a connection to a container (§39)",
+    );
+  }
+  const operatorSeed = gw.options.seed;
+  const operator = gw.operatorAuthor!;
+  const owner = authorForSeed(opts.ownerSeed);
+  const name = inboxName(opts.container, opts.connectionKey);
+
+  const existing = gw.connectionInboxes.get(name);
+  if (existing !== undefined) return existing; // durable: resume the same inbox (decision 3)
+
+  const table = readContainerTable(gw.reactor, gw.operatorAuthor);
+  if (!table.containers.has(name)) {
+    // The inbox seeds only THIS connection's deltas from the primary — none at spawn. A connection
+    // is provably the owner's, so the pool is the owner's trust domain (curated), separate storage.
+    const membership = {
+      op: "select",
+      pred: { match: { field: "author", cmp: "eq", const: opts.connectionKey } },
+      in: "input",
+    };
+    await gw.append([
+      signClaims(
+        containerClaims(
+          {
+            container: name,
+            trust: "curated",
+            posture: "separate",
+            membership,
+            inboxOf: opts.container,
+          },
+          operator,
+          gw.nextTimestamp(),
+        ),
+        operatorSeed,
+      ),
+    ]);
+  }
+
+  const inbox = await openContainerImpl(gw, {
+    name,
+    ...(opts.backend !== undefined ? { backend: opts.backend } : {}),
+  });
+  const pool = inbox.gateway!;
+
+  // The grant chain, in the pool's OWN ground (decision 2): the operator authors the owner's ADMIN
+  // grant, then the OWNER authors the connection's WRITE grant. The pool is its own gateway with its
+  // own store entity, so this never touches the real store's authority; grantHeld resolves
+  // connection-write → owner-admin → operator. The store operator appears once here (administrative
+  // provisioning, §39.1 point 3) and never on the read/write data path.
+  if (!holdsGrant(pool.reactor, STORE_ENTITY, owner, "admin", operator)) {
+    await pool.append([
+      signClaims(
+        grantClaims(STORE_ENTITY, owner, "admin", operator, pool.nextTimestamp()),
+        operatorSeed,
+      ),
+    ]);
+  }
+  if (!holdsGrant(pool.reactor, STORE_ENTITY, opts.connectionKey, "write", operator)) {
+    await pool.append([
+      signClaims(
+        grantClaims(STORE_ENTITY, opts.connectionKey, "write", owner, pool.nextTimestamp()),
+        opts.ownerSeed,
+      ),
+    ]);
+  }
+
+  // A drop or a detach ends the live binding — clear the durable handle so a later bind spawns
+  // fresh rather than resuming a pool that no longer exists.
+  const baseDrop = inbox.drop.bind(inbox);
+  const baseDetach = inbox.detach.bind(inbox);
+  const handle: Container = {
+    ...inbox,
+    drop: async () => {
+      await baseDrop();
+      gw.connectionInboxes.delete(name);
+    },
+    detach: async (note?: string) => {
+      await baseDetach(note);
+      gw.connectionInboxes.delete(name);
+    },
+  };
+  gw.connectionInboxes.set(name, handle);
+  return handle;
+}
+
+// Revoke a connection: strike its WRITE grant in the inbox pool, owner-authored (§39.3c). The door
+// then refuses new writes signed by that key; past deltas keep their author and stay readable, and
+// other connections are untouched — one-connection blast radius, two-sided by construction.
+export async function revokeConnectionImpl(opts: {
+  inbox: Container;
+  connectionKey: string;
+  ownerSeed: string;
+}): Promise<void> {
+  const pool = opts.inbox.gateway;
+  if (pool === undefined) {
+    throw new Error("revokeConnection: the inbox has no pool of its own — nothing to revoke (§39)");
+  }
+  const owner = authorForSeed(opts.ownerSeed);
+  const grantIds = survivingWriteGrantIds(pool.reactor, opts.connectionKey);
+  if (grantIds.length === 0) {
+    throw new Error(
+      `revokeConnection: no surviving write grant names ${opts.connectionKey} in this inbox`,
+    );
+  }
+  await pool.append(
+    grantIds.map((id) =>
+      signClaims(revocationClaims(id, owner, pool.nextTimestamp()), opts.ownerSeed),
+    ),
+  );
 }
 
 // --- the erase completeness guard (SPEC §24.8 × the mint) ----------------------------------------
