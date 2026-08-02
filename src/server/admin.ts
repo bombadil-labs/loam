@@ -1,10 +1,20 @@
-// The admin page (SPEC §40, phases A1 + A2 + A3) — the door, the read surface, the container
-// lifecycle, and the schema panel. `GET /admin` renders the signed-in user's container subtree
-// with the declare form and the registered lenses; `GET /admin/container` renders one container's
-// members and its lifecycle forms; `GET /admin/view` resolves a container's gather through a
-// registered lens; and the POSTs are `create-root`, `declare`, `detach`, `reattach`, the two-step
-// `drop` → `drop-confirm`, and `register`. Promotion and connections are later phases, each a new
+// The admin page (SPEC §40, phases A1–A4) — the door, the read surface, the container lifecycle,
+// the schema panel, and the promotion/federation panels. `GET /admin` renders the signed-in
+// user's container subtree with the declare form and the registered lenses; `GET /admin/container`
+// renders one container's members with their promote forms, its lifecycle forms, and the
+// federate-in form; `GET /admin/view` resolves a container's gather through a registered lens; and
+// the POSTs are `create-root`, `declare`, `detach`, `reattach`, the two-step `drop` →
+// `drop-confirm`, `register`, `promote`, and `federate`. Connections are a later phase, a new
 // exact path in `owns`.
+//
+// PROMOTION DRIVES `gw.promote` (T33's promote-outputs), never a reimplementation: the page's own
+// gate is only the subtree and "is this delta in the container's gather"; every refusal about the
+// delta itself — law-shapes, withdrawn outputs, dangling cites — is promote's, surfaced in its own
+// words. FEDERATE-IN lands a PASTED offer (the body of `GET /federate`) and adds no authorship:
+// each delta crosses by its own signature, through the container's own door — a separate
+// container's pool, or the primary for a shared one, whose membership then decides the gather. The
+// page is paste-only by design; the network leg of a pull belongs to `loam pull`, not to a door
+// that would otherwise fetch caller-named URLs from inside the store's own host.
 //
 // THE LIFECYCLE ACTS ONLY WHERE IT CAN TELL THE TRUTH. A shared container is all at-rest law, so
 // every act on it is a delta: detach lands the record, reattach negates it, drop strikes the
@@ -38,6 +48,7 @@ import {
   type Delta,
 } from "@bombadil/rhizomatic";
 import { readUserSeed, userSeedPath } from "../cli/config.js";
+import { parseOffer } from "../federation/offer.js";
 import {
   containerClaims,
   detachClaims,
@@ -46,7 +57,7 @@ import {
   type ContainerTable,
   type ResolvedContainer,
 } from "../gateway/container.js";
-import { Gateway } from "../gateway/gateway.js";
+import { Gateway, type FederationReport } from "../gateway/gateway.js";
 import { queryFieldFor } from "../gateway/gql.js";
 import {
   lensOf,
@@ -68,10 +79,14 @@ export const ADMIN_DROP_PATH = "/admin/drop";
 export const ADMIN_DROP_CONFIRM_PATH = "/admin/drop-confirm";
 export const ADMIN_REGISTER_PATH = "/admin/register";
 export const ADMIN_VIEW_PATH = "/admin/view";
+export const ADMIN_PROMOTE_PATH = "/admin/promote";
+export const ADMIN_FEDERATE_PATH = "/admin/federate";
 
 const MAX_BODY = 8 * 1024; // tokens, a name, a membership Term; nothing here needs more
 // A registration carries a hyperschema body and a resolution schema — real JSON, not a name.
 const REGISTER_MAX_BODY = 64 * 1024;
+// A pasted offer carries real deltas — a store's worth, potentially. Bounded, but generously.
+const FEDERATE_MAX_BODY = 1024 * 1024;
 
 /** How many pending drop confirmations this door remembers. Oldest-out; each is single-use. */
 const CONFIRM_CAP = 64;
@@ -341,12 +356,19 @@ you author — one container, named after you; everything you later make will li
     htmlOut(res, 200, dashboardPage(gw, session.user, table, reach, session.formToken));
   };
 
+  // A hidden pair every lifecycle form carries: the session's token and the target's name. The
+  // form is an OFFER, never the gate — every POST re-derives the subtree and the state before it acts.
+  const hiddenPair = (formToken: string, name: string): string =>
+    `<input type="hidden" name="form_token" value="${escapeHtml(formToken)}">\n` +
+    `<input type="hidden" name="name" value="${escapeHtml(name)}">`;
+
   // One member, rendered: the id, the author, the moment, and each pointer's role (with its
   // context where the pointer names an entity). Each entity target links into the view page, so
   // the members list is the entity picker — a reader walks from a raw pointer to a resolved read.
-  const memberHtml = (gw: Gateway, container: string, id: string): string => {
-    const delta = gw.reactor.get(id);
-    if (delta === undefined) return "";
+  // A member held ONLY in a container's own attached store — not in the primary — offers its
+  // promote form: there is something to move, so the form is truthful (§40 criterion 10). One the
+  // primary already holds offers none; promotion would have nothing to move.
+  const memberHtml = (gw: Gateway, container: string, delta: Delta, formToken: string): string => {
     const claims = delta.claims;
     const roles = claims.pointers
       .map((p) =>
@@ -357,19 +379,40 @@ you author — one container, named after you; everything you later make will li
           : escapeHtml(p.role),
       )
       .join(" · ");
+    const promoteForm =
+      gw.reactor.get(delta.id) === undefined
+        ? `\n<form method="post" action="${ADMIN_PROMOTE_PATH}">
+${hiddenPair(formToken, container)}
+<input type="hidden" name="delta" value="${escapeHtml(delta.id)}">
+<button type="submit">promote — into the primary ground</button>
+</form>`
+        : "";
     return (
       `<li><code>${escapeHtml(delta.id)}</code><br>` +
       `by <code>${escapeHtml(claims.author)}</code> at ` +
       `${escapeHtml(new Date(claims.timestamp).toISOString())}<br>` +
-      `${roles}</li>`
+      `${roles}${promoteForm}</li>`
     );
   };
 
-  // A hidden pair every lifecycle form carries: the session's token and the target's name. The
-  // form is an OFFER, never the gate — every POST re-derives the subtree and the state before it acts.
-  const hiddenPair = (formToken: string, name: string): string =>
-    `<input type="hidden" name="form_token" value="${escapeHtml(formToken)}">\n` +
-    `<input type="hidden" name="name" value="${escapeHtml(name)}">`;
+  // The federate-in form (§40 criterion 11): a pasted offer — the JSON body of a peer's
+  // `GET /federate`, or a store's export. Paste-only: the network leg of a pull stays with
+  // `loam pull`; this door never fetches a caller-named URL from inside the store's own host.
+  const federateFormHtml = (name: string, rec: ResolvedContainer, formToken: string): string => {
+    const door =
+      rec.posture === "separate"
+        ? `They land through this container's own store's door, under its own admission.`
+        : `They land through the primary's door; this container's membership then decides what
+it gathers — landing and gathering are two different questions.`;
+    return `<h2>Federate in.</h2>
+<p>Paste an offer — the JSON body of a peer's <code>GET /federate</code>, or a store's export.
+Each delta crosses by its own signature; this page adds no authorship. ${door}</p>
+<form method="post" action="${ADMIN_FEDERATE_PATH}">
+${hiddenPair(formToken, name)}
+<p><label>offer <textarea name="offer" rows="8" cols="72"></textarea></label></p>
+<button type="submit">federate in</button>
+</form>`;
+  };
 
   const actForm = (action: string, formToken: string, name: string, label: string): string =>
     `<form method="post" action="${action}">
@@ -432,7 +475,7 @@ ${back}`,
       );
     }
 
-    let members: readonly { id: string }[];
+    let members: readonly Delta[];
     try {
       members = gw.containerScope({ containers: [name] });
     } catch (err) {
@@ -464,9 +507,12 @@ ${back}`,
         ? "<p>Nothing has gathered here yet.</p>"
         : `<p>${members.length} member${members.length === 1 ? "" : "s"}.</p>
 <ul>
-${members.map((m) => memberHtml(gw, name, m.id)).join("\n")}
+${members.map((m) => memberHtml(gw, name, m, formToken)).join("\n")}
 </ul>`;
-    return page(name, `${head}\n${listing}\n${forms}\n${back}`);
+    return page(
+      name,
+      `${head}\n${listing}\n${federateFormHtml(name, rec, formToken)}\n${forms}\n${back}`,
+    );
   };
 
   const getContainer = (req: IncomingMessage, res: ServerResponse): void => {
@@ -1244,6 +1290,235 @@ ${hiddenPair(formToken, name)}
     seeOther(res);
   };
 
+  // Promote a container's output into the primary ground (§40 criterion 10) — the page drives
+  // `gw.promote` (T33's promote-outputs) and never re-decides its law. The page's own gate is
+  // narrow: the subtree, then "is this delta in the container's gather" — asked of the gather so a
+  // delta id outside it is refused without confirming whether it exists anywhere else. The source
+  // handed to promote is the attached store that actually HOLDS the output: the container's own
+  // pool, or an inbox pool composing into its gather (§39).
+  const postPromote = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    const gated = await postGate(req, res);
+    if (gated === undefined) return;
+    const gw = signerGround(res); // an adoption is the operator's own claim — the store must sign
+    if (gw === undefined) return;
+    const target = targetOf(gw, gated.user, gated.fields, res);
+    if (target === undefined) return;
+    const { table, name } = target;
+    let gather: readonly Delta[];
+    try {
+      gather = gw.containerScope({ containers: [name] });
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      if (detail.includes("is not attached")) {
+        refuse(
+          res,
+          409,
+          "This container's bytes are not attached here, so its gather cannot be read and " +
+            "nothing was promoted.",
+        );
+        return;
+      }
+      onFault(`the admin promote could not read the gather of "${name}": ${detail}`);
+      refuse(
+        res,
+        503,
+        "This container's gather cannot be read right now, so nothing was promoted.",
+      );
+      return;
+    }
+    // The typed id is never echoed: only an id proven to be IN the gather rides back into the DOM.
+    const deltaId = gated.fields.get("delta") ?? "";
+    if (!gather.some((d) => d.id === deltaId)) {
+      refuse(
+        res,
+        404,
+        "That delta is not in this container's gather, so there is nothing to promote from " +
+          "here — and whether it exists anywhere else, this page does not say.",
+      );
+      return;
+    }
+    if (gw.reactor.get(deltaId) !== undefined) {
+      refuse(
+        res,
+        409,
+        "This delta already lives in the primary ground — promotion moves a container's own " +
+          "output into the primary, and there is nothing left to move.",
+      );
+      return;
+    }
+    // In the gather, not in the primary: it is held by an attached store — the container's own
+    // pool, or an inbox pool bound to it.
+    let source: Gateway | undefined;
+    let from = name;
+    const holders = [
+      name,
+      ...[...table.containers]
+        .filter(([, rec]) => rec.inboxOf === name)
+        .map(([inbox]) => inbox)
+        .sort(),
+    ];
+    for (const holder of holders) {
+      const pool = gw.attachedContainers.get(holder);
+      if (
+        pool !== undefined &&
+        gw.quarantinePools.has(pool) &&
+        pool.reactor.get(deltaId) !== undefined
+      ) {
+        source = pool;
+        from = holder;
+        break;
+      }
+    }
+    if (source === undefined) {
+      onFault(
+        `the admin promote found ${deltaId} in the gather of "${name}" but in no attached store`,
+      );
+      refuse(
+        res,
+        503,
+        "The store holding this delta cannot be reached right now, so nothing was promoted.",
+      );
+      return;
+    }
+    let promoted: string;
+    try {
+      promoted = (await gw.promote(source, deltaId, { from })).promoted;
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      // Promote's own refusals are the product — its words, escaped, ride to the caller. Anything
+      // else is a fault this page does not explain.
+      if (/^(promotion refused:|promotion would dangle:|nothing to promote:)/.test(detail)) {
+        refuse(res, 409, `${escapeHtml(detail)} Nothing was promoted.`);
+        return;
+      }
+      onFault(`the admin promote of ${deltaId} from "${from}" failed: ${detail}`);
+      refuse(
+        res,
+        503,
+        "The store refused this promotion, and it says no rather than why. Nothing was promoted.",
+      );
+      return;
+    }
+    // Promote's own terms: a re-spoken claim in the primary, and a provenance record beside it.
+    htmlOut(
+      res,
+      200,
+      page(
+        "promoted",
+        `<h1>Promoted.</h1>
+<p>The store re-spoke the output as its own claim in the primary ground —
+<code>${escapeHtml(promoted)}</code> — and a provenance record beside it names where it came from:
+<code>${escapeHtml(from)}</code>, delta <code>${escapeHtml(deltaId)}</code>. The trail is kept
+forever; the value now survives even if its container is dropped.</p>
+<p><a href="${escapeHtml(detailHref(name))}">Back to <code>${escapeHtml(name)}</code>.</a></p>`,
+      ),
+    );
+  };
+
+  // Land a pasted offer in one subtree container (§40 criterion 11). The page adds no authorship —
+  // each delta crosses by its own signature, verified where every federated delta is verified. A
+  // SEPARATE container takes the offer through its pool's own door (its own admission); a SHARED
+  // one through the primary's door, and its membership then decides what the container gathers.
+  // The result page tells both numbers, because both are true and they differ.
+  const postFederate = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    const gated = await postGate(req, res, FEDERATE_MAX_BODY);
+    if (gated === undefined) return;
+    const gw = options.ground();
+    if (gw === undefined) {
+      refuse(res, 503, "This store's ground is not reachable, so nothing landed.");
+      return;
+    }
+    const target = targetOf(gw, gated.user, gated.fields, res);
+    if (target === undefined) return;
+    const { table, name, rec } = target;
+    if (table.detached.has(name)) {
+      refuse(
+        res,
+        409,
+        "This container is detached, deliberately out of the gather — reattach it before " +
+          "landing anything into its world. Nothing landed.",
+      );
+      return;
+    }
+    const raw = (gated.fields.get("offer") ?? "").trim();
+    if (raw.length === 0) {
+      refuse(res, 400, "The offer is empty, so nothing landed.");
+      return;
+    }
+    // parseOffer refuses the WHOLE paste on the first bad delta — a corrupt offer is reported
+    // whole, never quietly landed in part. Its message can quote a forged id, so it is escaped.
+    let deltas: Delta[];
+    try {
+      deltas = parseOffer(raw);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      refuse(res, 400, `${escapeHtml(detail)} — nothing landed.`);
+      return;
+    }
+    let report: FederationReport;
+    let door: string;
+    try {
+      if (rec.posture === "separate") {
+        const pool = gw.attachedContainers.get(name);
+        if (pool === undefined || !gw.quarantinePools.has(pool)) {
+          refuse(
+            res,
+            409,
+            "This container keeps its own store, and that store is not attached here — an " +
+              "offer lands through the container's own door or not at all. Attach it first. " +
+              "Nothing landed.",
+          );
+          return;
+        }
+        report = await pool.federate(deltas); // no override: the pool's own admission decides
+        door = "its own store";
+      } else {
+        report = await gw.federate(deltas); // no override: the primary's own admission decides
+        door = "the primary ground";
+      }
+    } catch (err) {
+      onFault(
+        `the admin federate into "${name}" failed: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+      refuse(res, 503, "The store could not land this offer, and it says no rather than why.");
+      return;
+    }
+    // The second number: of the offered deltas, how many the container's gather now holds. Landing
+    // and gathering are different doors, and the page must not let one count impersonate the other.
+    let gathered: number | undefined;
+    try {
+      const ids = new Set(gw.containerScope({ containers: [name] }).map((d) => d.id));
+      gathered = deltas.reduce((n, d) => (ids.has(d.id) ? n + 1 : n), 0);
+    } catch {
+      gathered = undefined;
+    }
+    const held = report.offered - report.accepted - report.rejected;
+    const gatherLine =
+      gathered === undefined
+        ? "What this container now gathers could not be counted just now."
+        : `This container now gathers ${gathered} of the ${report.offered} offered` +
+          (rec.posture === "separate"
+            ? "."
+            : " — its membership decides the gather, so a landed delta its membership does not " +
+              "select never enters this container's world.");
+    htmlOut(
+      res,
+      200,
+      page(
+        "federated",
+        `<h1>Federated.</h1>
+<p>Of ${report.offered} offered delta${report.offered === 1 ? "" : "s"}: ` +
+          `${report.accepted} landed newly in ${door}, ` +
+          `${report.rejected} ${report.rejected === 1 ? "was" : "were"} refused at the door` +
+          `${held > 0 ? `, and ${held} ${held === 1 ? "was" : "were"} already held` : ""}. ` +
+          `Each crossed by its own signature — this page added no authorship.</p>
+<p>${gatherLine}</p>
+<p><a href="${escapeHtml(detailHref(name))}">Back to <code>${escapeHtml(name)}</code>.</a></p>`,
+      ),
+    );
+  };
+
   const OWNED = new Set([
     ADMIN_PATH,
     ADMIN_CREATE_ROOT_PATH,
@@ -1255,6 +1530,8 @@ ${hiddenPair(formToken, name)}
     ADMIN_DROP_CONFIRM_PATH,
     ADMIN_REGISTER_PATH,
     ADMIN_VIEW_PATH,
+    ADMIN_PROMOTE_PATH,
+    ADMIN_FEDERATE_PATH,
   ]);
 
   const POSTS = new Map([
@@ -1265,6 +1542,8 @@ ${hiddenPair(formToken, name)}
     [ADMIN_DROP_PATH, postDrop],
     [ADMIN_DROP_CONFIRM_PATH, postDropConfirm],
     [ADMIN_REGISTER_PATH, postRegister],
+    [ADMIN_PROMOTE_PATH, postPromote],
+    [ADMIN_FEDERATE_PATH, postFederate],
   ]);
 
   return {
