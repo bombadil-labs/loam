@@ -75,10 +75,17 @@ export interface OAuthGrant {
   readonly actor: string;
   readonly grantedAt: number;
   /**
-   * Has the operator-signed write grant actually landed in the ground? A later phase sets this;
-   * this module only carries the field so the shape is fixed before any door writes it.
+   * Has the operator-signed write grant actually landed in the ground? The token exchange (phase 15)
+   * sets this true only after the ground append succeeds — the seed is written first (standing false)
+   * so a retry reuses it rather than minting a second (SPEC §37 phase 15, criterion 5).
    */
   readonly standing: boolean;
+  /**
+   * The id of the operator-signed write-grant delta this grant's standing rests on (phase 15).
+   * OPTIONAL: a store written before phase 15, or a grant whose ground append has not yet landed,
+   * carries none — so `revoke` re-derives the surviving grant deltas rather than trusting this alone.
+   */
+  readonly grantDeltaId?: string;
 }
 
 /** An issued access token, by DIGEST. The token itself is handed to the client and never stored. */
@@ -86,6 +93,14 @@ export interface OAuthToken {
   readonly digest: string; // sha256 hex of the bearer secret
   readonly clientId: string;
   readonly issuedAt: number;
+  /**
+   * The client generation this token was minted under (phase 15). A revoke bumps the client's
+   * generation, so a token whose generation no longer matches its client's is refused at
+   * authentication — the revocation binds on the next request with no restart (criterion 9).
+   * OPTIONAL only for a pre-phase-15 shape: an absent generation never equals a client's, so such a
+   * token fails closed.
+   */
+  readonly generation?: number;
 }
 
 /**
@@ -104,6 +119,18 @@ export interface OAuthCode {
   readonly redirectUri: string; // the EXACT registered uri this code is bound to
   readonly expiresAt: number; // monotonic deadline, recorded at mint
   readonly issuedAt: number; // wall clock, for a future `loam grant list`
+  /**
+   * The PKCE `code_challenge` (S256) captured at consent (phase 14 mints it, phase 15 redeems it).
+   * OPTIONAL because the consent GET does not require it — but the token exchange REFUSES a code that
+   * carries no challenge, so PKCE is mandatory for any usable flow (SPEC §37 phase 15, criterion 1).
+   */
+  readonly codeChallenge?: string;
+  /**
+   * The client generation this code was minted under (phase 15). Redemption refuses a code whose
+   * generation no longer matches its client's — a code issued before a revoke cannot mint a token
+   * after it (criterion 8). OPTIONAL for the pre-phase-15 shape: an absent generation fails closed.
+   */
+  readonly generation?: number;
 }
 
 export interface OAuthFile {
@@ -136,6 +163,20 @@ const num = (raw: unknown, where: string, field: string): number => {
   const value = (raw as Record<string, unknown>)[field];
   if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new OAuthFileUnreadable(`${where} has no ${field}`);
+  }
+  return value;
+};
+
+/**
+ * A positive integer at `field`, or `undefined` when the field is absent — a phase-15 addition
+ * (grant generation) that older shapes carry none of. Present-but-wrong throws, so a corrupt value
+ * never reads as "absent" and slips the check.
+ */
+const optGeneration = (raw: unknown, where: string, field: string): number | undefined => {
+  const value = (raw as Record<string, unknown>)[field];
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+    throw new OAuthFileUnreadable(`${where} has a ${field} that is not a positive integer`);
   }
   return value;
 };
@@ -251,12 +292,22 @@ function checkGrant(raw: unknown, where: string): OAuthGrant {
   if (typeof standing !== "boolean") {
     throw new OAuthFileUnreadable(`${where} does not say whether its grant has standing`);
   }
+  // OPTIONAL: the id of the operator-signed write-grant delta (phase 15). Checked for shape only —
+  // a non-empty string — when present; `revoke` re-derives from the ground when it is absent.
+  const rawGrantDeltaId = (raw as Record<string, unknown>)["grantDeltaId"];
+  if (
+    rawGrantDeltaId !== undefined &&
+    (typeof rawGrantDeltaId !== "string" || rawGrantDeltaId === "")
+  ) {
+    throw new OAuthFileUnreadable(`${where} has a grantDeltaId that is not a non-empty string`);
+  }
   return {
     clientId: str(raw, where, "clientId"),
     actorSeed,
     actor,
     grantedAt: num(raw, where, "grantedAt"),
     standing,
+    ...(rawGrantDeltaId === undefined ? {} : { grantDeltaId: rawGrantDeltaId }),
   };
 }
 
@@ -266,7 +317,13 @@ function checkToken(raw: unknown, where: string): OAuthToken {
   if (!HEX64.test(digest)) {
     throw new OAuthFileUnreadable(`${where} has a digest that is not a sha-256 hex digest`);
   }
-  return { digest, clientId: str(raw, where, "clientId"), issuedAt: num(raw, where, "issuedAt") };
+  const generation = optGeneration(raw, where, "generation");
+  return {
+    digest,
+    clientId: str(raw, where, "clientId"),
+    issuedAt: num(raw, where, "issuedAt"),
+    ...(generation === undefined ? {} : { generation }),
+  };
 }
 
 function checkCode(raw: unknown, where: string): OAuthCode {
@@ -280,12 +337,25 @@ function checkCode(raw: unknown, where: string): OAuthCode {
   // smuggle a forged `loam grant list` row through the code table either.
   const defect = uriTextDefect(redirectUri);
   if (defect !== undefined) throw new OAuthFileUnreadable(`${where}: ${defect}`);
+  // OPTIONAL, phase 15: the PKCE challenge (may be empty when consent captured none — such a code is
+  // unredeemable) and the mint-time client generation. A present challenge is a base64url string, so
+  // it carries no control byte that could forge a listing row.
+  const rawChallenge = (raw as Record<string, unknown>)["codeChallenge"];
+  if (rawChallenge !== undefined && typeof rawChallenge !== "string") {
+    throw new OAuthFileUnreadable(`${where} has a codeChallenge that is not a string`);
+  }
+  if (typeof rawChallenge === "string" && CONTROL(rawChallenge)) {
+    throw new OAuthFileUnreadable(`${where} has a codeChallenge carrying a control character`);
+  }
+  const generation = optGeneration(raw, where, "generation");
   return {
     digest,
     clientId: str(raw, where, "clientId"),
     redirectUri,
     expiresAt: num(raw, where, "expiresAt"),
     issuedAt: num(raw, where, "issuedAt"),
+    ...(rawChallenge === undefined ? {} : { codeChallenge: rawChallenge }),
+    ...(generation === undefined ? {} : { generation }),
   };
 }
 
@@ -681,3 +751,11 @@ export const clientFor = (file: OAuthFile, clientId: string): OAuthClient | unde
 
 export const grantFor = (file: OAuthFile, clientId: string): OAuthGrant | undefined =>
   file.grants.find((g) => g.clientId === clientId);
+
+/** The issued token with this digest, or undefined. One digest names one client (checkUnique). */
+export const tokenFor = (file: OAuthFile, digest: string): OAuthToken | undefined =>
+  file.tokens.find((t) => t.digest === digest);
+
+/** The in-flight authorization code with this digest, or undefined. */
+export const codeFor = (file: OAuthFile, digest: string): OAuthCode | undefined =>
+  (file.codes ?? []).find((c) => c.digest === digest);
