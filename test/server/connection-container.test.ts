@@ -136,12 +136,16 @@ describe("§39 criterion 2 — a narrow binding cannot read a sibling's members"
       ),
     ]);
     const onlyFriends = observed(FERN, "message", "for friends", 900, OWNER_SEED);
-    await gw.append([onlyFriends]);
+    const ownMember = observed(FERN, "height", 30, 901, OWNER_SEED); // a folklore-own member
+    await gw.append([onlyFriends, ownMember]);
     await bind(gw, "alice:folklore", CONN_SEED);
 
     // The refusal is a SCOPE answer, not an error: reading folklore simply does not include it.
+    // The POSITIVE control is load-bearing — without it, a folklore scope that resolved EMPTY (a
+    // broken Term, an empty gather) would pass the negative vacuously.
     const read = gw.connectionScope({ bound: "alice:folklore" }).map((d) => d.id);
-    expect(read).not.toContain(onlyFriends.id);
+    expect(read).toContain(ownMember.id); // folklore does resolve its own members
+    expect(read).not.toContain(onlyFriends.id); // but not the sibling's
     await gw.close();
   });
 });
@@ -624,7 +628,7 @@ describe("§39 criterion 17 — only an owner-authored grant extends membership"
 });
 
 describe("§39 — the inbox drops to a total forget (two-sided)", () => {
-  it("drop() purges the inbox's own bytes and strikes its declaration; a bystander inbox survives", async () => {
+  it("drop() purges the inbox's own bytes and strikes its declaration; bystanders (a sibling inbox AND a primary member) survive", async () => {
     const gw = await boot();
     await gw.append([
       declare(
@@ -632,8 +636,22 @@ describe("§39 — the inbox drops to a total forget (two-sided)", () => {
         1000,
       ),
     ]);
+    // A DIRECT member of the container in the primary ground — the second bystander §39.5.17 names.
+    const primaryMember = observed(FERN, "height", 33, 1100, OWNER_SEED);
+    await gw.append([primaryMember]);
+
     const backend1 = new MemoryBackend();
     const backend2 = new MemoryBackend();
+    // A purge SPY on the dropped inbox's backend: `holds` throws once drop() closes the store, so
+    // witness the byte removal at the purge call instead — an INDEPENDENT proof the target left the
+    // bytes, beside drop()'s own refuse-on-survivors verify (not delegated to the code under test).
+    const purged: string[] = [];
+    const origPurge = backend1.purge.bind(backend1);
+    backend1.purge = (ids: Iterable<string>): Promise<number> => {
+      purged.push(...ids);
+      return origPurge(ids);
+    };
+
     const inbox1 = await bind(gw, "alice:folklore", CONN_SEED, backend1);
     const inbox2 = await bind(gw, "alice:folklore", CONN2_SEED, backend2);
     const w1 = observed(FERN, "height", 42, gw.nextTimestamp(), CONN_SEED);
@@ -644,15 +662,42 @@ describe("§39 — the inbox drops to a total forget (two-sided)", () => {
 
     await inbox1.drop();
 
-    // The target is GONE. drop() purges + byte-verifies the pool (it refuses to close if any survive)
-    // then closes its store, so a successful drop IS the byte proof; the read and the table confirm
-    // it downward.
+    // The target is GONE, proven at the bytes: the purge spy saw w1's id, AND drop()'s internal
+    // verify refuses to close if any survive — two independent byte witnesses. The table and read
+    // confirm it downward.
+    expect(purged).toContain(w1.id);
     expect(gw.containers().containers.has(`inbox:alice:folklore:${CONN}`)).toBe(false);
     const scoped = gw.connectionScope({ bound: "alice:folklore" }).map((d) => d.id);
     expect(scoped).not.toContain(w1.id);
-    // The bystander inbox and its bytes SURVIVE — drop struck one inbox, not the container.
+    // The bystanders SURVIVE — drop struck one inbox, not the container: the sibling inbox's bytes,
+    // and the container's own direct member, both remain readable.
     expect(await backend2.holds(w2.id)).toBe(true);
     expect(scoped).toContain(w2.id);
+    expect(scoped).toContain(primaryMember.id);
+    await gw.close();
+  });
+
+  it("detach is REFUSED on an inbox — the durable lifecycle is bind / revoke / drop, never a silent un-suppression", async () => {
+    const gw = await boot();
+    await gw.append([
+      declare(
+        { container: "alice:folklore", trust: "curated", posture: "shared", membership: HEIGHTS },
+        1000,
+      ),
+    ]);
+    // The regression this guards: a connection RETRACTS a primary claim (a strike written into its
+    // inbox). If detach merely marked the inbox inactive, the strike would leave the gather and the
+    // retracted claim would resolve LIVE again — a silent un-suppression across the pool boundary.
+    const d1 = observed(FERN, "height", 30, 900, OWNER_SEED);
+    await gw.append([d1]);
+    const inbox = await bind(gw, "alice:folklore", CONN_SEED);
+    await inbox.gateway!.append([strikeBy(d1.id, CONN_SEED, gw.nextTimestamp())]);
+    // The retraction holds through the gather (positive control that the state is real).
+    expect(await heightVia(gw.connectionScope({ bound: "alice:folklore" }), FERN)).not.toBe(30);
+    // Detach refuses rather than un-suppressing — and names the operations that DO belong.
+    await expect(inbox.detach()).rejects.toThrow(/durable|drop\(\)|revoke/);
+    // The retraction still holds — nothing was uncovered.
+    expect(await heightVia(gw.connectionScope({ bound: "alice:folklore" }), FERN)).not.toBe(30);
     await gw.close();
   });
 });

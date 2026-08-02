@@ -1359,20 +1359,34 @@ export async function bindConnectionImpl(
     ]);
   }
 
-  // A drop or a detach ends the live binding — clear the durable handle so a later bind spawns
-  // fresh rather than resuming a pool that no longer exists.
+  // An inbox is DURABLE (§39 decision 3): the connection lifecycle is bind / revoke / drop, never
+  // detach. Detach is the KEEP path — it marks the pool inactive WITHOUT striking its declaration or
+  // purging its bytes, so a strike a connection wrote into its inbox would silently stop being
+  // gathered and a primary-ground claim it retracted would resolve LIVE again. That asymmetric
+  // un-suppression has no place in the lifecycle, so the inbox handle refuses detach and names the
+  // two operations that DO belong: drop() for a total forget, revokeConnection to refuse further
+  // writes while keeping the record.
+  //
+  // Drop ends the live binding — clear the durable handle so a later bind spawns fresh rather than
+  // resuming a purged pool. The delete runs in a `finally`: even if the declaration-strike append
+  // fails after the bytes are gone, the stale handle must not survive to be resumed.
   const baseDrop = inbox.drop.bind(inbox);
-  const baseDetach = inbox.detach.bind(inbox);
   const handle: Container = {
     ...inbox,
     drop: async () => {
-      await baseDrop();
-      gw.connectionInboxes.delete(name);
+      try {
+        await baseDrop();
+      } finally {
+        gw.connectionInboxes.delete(name);
+      }
     },
-    detach: async (note?: string) => {
-      await baseDetach(note);
-      gw.connectionInboxes.delete(name);
-    },
+    detach: () =>
+      Promise.reject(
+        new Error(
+          `an inbox is durable (§39): it does not detach. Use drop() for a total forget, or ` +
+            `revokeConnection to refuse further writes while keeping the connection's record.`,
+        ),
+      ),
   };
   gw.connectionInboxes.set(name, handle);
   return handle;
