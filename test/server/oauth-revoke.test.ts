@@ -301,7 +301,14 @@ describe("§37 phase 15 — revocation", () => {
       faults.push(m),
     );
     expect(locked.kind).toBe("locked");
-    expect(faults.join("\n")).not.toContain(home);
+    // The load-bearing check is the CALLER-facing RESULT. `revoke` is operator-driven (`loam grant
+    // revoke`), so `onFault` carries the home path to the operator's own terminal by design and stays
+    // empty on this path — asserting the fault channel alone would be vacuous (the review's finding).
+    // What must never carry the path is the value the caller receives back: a locked result is a bare
+    // `{ kind: "locked" }`, no home path and no internal flag name.
+    expect(JSON.stringify(locked)).not.toContain(home);
+    expect(JSON.stringify(locked)).not.toContain("operator.seed");
+    expect(faults.join("\n")).not.toContain(home); // and the fault channel stayed clean here too
     rmSync(oauthLockPath(home), { force: true });
 
     // Positive control naming which branch answered: an unknown client is a distinct `no-such-client`
