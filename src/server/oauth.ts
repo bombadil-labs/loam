@@ -613,12 +613,21 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
   const now = options.now ?? ((): number => performance.now());
   const digestOf = (secret: string): string => createHash("sha256").update(secret).digest("hex");
 
-  const htmlOut = (res: ServerResponse, status: number, body: string, cookie?: string): void => {
+  const htmlOut = (
+    res: ServerResponse,
+    status: number,
+    body: string,
+    cookie?: string,
+    csp: string = CSP,
+  ): void => {
     res.writeHead(status, {
       "content-type": "text/html; charset=utf-8",
-      "content-security-policy": CSP,
+      "content-security-policy": csp,
       "cache-control": "no-store",
-      "referrer-policy": "no-referrer",
+      // Never no-referrer on a form-hosting page — it nulls the POST's Origin (T143). `origin`,
+      // not `same-origin`: this page's query carries client_id, state and code_challenge, and
+      // under `origin` no Referer in any direction ever carries more than the bare origin.
+      "referrer-policy": "origin",
       ...(cookie === undefined ? {} : { "set-cookie": cookie }),
     });
     res.end(body);
@@ -703,7 +712,24 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
     // Display the REGISTERED uri (`redirectUri` here is byte-equal to it, having matched), never the
     // caller's own text. `state` and the PKCE `code_challenge` ride the form so the approval echoes
     // the state back to the client and binds the code to the challenge.
-    htmlOut(res, 200, consentPage(client, redirectUri, state, codeChallenge, session.formToken));
+    //
+    // The consent page's CSP widens form-action by exactly one origin: the REGISTERED uri's.
+    // Chrome enforces form-action against a form POST's redirect target, so under the shared
+    // `form-action 'self'` the approval's 302 to the connector is BLOCKED in a real browser
+    // (T143's second finding — invisible to every hand-built fixture). `redirectUri` is caller
+    // text made safe by the exactMatch fence above — byte-equal to a registered uri, so its
+    // origin is the registered one — and the refusal pages keep the shared CSP.
+    const consentCsp = CSP.replace(
+      "form-action 'self'",
+      `form-action 'self' ${new URL(redirectUri).origin}`,
+    );
+    htmlOut(
+      res,
+      200,
+      consentPage(client, redirectUri, state, codeChallenge, session.formToken),
+      undefined,
+      consentCsp,
+    );
   };
 
   const handlePost = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {

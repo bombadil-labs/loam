@@ -282,7 +282,9 @@ describe("§37 phase 14 — the consent page", () => {
       { client_id: CLIENT_ID, redirect_uri: REDIRECT },
       { cookie: `${SESSION_COOKIE}=${sessionId}` },
     );
-    expect(res.headers.get("content-security-policy")).toBe(CSP);
+    expect(res.headers.get("content-security-policy")).toBe(
+      CSP.replace("form-action 'self'", `form-action 'self' ${ALLOW_ORIGIN}`),
+    );
     const body = await res.text();
     // The name is escaped, never live markup.
     expect(body).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");

@@ -642,7 +642,10 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
       "content-type": "text/html; charset=utf-8",
       "content-security-policy": CSP,
       "cache-control": "no-store",
-      "referrer-policy": "no-referrer",
+      // Never no-referrer on a form-hosting page: it makes Chrome serialize the form POST's
+      // Origin as "null", and fromThisPage refuses null outright (T143). same-origin keeps a
+      // real Origin and still sends nothing cross-origin.
+      "referrer-policy": "same-origin",
       ...(cookie === undefined ? {} : { "set-cookie": cookie }),
     });
     res.end(body);
