@@ -67,7 +67,8 @@ precisely there.
    `src/server` is one of the named non-document sites (a pinned count — a new page copied from an
    old header block goes red). Verified in `test/server/referrer-policy.test.ts` (source scan).
 4. Real Chrome, driven over CDP, completes story 1: load `/login`, fill, submit, assert the
-   signed-in body and the session cookie; then submit logout and assert signed out. Verified in
+   signed-in body; the session cookie is HttpOnly, so its round trip is proved by the session-
+   gated logout that follows, asserting the signed-out body. Verified in
    `test/browser/door-smoke.test.ts`.
 5. Real Chrome completes story 2: consent approve lands on the registered `redirect_uri` with a
    `code` in the query — and the request that ARRIVES at the `redirect_uri` listener carries no
@@ -76,8 +77,11 @@ precisely there.
 6. Real Chrome completes story 3: one admin POST succeeds and its effect is visible in the
    following GET. Verified in `test/browser/door-smoke.test.ts`.
 7. The browser rail FAILS when Chrome is absent — it does not skip. The failure message names
-   `LOAM_CHROME` as the override. Verified in `test/browser/door-smoke.test.ts` (the resolver
-   throws; `npx vitest run test/browser` on a box with Chrome proves the resolve path). CI is
+   `LOAM_CHROME` as the override. This is a property of `resolveChrome` in `test/browser/cdp.ts`
+   (throw, no skip path exists); a box that has Chrome never exercises the throw, so its proof is
+   the code's shape, read in review: `grep -n "fails rather than skips" test/browser/cdp.ts`
+   finds the throw, and no skip call exists in `test/browser/` — named honestly rather than
+   claimed as a test. CI is
    provisioned already: the GitHub `ubuntu-latest` and `windows-latest` images both ship Chrome.
 8. Two-sided: a genuinely cross-site POST still refuses. The frozen rail
    `test/server/login-csrf.test.ts` (T127) continues to pass byte-identical — including its

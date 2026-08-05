@@ -6,9 +6,11 @@
 // (a hand-enumerated page list narrows in lockstep with what its author remembered; the scan
 // does not).
 //
-// The scan is textual, not semantic: it slices each `writeHead(` call's first 600 characters. A
-// header object assembled far from its writeHead would evade it — today none is, and the pinned
-// per-file counts below go red the moment one appears.
+// The scan is textual, not semantic: it slices each `writeHead(` call's first 800 characters and
+// matches the exact prettier-stable spelling `"referrer-policy": "no-referrer"`. A header object
+// assembled far from its writeHead, or a `setHeader` call, would evade all three scan tests —
+// today neither exists in `src/`, and the live-response assertions above are the level that
+// cannot be evaded, only narrowed.
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -152,7 +154,10 @@ describe("criterion 1 — form-hosting pages send the policy that keeps a real O
     expect(policyOf(consent)).toBe("origin");
     // T143's second finding: Chrome enforces form-action against the POST's redirect target, so
     // the consent page must name the registered redirect ORIGIN — and only there. Two-sided: the
-    // refusal page below keeps the unwidened CSP.
+    // refusal page below keeps the unwidened CSP. This literal is LOAD-BEARING: the
+    // implementation widens via CSP.replace, which no-ops silently if the constant is ever
+    // reworded, and oauth-consent's frozen expectation computes with the same replace — this
+    // hand-written string is the one assertion that goes red on that silent no-op.
     expect(consent.headers.get("content-security-policy")).toContain(
       `form-action 'self' ${ALLOW_ORIGIN}`,
     );

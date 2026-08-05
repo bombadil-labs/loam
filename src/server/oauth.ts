@@ -716,8 +716,9 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
     // The consent page's CSP widens form-action by exactly one origin: the REGISTERED uri's.
     // Chrome enforces form-action against a form POST's redirect target, so under the shared
     // `form-action 'self'` the approval's 302 to the connector is BLOCKED in a real browser
-    // (T143's second finding — invisible to every hand-built fixture). The origin comes from the
-    // registered record, never the caller's text, and the refusal pages keep the shared CSP.
+    // (T143's second finding — invisible to every hand-built fixture). `redirectUri` is caller
+    // text made safe by the exactMatch fence above — byte-equal to a registered uri, so its
+    // origin is the registered one — and the refusal pages keep the shared CSP.
     const consentCsp = CSP.replace(
       "form-action 'self'",
       `form-action 'self' ${new URL(redirectUri).origin}`,

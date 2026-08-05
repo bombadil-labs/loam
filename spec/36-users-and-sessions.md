@@ -296,6 +296,40 @@ tab — is fixed by a fresh form.
 proved by `test/server/login-csrf.test.ts` (phase 5's two rail files untouched, per the plan's
 freeze discipline). Working spec: `.adlc/specs/36-06-cross-site-defence.md`. Ticket T127.
 
+### 36.6.1 The pages hold up their end
+
+The provenance check above has a silent dependency the first human to drive the login form in a
+real browser discovered: the store's own pages must not stop the browser from *naming* itself.
+The pages originally sent `referrer-policy: no-referrer`, and under that policy Chrome serializes
+a same-origin form POST's `Origin` as the literal string `null` — which the check refuses, as it
+should. Every session-gated POST in the product refused every real Chrome, while every rail
+stayed green, because every rail hand-built its headers and none drove a browser.
+
+So the pages carry a contract of their own. Every HTML document that hosts a form declares a
+referrer policy that keeps a real `Origin` on the POST: `same-origin` for the login and admin
+pages (no referrer ever leaves the origin), `origin` for the consent page — its query carries
+`client_id`, `state` and `code_challenge`, and under `origin` no Referer in any direction ever
+carries more than the bare origin. JSON responses and the authorize 302 keep `no-referrer`; no
+form ever renders from them, and the 302 keeps the strictest policy toward a foreign
+`redirect_uri`. The consent page also widens CSP `form-action` by exactly the registered redirect
+origin — Chrome enforces `form-action` against a form POST's redirect target, so `'self'` alone
+blocks the approval's landing; the widened origin comes from the registered record's byte-exact
+match, and the refusal pages keep the unwidened CSP.
+
+The check itself did not move: `Origin: null` still refuses, and a null origin remains exactly
+what an attacker can select. What changed is that the store no longer manufactures one. Three
+rails hold it: `test/server/referrer-policy.test.ts` pins every named header on live responses
+and scans `src/` so no future page ships the old header beside `text/html`; and
+`test/browser/door-smoke.test.ts` drives REAL Chrome over CDP through login, logout, consent
+approval and one admin POST — the rail class this bug proved indispensable, and it fails rather
+than skips when Chrome is absent.
+
+**Provenance.** [PR #341](https://github.com/bombadil-labs/loam/pull/341) (rail-repair
+authorization in [PR #340](https://github.com/bombadil-labs/loam/pull/340)) — `src/server/session.ts`,
+`src/server/oauth.ts`, `src/server/admin.ts` (headers only), proved by
+`test/server/referrer-policy.test.ts` and `test/browser/door-smoke.test.ts`. Working spec:
+`.adlc/specs/36-06-origin-null-repair.md`. Ticket T143.
+
 ### 36.7 The bearer bridge
 
 A session opens the store's own pages and nothing else. `POST /session/token` is how a browser
