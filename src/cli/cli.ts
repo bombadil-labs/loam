@@ -254,7 +254,9 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
 // One blurb per flag NAME — a name means the same thing in every command that takes it. The LIST a
 // command shows comes from its own allowlist, so a flag added there appears in its help whether or
 // not anyone wrote it a blurb: an unexplained flag is still printed, never silently omitted.
-const FLAG_HELP: Readonly<Record<string, { readonly arg: string; readonly note: string }>> = {
+const FLAG_HELP: Readonly<
+  Record<string, { readonly arg: string; readonly note: string; readonly required?: boolean }>
+> = {
   home: { arg: "<dir>", note: "the home to work in (default $LOAM_HOME, else .loam)" },
   store: { arg: "<file>", note: "the store file inside the home (default store.sqlite)" },
   seed: { arg: "<hex>", note: "import an operator seed instead of minting one ($LOAM_SEED)" },
@@ -276,7 +278,11 @@ const FLAG_HELP: Readonly<Record<string, { readonly arg: string; readonly note: 
   },
   out: { arg: "<file>", note: "write the output here (default stdout)" },
   url: { arg: "<base>", note: "the running gateway to ask (default http://127.0.0.1:4321)" },
-  connector: { arg: "<name>", note: "the connector DISPLAY NAME a published page reads through" },
+  connector: {
+    arg: "<name>",
+    note: "the connector DISPLAY NAME a published page reads through",
+    required: true,
+  },
   "store-address": {
     arg: "<text>",
     note: "the store address the onboarding copy shows — text a viewer reads, never a target",
@@ -311,11 +317,19 @@ function topHelp(): string {
 
 function helpFor(command: CommandName): string {
   const spec = COMMANDS[command];
-  const options = [...spec.flags].map((name) => {
-    const { arg, note } = FLAG_HELP[name] ?? { arg: "<value>", note: "" };
+  const rows = [...spec.flags].map((name) => {
+    const { arg, note, required } = FLAG_HELP[name] ?? { arg: "<value>", note: "" };
     const shown =
       spec.booleans?.has(name) === true || arg === "" ? `--${name}` : `--${name} ${arg}`;
-    return `  ${shown.padEnd(18)}${note}`.trimEnd();
+    return { shown, note: required === true ? `${note} (required)` : note };
+  });
+  // The column fits the command's longest flag, capped so a very long one wraps its note to the
+  // next line rather than stretching every row.
+  const width =
+    rows.length === 0 ? 18 : Math.min(Math.max(...rows.map((r) => r.shown.length)) + 2, 26);
+  const options = rows.map(({ shown, note }) => {
+    if (shown.length > width) return `  ${shown}\n${" ".repeat(width + 2)}${note}`.trimEnd();
+    return `  ${shown.padEnd(width)}${note}`.trimEnd();
   });
   return [
     `loam ${command} — ${spec.summary}`,
@@ -848,6 +862,11 @@ function cmdMigrate(args: readonly string[], io: IO): number {
 async function cmdStore(args: readonly string[], io: IO): Promise<number> {
   const parsed = parseFor("store", args);
   const home = parsed.flags.get("home") ?? defaultHome();
+  const unusable = homeDefect(home, { allowMissing: false });
+  if (unusable !== undefined) {
+    io.err(`store: ${unusable}`);
+    return 1;
+  }
   const path = storePath(home, parsed.flags.get("store"));
   const backend = openStore(path, io);
   const deltas = await backend.deltasSince(new Set());
