@@ -2,7 +2,8 @@
 
 **Ticket.** T144. **Status.** Working spec, design-stage. Myk settled the user stories and three
 design questions on 2026-08-05, and refined the knob from a boolean into a CEILING in the same
-conversation. Two questions remain open (41.6). The landing PR is his merge.
+conversation, then answered all three remaining questions in the same conversation — 41.6 records them
+and 41.6b records the one he reframed. **No question is open.** The landing PR is his merge.
 
 **One sentence.** A container may inherit the deltas of its ancestors up to a declared ceiling, so a
 reader of that container gathers its own members plus every tier between it and the ceiling — and
@@ -151,19 +152,58 @@ drives a browser, which is exactly how an unusable login door shipped green.
     a consent page's tiers and counts, and be refused a re-parent by name. Verified in
     `test/site/inherit-stories.test.ts` (a new CDP-driven harness this work must build).
 
-## 41.6 Open questions
+## 41.6 The questions Myk answered, 2026-08-05
 
-**(a) Are an ancestor's connection INBOX pools inherited?** A container's members include the inboxes
-spawned for its connections (§39.3d). So an inheriting child would read what a connection wrote to its
-ancestor. Consistent, and possibly surprising — a person may not expect a child container to expose
-another app's writes. RECOMMEND: yes, inherited, because a member is a member and a carve-out here
-would make "what does this container contain" answerable only with a footnote. Myk's call.
+**(a) An ancestor's connection INBOX pools ARE inherited.** A member is a member; a carve-out would
+make "what does this container contain" answerable only with a footnote. So a child inheriting from
+`alice` reads what a connection wrote into `alice`'s inbox — and the consent criteria (13-15) must
+therefore count inbox deltas in their tier, because that is content a connection will read.
 
-**(b) What happens when a ceiling container is dropped or detached?** A descendant names it, so the
-chain breaks. Per H9 the read must never resolve as if the ancestor were empty. RECOMMEND: refuse the
-drop while any descendant names it as a ceiling, by the same logic that refuses a re-parent — and name
-the descendant in the refusal. The alternative, failing the read closed and loudly, moves the error from
-the act that caused it to a reader who did nothing wrong.
+**(b) CLOSED — the case cannot arise the way the question posed it.** Three facts settle it:
+
+- **A dropped ceiling needs no rule.** The ceiling is always an ancestor (41.2.2), so dropping it
+  necessarily drops every container that names it. Containment does the work. Myk saw this at once; the
+  question was badly posed for lumping drop together with detach.
+- **A detached ceiling is already handled.** `spec/27-containers.md:81` defines
+  `loam.container.detached` as the operator's record that **a SEPARATE container's store** is
+  deliberately absent, so a missing pool reads as a decision rather than resolving empty (H9). Detach
+  therefore cannot apply to a shared container at all, and "the ceiling is detached" narrows to "a
+  separate-posture ceiling is detached" — which criterion 11 already covers by reusing
+  `containerScope`'s existing refusal.
+- **A detached container has no life of its own.** Its bytes persist; nothing reads or writes them
+  until it is reattached. Writes are refused by construction, because the pool is not open — not by a
+  guard. Myk asked whether a detached container could keep running; it cannot, and that removes the
+  oddness he suspected.
+
+**(c) Dropping a container with live connections REFUSES BY DEFAULT, with an explicit override.** Myk:
+"handled via a `forceChildrenToDisconnect` flag, maybe? Refuse by default, but accept override?" The
+refusal names the blocking connections. The override revokes them and proceeds, and it is a named flag
+on the call — never a default, never inferred. This matches the re-parent rule, so a user learns one
+pattern: an act that would invalidate a granted consent is refused and says what blocks it.
+
+## 41.6b Moving an inheriting container — the real problem is the CONTENT, not the pointer
+
+The ticket first framed this as a dangling ceiling: move a container and its ceiling may stop being an
+ancestor. Myk found the deeper one — **the content may stop making sense.**
+
+His words: "there may be things in A.1.2.1.7 that depend on deltas in A.1.2 ... If we allow the move,
+the *meaning* of what's in A.1.2.1.7 may change in ways that become impossible to reason about." He
+floated pulling the depended-on deltas down into the moving container and called it a can of worms. It
+is: that copies deltas, and a copy is a second place a forgotten delta survives — which is exactly what
+41.2.4 exists to prevent.
+
+**So a move that CHANGES a container's inheritance is refused** — not because a pointer breaks, but
+because the content cannot be re-grounded without either changing its meaning silently or copying. A
+move that leaves the ceiling an ancestor, with the path's contents unchanged, is harmless and stays
+allowed.
+
+**The operation Myk actually wants is EJECTION, and it already has a name.** "Drop A.1 but keep
+A.1.2.1.7" is not a re-parent — it is taking a container out as something self-contained. That is the
+ejection idea, recorded when it was T119 and still undesigned: a container leaves and becomes a store
+its owner operates. Ejection resolves the coherence problem honestly: a store that stands alone has to
+materialise what it depended on, and there the copy is the entire point of leaving rather than a hidden
+side-effect of a move. **RECOMMEND: keep moves narrow here, and let ejection carry the keep-a-subtree
+case as its own ticket and its own design.**
 
 ## 41.7 Section number
 
