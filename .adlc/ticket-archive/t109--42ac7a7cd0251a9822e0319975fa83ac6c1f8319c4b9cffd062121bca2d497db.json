@@ -1,4 +1,12 @@
 {
+  "_adlcArchive": {
+    "archivedAt": "2026-08-05T22:43:49.532Z",
+    "reason": "completed",
+    "sourceRevision": null,
+    "sourceStoreHash": "3b4fd30b56f94284ac042dc6231a4cb2a1f7fa1537d94be9b19ee0763ba526b0",
+    "ticketHash": "4526069efd7eaf64717b1bbd4e5463721324db7c8952e4c1e6c6b0c62135765f",
+    "version": 1
+  },
   "body": "FOUND AT T64'S LANDING (#266): `Gateway.cut`, `slates()`, `receipt()`, `graveyards()` are public methods whose parameter and return types — SlateReport, CutReport, RestoreReport's siblings, the graveyard/receipt shapes, the slate claim builders — are not exported from `src/index.ts`. A consumer of the published package can call the doors and cannot NAME what they answer, except by deep dist/ import. This is exactly T82's defect (the container surface after T32) recurring one arc later, and the rule from that landing applies verbatim: export THE DOOR AND THE VOCABULARY A CALLER NEEDS TO DESCRIBE, SIGN, AND READ WHAT THE DOOR ANSWERS — and deliberately NOT the `*Impl` seams.\n\nAlso apply T82's other two disciplines: probe the NEGATIVE (export an Impl on purpose, watch the surface rail fail, revert — so 'we don't ship the internals' is pinned rather than assumed), and extend `pack.test.ts`'s dist expectations for the new d.ts files the re-exports resolve through.\n\nThe capabilities book's §29 claims currently name `Gateway` as their door — honest today. When this lands, sharpen them to the named exports in the same PR, or the book undersells a surface that exists.\n\nSelf-merge bar: repair-tier (restores the stated T82 rule for a landed surface), on green + P5 + the negative probe.",
   "edges": [],
   "id": "T109",

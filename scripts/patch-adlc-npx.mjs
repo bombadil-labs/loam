@@ -10,6 +10,7 @@
 // THE OBVIOUS FIX IS A TRAP, TWICE OVER, and both halves are worth recording.
 //
 // Naming `npx.cmd` alone turns `ENOENT` into `EINVAL`: Node ≥18.20.2 REFUSES to spawn a `.bat`/`.cmd`
+<<<<<<< Updated upstream
 // without `shell: true` (the CVE-2024-27980 argument-injection fix). The first version of this patch
 // therefore set `shell: true` on win32 — and a prosecutor pass called that out as stepping around a
 // mitigation rather than satisfying it. With `shell` enabled Node stops escaping argv and hands
@@ -17,6 +18,14 @@
 // `My Documents`) is silently word-split, and any `&`, `|`, `^` or backtick is executed. `adlc review`
 // forwards diff paths and free-text prompts, so that is live input. A review pointed at the wrong
 // target is precisely the silent-wrong-answer this script exists to prevent.
+=======
+// without `shell: true` (the CVE-2024-27980 argument-injection fix). Setting `shell: true` would step
+// around that mitigation rather than satisfy it: Node stops escaping argv and hands cmd.exe a joined
+// string, so any forwarded argument containing a space (a repo path under `My Documents`) is silently
+// word-split, and any `&`, `|`, `<` or `>` is executed by cmd.exe. `adlc review` forwards diff
+// paths and free-text prompts, so that is live input. A review pointed at the wrong target is precisely the
+// silent-wrong-answer this script exists to prevent.
+>>>>>>> Stashed changes
 //
 // So this patch takes the third road: spawn NODE ITSELF against npm's own `npx-cli.js`. No `.cmd`, no
 // shell, argv stays a real array, and the CVE mitigation is satisfied rather than disabled.
