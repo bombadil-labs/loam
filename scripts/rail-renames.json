@@ -74,7 +74,7 @@
     {
       "//": "T143 rail-driver REPAIR. The browser rail's 30s deadline covers both CDP operations and Chrome's cold start, and a loaded windows-latest runner missed the start once ('Chrome never wrote DevToolsActivePort', PR #342's run) while every unloaded run passes \u2014 the same loaded-runner I/O class vitest.config already budgets for. Launch gets its own 120s budget; every CDP operation keeps 30s. No assertion moves.",
       "from": "const DEADLINE_MS = 30_000;",
-      "to": "const DEADLINE_MS = 30_000; // per CDP operation \u2014 Chrome's cold start gets its own budget below",
+      "to": "const DEADLINE_MS = 30_000; // per CDP operation; Chrome's cold start gets its own budget below",
       "files": ["test/browser/cdp.ts"],
       "authorized": "Myk, 2026-08-05 \u2014 authorized in chat: give Chrome launch its own deadline so a loaded runner is not a red bar. Pair 1 of 2."
     },
