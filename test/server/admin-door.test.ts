@@ -459,7 +459,13 @@ describe("§40 phase A1 — the admin door", () => {
     const seedPath = userSeedPath(home, "cal");
     const raw = readFileSync(seedPath, "utf8").trim();
     expect(raw).toMatch(/^[0-9a-f]{64}$/);
-    expect(statSync(seedPath).mode & 0o777).toBe(0o600);
+    // POSIX only. Windows reports 0666 for an ordinary file whatever the open mode asked, so a
+    // Windows run proves NOTHING about who may read a minted seed — the same gap the credentials
+    // rail names. The rest of this test's claims (the grant, the Term, the leak scan) do hold on
+    // Windows and keep running there; only this line is platform-bound.
+    if (process.platform !== "win32") {
+      expect(statSync(seedPath).mode & 0o777).toBe(0o600);
+    }
     const mintedKey = authorForSeed(raw);
 
     // The write grant, operator-signed, on the minted key.
