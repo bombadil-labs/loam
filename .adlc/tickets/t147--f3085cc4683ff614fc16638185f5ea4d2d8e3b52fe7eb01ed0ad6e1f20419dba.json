@@ -1,0 +1,14 @@
+{
+  "body": "FOUND BY THE 2026-08-05 AUDIT (browser-user + fresh-operator journeys, independently, CONFIRMED). MECHANISM VERIFIED against the code: the login door re-reads credentials.json PER ATTEMPT (session.ts readCredentials in postLogin), so the credential half is live. What is NOT live is the GROUND: `loam user create` appends the user/role deltas from a second process, and the serving process's gateway never sees them, so the role check refuses — indistinguishable from a wrong password, BY DESIGN (the one-refusal oracle rule). `loam user create` prints a correct warning naming the server pid; miss that line and nothing anywhere ever tells you again. The serve log stays silent.\n\nDECIDE-THEN-BUILD, and the decision is real: (a) the server notices ground growth (re-open or refresh the reactor on a marker/mtime signal — relates the serving.json marker and T103's pulse idea); (b) role/user creation gains a served write path so the running process does the append itself (relates T137, the remote role-assignment path, which has its own security decisions); or (c) reporting only — the serve log says, on a refused login whose CREDENTIAL half matched but whose ground holds no role, that the ground may be stale (CAREFUL: this leaks match-status to the operator log; the log is the operator's own channel, same standing as the scrypt-cost fault, so it does not feed the caller oracle — but say so explicitly in the review).\n\nDO NOT soften the one-refusal shape toward the caller under any option.\n\nRAILS: a story test — create a user beside a live server, watch the refusal, then do whatever the chosen option promises and watch it succeed or be explained. Two-sided: the caller-visible refusal stays byte-identical.\n\nWHO MERGES: Myk — every option changes what the system promises (a live reload, a new write path, or a new operator-channel report).",
+  "edges": [],
+  "id": "T147",
+  "phase": "P0",
+  "rails": [],
+  "scope": [
+    "src/server/session.ts",
+    "src/server/http.ts",
+    "src/cli/cli.ts"
+  ],
+  "status": "todo",
+  "title": "A user created beside a live server cannot sign in, and only one CLI line ever says why"
+}
