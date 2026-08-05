@@ -41,7 +41,7 @@ export function resolveChrome(): string {
   );
 }
 
-const DEADLINE_MS = 30_000;
+const DEADLINE_MS = 30_000; // per CDP operation; Chrome's cold start gets its own budget below
 
 const withDeadline = <T>(promise: Promise<T>, what: string): Promise<T> => {
   let timer: NodeJS.Timeout;
@@ -186,7 +186,7 @@ export class Browser {
     );
     // Chrome announces its picked port by writing DevToolsActivePort into the profile dir.
     const portFile = join(userDataDir, "DevToolsActivePort");
-    const deadline = Date.now() + DEADLINE_MS;
+    const deadline = Date.now() + 120_000; // cold start on a loaded CI runner legitimately exceeds the per-op budget
     let port: number | undefined;
     while (port === undefined) {
       if (child.exitCode !== null)
