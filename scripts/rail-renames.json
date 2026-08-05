@@ -63,6 +63,13 @@
       "to": "verifier.slice(0, -1) + (verifier.endsWith(\"A\") ? \"B\" : \"A\")",
       "files": ["test/server/oauth-token.test.ts"],
       "authorized": "Myk, 2026-08-05 \u2014 repair a PKCE fixture whose mutation sometimes did not mutate; authorized in chat, re-shaped to one line after the guard refused the first pair"
+    },
+    {
+      "//": "T135 rail REPAIR (T143's second finding). The (4) test pins the consent page's CSP byte-for-byte to the shared constant, whose form-action is 'self' alone. Chrome enforces form-action against a form POST's REDIRECT TARGET, so under that CSP the approval's 302 to the connector is blocked in a real browser \u2014 the OAuth flow completes in every hand-built fixture and in no real Chrome. The repair widens the pinned expectation by exactly the REGISTERED redirect origin, which is where the 302 already goes; the test's intent (no-script, no live markup) is untouched, and the T143 branch adds the two-sided rail: refusal pages keep the unwidened CSP.",
+      "from": "toBe(CSP);",
+      "to": "toBe(CSP.replace(\"form-action 'self'\", `form-action 'self' ${ALLOW_ORIGIN}`));",
+      "files": ["test/server/oauth-consent.test.ts"],
+      "authorized": "Myk, 2026-08-05 \u2014 authorized in chat: widen the consent page's pinned form-action by the registered redirect origin so real Chrome can land the approval"
     }
   ]
 }
