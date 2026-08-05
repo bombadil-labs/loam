@@ -1,0 +1,13 @@
+{
+  "body": "FOUND BY THE 2026-08-05 AUDIT (connector-integrator journey, CONFIRMED, spec/37 in hand).\n\n1. THE DROPPED CONTINUATION: an unauthenticated GET /oauth/authorize renders the login form (correct), but signing in lands on the plain \"Signed in.\" page — the authorize request (client_id, redirect_uri, state, code_challenge) is gone. The person must be re-sent by the connector; a human driving it sees a dead end. The login form rendered by the consent door should carry the authorize continuation (a return-to bound to the same-origin authorize path ONLY — never an open redirect: reconstruct the query, verify the path is AUTHORIZE_PATH, nothing else) so a successful sign-in resumes consent.\n2. LATE VALIDATION: GET /oauth/authorize checks state length and PKCE challenge SHAPE, but not response_type (RFC 6749 requires code), not code_challenge_method (S256 is the only supported method and its absence should refuse at the door), and an ABSENT code_challenge passes the shape check vacuously. A person can approve, the code is minted, and the failure arrives at the token endpoint wearing a misleading invalid_grant. Refuse at the GET, on the consent page's own no-Location refusal path, naming the missing/unsupported parameter.\n\nRAILS: new test file beside the frozen oauth-consent suite; a browser story extending the continuation (sign in FROM authorize, land on consent, approve, land on redirect_uri) in a NEW browser test file. Frozen rails stay untouched.\n\nWHO MERGES: Myk — the continuation adds a parameter the login door round-trips, which is a surface decision on the auth path. The validation half alone is a conformance repair on the ordinary bar; split the PRs if that speeds the first half.",
+  "edges": [],
+  "id": "T148",
+  "phase": "P0",
+  "rails": [],
+  "scope": [
+    "src/server/oauth.ts",
+    "src/server/session.ts"
+  ],
+  "status": "todo",
+  "title": "The authorize door forgets where the person was going, and validates a doomed request only after minting its code"
+}

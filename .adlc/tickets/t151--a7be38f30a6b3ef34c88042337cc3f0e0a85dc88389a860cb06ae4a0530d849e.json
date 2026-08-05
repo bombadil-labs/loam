@@ -1,0 +1,13 @@
+{
+  "body": "FOUND BY THE 2026-08-05 AUDIT (spec-drift lens, all CONFIRMED with both sides cited). SPEC.md is the record of what IS; these rows are no longer true, and correcting the record is a repair, not a decision.\n\n1. spec/40-the-admin-page.md's Federation panel row promises a URL pull and user-seed authorship that the admin door deliberately REFUSES (the door's rails pin the refusal). The code is right and settled; the spec section overpromises. Re-word the row to what the door does, citing the refusal rationale. (medium — a reader building against the spec would build the wrong thing)\n2. SPEC.md's index row for §36 still says 'phases 1, 2 and 4 of 10 landed' while spec/36-users-and-sessions.md records all landed phases with provenance. Update the row.\n3. SPEC.md's preamble points at `.adlc/tickets.json`, which the sharded store replaced. Point at `.adlc/tickets/`.\n4. SPEC.md still labels §27 a design-stage draft that 'BUILDS none of it'; §27 landed (spec/27 files carry provenance). Update the label.\n\nRAILS: none beyond review — these are record corrections; the spec-accuracy test is the diff itself, each item citing the code or provenance footer that contradicts the old text.\n\nWHO MERGES: MYK — the change surface is SPEC.md and a spec/ section, and every touch of the record gets his read, however mechanical.",
+  "edges": [],
+  "id": "T151",
+  "phase": "P0",
+  "rails": [],
+  "scope": [
+    "SPEC.md",
+    "spec/40-the-admin-page.md"
+  ],
+  "status": "todo",
+  "title": "The record drifted: four places SPEC.md and spec/ describe a repo that has since moved"
+}
