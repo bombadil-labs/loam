@@ -107,7 +107,8 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
     // later scrub ONLY while the rebuild has not committed — a REFUSED VACUUM leaves the freelist
     // positive and self-heals. A COMMITTED VACUUM whose fold was deferred does NOT: it reads 0
     // through the WAL and this trigger goes blind to it (see the checkpoint branch below). Fully
-    // closing that second case wants a durable scrub watermark — a decision tracked on T49, not
+    // closing that second case wants a durable scrub watermark — a decision tracked on T100 (the
+    // erasure seam, §32), not
     // built here — so nothing is persisted yet.
     const freelist = this.db.pragma("freelist_count", { simple: true }) as number;
     if (freelist > 0) {
@@ -125,7 +126,8 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
           // `> 0` trigger skips the whole block — the rebuilt pages sit in the `-wal` sidecar until
           // some incidental checkpoint folds them, and a crash before then leaves the plaintext at
           // rest with nothing to re-detect it. Closing that needs a durable scrub watermark, which
-          // this ticket defers to a decision (tracked on T49), not a §11 promise broken here.
+          // this ticket defers to a decision (tracked on T100 — the erasure seam, §32), not a §11
+          // promise broken here.
           this.deferScrub(
             "the rebuilt pages could not be folded into the main file — a concurrent reader held " +
               "the write-ahead log past busy_timeout. The rebuild COMMITTED, so `freelist_count` " +
