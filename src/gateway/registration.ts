@@ -488,6 +488,48 @@ export interface RegistrationInput {
   readonly resolvers?: ResolverSpecs;
 }
 
+// A Policy JSON shape carries only its own kind's fields. Naming both the failing prop path and
+// the accepted shapes turns rhizomatic's bare parse error (`expected object for order`) into a
+// message a registry author can act on.
+const POLICY_SHAPES =
+  "a prop takes one of { pick: { order }, all: { order }, conflicts: { order }, merge: <fn>, " +
+  "absentAs: { const, then } } — every order is an object " +
+  "({ byTimestamp: 'desc' }, { byAuthorRank: ... }, { lexById: ... }, { byPred: ... }, { chain: [...] })";
+
+function parseSchemaNamed(input: unknown): Schema {
+  try {
+    return parseSchema(input);
+  } catch (err) {
+    throw new Error(`register: malformed schema at ${locateSchemaFailure(input)} — ${POLICY_SHAPES}`, {
+      cause: err,
+    });
+  }
+}
+
+// Find the first Policy rhizomatic refuses, so the door can name it. Per-prop probing via
+// `parseSchema({ default: policy })` is exact — a Policy parses standalone or not at all.
+function locateSchemaFailure(input: unknown): string {
+  if (typeof input !== "object" || input === null) return "schema";
+  const o = input as { props?: unknown; default?: unknown };
+  if (o.props !== undefined && typeof o.props === "object" && o.props !== null) {
+    for (const [name, policy] of Object.entries(o.props as Record<string, unknown>)) {
+      try {
+        parseSchema({ default: policy });
+      } catch {
+        return `schema.props.${name}`;
+      }
+    }
+  }
+  if ("default" in o) {
+    try {
+      parseSchema({ default: (o as { default?: unknown }).default });
+    } catch {
+      return "schema.default";
+    }
+  }
+  return "schema";
+}
+
 export function parseRegistrationInput(raw: unknown): RegistrationInput {
   const o = raw as {
     hyperschema?: { name?: unknown; alg?: unknown; body?: unknown };
@@ -527,7 +569,7 @@ export function parseRegistrationInput(raw: unknown): RegistrationInput {
   }
   return {
     hyperschema: { name, alg: alg ?? 1, body: parseTerm(body) },
-    schema: parseSchema(o.schema),
+    schema: parseSchemaNamed(o.schema),
     roots: o.roots as string[],
     ...(o.entity === undefined ? {} : { entity: o.entity }),
     ...(o.mutations === undefined ? {} : { mutations: parseClaimTemplates(o.mutations) }),
