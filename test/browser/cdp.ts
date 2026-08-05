@@ -48,7 +48,10 @@ const withDeadline = <T>(promise: Promise<T>, what: string): Promise<T> => {
   return Promise.race([
     promise.finally(() => clearTimeout(timer)),
     new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`timed out after ${DEADLINE_MS}ms: ${what}`)), DEADLINE_MS);
+      timer = setTimeout(
+        () => reject(new Error(`timed out after ${DEADLINE_MS}ms: ${what}`)),
+        DEADLINE_MS,
+      );
       timer.unref();
     }),
   ]);
@@ -66,7 +69,10 @@ interface CdpMessage {
 export class Tab {
   private readonly ws: WebSocket;
   private nextId = 1;
-  private readonly pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+  private readonly pending = new Map<
+    number,
+    { resolve: (v: unknown) => void; reject: (e: Error) => void }
+  >();
   private readonly eventWaiters = new Map<string, ((params: unknown) => void)[]>();
 
   private constructor(ws: WebSocket) {
@@ -94,7 +100,9 @@ export class Tab {
     await withDeadline(
       new Promise<void>((resolve, reject) => {
         ws.addEventListener("open", () => resolve(), { once: true });
-        ws.addEventListener("error", () => reject(new Error(`could not open ${wsUrl}`)), { once: true });
+        ws.addEventListener("error", () => reject(new Error(`could not open ${wsUrl}`)), {
+          once: true,
+        });
       }),
       "opening the CDP socket",
     );
@@ -114,19 +122,19 @@ export class Tab {
   }
 
   /** The NEXT Page.loadEventFired. Await the returned promise after triggering the navigation. */
-  loaded(): Promise<void> {
+  loaded(what = "a page load"): Promise<void> {
     return withDeadline(
       new Promise<void>((resolve) => {
         const list = this.eventWaiters.get("Page.loadEventFired") ?? [];
         list.push(() => resolve());
         this.eventWaiters.set("Page.loadEventFired", list);
       }),
-      "waiting for a page load",
+      `waiting for ${what}`,
     );
   }
 
   async navigate(url: string): Promise<void> {
-    const done = this.loaded();
+    const done = this.loaded(`the load of ${url}`);
     await this.send("Page.navigate", { url });
     await done;
   }
@@ -181,7 +189,8 @@ export class Browser {
     const deadline = Date.now() + DEADLINE_MS;
     let port: number | undefined;
     while (port === undefined) {
-      if (child.exitCode !== null) throw new Error(`Chrome exited ${child.exitCode} before serving CDP`);
+      if (child.exitCode !== null)
+        throw new Error(`Chrome exited ${child.exitCode} before serving CDP`);
       if (Date.now() > deadline) throw new Error("Chrome never wrote DevToolsActivePort");
       try {
         const first = readFileSync(portFile, "utf8").split("\n")[0] ?? "";

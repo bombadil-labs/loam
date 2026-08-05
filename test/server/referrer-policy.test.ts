@@ -24,6 +24,7 @@ import { hashPassword, writeCredentials, type ScryptParams } from "../../src/ser
 import { roleClaims, userClaims } from "../../src/server/users.js";
 import { PRESESSION_COOKIE, SESSION_COOKIE } from "../../src/server/session.js";
 import { writeOAuthFile, type OAuthClient } from "../../src/server/oauth-file.js";
+import { initHome } from "../../src/cli/config.js";
 
 vi.setConfig({ testTimeout: 20_000 });
 
@@ -34,7 +35,9 @@ const PASSWORD = "correct horse";
 const ALLOW_ORIGIN = "https://app.example";
 const REDIRECT = "https://app.example/cb";
 const CLIENT_ID = "connector-fixed-0001";
-const CODE_CHALLENGE = createHash("sha256").update("a-verifier-of-sufficient-length").digest("base64url");
+const CODE_CHALLENGE = createHash("sha256")
+  .update("a-verifier-of-sufficient-length")
+  .digest("base64url");
 
 const homes: string[] = [];
 const handles: ServerHandle[] = [];
@@ -50,6 +53,9 @@ async function doorServer(): Promise<{ base: string }> {
   await gateway.append([signClaims(roleClaims("myk", "operator", OPERATOR, ts++), OPERATOR_SEED)]);
   const home = mkdtempSync(join(tmpdir(), "loam-referrer-"));
   homes.push(home);
+  // The token door signs with <home>/operator.seed and fails closed without it — and a fallen-
+  // through /oauth/token would answer from the mount layer, without the header this rail pins.
+  initHome(home, OPERATOR_SEED);
   writeCredentials(home, { version: 1, users: { myk: await hashPassword(PASSWORD, CHEAP) } });
   const client: OAuthClient = {
     clientId: CLIENT_ID,
@@ -64,6 +70,7 @@ async function doorServer(): Promise<{ base: string }> {
     tokens: { "op-token": { operator: true } },
     port: 0,
     host: "127.0.0.1",
+    publicUrl: "https://store.example",
     users: { home, mount: "default" },
     connectors: { home, allowRedirectOrigins: [ALLOW_ORIGIN] },
   });
@@ -121,7 +128,9 @@ describe("criterion 1 — form-hosting pages send the policy that keeps a real O
     expect(policyOf(await fetch(`${base}/admin`))).toBe("same-origin");
     const { session } = await signIn(base);
     expect(
-      policyOf(await fetch(`${base}/admin`, { headers: { cookie: `${SESSION_COOKIE}=${session}` } })),
+      policyOf(
+        await fetch(`${base}/admin`, { headers: { cookie: `${SESSION_COOKIE}=${session}` } }),
+      ),
     ).toBe("same-origin");
   });
 
@@ -141,9 +150,20 @@ describe("criterion 1 — form-hosting pages send the policy that keeps a real O
     });
     expect(consent.status).toBe(200);
     expect(policyOf(consent)).toBe("origin");
-    const refused = await authorize({ client_id: "connector-nope", redirect_uri: REDIRECT, code_challenge: CODE_CHALLENGE });
+    // T143's second finding: Chrome enforces form-action against the POST's redirect target, so
+    // the consent page must name the registered redirect ORIGIN — and only there. Two-sided: the
+    // refusal page below keeps the unwidened CSP.
+    expect(consent.headers.get("content-security-policy")).toContain(
+      `form-action 'self' ${ALLOW_ORIGIN}`,
+    );
+    const refused = await authorize({
+      client_id: "connector-nope",
+      redirect_uri: REDIRECT,
+      code_challenge: CODE_CHALLENGE,
+    });
     expect(refused.status).toBe(400);
     expect(policyOf(refused)).toBe("origin");
+    expect(refused.headers.get("content-security-policy")).toContain("form-action 'self';");
     // No session: the consent door renders the login form through ITS OWN html helper.
     const anon = await fetch(`${base}/oauth/authorize`, { redirect: "manual" });
     expect(policyOf(anon)).toBe("origin");
@@ -217,15 +237,20 @@ describe("criterion 3 — the source floor", () => {
     }
     return out;
   };
-  /** The first 600 chars after each `writeHead(` — where every header object in src/ lives today. */
+  /** The first 800 chars after each `writeHead(` — room for every header object in src/ today. */
   const headerBlocks = (content: string): string[] =>
-    content.split("writeHead(").slice(1).map((chunk) => chunk.slice(0, 600));
+    content
+      .split("writeHead(")
+      .slice(1)
+      .map((chunk) => chunk.slice(0, 800));
 
   it("no writeHead in src/ pairs text/html with no-referrer — the T143 combination is banned outright", () => {
     for (const file of sources(join(root, "src"))) {
       for (const block of headerBlocks(readFileSync(file, "utf8"))) {
-        if (block.includes("text/html") && block.includes("no-referrer")) {
-          expect.fail(`${file}: a text/html writeHead sends no-referrer — a form on that page will POST Origin: null`);
+        if (block.includes("text/html") && block.includes('"referrer-policy": "no-referrer"')) {
+          expect.fail(
+            `${file}: a text/html writeHead sends no-referrer — a form on that page will POST Origin: null`,
+          );
         }
       }
     }
@@ -242,15 +267,19 @@ describe("criterion 3 — the source floor", () => {
       const htmlBlocks = headerBlocks(content).filter((b) => b.includes("text/html"));
       expect(htmlBlocks.length, `${rel} serves HTML`).toBeGreaterThan(0);
       for (const block of htmlBlocks) {
-        expect(block, `${rel}: a text/html writeHead must declare ${declaration}`).toContain(declaration);
+        expect(block, `${rel}: a text/html writeHead must declare ${declaration}`).toContain(
+          declaration,
+        );
       }
     }
   });
 
-  it("every remaining no-referrer in src/ is a named non-document — a new page copied from an old header block goes red", () => {
+  it("every remaining no-referrer DECLARATION in src/ is a named non-document — a new page copied from an old header block goes red", () => {
+    // Count declarations, not prose: the fix's own comments name the banned policy by name.
+    const DECLARATION = '"referrer-policy": "no-referrer"';
     const counts = new Map<string, number>();
     for (const file of sources(join(root, "src"))) {
-      const n = readFileSync(file, "utf8").split("no-referrer").length - 1;
+      const n = readFileSync(file, "utf8").split(DECLARATION).length - 1;
       if (n > 0) counts.set(file.slice(root.length + 1).replaceAll("\\", "/"), n);
     }
     expect(Object.fromEntries([...counts.entries()].sort())).toEqual({

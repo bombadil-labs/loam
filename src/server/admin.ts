@@ -228,7 +228,9 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
       "content-type": "text/html; charset=utf-8",
       "content-security-policy": CSP,
       "cache-control": "no-store",
-      "referrer-policy": "no-referrer",
+      // Never no-referrer on a form-hosting page — it nulls the form POST's Origin and
+      // fromThisPage refuses null (T143). same-origin sends nothing cross-origin.
+      "referrer-policy": "same-origin",
       ...(cookie === undefined ? {} : { "set-cookie": cookie }),
     });
     res.end(body);

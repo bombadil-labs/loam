@@ -39,7 +39,9 @@ const PASSWORD = "correct horse";
 const CLIENT_ID = "connector-fixed-0001";
 
 // A real PKCE S256 challenge — the consent GET refuses a malformed one before any page renders.
-const CODE_CHALLENGE = createHash("sha256").update("a-verifier-of-sufficient-length-43chars-min").digest("base64url");
+const CODE_CHALLENGE = createHash("sha256")
+  .update("a-verifier-of-sufficient-length-43chars-min")
+  .digest("base64url");
 
 let browser: Browser;
 let handle: ServerHandle;
@@ -120,16 +122,27 @@ const fill = (tab: Tab, name: string, value: string): Promise<unknown> =>
 
 /** Submit the page's form whose action matches, and wait for the navigation it causes. */
 const submit = async (tab: Tab, action: string): Promise<void> => {
-  const done = tab.loaded();
+  const done = tab.loaded(`the navigation after submitting ${action}`);
   await tab.eval(`document.querySelector('form[action="${action}"]').submit()`);
   await done;
 };
 
 const bodyText = (tab: Tab): Promise<unknown> => tab.eval("document.body.textContent");
 
-/** Drive the real login form as the named user; leaves the tab on the signed-in page. */
+/**
+ * Drive the real login form as the named user; leaves the tab on the signed-in page. Tabs share
+ * the profile's cookie jar, so a prior story's session (even a half-finished one) is signed out
+ * first — each story must stand alone.
+ */
 async function signIn(tab: Tab, user: string): Promise<void> {
   await tab.navigate(`${base}/login`);
+  const alreadyIn = (await tab.eval(
+    `document.querySelector('form[action="/logout"]') !== null`,
+  )) as boolean;
+  if (alreadyIn) {
+    await submit(tab, "/logout");
+    await tab.navigate(`${base}/login`);
+  }
   await fill(tab, "user", user);
   await fill(tab, "password", PASSWORD);
   await submit(tab, "/login");
@@ -153,14 +166,13 @@ describe("T143 — the doors, driven by a real browser", () => {
   it("story 2: alice approves a connector and lands on its registered redirect_uri with a code", async () => {
     const tab = await browser.tab();
     await signIn(tab, "alice");
-    const authorize =
-      `${base}/oauth/authorize?` +
-      new URLSearchParams({
-        client_id: CLIENT_ID,
-        redirect_uri: `${landingOrigin}/cb`,
-        state: "st-42",
-        code_challenge: CODE_CHALLENGE,
-      });
+    const query = new URLSearchParams({
+      client_id: CLIENT_ID,
+      redirect_uri: `${landingOrigin}/cb`,
+      state: "st-42",
+      code_challenge: CODE_CHALLENGE,
+    });
+    const authorize = `${base}/oauth/authorize?${query.toString()}`;
     await tab.navigate(authorize);
     expect(await bodyText(tab)).toContain("Approve a connector?");
     await submit(tab, "/oauth/authorize");
@@ -168,16 +180,21 @@ describe("T143 — the doors, driven by a real browser", () => {
     expect(where.startsWith(`${landingOrigin}/cb`)).toBe(true);
     expect(where).toContain("code=");
     expect(where).toContain("state=st-42");
-    // Criterion 5's second half: what ARRIVES at the connector carries no authorize URL. The
-    // Referer is absent, or at most the bare store origin — never a path, never the query that
-    // holds client_id, state and code_challenge.
+    // Criterion 5's second half: what ARRIVES at the connector carries no authorize URL. A
+    // STORE-origin Referer is at most the bare origin — never a path, never the query that holds
+    // client_id, state and code_challenge. The landing page's own subresource fetches (Chrome
+    // asks for /favicon.ico uninvited) legitimately carry the LANDING's referer; nothing else may.
     expect(landed.length).toBeGreaterThan(0);
     for (const hit of landed) {
       if (hit.referer === undefined) continue;
       const parsed = new URL(hit.referer);
-      expect(parsed.origin).toBe(new URL(base).origin);
-      expect(parsed.pathname).toBe("/");
-      expect(parsed.search).toBe("");
+      if (parsed.origin === new URL(base).origin) {
+        expect(parsed.pathname).toBe("/");
+        expect(parsed.search).toBe("");
+      } else {
+        expect(parsed.origin).toBe(landingOrigin);
+        expect(parsed.search).not.toContain("code_challenge");
+      }
     }
     tab.close();
   });

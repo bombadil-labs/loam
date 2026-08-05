@@ -31,6 +31,17 @@ The replacement policy is per page, chosen by what the page's URL contains:
   authorize 302 host no form and initiate no same-origin POST, and the 302 must keep the strictest
   policy toward a foreign `redirect_uri`.
 
+## The second finding (the browser rail found it while going red)
+
+Chrome enforces CSP `form-action` against a form POST's **redirect target**, not only its action.
+The consent approval POSTs to `'self'` and is then 302-redirected to the connector's
+`redirect_uri` — so under the shared `form-action 'self'`, real Chrome BLOCKS the approval's
+landing even with the referrer policy fixed. Every hand-built fixture follows the 302 itself and
+cannot see this. The repair: the consent page's CSP — that one page, never the refusal pages —
+widens `form-action` by exactly one origin, the REGISTERED redirect uri's origin, taken from the
+registered record and never from caller text. Nothing new can be reached: the 302 already goes
+precisely there.
+
 ## User stories (Myk approved all three; each story IS a rail)
 
 1. **Login and logout.** Alice opens `/login` in real Chrome, types her name and password, and
@@ -76,6 +87,10 @@ The replacement policy is per page, chosen by what the page's URL contains:
    rail was edited).
 9. No check relaxes: `git diff main -- src/server/session.ts` touches only response headers, never
    `fromThisPage`. Verified by `git diff main -- src/server/session.ts` in the PR review.
+10. The consent page's CSP widens `form-action` by exactly the registered redirect origin, and the
+    consent REFUSAL pages keep the unwidened `form-action 'self'` (two-sided). Verified in
+    `test/server/referrer-policy.test.ts` (both CSP assertions) and end-to-end by story 2 in
+    `test/browser/door-smoke.test.ts` (Chrome actually lands).
 
 ## Named gaps (each says which rail would close it, per the P3 rule)
 
