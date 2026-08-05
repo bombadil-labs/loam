@@ -92,22 +92,12 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
     this.db.pragma("secure_delete = ON");
     // ...but `secure_delete` is CONNECTION-level and governs only pages freed FROM NOW ON. A store
     // that erased anything before this shipped keeps that plaintext in its freelist forever, and no
-<<<<<<< Updated upstream
     // amount of future purging scrubs it — probed: reopening such a store and running fresh
     // appends/purges/checkpoints still yields the old content; only VACUUM clears it. Shipping a
     // §11 fix that leaves every existing store in violation is not a fix, so rebuild once when
     // there is inherited freelist to scrub. `freelist_count` is a cheap header read and is 0 on a
     // fresh store, so this is a no-op for anything created after this change. The cost is a
     // one-time rebuild on first open of a store that has erased before; correctness wins.
-=======
-    // amount of future purging scrubs it — only VACUUM clears it. Shipping a §11 fix that leaves
-    // every existing store in violation is not a fix, so rebuild once when there is inherited
-    // freelist to scrub. `freelist_count` is a cheap header read; the trigger is a PROXY, not a
-    // detector — it fires after ANY delete (even pages `secure_delete` already zeroed, so a scrub
-    // of a fresh store is harmless work) and it cannot tell inherited plaintext from a scrubbed
-    // freelist. The cost is a rebuild on open of a store that has freed pages; correctness wins
-    // either way.
->>>>>>> Stashed changes
     // ...and it is BEST-EFFORT, never open-blocking. VACUUM wants an exclusive write lock over the
     // whole file and this constructor is not async, so a second handle mid-append would turn
     // `new SqliteBackend(path)` into a synchronous SQLITE_BUSY — a throw the seam has no rejected
