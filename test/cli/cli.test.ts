@@ -302,6 +302,14 @@ describe("loam store", () => {
     expect(code).toBe(0);
     expect(out.join("\n")).toMatch(/deltas/i);
   });
+
+  it("a home that does not exist refuses naming the cure, not a raw ENOENT", async () => {
+    const code = await run(["store", "--home", join(home, "nowhere")], io());
+    expect(code).toBe(1);
+    const errs = err.join("\n");
+    expect(errs).not.toMatch(/ENOENT/);
+    expect(errs).toMatch(/loam init/);
+  });
 });
 
 describe("loam help and version", () => {
