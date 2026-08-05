@@ -237,7 +237,10 @@ describe("§37 phase 15 — the token exchange", () => {
     const code = await mintCode(base, challenge);
 
     // A WRONG verifier is refused — and burns the code.
-    const wrong = await redeem(base, { code, code_verifier: verifier.replace(/.$/, "A") });
+    const wrong = await redeem(base, {
+      code,
+      code_verifier: verifier.slice(0, -1) + (verifier.endsWith("A") ? "B" : "A"),
+    });
     expect(wrong.status).toBe(400);
     expect(await errorOf(wrong)).toBe("invalid_grant");
 
