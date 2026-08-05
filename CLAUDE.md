@@ -239,6 +239,27 @@ prove it* at design time, before any code. A criterion with no method is a WISH 
 Prefer `--llm`/`--prompt-only`, which also catches a method that is present but VACUOUS; the plain
 run only catches a missing one.
 
+**A WORKING SPEC OPENS WITH USER STORIES, AND YOU GRILL MYK TO GET THEM** (Myk, 2026-08-05). Before
+any criterion names a mechanism, the spec states what a PERSON does and what they expect to see. Myk
+asked for this so he can specify behaviour in user terms rather than internals — so the interrogation
+half of P1 is now literal: **ask him how users will relate to the thing, and keep asking until each
+story is concrete enough to execute.** A story names the actor, the action, and the OBSERVABLE result
+("alice opens /login, types her password, and lands on her own dashboard"), never a mechanism
+("session.ts mints a row").
+
+**T143 IS WHY.** Every gate was green — spec-lint, rails red then green, hollow-test, cross-model
+review, an audit lens — and **no human could log in**, because the store's own `Referrer-Policy` made
+Chrome send `Origin: null` and the door refused it. The gates verified conformance to the ticket. No
+gate asked whether a person could use the thing, and no rail drove a real browser. The rail even
+asserted the broken behaviour as correct, because it encoded the code's own premise. A user story
+would have named the end-to-end act, and an integration script for it fails on the first run.
+
+So the stories are not decoration; **they become the integration rails**. Each story earns a script or
+a test that drives the real surface end to end — a CDP-driven browser pass for a page, a CLI
+invocation for a command, a live door request for an API — and that rail is named in the criterion the
+same way a unit path is. A story with no executable form is a story not yet specified. Unit rails
+still prove the mechanism; the story rails prove the mechanism is reachable.
+
 **Then STOP and wait for Myk's word in chat before writing implementation code** — plus answers to
 the ticket's listed design questions. "He'd probably approve" is not his word. That stop is the P6
 human gate arriving early, at design time.
