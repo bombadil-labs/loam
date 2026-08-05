@@ -1528,4 +1528,41 @@ export const CHAPTERS = [
       },
     ],
   },
+  {
+    n: 15,
+    slug: "the-admin-page",
+    title: "Your containers, in a browser",
+    thesis:
+      "A signed-in person reads and runs their own container subtree from a served page — and the page will not confirm that anyone else's containers exist.",
+    covers: ["spec/40-the-admin-page.md"],
+    body: [
+      {
+        kind: "prose",
+        text: "A store's containers used to be reachable only from the command line. The admin page hands a user their own subtree — declare a child, detach one, drop one behind a confirmation, register a schema, promote a delta, pull a federation offer, revoke a connection — while the door re-derives what they may touch from the live container table on every single request.",
+      },
+      {
+        kind: "claims",
+        claims: [
+          {
+            says: "A user reaches their own root container and everything under it, and nothing else — a session addressing another user's container gets a refusal whose bytes are identical to the one for a container that does not exist, so the page never confirms what it will not show.",
+            spec: "spec/40-the-admin-page.md",
+            proof: "test/server/admin-containers.test.ts",
+            door: null,
+          },
+          {
+            says: "Scope is re-derived at the door on every request rather than trusted from the rendered form, and the two-step operations re-check both the scope and the confirmation token at their second step.",
+            spec: "spec/40-the-admin-page.md",
+            proof: "test/server/admin-door.test.ts",
+            door: null,
+          },
+          {
+            says: "A user's own key signs their data writes while the server's seed signs the container declarations that are operator law — the user acts, the operator provisions.",
+            spec: "spec/40-the-admin-page.md",
+            proof: "test/server/admin-promote.test.ts",
+            door: null,
+          },
+        ],
+      },
+    ],
+  },
 ];
