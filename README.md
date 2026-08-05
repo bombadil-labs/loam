@@ -226,7 +226,20 @@ the fourth is the only door out:
     relevant deltas; a pure function of the ambient root, so it resolves the same on every machine.
 - **`schema`** — the resolution program (a **Schema**): a per-property reduction — each prop names a
   GraphQL field and says how to fold that bucket's deltas into one value. Each prop's rule is a
-  **Policy** (`pick` / `all` / `merge` / …); the map of them is the Schema.
+  **Policy**; the map of them is the Schema. A Policy's JSON holds exactly one of five kinds:
+  - **`pick`** — the newest (or, per `order`, the first) surviving entry:
+    `{ "pick": { "order": { "byTimestamp": "desc" } } }`.
+  - **`all`** — every surviving entry, in order:
+    `{ "all": { "order": { "byTimestamp": "desc" } } }`.
+  - **`merge`** — the bucket reduced by an addend function — `max`, `min`, `sum`, `count`,
+    `and`, `or`, `concatSorted`:
+    `{ "merge": "sum" }`.
+  - **`conflicts`** — the surviving entries whose authors disagree, in order:
+    `{ "conflicts": { "order": { "byTimestamp": "desc" } } }`.
+  - **`absentAs`** — a constant to stand in when the bucket is empty, then the Policy for when it
+    is not: `{ "absentAs": { "const": 0, "then": { "pick": { "order": { "byTimestamp": "desc" } } } } }`.
+  An `order` is itself one object: `{ "byTimestamp": "desc" | "asc" }`,
+  `{ "byAuthorRank": … }`, `{ "lexById": … }`, `{ "byPred": … }`, or `{ "chain": [ … ] }`.
 - **`roots`** — the entities held **live**: the gather runs for each, and its view stays current
   as deltas arrive.
 - **`writable`** — the fields that accept a **surface write**. Immutable by default (SPEC §21): a
