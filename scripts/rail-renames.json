@@ -25,37 +25,44 @@
       "from": "including the one it PRESENTED. A P5 lens caught the original ordering dropping the",
       "to": "an evicting implementation would answer 200 here. This login PRESENTS NO SESSION, so it",
       "files": ["test/server/login-door.test.ts"],
-      "authorized": "Myk, 2026-07-31 — correct an overclaiming comment in T126's frozen rail"
+      "authorized": "Myk, 2026-07-31 \u2014 correct an overclaiming comment in T126's frozen rail"
     },
     {
       "from": "caller's live session before discovering the table was full, so the refusal concealed an",
       "to": "cannot reach the drop-versus-cap ordering in `open`: a caller presenting a live session is",
       "files": ["test/server/login-door.test.ts"],
-      "authorized": "Myk, 2026-07-31 — correct an overclaiming comment in T126's frozen rail"
+      "authorized": "Myk, 2026-07-31 \u2014 correct an overclaiming comment in T126's frozen rail"
     },
     {
       "from": "erasure; the presented-session probe after the 503 is that finding's rail.",
       "to": "always discounted a seat, so no 503 can co-occur with one. Only a unit rail pins that.",
       "files": ["test/server/login-door.test.ts"],
-      "authorized": "Myk, 2026-07-31 — correct an overclaiming comment in T126's frozen rail"
+      "authorized": "Myk, 2026-07-31 \u2014 correct an overclaiming comment in T126's frozen rail"
     },
     {
       "from": "//   - `createSessionTable`'s own semantics: it is a SECOND, unused implementation (see the",
       "to": "//   - Any door beyond `/session/token`. Phase 14's consent page rides this session through its",
       "files": ["test/server/session-token.test.ts"],
-      "authorized": "Myk, 2026-07-31 — merging this entry authorizes the edit. T128's rail header names a gap that createSessionTable's deletion removes; the three pairs replace that bullet with a gap that is still true. Line 1 of 3."
+      "authorized": "Myk, 2026-07-31 \u2014 merging this entry authorizes the edit. T128's rail header names a gap that createSessionTable's deletion removes; the three pairs replace that bullet with a gap that is still true. Line 1 of 3."
     },
     {
       "from": "//     working spec's named gap and its ticket). test/server/session-table.test.ts is green about",
       "to": "//     own window; this file rails the mint door only, and asserts nothing about the shape of",
       "files": ["test/server/session-token.test.ts"],
-      "authorized": "Myk, 2026-07-31 — merging this entry authorizes the edit. Line 2 of 3."
+      "authorized": "Myk, 2026-07-31 \u2014 merging this entry authorizes the edit. Line 2 of 3."
     },
     {
       "from": "//     code no request in this file executes.",
       "to": "//     the consent that window carries.",
       "files": ["test/server/session-token.test.ts"],
-      "authorized": "Myk, 2026-07-31 — merging this entry authorizes the edit. Line 3 of 3."
+      "authorized": "Myk, 2026-07-31 \u2014 merging this entry authorizes the edit. Line 3 of 3."
+    },
+    {
+      "//": "T136 rail REPAIR, not a rename. The (1) single-use test builds its wrong verifier with verifier.replace(/.$/, \"A\"). A 32-byte verifier is 43 base64url chars whose LAST char encodes only 4 bits, so ~6% of verifiers already end in \"A\" and the substitution leaves the string UNCHANGED \u2014 the wrong verifier is the right one, redemption correctly answers 200, and the rail fails. Measured: 1174/20000 = 5.87% end in A; reproduced 1 failure in 6 runs, matching CI. The pair replaces the whole line with a comment naming the arithmetic plus a mutation guaranteed to differ. No assertion changes; the test still asserts 400 and invalid_grant.",
+      "from": "    const wrong = await redeem(base, { code, code_verifier: verifier.replace(/.$/, \"A\") });",
+      "to": "    // The last base64url char of a 32-byte verifier carries only 4 bits, so ~6% of verifiers\n    // ALREADY end in \"A\" \u2014 replacing it with \"A\" left the string unchanged, made this \"wrong\"\n    // verifier the RIGHT one, and failed the rail about one run in seventeen. Mutate to a char\n    // that cannot equal the original.\n    const wrongVerifier = verifier.slice(0, -1) + (verifier.endsWith(\"A\") ? \"B\" : \"A\");\n    const wrong = await redeem(base, { code, code_verifier: wrongVerifier });",
+      "files": ["test/server/oauth-token.test.ts"],
+      "authorized": "Myk, 2026-08-05 \u2014 repair a PKCE fixture whose mutation sometimes did not mutate (~6% of verifiers already end in \"A\"); authorized in chat"
     }
   ]
 }
