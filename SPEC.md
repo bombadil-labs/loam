@@ -64,6 +64,7 @@ name begins with that number.
 | §36 | [Users and sessions — credentials at rest](spec/36-users-and-sessions.md) *(phases 1, 2 and 4 of 10 landed; the section grows as later phases land)* |
 | §37 | [Connectors — OAuth-based access for MCP clients](spec/37-connectors.md) *(all 15 phases landed — the connector is complete)* |
 | §39 | [A connection binds to a container — the inbox model](spec/39-connection-container.md) |
+| §40 | [The admin page — a user's containers, through the browser](spec/40-the-admin-page.md) |
 
 _**§21**, **§22**, **§25**, and **§26** are **landed** — design accepted and implemented (see each
 Provenance footer; §21.7's coexistence design is accepted with its implementation queued as ticket T2).
