@@ -1,19 +1,17 @@
 // §20 migration must not resurrect the withdrawn (ticket T41).
 //
-// Audit 3 probed this: every step's `additions()` loop gates on author + signature + shape, and
-// never asks whether the delta it is about to re-sign still SURVIVES. It re-expresses into a new
-// content address and supersedes the OLD id — but the operator's own retraction also points at the
-// old id, and NOTHING points at the re-expression. So a definition the operator deliberately
-// withdrew comes back live, in the operator's voice, wearing a new id.
+// Every step's `additions()` loop gates on author + signature + shape, and never asks whether the
+// delta it is about to re-sign still SURVIVES. It re-expresses into a new content address and
+// supersedes the OLD id — but the operator's own retraction also points at the old id, and NOTHING
+// points at the re-expression. So a definition the operator deliberately withdrew comes back live,
+// in the operator's voice, wearing a new id.
 //
 // The concrete cost is a §17 410 door becoming a 200 — and if the lens was ever `declarePublic`'d,
 // the withdrawn reading is then served ANONYMOUSLY.
 //
 // BOTH LEVELS, because it is not either/or (CLAUDE.md P3). The delta-level rails below assert that
 // no surviving new-form definition is emitted for withdrawn law; the object-level rail at the end
-// boots the migrated store and asks what a READER gets. An earlier draft of this file had only the
-// first while its header claimed the second — which is the exact shape of dishonesty this project
-// keeps finding, so both now exist rather than one being described as the other.
+// boots the migrated store and asks what a READER gets.
 //
 // The two catch different things. Delta-level would miss a migration that emits correct deltas the
 // serving layer then mishandles; object-level would miss law that is emitted-but-unbound today and

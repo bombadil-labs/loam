@@ -85,19 +85,18 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
     this.db.pragma("synchronous = NORMAL");
     // §11 is a promise about BYTES, not rows (ticket T40). SQLite's `secure_delete` defaults OFF,
     // so a DELETE unlinks the row while its content stays legible in freelist pages — after a
-    // COMPLETED erasure, `strings store.db` still yielded the delta's claims. Every erasure rail we
-    // had asserted at the API level (`get(id)` is undefined), which stays true across that leak,
-    // which is why it survived until an audit read the file. ON makes SQLite zero the freed pages
-    // as it frees them: the cost is paid on delete, which is rare here, rather than on every read.
+    // COMPLETED erasure, `strings store.db` still yields the delta's claims. API-level erasure
+    // rails (`get(id)` is undefined) stay true across that leak. ON makes SQLite zero the freed
+    // pages as it frees them: the cost is paid on delete, which is rare here, rather than on every
+    // read.
     this.db.pragma("secure_delete = ON");
     // ...but `secure_delete` is CONNECTION-level and governs only pages freed FROM NOW ON. A store
     // that erased anything before this shipped keeps that plaintext in its freelist forever, and no
-    // amount of future purging scrubs it — probed: reopening such a store and running fresh
-    // appends/purges/checkpoints still yields the old content; only VACUUM clears it. Shipping a
-    // §11 fix that leaves every existing store in violation is not a fix, so rebuild once when
-    // there is inherited freelist to scrub. `freelist_count` is a cheap header read and is 0 on a
-    // fresh store, so this is a no-op for anything created after this change. The cost is a
-    // one-time rebuild on first open of a store that has erased before; correctness wins.
+    // amount of future purging scrubs it — only VACUUM clears it. Shipping a §11 fix that leaves
+    // every existing store in violation is not a fix, so rebuild once when there is inherited
+    // freelist to scrub. `freelist_count` is a cheap header read and is 0 on a fresh store, so this
+    // is a no-op for a store created since. The cost is a one-time rebuild on first open of a store
+    // that has erased before; correctness wins.
     // ...and it is BEST-EFFORT, never open-blocking. VACUUM wants an exclusive write lock over the
     // whole file and this constructor is not async, so a second handle mid-append would turn
     // `new SqliteBackend(path)` into a synchronous SQLITE_BUSY — a throw the seam has no rejected

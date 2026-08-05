@@ -5,14 +5,11 @@
 // LIVE surface or through pinned resolution, and it asked `r.hyperschema.name === schemaName` while
 // every path around it names the lens.
 //
-// WHAT THE BUG ACTUALLY DID, corrected after an independent audit read the first draft of this file.
-// `lensOf(r)` is `r.lensName ?? r.hyperschema.name`, so a lens whose name COINCIDES with its
-// hyperschema's — the ordinary single-reading case — compares equal either way and the program-name
-// test silently keeps working. The comparison misfires only for a coexisting sibling whose lens name
-// differs. The first draft of this header claimed it "failed for BOTH readings", and its own fixture
-// disproved that: the broad reading was named "Plant" over hyperschema "Plant", so it rode the same
-// branch with the fix present or reverted. Both lenses here are now named distinctly from the
-// program, so both requests exercise the differing branch.
+// WHAT THE BUG ACTUALLY DID. `lensOf(r)` is `r.lensName ?? r.hyperschema.name`, so a lens whose name
+// COINCIDES with its hyperschema's — the ordinary single-reading case — compares equal either way and
+// the program-name test silently keeps working. The comparison misfires only for a coexisting sibling
+// whose lens name differs. Both lenses here are named distinctly from the program, so both requests
+// exercise the differing branch.
 //
 // WHAT THIS RAIL CAN AND CANNOT SEE. Warm and pinned resolution are semantically equal for the
 // LATEST version by design — pinned resolution applies that version's own schema and its own
@@ -20,7 +17,7 @@
 // version alone. What it CAN do, and now does, is make `pinned !== trueLatest` real: a second
 // version of one lens, so v1 and v2 answer under their own schemas, and the older version is also
 // addressed by its registration hash — which is what reaches the `@<hash>` branch (rest.ts:319) and
-// its own lens-vs-program comparison, a path the first draft never entered.
+// its own lens-vs-program comparison.
 //
 // THE RESIDUAL GAP, named rather than implied: **`servesLive` (rest.ts:346) is NOT railed by this
 // file and cannot be.** No assertion here observes WHICH of the two resolution paths ran, because
@@ -29,18 +26,6 @@
 // the SURROUNDING lens-vs-program behavior — per-lens addressing, the `@<hash>` comparison, and the
 // public admission filter — all of which do bite. An honest-looking header over a weaker test is how
 // this defect class survives review, so the limit is stated rather than glossed.
-
-// FROZEN AHEAD OF THE BUILD (ADLC P3), and deliberately NOT skipped. These rails land before the fix
-// they accompany so that `rails-guard` has a real freeze baseline on main and any later edit to them
-// is a visible, audited act. Unlike its sibling `test/gateway/byte-door-lens-gate.test.ts` — which
-// fails against main and therefore lands `describe.skip` — everything asserted here ALREADY HOLDS on
-// main: per-lens addressing, the `@<hash>` both-halves comparison, and the public admission filter
-// are all correct today. Verified by running it against main: 5 passed.
-//
-// That is worth stating plainly rather than letting the file look stronger than it is. This file does
-// NOT rail the one line the T42 build changes (`servesLive`, rest.ts:346) and cannot — see THE
-// RESIDUAL GAP below. It is here as the standing regression guard for the surrounding behavior, and
-// the build PR should not need to touch it at all.
 
 import { describe, expect, it } from "vitest";
 import { parseSchema, type Schema } from "@bombadil/rhizomatic";
@@ -57,7 +42,7 @@ const OP_SEED = "0e".repeat(32);
 // A lens name is minted from the registration's `schema:<name>` pointer, and GENESIS derives that
 // from the hyperschema — so a genesis lens can never differ from the program name. Both readings
 // under test therefore arrive via `publishRegistration`, which does carry a distinct lens name.
-// That is what lets neither of them ride the name coincidence that made the first draft insensitive.
+// That is what lets neither of them ride the name coincidence.
 const BASE: Schema = parseSchema({
   name: "Plant",
   alg: 1,
@@ -110,7 +95,7 @@ const get = (gw: Gateway, door: "full" | "public", vTag: string, lens: string) =
 describe("§21.7 — the REST door addresses each coexisting reading under its own policy", () => {
   it("PRECONDITION: neither lens name coincides with the program name", async () => {
     const gw = await boot();
-    // Without this the fixture silently reverts to the insensitive shape the first draft had.
+    // Without this the fixture silently reverts to the insensitive shape.
     const lenses = gw.registered.map((r) => ({ program: r.hyperschema.name, lens: lensOf(r) }));
     const plants = lenses.filter((l) => l.program === "Plant");
     expect(plants.length).toBeGreaterThanOrEqual(3);
@@ -143,7 +128,7 @@ describe("§21.7 — the REST door addresses each coexisting reading under its o
       "height",
     ]);
     // v2 is now `trueLatest` for PlantClassic, so v1 is a genuinely pinned, non-latest read — the
-    // state the warm/pinned split exists for, and one the first draft could not construct.
+    // state the warm/pinned split exists for.
     const v1 = await get(gw, "full", "v1", "PlantClassic");
     const v2 = await get(gw, "full", "v2", "PlantClassic");
     expect(v1.status).toBe(200);
