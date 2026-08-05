@@ -1,0 +1,13 @@
+{
+  "body": "FOUND TWICE ON 2026-08-05, both times by T143's work, neither time fixed by it:\n\n1. The independent premortem of the origin-null repair named it: ownOrigins is exactly the settled\n   public URL's origin (loopback-widened, session.ts ~399-430). Behind the rehearsed funnel shape\n   (TLS on 8443 in front of the store), a --public-url that disagrees with the address the browser\n   actually uses — scheme, host or port — makes every Origin-bearing POST refuse with the same 403\n   T143 produced. Every rail is green, because every rail runs loopback where agreement holds by\n   construction.\n2. The browser rail's own fixture hit the dependency immediately: it could not use port 0, because\n   publicUrl must name the port before listen. The rail reserves a port first and states why\n   (test/browser/door-smoke.test.ts). That comment is the only place the dependency is written down.\n\nTWO DELIVERABLES, either or both:\n\n(a) A LOUD FAULT instead of a silent 403: when a refused POST's Origin differs from every member of\n    ownOrigins only in scheme or port (host equal), say once — onFault — that --public-url likely\n    disagrees with the address the browser used, naming both. This is a report-honesty change: it\n    refuses exactly as before and explains itself. Rate/dedup like the scrypt-cost fault: say it on\n    TRANSITION, not per attempt, so a stranger cannot fill a log.\n(b) A FUNNEL-FIXTURE STORY RAIL: one browser story through a local TLS-terminating proxy (self-signed,\n    Chrome launched with --ignore-certificate-errors or the cert installed in the test profile),\n    asserting login succeeds when --public-url names the funnel address and refuses-with-the-fault\n    when it does not. Two-sided by construction.\n\nSTART WITH (a); it is small and pays immediately. (b) rides on test/browser/cdp.ts, which already\nexists.\n\nWHO MERGES: (a) makes a report more honest and self-merges on the ordinary bar. (b) is a rail\naddition, same bar. Neither widens what any door admits.\n\nWHY NOW: ~/.loam as Myk's primary store serves through exactly this funnel shape (the rehearsed\nrecipe), so the first real deploy is the first place this bites a human.",
+  "edges": [],
+  "id": "T145",
+  "phase": "P0",
+  "rails": [],
+  "scope": [
+    "src/server/session.ts",
+    "test/browser/door-smoke.test.ts"
+  ],
+  "status": "todo",
+  "title": "Origin-agreement behind a TLS terminator has no rail — a wrong --public-url is a silent universal 403, diagnosed by nobody"
+}
