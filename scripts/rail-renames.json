@@ -62,7 +62,7 @@
       "from": "    const wrong = await redeem(base, { code, code_verifier: verifier.replace(/.$/, \"A\") });",
       "to": "    // The last base64url char of a 32-byte verifier carries only 4 bits, so ~6% of verifiers\n    // ALREADY end in \"A\" \u2014 replacing it with \"A\" left the string unchanged, made this \"wrong\"\n    // verifier the RIGHT one, and failed the rail about one run in seventeen. Mutate to a char\n    // that cannot equal the original.\n    const wrongVerifier = verifier.slice(0, -1) + (verifier.endsWith(\"A\") ? \"B\" : \"A\");\n    const wrong = await redeem(base, { code, code_verifier: wrongVerifier });",
       "files": ["test/server/oauth-token.test.ts"],
-      "authorized": "PENDING MYK \u2014 a fixture that sometimes does not mutate; see the PR body for the measurement"
+      "authorized": "Myk, 2026-08-05 \u2014 repair a PKCE fixture whose mutation sometimes did not mutate (~6% of verifiers already end in \"A\"); authorized in chat"
     }
   ]
 }
