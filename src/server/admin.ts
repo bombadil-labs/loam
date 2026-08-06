@@ -246,21 +246,6 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
     return undefined;
   };
 
-  // The view page's address: a container, optionally a lens, optionally an entity. The page asks
-  // for whichever part is missing.
-
-  // The subtree as nested lists, rooted at the user's own container. Every name in `reach` except
-  // the root has an edge into `reach` (subtreeOf guarantees it), so the walk from the root covers
-  // the whole set.
-
-  // The author-select Term prefilled as the declare form's suggestion — the same shape the root's
-  // membership takes. A user with no usable signing key gets an empty textarea, never a Term that
-  // names somebody else.
-
-  // The schema panel (§40 phase A3): the registered lenses, read live under the store's law, and
-  // the register form. Registration is deliberately STORE-WIDE — a lens is how this store reads,
-  // for every reader — so the panel is the same for every user and takes no subtree gate.
-
   // --- the connections panel (phase A5) ----------------------------------------------------------
 
   // The connection key from the inbox's deterministic name (`inbox:<container>:<key>`,
@@ -457,23 +442,6 @@ ${flowNote}`;
     }
     htmlOut(res, 200, pages.dashboardPage(gw, session.user, table, reach, session.formToken));
   };
-
-  // A hidden pair every lifecycle form carries: the session's token and the target's name. The
-  // form is an OFFER, never the gate — every POST re-derives the subtree and the state before it acts.
-
-  // One member, rendered: the id, the author, the moment, and each pointer's role (with its
-  // context where the pointer names an entity). Each entity target links into the view page, so
-  // the members list is the entity picker — a reader walks from a raw pointer to a resolved read.
-  // A member held ONLY in a container's own attached store — not in the primary — offers its
-  // promote form: there is something to move, so the form is truthful (§40 criterion 10). One the
-  // primary already holds offers none; promotion would have nothing to move.
-
-  // The federate-in form (§40 criterion 11): a pasted offer — the JSON body of a peer's
-  // `GET /federate`, or a store's export. Paste-only: the network leg of a pull stays with
-  // `loam pull`; this door never fetches a caller-named URL from inside the store's own host.
-
-  // The lifecycle a container's page offers, by its state. Where an act cannot be truthful from
-  // a browser, the page says so instead of rendering a form that would lie.
 
   const getContainer = (req: IncomingMessage, res: ServerResponse): void => {
     const session = loginOrUndefined(req, res);

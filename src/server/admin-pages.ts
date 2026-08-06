@@ -1,6 +1,6 @@
-// T153 slice 3a — the admin door's PURE PAGE RENDERERS, moved out of the 2217-line
-// makeAdminDoor closure verbatim. The seam: these functions build HTML from their arguments and
-// nothing else. Three shared deps are injected through AdminPagesOpts:
+// T153 slice 3a — the admin door's PAGE RENDERERS, moved out of the 2217-line makeAdminDoor
+// closure verbatim. The seam: these functions build the admin HTML; the three things they cannot
+// do from their arguments are injected through AdminPagesOpts:
 //
 //   - home: the user-seed file path (membershipSuggestion reads it for the declare form hint);
 //   - onFault: the door's fault reporter (detailPage reports page-read failures through it);
@@ -69,6 +69,8 @@ export const adminPages = (opts: AdminPagesOpts) => {
   const detailHref = (name: string): string =>
     `${ADMIN_CONTAINER_PATH}?name=${encodeURIComponent(name)}`;
 
+  // The view page's address: a container, optionally a lens, optionally an entity. The page asks
+  // for whichever part is missing.
   const viewHref = (container: string, entity?: string, lens?: string): string =>
     `${ADMIN_VIEW_PATH}?container=${encodeURIComponent(container)}` +
     (lens === undefined ? "" : `&lens=${encodeURIComponent(lens)}`) +
@@ -82,6 +84,9 @@ export const adminPages = (opts: AdminPagesOpts) => {
       ...(rec.inboxOf === undefined ? [] : ["inbox"]),
     ].join(" · ");
 
+  // The subtree as nested lists, rooted at the user's own container. Every name in `reach` except
+  // the root has an edge into `reach` (subtreeOf guarantees it), so the walk from the root covers
+  // the whole set.
   const treeHtml = (table: ContainerTable, reach: ReadonlySet<string>, root: string): string => {
     const item = (name: string): string => {
       const rec = table.containers.get(name)!;
@@ -101,6 +106,9 @@ export const adminPages = (opts: AdminPagesOpts) => {
     return `<ul>\n${item(root)}\n</ul>`;
   };
 
+  // The author-select Term prefilled as the declare form's suggestion — the same shape the root's
+  // membership takes. A user with no usable signing key gets an empty textarea, never a Term that
+  // names somebody else.
   const membershipSuggestion = (user: string): string => {
     const seed = readUserSeed(opts.home, user);
     if (seed.kind !== "present" || !/^[0-9a-f]{64}$/.test(seed.seed)) return "";
@@ -135,6 +143,9 @@ ${parents}
 </form>`;
   };
 
+  // The schema panel (§40 phase A3): the registered lenses, read live under the store's law, and
+  // the register form. Registration is deliberately STORE-WIDE — a lens is how this store reads,
+  // for every reader — so the panel is the same for every user and takes no subtree gate.
   const schemaPanelHtml = (gw: Gateway, formToken: string): string => {
     const regs = readRegistrations(gw.reactor, gw.operatorAuthor);
     const listing =
@@ -192,10 +203,18 @@ you author — one container, named after you; everything you later make will li
 </form>`,
     );
 
+  // A hidden pair every lifecycle form carries: the session's token and the target's name. The
+  // form is an OFFER, never the gate — every POST re-derives the subtree and the state before it acts.
   const hiddenPair = (formToken: string, name: string): string =>
     `<input type="hidden" name="form_token" value="${escapeHtml(formToken)}">\n` +
     `<input type="hidden" name="name" value="${escapeHtml(name)}">`;
 
+  // One member, rendered: the id, the author, the moment, and each pointer's role (with its
+  // context where the pointer names an entity). Each entity target links into the view page, so
+  // the members list is the entity picker — a reader walks from a raw pointer to a resolved read.
+  // A member held ONLY in a container's own attached store — not in the primary — offers its
+  // promote form: there is something to move, so the form is truthful (§40 criterion 10). One the
+  // primary already holds offers none; promotion would have nothing to move.
   const memberHtml = (gw: Gateway, container: string, delta: Delta, formToken: string): string => {
     const claims = delta.claims;
     const roles = claims.pointers
@@ -223,6 +242,9 @@ ${hiddenPair(formToken, container)}
     );
   };
 
+  // The federate-in form (§40 criterion 11): a pasted offer — the JSON body of a peer's
+  // `GET /federate`, or a store's export. Paste-only: the network leg of a pull stays with
+  // `loam pull`; this door never fetches a caller-named URL from inside the store's own host.
   const federateFormHtml = (name: string, rec: ResolvedContainer, formToken: string): string => {
     const door =
       rec.posture === "separate"
@@ -245,6 +267,8 @@ ${hiddenPair(formToken, name)}
 <button type="submit">${label}</button>
 </form>`;
 
+  // The lifecycle a container's page offers, by its state. Where an act cannot be truthful from
+  // a browser, the page says so instead of rendering a form that would lie.
   const lifecycleForms = (
     table: ContainerTable,
     name: string,
