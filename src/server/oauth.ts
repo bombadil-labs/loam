@@ -948,21 +948,22 @@ export function makeTokenDoor(options: TokenDoorOptions): TokenDoor {
   const inc = (clientId: string): void => {
     redeeming.set(clientId, (redeeming.get(clientId) ?? 0) + 1);
   };
+  // The token door's JSON policy: no-store (a token answer must not be cached), no-referrer (JSON,
+  // never a form), CORS (browser callers). The one spelling, per door, per the T153 agreement.
+  const TOKEN_DOOR_HEADERS = {
+    "cache-control": "no-store",
+    "referrer-policy": "no-referrer",
+    "access-control-allow-origin": "*",
+  } as const;
+
   const dec = (clientId: string): void => {
     const n = (redeeming.get(clientId) ?? 0) - 1;
     if (n <= 0) redeeming.delete(clientId);
     else redeeming.set(clientId, n);
   };
 
-  const jsonOut = (res: ServerResponse, status: number, body: unknown): void => {
-    res.writeHead(status, {
-      "content-type": "application/json",
-      "cache-control": "no-store",
-      "referrer-policy": "no-referrer",
-      "access-control-allow-origin": "*",
-    });
-    res.end(JSON.stringify(body));
-  };
+  const jsonOut = (res: ServerResponse, status: number, body: unknown): void =>
+    endJson(res, status, body, TOKEN_DOOR_HEADERS);
   // RFC 6749 §5.2 token-error shape. NEVER the home path or a flag name (criterion 13): a lock fault
   // is a fixed 503 whose body says "lock", an ordinary caller error a 400 that names only itself.
   const refuse = (res: ServerResponse, status: number, error: string, description: string): void =>
