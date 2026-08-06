@@ -14,6 +14,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { type IncomingMessage, type ServerResponse } from "node:http";
+import { CACHE_NO_STORE, endJson } from "./respond.js";
 import { authorForSeed } from "@bombadil/rhizomatic";
 import {
   OAuthFileBusy,
@@ -327,15 +328,11 @@ export function makeOAuthDoors(options: OAuthOptions): OAuthDoors {
   const onFault = registration?.onFault ?? ((message: string): void => void message);
   const redeeming = registration?.redeeming;
 
-  const jsonOut = (res: ServerResponse, status: number, body: unknown): void => {
-    res.writeHead(status, {
-      "content-type": "application/json",
-      "cache-control": "no-store",
+  const jsonOut = (res: ServerResponse, status: number, body: unknown): void =>
+    endJson(res, status, body, {
       "referrer-policy": "no-referrer",
       "access-control-allow-origin": "*",
     });
-    res.end(JSON.stringify(body));
-  };
   const refuse = (res: ServerResponse, status: number, error: string, description: string): void =>
     jsonOut(res, status, { error, error_description: description });
 
@@ -623,7 +620,7 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
     res.writeHead(status, {
       "content-type": "text/html; charset=utf-8",
       "content-security-policy": csp,
-      "cache-control": "no-store",
+      "cache-control": CACHE_NO_STORE,
       // Never no-referrer on a form-hosting page — it nulls the POST's Origin (T143). `origin`,
       // not `same-origin`: this page's query carries client_id, state and code_challenge, and
       // under `origin` no Referer in any direction ever carries more than the bare origin.

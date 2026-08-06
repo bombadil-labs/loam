@@ -26,6 +26,7 @@
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { endJson } from "./respond.js";
 import { authorForSeed, signClaims, type Delta, type Primitive } from "@bombadil/rhizomatic";
 import { Kind, OperationTypeNode, parse, type DocumentNode } from "graphql";
 import { fromWire, toWire, type WireDelta } from "../federation/wire.js";
@@ -238,11 +239,7 @@ const json = (
   status: number,
   body: unknown,
   extraHeaders?: Record<string, string>,
-): void => {
-  const text = JSON.stringify(body);
-  res.writeHead(status, { "content-type": "application/json", ...CORS, ...extraHeaders });
-  res.end(text);
-};
+): void => endJson(res, status, body, { ...CORS, ...extraHeaders });
 
 // A rendered renderer route (SPEC §23): served with its own content-type (HTML on success, plain text on
 // a refusal), never JSON — the door is pixels.

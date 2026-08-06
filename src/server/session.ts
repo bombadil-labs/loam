@@ -37,6 +37,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { type IncomingMessage, type ServerResponse } from "node:http";
 import { type Reactor } from "@bombadil/rhizomatic";
+import { CACHE_NO_STORE, endJson } from "./respond.js";
 import {
   DEFAULT_SCRYPT,
   credentialsPath,
@@ -622,15 +623,12 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
   const preSessionToken = (nonce: string): string =>
     createHmac("sha256", formKey).update(nonce).digest("base64url");
 
-  const json = (res: ServerResponse, status: number, body: unknown, cookie?: string): void => {
-    res.writeHead(status, {
-      "content-type": "application/json",
-      "cache-control": "no-store",
+  const json = (res: ServerResponse, status: number, body: unknown, cookie?: string): void =>
+    endJson(res, status, body, {
+      // The JSON door's policy: a refusal never hosts a form, so no-referrer is safe here.
       "referrer-policy": "no-referrer",
       ...(cookie === undefined ? {} : { "set-cookie": cookie }),
     });
-    res.end(JSON.stringify(body));
-  };
 
   const html = (
     res: ServerResponse,
@@ -641,7 +639,7 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
     res.writeHead(status, {
       "content-type": "text/html; charset=utf-8",
       "content-security-policy": CSP,
-      "cache-control": "no-store",
+      "cache-control": CACHE_NO_STORE,
       // Never no-referrer on a form-hosting page: it makes Chrome serialize the form POST's
       // Origin as "null", and fromThisPage refuses null outright (T143). same-origin keeps a
       // real Origin and still sends nothing cross-origin.

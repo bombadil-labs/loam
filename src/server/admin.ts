@@ -48,6 +48,7 @@
 
 import { randomBytes } from "node:crypto";
 import { type IncomingMessage, type ServerResponse } from "node:http";
+import { CACHE_NO_STORE } from "./respond.js";
 import {
   authorForSeed,
   parseTerm,
@@ -227,7 +228,7 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
     res.writeHead(status, {
       "content-type": "text/html; charset=utf-8",
       "content-security-policy": CSP,
-      "cache-control": "no-store",
+      "cache-control": CACHE_NO_STORE,
       // Never no-referrer on a form-hosting page — it nulls the form POST's Origin and
       // fromThisPage refuses null (T143). same-origin sends nothing cross-origin.
       "referrer-policy": "same-origin",
