@@ -115,6 +115,37 @@ const offer = (deltas: ReturnType<typeof note>[]): string =>
   JSON.stringify({ deltas: deltas.map((d) => toWire(d)) });
 
 describe("the admin federate-in result counts repeats honestly", () => {
+  it("an oversized federate paste IS refused — by the form gate, never the transport (T153)", async () => {
+    // T153 moved the body readers into src/server/body.ts. The lenient reader's contract is
+    // `undefined` past the cap, so the FORM speaks its own refusal (the token check fails on an
+    // empty field map) instead of the transport's 413 — this rails that boundary through a REAL
+    // admin door, past a real 1 MiB cap, with a real session and token. A consolidation that
+    // re-wired the federate door to the strict reader would turn this 403 into a 413 and go red.
+    const { base } = await federateServer();
+    const session = await signIn(base, "ada");
+    const detail = await fetch(`${base}/admin/container?name=ada`, {
+      headers: { cookie: `${SESSION_COOKIE}=${session}` },
+    });
+    const formToken = /name="form_token" value="([^"]+)"/.exec(await detail.text())![1]!;
+
+    const huge = "x".repeat(1024 * 1024 + 64);
+    const res = await fetch(`${base}/admin/federate`, {
+      method: "POST",
+      redirect: "manual",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `${SESSION_COOKIE}=${session}`,
+        ...SAME_ORIGIN,
+      },
+      body: new URLSearchParams({
+        name: "ada",
+        form_token: formToken,
+        offer: huge,
+      }).toString(),
+    });
+    expect(res.status).toBe(403);
+    expect(await res.text()).toMatch(/did not come from this store's own page/);
+  });
   it("an in-paste duplicate is a repeat, not 'already held'", async () => {
     const { base, held } = await federateServer();
     const session = await signIn(base, "ada");
@@ -143,6 +174,7 @@ describe("the admin federate-in result counts repeats honestly", () => {
     const page = await res.text();
     // 3 offered, 1 of them a repeat; 1 landed newly; the remaining 1 is held by the store — not 2.
     expect(page).toMatch(/Of 3 offered deltas \(1 of them repeats in the paste\)/);
+
     expect(page).toMatch(/1 landed newly/);
     expect(page).toMatch(/1 was already held/);
     expect(page).not.toMatch(/2 .*already held/);

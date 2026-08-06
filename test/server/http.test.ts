@@ -142,6 +142,22 @@ describe("HTTP: the gateway behind a bearer token", () => {
     expect(res.status).toBe(413);
   });
 
+  it("an oversized REST body answers 413 in the transport's own words (T153 body.ts)", async () => {
+    // The T153 consolidation moved readBodyStrict and BodyTooLarge into src/server/body.ts.
+    // This rails the 413 BODY TEXT through a REAL REST door — the string comes from the shared
+    // class, never from a door-hardcoded copy — so a future merge that drops the class's message
+    // (a P5 lens caught exactly that in this PR) goes red here. The status-only GraphQL rail
+    // above cannot see it: that door hardcodes its own text.
+    const huge = "x".repeat(6 * 1024 * 1024);
+    const res = await fetch(`${base}/garden/rest`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer alice-token" },
+      body: JSON.stringify({ huge }),
+    });
+    expect(res.status).toBe(413);
+    expect(await res.text()).toContain("request body too large");
+  });
+
   it("subscribe over SSE: the snapshot arrives, then the patch", async () => {
     const query = encodeURIComponent(
       `subscription { plant(entity: "${FERN}") { height _fromHex } }`,

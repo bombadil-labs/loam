@@ -3,10 +3,12 @@
 // and this module keeps the disagreement explicit:
 //
 //   - readBodyStrict REFUSES an oversized body (BodyTooLarge -> 413) and keeps draining the
-//     request so the handler can answer cleanly. The REST/yield door's transport contract.
+//     request so the handler can answer cleanly. The transport contract for every http.ts door
+//     that reads a body: the REST/yield door, graphql, MCP, register, and import.
 //   - readBodyLenient answers `undefined` past the cap (and on a socket error), so the form
-//     gates can speak their own refusal message instead of the transport's. The login/register/
-//     federate doors' contract, where a too-big registration is a FORM error, not a transport one.
+//     gates can speak their own refusal message instead of the transport's. The login, register,
+//     and admin federate-in FORM doors' contract — a too-big registration is a FORM error, not a
+//     transport one (http.ts's own `federate` case is a GET-only operator surface that reads no body).
 //
 // Each door passes its own cap constant (per-door policy, never module state) and its own parser
 // entry point:
@@ -23,7 +25,11 @@ import type { IncomingMessage } from "node:http";
 import type { Primitive } from "@bombadil/rhizomatic";
 
 /** The strict reader's refusal (http.ts's transport contract): the door answers 413. */
-export class BodyTooLarge extends Error {}
+export class BodyTooLarge extends Error {
+  constructor() {
+    super("request body too large");
+  }
+}
 
 // Read the body as bytes (so a chunk boundary never splits a multibyte character), refusing
 // anything past the cap before it can exhaust memory. On overflow we stop buffering and reject,
