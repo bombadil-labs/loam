@@ -62,7 +62,12 @@ describe("the shared session fixture", () => {
       headers: { cookie: `${SESSION_COOKIE}=${session}` },
     });
     expect(res.status).toBe(200);
-    expect(await res.text()).toMatch(/admin/i);
+    // The anchor is ada, not chrome: an ANONYMOUS /admin answers 200 with the login form, so the
+    // assertion must prove the session was honored — the signed-in page speaks of ada's own
+    // (empty) subtree, which no login page ever says.
+    const page = await res.text();
+    expect(page).toMatch(/No container bears your name yet/);
+    expect(page).toMatch(/ada/);
   });
 
   it("a wrong password never mints a session cookie — the helper fails loud", async () => {
