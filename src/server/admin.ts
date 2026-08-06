@@ -105,6 +105,7 @@ import {
   adminPages,
   type RevokePlan,
 } from "./admin-pages.js";
+import { adminConnectors } from "./admin-connectors.js";
 
 const MAX_BODY = 8 * 1024; // tokens, a name, a membership Term; nothing here needs more
 // A registration carries a hyperschema body and a resolution schema — real JSON, not a name.
@@ -252,180 +253,48 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
   // container.ts's inboxName). A container name may itself carry colons, so the parse anchors on
   // the row's own `inboxOf` instead of splitting on ":". A hand-declared inbox whose name does not
   // follow the shape yields no key, and the panel says so rather than guessing.
-  const connectionKeyOf = (name: string, bound: string): string | undefined => {
-    const prefix = `inbox:${bound}:`;
-    return name.startsWith(prefix) && name.length > prefix.length
-      ? name.slice(prefix.length)
-      : undefined;
-  };
+
 
   // What the inbox pool's own grant deltas say about the key. "Revoked" is claimed only where a
   // struck write grant proves a connection once stood — the state is read from the deltas on every
   // request, never remembered by this door.
-  const grantStateOf = (
-    reactor: Reactor,
-    operator: string | undefined,
-    key: string,
-  ): "active" | "revoked" | "ungranted" => {
-    if (holdsGrant(reactor, STORE_ENTITY, key, "write", operator)) return "active";
-    for (const id of reactor.byTarget(STORE_ENTITY)) {
-      const delta = reactor.get(id);
-      if (delta === undefined) continue;
-      const ptrs = delta.claims.pointers;
-      const atGrants = ptrs.some(
-        (p) =>
-          p.target.kind === "entity" &&
-          p.target.entity.id === STORE_ENTITY &&
-          p.target.entity.context === CTX_GRANTS,
-      );
-      if (!atGrants) continue;
-      let subject: string | undefined;
-      let verb: string | undefined;
-      for (const p of ptrs) {
-        if (p.target.kind !== "primitive") continue;
-        if (p.role === "subject" && typeof p.target.value === "string") subject = p.target.value;
-        if (p.role === "verb" && typeof p.target.value === "string") verb = p.target.value;
-      }
-      if (subject === key && verb === "write") return "revoked";
-    }
-    return "ungranted";
-  };
 
-  // The connector records, read fresh per render. Unreadable is its own state: "cannot determine
-  // what is registered" is never "nothing is" (oauth-file.ts's rule), so the panel says the records
-  // cannot be read rather than rendering rows as bare.
-  type ConnectorRecords =
-    | { readonly kind: "none" }
-    | { readonly kind: "unreadable" }
-    | { readonly kind: "read"; readonly file: OAuthFile };
-  const connectorRecords = (): ConnectorRecords => {
-    if (options.connectors === undefined) return { kind: "none" };
-    try {
-      return { kind: "read", file: readOAuthFile(options.connectors.home) };
-    } catch (err) {
-      onFault(
-        `the admin page could not read the connector records: ` +
-          `${err instanceof Error ? err.message : String(err)}`,
-      );
-      return { kind: "unreadable" };
-    }
-  };
+
+
+
+
 
   // The oauth half of a row: the client whose granted actor IS this connection key. Live tokens
   // are counted the way the door counts them — a token whose generation no longer matches its
   // client's is dead already, so it is not a "live" anything.
-  interface ConnectorJoin {
-    readonly clientId: string;
-    readonly clientName?: string;
-    readonly generation?: number;
-    readonly liveTokens: number;
-  }
-  const joinFor = (records: ConnectorRecords, key: string): ConnectorJoin | undefined => {
-    if (records.kind !== "read") return undefined;
-    const grant = records.file.grants.find((g) => g.actor === key);
-    if (grant === undefined) return undefined;
-    const client = clientFor(records.file, grant.clientId);
-    const liveTokens =
-      client === undefined
-        ? 0
-        : records.file.tokens.filter(
-            (t) => t.clientId === grant.clientId && t.generation === client.generation,
-          ).length;
-    return {
-      clientId: grant.clientId,
-      ...(client === undefined
-        ? {}
-        : { clientName: client.clientName, generation: client.generation }),
-      liveTokens,
-    };
-  };
+
 
   // A key, shortened for the row. The full key rides in the title attribute, so hovering (and any
   // exact search) still has the whole of it; the inbox's own page carries it in full too.
-  const shortKey = (key: string): string => (key.length <= 24 ? key : `${key.slice(0, 24)}…`);
 
-  const connectionRowHtml = (
-    gw: Gateway,
-    records: ConnectorRecords,
-    name: string,
-    rec: ResolvedContainer,
-    formToken: string,
-  ): string => {
-    const bound = rec.inboxOf!;
-    const inboxLink = `<a href="${escapeHtml(pages.detailHref(name))}">its inbox</a> — drop lives there`;
-    const key = connectionKeyOf(name, bound);
-    if (key === undefined) {
-      return (
-        `<li><code>${escapeHtml(name)}</code> — an inbox of <code>${escapeHtml(bound)}</code> ` +
-        `whose name does not carry its connection key, so this panel can neither read nor revoke ` +
-        `it. ${inboxLink}.</li>`
-      );
-    }
-    const pool = gw.attachedContainers.get(name);
-    const state =
-      pool === undefined ? undefined : grantStateOf(pool.reactor, gw.operatorAuthor, key);
-    const stateWords =
-      state === undefined
-        ? "its inbox pool is not attached here, so its grant cannot be read from this page"
-        : state === "active"
-          ? "active — its writes land"
-          : state === "revoked"
-            ? "revoked — its next write refuses; everything it wrote is kept, author intact"
-            : "holds no write grant — its next write refuses";
-    const join = joinFor(records, key);
-    const via =
-      join === undefined
-        ? ""
-        : ` · via <code>${escapeHtml(join.clientName ?? join.clientId)}</code>` +
-          (join.generation === undefined ? "" : `, generation ${join.generation}`) +
-          `, ${join.liveTokens} live token${join.liveTokens === 1 ? "" : "s"}`;
-    // The form is an OFFER (revoke re-derives everything): shown where something stands to revoke —
-    // a standing inbox grant, or a connector grant the records still hold.
-    const revocable = state === "active" || join !== undefined;
-    const form = revocable
-      ? `\n${pages.actForm(ADMIN_REVOKE_PATH, formToken, name, "revoke…")}`
-      : "";
-    return (
-      `<li><code title="${escapeHtml(key)}">${escapeHtml(shortKey(key))}</code> → ` +
-      `<a href="${escapeHtml(pages.detailHref(bound))}"><code>${escapeHtml(bound)}</code></a> — ` +
-      `${stateWords}${via} · ${inboxLink}.${form}</li>`
-    );
-  };
 
-  const connectionsPanelHtml = (
-    gw: Gateway,
-    table: ContainerTable,
-    reach: ReadonlySet<string>,
-    formToken: string,
-  ): string => {
-    const records = connectorRecords();
-    const names = [...reach].filter((n) => table.containers.get(n)!.inboxOf !== undefined).sort();
-    const listing =
-      names.length === 0
-        ? "<p>No connection is bound in your subtree.</p>"
-        : `<ul>\n${names
-            .map((n) => connectionRowHtml(gw, records, n, table.containers.get(n)!, formToken))
-            .join("\n")}\n</ul>`;
-    const flowNote =
-      records.kind === "none"
-        ? `<p>This store has no connector flow configured — a connection here is a bare bound one,
-with no client name or token to show.</p>`
-        : records.kind === "unreadable"
-          ? `<p>This store's connector records cannot be read right now, so no client names or
-token counts are shown.</p>`
-          : "";
-    return `<h2>Connections.</h2>
-<p>A connection is an outside writer — an MCP client, a connector — bound to one container of
-yours. Its writes land in an inbox of their own. Revoking a connection refuses its next write;
-everything it already wrote is kept, author intact.</p>
-${listing}
-${flowNote}`;
-  };
+
+
+
 
   // T153 slice 3a: the page renderers now live in admin-pages.ts. The connectors panel
   // stays here (it reads the connector store through the closure) and is injected as the factory's
   // `connectionsPanel`; home and onFault ride in with it.
-  const pages = adminPages({ home: options.home, onFault, connectionsPanel: connectionsPanelHtml });
+  // T153 slice 3b: the connector panel lives in admin-connectors.ts and the page renderers in
+  // admin-pages.ts; each side injects what the other renders, LAZILY — both factories are
+  // constructed before any page renders, and neither dereferences the other until render time.
+  const pages = adminPages({
+    home: options.home,
+    onFault,
+    connectionsPanel: (gw, table, reach, formToken) =>
+      connectors.connectionsPanelHtml(gw, table, reach, formToken),
+  });
+  const connectors = adminConnectors({
+    connectors: options.connectors,
+    onFault,
+    detailHref: (name) => pages.detailHref(name),
+    actForm: (action, formToken, name, label) => pages.actForm(action, formToken, name, label),
+  });
   const getDashboard = (req: IncomingMessage, res: ServerResponse): void => {
     const session = loginOrUndefined(req, res);
     if (session === undefined) return;
@@ -1550,7 +1419,7 @@ forever; the value now survives even if its container is dropped.</p>
           "Nothing changed.",
       };
     }
-    const key = connectionKeyOf(name, bound);
+    const key = connectors.connectionKeyOf(name, bound);
     if (key === undefined) {
       return {
         act: "refuse",
