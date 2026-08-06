@@ -69,7 +69,7 @@ describe("a failed pull says what happened", () => {
   it("a peer that dies MID-OFFER is named too — the reset class, not a bare failure", async () => {
     // The connect edge is the easy one; the reset lands after the response starts, in boundedText.
     const gw = await local();
-    const dying = async (): Promise<Response> => {
+    const dying = (): Promise<Response> => {
       const stream = new ReadableStream({
         start(controller) {
           controller.enqueue(new TextEncoder().encode('{"deltas":'));
