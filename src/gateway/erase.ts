@@ -611,6 +611,23 @@ export const UNSWEPT_AUTH_SURFACES: readonly string[] = [
     "signing grant (`loam user remove-role`), is a separate operation, out of erasure's scope.",
 ];
 
+// The ONE standing R1 violation (T105, §32's seam census): a renderer/resolver compiled from a
+// source delta stays loaded in THIS PROCESS's ESM registry after the source delta is erased — the
+// registry offers no eviction, and no tier probe can ask it. The disclosure names the tier as
+// UNPROVEN (a tier that cannot be asked has proven nothing — H9) rather than letting the settled
+// verdict read as exhaustive. Same ONE-SOURCE doctrine as the auth surfaces: health() and the
+// compliance receipt both read this constant, so the two surfaces cannot drift. The COMPLETION
+// half — tearing down a condemned module's compiled copy — is T105 (b); this is the honesty half.
+export const ESM_RESIDENCY_DISCLOSURE: readonly string[] = [
+  "ESM RESIDENCY IS NOT SWEPT: a resolver or renderer compiled from a source delta stays loaded " +
+    "and EXECUTABLE in this process's ESM registry after that delta is erased — the registry " +
+    "offers no eviction, and no tier probe can ask it. The erasure verdicts above are byte-level " +
+    "and this tier is not among the bytes they proved; it reads as UNPROVEN, not as swept. The " +
+    "map holding Loam's own handle is keyed by the source's content address, so no door reads a " +
+    "namespace out of it without already holding the erased bytes; the executable copy itself " +
+    "remains until the process ends (SPEC §22/§23, T105).",
+];
+
 export interface StoreHealth {
   // "ok"       — every promise settled, nothing lagging.
   // "settling" — converging, not broken: erasure debt outstanding somewhere in reach, or a mirror
@@ -703,6 +720,6 @@ export async function healthImpl(gw: Gateway, now = Date.now()): Promise<StoreHe
     // The unswept-surface disclosure (T131), unconditional: these home files are outside erasure's
     // reach whether the store has forgotten nothing, something, or is mid-settle. The receipt reads
     // the SAME constant, so the two surfaces cannot drift.
-    nonSwept: [...UNSWEPT_AUTH_SURFACES],
+    nonSwept: [...UNSWEPT_AUTH_SURFACES, ...ESM_RESIDENCY_DISCLOSURE],
   };
 }

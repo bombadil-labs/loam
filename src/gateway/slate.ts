@@ -52,6 +52,7 @@ import {
   survivingDeclarationIds,
   unreachableStoreReport,
 } from "./container.js";
+import { ESM_RESIDENCY_DISCLOSURE } from "./erase.js";
 import {
   UNSWEPT_AUTH_SURFACES,
   eraseImpl,
@@ -1735,6 +1736,10 @@ export async function deriveReceiptImpl(
     priorTombstone: grave.priorTombstone,
     completeness,
     nonClaim: [
+      // The ESM registry is a tier the byte probes cannot ask — the standing R1 violation's
+      // honesty half (T105 a). Same constant health() reads, so the two surfaces cannot drift.
+      ...ESM_RESIDENCY_DISCLOSURE,
+
       "PEERS ARE NOT REACHED: erasure does not reach federation peers — they are not the " +
         "operator's replicas, and a peer refuses a foreign operator's removal-order at its own door.",
       "ALREADY-SERVED READS ARE NOT RECALLED: egress closure stopped further spread from this " +
