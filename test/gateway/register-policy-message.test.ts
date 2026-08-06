@@ -32,7 +32,7 @@ describe("the register door names a malformed Policy", () => {
       },
     };
     expect(() => parseRegistrationInput(bad)).toThrow(/schema\.props\.height/);
-    expect(() => parseRegistrationInput(bad)).toThrow(/pick | all | merge | conflicts | absentAs/);
+    expect(() => parseRegistrationInput(bad)).toThrow(/pick:|all:|merge:|conflicts:|absentAs:/);
   });
 
   it("a malformed default names schema.default, not a prop", () => {

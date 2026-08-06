@@ -1,6 +1,8 @@
 // T150 item 4 — the empty-surface refusal says WHICH emptiness: nothing at all, or law that
 // binds nothing. The inert case is the one a pull lands in — a governed store whose only
 // registrations are a peer's — and the refusal must name the operator's own register as the cure.
+// The cause is named as a pair, never attributed: foreign law is inert, and an own definition
+// that does not resolve binds nothing either.
 
 import { describe, expect, it } from "vitest";
 import { authorForSeed, parseTerm, signClaims } from "@bombadil/rhizomatic";
@@ -55,7 +57,7 @@ describe("the empty-surface refusal names its shape", () => {
     ]);
     expect(report.accepted).toBe(4);
     await expect(gw.query(`{ plant(entity: "${FERN}") { height } }`)).rejects.toThrow(
-      /nothing is registered.*store holds registrations that do not bind.*foreign law is inert.*loam register/,
+      /nothing is registered.*store holds registrations that do not bind \(foreign law is inert on a governed store; an own definition that does not resolve binds nothing either\).*loam register/,
     );
     await gw.close();
   });

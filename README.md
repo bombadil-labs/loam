@@ -238,8 +238,8 @@ the fourth is the only door out:
     `{ "conflicts": { "order": { "byTimestamp": "desc" } } }`.
   - **`absentAs`** — a constant to stand in when the bucket is empty, then the Policy for when it
     is not: `{ "absentAs": { "const": 0, "then": { "pick": { "order": { "byTimestamp": "desc" } } } } }`.
-  An `order` is itself one object: `{ "byTimestamp": "desc" | "asc" }`,
-  `{ "byAuthorRank": … }`, `{ "lexById": … }`, `{ "byPred": … }`, or `{ "chain": [ … ] }`.
+  An `order` is `{ "byTimestamp": "desc" | "asc" }`, `{ "byAuthorRank": [ … ] }`,
+  `{ "byPred": { "pred": …, "then": … } }`, `{ "chain": [ … ] }`, or the bare `"lexById"`.
 - **`roots`** — the entities held **live**: the gather runs for each, and its view stays current
   as deltas arrive.
 - **`writable`** — the fields that accept a **surface write**. Immutable by default (SPEC §21): a

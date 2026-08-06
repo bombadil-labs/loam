@@ -44,7 +44,7 @@ const note = (text: string, seed: string, timestamp: number): ReturnType<typeof 
   signClaims(
     {
       timestamp,
-      author: ADA,
+      author: authorForSeed(seed),
       pointers: [{ role: "note", target: { kind: "primitive", value: text } }],
     },
     seed,
@@ -146,6 +146,39 @@ describe("the admin federate-in result counts repeats honestly", () => {
     expect(page).toMatch(/1 landed newly/);
     expect(page).toMatch(/1 was already held/);
     expect(page).not.toMatch(/2 .*already held/);
+  });
+
+  it("a refused delta offered twice is two refusals and one repeat — held survives", async () => {
+    const { base, held } = await federateServer();
+    const session = await signIn(base, "ada");
+    // A delta the container's membership does not select is refused at the door; offered twice it
+    // is refused twice (the door counts per offer, deliberately), and the store-held delta must
+    // still be reported — the naive offered-accepted-rejected remainder would have erased it.
+    const foreign = note("not ada's", "ff".repeat(32), 9600);
+    const detail = await fetch(`${base}/admin/container?name=ada`, {
+      headers: { cookie: `${SESSION_COOKIE}=${session}` },
+    });
+    const formToken = /name="form_token" value="([^"]+)"/.exec(await detail.text())![1]!;
+
+    const res = await fetch(`${base}/admin/federate`, {
+      method: "POST",
+      redirect: "manual",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `${SESSION_COOKIE}=${session}`,
+        ...SAME_ORIGIN,
+      },
+      body: new URLSearchParams({
+        name: "ada",
+        form_token: formToken,
+        offer: offer([foreign, foreign, held]),
+      }).toString(),
+    });
+    expect(res.status).toBe(200);
+    const page = await res.text();
+    expect(page).toMatch(/Of 3 offered deltas \(1 of them repeats in the paste\)/);
+    expect(page).toMatch(/2 were refused at the door/);
+    expect(page).toMatch(/1 was already held/);
   });
 
   it("a paste with no repeats says nothing about repeats, and held stays honest", async () => {
