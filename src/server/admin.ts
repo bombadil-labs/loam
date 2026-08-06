@@ -1807,7 +1807,11 @@ forever; the value now survives even if its container is dropped.</p>
     } catch {
       gathered = undefined;
     }
-    const held = report.offered - report.accepted - report.rejected;
+    // The paste can repeat a delta; a repeat is neither newly landed nor refused, so the naive
+    // `offered - accepted - rejected` remainder would count it as "already held" — held by the
+    // store is not the same fact as repeated in your paste. Count the repeats separately.
+    const inPasteDuplicates = deltas.length - new Set(deltas.map((d) => d.id)).size;
+    const held = report.offered - report.accepted - report.rejected - inPasteDuplicates;
     const gatherLine =
       gathered === undefined
         ? "What this container now gathers could not be counted just now."
@@ -1822,7 +1826,8 @@ forever; the value now survives even if its container is dropped.</p>
       page(
         "federated",
         `<h1>Federated.</h1>
-<p>Of ${report.offered} offered delta${report.offered === 1 ? "" : "s"}: ` +
+<p>Of ${report.offered} offered delta${report.offered === 1 ? "" : "s"}` +
+          `${inPasteDuplicates > 0 ? ` (${inPasteDuplicates} of them repeats in the paste)` : ""}: ` +
           `${report.accepted} landed newly in ${door}, ` +
           `${report.rejected} ${report.rejected === 1 ? "was" : "were"} refused at the door` +
           `${held > 0 ? `, and ${held} ${held === 1 ? "was" : "were"} already held` : ""}. ` +
