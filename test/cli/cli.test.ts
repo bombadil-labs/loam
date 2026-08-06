@@ -310,6 +310,13 @@ describe("loam store", () => {
     expect(errs).not.toMatch(/ENOENT/);
     expect(errs).toMatch(/loam init/);
   });
+
+  it("an explicit --store override needs no home at all", async () => {
+    const store = join(home, "nowhere", "store.sqlite");
+    const code = await run(["store", "--store", store], io());
+    expect(code).toBe(0);
+    expect(out.join("\n")).toMatch(/deltas/i);
+  });
 });
 
 describe("loam help and version", () => {

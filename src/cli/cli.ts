@@ -862,12 +862,24 @@ function cmdMigrate(args: readonly string[], io: IO): number {
 async function cmdStore(args: readonly string[], io: IO): Promise<number> {
   const parsed = parseFor("store", args);
   const home = parsed.flags.get("home") ?? defaultHome();
-  const unusable = homeDefect(home, { allowMissing: false });
-  if (unusable !== undefined) {
-    io.err(`store: ${unusable}`);
-    return 1;
+  // The home is only a DIRECTION to the store file: an explicit --store override needs no home at
+  // all, and an existing read-only home is fine for a command that only reads config. The refusal
+  // is reserved for the one cure-naming shape the paper-cut is about: a home that cannot supply
+  // config.json at all.
+  let path: string;
+  try {
+    path = storePath(home, parsed.flags.get("store"));
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR" || code === "EISDIR") {
+      io.err(
+        `store: ${home} is not a usable loam home — \`loam init --home ${home}\` or ` +
+          "`loam user create` makes one",
+      );
+      return 1;
+    }
+    throw err;
   }
-  const path = storePath(home, parsed.flags.get("store"));
   const backend = openStore(path, io);
   const deltas = await backend.deltasSince(new Set());
   await backend.close();
