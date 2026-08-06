@@ -645,7 +645,8 @@ export interface StoreHealth {
   readonly slates: SlateHealth;
   readonly forgiven: ForgivenHealth;
   readonly lagging?: boolean; // present when the backend exposes mirror lag (MirrorBackend)
-  // The surfaces erasure does NOT reach (T131) — the two §36 home files, disclosed unconditionally so
+  // The surfaces erasure does NOT reach, disclosed unconditionally: the two §36 home files
+  // (T131, out of scope by design) and the ESM registry (T105 a, in scope but unprovable) — so
   // the report is honest about its own edges whatever the erasure state. A top-level field, never a
   // field of `ErasureHealth`: that interface is pinned by a `toEqual` rail (T70), and this fact is
   // about the report's scope rather than any one promise's settling.

@@ -5,20 +5,19 @@
 // once across the process and a changed byte is a fresh key. Loading is async (a `data:` import); the
 // callers pre-load at bind time so their hot paths stay synchronous.
 //
-// WHAT ERASURE CANNOT REACH HERE, and what nothing currently REPORTS (SPEC §11). Erasing the delta
-// that carried a unit of code does not unload the code: the source rides a `data:` URL into NODE'S
-// OWN ESM registry, which retains it for the life of the process and offers no eviction —
-// re-importing the same URL hands back the identical namespace. So clearing the Map below cannot
-// make the bytes gone; it can only drop Loam's own handle to them.
+// WHAT ERASURE CANNOT REACH HERE (SPEC §11). Erasing the delta that carried a unit of code does
+// not unload the code: the source rides a `data:` URL into NODE'S OWN ESM registry, which retains
+// it for the life of the process and offers no eviction — re-importing the same URL hands back the
+// identical namespace. So clearing the Map below cannot make the bytes gone; it can only drop
+// Loam's own handle to them.
 //
-// Say the rest plainly rather than dressing it as compliance. §11's rule that an unaskable tier
-// answers HELD is not being applied here — it is being contradicted: `healthImpl` probes the backend
-// tiers and the pools and nothing else, so after erasing a resolver- or renderer-carrying delta the
-// store reports a SETTLED, complete erasure while the source is still resident and still executable
-// in this process. That residual is UN-RAILED. The rail that would close it: erase a published
+// T105 (a) named the tier honestly: `health().nonSwept` and the compliance receipt's `nonClaim`
+// carry the ESM-residency disclosure unconditionally — the tier is in erasure's scope but no byte
+// probe can ask it, so it reads as UNPROVEN beside the probed tiers, never as swept. The verdict
+// itself still reads settled; moving it is the teardown half's decision (T105 b), since eviction
+// is not available to say it with. The rail that would close the residual: erase a published
 // resolver, then assert its source is no longer loadable — `loadedEsm(bundle)` undefined, and the
-// erasure verdict not claiming settled while it is. Whoever adds it will have to decide what the
-// verdict should SAY, since eviction is not available to say it with.
+// erasure verdict not claiming settled while it is.
 //
 // What bounds the exposure, and neither bound is a fix: the Map is keyed BY the source's content
 // address, so no door reads a namespace out of it without already holding the erased bytes; and the
