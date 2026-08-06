@@ -69,15 +69,18 @@ describe("a failed pull says what happened", () => {
   it("a peer that dies MID-OFFER is named too — the reset class, not a bare failure", async () => {
     // The connect edge is the easy one; the reset lands after the response starts, in boundedText.
     const gw = await local();
-    const dying = (): Promise<Response> => {
-      const stream = new ReadableStream({
-        start(controller) {
-          controller.enqueue(new TextEncoder().encode('{"deltas":'));
-          controller.error(new Error("other side closed"));
-        },
-      });
-      return new Response(stream, { status: 200 });
-    };
+    const dying = (): Promise<Response> =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('{"deltas":'));
+              controller.error(new Error("other side closed"));
+            },
+          }),
+          { status: 200 },
+        ),
+      );
     await expect(
       pullFrom(gw, "http://peer.example/default", "tok", { fetch: dying }),
     ).rejects.toThrow(/peer closed the connection/);
