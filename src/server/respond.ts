@@ -9,17 +9,17 @@ import type { ServerResponse } from "node:http";
 export const JSON_CONTENT_TYPE = "application/json";
 export const CACHE_NO_STORE = "no-store";
 
-// The JSON writer core: agreed headers here, the door's policy (and CORS, cookies) at the call.
+// The JSON writer core: the content-type is the agreement and the core WINS — a call site cannot
+// override the agreed spelling. Everything else (cache policy, referrer policy, CORS, cookies) is
+// the door's per-response choice, passed at the call. cache-control is deliberately NOT in the
+// core: the http door's JSON answers were cacheable-by-default before this module existed, and a
+// consolidation must not change what a door sends (T153's own rule).
 export function endJson(
   res: ServerResponse,
   status: number,
   body: unknown,
   headers: Record<string, string> = {},
 ): void {
-  res.writeHead(status, {
-    "content-type": JSON_CONTENT_TYPE,
-    "cache-control": CACHE_NO_STORE,
-    ...headers,
-  });
+  res.writeHead(status, { ...headers, "content-type": JSON_CONTENT_TYPE });
   res.end(JSON.stringify(body));
 }

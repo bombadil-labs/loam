@@ -14,7 +14,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { type IncomingMessage, type ServerResponse } from "node:http";
-import { CACHE_NO_STORE, endJson } from "./respond.js";
+import { CACHE_NO_STORE, endJson, JSON_CONTENT_TYPE } from "./respond.js";
 import { authorForSeed } from "@bombadil/rhizomatic";
 import {
   OAuthFileBusy,
@@ -287,6 +287,13 @@ export function makeOAuthDoors(options: OAuthOptions): OAuthDoors {
   const publicUrl = options.publicUrl;
   const registration = options.registration;
 
+  // The discovery documents' agreed headers (T153): no-store (a discovery answer changes with the
+  // store) and CORS (browser callers), spelled once here instead of per writeHead.
+  const DISCOVERY_HEADERS = {
+    "cache-control": "no-store",
+    "access-control-allow-origin": "*",
+  } as const;
+
   const documentFor = (pathname: string): Record<string, unknown> =>
     pathname === "/.well-known/oauth-protected-resource"
       ? protectedResourceDocument(publicUrl)
@@ -294,26 +301,23 @@ export function makeOAuthDoors(options: OAuthOptions): OAuthDoors {
 
   const wellKnown = (pathname: string, req: IncomingMessage, res: ServerResponse): void => {
     if (req.method !== "GET" && req.method !== "HEAD") {
-      res.writeHead(405, {
-        allow: "GET, HEAD",
-        "content-type": "application/json",
-        "access-control-allow-origin": "*",
-      });
-      res.end(JSON.stringify({ error: "this document answers GET" }));
+      endJson(
+        res,
+        405,
+        { error: "this document answers GET" },
+        {
+          allow: "GET, HEAD",
+          ...DISCOVERY_HEADERS,
+        },
+      );
       return;
     }
-    const headers = {
-      "content-type": "application/json",
-      "cache-control": "no-store",
-      "access-control-allow-origin": "*",
-    };
     if (req.method === "HEAD") {
-      res.writeHead(200, headers);
+      res.writeHead(200, { ...DISCOVERY_HEADERS, "content-type": JSON_CONTENT_TYPE });
       res.end();
       return;
     }
-    res.writeHead(200, headers);
-    res.end(JSON.stringify(documentFor(pathname)));
+    endJson(res, 200, documentFor(pathname), DISCOVERY_HEADERS);
   };
 
   // --- POST /oauth/register (RFC 7591), SPEC §37 phase 13 ---------------------------------------
@@ -330,6 +334,9 @@ export function makeOAuthDoors(options: OAuthOptions): OAuthDoors {
 
   const jsonOut = (res: ServerResponse, status: number, body: unknown): void =>
     endJson(res, status, body, {
+      // The oauth door's policy: no-referrer (JSON, never a form), no-store (auth answers), and
+      // CORS (the register/token doors answer browser callers).
+      "cache-control": "no-store",
       "referrer-policy": "no-referrer",
       "access-control-allow-origin": "*",
     });

@@ -625,7 +625,9 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
 
   const json = (res: ServerResponse, status: number, body: unknown, cookie?: string): void =>
     endJson(res, status, body, {
-      // The JSON door's policy: a refusal never hosts a form, so no-referrer is safe here.
+      // The login door's policy: a refusal never hosts a form, so no-referrer is safe, and an
+      // auth answer must not be cached by an intermediary.
+      "cache-control": "no-store",
       "referrer-policy": "no-referrer",
       ...(cookie === undefined ? {} : { "set-cookie": cookie }),
     });
