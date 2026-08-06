@@ -397,7 +397,7 @@ export async function eraseImpl(
   }
   if (faults.length > 0) {
     throw new Error(
-      `erase ${id}: the tombstone is recorded and every tier was swept, but the content is STILL ` +
+      `erase ${id}: the tombstone is recorded, but the content is STILL ` +
         `HELD by the store — erasure is not complete. ${faults.length} fault(s):\n  ` +
         `${faults.map((f) => f.what).join("\n  ")}\n` +
         `Resolve them and re-run; the re-run is safe and will not mint a second tombstone.`,
@@ -703,6 +703,10 @@ export async function healthImpl(gw: Gateway, now = Date.now()): Promise<StoreHe
     };
   }
   const lagging = (gw.backend as { lagging?: unknown }).lagging;
+  // T105 (a), deliberate: the ESM disclosure in nonSwept names an unprovable tier but does NOT
+  // move the top-level verdict — the byte probes answered every tier they can ask, and an
+  // unaskable tier reads as UNPROVEN beside them rather than as a failing probe. Moving the
+  // verdict itself is the teardown half's decision (T105 b).
   const status = erasure.unproven
     ? "unproven"
     : erasure.settled && lagging !== true
@@ -717,9 +721,10 @@ export async function healthImpl(gw: Gateway, now = Date.now()): Promise<StoreHe
     slates: slateHealth(gw, now),
     forgiven: forgivenHealth(gw),
     ...(typeof lagging === "boolean" && { lagging }),
-    // The unswept-surface disclosure (T131), unconditional: these home files are outside erasure's
-    // reach whether the store has forgotten nothing, something, or is mid-settle. The receipt reads
-    // the SAME constant, so the two surfaces cannot drift.
+    // The unswept-surface disclosures, unconditional: the home files (T131) are outside erasure's
+    // reach by design, and the ESM registry (T105 a) is in scope but unprovable to the tier probes.
+    // Both stay listed whether the store has forgotten nothing, something, or is mid-settle. The
+    // receipt reads the SAME constants, so the two surfaces cannot drift.
     nonSwept: [...UNSWEPT_AUTH_SURFACES, ...ESM_RESIDENCY_DISCLOSURE],
   };
 }

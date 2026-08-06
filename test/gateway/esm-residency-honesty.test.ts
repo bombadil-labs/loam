@@ -30,6 +30,8 @@ describe("T105 (a) — the ESM registry is named as the tier erasure cannot prov
     const report = await gw.cut(stood.container, { now: BEFORE_DEADLINE });
     const receipt = await gw.receipt(report.graveyard, { now: BEFORE_DEADLINE });
     expect(receipt.nonClaim.some((line) => line.includes("ESM RESIDENCY"))).toBe(true);
-    expect(receipt.nonClaim.some((line) => line.includes("UNPROVEN"))).toBe(true);
+    expect(
+      receipt.nonClaim.some((line) => line.includes("ESM RESIDENCY") && line.includes("UNPROVEN")),
+    ).toBe(true);
   });
 });
