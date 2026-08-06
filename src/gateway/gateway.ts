@@ -1160,11 +1160,17 @@ export class Gateway {
   // cure, named in both shapes. The scan is a cold path (it only runs on the error), so the
   // whole-store read is acceptable here where it would not be per request.
   private emptySurfaceMessage(): string {
-    const inert =
-      readRegistrations(this.reactor, undefined).length > 0
-        ? " the store holds registrations that do not bind (foreign law is inert on a governed store; " +
-          "an own definition that does not resolve binds nothing either);"
-        : "";
+    let inert = "";
+    if (readRegistrations(this.reactor, undefined).length > 0) {
+      // The derivable fact is that registrations exist and none binds. The causes are stated as
+      // general rules, attributed only where the store's own posture makes them true: foreign
+      // inertia is a governed-store rule (SPEC §8), never claimed of an ungoverned store.
+      inert =
+        this.operatorAuthor !== undefined
+          ? " the store holds registrations that do not bind (foreign law is inert on a governed " +
+            "store; an own definition that does not resolve binds nothing either);"
+          : " the store holds registrations that do not bind (they conflict or one does not resolve);";
+    }
     return (
       "nothing is registered: the gateway has no queryable surface yet —" +
       `${inert} \`loam register <file> --home ...\` or POST /:mount/register grows one`

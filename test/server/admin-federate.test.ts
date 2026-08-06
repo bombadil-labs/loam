@@ -181,6 +181,39 @@ describe("the admin federate-in result counts repeats honestly", () => {
     expect(page).toMatch(/1 was already held/);
   });
 
+  it("two held deltas plus a refused duplicate: both held facts survive the repeat", async () => {
+    const { base, gateway, held } = await federateServer();
+    const held2 = note("also in the ground", SEED_ADA, 9700);
+    await gateway.append([held2]);
+    const session = await signIn(base, "ada");
+    const foreign = note("not ada's", "ff".repeat(32), 9800);
+    const detail = await fetch(`${base}/admin/container?name=ada`, {
+      headers: { cookie: `${SESSION_COOKIE}=${session}` },
+    });
+    const formToken = /name="form_token" value="([^"]+)"/.exec(await detail.text())![1]!;
+
+    const res = await fetch(`${base}/admin/federate`, {
+      method: "POST",
+      redirect: "manual",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `${SESSION_COOKIE}=${session}`,
+        ...SAME_ORIGIN,
+      },
+      body: new URLSearchParams({
+        name: "ada",
+        form_token: formToken,
+        offer: offer([held, held2, foreign, foreign]),
+      }).toString(),
+    });
+    expect(res.status).toBe(200);
+    const page = await res.text();
+    // 4 offered, 1 repeat (the refused delta's second copy); 2 refused; BOTH held deltas reported.
+    expect(page).toMatch(/Of 4 offered deltas \(1 of them repeats in the paste\)/);
+    expect(page).toMatch(/2 were refused at the door/);
+    expect(page).toMatch(/2 were already held/);
+  });
+
   it("a paste with no repeats says nothing about repeats, and held stays honest", async () => {
     const { base, held } = await federateServer();
     const session = await signIn(base, "ada");
