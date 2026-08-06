@@ -500,9 +500,12 @@ function parseSchemaNamed(input: unknown): Schema {
   try {
     return parseSchema(input);
   } catch (err) {
-    throw new Error(`register: malformed schema at ${locateSchemaFailure(input)} — ${POLICY_SHAPES}`, {
-      cause: err,
-    });
+    throw new Error(
+      `register: malformed schema at ${locateSchemaFailure(input)} — ${POLICY_SHAPES}`,
+      {
+        cause: err,
+      },
+    );
   }
 }
 

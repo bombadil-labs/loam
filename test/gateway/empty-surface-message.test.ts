@@ -16,10 +16,7 @@ const FOREIGN_SEED = "ee".repeat(32);
 const FOREIGN = authorForSeed(FOREIGN_SEED);
 
 const governed = async (): Promise<Gateway> =>
-  Gateway.boot(
-    new MemoryBackend(),
-    assembleGenesis({ operatorSeed: OP_SEED, registrations: [] }),
-  );
+  Gateway.boot(new MemoryBackend(), assembleGenesis({ operatorSeed: OP_SEED, registrations: [] }));
 
 describe("the empty-surface refusal names its shape", () => {
   it("a store with no law names the register cure", async () => {
