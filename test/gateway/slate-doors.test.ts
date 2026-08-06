@@ -196,13 +196,14 @@ describe("T64 criterion 5 — cite closure: ONE predicate, two doors, asymmetric
       strangerSeed,
     );
     const refused = await gw.federate([strangerCite], { admit: () => true });
-    expect(refused).toEqual({ offered: 1, accepted: 0, rejected: 1 });
+    expect(refused).toEqual({ offered: 1, accepted: 0, rejected: 1, held: 0 });
     // The shape of an ORDINARY federation rejection, for comparison: no field distinguishes them.
     const forged = { ...strangerCite, id: contentAddress(new TextEncoder().encode("nope")) };
     expect(await gw.federate([forged], { admit: () => true })).toEqual({
       offered: 1,
       accepted: 0,
       rejected: 1,
+      held: 0,
     });
 
     // TWO-SIDED: a citation of the BYSTANDER passes both doors while the slate stands.
@@ -253,6 +254,7 @@ describe("T64 criterion 5 — a NEGATION is not a citation: cite closure must ne
       offered: 1,
       accepted: 1,
       rejected: 0,
+      held: 0,
     });
 
     // Two-sided, and this is the half that keeps the exemption honest: a delta that negates a member

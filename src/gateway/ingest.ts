@@ -524,6 +524,11 @@ export async function federateImpl(
     }
   }
   // "accepted" counts deltas NEWLY ingested — a duplicate verified but merged into what was
-  // already there, so a re-pull accepts nothing (union is idempotent).
-  return { offered: all.length, accepted, rejected };
+  // already there, so a re-pull accepts nothing (union is idempotent). "held" is the unique-id
+  // remainder: offered ids neither newly ingested nor refused. Occurrences and unique ids are
+  // different dimensions (a refused delta offered twice counts twice in `rejected` and once in
+  // `held`'s complement), so the two are never subtracted from each other.
+  const refusedIds = new Set(all.filter((d) => !crossed.has(d.id)).map((d) => d.id));
+  const held = new Set(all.map((d) => d.id)).size - accepted - refusedIds.size;
+  return { offered: all.length, accepted, rejected, held };
 }

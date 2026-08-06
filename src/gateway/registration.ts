@@ -493,8 +493,8 @@ export interface RegistrationInput {
 // message a registry author can act on.
 const POLICY_SHAPES =
   "a prop takes one of { pick: { order }, all: { order }, conflicts: { order }, merge: <fn>, " +
-  "absentAs: { const, then } } — every order is an object " +
-  "({ byTimestamp: 'desc' }, { byAuthorRank: ... }, { lexById: ... }, { byPred: ... }, { chain: [...] })";
+  "absentAs: { const, then } } — every order is { byTimestamp: 'desc' | 'asc' }, " +
+  "{ byAuthorRank: [...] }, { byPred: { pred, then } }, { chain: [...] }, or the bare 'lexById'";
 
 function parseSchemaNamed(input: unknown): Schema {
   try {

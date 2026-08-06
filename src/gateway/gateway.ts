@@ -197,9 +197,10 @@ export interface GatewayOptions {
 }
 
 export interface FederationReport {
-  readonly offered: number;
-  readonly accepted: number;
-  readonly rejected: number; // failed verification or admission
+  readonly offered: number; // occurrences in the offered batch, duplicates counted
+  readonly accepted: number; // UNIQUE deltas newly ingested (union is idempotent)
+  readonly rejected: number; // occurrences refused at the door — a duplicated refusal counts twice
+  readonly held: number; // UNIQUE offered ids the store already held — neither new nor refused
 }
 
 export interface RequestContext {
@@ -1153,14 +1154,16 @@ export class Gateway {
   }
 
   // An empty surface has two honest shapes, and the refusal says which. The plain one: the store
-  // holds no law at all. The inert one: it HOLDS registrations that bind nothing — a governed
-  // store where the only law is a peer's (foreign law is inert, SPEC §8) — and the operator's own
-  // register is the cure, named in both shapes. The scan is a cold path (it only runs on the
-  // error), so the whole-store read is acceptable here where it would not be per request.
+  // holds no law at all. The inert one: it HOLDS registrations that bind nothing — and the cause
+  // is named as a pair, never attributed: foreign law is inert on a governed store (SPEC §8), and
+  // an own definition that does not resolve binds nothing either. The operator's register is the
+  // cure, named in both shapes. The scan is a cold path (it only runs on the error), so the
+  // whole-store read is acceptable here where it would not be per request.
   private emptySurfaceMessage(): string {
     const inert =
       readRegistrations(this.reactor, undefined).length > 0
-        ? " the store holds registrations that do not bind (foreign law is inert on a governed store);"
+        ? " the store holds registrations that do not bind (foreign law is inert on a governed store; " +
+          "an own definition that does not resolve binds nothing either);"
         : "";
     return (
       "nothing is registered: the gateway has no queryable surface yet —" +

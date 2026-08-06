@@ -1807,11 +1807,12 @@ forever; the value now survives even if its container is dropped.</p>
     } catch {
       gathered = undefined;
     }
-    // The paste can repeat a delta; a repeat is neither newly landed nor refused, so the naive
-    // `offered - accepted - rejected` remainder would count it as "already held" — held by the
-    // store is not the same fact as repeated in your paste. Count the repeats separately.
+    // Held and repeats are different dimensions, and neither is inferred: the door reports held as
+    // a UNIQUE-id fact (a refused delta offered twice counts twice in `rejected` and once in the
+    // complement of `held`), and repeats are the paste's own extra copies. Held-by-the-store is
+    // not the same fact as repeated-in-your-paste, and the page never subtracts one from the other.
     const inPasteDuplicates = deltas.length - new Set(deltas.map((d) => d.id)).size;
-    const held = report.offered - report.accepted - report.rejected - inPasteDuplicates;
+    const held = report.held;
     const gatherLine =
       gathered === undefined
         ? "What this container now gathers could not be counted just now."
