@@ -21,6 +21,10 @@ gate down for every later PR. A blessing of an already-landed edit is a fact for
 renames file is an instrument, not a ledger.
 
 Residue, ticketed rather than lost: `loam pull` still prints only offered/accepted/refused, so the
-CLI cannot say "already held" where the admin page now can — inconsistent, not false. And the
-process hole itself — a direct push bypasses the rails backstop entirely — is the standing argument
-for branch protection or a push-trigger variant of the gate.
+CLI cannot say "already held" where the admin page now can — inconsistent, not false.
+
+The process hole itself is closed. Myk ordered branch protection the same day: main now requires a
+pull request with all three checks green (both green-gates and rails-guard), enforced for admins
+too, no force pushes. Proven red on arrival — a probe push was refused with "protected branch hook
+declined" before this entry merged. Every path to main now runs the backstop that this edit slipped
+past.
