@@ -13,7 +13,7 @@ store only ever learns. Two Loam instances that meet simply merge. Trust is a le
 holds, not a verdict the ground hands down.
 
 The design is in [SPEC.md](SPEC.md), the working record in [JOURNAL.md](JOURNAL.md), and the backlog
-of unbuilt work as ADLC tickets in `.adlc/tickets.json`. This page is the manual;
+of unbuilt work as ADLC tickets in `.adlc/tickets/`. This page is the manual;
 [how the repo is organized](#how-the-repo-is-organized) is spelled out below.
 
 **New here? Take [the interactive tutorial](https://bombadil-labs.github.io/loam/tutorial.html)** — it hands
@@ -534,7 +534,7 @@ village.
   footer linking the PR(s) that landed it and naming where it lives; `SPEC.md` is the index over
   them. Read it to understand the system; it grows only when work lands — a landing adds a new
   `spec/` file.
-- **`.adlc/tickets.json`** — the backlog: unbuilt and partially-designed work, as ADLC tickets.
+- **`.adlc/tickets/`** — the backlog: unbuilt and partially-designed work, as ADLC tickets, one shard each.
   The next thing to build is drawn from here, and its landing PR adds its `spec/` section file.
 - **[JOURNAL.md](JOURNAL.md)** — the append-only record: one entry per step, what was done and why.
   An index over [`journal/`](journal/), one file per entry.
