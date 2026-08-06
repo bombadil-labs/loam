@@ -1,12 +1,4 @@
 {
-  "_adlcArchive": {
-    "archivedAt": "2026-08-05T22:43:49.687Z",
-    "reason": "completed",
-    "sourceRevision": null,
-    "sourceStoreHash": "b0fc50809623841a36bf9a079cbb3cc467a1d2667ff78896f9e016cd39e1e664",
-    "ticketHash": "5e7ad125ca423be079111d7cdd316e171a9de7763f48ba53af528d5a7a79ee37",
-    "version": 1
-  },
   "body": "FOUND AT T109 (#269), flagged there as out of scope: `Gateway.health()` returns `StoreHealth` (with `SlateHealth`/`ForgivenHealth` inside), none exported from `src/index.ts`. Same defect as T82 (container surface) and T109 (slate surface), third door: a package consumer can call `health()` and cannot name what it answers. This was already noted once at T82's own landing ('Gateway.health() still returns an unexported StoreHealth') and left as a decision — T109 makes the pattern a rule, so close it.\n\nApply T82's disciplines verbatim, as T109 did: export the report TYPES (not any Impl), extend the surface rail (a new file if the T82-frozen `index-surface.test.ts` cannot be touched — check rails-guard), negative-probe an Impl, and sharpen any capabilities-book claim that names `Gateway` as the health door if a named export now fits better. Small, repair-tier, self-merge on green + P5 + the negative probe. Trivial enough to fold into the next surface-touching PR if one is open, but it earns its own shard so the 'three doors, one defect' story is on the record.",
   "edges": [],
   "id": "T111",
