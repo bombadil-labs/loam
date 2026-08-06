@@ -252,7 +252,8 @@ describe("loam pull <url>: a live peer through the same door", () => {
   });
 
   it("a down peer names the address, the cause, and the cure — not a bare fetch failed", async () => {
-    // A bound-then-closed port is a deterministic ECONNREFUSED with no service in between.
+    // A bound-then-closed loopback port is a near-certain ECONNREFUSED (the theoretical
+    // race — another listener taking it in the window — fails LOUD, never false-green).
     const { createServer } = await import("node:http");
     const server = createServer();
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));

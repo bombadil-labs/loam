@@ -46,10 +46,12 @@ async function boundedText(res: Response, limit: number): Promise<string> {
 
 // Pull `peerUrl`/federate (a mount base like http://host:port/default) into `local`, presenting
 // `peerToken` as the bearer. Returns the merge report.
-// What fetch actually saw, reduced to one line. Node's fetch failure is a TypeError whose CAUSE
-// chain carries the real verdict (getaddrinfo ENOTFOUND, connect ECONNREFUSED, a certificate
-// error); the verdict is what tells a puller whether to fix the address, wait, or fix the TLS.
-function fetchCause(err: unknown): string {
+// What fetch actually saw, and the cure that matches. Node's fetch failure is a TypeError whose
+// CAUSE chain carries the real verdict (getaddrinfo ENOTFOUND, connect ECONNREFUSED, a certificate
+// error, a mid-body reset); the verdict is what tells a puller whether to fix the address, wait,
+// or fix the trust — and the cure must not contradict the verdict (a TLS fault is not an address
+// problem, and EAI_AGAIN is a transient resolver hiccup, not a wrong host).
+function fetchVerdict(err: unknown): { verdict: string; cure: string } {
   const seen = new Set<unknown>();
   const texts: string[] = [];
   let cur: unknown = err;
@@ -66,11 +68,40 @@ function fetchCause(err: unknown): string {
     cur = e.cause;
   }
   const joined = texts.join("; ");
-  if (/ENOTFOUND|getaddrinfo|EAI_AGAIN/i.test(joined)) return "the host does not resolve";
-  if (/ECONNREFUSED/i.test(joined)) return "the connection was refused";
-  if (/ECONNRESET/i.test(joined)) return "the connection was reset";
-  if (/certificate|self-signed/i.test(joined)) return "the TLS certificate was not trusted";
-  return joined === "" ? "the peer did not answer" : joined;
+  if (/EAI_AGAIN/i.test(joined)) {
+    return {
+      verdict: "name resolution was temporarily unavailable (EAI_AGAIN)",
+      cure: "retry in a moment — the address may be fine",
+    };
+  }
+  if (/ENOTFOUND|getaddrinfo/i.test(joined)) {
+    return {
+      verdict: "the host does not resolve",
+      cure: "check the address (http://host:port/mount)",
+    };
+  }
+  if (/ECONNREFUSED/i.test(joined)) {
+    return {
+      verdict: "the connection was refused",
+      cure: "check the address (http://host:port/mount) and that the peer is serving",
+    };
+  }
+  if (/ECONNRESET|terminated|other side closed/i.test(joined)) {
+    return {
+      verdict: "the peer closed the connection",
+      cure: "retry — a large offer can take the peer past a proxy timeout",
+    };
+  }
+  if (/certificate|self-signed/i.test(joined)) {
+    return {
+      verdict: "the TLS certificate was not trusted",
+      cure: "fix the trust on this store, or check the address",
+    };
+  }
+  return {
+    verdict: joined === "" ? "the peer did not answer" : joined,
+    cure: "check the address (http://host:port/mount) and that the peer is serving",
+  };
 }
 
 export async function pullFrom(
@@ -81,24 +112,25 @@ export async function pullFrom(
 ): Promise<FederationReport> {
   const doFetch = opts.fetch ?? fetch;
   let res: Response;
+  let text: string;
   try {
     res = await doFetch(`${peerUrl}/federate`, {
       headers: { authorization: `Bearer ${peerToken}` },
     });
+    if (!res.ok) {
+      throw new Error(`federation: peer refused the offer (${res.status})`);
+    }
+    text = await boundedText(res, opts.maxBytes ?? DEFAULT_MAX_OFFER);
   } catch (err) {
-    // The bare fetch error ("fetch failed", a TypeError) names neither the peer nor what fetch
-    // saw — the operator typed the address, so the refusal must say it back, say what happened,
-    // and say the cure (T149).
-    throw new Error(
-      `federation: pull from ${peerUrl} failed — ${fetchCause(err)}; ` +
-        "check the address (http://host:port/mount) and that the peer is serving",
-      { cause: err },
-    );
+    // A refusal with its own message keeps it; anything else — a connect failure OR a peer that
+    // dies mid-offer — is wrapped with the peer, the verdict, and the cure. The bare error names
+    // neither; the operator typed the address, so the refusal says it back (T149).
+    if (err instanceof Error && err.message.startsWith("federation:")) throw err;
+    const { verdict, cure } = fetchVerdict(err);
+    throw new Error(`federation: pull from ${peerUrl} failed — ${verdict}; ${cure}`, {
+      cause: err,
+    });
   }
-  if (!res.ok) {
-    throw new Error(`federation: peer refused the offer (${res.status})`);
-  }
-  const text = await boundedText(res, opts.maxBytes ?? DEFAULT_MAX_OFFER);
   let body: { deltas?: WireDelta[] };
   try {
     body = JSON.parse(text) as { deltas?: WireDelta[] };

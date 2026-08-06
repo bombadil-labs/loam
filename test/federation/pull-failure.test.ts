@@ -22,7 +22,8 @@ async function local(): Promise<Gateway> {
 
 describe("a failed pull says what happened", () => {
   it("a refused connection names the peer address, the cause, and the cure", async () => {
-    // Bind then close: the port is a guaranteed ECONNREFUSED, no service in between.
+    // Bind then close: on loopback the freed port is a near-certain ECONNREFUSED (the
+    // theoretical race — another listener taking it in the window — fails LOUD, never false-green).
     const server = createServer();
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
     const { port } = server.address() as { port: number };
@@ -61,6 +62,38 @@ describe("a failed pull says what happened", () => {
     await expect(
       pullFrom(gw, "https://peer.example/default", "tok", { fetch: failing }),
     ).rejects.toThrow(/TLS certificate was not trusted/);
+    await gw.close();
+  });
+
+  it("a peer that dies MID-OFFER is named too — the reset class, not a bare failure", async () => {
+    // The connect edge is the easy one; the reset lands after the response starts, in boundedText.
+    const gw = await local();
+    const dying = async (): Promise<Response> => {
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"deltas":'));
+          controller.error(new Error("other side closed"));
+        },
+      });
+      return new Response(stream, { status: 200 });
+    };
+    await expect(
+      pullFrom(gw, "http://peer.example/default", "tok", { fetch: dying }),
+    ).rejects.toThrow(/peer closed the connection/);
+    await expect(
+      pullFrom(gw, "http://peer.example/default", "tok", { fetch: dying }),
+    ).rejects.toThrow(/check the address|retry/);
+    await gw.close();
+  });
+
+  it("a transient resolver hiccup is a retry, not a wrong address", async () => {
+    const gw = await local();
+    const failing = async (): Promise<Response> => {
+      throw new TypeError("fetch failed", { cause: new Error("getaddrinfo EAI_AGAIN") });
+    };
+    await expect(
+      pullFrom(gw, "http://peer.example/default", "tok", { fetch: failing }),
+    ).rejects.toThrow(/temporarily unavailable/);
     await gw.close();
   });
 });
