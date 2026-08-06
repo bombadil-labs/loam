@@ -46,6 +46,33 @@ async function boundedText(res: Response, limit: number): Promise<string> {
 
 // Pull `peerUrl`/federate (a mount base like http://host:port/default) into `local`, presenting
 // `peerToken` as the bearer. Returns the merge report.
+// What fetch actually saw, reduced to one line. Node's fetch failure is a TypeError whose CAUSE
+// chain carries the real verdict (getaddrinfo ENOTFOUND, connect ECONNREFUSED, a certificate
+// error); the verdict is what tells a puller whether to fix the address, wait, or fix the TLS.
+function fetchCause(err: unknown): string {
+  const seen = new Set<unknown>();
+  const texts: string[] = [];
+  let cur: unknown = err;
+  while (cur !== undefined && !seen.has(cur)) {
+    seen.add(cur);
+    const e = cur as { message?: unknown; cause?: unknown; errors?: unknown[] };
+    if (typeof e.message === "string" && e.message !== "fetch failed") texts.push(e.message);
+    if (Array.isArray(e.errors)) {
+      for (const sub of e.errors) {
+        const m = (sub as { message?: unknown } | undefined)?.message;
+        if (typeof m === "string" && !texts.includes(m)) texts.push(m);
+      }
+    }
+    cur = e.cause;
+  }
+  const joined = texts.join("; ");
+  if (/ENOTFOUND|getaddrinfo|EAI_AGAIN/i.test(joined)) return "the host does not resolve";
+  if (/ECONNREFUSED/i.test(joined)) return "the connection was refused";
+  if (/ECONNRESET/i.test(joined)) return "the connection was reset";
+  if (/certificate|self-signed/i.test(joined)) return "the TLS certificate was not trusted";
+  return joined === "" ? "the peer did not answer" : joined;
+}
+
 export async function pullFrom(
   local: Gateway,
   peerUrl: string,
@@ -53,9 +80,21 @@ export async function pullFrom(
   opts: PullOptions = {},
 ): Promise<FederationReport> {
   const doFetch = opts.fetch ?? fetch;
-  const res = await doFetch(`${peerUrl}/federate`, {
-    headers: { authorization: `Bearer ${peerToken}` },
-  });
+  let res: Response;
+  try {
+    res = await doFetch(`${peerUrl}/federate`, {
+      headers: { authorization: `Bearer ${peerToken}` },
+    });
+  } catch (err) {
+    // The bare fetch error ("fetch failed", a TypeError) names neither the peer nor what fetch
+    // saw — the operator typed the address, so the refusal must say it back, say what happened,
+    // and say the cure (T149).
+    throw new Error(
+      `federation: pull from ${peerUrl} failed — ${fetchCause(err)}; ` +
+        "check the address (http://host:port/mount) and that the peer is serving",
+      { cause: err },
+    );
+  }
   if (!res.ok) {
     throw new Error(`federation: peer refused the offer (${res.status})`);
   }

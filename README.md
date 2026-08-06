@@ -416,6 +416,23 @@ Foreign law stays inert: a peer's self-signed grant merges as a delta but govern
 it roots in no operator you blessed. **Each instance must have its own operator seed** — two
 sharing one trust each other's constitution completely.
 
+**The CLI recipe, end to end.** Pulling is one step, not the story. A governed store binds only
+its own operator's law, so the first query after a pull answers `nothing is registered` — the
+refusal says the store holds registrations that do not bind, foreign law is inert. That is the
+design, not a bug: foreign law never reshapes your surface. The recipe that works end to end:
+
+```sh
+loam pull http://peer.example/default --token "$PEER_TOKEN" --home ./mine   # their deltas, yours now
+loam register plant.json --home ./mine                                      # your own schema, binding here
+loam serve --http --home ./mine --token "$(openssl rand -hex 16)"           # serve your ground
+curl -s localhost:4321/default/graphql -H "authorization: Bearer $TOKEN" \
+  -d '{"query":"{ plant(entity: \"plant:fern\") { height } }"}'
+```
+
+The pull makes their facts live in your store; the register makes a lens you own; the serve
+answers it. A store that pulls and never registers gathered someone else's world with no way to
+read it — the empty-surface refusal is the honest report of exactly that.
+
 ## Forgetting — erasure, GDPR, and harmful content
 
 By default a store forgets nothing: revocation is negation, which _masks_ a delta from views but

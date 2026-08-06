@@ -250,4 +250,23 @@ describe("loam pull <url>: a live peer through the same door", () => {
     expect(code).toBe(2);
     expect(err.join("\n")).toMatch(/token/);
   });
+
+  it("a down peer names the address, the cause, and the cure — not a bare fetch failed", async () => {
+    // A bound-then-closed port is a deterministic ECONNREFUSED with no service in between.
+    const { createServer } = await import("node:http");
+    const server = createServer();
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const { port } = server.address() as { port: number };
+    await new Promise<void>((r) => server.close(() => r()));
+    const code = await run(
+      ["pull", `http://127.0.0.1:${port}/default`, "--home", join(dir, "h"), "--token", "tok"],
+      io(),
+    );
+    expect(code).toBe(1);
+    const printed = err.join("\n");
+    expect(printed).toMatch(new RegExp(`http:\\/\\/127\\.0\\.0\\.1:${port}\\/default`));
+    expect(printed).toMatch(/connection was refused/);
+    expect(printed).toMatch(/check the address/);
+    expect(printed).not.toMatch(/fetch failed/);
+  });
 });
