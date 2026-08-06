@@ -51,7 +51,11 @@ const note = (text: string, seed: string, timestamp: number): ReturnType<typeof 
   );
 
 /** A governed store with one user (ada) and one shared container gathering ada's own deltas. */
-async function federateServer(): Promise<{ base: string; gateway: Gateway; held: ReturnType<typeof note> }> {
+async function federateServer(): Promise<{
+  base: string;
+  gateway: Gateway;
+  held: ReturnType<typeof note>;
+}> {
   const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
   let ts = 9001;
   const op = (claims: Parameters<typeof signClaims>[0]): Promise<unknown> =>
