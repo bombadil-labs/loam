@@ -422,8 +422,9 @@ refusal says the store holds registrations that do not bind, foreign law is iner
 design, not a bug: foreign law never reshapes your surface. The recipe that works end to end:
 
 ```sh
-TOKEN=$(openssl rand -hex 16)                                                # one token for the whole recipe
+TOKEN=$(openssl rand -hex 16)                                                # THIS store's door token — minted here
 loam pull http://peer.example/default --token "$PEER_TOKEN" --home ./mine   # their deltas, yours now
+#   ^ PEER_TOKEN is the PEER's operator token — their door's secret, not yours to mint. Ask them.
 loam register plant.json --home ./mine                                      # your own schema, binding here
 loam serve --http --home ./mine --token "$TOKEN"                            # serve your ground
 curl -s localhost:4321/default/graphql -H "authorization: Bearer $TOKEN" \
