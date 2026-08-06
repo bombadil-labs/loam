@@ -64,7 +64,7 @@ export interface AdminPagesOpts {
   ) => string;
 }
 
-/** All of the admin door's pure page renderers, in one closure (moved verbatim from admin.ts). */
+/** All of the admin door's page renderers, in one closure (moved verbatim from admin.ts). */
 export const adminPages = (opts: AdminPagesOpts) => {
   const detailHref = (name: string): string =>
     `${ADMIN_CONTAINER_PATH}?name=${encodeURIComponent(name)}`;

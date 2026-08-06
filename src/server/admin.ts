@@ -422,7 +422,7 @@ ${listing}
 ${flowNote}`;
   };
 
-  // T153 slice 3a: the pure page renderers now live in admin-pages.ts. The connectors panel
+  // T153 slice 3a: the page renderers now live in admin-pages.ts. The connectors panel
   // stays here (it reads the connector store through the closure) and is injected as the factory's
   // `connectionsPanel`; home and onFault ride in with it.
   const pages = adminPages({ home: options.home, onFault, connectionsPanel: connectionsPanelHtml });
