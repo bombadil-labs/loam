@@ -1154,18 +1154,18 @@ export class Gateway {
 
   // An empty surface has two honest shapes, and the refusal says which. The plain one: the store
   // holds no law at all. The inert one: it HOLDS registrations that bind nothing — a governed
-  // store where the only law is a peer's (foreign law is inert, SPEC §8), so the operator's own
-  // register is the cure, and the message names it. The scan is a cold path (it only runs on the
+  // store where the only law is a peer's (foreign law is inert, SPEC §8) — and the operator's own
+  // register is the cure, named in both shapes. The scan is a cold path (it only runs on the
   // error), so the whole-store read is acceptable here where it would not be per request.
   private emptySurfaceMessage(): string {
-    const cure = "`loam register <file> --home ...` or POST /:mount/register grows one";
-    if (readRegistrations(this.reactor, undefined).length > 0) {
-      return (
-        "nothing binds here: the store holds registrations that do not bind — foreign law is " +
-        `inert on a governed store; ${cure}`
-      );
-    }
-    return `nothing is registered: the gateway has no queryable surface yet — ${cure}`;
+    const inert =
+      readRegistrations(this.reactor, undefined).length > 0
+        ? " the store holds registrations that do not bind (foreign law is inert on a governed store);"
+        : "";
+    return (
+      "nothing is registered: the gateway has no queryable surface yet —" +
+      `${inert} \`loam register <file> --home ...\` or POST /:mount/register grows one`
+    );
   }
 
   // T19 NOTE (a boundary judged, not forced): the public-door READERS — surface, isPublicLatest,

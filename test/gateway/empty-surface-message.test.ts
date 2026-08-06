@@ -55,7 +55,7 @@ describe("the empty-surface refusal names its shape", () => {
     ]);
     expect(report.accepted).toBe(4);
     await expect(gw.query(`{ plant(entity: "${FERN}") { height } }`)).rejects.toThrow(
-      /nothing binds here.*foreign law is inert.*loam register/,
+      /nothing is registered.*store holds registrations that do not bind.*foreign law is inert.*loam register/,
     );
     await gw.close();
   });
