@@ -27,6 +27,11 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { endJson } from "./respond.js";
+import {
+  BodyTooLarge,
+  parseBodyFields as parseAppBody,
+  readBodyStrict as readBody,
+} from "./body.js";
 import { authorForSeed, signClaims, type Delta, type Primitive } from "@bombadil/rhizomatic";
 import { Kind, OperationTypeNode, parse, type DocumentNode } from "graphql";
 import { fromWire, toWire, type WireDelta } from "../federation/wire.js";
@@ -188,37 +193,6 @@ you and your token.</p>
 </html>
 `;
 
-class BodyTooLarge extends Error {
-  constructor() {
-    super("request body too large");
-  }
-}
-
-// Read the body as bytes (so a chunk boundary never splits a multibyte character), refusing
-// anything past the cap before it can exhaust memory. On overflow we stop buffering and reject,
-// but let the request keep draining so the handler can answer with a clean response instead of
-// resetting the socket under the client.
-const readBody = (req: IncomingMessage, limit: number): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    let overflowed = false;
-    req.on("data", (c: Buffer) => {
-      if (overflowed) return;
-      size += c.length;
-      if (size > limit) {
-        overflowed = true;
-        reject(new BodyTooLarge());
-        return;
-      }
-      chunks.push(c);
-    });
-    req.on("end", () => {
-      if (!overflowed) resolve(Buffer.concat(chunks).toString("utf8"));
-    });
-    req.on("error", reject);
-  });
-
 // CORS, everywhere and uniformly: authority here is a bearer header the caller must present
 // explicitly (never a cookie, never ambient), so a wildcard origin lends nothing — it only
 // lets a browser page ask, and lets it READ a refusal instead of a mute CORS error. The
@@ -289,32 +263,6 @@ const gestureOf = (
     state[key] = value;
   }
   return { reads, state };
-};
-
-// Parse a rendered route's write body (SPEC §23.3): a browser `<form>` POSTs
-// `application/x-www-form-urlencoded` (every value a string); a programmatic caller may POST JSON (typed
-// primitives, validated like the REST write door). Either yields the field map writeRoute signs as the
-// renderer's pen. Throws a plain-English reason the caller answers 400 with.
-const parseAppBody = (
-  bodyText: string,
-  contentType: string | undefined,
-): Record<string, Primitive> => {
-  const out: Record<string, Primitive> = {};
-  if ((contentType ?? "").includes("application/json")) {
-    const parsed = JSON.parse(bodyText) as unknown;
-    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-      throw new Error("the write body must be a JSON object of fields");
-    }
-    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-      if (typeof v !== "string" && typeof v !== "number" && typeof v !== "boolean") {
-        throw new Error(`field "${k}" wants a primitive (string | number | boolean)`);
-      }
-      out[k] = v;
-    }
-    return out;
-  }
-  for (const [k, v] of new URLSearchParams(bodyText)) out[k] = v; // form-urlencoded: values are strings
-  return out;
 };
 
 // A raw-bytes response (SPEC §23.7 byte-door): the BytesView's own mime as Content-Type, the bytes as

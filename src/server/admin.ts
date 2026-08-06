@@ -49,6 +49,7 @@
 import { randomBytes } from "node:crypto";
 import { type IncomingMessage, type ServerResponse } from "node:http";
 import { CACHE_NO_STORE } from "./respond.js";
+import { parseUrlEncoded, readBodyLenient as readBody } from "./body.js";
 import {
   authorForSeed,
   parseTerm,
@@ -201,24 +202,6 @@ const authoredBy = (publicKey: string): unknown => ({
   pred: { match: { field: "author", cmp: "eq", const: publicKey } },
   in: "input",
 });
-
-const readBody = (req: IncomingMessage, max = MAX_BODY): Promise<string | undefined> =>
-  new Promise((resolve) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    let over = false;
-    req.on("data", (chunk: Buffer) => {
-      if (over) return;
-      size += chunk.length;
-      if (size > max) {
-        over = true;
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on("end", () => resolve(over ? undefined : Buffer.concat(chunks).toString("utf8")));
-    req.on("error", () => resolve(undefined));
-  });
 
 export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
   const gate = options.gate;
@@ -966,10 +949,7 @@ this lens does not gather; the lens may read ground this container does not hold
       refuse(res, 403, "This request did not come from this store's own page.");
       return undefined;
     }
-    const fields = new Map<string, string>();
-    for (const [k, v] of new URLSearchParams((await readBody(req, maxBody)) ?? "")) {
-      fields.set(k, v);
-    }
+    const fields = parseUrlEncoded((await readBody(req, maxBody)) ?? "");
     const session = gate.peek(req);
     if (session === undefined) {
       refuse(res, 401, "No live session is presented here.");

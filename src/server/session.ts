@@ -38,6 +38,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypt
 import { type IncomingMessage, type ServerResponse } from "node:http";
 import { type Reactor } from "@bombadil/rhizomatic";
 import { CACHE_NO_STORE, endJson } from "./respond.js";
+import { parseLoginBodyFields as formFields, readBodyLenient } from "./body.js";
 import {
   DEFAULT_SCRYPT,
   credentialsPath,
@@ -304,49 +305,9 @@ ${body}
 </html>
 `;
 
+/** session's cap is a door decision (8 KiB — a login form is a few hundred bytes). */
 const readDoorBody = (req: IncomingMessage): Promise<string | undefined> =>
-  new Promise((resolve) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    let over = false;
-    req.on("data", (chunk: Buffer) => {
-      if (over) return;
-      size += chunk.length;
-      if (size > MAX_BODY) {
-        over = true;
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on("end", () => resolve(over ? undefined : Buffer.concat(chunks).toString("utf8")));
-    req.on("error", () => resolve(undefined));
-  });
-
-// A form POST or a JSON body — both reach the same field map. `URLSearchParams` decodes what
-// browsers encode (`+` for space, UTF-8 percent-escapes) and never throws on a mangled escape —
-// a typo in a password must be a wrong password, never a 503 through the outer guard.
-function formFields(
-  body: string | undefined,
-  contentType: string | undefined,
-): Map<string, string> {
-  const out = new Map<string, string>();
-  if (body === undefined) return out;
-  if ((contentType ?? "").includes("application/json")) {
-    try {
-      const parsed: unknown = JSON.parse(body);
-      if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
-        for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-          if (typeof v === "string") out.set(k, v);
-        }
-      }
-    } catch {
-      return out;
-    }
-    return out;
-  }
-  for (const [k, v] of new URLSearchParams(body)) out.set(k, v);
-  return out;
-}
+  readBodyLenient(req, MAX_BODY);
 
 /**
  * Two secrets, compared in time that does not depend on where they first differ. Exported so a

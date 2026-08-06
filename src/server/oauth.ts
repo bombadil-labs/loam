@@ -15,6 +15,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { type IncomingMessage, type ServerResponse } from "node:http";
 import { CACHE_NO_STORE, endJson, JSON_CONTENT_TYPE } from "./respond.js";
+import { parseUrlEncoded, readBodyLenient } from "./body.js";
 import { authorForSeed } from "@bombadil/rhizomatic";
 import {
   OAuthFileBusy,
@@ -264,24 +265,9 @@ const WELL_KNOWN_PATHS = new Set([
 
 const REGISTER_PATH = "/oauth/register";
 
-/** Read a request body, capped — a registration is a few hundred bytes. `undefined` past the cap. */
+/** oauth's cap is a door decision (16 KiB — a registration is a few hundred bytes). */
 const readBody = (req: IncomingMessage): Promise<string | undefined> =>
-  new Promise((resolve) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    let over = false;
-    req.on("data", (chunk: Buffer) => {
-      if (over) return;
-      size += chunk.length;
-      if (size > MAX_BODY) {
-        over = true;
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on("end", () => resolve(over ? undefined : Buffer.concat(chunks).toString("utf8")));
-    req.on("error", () => resolve(undefined));
-  });
+  readBodyLenient(req, MAX_BODY);
 
 export function makeOAuthDoors(options: OAuthOptions): OAuthDoors {
   const publicUrl = options.publicUrl;
@@ -674,12 +660,7 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
   };
 
   const readBodyFields = (req: IncomingMessage): Promise<Map<string, string>> =>
-    readBody(req).then((body) => {
-      const out = new Map<string, string>();
-      if (body === undefined) return out;
-      for (const [k, v] of new URLSearchParams(body)) out.set(k, v);
-      return out;
-    });
+    readBody(req).then((body) => parseUrlEncoded(body ?? ""));
 
   const handleGet = (req: IncomingMessage, res: ServerResponse): void => {
     // Behind a phase-5 session. No session → the login form, and nothing minted. READ, don't slide:
@@ -1172,12 +1153,7 @@ export function makeTokenDoor(options: TokenDoorOptions): TokenDoor {
   }
 
   const readBodyFields = (req: IncomingMessage): Promise<Map<string, string>> =>
-    readBody(req).then((body) => {
-      const out = new Map<string, string>();
-      if (body === undefined) return out;
-      for (const [k, v] of new URLSearchParams(body)) out.set(k, v);
-      return out;
-    });
+    readBody(req).then((body) => parseUrlEncoded(body ?? ""));
 
   return {
     owns: (pathname) => pathname === TOKEN_PATH,
