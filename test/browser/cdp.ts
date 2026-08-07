@@ -216,7 +216,10 @@ export class Browser {
 
   async close(): Promise<void> {
     this.child.kill();
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    rmSync(this.userDataDir, { recursive: true, force: true });
+    await new Promise((resolve) => {
+      this.child.once("exit", resolve);
+      setTimeout(resolve, 5000).unref();
+    });
+    rmSync(this.userDataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
 }
