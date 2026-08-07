@@ -72,19 +72,6 @@
       "authorized": "Myk, 2026-08-05 \u2014 authorized in chat: widen the consent page's pinned form-action by the registered redirect origin so real Chrome can land the approval"
     },
     {
-      "//": "T143 rail-driver REPAIR. The browser rail's 30s deadline covers both CDP operations and Chrome's cold start, and a loaded windows-latest runner missed the start once ('Chrome never wrote DevToolsActivePort', PR #342's run) while every unloaded run passes \u2014 the same loaded-runner I/O class vitest.config already budgets for. Launch gets its own 120s budget; every CDP operation keeps 30s. No assertion moves.",
-      "from": "const DEADLINE_MS = 30_000;",
-      "to": "const DEADLINE_MS = 30_000; // per CDP operation; Chrome's cold start gets its own budget below",
-      "files": ["test/browser/cdp.ts"],
-      "authorized": "Myk, 2026-08-05 \u2014 authorized in chat: give Chrome launch its own deadline so a loaded runner is not a red bar. Pair 1 of 2."
-    },
-    {
-      "from": "const deadline = Date.now() + DEADLINE_MS;",
-      "to": "const deadline = Date.now() + 120_000; // cold start on a loaded CI runner legitimately exceeds the per-op budget",
-      "files": ["test/browser/cdp.ts"],
-      "authorized": "Myk, 2026-08-05 \u2014 authorized in chat. Pair 2 of 2."
-    },
-    {
       "//": "T143 rail-driver REPAIR, teardown half. Browser.close() kills Chrome, sleeps a fixed 200ms, then rmSync's the profile dir. On a windows runner Chrome's teardown can outlive the sleep while holding file locks, so the rm dies EPERM and fails the suite (observed on PR #351's run during the 2026-08-06 Actions outage recovery). The pairs wait for the child's real exit (5s ceiling, timer unref'd so a dead-on-arrival Chrome cannot hold the loop) and give the removal retries. No assertion moves; only teardown.",
       "from": "await new Promise((resolve) => setTimeout(resolve, 200));",
       "to": "await new Promise((resolve) => { this.child.once(\"exit\", resolve); setTimeout(resolve, 5000).unref(); });",
