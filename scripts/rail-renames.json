@@ -83,6 +83,19 @@
       "to": "const deadline = Date.now() + 120_000; // cold start on a loaded CI runner legitimately exceeds the per-op budget",
       "files": ["test/browser/cdp.ts"],
       "authorized": "Myk, 2026-08-05 \u2014 authorized in chat. Pair 2 of 2."
+    },
+    {
+      "//": "T143 rail-driver REPAIR, teardown half. Browser.close() kills Chrome, sleeps a fixed 200ms, then rmSync's the profile dir. On a windows runner Chrome's teardown can outlive the sleep while holding file locks, so the rm dies EPERM and fails the suite (observed on PR #351's run during the 2026-08-06 Actions outage recovery). The pairs wait for the child's real exit (5s ceiling, timer unref'd so a dead-on-arrival Chrome cannot hold the loop) and give the removal retries. No assertion moves; only teardown.",
+      "from": "await new Promise((resolve) => setTimeout(resolve, 200));",
+      "to": "await new Promise((resolve) => { this.child.once(\"exit\", resolve); setTimeout(resolve, 5000).unref(); });",
+      "files": ["test/browser/cdp.ts"],
+      "authorized": "Myk, 2026-08-06 \u2014 authorized in chat: wait for Chrome's real exit before removing its profile. Pair 1 of 2."
+    },
+    {
+      "from": "rmSync(this.userDataDir, { recursive: true, force: true });",
+      "to": "rmSync(this.userDataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });",
+      "files": ["test/browser/cdp.ts"],
+      "authorized": "Myk, 2026-08-06 \u2014 authorized in chat. Pair 2 of 2."
     }
   ]
 }
