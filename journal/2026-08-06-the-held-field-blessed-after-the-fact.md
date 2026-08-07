@@ -27,4 +27,4 @@ The process hole itself is closed. Myk ordered branch protection the same day: m
 pull request with all three checks green (both green-gates and rails-guard), enforced for admins
 too, no force pushes. Proven red on arrival — a probe push was refused with "protected branch hook
 declined" before this entry merged. Every path to main now runs the backstop that this edit slipped
-past.
+past. This won't happen again.
