@@ -72,17 +72,11 @@
       "authorized": "Myk, 2026-08-05 \u2014 authorized in chat: widen the consent page's pinned form-action by the registered redirect origin so real Chrome can land the approval"
     },
     {
-      "//": "T143 rail-driver REPAIR, teardown half. Browser.close() kills Chrome, sleeps a fixed 200ms, then rmSync's the profile dir. On a windows runner Chrome's teardown can outlive the sleep while holding file locks, so the rm dies EPERM and fails the suite (observed on PR #351's run during the 2026-08-06 Actions outage recovery). The pairs wait for the child's real exit (5s ceiling, timer unref'd so a dead-on-arrival Chrome cannot hold the loop) and give the removal retries. No assertion moves; only teardown.",
-      "from": "await new Promise((resolve) => setTimeout(resolve, 200));",
-      "to": "await new Promise((resolve) => { this.child.once(\"exit\", resolve); setTimeout(resolve, 5000).unref(); });",
-      "files": ["test/browser/cdp.ts"],
-      "authorized": "Myk, 2026-08-06 \u2014 authorized in chat: wait for Chrome's real exit before removing its profile. Pair 1 of 2."
-    },
-    {
-      "from": "rmSync(this.userDataDir, { recursive: true, force: true });",
-      "to": "rmSync(this.userDataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });",
-      "files": ["test/browser/cdp.ts"],
-      "authorized": "Myk, 2026-08-06 \u2014 authorized in chat. Pair 2 of 2."
+      "//": "T67 rail REPAIR. archive.test.ts's private testTimeout of 15000 predates the repo-wide raise to 20s (vitest.config.mjs), which was made precisely because byte-level erasure rails boundary-flake on loaded windows runners \u2014 the file's own override quietly undoes that repair, and the many-ids purge sweep timed out twice on loaded runners (PR #342's and PR #355's runs). The pair aligns the file with the repo default. No assertion moves; only the I/O budget.",
+      "from": "vi.setConfig({ testTimeout: 15000 });",
+      "to": "vi.setConfig({ testTimeout: 20_000 });",
+      "files": ["test/store/archive.test.ts"],
+      "authorized": "Myk, 2026-08-10 \u2014 authorized in chat: drop the stale 15s override so the repo's 20s I/O budget governs"
     }
   ]
 }
