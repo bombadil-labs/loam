@@ -1,10 +1,10 @@
 {
   "//": [
-    "Authorized vocabulary renames inside FROZEN rails \u2014 read by scripts/rails-guard-ci.mjs.",
+    "Authorized vocabulary renames inside FROZEN rails — read by scripts/rails-guard-ci.mjs.",
     "",
     "THE GATE READS THIS FILE FROM THE BASE TREE, NEVER FROM THE BRANCH. That is the entire",
     "security model: a branch cannot self-authorize, because the entry that exempts its edit",
-    "must already be on main \u2014 i.e. it arrived through a PR a human reviewed. Two-PR",
+    "must already be on main — i.e. it arrived through a PR a human reviewed. Two-PR",
     "discipline, enforced mechanically (Myk, 2026-07-26): first land the authorization here,",
     "then open the rename.",
     "",
@@ -14,7 +14,7 @@
     "",
     "Shape: { from, to, files?, authorized }. `files` limits the pair to exact paths; an",
     "UNSCOPED pair applies to every frozen rail and must be word-shaped (identifier or quoted",
-    "literal) \u2014 a SCOPED pair may carry wider literals (a regex fragment, a title phrase)",
+    "literal) — a SCOPED pair may carry wider literals (a regex fragment, a title phrase)",
     "because the reviewer reads it against the named files. `authorized` names who and when.",
     "Remove entries once the rename that consumed them has merged; a spent entry is inert",
     "(the substitution no longer produces the base) but tidiness keeps this file reviewable."
@@ -25,58 +25,51 @@
       "from": "including the one it PRESENTED. A P5 lens caught the original ordering dropping the",
       "to": "an evicting implementation would answer 200 here. This login PRESENTS NO SESSION, so it",
       "files": ["test/server/login-door.test.ts"],
-      "authorized": "Myk, 2026-07-31 \u2014 correct an overclaiming comment in T126's frozen rail"
+      "authorized": "Myk, 2026-07-31 — correct an overclaiming comment in T126's frozen rail"
     },
     {
       "from": "caller's live session before discovering the table was full, so the refusal concealed an",
       "to": "cannot reach the drop-versus-cap ordering in `open`: a caller presenting a live session is",
       "files": ["test/server/login-door.test.ts"],
-      "authorized": "Myk, 2026-07-31 \u2014 correct an overclaiming comment in T126's frozen rail"
+      "authorized": "Myk, 2026-07-31 — correct an overclaiming comment in T126's frozen rail"
     },
     {
       "from": "erasure; the presented-session probe after the 503 is that finding's rail.",
       "to": "always discounted a seat, so no 503 can co-occur with one. Only a unit rail pins that.",
       "files": ["test/server/login-door.test.ts"],
-      "authorized": "Myk, 2026-07-31 \u2014 correct an overclaiming comment in T126's frozen rail"
+      "authorized": "Myk, 2026-07-31 — correct an overclaiming comment in T126's frozen rail"
     },
     {
       "from": "//   - `createSessionTable`'s own semantics: it is a SECOND, unused implementation (see the",
       "to": "//   - Any door beyond `/session/token`. Phase 14's consent page rides this session through its",
       "files": ["test/server/session-token.test.ts"],
-      "authorized": "Myk, 2026-07-31 \u2014 merging this entry authorizes the edit. T128's rail header names a gap that createSessionTable's deletion removes; the three pairs replace that bullet with a gap that is still true. Line 1 of 3."
+      "authorized": "Myk, 2026-07-31 — merging this entry authorizes the edit. T128's rail header names a gap that createSessionTable's deletion removes; the three pairs replace that bullet with a gap that is still true. Line 1 of 3."
     },
     {
       "from": "//     working spec's named gap and its ticket). test/server/session-table.test.ts is green about",
       "to": "//     own window; this file rails the mint door only, and asserts nothing about the shape of",
       "files": ["test/server/session-token.test.ts"],
-      "authorized": "Myk, 2026-07-31 \u2014 merging this entry authorizes the edit. Line 2 of 3."
+      "authorized": "Myk, 2026-07-31 — merging this entry authorizes the edit. Line 2 of 3."
     },
     {
       "from": "//     code no request in this file executes.",
       "to": "//     the consent that window carries.",
       "files": ["test/server/session-token.test.ts"],
-      "authorized": "Myk, 2026-07-31 \u2014 merging this entry authorizes the edit. Line 3 of 3."
+      "authorized": "Myk, 2026-07-31 — merging this entry authorizes the edit. Line 3 of 3."
     },
     {
-      "//": "T136 rail REPAIR. The (1) single-use test builds its wrong verifier as verifier.replace(/.$/, \"A\"). A 32-byte verifier is 43 base64url chars whose LAST char carries only 4 bits, so ~6% already end in \"A\" (measured 12357/200000 = 6.18%) \u2014 the substitution then changes nothing, the wrong verifier IS the right one, redemption correctly answers 200, and the rail fails. On those runs the PKCE-mismatch path is never exercised. The replacement mutates to a char that cannot equal the original: 0 of 200000 unchanged. EXPRESSION ONLY \u2014 the first attempt tried to add explanatory comments in the same pair and was correctly refused as malformed, because the guard caps a pair at one line of 120 printable chars.",
+      "//": "T136 rail REPAIR. The (1) single-use test builds its wrong verifier as verifier.replace(/.$/, \"A\"). A 32-byte verifier is 43 base64url chars whose LAST char carries only 4 bits, so ~6% already end in \"A\" (measured 12357/200000 = 6.18%) — the substitution then changes nothing, the wrong verifier IS the right one, redemption correctly answers 200, and the rail fails. On those runs the PKCE-mismatch path is never exercised. The replacement mutates to a char that cannot equal the original: 0 of 200000 unchanged. EXPRESSION ONLY — the first attempt tried to add explanatory comments in the same pair and was correctly refused as malformed, because the guard caps a pair at one line of 120 printable chars.",
       "from": "verifier.replace(/.$/, \"A\")",
       "to": "verifier.slice(0, -1) + (verifier.endsWith(\"A\") ? \"B\" : \"A\")",
       "files": ["test/server/oauth-token.test.ts"],
-      "authorized": "Myk, 2026-08-05 \u2014 repair a PKCE fixture whose mutation sometimes did not mutate; authorized in chat, re-shaped to one line after the guard refused the first pair"
+      "authorized": "Myk, 2026-08-05 — repair a PKCE fixture whose mutation sometimes did not mutate; authorized in chat, re-shaped to one line after the guard refused the first pair"
     },
     {
-      "//": "T135 rail REPAIR (T143's second finding). The (4) test pins the consent page's CSP byte-for-byte to the shared constant, whose form-action is 'self' alone. Chrome enforces form-action against a form POST's REDIRECT TARGET, so under that CSP the approval's 302 to the connector is blocked in a real browser \u2014 the OAuth flow completes in every hand-built fixture and in no real Chrome. The repair widens the pinned expectation by exactly the REGISTERED redirect origin, which is where the 302 already goes; the test's intent (no-script, no live markup) is untouched, and the T143 branch adds the two-sided rail: refusal pages keep the unwidened CSP.",
+      "//": "T135 rail REPAIR (T143's second finding). The (4) test pins the consent page's CSP byte-for-byte to the shared constant, whose form-action is 'self' alone. Chrome enforces form-action against a form POST's REDIRECT TARGET, so under that CSP the approval's 302 to the connector is blocked in a real browser — the OAuth flow completes in every hand-built fixture and in no real Chrome. The repair widens the pinned expectation by exactly the REGISTERED redirect origin, which is where the 302 already goes; the test's intent (no-script, no live markup) is untouched, and the T143 branch adds the two-sided rail: refusal pages keep the unwidened CSP.",
       "from": "toBe(CSP);",
       "to": "toBe(CSP.replace(\"form-action 'self'\", `form-action 'self' ${ALLOW_ORIGIN}`));",
       "files": ["test/server/oauth-consent.test.ts"],
-      "authorized": "Myk, 2026-08-05 \u2014 authorized in chat: widen the consent page's pinned form-action by the registered redirect origin so real Chrome can land the approval"
-    },
-    {
-      "//": "T67 rail REPAIR. archive.test.ts's private testTimeout of 15000 predates the repo-wide raise to 20s (vitest.config.mjs), which was made precisely because byte-level erasure rails boundary-flake on loaded windows runners \u2014 the file's own override quietly undoes that repair, and the many-ids purge sweep timed out twice on loaded runners (PR #342's and PR #355's runs). The pair aligns the file with the repo default. No assertion moves; only the I/O budget.",
-      "from": "vi.setConfig({ testTimeout: 15000 });",
-      "to": "vi.setConfig({ testTimeout: 20_000 });",
-      "files": ["test/store/archive.test.ts"],
-      "authorized": "Myk, 2026-08-10 \u2014 authorized in chat: drop the stale 15s override so the repo's 20s I/O budget governs"
+      "authorized": "Myk, 2026-08-05 — authorized in chat: widen the consent page's pinned form-action by the registered redirect origin so real Chrome can land the approval"
     }
   ]
 }

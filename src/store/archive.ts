@@ -21,18 +21,13 @@
 
 /* eslint-disable @typescript-eslint/require-await -- the async keyword is load-bearing: it
    turns every synchronous throw into the rejected promise the seam promises. */
-import {
-  closeSync,
-  existsSync,
-  fsyncSync,
-  mkdirSync,
-  openSync,
-  readdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { open, rename, rm } from "node:fs/promises";
+
+// How many delta files may be mid-flush at once. Each still keeps write→fsync→rename order;
+// the pool only overlaps the waiting. Sixteen holds the fd footprint small while collapsing a
+// federation-sized batch's flush time from the sum of its fsyncs to roughly their depth (T155).
+const WRITE_POOL = 16;
 import { join } from "node:path";
 import {
   claimsToJson,
@@ -109,46 +104,58 @@ export class ArchiveBackend implements StoreBackend {
       seen.add(canon.id);
       fresh.push(canon);
     }
+    // The per-delta order is sacred — write, FSYNC, then rename, so the bytes are durable
+    // before the real name exists and no crash leaves a half-written delta wearing one. What
+    // is NOT sacred is running those flushes one at a time: an fsync is tens of milliseconds
+    // on a cloud disk, and a federation-sized batch serialized on the event loop pays the sum
+    // (T155 measured 200 deltas at 12s on a Windows runner). A bounded pool overlaps the
+    // flushes; each file still keeps its own order, and the first failure still refuses the
+    // batch loudly after the in-flight chunk settles.
     let stored = 0;
-    for (const d of fresh) {
-      const target = this.fileFor(d.id);
-      if (existsSync(target)) {
-        this.onDisk.add(d.id); // another handle got here first — same name, same bytes
-        continue;
+    for (let at = 0; at < fresh.length; at += WRITE_POOL) {
+      const chunk = fresh.slice(at, at + WRITE_POOL);
+      const settled = await Promise.allSettled(chunk.map((d) => this.writeOne(d)));
+      for (const s of settled) {
+        if (s.status === "fulfilled") stored += s.value;
+        else throw s.reason;
       }
-      mkdirSync(join(this.root, d.id.slice(0, 2)), { recursive: true });
-      const row: ArchiveRow = {
-        claims: claimsToJson(d.claims),
-        ...(d.sig !== undefined && { sig: d.sig }),
-      };
-      // Write, FSYNC, then rename: the bytes are durable before the real name exists, so
-      // neither a process crash nor a power loss leaves a half-written delta wearing a real
-      // name — at worst a `.tmp` straggler, which reads ignore (and nothing yet collects).
-      // The rename's own directory entry rides the OS's rename durability, which is the same
-      // honesty sqlite's `synchronous = NORMAL` keeps: a crash can lose the newest delta, never
-      // corrupt an older one — and a lost newest is exactly what union tolerates.
-      const tmp = `${target}.${process.pid}.tmp`;
-      const fd = openSync(tmp, "w");
-      try {
-        writeSync(fd, `${JSON.stringify(row)}\n`);
-        fsyncSync(fd);
-      } finally {
-        closeSync(fd);
-      }
-      try {
-        renameSync(tmp, target);
-      } catch (err) {
-        // A failed rename must not leave the temp file behind: it holds a FULL delta under a
-        // name no read returns — the byte-at-rest shape `holds` and §11 exist to hunt — and a
-        // bad target lands it in the process CWD, where the next `git add -A` offers it to
-        // history, beyond any purge's reach.
-        rmSync(tmp, { force: true });
-        throw err;
-      }
-      this.onDisk.add(d.id);
-      stored += 1;
     }
     return stored;
+  }
+
+  /** One delta to disk, in the order the durability comment above demands. Returns 1 if this
+   *  call stored it, 0 if another handle already had. */
+  private async writeOne(d: Delta): Promise<number> {
+    const target = this.fileFor(d.id);
+    if (existsSync(target)) {
+      this.onDisk.add(d.id); // another handle got here first — same name, same bytes
+      return 0;
+    }
+    mkdirSync(join(this.root, d.id.slice(0, 2)), { recursive: true });
+    const row: ArchiveRow = {
+      claims: claimsToJson(d.claims),
+      ...(d.sig !== undefined && { sig: d.sig }),
+    };
+    const tmp = `${target}.${process.pid}.tmp`;
+    const fh = await open(tmp, "w");
+    try {
+      await fh.write(`${JSON.stringify(row)}\n`);
+      await fh.sync();
+    } finally {
+      await fh.close();
+    }
+    try {
+      await rename(tmp, target);
+    } catch (err) {
+      // A failed rename must not leave the temp file behind: it holds a FULL delta under a
+      // name no read returns — the byte-at-rest shape `holds` and §11 exist to hunt — and a
+      // bad target lands it in the process CWD, where the next `git add -A` offers it to
+      // history, beyond any purge's reach.
+      await rm(tmp, { force: true });
+      throw err;
+    }
+    this.onDisk.add(d.id);
+    return 1;
   }
 
   async deltasSince(knownIds: ReadonlySet<string>): Promise<Delta[]> {
