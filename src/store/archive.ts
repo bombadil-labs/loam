@@ -28,6 +28,12 @@ import { open, rename, rm } from "node:fs/promises";
 // the pool only overlaps the waiting. Sixteen holds the fd footprint small while collapsing a
 // federation-sized batch's flush time from the sum of its fsyncs to roughly their depth (T155).
 const WRITE_POOL = 16;
+
+// Tmp names carry pid AND a per-process sequence: pid alone was enough while the write path was
+// synchronous (one handle's write→fsync→rename could not interleave with another's), but the
+// pooled path yields, and two same-process handles racing one id would open the SAME tmp — each
+// "w" truncating the other, a rename able to promote a not-yet-fsynced file into the real name.
+let tmpSeq = 0;
 import { join } from "node:path";
 import {
   claimsToJson,
@@ -136,7 +142,7 @@ export class ArchiveBackend implements StoreBackend {
       claims: claimsToJson(d.claims),
       ...(d.sig !== undefined && { sig: d.sig }),
     };
-    const tmp = `${target}.${process.pid}.tmp`;
+    const tmp = `${target}.${process.pid}.${tmpSeq++}.tmp`;
     const fh = await open(tmp, "w");
     try {
       await fh.write(`${JSON.stringify(row)}\n`);
