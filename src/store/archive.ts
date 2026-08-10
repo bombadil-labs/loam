@@ -16,8 +16,10 @@
 // the bad file — the next heal rewrites it from the primary's healthy copy.
 //
 // Batch atomicity, honestly: VALIDATION is atomic (the whole batch is gated before any file is
-// written), matching the contract's refusal semantics. An IO failure mid-batch may leave a
-// prefix of files behind — which union semantics render harmless: re-appending is a no-op.
+// written), matching the contract's refusal semantics. An IO failure mid-batch leaves every
+// earlier chunk plus the failing chunk's fulfilled peers behind — a non-contiguous subset, not
+// a prefix, since the pool lets in-flight writes settle before the batch refuses. Union
+// semantics render either shape harmless: re-appending is a no-op.
 
 /* eslint-disable @typescript-eslint/require-await -- the async keyword is load-bearing: it
    turns every synchronous throw into the rejected promise the seam promises. */
