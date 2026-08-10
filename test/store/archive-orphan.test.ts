@@ -1,5 +1,6 @@
 // One rail, in its own file because it mocks the filesystem seam and the mock is file-wide: a
-// failed rename in `ArchiveBackend.append` must unlink its temp file. Left behind, the orphan is
+// failed rename in `ArchiveBackend.append` must unlink its temp file (the write path is async
+// since T155, so the mocked seam is fs/promises). Left behind, the orphan is
 // a FULL delta at a name no read returns — the byte-at-rest shape §11 hunts — and wherever the
 // write landed, the next `git add -A` offers it to history, where no purge reaches.
 
@@ -9,18 +10,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FERN, GARDENER_SEED, observed } from "../spike/garden.js";
 
-vi.mock("node:fs", async (importOriginal) => {
-  const real = await importOriginal<typeof import("node:fs")>();
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const real = await importOriginal<typeof import("node:fs/promises")>();
   return {
     ...real,
-    renameSync: (from: string, to: string) => {
+    rename: async (from: string, to: string) => {
       if (String(from).endsWith(".tmp")) throw new Error("simulated rename failure (EIO)");
-      return real.renameSync(from, to);
+      return real.rename(from, to);
     },
   };
 });
 
-// Imported AFTER the mock so the driver binds the throwing renameSync.
+// Imported AFTER the mock so the driver binds the throwing rename.
 const { ArchiveBackend } = await import("../../src/store/archive.js");
 
 describe("ArchiveBackend.append never strands its temp file", () => {
