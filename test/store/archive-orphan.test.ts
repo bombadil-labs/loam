@@ -21,7 +21,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   };
 });
 
-// Imported AFTER the mock so the driver binds the throwing renameSync.
+// Imported AFTER the mock so the driver binds the throwing rename.
 const { ArchiveBackend } = await import("../../src/store/archive.js");
 
 describe("ArchiveBackend.append never strands its temp file", () => {
