@@ -121,4 +121,17 @@ describe("serve --archive <relative>, run from a foreign working directory", () 
     // And serve's own announcement names the home's vault, so the operator reads the truth.
     expect(out.join("\n")).toContain(`archive ${vault}`);
   });
+
+  it("--store <relative> lands the sqlite inside the home, and NOTHING in the CWD", async () => {
+    const handle = await run(
+      ["serve", "--http", "--port", "0", "--token", "t", "--home", home, "--store", "db.sqlite"],
+      io(),
+      { detach: true },
+    );
+    if (typeof handle === "number") throw new Error(`serve failed: ${err.join("\n")}`);
+    await handle.close();
+
+    expect(existsSync(join(home, "db.sqlite"))).toBe(true);
+    expect(readdirSync(scratch)).toEqual([]);
+  });
 });
