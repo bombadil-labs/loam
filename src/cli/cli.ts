@@ -64,10 +64,14 @@ import {
   archivePath,
   homeDefect,
   initHome,
+  penSeedPath,
+  readPenSeed,
+  readPenSeeds,
   readSeed,
   readUserSeed,
   storePath,
   userSeedPath,
+  writePenSeed,
   writeUserSeed,
 } from "./config.js";
 
@@ -97,6 +101,7 @@ type CommandName =
   | "repair"
   | "artifact"
   | "user"
+  | "pen"
   | "grant";
 
 interface CommandSpec {
@@ -231,6 +236,23 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "--role=operator` again, which mints a fresh key and files a fresh grant. Even the LAST",
       "operator may remove their own role this way and reassign it — both commands need only home",
       "access, never a live session, so the store is never lockable from a terminal that can read it.",
+    ],
+  },
+  pen: {
+    summary: "provision a renderer pen: mint its seed, grant it write standing (SPEC §23.3)",
+    usage: "loam pen create <name> [options]",
+    flags: new Set(["home", "store"]),
+    notes: [
+      "subcommands:",
+      "  create <name>    mint a signing seed at <home>/pen.<name>.seed (0600) and plant an",
+      "                    operator-signed write grant for its author in the store",
+      "",
+      'A write-enabled renderer binding names a pen (`pen: "<name>"`), and the pen needs BOTH keys',
+      "(§6): the seed file is CUSTODY — `loam serve` reads every pen.<name>.seed at boot and signs",
+      "that pen's form writes with it — and the grant is AUTHORIZATION. This command provides both.",
+      "The seed never enters the ground and is never printed; revocation is striking the grant",
+      "(past writes stay attributed to the pen). Like every role command, this signs with",
+      "<home>/operator.seed and needs only home access, never a live session.",
     ],
   },
   grant: {
@@ -582,9 +604,17 @@ async function cmdServe(
     backend = mirror;
   }
 
+  // Provisioned renderer pens (SPEC §23.3, T102): every `pen.<name>.seed` in the home, read at
+  // boot — the same moment users and credentials are read — and fed to `GatewayOptions.pens` so a
+  // write-enabled renderer's form POSTs have a key to sign with. A pen file that exists but cannot
+  // provision is a FAULT on the operator's log, never a silent skip: silence here resurfaces as a
+  // 403 on the first form submit, the exact puzzle the seed-file convention exists to end.
+  const { pens, faults: penFaults } = readPenSeeds(home);
+  for (const fault of penFaults) io.err(`loam: ${fault}`);
+
   // Boot the store from its genesis (idempotent): a fresh store is born governed; an existing
   // one simply re-lands the same operator identity.
-  const gateway = await Gateway.boot(backend, assembleGenesis({ operatorSeed: seed }));
+  const gateway = await Gateway.boot(backend, assembleGenesis({ operatorSeed: seed }), { pens });
   let server;
   try {
     server = await serve({
@@ -629,7 +659,9 @@ async function cmdServe(
   recordServing(home, server.url, path);
   io.out(
     `loam: serving ${path} at ${server.url}/default${vault === undefined ? "" : `\n  archive ${vault}`}` +
-      (withUsers ? `\n  login at ${publicUrlFlag ?? server.url}/login` : ""),
+      (withUsers ? `\n  login at ${publicUrlFlag ?? server.url}/login` : "") +
+      // Name the provisioned pens so "is my pen provisioned" is answered at boot, not by a 403.
+      (Object.keys(pens).length === 0 ? "" : `\n  pens ${Object.keys(pens).sort().join(", ")}`),
   );
 
   // Closing the server also releases the gateway (and its backend file) — one shutdown, whole.
@@ -1563,6 +1595,115 @@ async function cmdUserRole(
   }
 }
 
+async function cmdPen(args: readonly string[], io: IO): Promise<number> {
+  const parsed = parseFor("pen", args);
+  const sub = parsed.positionals[0];
+  if (sub !== "create") {
+    io.err("pen wants a subcommand: `loam pen create <name>`");
+    return 2;
+  }
+  const name = parsed.positionals[1];
+  if (name === undefined) {
+    io.err("pen create wants a name: `loam pen create <name>`");
+    return 2;
+  }
+  if (parsed.positionals.length > 2) {
+    io.err("pen create takes exactly one name");
+    return 2;
+  }
+  // Checked before ANY path is built from `name` — a pen name is a single path component (the seed
+  // file's own name), never a traversal. The user-name grammar is exactly that discipline.
+  const nameDefect = userNameDefect(name);
+  if (nameDefect !== undefined) {
+    io.err(`pen create: ${nameDefect.replace("is not a user name", "is not a pen name")}`);
+    return 2;
+  }
+  const home = parsed.flags.get("home") ?? defaultHome();
+  const unusable = homeDefect(home, { allowMissing: true });
+  if (unusable !== undefined) {
+    io.err(`pen create: ${unusable}`);
+    return 1;
+  }
+  const init = initHome(home);
+  if (init.created) io.out(`loam: initialized ${home}\n  operator ${init.operator}`);
+
+  // The pen's two keys (§6): the seed file is CUSTODY, the ground's grant is AUTHORIZATION, and
+  // either can exist without the other (a crash between the two writes, a hand-copied file). So
+  // this command asks BOTH halves before it writes anything, and each run converges the pair:
+  // seed absent → mint the file, then plant the grant; seed present without a grant → repair the
+  // grant alone; both present → refuse, because overwriting a live pen's seed would orphan the
+  // grant its author holds.
+  const seedRead = readPenSeed(home, name);
+  if (seedRead.kind === "unreadable") {
+    io.err(
+      `pen create: ${penSeedPath(home, name)} exists but cannot be read (${seedRead.detail}) — ` +
+        `this command will not overwrite a key it cannot see. Nothing was written.`,
+    );
+    return 1;
+  }
+
+  const path = storePath(home, parsed.flags.get("store"));
+  const seed = readSeed(home);
+  const operator = authorForSeed(seed);
+
+  // The seed file lands BEFORE the grant (the `user create` ordering, for the same reason): if the
+  // grant append then fails, a re-run finds the seed present, the grant absent, and repairs the
+  // grant alone. The other order would strand a live grant whose freshly-minted key was lost.
+  let penSeed: string;
+  if (seedRead.kind === "absent") {
+    penSeed = randomBytes(32).toString("hex");
+    try {
+      writePenSeed(home, name, penSeed);
+    } catch (err) {
+      io.err(
+        `pen create: writing ${penSeedPath(home, name)} failed: ` +
+          `${err instanceof Error ? err.message : String(err)}. Nothing was written.`,
+      );
+      return 1;
+    }
+  } else {
+    penSeed = seedRead.seed;
+  }
+  const penAuthor = authorForSeed(penSeed);
+
+  const gateway = await Gateway.boot(openStore(path, io), assembleGenesis({ operatorSeed: seed }));
+  let granted: boolean;
+  try {
+    // ASK THE GROUND for the pen's write standing rather than trusting this run's own memory —
+    // a second grant for an already-granted author would be noise a `revoke` then has to strike twice.
+    granted = survivingGrantClaimIds(gateway.reactor, operator, penAuthor).length > 0;
+    if (seedRead.kind === "present" && granted) {
+      io.err(
+        `pen create: ${name} is already provisioned — ${penSeedPath(home, name)} exists and its ` +
+          `author holds a write grant. Nothing was written. To retire the pen, strike its grant; ` +
+          `to re-key it, remove the seed file first (past writes stay attributed to the old key).`,
+      );
+      return 2;
+    }
+    if (!granted) {
+      await gateway.append([
+        signClaims(grantClaims(STORE_ENTITY, penAuthor, "write", operator, Date.now()), seed),
+      ]);
+    }
+  } finally {
+    await gateway.close();
+  }
+
+  io.out(
+    seedRead.kind === "present"
+      ? `loam: repaired pen ${name} — the seed file was already at ${penSeedPath(home, name)}, ` +
+          `and the missing write grant for its author is now in ${path}`
+      : `loam: provisioned pen ${name}\n` +
+          `  the seed is at ${penSeedPath(home, name)} (0600) — it never enters the ground\n` +
+          `  a write grant for its author is in ${path}\n` +
+          `  a renderer binding names it with pen: "${name}"; the next serve reads the seed file`,
+  );
+  // Serve reads pen seeds at BOOT, so a live server will not see this pen until it restarts.
+  const staleness = servingWarning(home, path);
+  if (staleness !== undefined) io.err(`loam: ${staleness}`);
+  return 0;
+}
+
 async function cmdGrant(args: readonly string[], io: IO): Promise<number> {
   const parsed = parseFor("grant", args);
   const sub = parsed.positionals[0];
@@ -1740,6 +1881,8 @@ export async function run(
         return await cmdArtifact(rest, io);
       case "user":
         return await cmdUser(rest, io, options);
+      case "pen":
+        return await cmdPen(rest, io);
       case "grant":
         return await cmdGrant(rest, io);
       default:

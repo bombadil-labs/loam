@@ -740,10 +740,25 @@ export async function writeRouteImpl(
       };
     }
   }
-  // The pen must be PROVISIONED (its seed in config) — custody. Absent → refuse (nothing to sign with).
+  // The pen must be PROVISIONED (its seed in config) — custody. Absent → refuse (nothing to sign
+  // with). The refusal NAMES THE CURE, but only on the token door: a stranger gets the same uniform
+  // body as any refused write below, because the pen's name and the store's file layout are the
+  // operator's business, not the anonymous fan's.
   const penSeed = gw.options.pens?.[binding.pen];
   if (penSeed === undefined) {
-    return { status: 403, contentType: text, body: "this renderer's pen is not provisioned" };
+    if (door === "public") {
+      return { status: 403, contentType: text, body: "the write was refused" };
+    }
+    return {
+      status: 403,
+      contentType: text,
+      body:
+        `this renderer's pen ("${binding.pen}") is not provisioned — no seed was supplied for it, ` +
+        `so the store has nothing to sign this write with. A CLI-served store provisions a pen ` +
+        `from a pen.${binding.pen}.seed file in its home: \`loam pen create ${binding.pen}\` mints ` +
+        `the seed and grants the pen write standing, and the next \`loam serve\` reads it. An ` +
+        `embedding provisions it in GatewayOptions.pens.`,
+    };
   }
   // A PROBATIONARY POOL ASKS ITS HOST'S LIVE WORD (SPEC §24.7, following the §12 precedent in
   // mounts.ts). A pool holds a SEEDED COPY of the operator's grants, frozen until someone calls

@@ -13,6 +13,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   statSync,
   writeFileSync,
@@ -137,6 +138,71 @@ export function readUserSeed(home: string, name: string): UserSeedRead {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return { kind: "absent" };
     return { kind: "unreadable", detail: err instanceof Error ? err.message : String(err) };
   }
+}
+
+// A renderer pen's signing key (SPEC §23.3, T102): one file per provisioned pen, beside
+// `operator.seed` and the `user.<name>.seed` files, at the same 0600 mode and under the same
+// law — the seed never enters the ground, and the filesystem is the trust root. The file name
+// IS the provisioning: `loam serve` reads every `pen.<name>.seed` at boot and hands the map to
+// `GatewayOptions.pens`, keyed by the `<name>` a renderer binding cites.
+export const penSeedPath = (home: string, name: string): string => join(home, `pen.${name}.seed`);
+
+export function writePenSeed(home: string, name: string, seed: string): void {
+  writeFileSync(penSeedPath(home, name), `${seed}\n`, { mode: 0o600 });
+}
+
+/** The same three-way read as a user seed (H9): "no file" and "a file I could not read" must
+ * never collapse — only the first means the pen is unprovisioned. */
+export function readPenSeed(home: string, name: string): UserSeedRead {
+  try {
+    return { kind: "present", seed: readFileSync(penSeedPath(home, name), "utf8").trim() };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { kind: "absent" };
+    return { kind: "unreadable", detail: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export interface PenSeeds {
+  readonly pens: Readonly<Record<string, string>>; // name → seed, the GatewayOptions.pens shape
+  readonly faults: readonly string[]; // one line per file that exists and could not provision
+}
+
+/**
+ * Every `pen.<name>.seed` in the home, as the map `loam serve` feeds `GatewayOptions.pens`. A file
+ * that exists but cannot provision — unreadable, or not a 64-hex seed — is a FAULT, never a silent
+ * skip: a skipped pen would surface only as a 403 on the first form POST, which is exactly the
+ * twenty-minute puzzle this convention exists to end.
+ */
+export function readPenSeeds(home: string): PenSeeds {
+  const pens: Record<string, string> = {};
+  const faults: string[] = [];
+  let entries: string[];
+  try {
+    entries = readdirSync(home);
+  } catch {
+    return { pens, faults }; // no home directory yet → nothing is provisioned, nothing to report
+  }
+  for (const entry of entries) {
+    const match = /^pen\.(.+)\.seed$/.exec(entry);
+    if (match === null) continue;
+    const name = match[1] as string;
+    const read = readPenSeed(home, name);
+    if (read.kind === "unreadable") {
+      faults.push(
+        `pen "${name}" is not provisioned — ${penSeedPath(home, name)} is unreadable: ${read.detail}`,
+      );
+      continue;
+    }
+    if (read.kind === "absent") continue; // raced away between readdir and read; absent is absent
+    if (!/^[0-9a-f]{64}$/.test(read.seed)) {
+      faults.push(
+        `pen "${name}" is not provisioned — ${penSeedPath(home, name)} does not hold a 64-hex seed`,
+      );
+      continue;
+    }
+    pens[name] = read.seed;
+  }
+  return { pens, faults };
 }
 
 export function readConfig(home: string): LoamConfig {
