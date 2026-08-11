@@ -7,12 +7,15 @@ import { defineConfig } from "vitest/config";
 // ONE file, so that a failed removal of a Chrome scratch profile on win32 stops reddening every
 // pull request. Read the shim's header for the deadlock it breaks and why the redirect is a
 // `transform` rather than a setup file or a resolver alias.
+// Posix separators on purpose: vite's module ids are posix-normalized on every platform, and this
+// value is returned AS an id. A backslash path resolves on Linux by luck and breaks on Windows,
+// which is the only platform the shim exists for.
 const SHIM = join(
   dirname(fileURLToPath(import.meta.url)),
   "test",
   "setup",
   "windows-teardown-tolerance.ts",
-);
+).replace(/\\/g, "/");
 const SENTINEL = "t156-tolerant-fs";
 const CDP_IMPORT = `import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";`;
 
