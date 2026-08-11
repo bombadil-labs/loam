@@ -36,8 +36,8 @@ export function killTree(child: ChildProcess): void {
  *
  * Windows refuses to remove a directory while any handle beneath it is open, so a straggling Chrome
  * child turns teardown into `EPERM ... rm '<profile>'` — raised on the profile ROOT, after its
- * contents are already gone. That flake failed CI four times (#362, #368, #375, and one before
- * them), and ten retries at 200ms did not outlast it.
+ * contents are already gone. That flake failed CI five times (#362, #368, #375, #379, and one
+ * before them), and ten retries at 200ms did not outlast it.
  *
  * `killTree` removes the cause. This is the second line of defence for the case where it does not:
  * the profile is scratch in the runner's own temp directory, it is measured in megabytes, and the
