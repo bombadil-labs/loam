@@ -141,6 +141,14 @@ export {
 } from "./gateway/container.js";
 export { freezeMembers, type ModuleVersion } from "./gateway/container-identity.js";
 export {
+  LISTING_DEFAULT_LIMIT,
+  LISTING_MAX_LIMIT,
+  listingContainerName,
+  listingContexts,
+  listingMembershipJson,
+  type ListOptions,
+} from "./gateway/listing.js";
+export {
   CTX_MANIFEST,
   MANIFEST_ENTITY,
   manifestExportClaims,

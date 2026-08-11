@@ -384,9 +384,46 @@ export function buildGqlSchema(
       resolve: (payload: PatchNode) => payload,
     };
 
-    // The read surface stops here: no mutation fields are even built — the definitions below
-    // were already validated when the FULL surface bound (the read set is a subset of it).
+    // The read surface stops here: no mutation fields OR LISTING fields are even built — the
+    // definitions below were already validated when the FULL surface bound (the read set is a
+    // subset of it). The listing door (T110) is deliberately on this side of the line: public
+    // enumeration is exactly what the uniform-refusal discipline prevents (§12 defers it behind
+    // a per-lens `enumerable` flag), so on the public surface a listing field is a validation
+    // impossibility, indistinguishable from a field that never existed.
     if (surface === "read") continue;
+
+    // The listing field (T110): `plants(limit, after)` — one page of the entities whose evidence
+    // the lens's backing container holds, each resolved through this lens. Refuse a collision
+    // NOW, at build time, exactly as the singular field does: a lens named "Plants" beside a lens
+    // named "Plant" is a world where "plants" means two things, and silence would pick one.
+    const listField = `${fieldName}s`;
+    if (Object.hasOwn(queryFields, listField)) {
+      throw new Error(
+        `schema ${lensOf(def)}: its listing field "${listField}" collides with an earlier schema`,
+      );
+    }
+    queryFields[listField] = {
+      type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(viewType))),
+      description:
+        `List the entities holding ${lensOf(def)} evidence, resolved through this lens — ` +
+        `ascending by _entity. One page per call; pass the last _entity as \`after\` for the ` +
+        `next. An entity may resolve sparse: evidence-level membership, absence stays absence.`,
+      args: {
+        limit: {
+          type: GraphQLInt,
+          description: "Page size (each entity costs a resolution); bounded, defaults small.",
+        },
+        after: {
+          type: GraphQLID,
+          description: "The previous page's last _entity, exclusive.",
+        },
+      },
+      resolve: (_src, args: { limit?: number | null; after?: string | null }) =>
+        hooks.list(lensOf(def), {
+          ...(args.limit === undefined || args.limit === null ? {} : { limit: args.limit }),
+          ...(args.after === undefined || args.after === null ? {} : { after: args.after }),
+        }),
+    };
 
     // Only WRITABLE props are offered as per-prop mutation args (SPEC §14): a read-only field is
     // simply absent from the write surface. Immutable-by-default (§21): absent `writable` → NO prop
