@@ -258,7 +258,10 @@ const FLAG_HELP: Readonly<
   Record<string, { readonly arg: string; readonly note: string; readonly required?: boolean }>
 > = {
   home: { arg: "<dir>", note: "the home to work in (default $LOAM_HOME, else .loam)" },
-  store: { arg: "<file>", note: "the store file inside the home (default store.sqlite)" },
+  store: {
+    arg: "<file>",
+    note: "the store file inside the home (default store.sqlite; an absolute path is used as-is)",
+  },
   seed: { arg: "<hex>", note: "import an operator seed instead of minting one ($LOAM_SEED)" },
   port: { arg: "<n>", note: "the port to listen on — 0 for ephemeral (default 4321)" },
   host: {
@@ -267,7 +270,10 @@ const FLAG_HELP: Readonly<
   },
   token: { arg: "<secret>", note: "the bearer token for the door ($LOAM_TOKEN)" },
   http: { arg: "", note: "serve over HTTP — the only transport today" },
-  archive: { arg: "<dir>", note: "mirror every delta into a cold store, relative to the home" },
+  archive: {
+    arg: "<dir>",
+    note: "mirror every delta into a cold store inside the home (an absolute path is used as-is)",
+  },
   "public-url": {
     arg: "<url>",
     note: "the outside http(s) address this store is reached at — opens §37 discovery",
@@ -862,8 +868,9 @@ function cmdMigrate(args: readonly string[], io: IO): number {
 async function cmdStore(args: readonly string[], io: IO): Promise<number> {
   const parsed = parseFor("store", args);
   const home = parsed.flags.get("home") ?? defaultHome();
-  // The home is only a DIRECTION to the store file: an explicit --store override needs no home at
-  // all, and an existing read-only home is fine for a command that only reads config. The refusal
+  // The home is only a DIRECTION to the store file: an explicit --store override never opens
+  // config.json (relative values still resolve inside the home; absolute values need no home at
+  // all), and an existing read-only home is fine for a command that only reads config. The refusal
   // is reserved for the one cure-naming shape the paper-cut is about: a home that cannot supply
   // config.json at all.
   let path: string;
