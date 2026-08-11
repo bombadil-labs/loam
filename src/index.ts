@@ -26,6 +26,12 @@ export {
   type GatherMask,
   type GatherSpec,
 } from "./gateway/gather.js";
+// The stock shelf: ordinary shapes, shipped as registration data, so a first store needs no
+// hand-written gather term. `loam register --stock <name>` is the CLI's reading of these; an
+// embedder can hand one to the same registration door a file goes through — CLONE IT FIRST, as the
+// CLI does. The shelf is frozen through, and a door that ever normalized its input in place would
+// otherwise throw on a shape it was handed rather than given.
+export { STOCK_SCHEMAS, stockNames, stockSchema, type StockSchema } from "./stock/index.js";
 export {
   Gateway,
   NothingPublic,

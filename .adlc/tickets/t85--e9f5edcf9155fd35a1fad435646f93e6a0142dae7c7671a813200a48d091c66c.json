@@ -2,14 +2,19 @@
   "body": "FINDING (verified). The README's own quickstart (\"Quickstart — the CLI\", README.md:60-70) tells a newcomer to run `loam register plant.json --home ./my-store` but never ships `plant.json` — the reader must first author a full registration object by hand, including a raw rhizomatic gather Term (the five-level nested `group`/`select`/`mask` shape documented later under \"Schemas are data\", README.md:118-150+). There is no `--stock` flag or equivalent on `loam register` today (`grep -n \"stock\" src/cli/cli.ts README.md` — zero matches), and no shipped schema library in the package itself — the closest precedent is `demos/village/schemas/*.json` (person.json, film.json, etc.), which are demo fixtures, not a package-shipped, documented library. So the very first thing a newcomer needs — store a note — requires understanding gather Terms, pointer contexts, and Policy folds before writing a single fact, which is a steep floor for \"day one.\"\n\nFIX SHAPE: (1) a small library of stock registrations shipped IN the package (e.g. `src/stock/` or `demos`-adjacent, exported as data — JSON or TS objects — for `note`, `person`, `event`, `post` at minimum, each a complete `{ hyperschema, schema, roots?, writable?, mutations? }` registration using the plain-entity gather idiom). (2) `loam register --stock <name>` on the CLI: skip the positional file argument, look up the named stock registration, and register it exactly as `loam register <file>` would (reuse `cmdRegister`'s registration path, don't duplicate it). List available stock names in `--help`/on a bad name. (3) README quickstart updated to `loam register --stock note --home ./my-store` as the friction-free path, with the hand-authored-Term walkthrough kept as the deeper \"Schemas are data\" explanation for when a reader outgrows the stock set.\n\nRAILS: a CLI test in test/cli/cli.test.ts registering `--stock note` (or each stock name) against a fresh home, then serving/querying through it to confirm the registered schema actually resolves a written fact; a test asserting an unknown `--stock` name errors with the available list rather than a raw file-not-found message.\n\nCARE: this ADDS surface (a new flag, a new shipped data library, a new registration path) rather than repairing stated behavior — Myk merges (P6), not self-merge.",
   "edges": [],
   "id": "T85",
-  "phase": "P0",
-  "rails": [],
+  "phase": "P5",
+  "rails": [
+    "test/cli/stock.test.ts",
+    "test/cli/pack-stock.test.ts"
+  ],
   "scope": [
     "src/cli/cli.ts",
     "src/stock/",
+    "src/index.ts",
     "README.md",
-    "test/cli/cli.test.ts"
+    "test/cli/stock.test.ts",
+    "test/cli/pack-stock.test.ts"
   ],
-  "status": "todo",
+  "status": "in-progress",
   "title": "`loam register --stock <name>` — a shipped library of stock schemas so day one doesn't require hand-authoring a rhizomatic gather Term"
 }
