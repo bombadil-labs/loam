@@ -247,7 +247,11 @@ describe("T146 — the pages link each other", () => {
     const ada = await signInFull(base, "ada");
     const adaCookie = { cookie: `${SESSION_COOKIE}=${ada.sessionId}` };
     const offer = await fetch(`${base}/admin`, { headers: adaCookie });
-    expect(await offer.text()).toContain('action="/logout"');
+    // The whole form, markup and all — a garbled button or close tag is a form a person
+    // cannot use, so the assertions pin the exact markup (a mutation probe survived less).
+    const offerHtml = await offer.text();
+    expect(offerHtml).toContain('<form method="post" action="/logout">');
+    expect(offerHtml).toContain('<button type="submit">sign out</button>\n</form>');
 
     // With a root, the dashboard carries it too.
     await fetch(`${base}/admin/create-root`, {
@@ -260,7 +264,9 @@ describe("T146 — the pages link each other", () => {
       body: new URLSearchParams({ form_token: ada.formToken }).toString(),
     });
     const dashboard = await fetch(`${base}/admin`, { headers: adaCookie });
-    expect(await dashboard.text()).toContain('action="/logout"');
+    const dashboardHtml = await dashboard.text();
+    expect(dashboardHtml).toContain('<form method="post" action="/logout">');
+    expect(dashboardHtml).toContain('<button type="submit">sign out</button>\n</form>');
 
     // A refusal page is no longer a dead end.
     const refused = await fetch(
@@ -269,8 +275,9 @@ describe("T146 — the pages link each other", () => {
     );
     expect(refused.status).toBe(403);
     const refusal = await refused.text();
-    expect(refusal).toContain('href="/login"');
-    expect(refusal).toContain('href="/admin"');
+    expect(refusal).toContain("<h1>Refused.</h1>");
+    expect(refusal).toContain('<a href="/login">Go to the sign-in page.</a>');
+    expect(refusal).toContain('<a href="/admin">Back to your containers.</a>');
   });
 
   it("(g) the declare form invites exactly the shape the door accepts — and the invited completion lands", async () => {
@@ -289,7 +296,7 @@ describe("T146 — the pages link each other", () => {
     const dashboard = await (await fetch(`${base}/admin`, { headers: adaCookie })).text();
     // The invited shape is the door's own precondition, pre-filled: the name input opens with
     // `ada:` already typed, so completing it cannot produce a name the door refuses for shape.
-    expect(dashboard).toContain('name="name" value="ada:"');
+    expect(dashboard).toContain('<input name="name" value="ada:">');
     // Two-sided: the completion of exactly that invitation is accepted.
     const declared = await fetch(`${base}/admin/declare`, {
       method: "POST",
