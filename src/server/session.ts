@@ -624,6 +624,9 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
   // browser's form navigation asks for `text/html` first — and the frozen referrer-policy rail
   // pins a form-urlencoded refusal WITHOUT that accept as JSON with `no-referrer`, so the
   // content-type alone must never flip the answer. A JSON caller's bytes therefore never move.
+  // `text/html` must be the FIRST media range: a caller whose accept merely tolerates HTML
+  // behind JSON (`application/json, text/html;q=0.1`) is a JSON caller, and a browser's form
+  // navigation always leads with text/html.
   const isFormNavigation = (req: IncomingMessage): boolean => {
     const contentType = req.headers["content-type"];
     const accept = req.headers.accept;
@@ -631,7 +634,7 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
       typeof contentType === "string" &&
       /^application\/x-www-form-urlencoded\b/i.test(contentType) &&
       typeof accept === "string" &&
-      accept.includes("text/html")
+      /^text\/html\b/i.test(accept.split(",")[0]!.trim())
     );
   };
 

@@ -11,7 +11,10 @@
 // What this file deliberately does not assert: the real browser walk (wrong password, then
 // right, then the signed-in → admin → sign-out link-walk) lives in test/browser/human-doors.test.ts,
 // where real Chrome sends the real headers. This file proves the seam; that one proves a person
-// can use it.
+// can use it. And the 503 refusals (busy door, unreachable ground) are not exercised in the HTML
+// frame: they ride the same refuseDoor seam (a) pins, and building a vanished-mount or held-hash
+// fixture here would duplicate login-door.test.ts (q)/(s) for no new seam coverage — the frame
+// rail that would close it fully is a browser story against a broken store.
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -45,7 +48,9 @@ afterEach(async () => {
   while (homes.length > 0) rmSync(homes.pop()!, { recursive: true, force: true });
 });
 
-async function doorServer(): Promise<{ base: string; gateway: Gateway }> {
+async function doorServer(
+  doorOptions: Record<string, unknown> = {},
+): Promise<{ base: string; gateway: Gateway }> {
   const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
   let ts = 9001;
   for (const [name, roles] of [
@@ -67,7 +72,7 @@ async function doorServer(): Promise<{ base: string; gateway: Gateway }> {
     tokens: { "op-token": { operator: true } },
     port: 0,
     host: "127.0.0.1",
-    users: { home, mount: "default" },
+    users: { home, mount: "default", ...doorOptions },
   });
   handles.push(handle);
   return { base: handle.url, gateway };
@@ -167,6 +172,23 @@ describe("T146 — a browser form POST is answered in HTML", () => {
       { accept: "application/json" },
     );
     expect(jsonAccept.headers.get("content-type")).toContain("application/json");
+    // And a browser Accept WITHOUT the form content-type is a JSON caller too — both conjuncts
+    // of the discriminator are load-bearing, so each is pinned alone.
+    const htmlAcceptOnly = await fetch(`${base}/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...BROWSER_ACCEPT },
+      body: JSON.stringify({ user: "myk", password: PASSWORD }),
+    });
+    expect(htmlAcceptOnly.status).toBe(403);
+    expect(htmlAcceptOnly.headers.get("content-type")).toContain("application/json");
+    // A caller that merely TOLERATES html behind its preferred JSON is a JSON caller: text/html
+    // must be the accept's first media range, the shape every browser form navigation sends.
+    const tolerated = await postLogin(
+      base,
+      { user: "myk", password: PASSWORD },
+      { accept: "application/json, text/html;q=0.1" },
+    );
+    expect(tolerated.headers.get("content-type")).toContain("application/json");
   });
 
   it("(c) one refusal in the HTML frame too: three causes, identical but for the echo of what the caller typed", async () => {
@@ -231,6 +253,43 @@ describe("T146 — a browser form POST is answered in HTML", () => {
     expect(body).toContain("no live session is presented here");
     // No cookie was presented, so no honest form token exists — the page links instead.
     expect(body).toContain('href="/login"');
+  });
+
+  it("(h) an HTML-frame refusal slides no idle window — the salvage renders through peek, never touch", async () => {
+    // The frozen no-slide rail (login-csrf (b2)) never enters the HTML frame, and the HTML
+    // refusal is the one new path that reads the session row on its way to a refusal. If the
+    // salvage ever read it through `touch`, refused browser traffic would keep a victim's
+    // session alive forever. Same clock fixture as (b2), driven through the browser frame.
+    let clock = 0;
+    const { base } = await doorServer({ idleMs: 1000, monotonicNow: () => clock });
+    const myk = await signInFull(base, "myk");
+    const sessionCookie = { cookie: `${SESSION_COOKIE}=${myk.sessionId}` };
+    clock = 900;
+    // Clears the guard (session token binds), is refused on its merits, and renders the HTML
+    // salvage — the assertion on content-type proves the refusal path under test actually ran.
+    const refused = await postLogin(
+      base,
+      { form_token: myk.formToken, user: "myk", password: "not it" },
+      { ...sessionCookie, ...SAME_ORIGIN, ...BROWSER_ACCEPT },
+    );
+    expect(refused.status).toBe(401);
+    expect(refused.headers.get("content-type")).toContain("text/html");
+    // Past the ORIGINAL window: a slid session would still answer Signed in here.
+    clock = 1500;
+    const after = await fetch(`${base}/login`, { headers: sessionCookie });
+    expect(await after.text()).not.toContain("Signed in");
+    // The control: a session ADMITTED at 900 does slide to 1900 (two-sided, in this fixture).
+    clock = 0;
+    const second = await signInFull(base, "myk");
+    const secondCookie = { cookie: `${SESSION_COOKIE}=${second.sessionId}` };
+    clock = 900;
+    expect(await (await fetch(`${base}/login`, { headers: secondCookie })).text()).toContain(
+      "Signed in",
+    );
+    clock = 1500;
+    expect(await (await fetch(`${base}/login`, { headers: secondCookie })).text()).toContain(
+      "Signed in",
+    );
   });
 });
 
