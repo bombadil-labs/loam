@@ -12,7 +12,13 @@ import {
   type Claims,
   type Delta,
 } from "@bombadil/rhizomatic";
-import { registrationDeltaClaims, schemaEntityFor, type Registration } from "./registration.js";
+import {
+  parseClaimTemplates,
+  registrationDeltaClaims,
+  schemaEntityFor,
+  type ClaimTemplates,
+  type Registration,
+} from "./registration.js";
 
 export interface GenesisSpec {
   readonly operatorSeed: string;
@@ -76,6 +82,21 @@ export function assembleGenesis(spec: GenesisSpec): Genesis {
       );
     }
     seenLens.add(key);
+    // Loud at the mint, exactly as publishRegistration is: a mutations payload that cannot be read
+    // faithfully refuses HERE, with its defect named, while the operator is present to fix it.
+    // Minted malformed, the binding would shed its templates on every replay instead — and before
+    // T96, took `writable` down with it, booting the store immutable-by-default against the
+    // operator's own declaration.
+    let mutations: ClaimTemplates | undefined;
+    try {
+      mutations = reg.mutations === undefined ? undefined : parseClaimTemplates(reg.mutations);
+    } catch (err) {
+      const defect = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `genesis: lens "${lensName}" carries a mutations payload that cannot be read ` +
+          `faithfully — ${defect}`,
+      );
+    }
     // Four deltas per registration (SPEC §21): the hyperschema DEFINITION, the LIVING resolution
     // Schema entity, its frozen VersionedSchema SNAPSHOT, and the BINDING that references all three.
     // Deterministic timestamps keep boot idempotent. The binding carries its `writable` list through
@@ -92,7 +113,7 @@ export function assembleGenesis(spec: GenesisSpec): Genesis {
       reg.roots,
       operator,
       () => clock++,
-      reg.mutations,
+      mutations,
       reg.writable,
       reg.resolvers,
     );

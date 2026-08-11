@@ -289,6 +289,15 @@ export function parseClaimTemplates(raw: unknown): ClaimTemplates {
       if (o["each"] === true) {
         throw new Error(`template "${name}" pointer ${i}: each belongs to entity pointers only`);
       }
+      // A `context` beside a literal value is the classic half-converted at-pointer (T96's exact
+      // payload). Dropping the key silently would accept a template the author meant differently —
+      // the refusal names the confusion instead.
+      if (o["context"] !== undefined) {
+        throw new Error(
+          `template "${name}" pointer ${i}: context belongs to an at pointer — ` +
+            `a literal value carries none`,
+        );
+      }
       const value = o["value"];
       const hole = value as { arg?: unknown };
       if (typeof hole === "object" && hole !== null) {

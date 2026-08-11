@@ -415,18 +415,32 @@ export function replayRegistrationsImpl(gw: Gateway): void {
           return false;
         }
       };
-      // A stored registration whose TEMPLATES are the only problem binds without them —
-      // the schema still serves; the surface just lacks the mutation.
-      const templateless: Bound = {
-        hyperschema: reg.hyperschema,
-        schema: reg.schema,
-        roots: reg.roots,
-        origin: reg.origin,
-        ...(reg.entity === undefined ? {} : { entity: reg.entity }),
-        ...(reg.resolvers === undefined ? {} : { resolvers: reg.resolvers }),
-      };
-      if (attempt(reg) || (reg.mutations !== undefined && attempt(templateless))) {
+      // A stored registration whose TEMPLATES are the only problem binds WITHOUT THE TEMPLATES
+      // and without nothing else — the schema still serves; the surface just lacks the mutation.
+      // The fallback sheds exactly one field. Rebuilding the candidate by hand here was T96:
+      // `writable` (and the lens name) went down with the templates, so under immutable-by-default
+      // (SPEC §14) the store booted with the operator's declared write surface silently revoked —
+      // and "quietly absent" is byte-identical to "deliberately locked" for every reader downstream.
+      const templateless: Bound = Object.fromEntries(
+        Object.entries(reg).filter(([k]) => k !== "mutations"),
+      ) as Bound;
+      if (attempt(reg)) {
         progressed = true;
+      } else if (reg.mutations !== undefined) {
+        // The full candidate's fault is on record now; hold it before the fallback's success
+        // erases it, so a bind-by-shedding stays visible instead of reading as fully bound.
+        const key = failureKey(reg.entity ?? "", lensOf(reg));
+        const fault = lastBindFailure(gw, key);
+        if (attempt(templateless)) {
+          progressed = true;
+          rememberBindFailure(
+            gw,
+            key,
+            new Error(`bound without its mutation templates — ${fault ?? "they did not bind"}`),
+          );
+        } else {
+          stillPending.push(reg); // its refs are not registered yet — try again next round
+        }
       } else {
         stillPending.push(reg); // its refs are not registered yet — try again next round
       }
