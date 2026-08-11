@@ -203,6 +203,17 @@ exports[`§21.7 pinning — the degenerate single-lens case is byte-identical > 
     """
     asOf: Float
   ): PlantView!
+
+  """
+  List the entities holding Plant evidence, resolved through this lens — ascending by _entity. One page per call; pass the last _entity as \`after\` for the next. An entity may resolve sparse: evidence-level membership, absence stays absence.
+  """
+  plants(
+    """Page size (each entity costs a resolution); bounded, defaults small."""
+    limit: Int
+
+    """The previous page's last _entity, exclusive."""
+    after: ID
+  ): [PlantView!]!
 }
 
 """The Plant hyperschema, resolved under its registered policy."""

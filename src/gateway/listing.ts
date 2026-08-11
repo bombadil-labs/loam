@@ -20,6 +20,7 @@
 import { signClaims } from "@bombadil/rhizomatic";
 import { containerClaims, readContainerTable } from "./container.js";
 import type { Gateway } from "./gateway.js";
+import { programOf, type ProgramName } from "./registration.js";
 import type { ResolvedNode } from "../surface/surface.js";
 
 // Each listed entity costs one resolution, so the page size is bounded here — an unbounded
@@ -48,10 +49,10 @@ export const listingContainerName = (program: string): string => `container:hype
 // because one hyperschema serves many schemas and the single maintained candidate set feeds
 // every lens reading over it. Sorted, so the same registration set always mints the same Term
 // (and therefore re-declares nothing).
-export function listingContexts(gw: Gateway, program: string): string[] {
+export function listingContexts(gw: Gateway, program: ProgramName): string[] {
   const contexts = new Set<string>();
   for (const r of gw.registered) {
-    if (r.hyperschema.name !== program) continue;
+    if (programOf(r) !== program) continue;
     for (const prop of r.schema.props.keys()) contexts.add(prop);
   }
   return [...contexts].sort();
@@ -77,7 +78,7 @@ export function listingMembershipJson(contexts: readonly string[]): Record<strin
 // immutable; a hand-declared stranger at this name with other knobs refuses at the door, loudly.
 async function ensureListingContainer(
   gw: Gateway,
-  program: string,
+  program: ProgramName,
   membership: Record<string, unknown>,
 ): Promise<string> {
   const name = listingContainerName(program);
@@ -122,7 +123,7 @@ export async function listImpl(
   opts: ListOptions = {},
 ): Promise<ResolvedNode[]> {
   const def = gw.def(name); // refuses an unregistered lens in the door's own voice
-  const program = def.hyperschema.name;
+  const program = programOf(def);
   const limit = opts.limit ?? LISTING_DEFAULT_LIMIT;
   if (!Number.isInteger(limit) || limit < 1 || limit > LISTING_MAX_LIMIT) {
     throw new Error(
