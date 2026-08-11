@@ -29,7 +29,7 @@ import {
 import { evalTerm } from "@bombadil/rhizomatic";
 import { entityGatherBody } from "../gateway/gather.js";
 
-export const CTX_USER = "loam.user";
+const CTX_USER = "loam.user";
 export const CTX_ROLE = "loam.role";
 
 /** The roles §36 ships. Anything else is a future ticket, and refused rather than guessed at. */
@@ -125,7 +125,7 @@ export function roleClaims(
  * caller with no operator gets no user and no role — the door stays shut rather than opening on a
  * fact nobody is answerable for.
  */
-export function userHyperSchema(operator: string): HyperSchema {
+function userHyperSchema(operator: string): HyperSchema {
   return {
     name: "LoamUser",
     alg: 1,
@@ -145,7 +145,7 @@ const pickLatest: Policy = { kind: "pick", order: { kind: "byTimestamp", dir: "d
 const allRoles: Policy = { kind: "all", order: { kind: "byTimestamp", dir: "asc" } };
 
 /** The resolution program over that gather: the user's name picks latest, its roles form a set. */
-export const USER_SCHEMA: Schema = {
+const USER_SCHEMA: Schema = {
   props: new Map<string, Policy>([
     [CTX_USER, pickLatest],
     [CTX_ROLE, allRoles],

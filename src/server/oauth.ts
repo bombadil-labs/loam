@@ -205,7 +205,7 @@ export function redirectOriginDefect(origin: string): string | undefined {
  * exact-match reason a later phase's authorize compares the caller's uri byte-for-byte against the
  * registered one.
  */
-export function redirectUriDefect(uri: string, allowed: readonly string[]): string | undefined {
+function redirectUriDefect(uri: string, allowed: readonly string[]): string | undefined {
   if (allowed.length === 0) {
     return (
       `this store registers no connectors: its operator has named no permitted redirect origin. ` +
@@ -559,7 +559,7 @@ const PKCE_SHAPE = /^[A-Za-z0-9._~-]{43,128}$/;
  * so a caller that sends none still gets a page) — but the token exchange refuses a code whose
  * challenge is empty, so PKCE is mandatory for any flow that actually redeems.
  */
-export function pkceChallengeDefect(challenge: string): string | undefined {
+function pkceChallengeDefect(challenge: string): string | undefined {
   if (challenge === "") return undefined;
   if (!PKCE_SHAPE.test(challenge)) {
     return "The PKCE code_challenge must be 43–128 characters of A–Z, a–z, 0–9, dot, dash, underscore or tilde.";
@@ -568,7 +568,7 @@ export function pkceChallengeDefect(challenge: string): string | undefined {
 }
 
 /** RFC 7636 S256: does `verifier` hash to `challenge`? Constant-time on the digest comparison. */
-export function pkceVerifies(verifier: string, challenge: string): boolean {
+function pkceVerifies(verifier: string, challenge: string): boolean {
   if (!PKCE_SHAPE.test(verifier) || challenge === "") return false;
   const computed = createHash("sha256").update(verifier).digest("base64url");
   return sameSecret(computed, challenge);
@@ -852,7 +852,7 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
 // of the same live process with no restart, and it strikes the ground write-grant so the actor loses
 // standing too. It never touches the connector's past deltas — they keep naming their author.
 
-export const TOKEN_PATH = "/oauth/token";
+const TOKEN_PATH = "/oauth/token";
 
 /** The connector identity a presented bearer token resolves to. The `actor` is a SIGNING SEED. */
 export interface ConnectorIdentity {
