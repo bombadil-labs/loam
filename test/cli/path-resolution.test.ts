@@ -64,6 +64,20 @@ describe("storePath and archivePath resolve overrides against the home", () => {
   });
 });
 
+describe("the help text states the rule, per flag", () => {
+  it("serve --help names home-relative resolution for --archive and --store", async () => {
+    const lines: string[] = [];
+    const io = { out: (s: string) => lines.push(s), err: (s: string) => lines.push(s) };
+    expect(await run(["serve", "--help"], io)).toBe(0);
+    const printed = lines.join("\n");
+    expect(printed).toMatch(
+      /--archive <dir>\s+mirror every delta into a cold store inside the home/,
+    );
+    expect(printed).toMatch(/an absolute path is used as-is/);
+    expect(printed).toMatch(/--store <file>\s+the store file inside the home/);
+  });
+});
+
 describe("serve --archive <relative>, run from a foreign working directory", () => {
   const out: string[] = [];
   const err: string[] = [];
