@@ -54,6 +54,23 @@ export interface MalformedBinding {
   readonly reason: string;
 }
 
+// A well-formed definition that a later definition of the same name replaced. Ordinary evolution,
+// never damage — but it is a delta the reader considered and did not turn into law, so it belongs
+// in the accounting. Without it the lists read as covering every binding delta and did not: a
+// re-blessed binding left its older definition in no list at all.
+export interface SupersededBinding {
+  readonly deltaId: string;
+  readonly name: string;
+}
+
+// The two ways a considered binding delta fails to become law. They are kept apart on purpose:
+// `malformed` is a damage report an operator must act on, `superseded` is a healthy recipe that
+// evolved. Folding one into the other would either hide damage or accuse a working binding.
+export interface BindingDropSinks {
+  readonly onMalformed?: (m: MalformedBinding) => void;
+  readonly onSuperseded?: (s: SupersededBinding) => void;
+}
+
 const primitive = (claims: Claims, role: string): string | number | boolean | undefined => {
   const p = claims.pointers.find((x) => x.role === role);
   return p?.target.kind === "primitive" ? p.target.value : undefined;
@@ -66,12 +83,16 @@ const primitive = (claims: Claims, role: string): string | number | boolean | un
 // is the same discipline registrations keep; the trust boundary is "the operator blessed this
 // function," and SPEC §6 reserves sandboxing of untrusted (federated) code for a later runtime.
 // (Scans the whole set for a small constitutional slice — fine at this scale; indexable later.)
-// `onMalformed` hears every binding delta this reader considered and could not parse — the sink
-// keeps the return type stable while letting a caller (Runner.attach) account for the drops.
+// `sinks` hear every binding delta this reader CONSIDERED and did not return — unparseable ones
+// through `onMalformed`, replaced ones through `onSuperseded`. They keep the return type stable
+// while letting a caller (Runner.attach) account for the drops. "Considered" is the exact word:
+// the two filters below run FIRST and are deliberate exclusions, not drops — a lawfully struck
+// delta is retired, and another author's definition was never this store's law. Neither is
+// reported, and neither is counted in the accounting Runner.attach documents.
 export function readBindingDefinitions(
   reactor: Reactor,
   operator?: string,
-  onMalformed?: (m: MalformedBinding) => void,
+  sinks: BindingDropSinks = {},
 ): BindingSpec[] {
   // A recipe evolves: the LATEST surviving definition per binding name is the law (timestamp,
   // then id, for a total order) — the same latest-per-entity discipline registrations and
@@ -111,7 +132,10 @@ export function readBindingDefinitions(
         ...(typeof budget !== "number" ? ["budget (a number)"] : []),
         ...(typeof emitRaw !== "string" ? ["emit (a string)"] : []),
       ];
-      onMalformed?.({ deltaId: delta.id, reason: `roles missing or mistyped: ${bad.join(", ")}` });
+      sinks.onMalformed?.({
+        deltaId: delta.id,
+        reason: `roles missing or mistyped: ${bad.join(", ")}`,
+      });
       continue;
     }
     let emit: BindingSpec["emit"];
@@ -123,7 +147,7 @@ export function readBindingDefinitions(
       try {
         emit = JSON.parse(emitRaw) as { keyed: string[] };
       } catch {
-        onMalformed?.({
+        sinks.onMalformed?.({
           deltaId: delta.id,
           reason: `emit is neither "append"/"supersede" nor JSON: ${JSON.stringify(emitRaw)}`,
         });
@@ -132,17 +156,22 @@ export function readBindingDefinitions(
     }
     const { timestamp } = delta.claims;
     const prev = best.get(name);
-    if (
+    const wins =
       prev === undefined ||
       timestamp > prev.timestamp ||
-      (timestamp === prev.timestamp && delta.id > prev.id)
-    ) {
-      best.set(name, {
-        spec: { name, fnId, materialization, pure, budget, emit },
-        timestamp,
-        id: delta.id,
-      });
+      (timestamp === prev.timestamp && delta.id > prev.id);
+    // Whichever definition loses the total order is REPLACED, not dropped on the floor: it is a
+    // delta the reader read and did not return, and the accounting says so.
+    if (!wins) {
+      sinks.onSuperseded?.({ deltaId: delta.id, name });
+      continue;
     }
+    if (prev !== undefined) sinks.onSuperseded?.({ deltaId: prev.id, name });
+    best.set(name, {
+      spec: { name, fnId, materialization, pure, budget, emit },
+      timestamp,
+      id: delta.id,
+    });
   }
   return [...best.values()].map((b) => b.spec);
 }
@@ -152,14 +181,25 @@ export interface RunnerOptions {
   readonly implementations: Record<string, DerivedFn>; // fnId → the code to run
 }
 
-// The three lists together account for every surviving, operator-blessed binding delta the store
-// holds: its latest-per-name definition is `installed` or `skipped`, or its delta is named in
-// `malformed`. Without the third list the pair READ as a partition and was not — a deploy check of
-// "skipped is empty" passed while a typo'd definition sat inert.
+// The four lists account for every binding delta the reader CONSIDERED — that is, every surviving,
+// operator-blessed delta filed at a `loam.binding` entity. Each such delta is either the law for
+// its name (counted once, by name, in `installed` or `skipped`), or it is named in `superseded` or
+// `malformed`. So `installed + skipped + superseded + malformed` equals the number of considered
+// deltas, since exactly one delta wins each name.
+//
+// Two deltas are deliberately NOT considered and so appear nowhere: one lawfully struck (retired),
+// and one authored by anybody but the operator of a governed store (never this store's law).
+//
+// `installed` and `skipped` alone READ as a partition and were not: a typo'd definition sat inert
+// while "skipped is empty" passed (H7), and a re-blessed binding left its older definition in no
+// list at all. `malformed` is a damage report — a delta stays named until it is lawfully struck,
+// so planting a corrected definition beside a broken one repairs the BINDING and leaves the broken
+// delta accused; negate it to clear the report.
 export interface Runner {
   readonly host: DerivationHost;
   readonly installed: string[]; // binding names the runner could run
   readonly skipped: string[]; // binding names whose implementation it lacks
+  readonly superseded: SupersededBinding[]; // definitions a later one of the same name replaced
   readonly malformed: MalformedBinding[]; // binding deltas that would not read as a definition
 }
 
@@ -172,9 +212,11 @@ export const Runner = {
     const installed: string[] = [];
     const skipped: string[] = [];
     const malformed: MalformedBinding[] = [];
-    for (const spec of readBindingDefinitions(gateway.reactor, gateway.operator, (m) =>
-      malformed.push(m),
-    )) {
+    const superseded: SupersededBinding[] = [];
+    for (const spec of readBindingDefinitions(gateway.reactor, gateway.operator, {
+      onMalformed: (m) => malformed.push(m),
+      onSuperseded: (s) => superseded.push(s),
+    })) {
       const fn = options.implementations[spec.fnId];
       if (fn === undefined) {
         skipped.push(spec.name);
@@ -190,6 +232,6 @@ export const Runner = {
       installed.push(spec.name);
     }
     gateway.animate(host);
-    return { host, installed, skipped, malformed };
+    return { host, installed, skipped, superseded, malformed };
   },
 };

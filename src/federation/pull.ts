@@ -14,6 +14,12 @@ import { fromWire, type WireDelta } from "./wire.js";
 // where it can be nonzero, and `offered` is restored to what the peer actually SENT. Without it
 // the report was false (H7): a peer offering 100 deltas of which 40 rot on the wire read
 // "offered 60, rejected 0", and every later pull repeated the lie.
+//
+// The invariant this buys is `offered === unreconstructable + (what reached federate)`, and that
+// is the whole of it. `offered`, `rejected` and `unreconstructable` count OCCURRENCES while
+// `accepted` and `held` count unique ids (federateImpl says so, and warns the two dimensions are
+// never subtracted from each other), so `accepted + rejected + held + unreconstructable` is NOT
+// `offered` — a peer that sends one delta twice breaks it. Do not infer a fifth number from these.
 export interface PullReport extends FederationReport {
   readonly unreconstructable: number;
 }

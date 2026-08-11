@@ -77,8 +77,10 @@ export {
   Runner,
   bindingDefinitionClaims,
   readBindingDefinitions,
+  type BindingDropSinks,
   type MalformedBinding,
   type RunnerOptions,
+  type SupersededBinding,
 } from "../runner/runner.js";
 
 // Key custody, page-side: mint where the seed will live; show the author around instead.

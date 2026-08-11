@@ -58,13 +58,39 @@ describe("the pull report accounts for every delta the peer sent", () => {
     expect(report.unreconstructable).toBe(1);
     expect(report.accepted).toBe(2);
     expect(report.rejected).toBe(0);
-    expect(report.offered).toBe(
-      report.accepted + report.rejected + report.held + report.unreconstructable,
-    );
+    // The invariant, and ONLY this one: offered is what the peer sent, and the drops plus what
+    // reached federate account for it. Summing accepted + rejected + held + unreconstructable is
+    // NOT an identity — those mix unique ids with occurrences (the duplicate case below proves
+    // it), so the rail must not freeze a false one in the act of fixing a false report.
+    expect(report.offered - report.unreconstructable).toBe(2);
     // Delta level: the good bystanders are IN the store, the unreconstructable one is not.
     const ids = new Set([...gw.reactor.snapshot()].map((d) => d.id));
     for (const w of good) expect(ids.has(w.id)).toBe(true);
     expect(ids.has(corrupt.id)).toBe(false);
+    // And nothing carrying the corrupt delta's CLAIM landed under some other id: the drop is
+    // real, not just an id the store could never have minted.
+    const heights = [...gw.reactor.snapshot()].flatMap((d) =>
+      d.claims.pointers.filter((p) => p.role === "height" && p.target.kind === "primitive"),
+    );
+    expect(heights.map((p) => (p.target as { value: unknown }).value)).not.toContain(64);
+    await gw.close();
+  });
+
+  it("a peer that repeats a delta: offered still counts every occurrence it sent", async () => {
+    const gw = await local();
+    const { good, corrupt } = mixedOffer();
+    const twice = JSON.stringify({ deltas: [good[0], good[0], corrupt] });
+    const report = await pullFrom(gw, "http://peer.example/default", "tok", {
+      fetch: serving(twice),
+    });
+    expect(report.offered).toBe(3); // occurrences, not unique ids
+    expect(report.unreconstructable).toBe(1);
+    expect(report.offered - report.unreconstructable).toBe(2);
+    // The dimensions genuinely differ here: one unique delta was newly ingested, so the four
+    // numbers do NOT sum to offered. Asserted, so nobody re-derives the identity from a
+    // duplicate-free fixture and freezes it back in.
+    expect(report.accepted).toBe(1);
+    expect(report.accepted + report.rejected + report.held + report.unreconstructable).toBe(2);
     await gw.close();
   });
 
