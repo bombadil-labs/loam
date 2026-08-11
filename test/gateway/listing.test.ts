@@ -250,7 +250,13 @@ describe("the listing door — delta level: what the container actually holds", 
         OPERATOR_SEED,
       ),
     ]);
-    await expect(gw.list("Plant")).rejects.toThrow(/curated\/separate|this name is taken/);
+    // Pinned to the GUARD's own voice, not the append door's immutability refusal: the guard
+    // must fire up front, before the short-circuit path could ever read through a separate
+    // pool's snapshot (with an equal membership term the short-circuit skips the append door
+    // entirely, so the downstream refusal cannot be the rail).
+    await expect(gw.list("Plant")).rejects.toThrow(
+      /reads only through the curated\/shared container it declares itself/,
+    );
     await gw.close();
   });
 
