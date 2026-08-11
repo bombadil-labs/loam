@@ -26,7 +26,7 @@ import {
   listingContainerName,
   listingMembershipJson,
 } from "../../src/gateway/listing.js";
-import { exclusionClaims } from "../../src/gateway/container.js";
+import { containerClaims, detachClaims, exclusionClaims } from "../../src/gateway/container.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE, pickLatest } from "./fixtures.js";
@@ -95,6 +95,20 @@ describe("the listing door — object level: what the authed door serves", () =>
     await expect(gw.list("Plant", { limit: LISTING_MAX_LIMIT + 1 })).rejects.toThrow(
       /between 1 and/,
     );
+    // The bounds are PROMISES, pinned as literals so a drifted constant is a red bar, not a
+    // silently wider door (a hollow-test survivor bought these two lines).
+    await expect(gw.list("Plant", { limit: 501 })).rejects.toThrow(/between 1 and 500/);
+    await expect(gw.list("Plant", { limit: 500 })).resolves.toEqual([]);
+    await gw.close();
+  });
+
+  it("defaults to a modest page: exactly 25 entities when none is asked for", async () => {
+    const gw = await governedGarden();
+    const names = Array.from({ length: 30 }, (_, i) => `plant:p${String(i).padStart(2, "0")}`);
+    await gw.append(names.map((n, i) => observed(n, "height", i, 1000 + i, GARDENER_SEED)));
+    const page = await gw.list("Plant");
+    expect(page).toHaveLength(25); // the literal IS the promise; widen it deliberately or not at all
+    expect(entitiesOf(page)).toEqual(names.slice(0, 25));
     await gw.close();
   });
 
@@ -187,6 +201,68 @@ describe("the listing door — delta level: what the container actually holds", 
     expect(members.some((d) => d.id === mossTag.id)).toBe(false);
     // Object level: the door no longer names moss; the live bystander survives (two-sided).
     expect(entitiesOf(await gw.list("Plant"))).toEqual([FERN]);
+    await gw.close();
+  });
+
+  it("an evolved lens narrows the membership: the superseded binding's contexts do not linger", async () => {
+    const gw = await governedGarden();
+    await gw.append([
+      observed(FERN, "height", 30, 1000, GARDENER_SEED),
+      observed(MOSS, "note", "check weekly", 1100, GARDENER_SEED),
+    ]);
+    // A sibling lens reads "note"; moss lists.
+    await gw.publishRegistration(
+      PLANT,
+      { name: "Sketch", props: new Map([["note", pickLatest]]), default: pickLatest },
+      [FERN],
+    );
+    expect(entitiesOf(await gw.list("Sketch"))).toEqual([FERN, MOSS]);
+    // The lens EVOLVES in place and stops reading "note". The flat registration list still
+    // holds the superseded binding beside the survivor; the membership must follow the
+    // survivor (a P5 lens's finding: a union drawn from the flat list keeps admitting
+    // contexts no surviving lens reads).
+    await gw.publishRegistration(
+      PLANT,
+      { name: "Sketch", props: new Map([["watered", pickLatest]]), default: pickLatest },
+      [FERN],
+    );
+    expect(entitiesOf(await gw.list("Sketch"))).toEqual([FERN]); // the refresh rides the read
+    const declared = gw.containers().containers.get(listingContainerName("Plant"));
+    expect(declared!.membership).toEqual(
+      listingMembershipJson(["height", "readings", "tag", "watered"]),
+    );
+    await gw.close();
+  });
+
+  it("refuses a name squatted by a container with other knobs — never reads through it", async () => {
+    const gw = await governedGarden();
+    await gw.append([observed(FERN, "height", 30, 1000, GARDENER_SEED)]);
+    // The operator already declared this exact name curated/SEPARATE. Trust and posture are
+    // immutable (§28.4), so the listing can never repair it — and a separate posture would
+    // read a pool's snapshot as "the Plants". The door must refuse, loudly, up front.
+    await gw.append([
+      signClaims(
+        containerClaims(
+          { container: listingContainerName("Plant"), trust: "curated", posture: "separate" },
+          OPERATOR,
+          2000,
+        ),
+        OPERATOR_SEED,
+      ),
+    ]);
+    await expect(gw.list("Plant")).rejects.toThrow(/curated\/separate|this name is taken/);
+    await gw.close();
+  });
+
+  it("refuses a DETACHED backing container instead of serving a complete-looking empty page", async () => {
+    const gw = await governedGarden();
+    await gw.append([observed(FERN, "height", 30, 1000, GARDENER_SEED)]);
+    expect(entitiesOf(await gw.list("Plant"))).toEqual([FERN]);
+    const name = listingContainerName("Plant");
+    await gw.append([signClaims(detachClaims(name, undefined, OPERATOR, 3000), OPERATOR_SEED)]);
+    // Detach means "off the record", and this caller never named a container: an empty page
+    // would read as "no plants" (H9). Exclusion is the deliberate way to empty a listing.
+    await expect(gw.list("Plant")).rejects.toThrow(/DETACHED/);
     await gw.close();
   });
 

@@ -20,6 +20,7 @@
 import { signClaims } from "@bombadil/rhizomatic";
 import { containerClaims, readContainerTable } from "./container.js";
 import type { Gateway } from "./gateway.js";
+import { groupPrograms } from "./lifecycle.js";
 import { programOf, type ProgramName } from "./registration.js";
 import type { ResolvedNode } from "../surface/surface.js";
 
@@ -48,11 +49,14 @@ export const listingContainerName = (program: string): string => `container:hype
 // The prop contexts every sibling lens of this hyperschema resolves into fields — the union,
 // because one hyperschema serves many schemas and the single maintained candidate set feeds
 // every lens reading over it. Sorted, so the same registration set always mints the same Term
-// (and therefore re-declares nothing).
+// (and therefore re-declares nothing). Read from the GROUPING, never the flat list: the flat
+// list legitimately holds a superseded binding beside its evolution, and a union drawn from it
+// would keep admitting contexts no SURVIVING lens reads (the H6 family's shape — a membership
+// nobody's current reading declares).
 export function listingContexts(gw: Gateway, program: ProgramName): string[] {
+  const group = groupPrograms(gw.registered).get(program);
   const contexts = new Set<string>();
-  for (const r of gw.registered) {
-    if (programOf(r) !== program) continue;
+  for (const r of group?.lenses.values() ?? []) {
     for (const prop of r.schema.props.keys()) contexts.add(prop);
   }
   return [...contexts].sort();
@@ -74,35 +78,57 @@ export function listingMembershipJson(contexts: readonly string[]): Record<strin
 // Ensure the backing container's declaration is current: absent, declare it; present with a
 // different membership (a sibling lens arrived and widened the context union), re-declare —
 // membership is a latest-wins knob (§27.1), so the refresh is one more declaration, never an
-// edit. Same-membership is a no-op: reads stay reads. Trust/posture are curated/shared and
-// immutable; a hand-declared stranger at this name with other knobs refuses at the door, loudly.
+// edit. Same-membership is a no-op: reads stay reads.
+//
+// Two refusals guard the read BEFORE any short-circuit, because the door's own validator only
+// runs on the re-declare path (a P5 lens's finding):
+//   - the name is taken by a container with OTHER knobs — a separate-posture container here
+//     would make the listing read a pool's snapshot as "the Plants"; refuse rather than serve
+//     through a container this door did not shape (trust/posture are immutable, §28.4, so a
+//     re-declare could never repair it silently either);
+//   - the container is DETACHED — a detached container contributes nothing to a scope read by
+//     design, which for a caller who never named a container would turn "off the record" into a
+//     complete-looking empty page; the exclusion knob is the deliberate way to empty a listing,
+//     and it stays honored downstream.
 async function ensureListingContainer(
   gw: Gateway,
+  lens: string,
   program: ProgramName,
   membership: Record<string, unknown>,
+  law: { operator: string; seed: string },
 ): Promise<string> {
   const name = listingContainerName(program);
-  const standing = readContainerTable(gw.reactor, gw.operatorAuthor).containers.get(name);
+  const table = readContainerTable(gw.reactor, gw.operatorAuthor);
+  const standing = table.containers.get(name);
+  if (standing !== undefined && (standing.trust !== "curated" || standing.posture !== "shared")) {
+    throw new Error(
+      `list ${lens}: "${name}" stands declared ${standing.trust}/${standing.posture}, and the ` +
+        `listing reads only through the curated/shared container it declares itself — trust and ` +
+        `posture are immutable (§28.4), so this name is taken. Strike that declaration, or leave ` +
+        `this lens unlisted.`,
+    );
+  }
+  if (table.detached.has(name)) {
+    throw new Error(
+      `list ${lens}: the backing container "${name}" is DETACHED — its candidate set is ` +
+        `deliberately off the record, and an empty page here would read as "no entities" (H9). ` +
+        `Reattach it, or exclude the container if an empty listing is what you mean.`,
+    );
+  }
   if (
     standing?.membership !== undefined &&
     JSON.stringify(standing.membership) === JSON.stringify(membership)
   ) {
     return name;
   }
-  if (gw.operatorAuthor === undefined || gw.options.seed === undefined) {
-    throw new Error(
-      `list ${program}: a listing reads through the container that backs its hyperschema, and an ` +
-        `ungoverned store has no operator to declare one — open the gateway with an operator seed`,
-    );
-  }
   await gw.append([
     signClaims(
       containerClaims(
         { container: name, trust: "curated", posture: "shared", membership },
-        gw.operatorAuthor,
+        law.operator,
         gw.nextTimestamp(),
       ),
-      gw.options.seed,
+      law.seed,
     ),
   ]);
   return name;
@@ -131,8 +157,26 @@ export async function listImpl(
         `entity costs a resolution, so the page is bounded; walk the cursor for more`,
     );
   }
+  // The refusal names the LENS the caller asked for (H6: a message reporting the program would
+  // describe a request the caller never made); the container it could not declare is the body's.
+  if (gw.operatorAuthor === undefined || gw.options.seed === undefined) {
+    throw new Error(
+      `list ${name}: a listing reads through the container that backs its hyperschema ` +
+        `("${listingContainerName(program)}"), and an ungoverned store has no operator to ` +
+        `declare one — open the gateway with an operator seed`,
+    );
+  }
   const contexts = listingContexts(gw, program);
-  const container = await ensureListingContainer(gw, program, listingMembershipJson(contexts));
+  const container = await ensureListingContainer(
+    gw,
+    name,
+    program,
+    listingMembershipJson(contexts),
+    {
+      operator: gw.operatorAuthor,
+      seed: gw.options.seed,
+    },
+  );
   const members = gw.containerScope({ containers: [container] });
   const inContexts = new Set(contexts);
   const ids = new Set<string>();
