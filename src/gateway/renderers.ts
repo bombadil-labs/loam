@@ -546,6 +546,7 @@ export async function serveRouteImpl(
           state,
         },
         gw.options.renderTimeoutMs,
+        gw.options.renderSpawnTimeoutMs,
       );
     } finally {
       gw.publicRendersInFlight -= 1;
@@ -566,6 +567,7 @@ export async function serveRouteImpl(
       state,
     },
     gw.options.renderTimeoutMs,
+    gw.options.renderSpawnTimeoutMs,
   );
 }
 

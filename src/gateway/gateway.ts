@@ -194,6 +194,12 @@ export interface GatewayOptions {
   // that lengthens this clock is not weakening the timeout, it is removing the competing bound
   // from the frame to observe the other one.
   readonly renderTimeoutMs?: number;
+  // The worker-SPAWN budget in ms (default RENDER_SPAWN_TIMEOUT_MS, 10_000). A separate knob because
+  // it bounds a separate thing: thread start under host load, which no bundle can influence. It is
+  // still the operator's to set, and on the public door it is what really bounds how long one
+  // anonymous request may hold a `maxPublicRenders` slot — leaving it hard-coded would put that
+  // window out of the operator's reach.
+  readonly renderSpawnTimeoutMs?: number;
 }
 
 export interface FederationReport {

@@ -12,9 +12,17 @@
 // in for it by proving the spawn clock reads its own number rather than the render's.
 
 import { describe, expect, it } from "vitest";
+import { assembleGenesis } from "../../src/gateway/genesis.js";
+import { Gateway } from "../../src/gateway/gateway.js";
+import { MemoryBackend } from "../../src/store/memory.js";
 import { RENDER_SPAWN_TIMEOUT_MS, renderInWorker } from "../../src/gateway/render-worker.js";
+import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
+import { FERN, observed } from "../spike/garden.js";
 
-const OK = "export default (n) => `<p>height: ${n.height}</p>`;";
+const OP_SEED = "0e".repeat(32);
+// The function-level rails feed the node straight to the bundle; the door wraps it in a §23.7
+// envelope, so the door's bundle reads `n.view.height`.
+const OK = "export default (n) => `<p>height: ${n.height ?? n.view.height}</p>`;";
 const HANG = "export default () => { while (true) {} };";
 const NODE = { height: 42 };
 
@@ -28,15 +36,20 @@ describe("§23.9 / T139: spawn and render are bounded by SEPARATE budgets", () =
     expect(out.body).toBe("the renderer could not start"); // the host failed to start it; it never ran
   });
 
-  it("the RENDER window still reads the operator's budget (rail b)", async () => {
-    // The mirror: a generous spawn ceiling cannot buy the bundle time. 1ms against a trivial bundle
-    // can only pass if the render clock stopped governing the worker.
+  it("the RENDER window still reads the operator's budget, not the spawn budget (rail b)", async () => {
+    // The mirror of (a), and NARROWER than it: the mutant this kills is a render window re-armed
+    // with `spawnTimeoutMs` (10s), which would render this 200. It does NOT go red on a full revert
+    // to one shared budget — pre-T139 both clocks fired the same `timedOut` body, so 1ms refuses
+    // here either way. Rail (a) is the revert-probe; this one guards the direction (a) cannot see.
     const out = await renderInWorker(OK, NODE, 1, 10_000);
     expect(out.status).toBe(500);
     expect(out.body).toBe("the renderer timed out"); // it ran, and it overran — a different cause
   });
 
-  it("a healthy bundle renders when both budgets are honest (rail c)", async () => {
+  it("CONTROL: a healthy bundle renders when both budgets are honest (rail c)", async () => {
+    // Named a control because it holds under the pre-T139 code and under a build with the spawn
+    // budget deleted outright. It observes that the split did not break the happy path; it
+    // constrains nothing about the split itself.
     const out = await renderInWorker(OK, NODE, RENDER_SPAWN_TIMEOUT_MS, RENDER_SPAWN_TIMEOUT_MS);
     expect(out.status).toBe(200);
     expect(out.contentType).toContain("text/html");
@@ -52,7 +65,66 @@ describe("§23.9 / T139: spawn and render are bounded by SEPARATE budgets", () =
     const elapsed = Date.now() - t0;
     expect(out.status).toBe(500);
     expect(out.body).toBe("the renderer timed out");
-    // Half the spawn ceiling: code that fed the spawn budget to the render window sits here for 10s+.
+    // The enforced bound is half the spawn ceiling, not the 200ms budget: the call also pays real
+    // spawn, and pinning it tighter would re-create this ticket's flake. Code that fed the spawn
+    // budget to the render window sits here for 10s+ and goes red.
     expect(elapsed).toBeLessThan(RENDER_SPAWN_TIMEOUT_MS / 2);
   }, 30_000);
+});
+
+describe("§23.9 / T139: the split reaches the DOOR, and the spawn budget is the operator's", () => {
+  // The object-level half. Every rail above calls `renderInWorker` directly, and this file's own
+  // history says that is not enough: the first `renderTimeoutMs` fed ONE of the two render call
+  // sites and the flake it existed to fix kept firing (render-sandbox.test.ts). A door-collapse
+  // mutant — either call site in renderers.ts handing `renderTimeoutMs` to BOTH parameters, i.e.
+  // the pre-T139 single budget restored at the seam — leaves the function-level rails green.
+  const boot = (options: {
+    renderTimeoutMs?: number;
+    renderSpawnTimeoutMs?: number;
+  }): Promise<Gateway> =>
+    Gateway.boot(
+      new MemoryBackend(),
+      assembleGenesis({
+        operatorSeed: OP_SEED,
+        registrations: [
+          {
+            hyperschema: PLANT,
+            schema: PLANT_POLICY,
+            roots: [FERN],
+            writable: [...PLANT_WRITABLE],
+          },
+        ],
+      }),
+      options,
+    );
+
+  const staged = async (options: {
+    renderTimeoutMs?: number;
+    renderSpawnTimeoutMs?: number;
+  }): Promise<Gateway> => {
+    const gw = await boot(options);
+    await gw.append([observed(FERN, "height", 42, 1000, OP_SEED)]);
+    await gw.publishRenderer({ route: "ok", schema: "Plant", consumes: ["height"], bundle: OK });
+    return gw;
+  };
+
+  it("a 1ms SPAWN budget refuses at the door — the knob reaches the worker (rail e)", async () => {
+    // 1ms of spawn against a 10s render budget. Only a door that carries the spawn budget through
+    // can answer this; a door that passed `renderTimeoutMs` to both parameters renders 200.
+    const gw = await staged({ renderTimeoutMs: 10_000, renderSpawnTimeoutMs: 1 });
+    const out = await gw.serveRoute("ok", FERN, "full");
+    expect(out.status).toBe(500);
+    expect(out.body).toBe("the renderer could not start");
+    await gw.close();
+  });
+
+  it("a generous SPAWN budget does not lift the door's RENDER budget (rail f)", async () => {
+    // The mirror at the door: 1ms of render under a 10s spawn ceiling still refuses, and refuses
+    // with the RENDER cause. A door that fed the spawn budget to the render window renders 200.
+    const gw = await staged({ renderTimeoutMs: 1, renderSpawnTimeoutMs: 10_000 });
+    const out = await gw.serveRoute("ok", FERN, "full");
+    expect(out.status).toBe(500);
+    expect(out.body).toBe("the renderer timed out");
+    await gw.close();
+  });
 });
