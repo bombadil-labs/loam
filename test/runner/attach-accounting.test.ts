@@ -167,14 +167,23 @@ describe("attach accounts for every binding delta in the ground", () => {
       bindingDefinitionClaims(spec("binding:good", "fn:b"), RUNNER, 7),
       RUNNER_SEED,
     );
-    const gw = await Gateway.open(new MemoryBackend());
-    gw.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
-    await gw.append([tieA, tieB]);
-    const runner = Runner.attach(gw, { seed: RUNNER_SEED, implementations: {} });
-    const loser = tieA.id > tieB.id ? tieB : tieA;
-    expect(runner.superseded).toEqual([{ deltaId: loser.id, name: "binding:good" }]);
-    expect(runner.skipped).toEqual(["binding:good"]); // one law, counted once
-    await gw.close();
+    // Looped for the same reason as above, and a sharper one: with a single arrival order, an
+    // implementation that ignored the id tiebreak entirely would still name the second-appended
+    // delta the loser, and whether that matches depends on how two content hashes happen to
+    // fall. Under BOTH orders the loser is the lower id, and only a real tiebreak gives that.
+    const lowerId = tieA.id < tieB.id ? tieA : tieB;
+    for (const arrival of [
+      [tieA, tieB],
+      [tieB, tieA],
+    ]) {
+      const gw = await Gateway.open(new MemoryBackend());
+      gw.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
+      await gw.append(arrival);
+      const runner = Runner.attach(gw, { seed: RUNNER_SEED, implementations: {} });
+      expect(runner.superseded).toEqual([{ deltaId: lowerId.id, name: "binding:good" }]);
+      expect(runner.skipped).toEqual(["binding:good"]); // one law, counted once
+      await gw.close();
+    }
   });
 
   it("delta level: a malformed definition is dropped from the RUN, never from the store", async () => {

@@ -6,7 +6,7 @@
 // Two-sided, both levels: the report names the drops AND the good bystanders land at the delta
 // level; a clean offer reports zero drops and prints no damage line.
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -73,6 +73,30 @@ describe("the pull report accounts for every delta the peer sent", () => {
       d.claims.pointers.filter((p) => p.role === "height" && p.target.kind === "primitive"),
     );
     expect(heights.map((p) => (p.target as { value: unknown }).value)).not.toContain(64);
+    await gw.close();
+  });
+
+  // The CLI cue offers two cures because fromWire refuses two different things. The mixed offer
+  // above drives the id-mismatch kind; this drives the OTHER kind, so neither half of the message
+  // is a promise the code has never kept. A pointer whose target shape this rhizomatic does not
+  // know is exactly what a peer on a newer version sends, and H5 makes parseClaims fail closed.
+  it("a claim shape this loam cannot read counts as unreconstructable too, and does not throw", async () => {
+    const gw = await local();
+    const sound = toWire(observed(FERN, "height", 62, 1000, GARDENER_SEED));
+    const future = JSON.parse(JSON.stringify(sound)) as WireDelta & {
+      claims: { pointers: { role: string; target: unknown }[] };
+    };
+    future.claims.pointers = [
+      { role: "height", target: { kind: "tomorrow", something: "this loam has never seen" } },
+    ];
+    const report = await pullFrom(gw, "http://peer.example/default", "tok", {
+      fetch: serving(JSON.stringify({ deltas: [sound, future] })),
+    });
+    // Counted, not thrown: the sound delta still lands and the peer is not declared unreachable.
+    expect(report.unreconstructable).toBe(1);
+    expect(report.offered).toBe(2);
+    expect(report.accepted).toBe(1);
+    expect(new Set([...gw.reactor.snapshot()].map((d) => d.id)).has(sound.id)).toBe(true);
     await gw.close();
   });
 
@@ -196,9 +220,13 @@ describe("loam pull names the drops (the door the operator actually reads)", () 
     const badFile = join(dir, "damaged.json");
     const { corrupt } = mixedOffer();
     writeFileSync(badFile, JSON.stringify({ deltas: [...good, corrupt] }));
-    expect(await run(["pull", badFile, "--home", join(dir, "h4")], io)).toBe(2);
+    const h4 = join(dir, "h4");
+    expect(await run(["pull", badFile, "--home", h4], io)).toBe(2);
     expect(err.join("\n")).toMatch(/does not recompute from its claims/);
     expect(err.join("\n")).not.toMatch(/would not reconstruct/);
     expect(out.join("\n")).not.toMatch(/accepted/);
+    // Object level for "nothing lands": the refusal happens before the home is even minted, so
+    // the good deltas that shared the damaged file are nowhere on disk. Asserted, not assumed.
+    expect(existsSync(h4)).toBe(false);
   });
 });
