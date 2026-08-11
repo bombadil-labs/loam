@@ -225,8 +225,20 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
 
   // Every refusal is a page with no `Location`, and none reflects caller text — a name the caller
   // typed never rides back into the DOM; only names read from the table are rendered, escaped.
+  // The two links are T146's repair: a refusal page was a dead end, and the Back button was the
+  // only way off it. One refusal body per cause still holds — the links are the same on every
+  // refusal, so they distinguish nothing.
   const refuse = (res: ServerResponse, status: number, message: string): void =>
-    htmlOut(res, status, page("this request was refused", `<h1>Refused.</h1>\n<p>${message}</p>`));
+    htmlOut(
+      res,
+      status,
+      page(
+        "this request was refused",
+        `<h1>Refused.</h1>\n<p>${message}</p>\n` +
+          `<p><a href="${ADMIN_PATH}">Back to your containers.</a> · ` +
+          `<a href="/login">Go to the sign-in page.</a></p>`,
+      ),
+    );
 
   // ONE body for a foreign name and an absent one: a 403 that varied would confirm which
   // containers exist to a user who may not see them.

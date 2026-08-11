@@ -115,6 +115,14 @@ export const adminPages = (opts: AdminPagesOpts) => {
     return JSON.stringify(authoredBy(authorForSeed(seed.seed)));
   };
 
+  // T146: every admin page carries the way out. The logout door checks the SESSION's own form
+  // token under the phase-6 preamble, and these pages hold exactly that token — so the form here
+  // is the same one the signed-in page offers, not a second mechanism.
+  const signOutFormHtml = (formToken: string): string => `<form method="post" action="/logout">
+<input type="hidden" name="form_token" value="${escapeHtml(formToken)}">
+<button type="submit">sign out</button>
+</form>`;
+
   const declareFormHtml = (user: string, reach: ReadonlySet<string>, formToken: string): string => {
     const parents = [...reach]
       .sort()
@@ -130,7 +138,7 @@ A shared child is a reading over ground this store already holds; give it a memb
 A separate child keeps its own store, attached later from the command line.</p>
 <form method="post" action="${ADMIN_DECLARE_PATH}">
 <input type="hidden" name="form_token" value="${escapeHtml(formToken)}">
-<p><label>name <input name="name" placeholder="${escapeHtml(user)}:notes"></label></p>
+<p><label>name <input name="name" value="${escapeHtml(user)}:"></label></p>
 <p><label>inside <select name="parent">
 ${parents}
 </select></label></p>
@@ -188,7 +196,8 @@ name, and everything declared inside it. Each name opens its own page.</p>
 ${treeHtml(table, reach, user)}
 ${opts.connectionsPanel(gw, table, reach, formToken)}
 ${declareFormHtml(user, reach, formToken)}
-${schemaPanelHtml(gw, formToken)}`,
+${schemaPanelHtml(gw, formToken)}
+${signOutFormHtml(formToken)}`,
     );
 
   const createOfferPage = (user: string, formToken: string): string =>
@@ -200,7 +209,8 @@ you author — one container, named after you; everything you later make will li
 <form method="post" action="${ADMIN_CREATE_ROOT_PATH}">
 <input type="hidden" name="form_token" value="${escapeHtml(formToken)}">
 <button type="submit">create your container</button>
-</form>`,
+</form>
+${signOutFormHtml(formToken)}`,
     );
 
   // A hidden pair every lifecycle form carries: the session's token and the target's name. The
@@ -318,7 +328,8 @@ writes, or drop it to forget it whole.</p>`
 <p>This container is detached: kept, deliberately, and out of the gather. Its bytes are held, and
 no read composes them until it is reattached.</p>
 ${forms}
-${back}`,
+${back}
+${signOutFormHtml(formToken)}`,
       );
     }
 
@@ -337,7 +348,8 @@ ${back}`,
 <p>Declared, not attached — its bytes are not readable from here. This page will not pretend the
 container is empty; attach it, and its contents appear.</p>
 ${forms}
-${back}`,
+${back}
+${signOutFormHtml(formToken)}`,
         );
       }
       opts.onFault(`the admin page could not read container "${name}": ${detail}`);
@@ -346,7 +358,8 @@ ${back}`,
         `${head}
 <p>This container's contents cannot be read right now. The store says no rather than why.</p>
 ${forms}
-${back}`,
+${back}
+${signOutFormHtml(formToken)}`,
       );
     }
     const listing =
@@ -358,7 +371,7 @@ ${members.map((m) => memberHtml(gw, name, m, formToken)).join("\n")}
 </ul>`;
     return page(
       name,
-      `${head}\n${listing}\n${federateFormHtml(name, rec, formToken)}\n${forms}\n${back}`,
+      `${head}\n${listing}\n${federateFormHtml(name, rec, formToken)}\n${forms}\n${back}\n${signOutFormHtml(formToken)}`,
     );
   };
 
