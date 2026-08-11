@@ -391,6 +391,43 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
     ]);
   })();
 
+  // THE NEAR-MISS FAULT (T145). A refused Origin whose HOST matches one of this store's own
+  // origins but whose scheme or port does not is almost never an attack — it is the funnel shape
+  // (a TLS terminator or proxy in front of the store) with --public-url naming the store's side
+  // of the proxy instead of the browser's. Without this line, that misconfiguration is a silent
+  // universal 403 nobody can diagnose (the exact failure §36.6 already names for 0.0.0.0). Said
+  // on TRANSITION, like `noteCostAgreement` below — but where the credential file can change
+  // under a running server, --public-url cannot change without a restart, so the disagreement
+  // state can only ever be DISCOVERED, never repaired, in this process's lifetime. The latch is
+  // therefore one-way: exactly one line per process, and nothing a stranger can pump — a reset
+  // on the next agreeing Origin would let any bare client alternate a matching and a near-miss
+  // Origin by hand and fill the operator's channel. The refusal the CALLER sees is untouched.
+  let publicUrlDisagreed = false;
+  const notePublicUrlDisagreement = (origin: string): void => {
+    if (publicUrlDisagreed) return;
+    let sent: URL;
+    try {
+      sent = new URL(origin);
+    } catch {
+      return; // "null" and other non-URL origins carry no address to disagree with
+    }
+    for (const own of ownOrigins) {
+      const settled = new URL(own);
+      if (settled.hostname !== sent.hostname) continue;
+      publicUrlDisagreed = true;
+      const differs: string[] = [];
+      if (sent.protocol !== settled.protocol) differs.push("scheme");
+      if (sent.port !== settled.port) differs.push("port");
+      onFault(
+        `a POST was refused because its Origin "${origin}" differs from this store's own ` +
+          `origin "${own}" only in ${differs.join(" and ")} — the browser likely reaches ` +
+          `this store through an address --public-url does not name; set --public-url to ` +
+          `the address in the browser's location bar`,
+      );
+      return;
+    }
+  };
+
   /**
    * Did this POST come from this store's own page? `Origin`, when present and non-empty, is
    * decisive and OUTRANKS `Sec-Fetch-Site` — a caller that names a specific foreign page is
@@ -407,7 +444,9 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
       // "null" can never be in the set. It must NOT fall through to the fetch-site hint: the
       // hint says same-origin for a sandboxed same-origin iframe, and null is exactly the
       // origin an attacker can select.
-      return ownOrigins.has(origin);
+      if (ownOrigins.has(origin)) return true;
+      notePublicUrlDisagreement(origin);
+      return false;
     }
     return req.headers["sec-fetch-site"] === "same-origin";
   };
