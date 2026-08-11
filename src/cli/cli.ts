@@ -779,8 +779,17 @@ async function cmdPull(args: readonly string[], io: IO): Promise<number> {
     assembleGenesis({ operatorSeed: readSeed(home) }),
   );
   let report: FederationReport;
+  // Pull's own dimension: deltas the peer sent that would not even reconstruct (see PullReport).
+  // The file path cannot produce it — parseOffer refuses a corrupt file whole.
+  let unreconstructable = 0;
   try {
-    report = isUrl ? await pullFrom(gateway, source, token!) : await gateway.federate(offered!);
+    if (isUrl) {
+      const pulled = await pullFrom(gateway, source, token!);
+      report = pulled;
+      unreconstructable = pulled.unreconstructable;
+    } else {
+      report = await gateway.federate(offered!);
+    }
   } catch (err) {
     await gateway.close().catch(() => {}); // never let a close failure mask the real refusal
     throw err;
@@ -794,9 +803,9 @@ async function cmdPull(args: readonly string[], io: IO): Promise<number> {
   );
   // A rotten delta rots on EVERY pull — reconstruction fails on the peer's bytes, not on timing —
   // so this is the operator's only cue to get the peer a fresh export. Never silent (H7).
-  if (report.unreconstructable > 0) {
+  if (unreconstructable > 0) {
     io.err(
-      `loam: ${report.unreconstructable} of the offered deltas would not reconstruct and were ` +
+      `loam: ${unreconstructable} of the offered deltas would not reconstruct and were ` +
         `dropped — the peer's offer is damaged; pulling again will drop the same ones until the ` +
         `peer repairs it`,
     );

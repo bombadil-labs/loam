@@ -48,7 +48,9 @@ const stringBudget = (): Claims => {
   return {
     ...claims,
     pointers: claims.pointers.map((p) =>
-      p.role === "budget" ? { role: "budget", target: { kind: "primitive" as const, value: "ten" } } : p,
+      p.role === "budget"
+        ? { role: "budget", target: { kind: "primitive" as const, value: "ten" } }
+        : p,
     ),
   };
 };
@@ -60,7 +62,10 @@ async function storeWithFour(): Promise<{
 }> {
   const gateway = await Gateway.open(new MemoryBackend());
   gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
-  const good = signClaims(bindingDefinitionClaims(spec("binding:good", "fn:good"), RUNNER, 1), RUNNER_SEED);
+  const good = signClaims(
+    bindingDefinitionClaims(spec("binding:good", "fn:good"), RUNNER, 1),
+    RUNNER_SEED,
+  );
   const orphan = signClaims(
     bindingDefinitionClaims(spec("binding:orphan", "fn:orphan"), RUNNER, 4),
     RUNNER_SEED,

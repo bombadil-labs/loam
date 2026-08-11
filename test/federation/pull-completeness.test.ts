@@ -35,7 +35,10 @@ function mixedOffer(): { good: WireDelta[]; corrupt: WireDelta; body: string } {
     toWire(observed(FERN, "height", 62, 1000, GARDENER_SEED)),
     toWire(observed(FERN, "height", 63, 2000, GARDENER_SEED)),
   ];
-  const corrupt = { ...toWire(observed(FERN, "height", 64, 3000, GARDENER_SEED)), id: "00".repeat(32) };
+  const corrupt = {
+    ...toWire(observed(FERN, "height", 64, 3000, GARDENER_SEED)),
+    id: "00".repeat(32),
+  };
   return { good, corrupt, body: JSON.stringify({ deltas: [...good, corrupt] }) };
 }
 
@@ -86,9 +89,10 @@ describe("the pull report accounts for every delta the peer sent", () => {
     });
     expect(clean.unreconstructable).toBe(0);
     expect(clean.accepted).toBe(2);
-    // federate is handed live deltas — the door where reconstruction cannot fail says so.
+    // federate is handed live deltas — reconstruction cannot fail there, so the count lives on
+    // PullReport ONLY and federate's report shape stays exactly what T64's rails froze.
     const direct = await gw.federate([observed(FERN, "height", 65, 4000, GARDENER_SEED)]);
-    expect(direct.unreconstructable).toBe(0);
+    expect("unreconstructable" in direct).toBe(false);
     await gw.close();
   });
 });

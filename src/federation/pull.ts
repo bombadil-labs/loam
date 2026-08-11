@@ -8,6 +8,16 @@ import type { Delta } from "@bombadil/rhizomatic";
 import type { FederationReport, Gateway } from "../gateway/gateway.js";
 import { fromWire, type WireDelta } from "./wire.js";
 
+// The pull report: federate's report plus the one dimension only the wire crossing can produce.
+// A delta that fails RECONSTRUCTION (its id does not recompute from its claims) never reaches
+// federate, so `FederationReport` cannot carry the count — the field lives here, on the door
+// where it can be nonzero, and `offered` is restored to what the peer actually SENT. Without it
+// the report was false (H7): a peer offering 100 deltas of which 40 rot on the wire read
+// "offered 60, rejected 0", and every later pull repeated the lie.
+export interface PullReport extends FederationReport {
+  readonly unreconstructable: number;
+}
+
 const DEFAULT_MAX_OFFER = 64 * 1024 * 1024; // a peer's offer, capped so it cannot OOM the puller
 
 export interface PullOptions {
@@ -109,7 +119,7 @@ export async function pullFrom(
   peerUrl: string,
   peerToken: string,
   opts: PullOptions = {},
-): Promise<FederationReport> {
+): Promise<PullReport> {
   const doFetch = opts.fetch ?? fetch;
   let res: Response;
   let text: string;
@@ -152,7 +162,10 @@ export async function pullFrom(
     }
   }
   // No explicit admit → federate resolves the local trust policy itself (fresh per call).
-  const report = await local.federate(deltas, opts.admit === undefined ? {} : { admit: opts.admit });
+  const report = await local.federate(
+    deltas,
+    opts.admit === undefined ? {} : { admit: opts.admit },
+  );
   // `offered` restored to what the peer actually SENT — federate can only count what reached it.
   return {
     ...report,
