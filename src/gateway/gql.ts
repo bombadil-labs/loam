@@ -418,10 +418,12 @@ export function buildGqlSchema(
           description: "The previous page's last _entity, exclusive.",
         },
       },
+      // `== null` on purpose: GraphQL hands an omitted argument as undefined and an explicit
+      // null as null, and both mean "not asked for" here — one comparison covers the pair.
       resolve: (_src, args: { limit?: number | null; after?: string | null }) =>
         hooks.list(lensOf(def), {
-          ...(args.limit === undefined || args.limit === null ? {} : { limit: args.limit }),
-          ...(args.after === undefined || args.after === null ? {} : { after: args.after }),
+          ...(args.limit == null ? {} : { limit: args.limit }),
+          ...(args.after == null ? {} : { after: args.after }),
         }),
     };
 
