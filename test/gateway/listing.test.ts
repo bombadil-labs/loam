@@ -112,6 +112,20 @@ describe("the listing door — object level: what the authed door serves", () =>
     await gw.close();
   });
 
+  it("a lens whose name IS another lens's listing field refuses at build, both orders", async () => {
+    // "Plant" serves `plant` + `plants`; a lens named "Plants" serves `plants`. One word, two
+    // meanings — the build refuses whichever arrives second, never silently picking a winner.
+    const first = await governedGarden(); // Plant is registered
+    expect(() => first.register({ ...PLANT, name: "Plants" }, PLANT_POLICY, [FERN])).toThrowError(
+      /collides/,
+    );
+    await first.close();
+    const second = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
+    second.register({ ...PLANT, name: "Plants" }, PLANT_POLICY, [FERN]);
+    expect(() => second.register(PLANT, PLANT_POLICY, [FERN])).toThrowError(/collides/);
+    await second.close();
+  });
+
   it("refuses an unregistered lens in the door's own voice", async () => {
     const gw = await governedGarden();
     await expect(gw.list("Nope")).rejects.toThrow(/no registered schema named Nope/);
