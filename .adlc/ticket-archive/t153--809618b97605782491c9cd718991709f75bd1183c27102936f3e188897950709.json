@@ -1,4 +1,12 @@
 {
+  "_adlcArchive": {
+    "archivedAt": "2026-08-11T04:49:48.016Z",
+    "reason": "completed",
+    "sourceRevision": null,
+    "sourceStoreHash": "297e6469f48a33cba53ea32d1cea9a4e6dad7d1ccd87e7d5392cd87179b75dca",
+    "ticketHash": "ba667c8c238973280da50254c478ad45cded9271eeb5fcbc5459778f83d00148",
+    "version": 1
+  },
   "body": "FOUND BY THE 2026-08-05 AUDIT (consolidation lens, CONFIRMED by grep; counts are the lens's and each candidate MUST be re-verified during execution — an export a test imports is not dead). The expansion built users, sessions, OAuth, admin and the board fast, and each module grew its own copies of the same four ideas:\n\n1. HTTP response writers: html/json/htmlOut/jsonOut implemented six times across session.ts, oauth.ts (x3 doors), admin.ts, http.ts — same headers, drifting names, and T143 just proved the copies can disagree in ways that matter (referrer-policy had to be fixed in three places; the coverage rail now pins them). ONE module (src/server/respond.ts) with the policy/CSP knobs explicit; each door imports it. The source-scan rail in test/server/referrer-policy.test.ts stays true because the declarations move but keep their spelling — verify the pinned counts against the new layout and update THAT rail only via its own non-frozen status (it IS frozen — T143's rail; the counts pin files, so the consolidation needs a rail-renames pair set, or the module keeps per-door wrapper constants so the per-file counts hold. PREFER the wrapper-constant shape: no pair needed).\n2. Capped body-reader four times, urlencoded/JSON form-parser three times, four names. Same module.\n3. admin.ts is 2230 lines with two clean seams the lens names: the pure page-renderers, and the federation/connector door group. Split at those seams, mechanical moves only, no behavior change; the frozen admin rails keep passing untouched.\n4. ~35 exported server symbols with no importer, including two whole functions in login-locks.ts that are dead code. Cull after verifying each against test/ imports and the public surface pinned by test/cli/pack.test.ts.\n\nSHAPE: a STACK of small PRs (seam moves first, then the shared module adoption door by door, then the cull), each mechanically green, none changing a promise. Self-merge tier throughout if the wrapper-constant shape avoids every frozen-rail edit; anything needing a pair goes through Myk.\n\nRAILS: the existing suite IS the rail — every move must keep it byte-identically green; the shared module gets its own header test.",
   "edges": [],
   "id": "T153",
