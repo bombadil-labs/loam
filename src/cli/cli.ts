@@ -779,8 +779,17 @@ async function cmdPull(args: readonly string[], io: IO): Promise<number> {
     assembleGenesis({ operatorSeed: readSeed(home) }),
   );
   let report: FederationReport;
+  // Pull's own dimension: deltas the peer sent that would not even reconstruct (see PullReport).
+  // The file path cannot produce it — parseOffer refuses a corrupt file whole.
+  let unreconstructable = 0;
   try {
-    report = isUrl ? await pullFrom(gateway, source, token!) : await gateway.federate(offered!);
+    if (isUrl) {
+      const pulled = await pullFrom(gateway, source, token!);
+      report = pulled;
+      unreconstructable = pulled.unreconstructable;
+    } else {
+      report = await gateway.federate(offered!);
+    }
   } catch (err) {
     await gateway.close().catch(() => {}); // never let a close failure mask the real refusal
     throw err;
@@ -792,6 +801,19 @@ async function cmdPull(args: readonly string[], io: IO): Promise<number> {
       `  ${report.accepted} accepted, ${report.rejected} refused, of ${report.offered} offered — ` +
       `union is union; pulling again is safe`,
   );
+  // A delta that will not reconstruct fails on the BYTES, not on timing, so every later pull
+  // drops the same ones — this line is the operator's only cue. It names the count and BOTH
+  // cures, because the door genuinely cannot tell a rotted offer from a peer speaking a newer
+  // delta shape than this puller (PullReport carries the reasoning). Never silent, and never a
+  // guessed cause: prescribing "the peer must repair it" would be H7 in a new place.
+  if (unreconstructable > 0) {
+    io.err(
+      `loam: ${unreconstructable} of the offered deltas would not reconstruct and were ` +
+        `dropped — pulling again drops the same ones. Either the peer's offer is damaged or the ` +
+        `peer speaks a newer delta shape than this loam: ask for a fresh export, and compare ` +
+        `both sides' versions`,
+    );
+  }
   // "Accepted" is true of the FILE, not of any server already holding it open: a running serve
   // keeps answering from boot-time memory. Say so, right under the count that would otherwise lie
   // by omission — and never block; the deltas are durable whatever the server knows.
