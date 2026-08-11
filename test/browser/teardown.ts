@@ -20,7 +20,7 @@ const HELD_OPEN = new Set(["EPERM", "EBUSY", "ENOTEMPTY"]);
 // What `killTree` learned, for `dropProfile` to say out loud if the removal then fails. Without it
 // a swallowed failure reports WHICH directory survived and never WHY, and the next reader gets a
 // warning that cannot tell them anything — H7's shape in a teardown path.
-let killNote = "";
+let notes: string[] = [];
 
 /**
  * Stop Chrome. On Windows, stop everything it spawned as well.
@@ -43,30 +43,28 @@ let killNote = "";
  * `scripts/patch-adlc-npx.mjs`) is not this one.
  */
 export function killTree(child: ChildProcess): void {
-  killNote = "";
+  notes = [];
   if (onWindows) {
     if (child.exitCode !== null || child.signalCode !== null) {
-      killNote =
-        "Chrome's browser process had already exited, so any orphan it left was out of taskkill's reach";
+      notes.push(
+        "Chrome's browser process had already exited, so any orphan it left was out of taskkill's reach",
+      );
     } else if (child.pid === undefined) {
-      killNote = "Chrome had no pid to kill";
+      notes.push("Chrome had no pid to kill");
     } else {
       // A hung taskkill would otherwise burn the whole 20s hook budget and read as a hung suite.
       const done = spawnSync("taskkill", ["/T", "/F", "/PID", String(child.pid)], {
         stdio: "ignore",
         timeout: 10_000,
       });
-      if (done.error !== undefined) killNote = `taskkill did not run: ${done.error.message}`;
-      else if (done.status !== 0) killNote = `taskkill exited ${String(done.status)}`;
+      if (done.error !== undefined) notes.push(`taskkill did not run: ${done.error.message}`);
+      else if (done.status !== 0) notes.push(`taskkill exited ${String(done.status)}`);
     }
   }
   // `kill()` EMITS rather than throws, and a process caught mid-termination can answer EACCES
   // instead of ESRCH. With no listener that becomes an uncaught exception out of afterAll.
   child.once("error", (err) => {
-    killNote =
-      killNote === ""
-        ? `kill() raised ${err.message}`
-        : `${killNote}; kill() raised ${err.message}`;
+    notes.push(`kill() raised ${err.message}`);
   });
   child.kill();
 }
@@ -93,9 +91,15 @@ export function dropProfile(userDataDir: string): void {
   try {
     rmSync(userDataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   } catch (err) {
+    // Two refusals, deliberately separate rather than one `||`: the platform half is reachable
+    // from any POSIX runner and `teardown.test.ts` rails it, and only the code half is Windows-only.
+    if (!onWindows) throw err;
     const code = (err as NodeJS.ErrnoException).code ?? "";
-    if (!onWindows || !HELD_OPEN.has(code)) throw err;
-    const why = killNote === "" ? "" : ` — ${killNote}`;
-    console.warn(`Windows still holds the throwaway Chrome profile ${userDataDir} (${code})${why}`);
+    if (!HELD_OPEN.has(code)) throw err;
+    console.warn(
+      [`Windows still holds the throwaway Chrome profile ${userDataDir} (${code})`, ...notes].join(
+        " — ",
+      ),
+    );
   }
 }
