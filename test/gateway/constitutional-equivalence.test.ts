@@ -230,7 +230,7 @@ function assertIdentical(reactor: Reactor, where: string, operator?: string): vo
     [ARTIFACT_ENTITY, CTX_ARTIFACT],
   ] as const) {
     expect(
-      ids(lawfulDeltasAt(reactor, entity, context, operator)),
+      ids(lawfulDeltasAt(reactor, { entity, context }, operator)),
       `${where}: the indexed candidate set at ${entity} differs from the scanned one`,
     ).toEqual(ids(scannedDeltasAt(reactor, entity, context, operator)));
   }
@@ -368,9 +368,27 @@ describe("T37 — the indexed answer equals the scanned answer, through every mu
       ),
     ]);
     await gw.append([sign(trustAt(CAGE, "roster", [SURVEYOR], 9610))]);
+    // A container declaration carries no `mode` and no `admit-author`, so the trust reader would
+    // SKIP it even if a context-blind route handed it over — which would leave the object-level
+    // assertions below unable to see the bug at all. So file a DECOY at the same id under a
+    // non-trust context that does carry both: later than the real declaration, and naming a mode
+    // and a roster member the real one does not. If the context filter is dropped, the decoy wins
+    // on timestamp and the answers below change.
+    const decoy = sign({
+      ...trustAt(CAGE, "closed", [GARDENER], 9620),
+      pointers: [
+        {
+          role: "declares",
+          target: { kind: "entity" as const, entity: { id: CAGE, context: "loam.decoy" } },
+        },
+        { role: "mode", target: { kind: "primitive" as const, value: "closed" } },
+        { role: "admit-author", target: { kind: "primitive" as const, value: GARDENER } },
+      ],
+    });
+    await gw.append([decoy]);
     for (const at of [TRUST_ENTITY, CAGE]) {
       expect(
-        ids(lawfulDeltasAt(gw.reactor, at, CTX_TRUST, OP)),
+        ids(lawfulDeltasAt(gw.reactor, { entity: at, context: CTX_TRUST }, OP)),
         `one entity, two contexts: the indexed candidates at ${at} differ from the scanned ones`,
       ).toEqual(ids(scannedDeltasAt(gw.reactor, at, CTX_TRUST, OP)));
       const shipped = readTrustPolicyAt(gw.reactor, at, OP);
@@ -382,7 +400,7 @@ describe("T37 — the indexed answer equals the scanned answer, through every mu
     expect(readTrustPolicyAt(gw.reactor, CAGE, OP).mode).toBe("roster");
     expect([...readTrustPolicyAt(gw.reactor, CAGE, OP).roster]).toEqual([SURVEYOR]);
     expect(gw.reactor.byTarget(CAGE).length).toBeGreaterThan(
-      lawfulDeltasAt(gw.reactor, CAGE, CTX_TRUST, OP).length,
+      lawfulDeltasAt(gw.reactor, { entity: CAGE, context: CTX_TRUST }, OP).length,
     ); // the index really does hold more at this id than the trust reader may see
     assertIdentical(gw.reactor, "one entity carries two kinds of law", OP);
 
@@ -428,9 +446,40 @@ describe("T37 — the indexed answer equals the scanned answer, through every mu
     expect(readTrustPolicy(stub, OP).mode).toBe("closed"); // so the declaration still governs
   });
 
+  it("a ground that disagrees with its own index REFUSES — it does not read law from the gap", () => {
+    // The mirror of the case above, failing in the other direction. `lawfulNegated`'s unresolvable
+    // id makes a strike not count, which lets its target SURVIVE — conservative. An unresolvable id
+    // in `lawfulDeltasAt` would drop a DECLARATION, and an empty trust list reads as `open`
+    // (trust.ts) — so a skip there would swing the federation door open on an answer nobody
+    // determined. That is H9, and the remedy is to refuse rather than to guess.
+    //
+    // Unreachable against today's substrate, so it is pinned with a stub, as the purge hole is.
+    const trust = sign(trustClaims("closed", [], OP, 1000));
+    const stub = {
+      negationsOf: () => [],
+      get: () => undefined, // the set cannot resolve what the index names
+      snapshot: () => new Set([trust]),
+      byTarget: () => [trust.id],
+    } as unknown as Reactor;
+
+    expect(() => lawfulDeltasAt(stub, { entity: TRUST_ENTITY, context: CTX_TRUST }, OP)).toThrow(
+      /cannot resolve it/,
+    );
+    // And the refusal reaches the reader — the door does not quietly open.
+    expect(() => readTrustPolicy(stub, OP)).toThrow(/cannot resolve it/);
+  });
+
   it("holds for an UNGOVERNED store, where every voice is lawful", async () => {
     // No operator: `lawfulSnapshot` is the whole store, so the author filter must be absent on
-    // BOTH routes. An index consulted with a filter the scan does not apply would diverge here.
+    // BOTH routes. An index consulted with a filter the scan does not apply diverges here.
+    //
+    // WHAT THIS CASE ASSERTS AND WHAT IT DOES NOT. The DELTA level is live: `lawfulDeltasAt` and
+    // `lawfulNegated` both run their undefined-operator branch and are compared against the scan.
+    // The OBJECT level is NOT — all four readers short-circuit on `operator === undefined` before
+    // touching a delta, and every oracle short-circuits identically, so those four comparisons are
+    // constant-against-constant. That is a property of the readers, not a gap this rail could
+    // close: an ungoverned store has no lawful voice, so there is no object-level answer to
+    // compare. The rail that WOULD close it does not exist because the behaviour does not.
     const gw = await Gateway.open(new MemoryBackend());
     await gw.federate([
       signClaims(trustClaims("roster", [GARDENER], GARDENER, 9001), GARDENER_SEED),
@@ -441,8 +490,17 @@ describe("T37 — the indexed answer equals the scanned answer, through every mu
     // on that too.
     assertIdentical(gw.reactor, "ungoverned ground, read as the operator", OP);
     assertIdentical(gw.reactor, "ungoverned ground, read ungoverned", undefined);
-    // A floor: the ungoverned store really is holding the stranger's declarations.
-    expect(lawfulDeltasAt(gw.reactor, TRUST_ENTITY, CTX_TRUST, undefined).length).toBe(1);
+    // Floors: the ungoverned store really is holding the strangers' declarations, at two entities
+    // and from two different authors — so the delta-level halves above ran over a non-empty set.
+    expect(
+      lawfulDeltasAt(gw.reactor, { entity: TRUST_ENTITY, context: CTX_TRUST }, undefined).length,
+    ).toBe(1);
+    expect(
+      lawfulDeltasAt(gw.reactor, { entity: PUBLIC_ENTITY, context: CTX_PUBLIC }, undefined).length,
+    ).toBe(1);
+    expect(
+      lawfulDeltasAt(gw.reactor, { entity: TRUST_ENTITY, context: CTX_TRUST }, OP).length,
+    ).toBe(0); // and none is the operator's
     await gw.close();
   });
 });

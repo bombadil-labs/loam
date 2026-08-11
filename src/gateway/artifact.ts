@@ -124,7 +124,11 @@ export function readArtifactRoutes(reactor: Reactor, operator?: string): Readonl
   const open = new Set<string>();
   if (operator === undefined) return open;
   const negated = lawfulNegated(reactor, operator);
-  for (const delta of lawfulDeltasAt(reactor, ARTIFACT_ENTITY, CTX_ARTIFACT, operator)) {
+  for (const delta of lawfulDeltasAt(
+    reactor,
+    { entity: ARTIFACT_ENTITY, context: CTX_ARTIFACT },
+    operator,
+  )) {
     if (negated(delta.id)) continue;
     for (const p of delta.claims.pointers) {
       if (

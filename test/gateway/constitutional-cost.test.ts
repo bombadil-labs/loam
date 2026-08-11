@@ -21,7 +21,7 @@
 // safety decision reading a stale index is silently wrong, and these reads decide what is LAWFUL.
 
 import { describe, expect, it } from "vitest";
-import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
+import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { readTrustPolicy, trustClaims } from "../../src/gateway/trust.js";
@@ -155,10 +155,17 @@ describe("T37 — a constitutional read costs the same in a big store as in a sm
 describe("T37 — the negation algebra itself is index-bound", () => {
   it("lawfulNegated costs the same however much unrelated ground the store holds", async () => {
     const { lawfulNegated } = await import("../../src/gateway/registration.js");
-    const build2 = async (padding: number): Promise<{ gw: Gateway; claim: Delta }> => {
+    // The fixture carries BOTH answers — a survivor and a struck delta. A floor that only asserts
+    // `false` is satisfied by `() => () => false`, which is also perfectly cheap, so it would pass
+    // the cost assertion beside it with the predicate deleted (H10).
+    const build2 = async (
+      padding: number,
+    ): Promise<{ gw: Gateway; survivor: Delta; struck: Delta }> => {
       const gw = await Gateway.open(new MemoryBackend(), { seed: OP_SEED });
-      const claim = observed(FERN, "height", 30, 1000, OP_SEED);
-      await gw.append([claim]);
+      const survivor = observed(FERN, "height", 30, 1000, OP_SEED);
+      const struck = observed(FERN, "width", 12, 1001, OP_SEED);
+      await gw.append([survivor, struck]);
+      await gw.append([signClaims(makeNegationClaims(OP, 1100, struck.id), OP_SEED)]);
       if (padding > 0) {
         await gw.append(
           Array.from({ length: padding }, (_, i) =>
@@ -166,15 +173,18 @@ describe("T37 — the negation algebra itself is index-bound", () => {
           ),
         );
       }
-      return { gw, claim };
+      return { gw, survivor, struck };
     };
     const small = await build2(0);
     const big = await build2(200);
 
     const smallTouched = meter(small.gw);
     const bigTouched = meter(big.gw);
-    expect(lawfulNegated(small.gw.reactor, OP)(small.claim.id)).toBe(false);
-    expect(lawfulNegated(big.gw.reactor, OP)(big.claim.id)).toBe(false);
+    for (const s of [small, big]) {
+      const negated = lawfulNegated(s.gw.reactor, OP);
+      expect(negated(s.survivor.id)).toBe(false);
+      expect(negated(s.struck.id)).toBe(true); // the other direction — a do-nothing predicate fails
+    }
 
     expect(
       bigTouched(),

@@ -76,7 +76,11 @@ export function readPublicSchemas(reactor: Reactor, operator?: string): Readonly
   const open = new Set<string>();
   if (operator === undefined) return open;
   const negated = lawfulNegated(reactor, operator);
-  for (const delta of lawfulDeltasAt(reactor, PUBLIC_ENTITY, CTX_PUBLIC, operator)) {
+  for (const delta of lawfulDeltasAt(
+    reactor,
+    { entity: PUBLIC_ENTITY, context: CTX_PUBLIC },
+    operator,
+  )) {
     if (negated(delta.id)) continue;
     for (const p of delta.claims.pointers) {
       // The same shape the door enforces (publicDefect): non-empty strings only, so a

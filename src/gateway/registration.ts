@@ -646,22 +646,44 @@ function isLawful(reactor: Reactor, id: string, operator?: string): boolean {
 // ORDER: `byTarget` answers in id order, where a snapshot answers in ingest order. Callers here
 // pick a winner by (timestamp, id) or union into a Set, so both orders give the same answer; a
 // caller for whom ingest order MATTERS must not use this.
-export function lawfulDeltasAt(
-  reactor: Reactor,
-  entity: string,
-  context: string,
-  operator?: string,
-): Delta[] {
+//
+// THE BOUND IS NOT CONSTANT. This costs one pass over the deltas filed at ONE entity id — across
+// every context, since the index keys on the id alone. For the store's constitutional entities
+// that is the declaration history, which grows only when the operator legislates. For a CONTAINER
+// entity it also carries that container's exclusions and detach records. Small, and unrelated to
+// the size of the store; still not O(1).
+// THE COORDINATE IS ONE ARGUMENT, deliberately. Entity ids and contexts are both bare strings, so
+// three positional strings would let a caller drop the context and still compile — and the readers
+// do NOT fail in a uniform direction when their candidate list comes back empty: trust answers
+// `open` and budget answers unmetered (both ADMIT), while public and artifact answer the empty set
+// (which refuses). A silently-widened door is not a mistake the compiler may be allowed to miss.
+export interface LawAt {
+  readonly entity: string;
+  readonly context: string;
+}
+
+export function lawfulDeltasAt(reactor: Reactor, at: LawAt, operator?: string): Delta[] {
   const out: Delta[] = [];
-  for (const id of reactor.byTarget(entity)) {
+  for (const id of reactor.byTarget(at.entity)) {
+    // Unreachable against today's substrate: nothing removes from the reactor's set, and an erase
+    // replays a fresh one, so an id the index names is an id the set holds. It REFUSES rather than
+    // skipping, because skipping would fail in the wrong direction — a dropped declaration shrinks
+    // the lawful list, and an empty trust list reads as `open`. That is H9 exactly: an answer the
+    // reader never determined, spent as a licence to admit. If a removal API ever lands, this
+    // wants a decision, and a hard error is what makes the decision unavoidable.
     const delta = reactor.get(id);
-    if (delta === undefined) continue;
+    if (delta === undefined) {
+      throw new Error(
+        `the target index names delta ${id} at ${at.entity}, and the store cannot resolve it — ` +
+          `refusing to read law from a ground that disagrees with its own index`,
+      );
+    }
     if (operator !== undefined && delta.claims.author !== operator) continue;
     const filedHere = delta.claims.pointers.some(
       (p) =>
         p.target.kind === "entity" &&
-        p.target.entity.id === entity &&
-        p.target.entity.context === context,
+        p.target.entity.id === at.entity &&
+        p.target.entity.context === at.context,
     );
     if (filedHere) out.push(delta);
   }

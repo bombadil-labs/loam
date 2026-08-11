@@ -126,7 +126,11 @@ export function readBudgetPolicy(
   if (operator === undefined) return budgets;
   const negated = lawfulNegated(reactor, operator);
   const latest = new Map<string, { policy: BudgetPolicy; timestamp: number; id: string }>();
-  for (const delta of lawfulDeltasAt(reactor, BUDGET_ENTITY, CTX_BUDGET, operator)) {
+  for (const delta of lawfulDeltasAt(
+    reactor,
+    { entity: BUDGET_ENTITY, context: CTX_BUDGET },
+    operator,
+  )) {
     if (negated(delta.id)) continue;
 
     let subject: string | undefined;
