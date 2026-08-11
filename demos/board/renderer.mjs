@@ -1,7 +1,8 @@
 // The board's face (§34) — a renderer bundle: one resolved node in, one HTML page out. The node
 // is the Board singleton's View: `{ banner, items: [<BoardItem view>...] }`, each item carrying
-// kind/title/seam/url/status/est. Four sections by status; `shipped` IS the exit, so the section
-// move is the only goodbye an item ever says.
+// kind/title/seam/url/status/est. Four sections by status, plus a catch-all for any status no
+// section holds — a mis-statused item shows up looking wrong rather than silently not being
+// there (T112). `shipped` IS the exit, so the section move is the only goodbye an item ever says.
 //
 // Self-contained by design: a bundle runs from its content address with no module graph, so the
 // section table lives here rather than in vocabulary.mjs. The `data-section` / `data-title`
@@ -40,8 +41,11 @@ export default (n) => {
     `<span class="st">${esc(x.kind)} · ${esc(x.status)}${x.est ? ` · ≈${esc(x.est)} min` : ""}</span>` +
     brief(x) +
     `</div>`;
+  // The catch-all holds whatever no section does. Absence must be visible: the door still
+  // answers a mis-statused item, so a page that drops it disagrees with its own store.
+  const placed = new Set(SECTIONS.flatMap((s) => s.holds));
   const sec = ({ key, label, hue, holds }) => {
-    const held = items.filter((x) => holds.includes(x.status));
+    const held = items.filter((x) => (holds ? holds.includes(x.status) : !placed.has(x.status)));
     return held.length === 0
       ? ""
       : `<section data-section="${key}"><h2 style="color:${hue}">${esc(label)} · ${held.length}</h2>` +
@@ -66,7 +70,7 @@ export default (n) => {
   </head><body><main>
   <div class="k">bombadil labs · rendered live from the ground</div>
   <h1>${esc(n.view.banner ?? "Loam — the board")}</h1>
-  ${SECTIONS.map(sec).join("")}
+  ${[...SECTIONS, { key: "unplaced", label: "status?", hue: "#c2566a", holds: null }].map(sec).join("")}
   <footer>every line above is a signed delta · entity ${esc(n.entity)} · digest ${esc(n.hex).slice(0, 20)}…</footer>
   </main></body></html>`;
 };

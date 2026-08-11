@@ -3,12 +3,14 @@
   "edges": [],
   "id": "T112",
   "phase": "P1",
-  "rails": [],
+  "rails": [
+    "test/board/board-catchall.test.ts"
+  ],
   "scope": [
     "demos/board/renderer.mjs",
     "scripts/render-board-artifact.mjs",
     "test/board/"
   ],
-  "status": "todo",
+  "status": "in-progress",
   "title": "The board renderer silently drops an item whose status is in no section — store and page disagree"
 }
