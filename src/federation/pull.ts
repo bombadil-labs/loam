@@ -137,14 +137,26 @@ export async function pullFrom(
   } catch {
     throw new Error("federation: the peer's offer was not the expected JSON");
   }
+  // A delta that will not reconstruct is dropped and the REST still land (a live peer's stream
+  // may be partially good — offer.ts holds the divergence note). The drop is deliberate; hiding
+  // it from the report is not (H7): a reconstruction failure is a property of the peer's bytes,
+  // so every later pull drops the same deltas — "the next pull heals" is false for this class,
+  // and only the count tells an operator their peer's offer is rotting.
   const deltas: Delta[] = [];
+  let unreconstructable = 0;
   for (const wire of body.deltas ?? []) {
     try {
       deltas.push(fromWire(wire));
     } catch {
-      // A delta that will not reconstruct is dropped here; `federate` counts what it admits.
+      unreconstructable += 1;
     }
   }
   // No explicit admit → federate resolves the local trust policy itself (fresh per call).
-  return local.federate(deltas, opts.admit === undefined ? {} : { admit: opts.admit });
+  const report = await local.federate(deltas, opts.admit === undefined ? {} : { admit: opts.admit });
+  // `offered` restored to what the peer actually SENT — federate can only count what reached it.
+  return {
+    ...report,
+    offered: report.offered + unreconstructable,
+    unreconstructable,
+  };
 }

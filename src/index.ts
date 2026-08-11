@@ -240,6 +240,7 @@ export {
   Runner,
   bindingDefinitionClaims,
   readBindingDefinitions,
+  type MalformedBinding,
   type RunnerOptions,
 } from "./runner/runner.js";
 export { migrate, MIGRATIONS, type Migration, type MigrationReport } from "./migrate/migrate.js";

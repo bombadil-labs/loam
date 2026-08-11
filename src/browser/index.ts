@@ -77,6 +77,7 @@ export {
   Runner,
   bindingDefinitionClaims,
   readBindingDefinitions,
+  type MalformedBinding,
   type RunnerOptions,
 } from "../runner/runner.js";
 

@@ -201,6 +201,12 @@ export interface FederationReport {
   readonly accepted: number; // UNIQUE deltas newly ingested (union is idempotent)
   readonly rejected: number; // occurrences refused at the door — a duplicated refusal counts twice
   readonly held: number; // UNIQUE offered ids the store already held — neither new nor refused
+  // Occurrences the peer sent that could not even be RECONSTRUCTED (id fails to recompute from
+  // the claims), so they never reached verification. Always 0 from federate() itself — it is
+  // handed live deltas — and counted by pullFrom, whose wire crossing is where reconstruction
+  // can fail. Without this field the report was false (H7): a peer offering 100 deltas of which
+  // 40 rot on the wire read "offered 60, rejected 0", and every later pull repeated the lie.
+  readonly unreconstructable: number;
 }
 
 export interface RequestContext {

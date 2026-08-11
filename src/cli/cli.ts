@@ -792,6 +792,15 @@ async function cmdPull(args: readonly string[], io: IO): Promise<number> {
       `  ${report.accepted} accepted, ${report.rejected} refused, of ${report.offered} offered — ` +
       `union is union; pulling again is safe`,
   );
+  // A rotten delta rots on EVERY pull — reconstruction fails on the peer's bytes, not on timing —
+  // so this is the operator's only cue to get the peer a fresh export. Never silent (H7).
+  if (report.unreconstructable > 0) {
+    io.err(
+      `loam: ${report.unreconstructable} of the offered deltas would not reconstruct and were ` +
+        `dropped — the peer's offer is damaged; pulling again will drop the same ones until the ` +
+        `peer repairs it`,
+    );
+  }
   // "Accepted" is true of the FILE, not of any server already holding it open: a running serve
   // keeps answering from boot-time memory. Say so, right under the count that would otherwise lie
   // by omission — and never block; the deltas are durable whatever the server knows.

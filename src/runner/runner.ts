@@ -45,6 +45,15 @@ export function bindingDefinitionClaims(
   };
 }
 
+// A binding delta that could not be read as a definition: which delta, and why. Dropping a
+// malformed definition is deliberate (never fatal to the attach of every other binding); dropping
+// it from the ACCOUNTING is not (H7) — a deploy check like "skipped is empty" would pass while a
+// typo'd definition sits inert, computing nothing.
+export interface MalformedBinding {
+  readonly deltaId: string;
+  readonly reason: string;
+}
+
 const primitive = (claims: Claims, role: string): string | number | boolean | undefined => {
   const p = claims.pointers.find((x) => x.role === role);
   return p?.target.kind === "primitive" ? p.target.value : undefined;
@@ -57,7 +66,13 @@ const primitive = (claims: Claims, role: string): string | number | boolean | un
 // is the same discipline registrations keep; the trust boundary is "the operator blessed this
 // function," and SPEC §6 reserves sandboxing of untrusted (federated) code for a later runtime.
 // (Scans the whole set for a small constitutional slice — fine at this scale; indexable later.)
-export function readBindingDefinitions(reactor: Reactor, operator?: string): BindingSpec[] {
+// `onMalformed` hears every binding delta this reader considered and could not parse — the sink
+// keeps the return type stable while letting a caller (Runner.attach) account for the drops.
+export function readBindingDefinitions(
+  reactor: Reactor,
+  operator?: string,
+  onMalformed?: (m: MalformedBinding) => void,
+): BindingSpec[] {
   // A recipe evolves: the LATEST surviving definition per binding name is the law (timestamp,
   // then id, for a total order) — the same latest-per-entity discipline registrations and
   // translations keep. Without it, a re-blessed binding would hand attach two definitions of
@@ -88,6 +103,15 @@ export function readBindingDefinitions(reactor: Reactor, operator?: string): Bin
       typeof budget !== "number" ||
       typeof emitRaw !== "string"
     ) {
+      const bad = [
+        ...(typeof name !== "string" ? ["name (a string)"] : []),
+        ...(typeof fnId !== "string" ? ["fnId (a string)"] : []),
+        ...(typeof materialization !== "string" ? ["materialization (a string)"] : []),
+        ...(typeof pure !== "boolean" ? ["pure (a boolean)"] : []),
+        ...(typeof budget !== "number" ? ["budget (a number)"] : []),
+        ...(typeof emitRaw !== "string" ? ["emit (a string)"] : []),
+      ];
+      onMalformed?.({ deltaId: delta.id, reason: `roles missing or mistyped: ${bad.join(", ")}` });
       continue;
     }
     let emit: BindingSpec["emit"];
@@ -99,6 +123,10 @@ export function readBindingDefinitions(reactor: Reactor, operator?: string): Bin
       try {
         emit = JSON.parse(emitRaw) as { keyed: string[] };
       } catch {
+        onMalformed?.({
+          deltaId: delta.id,
+          reason: `emit is neither "append"/"supersede" nor JSON: ${JSON.stringify(emitRaw)}`,
+        });
         continue;
       }
     }
@@ -124,10 +152,15 @@ export interface RunnerOptions {
   readonly implementations: Record<string, DerivedFn>; // fnId → the code to run
 }
 
+// The three lists together account for every surviving, operator-blessed binding delta the store
+// holds: its latest-per-name definition is `installed` or `skipped`, or its delta is named in
+// `malformed`. Without the third list the pair READ as a partition and was not — a deploy check of
+// "skipped is empty" passed while a typo'd definition sat inert.
 export interface Runner {
   readonly host: DerivationHost;
   readonly installed: string[]; // binding names the runner could run
   readonly skipped: string[]; // binding names whose implementation it lacks
+  readonly malformed: MalformedBinding[]; // binding deltas that would not read as a definition
 }
 
 // Attach a runner to a gateway: install every stored binding whose implementation is on hand,
@@ -138,7 +171,10 @@ export const Runner = {
     const host = new DerivationHost(gateway.reactor);
     const installed: string[] = [];
     const skipped: string[] = [];
-    for (const spec of readBindingDefinitions(gateway.reactor, gateway.operator)) {
+    const malformed: MalformedBinding[] = [];
+    for (const spec of readBindingDefinitions(gateway.reactor, gateway.operator, (m) =>
+      malformed.push(m),
+    )) {
       const fn = options.implementations[spec.fnId];
       if (fn === undefined) {
         skipped.push(spec.name);
@@ -154,6 +190,6 @@ export const Runner = {
       installed.push(spec.name);
     }
     gateway.animate(host);
-    return { host, installed, skipped };
+    return { host, installed, skipped, malformed };
   },
 };

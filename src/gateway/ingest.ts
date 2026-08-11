@@ -530,5 +530,7 @@ export async function federateImpl(
   // `held`'s complement), so the two are never subtracted from each other.
   const refusedIds = new Set(all.filter((d) => !crossed.has(d.id)).map((d) => d.id));
   const held = new Set(all.map((d) => d.id)).size - accepted - refusedIds.size;
-  return { offered: all.length, accepted, rejected, held };
+  // `unreconstructable` is pullFrom's dimension: federate is handed live deltas, so nothing at
+  // this door can fail to reconstruct. Stating the 0 keeps the accounting closed at every door.
+  return { offered: all.length, accepted, rejected, held, unreconstructable: 0 };
 }
