@@ -22,6 +22,7 @@ import {
   publishSchemaClaims,
   schemaCanonicalHex,
   type Claims,
+  type Delta,
   type HyperSchema,
   type Schema,
   type Primitive,
@@ -605,7 +606,6 @@ const primitive = (claims: Claims, role: string): string | number | boolean | un
 // negations count — a write-granted author's strike, or a federated stranger's, retires
 // nothing the operator planted. Content addressing keeps the chain acyclic; memoized anyway.
 export function lawfulNegated(reactor: Reactor, operator?: string): (id: string) => boolean {
-  const lawfulIds = new Set([...lawfulSnapshot(reactor, operator)].map((d) => d.id));
   const memo = new Map<string, boolean>();
   const negated = (id: string): boolean => {
     const memoed = memo.get(id);
@@ -613,11 +613,59 @@ export function lawfulNegated(reactor: Reactor, operator?: string): (id: string)
     memo.set(id, false); // in-progress: treat as surviving (acyclic by construction)
     const verdict = reactor
       .negationsOf(id)
-      .some((negation) => lawfulIds.has(negation) && !negated(negation));
+      .some((negation) => isLawful(reactor, negation, operator) && !negated(negation));
     memo.set(id, verdict);
     return verdict;
   };
   return negated;
+}
+
+// Membership of the lawful slice, asked one id at a time (hazard H8). The set answer and this one
+// agree by construction: `lawfulSnapshot` is `reactor.snapshot()` filtered on author, `reactor.get`
+// reads the same set, so `lawfulIds.has(id)` and this are the SAME predicate — one materializes
+// every delta to answer, the other answers from the id.
+//
+// It is not a stored index and cannot go stale: there is no state here to fall behind the ground.
+// Every answer is read from the reactor at the moment it is asked.
+function isLawful(reactor: Reactor, id: string, operator?: string): boolean {
+  const delta = reactor.get(id);
+  if (delta === undefined) return false; // gone is gone — a purged strike retires nothing (§11)
+  return operator === undefined || delta.claims.author === operator;
+}
+
+// The lawful deltas FILED AT one entity under one context — the question every constitutional
+// reader actually asks, answered from the reactor's target index rather than by walking the store
+// (hazard H8). `byTarget` is the substrate's own index, written inside `ingest` alongside the set
+// it indexes, so it cannot disagree with a snapshot taken in the same breath; an erase rebuilds
+// both together by replaying the reactor.
+//
+// This narrows a delta-set and therefore owes H1 an answer: it does NOT carry negation closure,
+// because it is not a set handed to an evaluator. It is a candidate list, and every caller runs
+// `lawfulNegated` over the ids it returns — the negation algebra stays where it was, at the reader.
+//
+// ORDER: `byTarget` answers in id order, where a snapshot answers in ingest order. Callers here
+// pick a winner by (timestamp, id) or union into a Set, so both orders give the same answer; a
+// caller for whom ingest order MATTERS must not use this.
+export function lawfulDeltasAt(
+  reactor: Reactor,
+  entity: string,
+  context: string,
+  operator?: string,
+): Delta[] {
+  const out: Delta[] = [];
+  for (const id of reactor.byTarget(entity)) {
+    const delta = reactor.get(id);
+    if (delta === undefined) continue;
+    if (operator !== undefined && delta.claims.author !== operator) continue;
+    const filedHere = delta.claims.pointers.some(
+      (p) =>
+        p.target.kind === "entity" &&
+        p.target.entity.id === entity &&
+        p.target.entity.context === context,
+    );
+    if (filedHere) out.push(delta);
+  }
+  return out;
 }
 
 interface Candidate {

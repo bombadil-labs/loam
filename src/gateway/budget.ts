@@ -27,7 +27,7 @@
 // next request; a fresh declaration for the same author supersedes (latest lawful wins).
 
 import type { Claims, Delta, Reactor } from "@bombadil/rhizomatic";
-import { lawfulNegated, lawfulSnapshot } from "./registration.js";
+import { lawfulDeltasAt, lawfulNegated } from "./registration.js";
 
 export const BUDGET_ENTITY = "loam:budget";
 export const CTX_BUDGET = "loam.budget";
@@ -126,14 +126,8 @@ export function readBudgetPolicy(
   if (operator === undefined) return budgets;
   const negated = lawfulNegated(reactor, operator);
   const latest = new Map<string, { policy: BudgetPolicy; timestamp: number; id: string }>();
-  for (const delta of lawfulSnapshot(reactor, operator)) {
-    const declares = delta.claims.pointers.some(
-      (p) =>
-        p.target.kind === "entity" &&
-        p.target.entity.id === BUDGET_ENTITY &&
-        p.target.entity.context === CTX_BUDGET,
-    );
-    if (!declares || negated(delta.id)) continue;
+  for (const delta of lawfulDeltasAt(reactor, BUDGET_ENTITY, CTX_BUDGET, operator)) {
+    if (negated(delta.id)) continue;
 
     let subject: string | undefined;
     const policy: { maxAppends?: number } = {};
