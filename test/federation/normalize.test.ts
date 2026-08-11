@@ -11,6 +11,7 @@ import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { readTranslations, translate, translationClaims } from "../../src/federation/translate.js";
 import { MemoryBackend } from "../../src/store/memory.js";
+import { isSuppressed } from "../gateway/narrowing.js";
 import { PLANT, pickLatest } from "../gateway/fixtures.js";
 
 const OPERATOR_SEED = "0e".repeat(32);
@@ -56,6 +57,21 @@ const CINELOG_SPEC = {
     ],
   },
 };
+
+// Every rendering in the store that cites `sourceId` under the reserved `translates` role — the
+// only edge that carries a foreign claim into the living dialect, and so the narrowing boundary
+// hazard H1 asks about here.
+const renderingsOf = (gateway: Gateway, sourceId: string): string[] =>
+  [...gateway.reactor.snapshot()]
+    .filter((d) =>
+      d.claims.pointers.some(
+        (p) =>
+          p.role === "translates" &&
+          p.target.kind === "delta" &&
+          p.target.deltaRef.delta === sourceId,
+      ),
+    )
+    .map((d) => d.id);
 
 async function normalizedWorld(): Promise<Gateway> {
   const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
@@ -270,6 +286,55 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
     ]);
     const report = await translate(gateway, { seed: TRANSLATOR_SEED });
     expect(report).toEqual({ emitted: 0, matched: 0, unbound: 0, refused: 0 }); // retired facts stay retired
+    // The report is the pass's own account of itself; ask the store as well. The first line is a
+    // FIXTURE check, not a check on `translate` — `isSuppressed` is author-blind, so it says only
+    // that a negation is present, and the negation here is the operator's on purpose (`dataStruck`,
+    // which the pass actually consults, would ignore a stranger's). The second is DELTA level: no
+    // rendering of the struck source exists at all.
+    expect(isSuppressed(gateway, foreign.id)).toBe(true);
+    expect(renderingsOf(gateway, foreign.id)).toEqual([]);
+    // ...and OBJECT level, through the Attendance Schema: the lens stays dark. The first test in
+    // this file lights the same lens up on the same fixture minus the strike, so this is a real
+    // difference and not an empty view that was always empty.
+    const view = await gateway.query(`{ attendance(entity: "person:wren") { events_attended } }`);
+    expect(view.errors).toBeUndefined(); // a failed query has no `data` and would pass vacuously
+    expect(JSON.stringify(view.data)).not.toContain("film:stalker");
+    await gateway.close();
+  });
+
+  it("...and a struck source suppresses only ITS OWN rendering — a live neighbour still renders", async () => {
+    // The two-sided half of the rail above. `emitted: 0` is also what a translate pass that had
+    // stopped working entirely would report, so a struck source must be shown to cost exactly one
+    // rendering and no more. Both entries belong to the SAME person, so one reading of one lens
+    // carries both sides.
+    const gateway = await normalizedWorld();
+    const struck = cinelogEntry("person:wren", "film:stalker", "2026-07-08", 5000);
+    const live = cinelogEntry("person:wren", "film:solaris", "2026-07-09", 5001);
+    await gateway.federate([struck, live]);
+    const { makeNegationClaims } = await import("@bombadil/rhizomatic");
+    await gateway.append([
+      signClaims(makeNegationClaims(OPERATOR, 6000, struck.id), OPERATOR_SEED),
+    ]);
+
+    const report = await translate(gateway, { seed: TRANSLATOR_SEED });
+    expect(report).toEqual({ emitted: 1, matched: 1, unbound: 0, refused: 0 });
+
+    // Delta level: exactly one rendering, and it cites the surviving source.
+    expect(renderingsOf(gateway, struck.id)).toEqual([]);
+    expect(renderingsOf(gateway, live.id)).toHaveLength(1);
+
+    // Object level, in one query: what a reader RESOLVES through the Attendance Schema. The
+    // surviving film is in the view and the struck one is not. A pass that ignored the strike puts
+    // stalker back; a pass that over-suppressed loses solaris. Only the correct one gives both.
+    const read = await gateway.query(`{ attendance(entity: "person:wren") { events_attended } }`);
+    expect(read.errors).toBeUndefined();
+    const view = JSON.stringify(read.data);
+    expect(view).toContain("film:solaris");
+    expect(view).not.toContain("film:stalker");
+
+    // NOT asserted here: suppression of a rendering whose source is struck AFTER it was emitted.
+    // That is `translate`'s reconciliation stage, which this single-pass fixture never reaches —
+    // test/federation/translate-suppression.test.ts drives it, at both levels.
     await gateway.close();
   });
 
