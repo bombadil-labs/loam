@@ -657,23 +657,85 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
     `${PRESESSION_COOKIE}=${nonce}; ${COOKIE_ATTRIBUTES}`;
   const clearPreCookie = (): string => `${PRESESSION_COOKIE}=; ${COOKIE_ATTRIBUTES}; Max-Age=0`;
 
+  // Is this POST a browser's own form submission, rather than a JSON caller (T146)? Both signals
+  // are required, and the ACCEPT half is the load-bearing one: every JSON-shaped rail and API
+  // caller sends fetch's default accept (star-slash-star) or `application/json`, while a real
+  // browser's form navigation asks for `text/html` first — and the frozen referrer-policy rail
+  // pins a form-urlencoded refusal WITHOUT that accept as JSON with `no-referrer`, so the
+  // content-type alone must never flip the answer. A JSON caller's bytes therefore never move.
+  // `text/html` must be the FIRST media range: a caller whose accept merely tolerates HTML
+  // behind JSON (`application/json, text/html;q=0.1`) is a JSON caller, and a browser's form
+  // navigation always leads with text/html.
+  const isFormNavigation = (req: IncomingMessage): boolean => {
+    const contentType = req.headers["content-type"];
+    const accept = req.headers.accept;
+    return (
+      typeof contentType === "string" &&
+      /^application\/x-www-form-urlencoded\b/i.test(contentType) &&
+      typeof accept === "string" &&
+      /^text\/html\b/i.test(accept.split(",")[0]!.trim())
+    );
+  };
+
+  /**
+   * The form token an HTML refusal may honestly re-render (T146): the presented session's own,
+   * else the HMAC of the presented pre-session nonce — recomputed under the CURRENT boot key, so
+   * the re-rendered form works even when the refusal was a stale form from before a restart. No
+   * cookie is ever SET on a refusal; with nothing presented, there is no honest token and the
+   * page carries a link to /login instead of a form.
+   */
+  const refusalFormToken = (req: IncomingMessage): string | undefined => {
+    const held = peek(req);
+    if (held !== undefined) return held.session.formToken;
+    const nonce = preSessionIdFrom(req);
+    if (nonce !== undefined) return preSessionToken(nonce);
+    return undefined;
+  };
+
+  /**
+   * ONE refusal, two frames (T146). The message is the whole information content in both: the
+   * JSON caller gets the exact bytes this door has always answered, and a browser's form POST
+   * gets the sign-in page again with the SAME sentence inline — never finer, so no oracle opens.
+   * The HTML rides the `html` helper (CSP, no-store, same-origin referrer policy), sets no
+   * cookie, and keeps the JSON status.
+   */
+  const refuseDoor = (
+    req: IncomingMessage,
+    res: ServerResponse,
+    status: number,
+    message: string,
+    user = "",
+  ): void => {
+    if (!isFormNavigation(req)) {
+      json(res, status, { errors: [message] });
+      return;
+    }
+    const formToken = refusalFormToken(req);
+    html(
+      res,
+      status,
+      formToken === undefined
+        ? page(
+            "sign in to a Loam store",
+            `<h1>Sign in.</h1>\n<p>${escapeHtml(message)}</p>\n` +
+              `<p><a href="/login">Go to the sign-in page.</a></p>`,
+          )
+        : loginPage(formToken, { refusal: message, user }),
+    );
+  };
+
   // The login door's ONE refusal, whatever went wrong behind it: an unknown user, a wrong
   // password, a user the ground holds no role for. Anything finer would be an oracle.
-  const refuseLogin = (res: ServerResponse): void =>
-    json(res, 401, { errors: ["the login was refused"] });
+  const LOGIN_REFUSED = "the login was refused";
 
   // The provenance refusal (SPEC §36 phase 6) — its own shape, distinct from the login refusal:
   // it refuses the REQUEST's origin, not the credential, and it fires before any credential is
   // read. It names the cure because every NON-attack path to it — a form issued before a
   // restart (the boot key died with the process), a stale tab — is fixed by a fresh form, and
   // an operator reading a bare attack accusation after a deploy files an outage.
-  const notThisPage = (res: ServerResponse): void =>
-    json(res, 403, {
-      errors: [
-        "this request did not come from this store's own page, so it is refused — reload the " +
-          "page and try again",
-      ],
-    });
+  const NOT_THIS_PAGE =
+    "this request did not come from this store's own page, so it is refused — reload the " +
+    "page and try again";
 
   /**
    * The POST doors' shared preamble (SPEC §36 phase 6), in a pinned order:
@@ -697,8 +759,9 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
     | undefined
   > => {
     if (!fromThisPage(req)) {
-      await readDoorBody(req); // drain: the refusal must not leave the socket dirty
-      notThisPage(res);
+      await readDoorBody(req); // drain: the refusal must not leave the socket dirty (not parsed,
+      // so the provenance refusal echoes no field a foreign page posted)
+      refuseDoor(req, res, 403, NOT_THIS_PAGE);
       return undefined;
     }
     const body = formFields(await readDoorBody(req), req.headers["content-type"]);
@@ -706,7 +769,7 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
     const held = peek(req);
     if (held !== undefined) {
       if (!sameSecret(presented, held.session.formToken)) {
-        notThisPage(res);
+        refuseDoor(req, res, 403, NOT_THIS_PAGE, body.get("user") ?? "");
         return undefined;
       }
       // NO SLIDE HERE. Clearing the guard is not admission — `postLogin` can still answer 401
@@ -719,22 +782,28 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
     }
     const nonce = preSessionIdFrom(req);
     if (nonce === undefined || !sameSecret(presented, preSessionToken(nonce))) {
-      notThisPage(res);
+      refuseDoor(req, res, 403, NOT_THIS_PAGE, body.get("user") ?? "");
       return undefined;
     }
     return { held: undefined, body };
   };
 
-  const cannotDecide = (res: ServerResponse, what: string): void =>
-    json(res, 503, { errors: [what] });
+  const cannotDecide = (req: IncomingMessage, res: ServerResponse, what: string): void =>
+    refuseDoor(req, res, 503, what);
 
-  const loginPage = (formToken: string): string =>
+  // `salvage` is T146's browser path: the form rendered AGAIN after a refused POST, the refusal
+  // stated inline and the typed user kept so a person retypes one field, not two. The refusal
+  // sentence is EXACTLY the JSON refusal's — the one-refusal rule is about information, and this
+  // page changes only the frame. With no salvage the bytes are the GET page, unchanged.
+  const loginPage = (formToken: string, salvage?: { refusal: string; user: string }): string =>
     page(
       "sign in to a Loam store",
       `<h1>Sign in.</h1>
-<form method="post" action="/login">
+${salvage === undefined ? "" : `<p>${escapeHtml(salvage.refusal)}</p>\n`}<form method="post" action="/login">
 <input type="hidden" name="form_token" value="${escapeHtml(formToken)}">
-<label>user<input name="user" autocomplete="username" autocapitalize="none" spellcheck="false"></label>
+<label>user<input name="user"${
+        salvage === undefined || salvage.user === "" ? "" : ` value="${escapeHtml(salvage.user)}"`
+      } autocomplete="username" autocapitalize="none" spellcheck="false"></label>
 <label>password<input name="password" type="password" autocomplete="current-password"></label>
 <button type="submit">sign in</button>
 </form>
@@ -754,6 +823,7 @@ page will offer.</p>`,
               .map((role) => `<code>${escapeHtml(role)}</code>`)
               .join(", ")} role${roles.size === 1 ? "" : "s"} here`
       }.</p>
+<p><a href="/admin">Your containers.</a></p>
 <form method="post" action="/logout">
 <input type="hidden" name="form_token" value="${escapeHtml(formToken)}">
 <button type="submit">sign out</button>
@@ -791,7 +861,7 @@ page will offer.</p>`,
         // CANNOT DECIDE IS NOT "FORGOTTEN". Dropping the session here would destroy an
         // authenticated caller's state over a local condition this door could not evaluate.
         // Refuse, and leave the session exactly as it was.
-        cannotDecide(res, "this store's ground is not reachable, so this page cannot load");
+        cannotDecide(req, res, "this store's ground is not reachable, so this page cannot load");
         return;
       }
       if (roles.size > 0) {
@@ -819,7 +889,7 @@ page will offer.</p>`,
     const password = body.get("password") ?? "";
     if (userNameDefect(user) !== undefined) {
       // Not a name any user could hold, so there is nothing to hash and nothing to count.
-      refuseLogin(res);
+      refuseDoor(req, res, 401, LOGIN_REFUSED, user);
       return;
     }
     // THE WAIT COMES FIRST, BEFORE THE COMPARE, and the order is the whole design (SPEC §36 phase 9).
@@ -851,9 +921,13 @@ page will offer.</p>`,
     // a measurement taken before the work it authorizes. A refusal here spends no hash, and a
     // refusal here is not a failed attempt, so it never fills the delay either.
     if (hashesInFlight >= maxHashes) {
-      json(res, 503, {
-        errors: ["the login door is busy: too much unauthenticated work is already in flight"],
-      });
+      refuseDoor(
+        req,
+        res,
+        503,
+        "the login door is busy: too much unauthenticated work is already in flight",
+        user,
+      );
       return;
     }
     let credentials;
@@ -866,7 +940,11 @@ page will offer.</p>`,
         `the login door cannot read ${credentialsPath(options.home)}: ` +
           `${err instanceof Error ? err.message : String(err)}`,
       );
-      cannotDecide(res, "the login door cannot read its credentials, so it refuses every login");
+      cannotDecide(
+        req,
+        res,
+        "the login door cannot read its credentials, so it refuses every login",
+      );
       return;
     }
     noteCostAgreement(credentials);
@@ -885,7 +963,11 @@ page will offer.</p>`,
         `the login door could not verify a credential: ` +
           `${err instanceof Error ? err.message : String(err)}`,
       );
-      cannotDecide(res, "the login door cannot read its credentials, so it refuses every login");
+      cannotDecide(
+        req,
+        res,
+        "the login door cannot read its credentials, so it refuses every login",
+      );
       return;
     } finally {
       hashesInFlight -= 1;
@@ -895,7 +977,7 @@ page will offer.</p>`,
       // wait. `recordFailure` fails open — a write fault must not turn this 401 into a 503 (see its
       // definition), because a local disk fault has no say in what this door answers.
       recordFailure(user);
-      refuseLogin(res);
+      refuseDoor(req, res, 401, LOGIN_REFUSED, user);
       return;
     }
     // The password was right. The GROUND still has to hold a role for this user — `rolesOf`
@@ -904,11 +986,11 @@ page will offer.</p>`,
     // credential file cannot know that it was erased).
     const roles = groundRoles(user);
     if (roles === undefined) {
-      cannotDecide(res, "this store's ground is not reachable, so no session opens");
+      cannotDecide(req, res, "this store's ground is not reachable, so no session opens");
       return;
     }
     if (roles.size === 0) {
-      refuseLogin(res);
+      refuseDoor(req, res, 401, LOGIN_REFUSED, user);
       return;
     }
     // A NEW id, and any session presented dies with the old cookie value: a session must never
@@ -918,7 +1000,7 @@ page will offer.</p>`,
     // session exactly as it was.
     const opened = open(user, roles, guard.held?.id);
     if (opened === undefined) {
-      cannotDecide(res, "this store is holding all the sessions it can");
+      cannotDecide(req, res, "this store is holding all the sessions it can");
       return;
     }
     // THE CORRECT PASSWORD IS ALREADY ACCEPTED, so nothing after the seat may refuse it. Clearing
@@ -942,17 +1024,17 @@ page will offer.</p>`,
     // already proved same-origin, so the 401 reveals nothing it should not).
     if (!fromThisPage(req)) {
       await readDoorBody(req); // drain: the refusal must not leave the socket dirty
-      notThisPage(res);
+      refuseDoor(req, res, 403, NOT_THIS_PAGE);
       return;
     }
     const body = formFields(await readDoorBody(req), req.headers["content-type"]);
     const held = peek(req);
     if (held === undefined) {
-      json(res, 401, { errors: ["no live session is presented here"] });
+      refuseDoor(req, res, 401, "no live session is presented here");
       return;
     }
     if (!sameSecret(body.get("form_token") ?? "", held.session.formToken)) {
-      notThisPage(res);
+      refuseDoor(req, res, 403, NOT_THIS_PAGE);
       return;
     }
     drop(held.id);
@@ -987,7 +1069,7 @@ page will offer.</p>`,
     // erased, after sign-in must stop minting on the next ask rather than the next restart.
     const roles = groundRoles(session.user);
     if (roles === undefined) {
-      cannotDecide(res, "this store's ground is not reachable, so no token is minted");
+      cannotDecide(req, res, "this store's ground is not reachable, so no token is minted");
       return;
     }
     if (roles.size === 0) {
@@ -1159,9 +1241,12 @@ page will offer.</p>`,
             `${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
         );
         if (!res.headersSent) {
-          json(res, 503, {
-            errors: ["the login door could not answer, and it says no rather than why"],
-          });
+          refuseDoor(
+            req,
+            res,
+            503,
+            "the login door could not answer, and it says no rather than why",
+          );
         } else {
           res.end();
         }
