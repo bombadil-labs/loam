@@ -307,14 +307,22 @@ function boundNames(tokens: readonly Token[]): ReadonlySet<string> {
   return bound;
 }
 
-// The token ranges a worker realm can never execute: the arm of a `typeof X === "undefined"` /
-// `!== "undefined"` guard that requires X to be defined, where X is one of the names we refuse. In THIS
-// realm those names are genuinely absent, so the arm is dead — and this is precisely the shape a bundler
-// emits when it guards a browser-only path.
+// A `typeof`-literal every guard resolves against. Real bundler output does NOT stick to
+// `"undefined"`: esbuild-minified react-dom emits `typeof window == "object"` and
+// `typeof process.emit == "function"` (T97's vendored fixture carries both), and in the worker realm
+// every one of these decides the same way, because the refused name IS undefined there.
+const TYPEOF_LITERAL = /^["'](undefined|object|function|string|number|boolean|symbol|bigint)["']$/;
+
+// The token ranges a worker realm can never execute: the arm of a `typeof X <op> "literal"` guard that
+// requires X to be defined, where X is one of the names we refuse. In THIS realm those names are
+// genuinely absent, so `typeof X` is "undefined", every comparison against a typeof-literal has a KNOWN
+// value, and the arm the false side guards is dead — precisely the shape a bundler emits around a
+// browser-only or node-only path.
 function deadRanges(tokens: readonly Token[]): Array<[number, number]> {
   const dead: Array<[number, number]> = [];
-  const blockAfter = (start: number): number => {
-    // The consequent: a braced block, or a single statement up to `;`.
+  // The end of the block that starts at `start`: a braced block to its matching `}`, or a single
+  // statement up to `;` (stopping if the enclosing block closes first).
+  const blockEnd = (start: number): number => {
     let j = start;
     while (j < tokens.length && tokens[j]!.kind === "punct" && tokens[j]!.text === ")") j += 1;
     if (tokens[j]?.text === "{") {
@@ -329,7 +337,18 @@ function deadRanges(tokens: readonly Token[]): Array<[number, number]> {
       }
       return j;
     }
-    while (j < tokens.length && tokens[j]!.text !== ";") j += 1;
+    let depth = 0;
+    while (j < tokens.length) {
+      const u = tokens[j]!;
+      if (u.kind === "punct") {
+        if (u.text === "(" || u.text === "{" || u.text === "[") depth += 1;
+        else if (u.text === ")" || u.text === "}" || u.text === "]") {
+          if (depth === 0) return j;
+          depth -= 1;
+        } else if (u.text === ";" && depth === 0) return j;
+      }
+      j += 1;
+    }
     return j;
   };
   for (let i = 0; i < tokens.length; i += 1) {
@@ -339,24 +358,57 @@ function deadRanges(tokens: readonly Token[]): Array<[number, number]> {
     const op = tokens[i + 2];
     const lit = tokens[i + 3];
     if (op?.kind !== "punct" || lit?.kind !== "string") continue;
-    const undef = lit.text === '"undefined"' || lit.text === "'undefined'";
-    if (!undef) continue;
-    // `!==`/`!=` "undefined" → the arm needing it DEFINED is the consequent (dead here).
-    // `===`/`==` "undefined" → the consequent is the reachable one; the ELSE arm is dead.
-    const consequentEnd = blockAfter(i + 4);
-    if (op.text === "!==" || op.text === "!=") {
-      dead.push([i + 4, consequentEnd]);
-    } else if (op.text === "===" || op.text === "==") {
+    const eq = op.text === "===" || op.text === "==";
+    const ne = op.text === "!==" || op.text === "!=";
+    if (!eq && !ne) continue;
+    const m = TYPEOF_LITERAL.exec(lit.text);
+    if (m === null) continue;
+    // In the worker realm `typeof X` is "undefined", so the comparison's value is decided here.
+    const truth = eq ? m[1] === "undefined" : m[1] !== "undefined";
+    if (!truth) {
+      // FALSE guard: everything it gates is unreachable — the rest of the `&&` chain, the enclosing
+      // condition's tail, and the consequent block. Walk from the comparison to the end of the
+      // condition, then through the guarded block. Bail out (marking nothing — erring toward
+      // REFUSAL) on any shape where the tail can still run: an `||` alternative, a ternary, a comma
+      // operator (another argument or expression evaluates regardless of this one).
+      let j = i + 4;
+      let depth = 0;
+      let end: number | undefined;
+      let bail = false;
+      while (j < tokens.length) {
+        const u = tokens[j]!;
+        if (u.kind === "punct") {
+          if (u.text === "(" || u.text === "{" || u.text === "[") depth += 1;
+          else if (u.text === "}" || u.text === "]") {
+            if (depth === 0) {
+              end = j; // the enclosing block closed — a bare guard expression, dead to here
+              break;
+            }
+            depth -= 1;
+          } else if (u.text === ")") {
+            if (depth === 0) {
+              end = blockEnd(j + 1); // the condition closed — the consequent it gates is dead too
+              break;
+            }
+            depth -= 1;
+          } else if (u.text === ";" && depth === 0) {
+            end = j; // a bare `typeof X !== "undefined" && X.y();` — dead to the statement's end
+            break;
+          } else if ((u.text === "|" || u.text === "?" || u.text === ",") && depth === 0) {
+            bail = true;
+            break;
+          }
+        }
+        j += 1;
+      }
+      if (!bail && end !== undefined) dead.push([i + 4, end]);
+    } else {
+      // TRUE guard: the consequent is the reachable arm; only an explicit ELSE arm is dead.
+      const consequentEnd = blockEnd(i + 4);
       const els = tokens[consequentEnd];
       if (els?.kind === "keyword" && els.text === "else") {
-        dead.push([consequentEnd + 1, blockAfter(consequentEnd + 1)]);
+        dead.push([consequentEnd + 1, blockEnd(consequentEnd + 1)]);
       }
-    }
-    // A bare `typeof X !== "undefined" && X.y` — the right operand of `&&` is equally unreachable.
-    if ((op.text === "!==" || op.text === "!=") && tokens[i + 4]?.text === "&") {
-      let j = i + 4;
-      while (j < tokens.length && tokens[j]!.text !== ";" && tokens[j]!.text !== ")") j += 1;
-      dead.push([i + 4, j]);
     }
   }
   return dead;
@@ -389,6 +441,18 @@ export function scanHostReferences(source: string): HostReference[] {
     if (tokens[i + 1]?.kind === "punct" && tokens[i + 1]!.text === ":") continue;
     // The operand of `typeof` — feature detection reaches nothing.
     if (prev?.kind === "keyword" && prev.text === "typeof") continue;
+    // `Function.prototype.bind`, exactly — esbuild-minified react-dom caches it in a module-level
+    // `var`. Reading `bind` off the prototype evaluates no string; the eval-family hazard is the
+    // CONSTRUCTOR. Only this member chain is suppressed: `Function(...)`, `new Function`, and
+    // `Function.prototype.constructor` all still refuse.
+    if (
+      t.text === "Function" &&
+      tokens[i + 1]?.text === "." &&
+      tokens[i + 2]?.text === "prototype" &&
+      tokens[i + 3]?.text === "." &&
+      tokens[i + 4]?.text === "bind"
+    )
+      continue;
     if (isDead(i)) continue;
     add(t.text);
   }
