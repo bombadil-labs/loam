@@ -23,6 +23,9 @@ export default tseslint.config(
       // source file. git ignores them; eslint would otherwise lint N copies of the tree and bury
       // the real bar under thousands of duplicate findings (measured: 2973 from six worktrees).
       ".claude/worktrees/**",
+      // Vendored bundler output (T97): real esbuild-over-React fixtures, read as text by the
+      // reference-scan rail. Minified generated code is not ours to lint.
+      "test/gateway/fixtures/*.bundle.mjs",
     ],
   },
   js.configs.recommended,
