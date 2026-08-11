@@ -151,7 +151,11 @@ export interface PublishOutcome {
    *  the program — sibling readings over one program bind independently. */
   readonly lens: string;
   readonly bound: boolean;
-  /** When `bound` is false: the proximate cause the fixpoint actually caught. */
+  /**
+   * When `bound` is false: the proximate cause the fixpoint actually caught. When `bound` is
+   * true it may still carry one honest caveat: the surface serves, but only by shedding its
+   * mutation templates (T96) — a bound schema missing a declared door is not a clean success.
+   */
   readonly reason?: string;
 }
 
@@ -428,7 +432,9 @@ export function replayRegistrationsImpl(gw: Gateway): void {
         progressed = true;
       } else if (reg.mutations !== undefined) {
         // The full candidate's fault is on record now; hold it before the fallback's success
-        // erases it, so a bind-by-shedding stays visible instead of reading as fully bound.
+        // erases it. A bind-by-shedding re-records it so the outcome can say what was shed —
+        // publishRegistration reads this even on a bound surface (a served schema missing its
+        // declared mutations is not an unqualified success).
         const key = failureKey(reg.entity ?? "", lensOf(reg));
         const fault = lastBindFailure(gw, key);
         if (attempt(templateless)) {
@@ -726,7 +732,15 @@ export async function publishRegistrationImpl(
   const bound = gw.registered.some(
     (r) => r.origin === "store" && r.entity === schemaEntity && lensOf(r) === lensName,
   );
-  if (bound) return { persisted: true, lens: lensName, bound: true };
+  if (bound) {
+    // Bound, possibly by SHEDDING: the replay may have dropped the templates to bind the rest
+    // (T96). A record under this key after a successful bind can only be the shed breadcrumb —
+    // a full bind clears it — so surface it rather than report an unqualified success.
+    const shed = lastBindFailure(gw, failureKey(schemaEntity, lensName));
+    return shed === undefined
+      ? { persisted: true, lens: lensName, bound: true }
+      : { persisted: true, lens: lensName, bound: true, reason: shed };
+  }
   // Valid law, written, not serving HERE. Reported, never thrown: the deltas exist and would bind on
   // a peer that pulls them, or on a later boot without whatever shadows them. Throwing would call a
   // successful write a failure; swallowing it silently would hide a surface the caller expects. The

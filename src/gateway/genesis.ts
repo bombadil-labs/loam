@@ -16,7 +16,6 @@ import {
   parseClaimTemplates,
   registrationDeltaClaims,
   schemaEntityFor,
-  type ClaimTemplates,
   type Registration,
 } from "./registration.js";
 
@@ -86,16 +85,19 @@ export function assembleGenesis(spec: GenesisSpec): Genesis {
     // faithfully refuses HERE, with its defect named, while the operator is present to fix it.
     // Minted malformed, the binding would shed its templates on every replay instead — and before
     // T96, took `writable` down with it, booting the store immutable-by-default against the
-    // operator's own declaration.
-    let mutations: ClaimTemplates | undefined;
-    try {
-      mutations = reg.mutations === undefined ? undefined : parseClaimTemplates(reg.mutations);
-    } catch (err) {
-      const defect = err instanceof Error ? err.message : String(err);
-      throw new Error(
-        `genesis: lens "${lensName}" carries a mutations payload that cannot be read ` +
-          `faithfully — ${defect}`,
-      );
+    // operator's own declaration. Validation only: the AUTHOR'S bytes are what the binding
+    // carries (below), because serializing the parsed form would move the delta's content
+    // address (H4) and hand every existing well-formed store a duplicate binding on its next boot.
+    if (reg.mutations !== undefined) {
+      try {
+        parseClaimTemplates(reg.mutations);
+      } catch (err) {
+        const defect = err instanceof Error ? err.message : String(err);
+        throw new Error(
+          `genesis: lens "${lensName}" carries a mutations payload that cannot be read ` +
+            `faithfully — ${defect}`,
+        );
+      }
     }
     // Four deltas per registration (SPEC §21): the hyperschema DEFINITION, the LIVING resolution
     // Schema entity, its frozen VersionedSchema SNAPSHOT, and the BINDING that references all three.
@@ -113,7 +115,7 @@ export function assembleGenesis(spec: GenesisSpec): Genesis {
       reg.roots,
       operator,
       () => clock++,
-      mutations,
+      reg.mutations,
       reg.writable,
       reg.resolvers,
     );

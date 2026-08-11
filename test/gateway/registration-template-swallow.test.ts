@@ -8,8 +8,9 @@
 //     else — the binding delta still carries both payloads (delta level), and the booted
 //     gateway's surface still names the declared writable set and accepts a write on a declared
 //     field (object level). The well-formed control pins that a good template still binds whole.
-// Deliberately not asserted here: publish-time refusals (claims.test.ts owns those) and the
-// bind-failure record's wording (an internal breadcrumb, not a served surface).
+// Deliberately not asserted here: publish-time refusals (claims.test.ts owns those), and a
+// boot-time shed's operator report — today the shed is visible only through a later
+// publishRegistration outcome's reason; a `store health` line for it is T96's open (c).
 
 import { describe, expect, it } from "vitest";
 import { STORE_ENTITY, assembleGenesis } from "../../src/gateway/genesis.js";
@@ -17,7 +18,8 @@ import { grantClaims } from "../../src/gateway/accounts.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { lensOf, type ClaimTemplates } from "../../src/gateway/registration.js";
-import { authorForSeed } from "@bombadil/rhizomatic";
+import { authorForSeed, publishHyperSchemaClaims, signClaims } from "@bombadil/rhizomatic";
+import { registrationDeltaClaims } from "../../src/gateway/registration.js";
 import { FERN, GARDENER, GARDENER_SEED } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY } from "./fixtures.js";
 
@@ -45,13 +47,15 @@ const WELL_FORMED: ClaimTemplates = {
   },
 };
 
+// The lens name deliberately DIFFERS from the program name ("Plant"): a name-coincident
+// fixture cannot see a fallback that drops `lensName` and lands on the hyperschema's (H6).
 const genesisWith = (mutations: ClaimTemplates) =>
   assembleGenesis({
     operatorSeed: OPERATOR_SEED,
     registrations: [
       {
         hyperschema: PLANT,
-        schema: PLANT_POLICY,
+        schema: { ...PLANT_POLICY, name: "PlantView" },
         roots: [FERN],
         writable: ["height", "tag"],
         mutations,
@@ -63,7 +67,7 @@ const genesisWith = (mutations: ClaimTemplates) =>
 describe("T96: a template fault never narrows the write surface", () => {
   it("a mutations payload that cannot be read faithfully refuses at the mint, defect named", () => {
     expect(() => genesisWith(HALF_CONVERTED)).toThrow(
-      /genesis: lens "Plant" carries a mutations payload that cannot be read faithfully/,
+      /genesis: lens "PlantView" carries a mutations payload that cannot be read faithfully/,
     );
     expect(() => genesisWith(HALF_CONVERTED)).toThrow(/context belongs to an at pointer/);
   });
@@ -85,9 +89,10 @@ describe("T96: a template fault never narrows the write surface", () => {
 
     // OBJECT level: the booted surface sheds the template and NOTHING else.
     const gw = await Gateway.boot(new MemoryBackend(), genesis);
-    const reg = gw.registered.find((r) => lensOf(r) === "Plant");
+    const reg = gw.registered.find((r) => lensOf(r) === "PlantView");
     expect(reg).toBeDefined();
     expect(reg!.writable).toEqual(["height", "tag"]); // the bystander, alive
+    expect(reg!.lensName).toBe("PlantView"); // the OTHER bystander the old rebuild dropped (H6)
     expect(reg!.mutations).toBeUndefined(); // the cost, exactly one field wide
 
     // The template's mutation is honestly absent from the door…
@@ -98,18 +103,18 @@ describe("T96: a template fault never narrows the write surface", () => {
 
     // …and a write on a DECLARED writable field still lands: the operator's surface holds.
     const write = await gw.query(
-      `mutation { plant(entity: "${FERN}", height: 40) { height } }`,
+      `mutation { plantView(entity: "${FERN}", height: 40) { height } }`,
       undefined,
       { actor: GARDENER_SEED },
     );
     expect(write.errors).toBeUndefined();
-    expect((write.data as { plant: { height: number } }).plant.height).toBe(40);
+    expect((write.data as { plantView: { height: number } }).plantView.height).toBe(40);
     await gw.close();
   });
 
   it("a well-formed template still binds whole: templates AND writable, exactly as declared", async () => {
     const gw = await Gateway.boot(new MemoryBackend(), genesisWith(WELL_FORMED));
-    const reg = gw.registered.find((r) => lensOf(r) === "Plant");
+    const reg = gw.registered.find((r) => lensOf(r) === "PlantView");
     expect(reg).toBeDefined();
     expect(reg!.writable).toEqual(["height", "tag"]);
     expect(Object.keys(reg!.mutations ?? {})).toEqual(["water"]);
@@ -119,6 +124,59 @@ describe("T96: a template fault never narrows the write surface", () => {
       actor: GARDENER_SEED,
     });
     expect(watered.errors).toBeUndefined();
+    await gw.close();
+  });
+
+  it("a store ALREADY holding T96's bytes replays them at the same cost: templates shed, writable alive", async () => {
+    // The mint refusals above cannot reach a binding that predates them. Plant the ticket's exact
+    // half-converted payload at rest — a well-formed binding with a poison mutations pointer —
+    // and prove replay charges the drop to the templates alone.
+    const gw = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
+    await gw.append([
+      signClaims(grantClaims(STORE_ENTITY, GARDENER, "write", OPERATOR, 1), OPERATOR_SEED),
+    ]);
+    const { living, snapshot, binding } = registrationDeltaClaims(
+      "hyperschema:Plant",
+      "PlantView",
+      { ...PLANT_POLICY, name: "PlantView" },
+      [FERN],
+      OPERATOR,
+      () => 3,
+      undefined,
+      ["height", "tag"],
+    );
+    await gw.append([
+      signClaims(publishHyperSchemaClaims(PLANT, "hyperschema:Plant", OPERATOR, 2), OPERATOR_SEED),
+      signClaims(living, OPERATOR_SEED),
+      signClaims(snapshot, OPERATOR_SEED),
+      signClaims(
+        {
+          ...binding,
+          pointers: [
+            ...binding.pointers,
+            {
+              role: "mutations",
+              target: {
+                kind: "primitive",
+                value: '{"water":{"pointers":[{"role":"value","context":"watered","value":true}]}}',
+              },
+            },
+          ],
+        },
+        OPERATOR_SEED,
+      ),
+    ]);
+    gw.replayRegistrations();
+    const reg = gw.registered.find((r) => lensOf(r) === "PlantView");
+    expect(reg).toBeDefined();
+    expect(reg!.writable).toEqual(["height", "tag"]); // the bystander, alive at rest too
+    expect(reg!.mutations).toBeUndefined(); // the poison payload fell away, alone
+    const write = await gw.query(
+      `mutation { plantView(entity: "${FERN}", height: 41) { height } }`,
+      undefined,
+      { actor: GARDENER_SEED },
+    );
+    expect(write.errors).toBeUndefined();
     await gw.close();
   });
 });
