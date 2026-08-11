@@ -19,7 +19,9 @@ const HELD_OPEN = new Set(["EPERM", "EBUSY", "ENOTEMPTY"]);
 
 // What `killTree` learned, for `dropProfile` to say out loud if the removal then fails. Without it
 // a swallowed failure reports WHICH directory survived and never WHY, and the next reader gets a
-// warning that cannot tell them anything — H7's shape in a teardown path.
+// warning that cannot tell them anything — H7's shape in a teardown path. It assumes the pairing
+// `Browser.close()` performs: one `killTree`, then that browser's `dropProfile`. Two teardowns
+// interleaved would cross their notes, which costs a misattributed message and nothing else.
 let notes: string[] = [];
 
 /**
