@@ -6,7 +6,7 @@
 // Two-sided, both levels: the report names the drops AND the good bystanders land at the delta
 // level; a clean offer reports zero drops and prints no damage line.
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -149,6 +149,15 @@ describe("loam pull names the drops (the door the operator actually reads)", () 
     const cleanUrl = await serve(JSON.stringify({ deltas: good }));
     const clean = await run(["pull", cleanUrl, "--home", join(dir, "h2"), "--token", "tok"], io);
     expect(clean).toBe(0);
+    expect(out.join("\n")).toMatch(/2 accepted, 0 refused, of 2 offered/);
+    expect(err.join("\n")).not.toMatch(/would not reconstruct/);
+    // And the FILE door: parseOffer refuses a corrupt file whole, so a file pull can never have
+    // drops — it must never claim any (the count starts at zero and only the wire can raise it).
+    out.length = 0;
+    err.length = 0;
+    const file = join(dir, "offer.json");
+    writeFileSync(file, JSON.stringify({ deltas: good }));
+    expect(await run(["pull", file, "--home", join(dir, "h3")], io)).toBe(0);
     expect(out.join("\n")).toMatch(/2 accepted, 0 refused, of 2 offered/);
     expect(err.join("\n")).not.toMatch(/would not reconstruct/);
   });
