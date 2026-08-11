@@ -3,10 +3,15 @@
   "edges": [],
   "id": "T97",
   "phase": "P0",
-  "rails": [],
+  "rails": [
+    "test/gateway/artifact-pack-real-bundle.test.ts"
+  ],
   "scope": [
+    "src/gateway/artifact-scan.ts",
+    "test/gateway/artifact-pack-real-bundle.test.ts",
     "test/gateway/artifact-pack.test.ts",
-    "src/gateway/artifact-scan.ts"
+    "test/gateway/fixtures/react-reaching.bundle.mjs",
+    "test/gateway/fixtures/react-renderer.bundle.mjs"
   ],
   "status": "todo",
   "title": "The bundle-reference scan is railed against a hand-authored fixture, not real esbuild-bundled React — the shape is right and the provenance is weaker than the criterion asks"

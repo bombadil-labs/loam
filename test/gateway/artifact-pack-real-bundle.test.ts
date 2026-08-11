@@ -83,6 +83,22 @@ describe("§30 criterion 20(b) on real esbuild output (T97)", () => {
     await gw.close();
   }, 30_000);
 
+  it("a dead arm without braces ends at its own statement — not before it, not after it", () => {
+    // The guard dialect real bundlers emit is usually braced; the unbraced arm is a walk the big
+    // fixtures never reach, so it is pinned here at the unit level. Three sides: a plain unbraced
+    // else-arm is dead, one with nested brackets is dead THROUGH the brackets, and the range stops
+    // at the `;` — a reach in the next statement is still seen.
+    expect(scanHostReferences('if (typeof window === "undefined") a(); else window.x();')).toEqual(
+      [],
+    );
+    expect(scanHostReferences('if (typeof window === "undefined") a(); else b.c(window);')).toEqual(
+      [],
+    );
+    expect(
+      scanHostReferences('if (typeof window === "undefined") a(); else b(); window.x();'),
+    ).toEqual([{ name: "window", family: "browser" }]);
+  });
+
   it("the same real shape with a genuine `document` reach is refused naming ONLY document", async () => {
     // The scan, first: exactly the one reach, nothing from react-dom's own dialect.
     expect(scanHostReferences(REACHING_BUNDLE)).toEqual([{ name: "document", family: "browser" }]);

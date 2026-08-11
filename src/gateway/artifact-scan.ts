@@ -345,7 +345,7 @@ function deadRanges(tokens: readonly Token[]): Array<[number, number]> {
         else if (u.text === ")" || u.text === "}" || u.text === "]") {
           if (depth === 0) return j;
           depth -= 1;
-        } else if (u.text === ";" && depth === 0) return j;
+        } else if (u.text === ";" && depth === 0) return j + 1; // past the statement, like `}` above
       }
       j += 1;
     }
