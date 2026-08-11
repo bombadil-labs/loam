@@ -4,14 +4,18 @@
 // Two-sided: (1) every KNOWN status renders in its own section — all seven, including review /
 // parked / blocked, the three no earlier test seeded (the 2026-07-26 hollow-test survivors);
 // (2) an item with an OFF-LIST status appears in the catch-all section, status text visible;
-// (3) the page's data-title set EQUALS the door's own items — page-vs-door agreement, exact.
+// (3) the page's data-title set EQUALS the door's own items — page-vs-door agreement, exact;
+// (4) an item whose status delta was STRUCK (status resolves undefined) lands in the catch-all —
+// the composed case the door-level H1 rail in board-render.test.ts leaves unpinned.
 
 import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { signClaims } from "@bombadil/rhizomatic";
+import { makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
 import { publicClaims } from "../../src/gateway/public.js";
 import { BOARD_ENTITY, BOARD_ROUTE } from "../../demos/board/vocabulary.mjs";
 import {
+  FABLE,
+  FABLE_SEED,
   MOUNT,
   OPERATOR,
   OP_SEED,
@@ -19,6 +23,7 @@ import {
   bootWorld,
   gql,
   registerVocabulary,
+  statusDeltas,
   type BoardWorld,
 } from "./fixtures.js";
 
@@ -123,5 +128,24 @@ describe("T112: every item the door answers is on the page", () => {
     expect(doorTitles.length).toBeGreaterThanOrEqual(KNOWN.length + 1); // floor: never vacuous (H10)
     const html = await (await page()).text();
     expect(renderedTitles(html).sort()).toEqual(doorTitles);
+  });
+
+  // The composed case the door-level H1 rail leaves unpinned: a struck status resolves to
+  // undefined, which no section holds — the item must land in the catch-all, not vanish.
+  it("an item whose status delta was struck stays on the page, in the catch-all", async () => {
+    await addItem(world.base, "fable", "board:struck", {
+      kind: "ticket",
+      title: "the item whose status was struck",
+      status: "building",
+    });
+    const [status, ...rest] = statusDeltas(world.gw, "board:struck");
+    expect(rest).toHaveLength(0); // exactly the one delta we are about to strike
+    await world.gw.append([
+      signClaims(makeNegationClaims(FABLE, Date.now(), status!.id), FABLE_SEED),
+    ]);
+
+    const html = await (await page()).text();
+    expect(section(html, "flight")).not.toContain("the item whose status was struck");
+    expect(section(html, "unplaced")).toContain("the item whose status was struck");
   });
 });
