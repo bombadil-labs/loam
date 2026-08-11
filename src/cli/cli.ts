@@ -801,13 +801,17 @@ async function cmdPull(args: readonly string[], io: IO): Promise<number> {
       `  ${report.accepted} accepted, ${report.rejected} refused, of ${report.offered} offered — ` +
       `union is union; pulling again is safe`,
   );
-  // A rotten delta rots on EVERY pull — reconstruction fails on the peer's bytes, not on timing —
-  // so this is the operator's only cue to get the peer a fresh export. Never silent (H7).
+  // A delta that will not reconstruct fails on the BYTES, not on timing, so every later pull
+  // drops the same ones — this line is the operator's only cue. It names the count and BOTH
+  // cures, because the door genuinely cannot tell a rotted offer from a peer speaking a newer
+  // delta shape than this puller (PullReport carries the reasoning). Never silent, and never a
+  // guessed cause: prescribing "the peer must repair it" would be H7 in a new place.
   if (unreconstructable > 0) {
     io.err(
       `loam: ${unreconstructable} of the offered deltas would not reconstruct and were ` +
-        `dropped — the peer's offer is damaged; pulling again will drop the same ones until the ` +
-        `peer repairs it`,
+        `dropped — pulling again drops the same ones. Either the peer's offer is damaged or the ` +
+        `peer speaks a newer delta shape than this loam: ask for a fresh export, and compare ` +
+        `both sides' versions`,
     );
   }
   // "Accepted" is true of the FILE, not of any server already holding it open: a running serve

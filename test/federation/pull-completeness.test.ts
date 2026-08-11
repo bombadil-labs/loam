@@ -166,7 +166,10 @@ describe("loam pull names the drops (the door the operator actually reads)", () 
     expect(code).toBe(0);
     expect(out.join("\n")).toMatch(/2 accepted, 0 refused, of 3 offered/);
     expect(err.join("\n")).toMatch(/1 of the offered deltas would not reconstruct/);
-    expect(err.join("\n")).toMatch(/pulling again will drop the same ones/);
+    expect(err.join("\n")).toMatch(/pulling again drops the same ones/);
+    // And it does NOT prescribe a cause it never verified: fromWire refuses a rotted delta and
+    // an unreadable claim shape alike, so the line offers both cures or it is overclaiming.
+    expect(err.join("\n")).toMatch(/newer delta shape/);
     await new Promise<void>((r) => server!.close(() => r()));
     server = undefined;
     // The bystander side: a clean offer earns no damage line.
@@ -177,8 +180,7 @@ describe("loam pull names the drops (the door the operator actually reads)", () 
     expect(clean).toBe(0);
     expect(out.join("\n")).toMatch(/2 accepted, 0 refused, of 2 offered/);
     expect(err.join("\n")).not.toMatch(/would not reconstruct/);
-    // And the FILE door: parseOffer refuses a corrupt file whole, so a file pull can never have
-    // drops — it must never claim any (the count starts at zero and only the wire can raise it).
+    // And the FILE door, both sides. A clean file pulls and is not accused.
     out.length = 0;
     err.length = 0;
     const file = join(dir, "offer.json");
@@ -186,5 +188,17 @@ describe("loam pull names the drops (the door the operator actually reads)", () 
     expect(await run(["pull", file, "--home", join(dir, "h3")], io)).toBe(0);
     expect(out.join("\n")).toMatch(/2 accepted, 0 refused, of 2 offered/);
     expect(err.join("\n")).not.toMatch(/would not reconstruct/);
+    // A DAMAGED file is refused WHOLE — that is why the file branch can honestly hard-code the
+    // count at zero. Assert the refusal rather than trusting the comment: nothing lands, the
+    // exit is nonzero, and no partial-drop line is printed, because there was no partial pull.
+    out.length = 0;
+    err.length = 0;
+    const badFile = join(dir, "damaged.json");
+    const { corrupt } = mixedOffer();
+    writeFileSync(badFile, JSON.stringify({ deltas: [...good, corrupt] }));
+    expect(await run(["pull", badFile, "--home", join(dir, "h4")], io)).toBe(2);
+    expect(err.join("\n")).toMatch(/does not recompute from its claims/);
+    expect(err.join("\n")).not.toMatch(/would not reconstruct/);
+    expect(out.join("\n")).not.toMatch(/accepted/);
   });
 });

@@ -130,9 +130,65 @@ describe("attach accounts for every binding delta in the ground", () => {
     await gateway.close();
   });
 
+  // The order deltas ARRIVE in decides which of the two report sites fires: the loser can be
+  // seen after the winner (report this delta) or before it (report the one it displaces). Both
+  // are ordinary — a federated pull replays in no particular order — and a fixture that only
+  // ever appends oldest-first leaves the other site free to be deleted with the rail still green.
+  it("either arrival order reports the replaced definition, and a timestamp tie is broken by id", async () => {
+    const newer = signClaims(
+      bindingDefinitionClaims(spec("binding:good", "fn:good"), RUNNER, 5),
+      RUNNER_SEED,
+    );
+    const older = signClaims(
+      bindingDefinitionClaims(spec("binding:good", "fn:stale"), RUNNER, 1),
+      RUNNER_SEED,
+    );
+    for (const arrival of [
+      [newer, older],
+      [older, newer],
+    ]) {
+      const gw = await Gateway.open(new MemoryBackend());
+      gw.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
+      await gw.append(arrival);
+      const runner = Runner.attach(gw, {
+        seed: RUNNER_SEED,
+        implementations: { "fn:good": () => [], "fn:stale": () => [] },
+      });
+      expect(runner.installed).toEqual(["binding:good"]);
+      expect(runner.superseded).toEqual([{ deltaId: older.id, name: "binding:good" }]);
+      await gw.close();
+    }
+    // A timestamp tie falls to the higher delta id — the loser is still named, never dropped.
+    const tieA = signClaims(
+      bindingDefinitionClaims(spec("binding:good", "fn:a"), RUNNER, 7),
+      RUNNER_SEED,
+    );
+    const tieB = signClaims(
+      bindingDefinitionClaims(spec("binding:good", "fn:b"), RUNNER, 7),
+      RUNNER_SEED,
+    );
+    const gw = await Gateway.open(new MemoryBackend());
+    gw.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
+    await gw.append([tieA, tieB]);
+    const runner = Runner.attach(gw, { seed: RUNNER_SEED, implementations: {} });
+    const loser = tieA.id > tieB.id ? tieB : tieA;
+    expect(runner.superseded).toEqual([{ deltaId: loser.id, name: "binding:good" }]);
+    expect(runner.skipped).toEqual(["binding:good"]); // one law, counted once
+    await gw.close();
+  });
+
   it("delta level: a malformed definition is dropped from the RUN, never from the store", async () => {
     const { gateway, typoId, budgetId } = await storeWithFive();
-    Runner.attach(gateway, { seed: RUNNER_SEED, implementations: {} });
+    // A real implementation map, so "dropped from the RUN" is an assertion rather than a
+    // foregone conclusion: fn:typo and fn:overdrawn are ON HAND and still install nothing.
+    const runner = Runner.attach(gateway, {
+      seed: RUNNER_SEED,
+      implementations: { "fn:good": () => [], "fn:typo": () => [], "fn:overdrawn": () => [] },
+    });
+    expect(runner.installed).toEqual(["binding:good"]);
+    expect(runner.installed).not.toContain("binding:typo");
+    expect(runner.installed).not.toContain("binding:overdrawn");
+    // Never from the ground: the deltas the run refused are still in the store, unstruck.
     const ids = new Set([...gateway.reactor.snapshot()].map((d) => d.id));
     expect(ids.has(typoId)).toBe(true);
     expect(ids.has(budgetId)).toBe(true);

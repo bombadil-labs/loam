@@ -155,9 +155,13 @@ export async function pullFrom(
   }
   // A delta that will not reconstruct is dropped and the REST still land (a live peer's stream
   // may be partially good — offer.ts holds the divergence note). The drop is deliberate; hiding
-  // it from the report is not (H7): a reconstruction failure is a property of the peer's bytes,
-  // so every later pull drops the same deltas — "the next pull heals" is false for this class,
-  // and only the count tells an operator their peer's offer is rotting.
+  // it from the report is not (H7). What the count DOES prove is that the same bytes fail the
+  // same way on every pull, so "the next pull heals" is false for this class. What it does NOT
+  // prove is whose fault it is: `fromWire` refuses both a delta whose id does not recompute (the
+  // peer's bytes rotted) and one whose claims `parseClaims` will not read (H5 fails closed on an
+  // unknown key — a peer on a NEWER rhizomatic looks identical from here, and the cure is to
+  // upgrade this puller, not the peer). The report says the count and stops; naming a cause the
+  // catch discarded would be the same overclaim in a new place.
   const deltas: Delta[] = [];
   let unreconstructable = 0;
   for (const wire of body.deltas ?? []) {
