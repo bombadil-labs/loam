@@ -567,6 +567,30 @@ function pkceChallengeDefect(challenge: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Is this authorize request one the token door could ever finish? Checked at the consent GET and
+ * re-checked on the approval POST, so a doomed flow refuses HERE — on the page, with the parameter
+ * named — instead of minting a code whose redemption fails late wearing `invalid_grant`.
+ *
+ * Each parameter is judged only when PRESENT. Every flow this store has ever completed omits both
+ * (the redeemer reads neither; it verifies S256 and nothing else), so absence stays a working
+ * spelling — but a caller that NAMES a value asks for the flow that value means, and `token`,
+ * `plain` or any other unsupported value names a flow this store cannot finish. The refusal
+ * states the supported value and never reflects the caller's own text.
+ */
+export function authorizeRequestDefect(
+  responseType: string,
+  codeChallengeMethod: string,
+): string | undefined {
+  if (responseType !== "" && responseType !== "code") {
+    return 'This store issues authorization codes and nothing else: response_type, when sent, must be "code".';
+  }
+  if (codeChallengeMethod !== "" && codeChallengeMethod !== "S256") {
+    return 'This store verifies PKCE one way only: code_challenge_method, when sent, must be "S256".';
+  }
+  return undefined;
+}
+
 /** RFC 7636 S256: does `verifier` hash to `challenge`? Constant-time on the digest comparison. */
 function pkceVerifies(verifier: string, challenge: string): boolean {
   if (!PKCE_SHAPE.test(verifier) || challenge === "") return false;
@@ -682,6 +706,14 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
       refuse(res, 400, "The state value is too long.");
       return;
     }
+    const requestDefect = authorizeRequestDefect(
+      params.get("response_type") ?? "",
+      params.get("code_challenge_method") ?? "",
+    );
+    if (requestDefect !== undefined) {
+      refuse(res, 400, requestDefect);
+      return;
+    }
     const challengeDefect = pkceChallengeDefect(codeChallenge);
     if (challengeDefect !== undefined) {
       refuse(res, 400, challengeDefect);
@@ -744,6 +776,16 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
     const codeChallenge = fields.get("code_challenge") ?? "";
     if (state.length > MAX_STATE) {
       refuse(res, 400, "The state value is too long.");
+      return;
+    }
+    // The same gate the GET ran, on the POST's OWN fields — the consent form does not carry these,
+    // but a hand-built POST may, and a value the GET would refuse must not mint here either.
+    const requestDefect = authorizeRequestDefect(
+      fields.get("response_type") ?? "",
+      fields.get("code_challenge_method") ?? "",
+    );
+    if (requestDefect !== undefined) {
+      refuse(res, 400, requestDefect);
       return;
     }
     const challengeDefect = pkceChallengeDefect(codeChallenge);
