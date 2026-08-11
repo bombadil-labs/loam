@@ -44,7 +44,7 @@ import type { Gateway } from "../gateway/gateway.js";
 // A mount name has to survive one round trip through a URL path segment, or the mount it names is
 // unreachable — a door that reports success and opens nothing (H7's shape). Applied to the static
 // table and to `addMount` alike, so "validated like a static one" is one function, not two.
-export function mountNameDefect(name: string): string | undefined {
+function mountNameDefect(name: string): string | undefined {
   if (name.length === 0) return "a mount name must not be empty — no URL path could reach it";
   if (name.includes("/")) {
     return `a mount name must not contain "/" — "${name}" could never route as one path segment`;

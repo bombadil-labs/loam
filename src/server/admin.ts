@@ -141,7 +141,7 @@ export interface AdminDoor {
  * inbox pool (`inboxOf`, §39) hanging off a reachable container. A fixpoint rather than one pass,
  * because an edge can hang off an inbox pool and the table's iteration order guarantees nothing.
  */
-export function subtreeOf(table: ContainerTable, root: string): ReadonlySet<string> {
+function subtreeOf(table: ContainerTable, root: string): ReadonlySet<string> {
   const reach = new Set<string>();
   if (!table.containers.has(root)) return reach;
   reach.add(root);

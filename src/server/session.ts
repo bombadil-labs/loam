@@ -239,12 +239,12 @@ const opaqueId = (): string => randomBytes(32).toString("base64url");
  * TWO cookies of the same name is not a session, it is an AMBIGUITY, and picking either one is
  * picking whichever an injector managed to place first. So it refuses.
  */
-export function sessionIdFrom(req: IncomingMessage): string | undefined {
+function sessionIdFrom(req: IncomingMessage): string | undefined {
   return cookieValue(req, SESSION_COOKIE);
 }
 
 /** The pre-session nonce a caller presented, by the same one-value discipline. */
-export function preSessionIdFrom(req: IncomingMessage): string | undefined {
+function preSessionIdFrom(req: IncomingMessage): string | undefined {
   return cookieValue(req, PRESESSION_COOKIE);
 }
 
