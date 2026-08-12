@@ -14,8 +14,9 @@
 import { execFileSync } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 
-// `npm pack` is the heaviest external process in the suite — same hang-guard pack.test.ts carries.
-vi.setConfig({ testTimeout: 15000 });
+// `npm pack` is the heaviest external process in the suite — same hang-guard pack.test.ts carries,
+// which is the config's own floor (test/scripts/timeout-floor.test.ts refuses anything under it).
+vi.setConfig({ testTimeout: 20000 });
 
 describe("npm pack: the stock shelf rides the tarball", () => {
   it("ships the stock module and the declaration its type re-export resolves through", () => {

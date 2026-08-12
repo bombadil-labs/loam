@@ -185,13 +185,33 @@ describe("loam register --stock", () => {
   it("the shelf is frozen through — no consumer can edit what a later --stock registers", () => {
     const entry = stockSchema("note");
     expect(entry).toBeDefined();
-    const reg = entry!.registration as { roots: string[]; writable: string[] };
+    const reg = entry!.registration as {
+      roots: string[];
+      writable: string[];
+      hyperschema: { body: { in: { in: { policy: string }; pred: Record<string, unknown> } } };
+      schema: { props: Record<string, { pick: { order: { byTimestamp: string } } }> };
+    };
     expect(Object.isFrozen(STOCK_SCHEMAS)).toBe(true);
     expect(Object.isFrozen(entry)).toBe(true);
     expect(Object.isFrozen(reg)).toBe(true);
     expect(() => reg.roots.push("note:mine")).toThrow();
     expect(() => reg.writable.push("secret")).toThrow();
     expect(reg.roots).toEqual([]);
+
+    // DEPTH IS THE POINT. `roots` and `writable` sit one hop down; a freeze that stopped there
+    // would pass those two assertions and still leave the shape editable where it matters. The
+    // gather's negation mask is FOUR hops down (body → in → in → policy) and the ordering that
+    // decides which author's claim wins is three (schema → props → title → pick), so both get
+    // named — flipping either would rewrite what every later `--stock` registers.
+    const mask = reg.hyperschema.body.in.in;
+    expect(Object.isFrozen(mask)).toBe(true);
+    expect(() => (mask.policy = "keep")).toThrow();
+    expect(mask.policy).toBe("drop");
+    expect(() => (reg.hyperschema.body.in.pred = { match: {} })).toThrow();
+    const order = reg.schema.props["title"]!.pick.order;
+    expect(Object.isFrozen(order)).toBe(true);
+    expect(() => (order.byTimestamp = "asc")).toThrow();
+    expect(order.byTimestamp).toBe("desc");
   });
 
   // Re-registering is the ordinary evolve path (`Republishing at the same entity evolves it`), and

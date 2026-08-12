@@ -14,20 +14,33 @@
 // outgrows it has README's "Schemas are data" waiting. No expands, no claim templates: the
 // interesting choices belong to the reader who has a reason for them.
 //
-// THE NEGATION POSTURE IS `drop`, WHICH IS THE UNGOVERNED ONE, and it is worth naming rather than
-// leaving to be discovered. Under `drop` every negation present binds, whoever signed it — so a
-// store that FEDERATES can have a peer's strike retract a field from a stock view. The
-// trust-masked alternative exists (`governedGatherBody`, accounts.ts) and is not used here for a
-// reason the whole feature rests on: a stock schema must be the registration a person could have
-// typed, and every hand-authored registration in this tree — demos, fixtures, README — is `drop`.
-// Computing a different body behind `--stock` would make it a privileged path, which is the one
-// thing it must not be. A federating store writes its own body; the CLI's help says so.
+// A STOCK SHAPE IS UNGOVERNED IN BOTH DIRECTIONS, and both are worth naming rather than leaving to
+// be discovered. Neither is a defect; together they are why the shelf is a starting point rather
+// than a deployment.
+//
+//   • STRIKES. The negation posture is `drop`: every negation present binds, whoever signed it, so
+//     a peer's strike can retract a field from a stock view.
+//   • CLAIMS. `entityGatherJson()` is called with NO `authoredBy`, so the outer select admits every
+//     author's claims too — not only their strikes. Every prop here is `pick byTimestamp desc`, so
+//     a peer who signs `Note.title` at your entity with a later timestamp wins your view and keeps
+//     winning it.
+//
+// A trust mask answers only the first half. The second wants `authoredBy` in the BODY (the select
+// admits your operator alone) or `byAuthorRank` in the SCHEMA (a stranger cannot outrank you).
+// Neither is computed here for a reason the whole feature rests on: a stock schema must be the
+// registration a person could have typed, and every hand-authored registration in this tree —
+// demos, fixtures, README — is this shape. Computing a different body behind `--stock` would make
+// it a privileged path, which is the one thing it must not be. A federating store writes its own
+// body; the CLI's help and README say so in the same words.
 //
 // `roots` is EMPTY on every entry, and that is correct rather than lazy. Roots are the entities a
 // gateway holds live, and a shipped library cannot know yours; an entity outside the roots is
 // materialized lazily on first read (§21.7), so a stock registration serves `note:groceries`
-// without having been told about it. Naming roots is a deployment decision, made by re-registering
-// your own file when you have one.
+// without having been told about it. The ceiling is real and belongs here, because empty roots
+// makes lazy materialization the DEFAULT posture of every store that starts from this shelf: one
+// gateway holds at most MAX_LAZY_MATS = 1024 unregistered entities live (lifecycle.ts), and the
+// 1025th read throws rather than growing the reactor without bound. A store meant to serve more
+// names its roots — which is a deployment decision, made by re-registering your own file.
 
 import { entityGatherJson } from "../gateway/gather.js";
 
