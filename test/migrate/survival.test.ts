@@ -81,6 +81,22 @@ const nameOf = (d: Delta): string | undefined => {
 };
 
 // Is `id` struck by a surviving negation in this set? (Transitive: a struck strike revives.)
+//
+// THIS FILE DOES NOT ROUTE THROUGH `test/gateway/narrowing.ts`, and the reason is a property of the
+// migration edge rather than a preference. `assertPreservesSuppression` asks whether a claim struck
+// at the source reads as live at the destination — and `migrate` is GROW-ONLY (its driver seeds a
+// map from every input delta and only ever adds), so the destination is a superset of the source for
+// every possible step. The helper's question is therefore true by construction here: it would be
+// green with the T41 fix reverted, with the step deleted, with everything deleted. A rail that
+// cannot fail is worse than none (H10).
+//
+// The resurrection this file exists to catch takes a different shape. A migration re-expresses a
+// definition into a FRESH content address, which nothing negates — so the revived claim is a delta
+// that did not exist at the source, and no source-to-destination suppression comparison can see it.
+// What sees it is the pair below: `isStruck` over the raw output array (transitive, because a struck
+// strike revives, which the shared helper's presence test cannot express), and the object-level
+// question of what BINDS — still the `it.skip` at the end of this file, whose body carries the
+// fixture gap and the recipe to close it.
 const isStruck = (deltas: readonly Delta[], id: string): boolean => {
   const strikes = deltas.filter((d) =>
     d.claims.pointers.some(

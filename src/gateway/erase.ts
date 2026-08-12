@@ -397,7 +397,7 @@ export async function eraseImpl(
   }
   if (faults.length > 0) {
     throw new Error(
-      `erase ${id}: the tombstone is recorded and every tier was swept, but the content is STILL ` +
+      `erase ${id}: the tombstone is recorded, but the content is STILL ` +
         `HELD by the store — erasure is not complete. ${faults.length} fault(s):\n  ` +
         `${faults.map((f) => f.what).join("\n  ")}\n` +
         `Resolve them and re-run; the re-run is safe and will not mint a second tombstone.`,
@@ -611,6 +611,23 @@ export const UNSWEPT_AUTH_SURFACES: readonly string[] = [
     "signing grant (`loam user remove-role`), is a separate operation, out of erasure's scope.",
 ];
 
+// The ONE standing R1 violation (T105, §32's seam census): a renderer/resolver compiled from a
+// source delta stays loaded in THIS PROCESS's ESM registry after the source delta is erased — the
+// registry offers no eviction, and no tier probe can ask it. The disclosure names the tier as
+// UNPROVEN (a tier that cannot be asked has proven nothing — H9) rather than letting the settled
+// verdict read as exhaustive. Same ONE-SOURCE doctrine as the auth surfaces: health() and the
+// compliance receipt both read this constant, so the two surfaces cannot drift. The COMPLETION
+// half — tearing down a condemned module's compiled copy — is T105 (b); this is the honesty half.
+export const ESM_RESIDENCY_DISCLOSURE: readonly string[] = [
+  "ESM RESIDENCY IS NOT SWEPT: a resolver or renderer compiled from a source delta stays loaded " +
+    "and EXECUTABLE in this process's ESM registry after that delta is erased — the registry " +
+    "offers no eviction, and no tier probe can ask it. The erasure verdicts above are byte-level " +
+    "and this tier is not among the bytes they proved; it reads as UNPROVEN, not as swept. The " +
+    "map holding Loam's own handle is keyed by the source's content address, so no door reads a " +
+    "namespace out of it without already holding the erased bytes; the executable copy itself " +
+    "remains until the process ends (SPEC §22/§23, T105).",
+];
+
 export interface StoreHealth {
   // "ok"       — every promise settled, nothing lagging.
   // "settling" — converging, not broken: erasure debt outstanding somewhere in reach, or a mirror
@@ -628,7 +645,8 @@ export interface StoreHealth {
   readonly slates: SlateHealth;
   readonly forgiven: ForgivenHealth;
   readonly lagging?: boolean; // present when the backend exposes mirror lag (MirrorBackend)
-  // The surfaces erasure does NOT reach (T131) — the two §36 home files, disclosed unconditionally so
+  // The surfaces erasure does NOT reach, disclosed unconditionally: the two §36 home files
+  // (T131, out of scope by design) and the ESM registry (T105 a, in scope but unprovable) — so
   // the report is honest about its own edges whatever the erasure state. A top-level field, never a
   // field of `ErasureHealth`: that interface is pinned by a `toEqual` rail (T70), and this fact is
   // about the report's scope rather than any one promise's settling.
@@ -686,6 +704,10 @@ export async function healthImpl(gw: Gateway, now = Date.now()): Promise<StoreHe
     };
   }
   const lagging = (gw.backend as { lagging?: unknown }).lagging;
+  // T105 (a), deliberate: the ESM disclosure in nonSwept names an unprovable tier but does NOT
+  // move the top-level verdict — the byte probes answered every tier they can ask, and an
+  // unaskable tier reads as UNPROVEN beside them rather than as a failing probe. Moving the
+  // verdict itself is the teardown half's decision (T105 b).
   const status = erasure.unproven
     ? "unproven"
     : erasure.settled && lagging !== true
@@ -700,9 +722,10 @@ export async function healthImpl(gw: Gateway, now = Date.now()): Promise<StoreHe
     slates: slateHealth(gw, now),
     forgiven: forgivenHealth(gw),
     ...(typeof lagging === "boolean" && { lagging }),
-    // The unswept-surface disclosure (T131), unconditional: these home files are outside erasure's
-    // reach whether the store has forgotten nothing, something, or is mid-settle. The receipt reads
-    // the SAME constant, so the two surfaces cannot drift.
-    nonSwept: [...UNSWEPT_AUTH_SURFACES],
+    // The unswept-surface disclosures, unconditional: the home files (T131) are outside erasure's
+    // reach by design, and the ESM registry (T105 a) is in scope but unprovable to the tier probes.
+    // Both stay listed whether the store has forgotten nothing, something, or is mid-settle. The
+    // receipt reads the SAME constants, so the two surfaces cannot drift.
+    nonSwept: [...UNSWEPT_AUTH_SURFACES, ...ESM_RESIDENCY_DISCLOSURE],
   };
 }

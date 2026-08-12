@@ -3,7 +3,8 @@
 // drove a real browser; this helper is deliberately small enough to keep that rail cheap.
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { dropProfile, killTree } from "./teardown.js";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
@@ -215,8 +216,11 @@ export class Browser {
   }
 
   async close(): Promise<void> {
-    this.child.kill();
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    rmSync(this.userDataDir, { recursive: true, force: true });
+    killTree(this.child);
+    await new Promise((resolve) => {
+      this.child.once("exit", resolve);
+      setTimeout(resolve, 5000).unref();
+    });
+    dropProfile(this.userDataDir);
   }
 }

@@ -1,22 +1,24 @@
 {
   "_adlcArchive": {
-    "archivedAt": "2026-08-05T22:43:49.834Z",
+    "archivedAt": "2026-08-11T03:58:26.981Z",
     "reason": "completed",
     "sourceRevision": null,
-    "sourceStoreHash": "8ac42f9043dd7d4fe456dda1bac2b720f90bc8307864a999da1df9b2e43c619c",
-    "ticketHash": "077f7006dffd779cf5d4c6f7d33079430b1cce2c9a3bcc424963eab2e89dbe06",
+    "sourceStoreHash": "1cffe218bde494c841e12d99c8356f8be9ee0a91d0478d5f4669b9ca0d7699ad",
+    "ticketHash": "bbc40c700b54b07953fa1c1a5c23f4fe5e5ecbd199ad3e589535d419b48ab607",
     "version": 1
   },
   "body": "FOUND BY T108's hollow-rail lens (#272 P5). The board renderer buckets items by status into fixed SECTIONS (`SECTION.holds`); an item whose status matches NO section emits no `data-title` and vanishes from the page — while the door's `items` still returns it. So 'the mirror shows exactly the store's items' (criterion e) is true only for well-statused items, and a typo'd or new status silently disappears from the board rather than showing up wrong. On the ONE app we run daily, an item that quietly isn't there is worse than one that looks wrong — you stop trusting the board.\n\nThe fix is a design choice, small either way: (a) an explicit CATCH-ALL section ('other', or 'status?') so every item the door returns is visible even when mis-statused — recommend this, it is the fail-loud direction and matches the erasure-era instinct that absence must be visible; or (b) validate status at the write door (`boardEvent` refuses an unknown status), which is fail-closed but needs a fixed vocabulary the app may outgrow. Recommend (a) plus a soft version of (b) later.\n\nThe rail is the two-sided one the lens implied: an item with an off-list status APPEARS on the page (in the catch-all) AND is counted by the mirror-equality check — closing the gap criterion e's word 'exactly' currently overstates. Repair-tier once T108 lands; fold into the T108 landing PR if it is still open, else its own small PR.\n\nMORE EVIDENCE (2026-07-26, the brief PR's hollow-test run): mutation of the section table survives the whole board suite. Two survivors: shrink `flight.holds` to drop \"review\" (demos/board/renderer.mjs:21) and shrink the parked/blocked holds (renderer.mjs:23). No test seeds an item with status review, parked, or blocked. The rail for this ticket must seed every section's statuses, plus one unknown status, and assert page-vs-door agreement.",
   "edges": [],
   "id": "T112",
   "phase": "P1",
-  "rails": [],
+  "rails": [
+    "test/board/board-catchall.test.ts"
+  ],
   "scope": [
     "demos/board/renderer.mjs",
     "scripts/render-board-artifact.mjs",
     "test/board/"
   ],
-  "status": "todo",
+  "status": "in-progress",
   "title": "The board renderer silently drops an item whose status is in no section — store and page disagree"
 }

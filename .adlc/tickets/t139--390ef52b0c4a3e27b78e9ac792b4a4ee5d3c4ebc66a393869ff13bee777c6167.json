@@ -1,12 +1,4 @@
 {
-  "_adlcArchive": {
-    "archivedAt": "2026-08-05T22:43:50.138Z",
-    "reason": "completed",
-    "sourceRevision": null,
-    "sourceStoreHash": "de7ca31007672033a8a764228fc8ca82a521c6d238e4f1658eda3c85b6a71743",
-    "ticketHash": "4184d98717e766e23aa6fae98a9509089ff4bf3cd97706477b7eb714d6ed7f09",
-    "version": 1
-  },
   "body": "OBSERVED TWICE ON 2026-07-28, by two independent build lanes running the full suite in sibling\nworktrees (T122's and T123's). Both saw test/gateway/write-renderers.test.ts fail under load and pass\nclean on isolated rerun. Neither diff touches the file.\n\nMEASURED THE SAME NIGHT, on main: 3 isolated runs pass (7/7 tests, ~2s); 4 CONCURRENT copies of the\nfile alone all pass. So the reproduction needs heavier contention than the file self-inflicts —\nplausibly the full suite in two-plus worktrees, where worker-thread spawn or render timeouts starve.\nThe failure text was not captured by either lane; capturing it is step one.\n\nTHE STANDING RULE (Myk, 2026-07-23) says a flake is fixed NOW; tonight's budget bent that to\ndiagnose-and-ticket, and this body says so plainly rather than hiding it. The exposure is confined to\nconcurrent local lanes — single-tree CI has not failed on it — but the rule's point stands: a lane\nthat learns to rerun a red bar is learning the wrong lesson, so this outranks ordinary queue work the\nnext time a lane hits it WITH the failure text in hand.\n\nTHE WORK: (1) reproduce under full-suite dual-worktree load and capture the assertion; (2) decide\nRAIL bug vs SPEC-ACCURACY bug — if the render worker genuinely cannot promise its timing under\ncontention, the test must pin what IS promised, not a wider margin; NEVER widen the assertion and\nnever add a retry; (3) fix that one; (4) if it cannot be fixed same-day once diagnosed, it.skip with\nthis ticket id in the title.\n\nRAILS: the fix's own test, plus the two-direction measurement recorded in the PR (fails under load\npre-fix, passes under load post-fix, passes isolated both sides).",
   "edges": [],
   "id": "T139",

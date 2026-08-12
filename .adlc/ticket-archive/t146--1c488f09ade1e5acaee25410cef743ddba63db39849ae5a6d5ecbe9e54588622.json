@@ -1,13 +1,24 @@
 {
+  "_adlcArchive": {
+    "archivedAt": "2026-08-11T04:49:46.895Z",
+    "reason": "completed",
+    "sourceRevision": null,
+    "sourceStoreHash": "6032ce37bb0e60b1d6386433406d90c88e688da652a94d48c74fa78b924a33e1",
+    "ticketHash": "80d2747757d9745a61102059e0cf92aea01be5589519898c22a660e1d00083c8",
+    "version": 1
+  },
   "body": "FOUND BY THE 2026-08-05 CONSOLIDATION AUDIT (browser-user journey, real Chrome, CONFIRMED). The data doors may speak JSON; the HUMAN pages must not.\n\nWHAT A PERSON SEES TODAY:\n1. A wrong password on the /login form lands the browser on a bare JSON document: {\"errors\":[\"the login was refused\"]}, 401, application/json. No form, no prose, no link. The provenance 403 takes the same JSON shape on the same human path. The Back button is the only recovery. The admin doors already render refusals as styled HTML pages (admin.ts refuse()), so the pattern exists in-tree; the login door's refuseLogin/notThisPage (session.ts) answer with json() regardless of who asks.\n2. Session-refusal pages are dead ends: nothing links back to /login.\n3. No page links to any other page: /admin is undiscoverable from the signed-in answer, and the admin pages carry no sign-out.\n4. The admin Declare-a-child form invites a name shape the door then refuses (the form's placeholder/label suggests the wrong vocabulary).\n\nTHE REPAIR DIRECTION: on the login door's POSTs, when the request is a form POST from a browser (it carries the form token and came through fromThisPage — or content-type is form-urlencoded), render the sign-in page again with the refusal stated inline, the user field preserved, and the one-refusal-shape rule kept (the page says exactly what the JSON said: refused, no finer). Keep JSON for JSON callers. Add the small links: signed-in page names /admin, admin pages carry the sign-out form, refusal pages link /login. Fix the declare form's invited shape.\n\nCONSTRAINT: the ONE-REFUSAL oracle rule holds — the HTML refusal must not distinguish unknown user from wrong password from role-less user. Only the FRAME changes, never the information.\n\nRAILS: extend the browser story (a NEW test file beside test/browser/door-smoke.test.ts — that file is frozen): wrong password then right password in real Chrome, asserting the person stays on a usable page both times; a link-walk assertion (signed-in -> admin -> sign out). Frozen rails on the JSON shapes stay green because JSON callers still get JSON.\n\nWHO MERGES: Myk if any response shape changes for a non-browser caller; otherwise ordinary bar. State in the PR which callers see a changed content-type.",
   "edges": [],
   "id": "T146",
-  "phase": "P0",
-  "rails": [],
+  "phase": "P5",
+  "rails": [
+    "test/server/human-doors.test.ts",
+    "test/browser/human-doors.test.ts"
+  ],
   "scope": [
     "src/server/session.ts",
     "src/server/admin.ts"
   ],
-  "status": "todo",
+  "status": "in-progress",
   "title": "The human doors refuse in JSON, and the pages give a person no way around"
 }

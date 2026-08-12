@@ -14,6 +14,8 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { type IncomingMessage, type ServerResponse } from "node:http";
+import { CACHE_NO_STORE, endJson, JSON_CONTENT_TYPE } from "./respond.js";
+import { parseUrlEncoded, readBodyLenient } from "./body.js";
 import { authorForSeed } from "@bombadil/rhizomatic";
 import {
   OAuthFileBusy,
@@ -203,7 +205,7 @@ export function redirectOriginDefect(origin: string): string | undefined {
  * exact-match reason a later phase's authorize compares the caller's uri byte-for-byte against the
  * registered one.
  */
-export function redirectUriDefect(uri: string, allowed: readonly string[]): string | undefined {
+function redirectUriDefect(uri: string, allowed: readonly string[]): string | undefined {
   if (allowed.length === 0) {
     return (
       `this store registers no connectors: its operator has named no permitted redirect origin. ` +
@@ -263,28 +265,20 @@ const WELL_KNOWN_PATHS = new Set([
 
 const REGISTER_PATH = "/oauth/register";
 
-/** Read a request body, capped — a registration is a few hundred bytes. `undefined` past the cap. */
+/** oauth's cap is a door decision (16 KiB — a registration is a few hundred bytes). */
 const readBody = (req: IncomingMessage): Promise<string | undefined> =>
-  new Promise((resolve) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    let over = false;
-    req.on("data", (chunk: Buffer) => {
-      if (over) return;
-      size += chunk.length;
-      if (size > MAX_BODY) {
-        over = true;
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on("end", () => resolve(over ? undefined : Buffer.concat(chunks).toString("utf8")));
-    req.on("error", () => resolve(undefined));
-  });
+  readBodyLenient(req, MAX_BODY);
 
 export function makeOAuthDoors(options: OAuthOptions): OAuthDoors {
   const publicUrl = options.publicUrl;
   const registration = options.registration;
+
+  // The discovery documents' agreed headers (T153): no-store (a discovery answer changes with the
+  // store) and CORS (browser callers), spelled once here instead of per writeHead.
+  const DISCOVERY_HEADERS = {
+    "cache-control": "no-store",
+    "access-control-allow-origin": "*",
+  } as const;
 
   const documentFor = (pathname: string): Record<string, unknown> =>
     pathname === "/.well-known/oauth-protected-resource"
@@ -293,26 +287,23 @@ export function makeOAuthDoors(options: OAuthOptions): OAuthDoors {
 
   const wellKnown = (pathname: string, req: IncomingMessage, res: ServerResponse): void => {
     if (req.method !== "GET" && req.method !== "HEAD") {
-      res.writeHead(405, {
-        allow: "GET, HEAD",
-        "content-type": "application/json",
-        "access-control-allow-origin": "*",
-      });
-      res.end(JSON.stringify({ error: "this document answers GET" }));
+      endJson(
+        res,
+        405,
+        { error: "this document answers GET" },
+        {
+          allow: "GET, HEAD",
+          ...DISCOVERY_HEADERS,
+        },
+      );
       return;
     }
-    const headers = {
-      "content-type": "application/json",
-      "cache-control": "no-store",
-      "access-control-allow-origin": "*",
-    };
     if (req.method === "HEAD") {
-      res.writeHead(200, headers);
+      res.writeHead(200, { ...DISCOVERY_HEADERS, "content-type": JSON_CONTENT_TYPE });
       res.end();
       return;
     }
-    res.writeHead(200, headers);
-    res.end(JSON.stringify(documentFor(pathname)));
+    endJson(res, 200, documentFor(pathname), DISCOVERY_HEADERS);
   };
 
   // --- POST /oauth/register (RFC 7591), SPEC §37 phase 13 ---------------------------------------
@@ -327,15 +318,14 @@ export function makeOAuthDoors(options: OAuthOptions): OAuthDoors {
   const onFault = registration?.onFault ?? ((message: string): void => void message);
   const redeeming = registration?.redeeming;
 
-  const jsonOut = (res: ServerResponse, status: number, body: unknown): void => {
-    res.writeHead(status, {
-      "content-type": "application/json",
+  const jsonOut = (res: ServerResponse, status: number, body: unknown): void =>
+    endJson(res, status, body, {
+      // The oauth door's policy: no-referrer (JSON, never a form), no-store (auth answers), and
+      // CORS (the register/token doors answer browser callers).
       "cache-control": "no-store",
       "referrer-policy": "no-referrer",
       "access-control-allow-origin": "*",
     });
-    res.end(JSON.stringify(body));
-  };
   const refuse = (res: ServerResponse, status: number, error: string, description: string): void =>
     jsonOut(res, status, { error, error_description: description });
 
@@ -569,7 +559,7 @@ const PKCE_SHAPE = /^[A-Za-z0-9._~-]{43,128}$/;
  * so a caller that sends none still gets a page) — but the token exchange refuses a code whose
  * challenge is empty, so PKCE is mandatory for any flow that actually redeems.
  */
-export function pkceChallengeDefect(challenge: string): string | undefined {
+function pkceChallengeDefect(challenge: string): string | undefined {
   if (challenge === "") return undefined;
   if (!PKCE_SHAPE.test(challenge)) {
     return "The PKCE code_challenge must be 43–128 characters of A–Z, a–z, 0–9, dot, dash, underscore or tilde.";
@@ -578,7 +568,7 @@ export function pkceChallengeDefect(challenge: string): string | undefined {
 }
 
 /** RFC 7636 S256: does `verifier` hash to `challenge`? Constant-time on the digest comparison. */
-export function pkceVerifies(verifier: string, challenge: string): boolean {
+function pkceVerifies(verifier: string, challenge: string): boolean {
   if (!PKCE_SHAPE.test(verifier) || challenge === "") return false;
   const computed = createHash("sha256").update(verifier).digest("base64url");
   return sameSecret(computed, challenge);
@@ -623,7 +613,7 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
     res.writeHead(status, {
       "content-type": "text/html; charset=utf-8",
       "content-security-policy": csp,
-      "cache-control": "no-store",
+      "cache-control": CACHE_NO_STORE,
       // Never no-referrer on a form-hosting page — it nulls the POST's Origin (T143). `origin`,
       // not `same-origin`: this page's query carries client_id, state and code_challenge, and
       // under `origin` no Referer in any direction ever carries more than the bare origin.
@@ -670,12 +660,7 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
   };
 
   const readBodyFields = (req: IncomingMessage): Promise<Map<string, string>> =>
-    readBody(req).then((body) => {
-      const out = new Map<string, string>();
-      if (body === undefined) return out;
-      for (const [k, v] of new URLSearchParams(body)) out.set(k, v);
-      return out;
-    });
+    readBody(req).then((body) => parseUrlEncoded(body ?? ""));
 
   const handleGet = (req: IncomingMessage, res: ServerResponse): void => {
     // Behind a phase-5 session. No session → the login form, and nothing minted. READ, don't slide:
@@ -867,7 +852,7 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
 // of the same live process with no restart, and it strikes the ground write-grant so the actor loses
 // standing too. It never touches the connector's past deltas — they keep naming their author.
 
-export const TOKEN_PATH = "/oauth/token";
+const TOKEN_PATH = "/oauth/token";
 
 /** The connector identity a presented bearer token resolves to. The `actor` is a SIGNING SEED. */
 export interface ConnectorIdentity {
@@ -944,21 +929,22 @@ export function makeTokenDoor(options: TokenDoorOptions): TokenDoor {
   const inc = (clientId: string): void => {
     redeeming.set(clientId, (redeeming.get(clientId) ?? 0) + 1);
   };
+  // The token door's JSON policy: no-store (a token answer must not be cached), no-referrer (JSON,
+  // never a form), CORS (browser callers). The one spelling, per door, per the T153 agreement.
+  const TOKEN_DOOR_HEADERS = {
+    "cache-control": "no-store",
+    "referrer-policy": "no-referrer",
+    "access-control-allow-origin": "*",
+  } as const;
+
   const dec = (clientId: string): void => {
     const n = (redeeming.get(clientId) ?? 0) - 1;
     if (n <= 0) redeeming.delete(clientId);
     else redeeming.set(clientId, n);
   };
 
-  const jsonOut = (res: ServerResponse, status: number, body: unknown): void => {
-    res.writeHead(status, {
-      "content-type": "application/json",
-      "cache-control": "no-store",
-      "referrer-policy": "no-referrer",
-      "access-control-allow-origin": "*",
-    });
-    res.end(JSON.stringify(body));
-  };
+  const jsonOut = (res: ServerResponse, status: number, body: unknown): void =>
+    endJson(res, status, body, TOKEN_DOOR_HEADERS);
   // RFC 6749 §5.2 token-error shape. NEVER the home path or a flag name (criterion 13): a lock fault
   // is a fixed 503 whose body says "lock", an ordinary caller error a 400 that names only itself.
   const refuse = (res: ServerResponse, status: number, error: string, description: string): void =>
@@ -1167,12 +1153,7 @@ export function makeTokenDoor(options: TokenDoorOptions): TokenDoor {
   }
 
   const readBodyFields = (req: IncomingMessage): Promise<Map<string, string>> =>
-    readBody(req).then((body) => {
-      const out = new Map<string, string>();
-      if (body === undefined) return out;
-      for (const [k, v] of new URLSearchParams(body)) out.set(k, v);
-      return out;
-    });
+    readBody(req).then((body) => parseUrlEncoded(body ?? ""));
 
   return {
     owns: (pathname) => pathname === TOKEN_PATH,

@@ -42,9 +42,13 @@ export {
   publicDefect,
   readPublicSchemas,
 } from "./gateway/public.js";
-export { pullFrom, type PullOptions } from "./federation/pull.js";
+export { pullFrom, type PullOptions, type PullReport } from "./federation/pull.js";
 export { exportOffer, parseOffer } from "./federation/offer.js";
 export { toWire, fromWire, type WireDelta } from "./federation/wire.js";
+// The health DOOR is `Gateway.health()` (SPEC §11, T70); `StoreHealth` and its component shapes
+// (`ErasureHealth` here, `SlateHealth` / `ForgivenHealth` in the slate block below) are what a
+// caller needs to READ what it answers. The bodies computing them (`healthImpl`, `slateHealth`,
+// `forgivenHealth`) take a `Gateway` seam and stay out.
 export {
   CTX_ERASE,
   ERASE_ENTITY,
@@ -54,6 +58,8 @@ export {
   readTombstones,
   sealCommitment,
   tombstonesIn,
+  type ErasureHealth,
+  type StoreHealth,
 } from "./gateway/erase.js";
 export {
   CTX_TRUST,
@@ -94,12 +100,14 @@ export {
   type CutMemberReport,
   type CutReport,
   type Duplicate,
+  type ForgivenHealth,
   type GraveyardRecord,
   type GraveyardSpec,
   type Receipt,
   type ReceiptMember,
   type Slate,
   type SlateClosure,
+  type SlateHealth,
   type SlateReport,
   type SlateSpec,
   type TierVerdict,
@@ -232,7 +240,10 @@ export {
   Runner,
   bindingDefinitionClaims,
   readBindingDefinitions,
+  type BindingDropSinks,
+  type MalformedBinding,
   type RunnerOptions,
+  type SupersededBinding,
 } from "./runner/runner.js";
 export { migrate, MIGRATIONS, type Migration, type MigrationReport } from "./migrate/migrate.js";
 export { run, main, type IO, type RunOptions } from "./cli/cli.js";

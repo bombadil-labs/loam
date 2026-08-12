@@ -98,6 +98,7 @@ import {
   type WithdrawnRegistration,
   type LensName,
 } from "./registration.js";
+import { readRegistrations } from "./registration.js";
 import { newResolverMemo, type ResolverMemo } from "./resolvers.js";
 import {
   openQuarantineImpl,
@@ -196,9 +197,10 @@ export interface GatewayOptions {
 }
 
 export interface FederationReport {
-  readonly offered: number;
-  readonly accepted: number;
-  readonly rejected: number; // failed verification or admission
+  readonly offered: number; // occurrences in the offered batch, duplicates counted
+  readonly accepted: number; // UNIQUE deltas newly ingested (union is idempotent)
+  readonly rejected: number; // occurrences refused at the door — a duplicated refusal counts twice
+  readonly held: number; // UNIQUE offered ids the store already held — neither new nor refused
 }
 
 export interface RequestContext {
@@ -1146,9 +1148,33 @@ export class Gateway {
 
   private schemaOrThrow(): GraphQLSchema {
     if (this.gql === undefined) {
-      throw new Error("nothing is registered: the gateway has no queryable surface yet");
+      throw new Error(this.emptySurfaceMessage());
     }
     return this.gql;
+  }
+
+  // An empty surface has two honest shapes, and the refusal says which. The plain one: the store
+  // holds no law at all. The inert one: it HOLDS registrations that bind nothing — and the cause
+  // is named as a pair, never attributed: foreign law is inert on a governed store (SPEC §8), and
+  // an own definition that does not resolve binds nothing either. The operator's register is the
+  // cure, named in both shapes. The scan is a cold path (it only runs on the error), so the
+  // whole-store read is acceptable here where it would not be per request.
+  private emptySurfaceMessage(): string {
+    let inert = "";
+    if (readRegistrations(this.reactor, undefined).length > 0) {
+      // The derivable fact is that registrations exist and none binds. The causes are stated as
+      // general rules, attributed only where the store's own posture makes them true: foreign
+      // inertia is a governed-store rule (SPEC §8), never claimed of an ungoverned store.
+      inert =
+        this.operatorAuthor !== undefined
+          ? " the store holds registrations that do not bind (foreign law is inert on a governed " +
+            "store; an own definition that does not resolve binds nothing either);"
+          : " the store holds registrations that do not bind (they conflict or one does not resolve);";
+    }
+    return (
+      "nothing is registered: the gateway has no queryable surface yet —" +
+      `${inert} \`loam register <file> --home ...\` or POST /:mount/register grows one`
+    );
   }
 
   // T19 NOTE (a boundary judged, not forced): the public-door READERS — surface, isPublicLatest,

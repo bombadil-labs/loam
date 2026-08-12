@@ -17,7 +17,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { authorForSeed } from "@bombadil/rhizomatic";
 import { randomBytes } from "node:crypto";
 
@@ -143,13 +143,23 @@ export function readConfig(home: string): LoamConfig {
   return JSON.parse(readFileSync(configPath(home), "utf8")) as LoamConfig;
 }
 
+// One rule for every path flag: a relative value names a place INSIDE THE HOME, an absolute value
+// is used as-is. The config values have always been home-relative; a flag override used to bypass
+// this rule and resolve against the process's working directory instead, so for --archive a serve
+// could mint an erasure-bearing vault wherever it happened to run while the vault the help text
+// promised was never opened. `--store` and `--archive` take the same rule, or the two ways of
+// naming the same file disagree about what it is relative to.
+const resolveInHome = (home: string, path: string): string =>
+  isAbsolute(path) ? path : join(home, path);
+
 export function storePath(home: string, override?: string): string {
-  return override ?? join(home, readConfig(home).store);
+  if (override !== undefined) return resolveInHome(home, override);
+  return join(home, readConfig(home).store);
 }
 
 // The archive is opt-in: undefined means "no cold store" — serve runs the bare sqlite driver.
 export function archivePath(home: string, override?: string): string | undefined {
-  if (override !== undefined) return override;
+  if (override !== undefined) return resolveInHome(home, override);
   const archive = readConfig(home).archive;
   return archive === undefined ? undefined : join(home, archive);
 }

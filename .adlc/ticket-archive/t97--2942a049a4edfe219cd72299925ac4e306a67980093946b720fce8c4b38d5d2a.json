@@ -1,12 +1,25 @@
 {
+  "_adlcArchive": {
+    "archivedAt": "2026-08-11T16:33:37.302Z",
+    "reason": "completed",
+    "sourceRevision": null,
+    "sourceStoreHash": "4b28f0139bf2a156028b635445aa948a3f74314952f4e166c0eb6fb7e51e698c",
+    "ticketHash": "8ee47443bfd7e923103d857319a7516590adc05c7da3e49f5cbe1a25d2a1001a",
+    "version": 1
+  },
   "body": "A NAMED GAP IN T79's RAILS, written down rather than left for a reader to discover.\n\nWHAT §30's CRITERION 20(b) ASKS. That the pack-time reference scan refuses a bundle reaching for a host global (a) AND that 'a real `esbuild`-bundled React renderer' still PACKS (b) — the shape §23.2 names as the target: 'a React renderer bundles its own React and returns renderToString(...)'. The (b) half is the load-bearing one, and the criterion says why in its own words: a rail measuring only true positives stays GREEN while the door refuses nearly every real bundle. A scan that refuses the target shape is not a cheap guard, it is a broken door.\n\nWHAT LANDED. (a) is fully railed — fourteen families and names, each refused and named, plus the widened set T79 added (`eval`, `Function`, `module`, `__dirname`, `__filename`). (b) is railed against a HAND-AUTHORED FIXTURE that carries every pattern the criterion enumerates: a `typeof globalThis !== \"undefined\"` polyfill, a `typeof process !== \"undefined\" && process.env.NODE_ENV` guard, a `typeof document !== \"undefined\"` branch, and the identifiers `processNote` and `documentTitle` — the last two being exactly what a substring scan refuses outright. It packs, and it must.\n\nSO THE SHAPE IS RIGHT AND THE PROVENANCE IS WEAKER THAN ASKED. The scan is a real lexer (comments, strings, templates with live interpolations, regex-vs-divide disambiguation) plus a binder pass for shadowed names, a `typeof`-operand suppression, and a dead-branch pass for the arm of a `typeof X === \"undefined\"` guard that cannot run in a worker realm. Those are the mechanisms real bundler output needs, and the fixture exercises each. What is NOT proven is that the OUTPUT OF A REAL BUNDLER, over a real React, contains only patterns the fixture anticipated. The gap is between 'every pattern I thought of' and 'what esbuild actually emits', which is precisely the gap a hand-authored fixture cannot close, because its author and the scan's author are the same.\n\nWHY IT LANDED THAT WAY. React is not a dependency of this repo and the build session could not install one. `esbuild` IS a devDependency, so the missing half is the PACKAGE, not the bundler.\n\nWHAT WOULD CLOSE IT, cheapest first:\n  (a) Add `react` + `react-dom` as devDependencies and a fixture step that runs the REAL `esbuild` over a small `renderToString` renderer, then asserts the output PACKS. Small, and it is the literal reading of the criterion. Note the honest cost: it puts React in the dev tree of a repo that has none, and it makes a rail depend on an upstream package's future output — which is a FEATURE here (that is the thing being tested) and a maintenance edge (a React release can turn the bar red for a reason that is not a Loam regression). If that trade is unwelcome, prefer (b).\n  (b) Vendor ONE frozen esbuild-bundled artifact as a fixture FILE, generated once from real React and committed with the command that produced it in a header. No dependency, no upstream flake, and it is real bundler output rather than an imitation of it. It goes stale, which is the honest weakness — a scan change and a five-year-old fixture can both be right.\n  (c) Widen to a SET: minified output from esbuild, rollup, and webpack over the same renderer. This is the version that would actually earn the claim, because 'refuses nearly every real bundle' is a statement about the population, not about one member.\nRECOMMENDATION: (b) plus (c) over time — vendor the first artifact now, add a bundler per boring afternoon. (a) only if Myk wants React in the dev tree for other reasons.\n\nWHAT MUST NOT CHANGE while closing it. The scan's honest limit stays stated: even a reference scan is defeatable by string construction (`globalThis[\"win\" + \"dow\"]`), so it is the CHEAP half of confinement and never the enforcing one — §30's realm boundary is (`test/gateway/artifact-realm.test.ts` rails the seal as a program). Both, not either. A widened fixture set makes the cheap half honest; it does not promote it.\n\nEVIDENCE: test/gateway/artifact-pack.test.ts (the `describe` for criterion 20, whose header records this gap); src/gateway/artifact-scan.ts (the lexer, the binder, the dead-branch pass, and the header that says what it deliberately does not do).",
   "edges": [],
   "id": "T97",
   "phase": "P0",
-  "rails": [],
+  "rails": [
+    "test/gateway/artifact-pack-real-bundle.test.ts"
+  ],
   "scope": [
+    "src/gateway/artifact-scan.ts",
+    "test/gateway/artifact-pack-real-bundle.test.ts",
     "test/gateway/artifact-pack.test.ts",
-    "src/gateway/artifact-scan.ts"
+    "test/gateway/fixtures/react-reaching.bundle.mjs",
+    "test/gateway/fixtures/react-renderer.bundle.mjs"
   ],
   "status": "todo",
   "title": "The bundle-reference scan is railed against a hand-authored fixture, not real esbuild-bundled React — the shape is right and the provenance is weaker than the criterion asks"

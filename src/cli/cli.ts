@@ -254,9 +254,14 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
 // One blurb per flag NAME — a name means the same thing in every command that takes it. The LIST a
 // command shows comes from its own allowlist, so a flag added there appears in its help whether or
 // not anyone wrote it a blurb: an unexplained flag is still printed, never silently omitted.
-const FLAG_HELP: Readonly<Record<string, { readonly arg: string; readonly note: string }>> = {
+const FLAG_HELP: Readonly<
+  Record<string, { readonly arg: string; readonly note: string; readonly required?: boolean }>
+> = {
   home: { arg: "<dir>", note: "the home to work in (default $LOAM_HOME, else .loam)" },
-  store: { arg: "<file>", note: "the store file inside the home (default store.sqlite)" },
+  store: {
+    arg: "<file>",
+    note: "the store file inside the home (default store.sqlite; an absolute path is used as-is)",
+  },
   seed: { arg: "<hex>", note: "import an operator seed instead of minting one ($LOAM_SEED)" },
   port: { arg: "<n>", note: "the port to listen on — 0 for ephemeral (default 4321)" },
   host: {
@@ -265,7 +270,10 @@ const FLAG_HELP: Readonly<Record<string, { readonly arg: string; readonly note: 
   },
   token: { arg: "<secret>", note: "the bearer token for the door ($LOAM_TOKEN)" },
   http: { arg: "", note: "serve over HTTP — the only transport today" },
-  archive: { arg: "<dir>", note: "mirror every delta into a cold store, relative to the home" },
+  archive: {
+    arg: "<dir>",
+    note: "mirror every delta into a cold store inside the home (an absolute path is used as-is)",
+  },
   "public-url": {
     arg: "<url>",
     note: "the outside http(s) address this store is reached at — opens §37 discovery",
@@ -276,7 +284,11 @@ const FLAG_HELP: Readonly<Record<string, { readonly arg: string; readonly note: 
   },
   out: { arg: "<file>", note: "write the output here (default stdout)" },
   url: { arg: "<base>", note: "the running gateway to ask (default http://127.0.0.1:4321)" },
-  connector: { arg: "<name>", note: "the connector DISPLAY NAME a published page reads through" },
+  connector: {
+    arg: "<name>",
+    note: "the connector DISPLAY NAME a published page reads through",
+    required: true,
+  },
   "store-address": {
     arg: "<text>",
     note: "the store address the onboarding copy shows — text a viewer reads, never a target",
@@ -311,11 +323,19 @@ function topHelp(): string {
 
 function helpFor(command: CommandName): string {
   const spec = COMMANDS[command];
-  const options = [...spec.flags].map((name) => {
-    const { arg, note } = FLAG_HELP[name] ?? { arg: "<value>", note: "" };
+  const rows = [...spec.flags].map((name) => {
+    const { arg, note, required } = FLAG_HELP[name] ?? { arg: "<value>", note: "" };
     const shown =
       spec.booleans?.has(name) === true || arg === "" ? `--${name}` : `--${name} ${arg}`;
-    return `  ${shown.padEnd(18)}${note}`.trimEnd();
+    return { shown, note: required === true ? `${note} (required)` : note };
+  });
+  // The column fits the command's longest flag, capped so a very long one wraps its note to the
+  // next line rather than stretching every row.
+  const width =
+    rows.length === 0 ? 18 : Math.min(Math.max(...rows.map((r) => r.shown.length)) + 2, 26);
+  const options = rows.map(({ shown, note }) => {
+    if (shown.length > width) return `  ${shown}\n${" ".repeat(width + 2)}${note}`.trimEnd();
+    return `  ${shown.padEnd(width)}${note}`.trimEnd();
   });
   return [
     `loam ${command} — ${spec.summary}`,
@@ -759,8 +779,17 @@ async function cmdPull(args: readonly string[], io: IO): Promise<number> {
     assembleGenesis({ operatorSeed: readSeed(home) }),
   );
   let report: FederationReport;
+  // Pull's own dimension: deltas the peer sent that would not even reconstruct (see PullReport).
+  // The file path cannot produce it — parseOffer refuses a corrupt file whole.
+  let unreconstructable = 0;
   try {
-    report = isUrl ? await pullFrom(gateway, source, token!) : await gateway.federate(offered!);
+    if (isUrl) {
+      const pulled = await pullFrom(gateway, source, token!);
+      report = pulled;
+      unreconstructable = pulled.unreconstructable;
+    } else {
+      report = await gateway.federate(offered!);
+    }
   } catch (err) {
     await gateway.close().catch(() => {}); // never let a close failure mask the real refusal
     throw err;
@@ -772,6 +801,19 @@ async function cmdPull(args: readonly string[], io: IO): Promise<number> {
       `  ${report.accepted} accepted, ${report.rejected} refused, of ${report.offered} offered — ` +
       `union is union; pulling again is safe`,
   );
+  // A delta that will not reconstruct fails on the BYTES, not on timing, so every later pull
+  // drops the same ones — this line is the operator's only cue. It names the count and BOTH
+  // cures, because the door genuinely cannot tell a rotted offer from a peer speaking a newer
+  // delta shape than this puller (PullReport carries the reasoning). Never silent, and never a
+  // guessed cause: prescribing "the peer must repair it" would be H7 in a new place.
+  if (unreconstructable > 0) {
+    io.err(
+      `loam: ${unreconstructable} of the offered deltas would not reconstruct and were ` +
+        `dropped — pulling again drops the same ones. Either the peer's offer is damaged or the ` +
+        `peer speaks a newer delta shape than this loam: ask for a fresh export, and compare ` +
+        `both sides' versions`,
+    );
+  }
   // "Accepted" is true of the FILE, not of any server already holding it open: a running serve
   // keeps answering from boot-time memory. Say so, right under the count that would otherwise lie
   // by omission — and never block; the deltas are durable whatever the server knows.
@@ -848,7 +890,25 @@ function cmdMigrate(args: readonly string[], io: IO): number {
 async function cmdStore(args: readonly string[], io: IO): Promise<number> {
   const parsed = parseFor("store", args);
   const home = parsed.flags.get("home") ?? defaultHome();
-  const path = storePath(home, parsed.flags.get("store"));
+  // The home is only a DIRECTION to the store file: an explicit --store override never opens
+  // config.json (relative values still resolve inside the home; absolute values need no home at
+  // all), and an existing read-only home is fine for a command that only reads config. The refusal
+  // is reserved for the one cure-naming shape the paper-cut is about: a home that cannot supply
+  // config.json at all.
+  let path: string;
+  try {
+    path = storePath(home, parsed.flags.get("store"));
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR" || code === "EISDIR") {
+      io.err(
+        `store: ${home} is not a usable loam home — \`loam init --home ${home}\` or ` +
+          "`loam user create` makes one",
+      );
+      return 1;
+    }
+    throw err;
+  }
   const backend = openStore(path, io);
   const deltas = await backend.deltasSince(new Set());
   await backend.close();

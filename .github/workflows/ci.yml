@@ -16,6 +16,16 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
+      # Defender's real-time scan taxes every file CREATION in the kernel, where no concurrency
+      # helps — the byte-heavy suites (archive: one file per delta; sqlite: WAL churn) pay it per
+      # file. Excluding the workspace and the temp dir is the standard runner treatment; measured
+      # need: archive.test.ts at 12-14s on windows vs 0.7s on linux, timing out under load (T155).
+      - name: exempt the workspace from Defender's per-file scan (windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE"
+          Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP"
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -28,6 +38,10 @@ jobs:
       - run: npm i -g @adlc/cli
       - name: format + lint + typecheck + tests
         run: npm run check
+        env:
+          # fs.promises rides libuv's threadpool, default 4 threads — half the archive write
+          # pool's width. Sixteen lets the pooled flushes (T155) actually overlap.
+          UV_THREADPOOL_SIZE: "16"
 
   # The rail backstop. ADLC's in-session PreToolUse hook cannot gate Bash — a shell can't be reliably
   # parsed — so a rail edited through a shell command is caught here or nowhere. Linux only: the two

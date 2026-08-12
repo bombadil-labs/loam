@@ -268,6 +268,11 @@ human gate arriving early, at design time.
 only checks one leaves the other open, and 2026-07-21 produced the failure in *both* directions on
 the same day:
 
+**Session fixtures live in ONE place (T152).** A server rail that needs a login uses
+`test/helpers/session-fixture.ts` — `signIn`, `cookiesOf`, `valueOf`, `formTokenOf`, `SAME_ORIGIN`.
+Do not write a sixteenth copy; the ~15 existing copies stay frozen in their files, and every future
+file imports the helper.
+
 - **Object-level only** missed T40: `get(id)` returned undefined — the API said forgotten — while
   the plaintext sat legible in the sqlite file. The store lied downward.
 - **Delta-level only** missed T15/T38: the right deltas crossed the seeding edge, and a *reader*

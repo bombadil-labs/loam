@@ -48,20 +48,17 @@
 
 import { randomBytes } from "node:crypto";
 import { type IncomingMessage, type ServerResponse } from "node:http";
+import { CACHE_NO_STORE } from "./respond.js";
+import { parseUrlEncoded, readBodyLenient as readBody } from "./body.js";
 import {
   authorForSeed,
   parseTerm,
   signClaims,
   type Claims,
   type Delta,
-  type Reactor,
-  evalTerm,
-  DeltaSet,
 } from "@bombadil/rhizomatic";
 import { readUserSeed, userSeedPath, writeUserSeed } from "../cli/config.js";
-import { parseOffer } from "../federation/offer.js";
-import { CTX_GRANTS, grantClaims, holdsGrant } from "../gateway/accounts.js";
-import { withBatchNegationClosure } from "../gateway/ingest.js";
+import { grantClaims } from "../gateway/accounts.js";
 import { rolesOf } from "./users.js";
 import {
   containerClaims,
@@ -71,7 +68,7 @@ import {
   type ContainerTable,
   type ResolvedContainer,
 } from "../gateway/container.js";
-import { Gateway, type FederationReport } from "../gateway/gateway.js";
+import { Gateway } from "../gateway/gateway.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
 import { queryFieldFor } from "../gateway/gql.js";
 import {
@@ -82,30 +79,29 @@ import {
   type RegistrationInput,
 } from "../gateway/registration.js";
 import { MemoryBackend } from "../store/memory.js";
-import { clientFor, readOAuthFile, type OAuthFile } from "./oauth-file.js";
-import { revokeConnector } from "./oauth.js";
+import { adminFederation } from "./admin-federation.js";
 import { CSP, escapeHtml, page, sameSecret, type SessionGate } from "./session.js";
-
-export const ADMIN_PATH = "/admin";
-export const ADMIN_CREATE_ROOT_PATH = "/admin/create-root";
-export const ADMIN_CONTAINER_PATH = "/admin/container";
-export const ADMIN_DECLARE_PATH = "/admin/declare";
-export const ADMIN_DETACH_PATH = "/admin/detach";
-export const ADMIN_REATTACH_PATH = "/admin/reattach";
-export const ADMIN_DROP_PATH = "/admin/drop";
-export const ADMIN_DROP_CONFIRM_PATH = "/admin/drop-confirm";
-export const ADMIN_REGISTER_PATH = "/admin/register";
-export const ADMIN_VIEW_PATH = "/admin/view";
-export const ADMIN_PROMOTE_PATH = "/admin/promote";
-export const ADMIN_FEDERATE_PATH = "/admin/federate";
-export const ADMIN_REVOKE_PATH = "/admin/revoke";
-export const ADMIN_REVOKE_CONFIRM_PATH = "/admin/revoke-confirm";
+import {
+  ADMIN_PATH,
+  ADMIN_CREATE_ROOT_PATH,
+  ADMIN_CONTAINER_PATH,
+  ADMIN_DECLARE_PATH,
+  ADMIN_DETACH_PATH,
+  ADMIN_REATTACH_PATH,
+  ADMIN_DROP_PATH,
+  ADMIN_DROP_CONFIRM_PATH,
+  ADMIN_REGISTER_PATH,
+  ADMIN_VIEW_PATH,
+  ADMIN_PROMOTE_PATH,
+  ADMIN_FEDERATE_PATH,
+  ADMIN_REVOKE_PATH,
+  ADMIN_REVOKE_CONFIRM_PATH,
+  adminPages,
+} from "./admin-pages.js";
 
 const MAX_BODY = 8 * 1024; // tokens, a name, a membership Term; nothing here needs more
 // A registration carries a hyperschema body and a resolution schema — real JSON, not a name.
 const REGISTER_MAX_BODY = 64 * 1024;
-// A pasted offer carries real deltas — a store's worth, potentially. Bounded, but generously.
-const FEDERATE_MAX_BODY = 1024 * 1024;
 
 /** How many pending drop confirmations this door remembers. Oldest-out; each is single-use. */
 const CONFIRM_CAP = 64;
@@ -145,36 +141,7 @@ export interface AdminDoor {
  * inbox pool (`inboxOf`, §39) hanging off a reachable container. A fixpoint rather than one pass,
  * because an edge can hang off an inbox pool and the table's iteration order guarantees nothing.
  */
-// The membership Term a SHARED container resolves right now — inline, or from its published
-// address. `undefined` where it resolves none (H9: the caller must refuse, never treat that as
-// "everything" or "nothing").
-function membershipTermOf(
-  gw: Gateway,
-  rec: ResolvedContainer,
-): ReturnType<typeof parseTerm> | undefined {
-  let raw: unknown = rec.membership;
-  if (raw === undefined && rec.membershipAt !== undefined) {
-    const published = gw.reactor.get(rec.membershipAt);
-    if (published === undefined) return undefined;
-    const text = published.claims.pointers.find(
-      (p) => p.role === "term" && p.target.kind === "primitive",
-    );
-    if (text === undefined || text.target.kind !== "primitive") return undefined;
-    try {
-      raw = JSON.parse(String(text.target.value));
-    } catch {
-      return undefined;
-    }
-  }
-  if (raw === undefined) return undefined;
-  try {
-    return parseTerm(raw);
-  } catch {
-    return undefined;
-  }
-}
-
-export function subtreeOf(table: ContainerTable, root: string): ReadonlySet<string> {
+function subtreeOf(table: ContainerTable, root: string): ReadonlySet<string> {
   const reach = new Set<string>();
   if (!table.containers.has(root)) return reach;
   reach.add(root);
@@ -201,24 +168,6 @@ const authoredBy = (publicKey: string): unknown => ({
   in: "input",
 });
 
-const readBody = (req: IncomingMessage, max = MAX_BODY): Promise<string | undefined> =>
-  new Promise((resolve) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    let over = false;
-    req.on("data", (chunk: Buffer) => {
-      if (over) return;
-      size += chunk.length;
-      if (size > max) {
-        over = true;
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on("end", () => resolve(over ? undefined : Buffer.concat(chunks).toString("utf8")));
-    req.on("error", () => resolve(undefined));
-  });
-
 export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
   const gate = options.gate;
   const onFault = options.onFault ?? ((message: string): void => void message);
@@ -227,7 +176,7 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
     res.writeHead(status, {
       "content-type": "text/html; charset=utf-8",
       "content-security-policy": CSP,
-      "cache-control": "no-store",
+      "cache-control": CACHE_NO_STORE,
       // Never no-referrer on a form-hosting page — it nulls the form POST's Origin and
       // fromThisPage refuses null (T143). same-origin sends nothing cross-origin.
       "referrer-policy": "same-origin",
@@ -238,8 +187,20 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
 
   // Every refusal is a page with no `Location`, and none reflects caller text — a name the caller
   // typed never rides back into the DOM; only names read from the table are rendered, escaped.
+  // The two links are T146's repair: a refusal page was a dead end, and the Back button was the
+  // only way off it. One refusal body per cause still holds — the links are the same on every
+  // refusal, so they distinguish nothing.
   const refuse = (res: ServerResponse, status: number, message: string): void =>
-    htmlOut(res, status, page("this request was refused", `<h1>Refused.</h1>\n<p>${message}</p>`));
+    htmlOut(
+      res,
+      status,
+      page(
+        "this request was refused",
+        `<h1>Refused.</h1>\n<p>${message}</p>\n` +
+          `<p><a href="${ADMIN_PATH}">Back to your containers.</a> · ` +
+          `<a href="/login">Go to the sign-in page.</a></p>`,
+      ),
+    );
 
   // ONE body for a foreign name and an absent one: a 403 that varied would confirm which
   // containers exist to a user who may not see them.
@@ -259,317 +220,17 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
     return undefined;
   };
 
-  const detailHref = (name: string): string =>
-    `${ADMIN_CONTAINER_PATH}?name=${encodeURIComponent(name)}`;
-
-  // The view page's address: a container, optionally a lens, optionally an entity. The page asks
-  // for whichever part is missing.
-  const viewHref = (container: string, entity?: string, lens?: string): string =>
-    `${ADMIN_VIEW_PATH}?container=${encodeURIComponent(container)}` +
-    (lens === undefined ? "" : `&lens=${encodeURIComponent(lens)}`) +
-    (entity === undefined ? "" : `&entity=${encodeURIComponent(entity)}`);
-
-  const stateOf = (table: ContainerTable, name: string, rec: ResolvedContainer): string =>
-    [
-      rec.trust,
-      rec.posture,
-      table.detached.has(name) ? "detached" : "active",
-      ...(rec.inboxOf === undefined ? [] : ["inbox"]),
-    ].join(" · ");
-
-  // The subtree as nested lists, rooted at the user's own container. Every name in `reach` except
-  // the root has an edge into `reach` (subtreeOf guarantees it), so the walk from the root covers
-  // the whole set.
-  const treeHtml = (table: ContainerTable, reach: ReadonlySet<string>, root: string): string => {
-    const item = (name: string): string => {
-      const rec = table.containers.get(name)!;
-      const kids = [...reach]
-        .filter((child) => {
-          const c = table.containers.get(child)!;
-          return c.parent === name || c.inboxOf === name;
-        })
-        .sort();
-      const line =
-        `<a href="${escapeHtml(detailHref(name))}"><code>${escapeHtml(name)}</code></a> — ` +
-        escapeHtml(stateOf(table, name, rec));
-      return kids.length === 0
-        ? `<li>${line}</li>`
-        : `<li>${line}\n<ul>\n${kids.map(item).join("\n")}\n</ul></li>`;
-    };
-    return `<ul>\n${item(root)}\n</ul>`;
-  };
-
-  // The author-select Term prefilled as the declare form's suggestion — the same shape the root's
-  // membership takes. A user with no usable signing key gets an empty textarea, never a Term that
-  // names somebody else.
-  const membershipSuggestion = (user: string): string => {
-    const seed = readUserSeed(options.home, user);
-    if (seed.kind !== "present" || !/^[0-9a-f]{64}$/.test(seed.seed)) return "";
-    return JSON.stringify(authoredBy(authorForSeed(seed.seed)));
-  };
-
-  const declareFormHtml = (user: string, reach: ReadonlySet<string>, formToken: string): string => {
-    const parents = [...reach]
-      .sort()
-      .map(
-        (name) =>
-          `<option value="${escapeHtml(name)}"${name === user ? " selected" : ""}>` +
-          `${escapeHtml(name)}</option>`,
-      )
-      .join("\n");
-    return `<h2>Declare a child.</h2>
-<p>A child container lives inside your subtree and bears your name — <code>${escapeHtml(user)}:notes</code>.
-A shared child is a reading over ground this store already holds; give it a membership Term.
-A separate child keeps its own store, attached later from the command line.</p>
-<form method="post" action="${ADMIN_DECLARE_PATH}">
-<input type="hidden" name="form_token" value="${escapeHtml(formToken)}">
-<p><label>name <input name="name" placeholder="${escapeHtml(user)}:notes"></label></p>
-<p><label>inside <select name="parent">
-${parents}
-</select></label></p>
-<p><label>posture <select name="posture">
-<option value="shared">shared</option>
-<option value="separate">separate</option>
-</select></label></p>
-<p><label>membership Term <textarea name="membership" rows="4" cols="72">${escapeHtml(membershipSuggestion(user))}</textarea></label></p>
-<button type="submit">declare</button>
-</form>`;
-  };
-
-  // The schema panel (§40 phase A3): the registered lenses, read live under the store's law, and
-  // the register form. Registration is deliberately STORE-WIDE — a lens is how this store reads,
-  // for every reader — so the panel is the same for every user and takes no subtree gate.
-  const schemaPanelHtml = (gw: Gateway, formToken: string): string => {
-    const regs = readRegistrations(gw.reactor, gw.operatorAuthor);
-    const listing =
-      regs.length === 0
-        ? "<p>No lens is registered on this store yet.</p>"
-        : `<ul>\n${regs
-            .map(
-              (r) =>
-                `<li><code>${escapeHtml(lensOf(r))}</code> — roots: ` +
-                (r.roots.length === 0
-                  ? "none"
-                  : r.roots.map((root) => `<code>${escapeHtml(root)}</code>`).join(", ")) +
-                `</li>`,
-            )
-            .join("\n")}\n</ul>`;
-    return `<h2>Schemas.</h2>
-<p>A registered lens is how this store reads: a hyperschema that gathers, a schema that resolves.
-Registration is store law — every reader here reads through the same lenses. The body below is the
-same JSON <code>loam register</code> takes.</p>
-${listing}
-<form method="post" action="${ADMIN_REGISTER_PATH}">
-<input type="hidden" name="form_token" value="${escapeHtml(formToken)}">
-<p><label>registration <textarea name="registration" rows="12" cols="72"></textarea></label></p>
-<button type="submit">register</button>
-</form>`;
-  };
-
-  // --- the connections panel (phase A5) ----------------------------------------------------------
-
-  // The connection key from the inbox's deterministic name (`inbox:<container>:<key>`,
-  // container.ts's inboxName). A container name may itself carry colons, so the parse anchors on
-  // the row's own `inboxOf` instead of splitting on ":". A hand-declared inbox whose name does not
-  // follow the shape yields no key, and the panel says so rather than guessing.
-  const connectionKeyOf = (name: string, bound: string): string | undefined => {
-    const prefix = `inbox:${bound}:`;
-    return name.startsWith(prefix) && name.length > prefix.length
-      ? name.slice(prefix.length)
-      : undefined;
-  };
-
-  // What the inbox pool's own grant deltas say about the key. "Revoked" is claimed only where a
-  // struck write grant proves a connection once stood — the state is read from the deltas on every
-  // request, never remembered by this door.
-  const grantStateOf = (
-    reactor: Reactor,
-    operator: string | undefined,
-    key: string,
-  ): "active" | "revoked" | "ungranted" => {
-    if (holdsGrant(reactor, STORE_ENTITY, key, "write", operator)) return "active";
-    for (const id of reactor.byTarget(STORE_ENTITY)) {
-      const delta = reactor.get(id);
-      if (delta === undefined) continue;
-      const ptrs = delta.claims.pointers;
-      const atGrants = ptrs.some(
-        (p) =>
-          p.target.kind === "entity" &&
-          p.target.entity.id === STORE_ENTITY &&
-          p.target.entity.context === CTX_GRANTS,
-      );
-      if (!atGrants) continue;
-      let subject: string | undefined;
-      let verb: string | undefined;
-      for (const p of ptrs) {
-        if (p.target.kind !== "primitive") continue;
-        if (p.role === "subject" && typeof p.target.value === "string") subject = p.target.value;
-        if (p.role === "verb" && typeof p.target.value === "string") verb = p.target.value;
-      }
-      if (subject === key && verb === "write") return "revoked";
-    }
-    return "ungranted";
-  };
-
-  // The connector records, read fresh per render. Unreadable is its own state: "cannot determine
-  // what is registered" is never "nothing is" (oauth-file.ts's rule), so the panel says the records
-  // cannot be read rather than rendering rows as bare.
-  type ConnectorRecords =
-    | { readonly kind: "none" }
-    | { readonly kind: "unreadable" }
-    | { readonly kind: "read"; readonly file: OAuthFile };
-  const connectorRecords = (): ConnectorRecords => {
-    if (options.connectors === undefined) return { kind: "none" };
-    try {
-      return { kind: "read", file: readOAuthFile(options.connectors.home) };
-    } catch (err) {
-      onFault(
-        `the admin page could not read the connector records: ` +
-          `${err instanceof Error ? err.message : String(err)}`,
-      );
-      return { kind: "unreadable" };
-    }
-  };
-
-  // The oauth half of a row: the client whose granted actor IS this connection key. Live tokens
-  // are counted the way the door counts them — a token whose generation no longer matches its
-  // client's is dead already, so it is not a "live" anything.
-  interface ConnectorJoin {
-    readonly clientId: string;
-    readonly clientName?: string;
-    readonly generation?: number;
-    readonly liveTokens: number;
-  }
-  const joinFor = (records: ConnectorRecords, key: string): ConnectorJoin | undefined => {
-    if (records.kind !== "read") return undefined;
-    const grant = records.file.grants.find((g) => g.actor === key);
-    if (grant === undefined) return undefined;
-    const client = clientFor(records.file, grant.clientId);
-    const liveTokens =
-      client === undefined
-        ? 0
-        : records.file.tokens.filter(
-            (t) => t.clientId === grant.clientId && t.generation === client.generation,
-          ).length;
-    return {
-      clientId: grant.clientId,
-      ...(client === undefined
-        ? {}
-        : { clientName: client.clientName, generation: client.generation }),
-      liveTokens,
-    };
-  };
-
-  // A key, shortened for the row. The full key rides in the title attribute, so hovering (and any
-  // exact search) still has the whole of it; the inbox's own page carries it in full too.
-  const shortKey = (key: string): string => (key.length <= 24 ? key : `${key.slice(0, 24)}…`);
-
-  const connectionRowHtml = (
-    gw: Gateway,
-    records: ConnectorRecords,
-    name: string,
-    rec: ResolvedContainer,
-    formToken: string,
-  ): string => {
-    const bound = rec.inboxOf!;
-    const inboxLink = `<a href="${escapeHtml(detailHref(name))}">its inbox</a> — drop lives there`;
-    const key = connectionKeyOf(name, bound);
-    if (key === undefined) {
-      return (
-        `<li><code>${escapeHtml(name)}</code> — an inbox of <code>${escapeHtml(bound)}</code> ` +
-        `whose name does not carry its connection key, so this panel can neither read nor revoke ` +
-        `it. ${inboxLink}.</li>`
-      );
-    }
-    const pool = gw.attachedContainers.get(name);
-    const state =
-      pool === undefined ? undefined : grantStateOf(pool.reactor, gw.operatorAuthor, key);
-    const stateWords =
-      state === undefined
-        ? "its inbox pool is not attached here, so its grant cannot be read from this page"
-        : state === "active"
-          ? "active — its writes land"
-          : state === "revoked"
-            ? "revoked — its next write refuses; everything it wrote is kept, author intact"
-            : "holds no write grant — its next write refuses";
-    const join = joinFor(records, key);
-    const via =
-      join === undefined
-        ? ""
-        : ` · via <code>${escapeHtml(join.clientName ?? join.clientId)}</code>` +
-          (join.generation === undefined ? "" : `, generation ${join.generation}`) +
-          `, ${join.liveTokens} live token${join.liveTokens === 1 ? "" : "s"}`;
-    // The form is an OFFER (revoke re-derives everything): shown where something stands to revoke —
-    // a standing inbox grant, or a connector grant the records still hold.
-    const revocable = state === "active" || join !== undefined;
-    const form = revocable ? `\n${actForm(ADMIN_REVOKE_PATH, formToken, name, "revoke…")}` : "";
-    return (
-      `<li><code title="${escapeHtml(key)}">${escapeHtml(shortKey(key))}</code> → ` +
-      `<a href="${escapeHtml(detailHref(bound))}"><code>${escapeHtml(bound)}</code></a> — ` +
-      `${stateWords}${via} · ${inboxLink}.${form}</li>`
-    );
-  };
-
-  const connectionsPanelHtml = (
-    gw: Gateway,
-    table: ContainerTable,
-    reach: ReadonlySet<string>,
-    formToken: string,
-  ): string => {
-    const records = connectorRecords();
-    const names = [...reach].filter((n) => table.containers.get(n)!.inboxOf !== undefined).sort();
-    const listing =
-      names.length === 0
-        ? "<p>No connection is bound in your subtree.</p>"
-        : `<ul>\n${names
-            .map((n) => connectionRowHtml(gw, records, n, table.containers.get(n)!, formToken))
-            .join("\n")}\n</ul>`;
-    const flowNote =
-      records.kind === "none"
-        ? `<p>This store has no connector flow configured — a connection here is a bare bound one,
-with no client name or token to show.</p>`
-        : records.kind === "unreadable"
-          ? `<p>This store's connector records cannot be read right now, so no client names or
-token counts are shown.</p>`
-          : "";
-    return `<h2>Connections.</h2>
-<p>A connection is an outside writer — an MCP client, a connector — bound to one container of
-yours. Its writes land in an inbox of their own. Revoking a connection refuses its next write;
-everything it already wrote is kept, author intact.</p>
-${listing}
-${flowNote}`;
-  };
-
-  const dashboardPage = (
-    gw: Gateway,
-    user: string,
-    table: ContainerTable,
-    reach: ReadonlySet<string>,
-    formToken: string,
-  ): string =>
-    page(
-      "your containers",
-      `<h1>Your containers.</h1>
-<p>You are <code>${escapeHtml(user)}</code>. Below is your subtree: the container that bears your
-name, and everything declared inside it. Each name opens its own page.</p>
-${treeHtml(table, reach, user)}
-${connectionsPanelHtml(gw, table, reach, formToken)}
-${declareFormHtml(user, reach, formToken)}
-${schemaPanelHtml(gw, formToken)}`,
-    );
-
-  const createOfferPage = (user: string, formToken: string): string =>
-    page(
-      "create your container",
-      `<h1>No container bears your name yet.</h1>
-<p>You are <code>${escapeHtml(user)}</code>. Your root container is where this store gathers what
-you author — one container, named after you; everything you later make will live inside it.</p>
-<form method="post" action="${ADMIN_CREATE_ROOT_PATH}">
-<input type="hidden" name="form_token" value="${escapeHtml(formToken)}">
-<button type="submit">create your container</button>
-</form>`,
-    );
-
+  // T153 slice 3b: the federation/connector group lives in admin-federation.ts — the connections
+  // panel, federate-in, and the revoke pair. It is constructed below, once the door helpers it
+  // shares exist; the page factory reaches it lazily, at render time.
+  // T153 slice 3a: the page renderers live in admin-pages.ts; home and onFault ride in, and the
+  // connections panel is injected from the federation group.
+  const pages = adminPages({
+    home: options.home,
+    onFault,
+    connectionsPanel: (gw, table, reach, formToken) =>
+      fed.connectionsPanelHtml(gw, table, reach, formToken),
+  });
   const getDashboard = (req: IncomingMessage, res: ServerResponse): void => {
     const session = loginOrUndefined(req, res);
     if (session === undefined) return;
@@ -581,169 +242,10 @@ you author — one container, named after you; everything you later make will li
     const table = gw.containers();
     const reach = subtreeOf(table, session.user);
     if (reach.size === 0) {
-      htmlOut(res, 200, createOfferPage(session.user, session.formToken));
+      htmlOut(res, 200, pages.createOfferPage(session.user, session.formToken));
       return;
     }
-    htmlOut(res, 200, dashboardPage(gw, session.user, table, reach, session.formToken));
-  };
-
-  // A hidden pair every lifecycle form carries: the session's token and the target's name. The
-  // form is an OFFER, never the gate — every POST re-derives the subtree and the state before it acts.
-  const hiddenPair = (formToken: string, name: string): string =>
-    `<input type="hidden" name="form_token" value="${escapeHtml(formToken)}">\n` +
-    `<input type="hidden" name="name" value="${escapeHtml(name)}">`;
-
-  // One member, rendered: the id, the author, the moment, and each pointer's role (with its
-  // context where the pointer names an entity). Each entity target links into the view page, so
-  // the members list is the entity picker — a reader walks from a raw pointer to a resolved read.
-  // A member held ONLY in a container's own attached store — not in the primary — offers its
-  // promote form: there is something to move, so the form is truthful (§40 criterion 10). One the
-  // primary already holds offers none; promotion would have nothing to move.
-  const memberHtml = (gw: Gateway, container: string, delta: Delta, formToken: string): string => {
-    const claims = delta.claims;
-    const roles = claims.pointers
-      .map((p) =>
-        p.target.kind === "entity"
-          ? `${escapeHtml(p.role)} @ ${escapeHtml(p.target.entity.context ?? "")} → ` +
-            `<a href="${escapeHtml(viewHref(container, p.target.entity.id))}">` +
-            `<code>${escapeHtml(p.target.entity.id)}</code></a>`
-          : escapeHtml(p.role),
-      )
-      .join(" · ");
-    const promoteForm =
-      gw.reactor.get(delta.id) === undefined
-        ? `\n<form method="post" action="${ADMIN_PROMOTE_PATH}">
-${hiddenPair(formToken, container)}
-<input type="hidden" name="delta" value="${escapeHtml(delta.id)}">
-<button type="submit">promote — into the primary ground</button>
-</form>`
-        : "";
-    return (
-      `<li><code>${escapeHtml(delta.id)}</code><br>` +
-      `by <code>${escapeHtml(claims.author)}</code> at ` +
-      `${escapeHtml(new Date(claims.timestamp).toISOString())}<br>` +
-      `${roles}${promoteForm}</li>`
-    );
-  };
-
-  // The federate-in form (§40 criterion 11): a pasted offer — the JSON body of a peer's
-  // `GET /federate`, or a store's export. Paste-only: the network leg of a pull stays with
-  // `loam pull`; this door never fetches a caller-named URL from inside the store's own host.
-  const federateFormHtml = (name: string, rec: ResolvedContainer, formToken: string): string => {
-    const door =
-      rec.posture === "separate"
-        ? `They land through this container's own store's door, under its own admission.`
-        : `They land through the primary's door; this container's membership then decides what
-it gathers — landing and gathering are two different questions.`;
-    return `<h2>Federate in.</h2>
-<p>Paste an offer — the JSON body of a peer's <code>GET /federate</code>, or a store's export.
-Each delta crosses by its own signature; this page adds no authorship. ${door}</p>
-<form method="post" action="${ADMIN_FEDERATE_PATH}">
-${hiddenPair(formToken, name)}
-<p><label>offer <textarea name="offer" rows="8" cols="72"></textarea></label></p>
-<button type="submit">federate in</button>
-</form>`;
-  };
-
-  const actForm = (action: string, formToken: string, name: string, label: string): string =>
-    `<form method="post" action="${action}">
-${hiddenPair(formToken, name)}
-<button type="submit">${label}</button>
-</form>`;
-
-  // The lifecycle a container's page offers, by its state. Where an act cannot be truthful from
-  // a browser, the page says so instead of rendering a form that would lie.
-  const lifecycleForms = (
-    table: ContainerTable,
-    name: string,
-    rec: ResolvedContainer,
-    formToken: string,
-  ): string => {
-    if (table.detached.has(name)) {
-      if (rec.posture === "separate") {
-        return `<p>Reattaching needs this container's own store, which a page cannot hand back —
-reattach it from the command line on the machine that holds it. Its bytes are not here, so a drop
-cannot be proven here either.</p>`;
-      }
-      return (
-        actForm(ADMIN_REATTACH_PATH, formToken, name, "reattach — back into the gather") +
-        "\n" +
-        actForm(ADMIN_DROP_PATH, formToken, name, "drop…")
-      );
-    }
-    const detach =
-      rec.inboxOf !== undefined
-        ? `<p>An inbox is durable: it does not detach. Revoke its connection to refuse further
-writes, or drop it to forget it whole.</p>`
-        : actForm(ADMIN_DETACH_PATH, formToken, name, "detach — keep it, out of the gather");
-    return detach + "\n" + actForm(ADMIN_DROP_PATH, formToken, name, "drop…");
-  };
-
-  const detailPage = (
-    gw: Gateway,
-    table: ContainerTable,
-    name: string,
-    rec: ResolvedContainer,
-    formToken: string,
-  ): string => {
-    const head =
-      `<h1><code>${escapeHtml(name)}</code>.</h1>\n<p>${escapeHtml(stateOf(table, name, rec))}` +
-      (rec.parent === undefined && rec.inboxOf === undefined
-        ? " — your root."
-        : ` — inside <code>${escapeHtml(rec.inboxOf ?? rec.parent!)}</code>.`) +
-      "</p>";
-    const back = `<p><a href="${ADMIN_PATH}">Back to your containers.</a></p>`;
-    const forms = lifecycleForms(table, name, rec, formToken);
-
-    if (table.detached.has(name)) {
-      return page(
-        name,
-        `${head}
-<p>This container is detached: kept, deliberately, and out of the gather. Its bytes are held, and
-no read composes them until it is reattached.</p>
-${forms}
-${back}`,
-      );
-    }
-
-    let members: readonly Delta[];
-    try {
-      members = gw.containerScope({ containers: [name] });
-    } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err);
-      // The H9 refusal, surfaced as the truth it is: a declared separate container whose bytes
-      // are not here must say so — an empty member list would be exactly the lie the refusal
-      // exists to prevent.
-      if (detail.includes("is not attached")) {
-        return page(
-          name,
-          `${head}
-<p>Declared, not attached — its bytes are not readable from here. This page will not pretend the
-container is empty; attach it, and its contents appear.</p>
-${forms}
-${back}`,
-        );
-      }
-      onFault(`the admin page could not read container "${name}": ${detail}`);
-      return page(
-        name,
-        `${head}
-<p>This container's contents cannot be read right now. The store says no rather than why.</p>
-${forms}
-${back}`,
-      );
-    }
-    const listing =
-      members.length === 0
-        ? "<p>Nothing has gathered here yet.</p>"
-        : `<p>${members.length} member${members.length === 1 ? "" : "s"}.</p>
-<ul>
-${members.map((m) => memberHtml(gw, name, m, formToken)).join("\n")}
-</ul>`;
-    return page(
-      name,
-      `${head}\n${listing}\n${federateFormHtml(name, rec, formToken)}\n${forms}\n${back}`,
-    );
+    htmlOut(res, 200, pages.dashboardPage(gw, session.user, table, reach, session.formToken));
   };
 
   const getContainer = (req: IncomingMessage, res: ServerResponse): void => {
@@ -762,7 +264,11 @@ ${members.map((m) => memberHtml(gw, name, m, formToken)).join("\n")}
       notYours(res);
       return;
     }
-    htmlOut(res, 200, detailPage(gw, table, name, table.containers.get(name)!, session.formToken));
+    htmlOut(
+      res,
+      200,
+      pages.detailPage(gw, table, name, table.containers.get(name)!, session.formToken),
+    );
   };
 
   // --- the resolved view (phase A3) --------------------------------------------------------------
@@ -822,18 +328,6 @@ ${members.map((m) => memberHtml(gw, name, m, formToken)).join("\n")}
     }
   };
 
-  const viewFieldsHtml = (view: Record<string, unknown>): string => {
-    const entries = Object.entries(view);
-    if (entries.length === 0) return "<p>The view resolved, and every field of it is absent.</p>";
-    return `<dl>\n${entries
-      .map(
-        ([k, v]) =>
-          `<dt><code>${escapeHtml(k)}</code></dt>` +
-          `<dd><code>${escapeHtml(JSON.stringify(v) ?? "")}</code></dd>`,
-      )
-      .join("\n")}\n</dl>`;
-  };
-
   const getView = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const session = loginOrUndefined(req, res);
     if (session === undefined) return;
@@ -854,7 +348,7 @@ ${members.map((m) => memberHtml(gw, name, m, formToken)).join("\n")}
       return;
     }
     const back =
-      `<p><a href="${escapeHtml(detailHref(container))}">Back to ` +
+      `<p><a href="${escapeHtml(pages.detailHref(container))}">Back to ` +
       `<code>${escapeHtml(container)}</code>.</a></p>`;
     let members: readonly Delta[];
     try {
@@ -889,7 +383,7 @@ Register one <a href="${ADMIN_PATH}">from your page</a>.</p>`
           : `<ul>\n${regs
               .map(
                 (r) =>
-                  `<li><a href="${escapeHtml(viewHref(container, entity === "" ? undefined : entity, lensOf(r)))}">` +
+                  `<li><a href="${escapeHtml(pages.viewHref(container, entity === "" ? undefined : entity, lensOf(r)))}">` +
                   `<code>${escapeHtml(lensOf(r))}</code></a></li>`,
               )
               .join("\n")}\n</ul>`;
@@ -919,7 +413,7 @@ ${back}`,
           "name an entity",
           `<h1>Name an entity.</h1>
 <p>A view resolves at one entity. The members of
-<a href="${escapeHtml(detailHref(container))}"><code>${escapeHtml(container)}</code></a> link
+<a href="${escapeHtml(pages.detailHref(container))}"><code>${escapeHtml(container)}</code></a> link
 each entity they point at straight to this page.</p>`,
         ),
       );
@@ -945,7 +439,7 @@ each entity they point at straight to this page.</p>`,
       ? `<p>This lens reads nothing here. No claim in this container's gather is evidence for this
 entity under this lens — not an empty record, but the absence of one. The container may hold data
 this lens does not gather; the lens may read ground this container does not hold.</p>`
-      : viewFieldsHtml(resolved.view);
+      : pages.viewFieldsHtml(resolved.view);
     htmlOut(res, 200, page("a resolved view", `${head}\n${bodyHtml}\n${back}`));
   };
 
@@ -965,10 +459,7 @@ this lens does not gather; the lens may read ground this container does not hold
       refuse(res, 403, "This request did not come from this store's own page.");
       return undefined;
     }
-    const fields = new Map<string, string>();
-    for (const [k, v] of new URLSearchParams((await readBody(req, maxBody)) ?? "")) {
-      fields.set(k, v);
-    }
+    const fields = parseUrlEncoded((await readBody(req, maxBody)) ?? "");
     const session = gate.peek(req);
     if (session === undefined) {
       refuse(res, 401, "No live session is presented here.");
@@ -1277,41 +768,24 @@ this lens does not gather; the lens may read ground this container does not hold
     return token;
   };
   const confirmTokens = new Map<string, { user: string; name: string }>();
-  const revokeTokens = new Map<string, { user: string; name: string }>();
 
-  const confirmPage = (
-    name: string,
-    rec: ResolvedContainer,
-    count: number | undefined,
-    formToken: string,
-    confirmToken: string,
-  ): string => {
-    const held =
-      count === undefined
-        ? "What it gathers could not be counted just now."
-        : `It holds ${count} delta${count === 1 ? "" : "s"}.`;
-    const consequence =
-      rec.posture === "shared"
-        ? `<p>Dropping it strikes the declaration: the container forgets its shape, and the name
-stops resolving. The deltas it gathered remain in the store — none of them is forgotten.</p>`
-        : `<p>This is the inbox pool of one connection writing into
-<code>${escapeHtml(rec.inboxOf ?? "")}</code>. Dropping it ends that connection whole: its pool
-is purged at the bytes and verified gone, and its declaration is struck. Everything outside the
-pool remains.</p>`;
-    return page(
-      "confirm the drop",
-      `<h1>Drop <code>${escapeHtml(name)}</code>?</h1>
-<p>${held}</p>
-${consequence}
-<p>This cannot be undone.</p>
-<form method="post" action="${ADMIN_DROP_CONFIRM_PATH}">
-${hiddenPair(formToken, name)}
-<input type="hidden" name="confirm_token" value="${escapeHtml(confirmToken)}">
-<button type="submit">yes — drop it</button>
-</form>
-<p><a href="${ADMIN_PATH}">No — keep it.</a></p>`,
-    );
-  };
+  // The federation/connector group (T153 slice 3b) — the connections panel, federate-in, and the
+  // revoke pair, sharing this door's gate helpers. Its revoke-confirm store lives inside it,
+  // separate from drop's `confirmTokens` by construction.
+  const fed = adminFederation({
+    ...(options.connectors === undefined ? {} : { connectors: options.connectors }),
+    home: options.home,
+    ground: options.ground,
+    onFault,
+    htmlOut,
+    refuse,
+    postGate,
+    signerGround,
+    targetOf,
+    mintConfirm,
+    negationOf,
+    pages,
+  });
 
   const postDrop = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const gated = await postGate(req, res);
@@ -1339,7 +813,13 @@ ${hiddenPair(formToken, name)}
     htmlOut(
       res,
       200,
-      confirmPage(name, rec, count, gated.formToken, mintConfirm(confirmTokens, gated.user, name)),
+      pages.confirmPage(
+        name,
+        rec,
+        count,
+        gated.formToken,
+        mintConfirm(confirmTokens, gated.user, name),
+      ),
     );
   };
 
@@ -1694,463 +1174,7 @@ ${hiddenPair(formToken, name)}
 <code>${escapeHtml(promoted)}</code> — and a provenance record beside it names where it came from:
 <code>${escapeHtml(from)}</code>, delta <code>${escapeHtml(deltaId)}</code>. The trail is kept
 forever; the value now survives even if its container is dropped.</p>
-<p><a href="${escapeHtml(detailHref(name))}">Back to <code>${escapeHtml(name)}</code>.</a></p>`,
-      ),
-    );
-  };
-
-  // Land a pasted offer in one subtree container (§40 criterion 11). The page adds no authorship —
-  // each delta crosses by its own signature, verified where every federated delta is verified. A
-  // SEPARATE container takes the offer through its pool's own door (its own admission); a SHARED
-  // one through the primary's door, and its membership then decides what the container gathers.
-  // The result page tells both numbers, because both are true and they differ.
-  const postFederate = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    const gated = await postGate(req, res, FEDERATE_MAX_BODY);
-    if (gated === undefined) return;
-    const gw = options.ground();
-    if (gw === undefined) {
-      refuse(res, 503, "This store's ground is not reachable, so nothing landed.");
-      return;
-    }
-    const target = targetOf(gw, gated.user, gated.fields, res);
-    if (target === undefined) return;
-    const { table, name, rec } = target;
-    if (table.detached.has(name)) {
-      refuse(
-        res,
-        409,
-        "This container is detached, deliberately out of the gather — reattach it before " +
-          "landing anything into its world. Nothing landed.",
-      );
-      return;
-    }
-    const raw = (gated.fields.get("offer") ?? "").trim();
-    if (raw.length === 0) {
-      refuse(res, 400, "The offer is empty, so nothing landed.");
-      return;
-    }
-    // parseOffer refuses the WHOLE paste on the first bad delta — a corrupt offer is reported
-    // whole, never quietly landed in part. Its message can quote a forged id, so it is escaped.
-    let deltas: Delta[];
-    try {
-      deltas = parseOffer(raw);
-    } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err);
-      refuse(res, 400, `${escapeHtml(detail)} — nothing landed.`);
-      return;
-    }
-    let report: FederationReport;
-    let door: string;
-    try {
-      if (rec.posture === "separate") {
-        const pool = gw.attachedContainers.get(name);
-        if (pool === undefined || !gw.quarantinePools.has(pool)) {
-          refuse(
-            res,
-            409,
-            "This container keeps its own store, and that store is not attached here — an " +
-              "offer lands through the container's own door or not at all. Attach it first. " +
-              "Nothing landed.",
-          );
-          return;
-        }
-        report = await pool.federate(deltas); // no override: the pool's own admission decides
-        door = "its own store";
-      } else {
-        // A SHARED container has no store of its own: its deltas live in the primary ground, which
-        // every other user's containers also cut. So the write is BOUNDED TO WHAT THIS CONTAINER
-        // GATHERS — the subtree gate authorizes landing bytes in ada's world, not in the store at
-        // large, and an unbounded `federate` here would let any tenant seed the primary with
-        // deltas another user's membership Term happens to select. The bound is the container's
-        // own membership, evaluated over the OFFER, plus the offer-local negation closure (H1: a
-        // subset that drops an admitted delta's strike revives it).
-        const term = membershipTermOf(gw, rec);
-        if (term === undefined) {
-          refuse(
-            res,
-            409,
-            "This container resolves no membership just now, so there is nothing to land into. " +
-              "Nothing landed.",
-          );
-          return;
-        }
-        const result = evalTerm(term, DeltaSet.from(deltas));
-        if (result.sort !== "dset") {
-          refuse(
-            res,
-            409,
-            "This container's membership does not select a delta set, so there is nothing to " +
-              "land into. Nothing landed.",
-          );
-          return;
-        }
-        const admitted = new Set(
-          withBatchNegationClosure(deltas, [...result.set]).map((d) => d.id),
-        );
-        report = await gw.federate(deltas, { admit: (d) => admitted.has(d.id) });
-        door = "the primary ground, bounded to this container's membership";
-      }
-    } catch (err) {
-      onFault(
-        `the admin federate into "${name}" failed: ` +
-          `${err instanceof Error ? err.message : String(err)}`,
-      );
-      refuse(res, 503, "The store could not land this offer, and it says no rather than why.");
-      return;
-    }
-    // The second number: of the offered deltas, how many the container's gather now holds. Landing
-    // and gathering are different doors, and the page must not let one count impersonate the other.
-    let gathered: number | undefined;
-    try {
-      const ids = new Set(gw.containerScope({ containers: [name] }).map((d) => d.id));
-      gathered = deltas.reduce((n, d) => (ids.has(d.id) ? n + 1 : n), 0);
-    } catch {
-      gathered = undefined;
-    }
-    const held = report.offered - report.accepted - report.rejected;
-    const gatherLine =
-      gathered === undefined
-        ? "What this container now gathers could not be counted just now."
-        : `This container now gathers ${gathered} of the ${report.offered} offered` +
-          (rec.posture === "separate"
-            ? "."
-            : " — its membership decides the gather, so a landed delta its membership does not " +
-              "select never enters this container's world.");
-    htmlOut(
-      res,
-      200,
-      page(
-        "federated",
-        `<h1>Federated.</h1>
-<p>Of ${report.offered} offered delta${report.offered === 1 ? "" : "s"}: ` +
-          `${report.accepted} landed newly in ${door}, ` +
-          `${report.rejected} ${report.rejected === 1 ? "was" : "were"} refused at the door` +
-          `${held > 0 ? `, and ${held} ${held === 1 ? "was" : "were"} already held` : ""}. ` +
-          `Each crossed by its own signature — this page added no authorship.</p>
-<p>${gatherLine}</p>
-<p><a href="${escapeHtml(detailHref(name))}">Back to <code>${escapeHtml(name)}</code>.</a></p>`,
-      ),
-    );
-  };
-
-  // --- revoke a connection (phase A5) ------------------------------------------------------------
-
-  // Every SURVIVING operator-authored grant delta at the store entity naming `subject` — what the
-  // connector revoke strikes in the ground, the same derivation `loam grant revoke` runs.
-  const survivingOperatorGrantIds = (
-    reactor: Reactor,
-    operator: string,
-    subject: string,
-  ): string[] => {
-    const out: string[] = [];
-    for (const id of reactor.byTarget(STORE_ENTITY)) {
-      const delta = reactor.get(id);
-      if (delta === undefined || delta.claims.author !== operator) continue;
-      const ptrs = delta.claims.pointers;
-      const atGrants = ptrs.some(
-        (p) =>
-          p.target.kind === "entity" &&
-          p.target.entity.id === STORE_ENTITY &&
-          p.target.entity.context === CTX_GRANTS,
-      );
-      if (!atGrants) continue;
-      const named = ptrs.some(
-        (p) => p.role === "subject" && p.target.kind === "primitive" && p.target.value === subject,
-      );
-      if (!named) continue;
-      if (reactor.negationsOf(id).some((n) => reactor.get(n) !== undefined)) continue;
-      out.push(id);
-    }
-    return out;
-  };
-
-  // What a revoke of this connection would truthfully be — resolved fresh at BOTH steps, exactly
-  // as a drop's plan is. It can have two halves, and either may stand alone: the §39.3c strike of
-  // the write grant in the inbox pool (owner-authored, in the session user's voice), and phase 15's
-  // connector revoke (generation bump + records strike + ground strike) when the key is a
-  // connector's granted actor.
-  type RevokePlan =
-    | {
-        readonly act: "revoke";
-        readonly key: string;
-        readonly bound: string;
-        readonly inbox?: Container;
-        readonly ownerSeed?: string;
-        readonly client?: {
-          readonly clientId: string;
-          readonly clientName?: string;
-          readonly generation?: number;
-        };
-      }
-    | { readonly act: "refuse"; readonly status: number; readonly message: string };
-
-  const planRevoke = (
-    gw: Gateway,
-    user: string,
-    name: string,
-    rec: ResolvedContainer,
-  ): RevokePlan => {
-    const bound = rec.inboxOf;
-    if (bound === undefined) {
-      return {
-        act: "refuse",
-        status: 409,
-        message:
-          "This container is not a connection inbox, so there is no connection to revoke. " +
-          "Nothing changed.",
-      };
-    }
-    const key = connectionKeyOf(name, bound);
-    if (key === undefined) {
-      return {
-        act: "refuse",
-        status: 409,
-        message:
-          "This inbox's name does not carry its connection key, so this page cannot revoke it. " +
-          "Nothing changed.",
-      };
-    }
-    // The connector half. An unreadable records file refuses the WHOLE act: "cannot determine what
-    // is registered" is never a licence to revoke only the half this page can see.
-    let client: { clientId: string; clientName?: string; generation?: number } | undefined;
-    if (options.connectors !== undefined) {
-      let file: OAuthFile;
-      try {
-        file = readOAuthFile(options.connectors.home);
-      } catch (err) {
-        onFault(
-          `the admin revoke could not read the connector records: ` +
-            `${err instanceof Error ? err.message : String(err)}`,
-        );
-        return {
-          act: "refuse",
-          status: 503,
-          message:
-            "This store's connector records cannot be read right now, so nothing was revoked.",
-        };
-      }
-      const grant = file.grants.find((g) => g.actor === key);
-      if (grant !== undefined) {
-        const c = clientFor(file, grant.clientId);
-        client = {
-          clientId: grant.clientId,
-          ...(c === undefined ? {} : { clientName: c.clientName, generation: c.generation }),
-        };
-      }
-    }
-    // The §39 half: a standing write grant in the attached inbox pool, struck in the OWNER's
-    // voice — the session user's own seed, never the operator's.
-    const pool = gw.attachedContainers.get(name);
-    const standing =
-      pool !== undefined && holdsGrant(pool.reactor, STORE_ENTITY, key, "write", gw.operatorAuthor);
-    let inboxLeg: { inbox: Container; ownerSeed: string } | undefined;
-    if (standing) {
-      const handle = gw.connectionInboxes.get(name);
-      if (handle === undefined) {
-        return {
-          act: "refuse",
-          status: 409,
-          message:
-            "This connection's inbox is attached but not bound as a live connection on this " +
-            "server, so this page cannot strike its grant. Bind it again, then revoke. " +
-            "Nothing was revoked.",
-        };
-      }
-      const seed = readUserSeed(options.home, user);
-      if (seed.kind !== "present" || !/^[0-9a-f]{64}$/.test(seed.seed)) {
-        return {
-          act: "refuse",
-          status: 409,
-          message:
-            "You have no signing key on this store, so a revocation cannot be authored in your " +
-            "name. Ask the store's operator to provision your key. Nothing was revoked.",
-        };
-      }
-      inboxLeg = { inbox: handle, ownerSeed: seed.seed };
-    }
-    if (inboxLeg === undefined && client === undefined) {
-      return pool !== undefined
-        ? {
-            act: "refuse",
-            status: 409,
-            message:
-              "This connection holds no standing write grant — its next write already refuses. " +
-              "There is nothing left to revoke.",
-          }
-        : {
-            act: "refuse",
-            status: 409,
-            message:
-              "This connection's inbox pool is not attached here, and no connector record names " +
-              "its key — this page has nothing it can revoke.",
-          };
-    }
-    return {
-      act: "revoke",
-      key,
-      bound,
-      ...(inboxLeg ?? {}),
-      ...(client === undefined ? {} : { client }),
-    };
-  };
-
-  const revokeConfirmPage = (
-    name: string,
-    plan: Extract<RevokePlan, { act: "revoke" }>,
-    formToken: string,
-    confirmToken: string,
-  ): string => {
-    const clientLine =
-      plan.client === undefined
-        ? ""
-        : `<p>It is the connector <code>${escapeHtml(plan.client.clientName ?? plan.client.clientId)}</code>` +
-          (plan.client.generation === undefined ? "" : ` (generation ${plan.client.generation})`) +
-          `. Revoking retires every token it holds — each is refused on its next request.</p>\n`;
-    return page(
-      "confirm the revoke",
-      `<h1>Revoke <code>${escapeHtml(plan.key)}</code>?</h1>
-<p>It writes into <code>${escapeHtml(plan.bound)}</code>. Revoking refuses its next write.</p>
-${clientLine}<p>Everything it already wrote is kept, author intact — a revocation closes the door and does not
-rewrite history. Every other connection is untouched. To forget its inbox whole, drop it from
-<a href="${escapeHtml(detailHref(name))}">its own page</a>.</p>
-<form method="post" action="${ADMIN_REVOKE_CONFIRM_PATH}">
-${hiddenPair(formToken, name)}
-<input type="hidden" name="confirm_token" value="${escapeHtml(confirmToken)}">
-<button type="submit">yes — revoke it</button>
-</form>
-<p><a href="${ADMIN_PATH}">No — keep it writing.</a></p>`,
-    );
-  };
-
-  const postRevoke = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    const gated = await postGate(req, res);
-    if (gated === undefined) return;
-    const gw = signerGround(res); // both halves author deltas under the store's law
-    if (gw === undefined) return;
-    const target = targetOf(gw, gated.user, gated.fields, res);
-    if (target === undefined) return;
-    const plan = planRevoke(gw, gated.user, target.name, target.rec);
-    if (plan.act === "refuse") {
-      refuse(res, plan.status, plan.message);
-      return;
-    }
-    htmlOut(
-      res,
-      200,
-      revokeConfirmPage(
-        target.name,
-        plan,
-        gated.formToken,
-        mintConfirm(revokeTokens, gated.user, target.name),
-      ),
-    );
-  };
-
-  const postRevokeConfirm = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    const gated = await postGate(req, res);
-    if (gated === undefined) return;
-    const gw = signerGround(res);
-    if (gw === undefined) return;
-    const target = targetOf(gw, gated.user, gated.fields, res);
-    if (target === undefined) return;
-    const { name, rec } = target;
-    const presented = gated.fields.get("confirm_token") ?? "";
-    const held = revokeTokens.get(presented);
-    if (held === undefined || held.user !== gated.user || held.name !== name) {
-      refuse(res, 403, "This revoke was not confirmed from its own page, so nothing was revoked.");
-      return;
-    }
-    revokeTokens.delete(presented); // single-use, consumed before the act
-    const plan = planRevoke(gw, gated.user, name, rec);
-    if (plan.act === "refuse") {
-      refuse(res, plan.status, plan.message);
-      return;
-    }
-    // The connector half runs FIRST: the generation bump is what kills a live bearer, and a panel
-    // that said "revoked" while a token still worked would be the exact lie this page must not
-    // tell. If it fails, nothing has happened yet and the refusal can honestly say so.
-    if (plan.client !== undefined) {
-      const clientId = plan.client.clientId;
-      const strike = async (grant: { actor: string }): Promise<void> => {
-        const ids = survivingOperatorGrantIds(gw.reactor, gw.operatorAuthor!, grant.actor);
-        if (ids.length === 0) return;
-        await gw.append(
-          ids.map((id) =>
-            signClaims(negationOf(id, gw.operatorAuthor!, gw.nextTimestamp()), gw.options.seed!),
-          ),
-        );
-      };
-      const outcome = await revokeConnector(options.connectors!.home, clientId, strike, onFault);
-      if (outcome.kind === "no-such-client") {
-        refuse(
-          res,
-          409,
-          "This connector left the records between the confirm page and now, so nothing was " +
-            "revoked. Its row will say what still stands.",
-        );
-        return;
-      }
-      if (outcome.kind === "locked") {
-        refuse(
-          res,
-          503,
-          "This store's connector records are locked by another process, so nothing was revoked. " +
-            "Retry once it is idle.",
-        );
-        return;
-      }
-      if (outcome.kind === "unreadable") {
-        refuse(
-          res,
-          503,
-          "This store's connector records cannot be read right now, so nothing was revoked.",
-        );
-        return;
-      }
-    }
-    // The §39 half: strike the write grant in the inbox pool, in the owner's own voice. If it
-    // fails AFTER the connector half succeeded, the page says exactly which half happened —
-    // a half-done revoke reported whole is the H7 shape.
-    if (plan.inbox !== undefined) {
-      try {
-        await gw.revokeConnection({
-          inbox: plan.inbox,
-          connectionKey: plan.key,
-          ownerSeed: plan.ownerSeed!,
-        });
-      } catch (err) {
-        onFault(
-          `the admin revoke could not strike the inbox grant of "${name}": ` +
-            `${err instanceof Error ? err.message : String(err)}`,
-        );
-        refuse(
-          res,
-          503,
-          plan.client !== undefined
-            ? "The connector's tokens are retired, but the write grant in its inbox could not " +
-                "be struck — this revoke is incomplete. Retry it."
-            : "The revocation could not land, so nothing was revoked.",
-        );
-        return;
-      }
-    }
-    const clientDone =
-      plan.client === undefined
-        ? ""
-        : ` The connector <code>${escapeHtml(plan.client.clientName ?? plan.client.clientId)}</code>
-holds no working token now — each is refused on its next request.`;
-    htmlOut(
-      res,
-      200,
-      page(
-        "revoked",
-        `<h1>Revoked.</h1>
-<p><code>${escapeHtml(plan.key)}</code> no longer writes into
-<code>${escapeHtml(plan.bound)}</code>: its next write is refused at the door.${clientDone}
-Everything it already wrote remains, author intact, and every other connection is untouched.</p>
-<p><a href="${escapeHtml(detailHref(name))}">Its inbox</a> keeps the record — drop it there to
-forget it whole.</p>
-<p><a href="${ADMIN_PATH}">Back to your containers.</a></p>`,
+<p><a href="${escapeHtml(pages.detailHref(name))}">Back to <code>${escapeHtml(name)}</code>.</a></p>`,
       ),
     );
   };
@@ -2181,9 +1205,9 @@ forget it whole.</p>
     [ADMIN_DROP_CONFIRM_PATH, postDropConfirm],
     [ADMIN_REGISTER_PATH, postRegister],
     [ADMIN_PROMOTE_PATH, postPromote],
-    [ADMIN_FEDERATE_PATH, postFederate],
-    [ADMIN_REVOKE_PATH, postRevoke],
-    [ADMIN_REVOKE_CONFIRM_PATH, postRevokeConfirm],
+    [ADMIN_FEDERATE_PATH, fed.postFederate],
+    [ADMIN_REVOKE_PATH, fed.postRevoke],
+    [ADMIN_REVOKE_CONFIRM_PATH, fed.postRevokeConfirm],
   ]);
 
   return {

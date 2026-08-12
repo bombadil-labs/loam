@@ -8,3 +8,6 @@ demos/village/
 # scripts/gen-packets.mjs (--check gates drift) — a formatter pass would break identity.
 demos/tutorial/packets/
 .adlc/
+# Vendored bundler output (T97): real esbuild-over-React fixtures the reference-scan rail reads as
+# text. A formatter pass would rewrite the very dialect being tested.
+test/gateway/fixtures/*.bundle.mjs

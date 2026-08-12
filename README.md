@@ -13,7 +13,7 @@ store only ever learns. Two Loam instances that meet simply merge. Trust is a le
 holds, not a verdict the ground hands down.
 
 The design is in [SPEC.md](SPEC.md), the working record in [JOURNAL.md](JOURNAL.md), and the backlog
-of unbuilt work as ADLC tickets in `.adlc/tickets.json`. This page is the manual;
+of unbuilt work as ADLC tickets in `.adlc/tickets/`. This page is the manual;
 [how the repo is organized](#how-the-repo-is-organized) is spelled out below.
 
 **New here? Take [the interactive tutorial](https://bombadil-labs.github.io/loam/tutorial.html)** — it hands
@@ -226,7 +226,20 @@ the fourth is the only door out:
     relevant deltas; a pure function of the ambient root, so it resolves the same on every machine.
 - **`schema`** — the resolution program (a **Schema**): a per-property reduction — each prop names a
   GraphQL field and says how to fold that bucket's deltas into one value. Each prop's rule is a
-  **Policy** (`pick` / `all` / `merge` / …); the map of them is the Schema.
+  **Policy**; the map of them is the Schema. A Policy's JSON holds exactly one of five kinds:
+  - **`pick`** — the newest (or, per `order`, the first) surviving entry:
+    `{ "pick": { "order": { "byTimestamp": "desc" } } }`.
+  - **`all`** — every surviving entry, in order:
+    `{ "all": { "order": { "byTimestamp": "desc" } } }`.
+  - **`merge`** — the bucket reduced by an addend function — `max`, `min`, `sum`, `count`,
+    `and`, `or`, `concatSorted`:
+    `{ "merge": "sum" }`.
+  - **`conflicts`** — the surviving entries whose authors disagree, in order:
+    `{ "conflicts": { "order": { "byTimestamp": "desc" } } }`.
+  - **`absentAs`** — a constant to stand in when the bucket is empty, then the Policy for when it
+    is not: `{ "absentAs": { "const": 0, "then": { "pick": { "order": { "byTimestamp": "desc" } } } } }`.
+  An `order` is `{ "byTimestamp": "desc" | "asc" }`, `{ "byAuthorRank": [ … ] }`,
+  `{ "byPred": { "pred": …, "then": … } }`, `{ "chain": [ … ] }`, or the bare `"lexById"`.
 - **`roots`** — the entities held **live**: the gather runs for each, and its view stays current
   as deltas arrive.
 - **`writable`** — the fields that accept a **surface write**. Immutable by default (SPEC §21): a
@@ -403,6 +416,25 @@ Foreign law stays inert: a peer's self-signed grant merges as a delta but govern
 it roots in no operator you blessed. **Each instance must have its own operator seed** — two
 sharing one trust each other's constitution completely.
 
+**The CLI recipe, end to end.** Pulling is one step, not the story. A governed store binds only
+its own operator's law, so the first query after a pull answers `nothing is registered` — the
+refusal says the store holds registrations that do not bind, foreign law is inert. That is the
+design, not a bug: foreign law never reshapes your surface. The recipe that works end to end:
+
+```sh
+TOKEN=$(openssl rand -hex 16)                                                # THIS store's door token — minted here
+loam pull http://peer.example/default --token "$PEER_TOKEN" --home ./mine   # their deltas, yours now
+#   ^ PEER_TOKEN is the PEER's operator token — their door's secret, not yours to mint. Ask them.
+loam register plant.json --home ./mine                                      # your own schema, binding here
+loam serve --http --home ./mine --token "$TOKEN"                            # serve your ground
+curl -s localhost:4321/default/graphql -H "authorization: Bearer $TOKEN" \
+  -d '{"query":"{ plant(entity: \"plant:fern\") { height } }"}'
+```
+
+The pull makes their facts live in your store; the register makes a lens you own; the serve
+answers it. A store that pulls and never registers gathered someone else's world with no way to
+read it — the empty-surface refusal is the honest report of exactly that.
+
 ## Forgetting — erasure, GDPR, and harmful content
 
 By default a store forgets nothing: revocation is negation, which _masks_ a delta from views but
@@ -521,7 +553,7 @@ village.
   footer linking the PR(s) that landed it and naming where it lives; `SPEC.md` is the index over
   them. Read it to understand the system; it grows only when work lands — a landing adds a new
   `spec/` file.
-- **`.adlc/tickets.json`** — the backlog: unbuilt and partially-designed work, as ADLC tickets.
+- **`.adlc/tickets/`** — the backlog: unbuilt and partially-designed work, as ADLC tickets, one shard each.
   The next thing to build is drawn from here, and its landing PR adds its `spec/` section file.
 - **[JOURNAL.md](JOURNAL.md)** — the append-only record: one entry per step, what was done and why.
   An index over [`journal/`](journal/), one file per entry.

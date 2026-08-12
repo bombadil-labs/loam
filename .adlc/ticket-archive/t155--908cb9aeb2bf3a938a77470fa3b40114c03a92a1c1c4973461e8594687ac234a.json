@@ -1,0 +1,20 @@
+{
+  "_adlcArchive": {
+    "archivedAt": "2026-08-11T03:58:29.345Z",
+    "reason": "completed",
+    "sourceRevision": null,
+    "sourceStoreHash": "0e5ea904d73cb22b6ebf666cd78b41ea2b355c3e268352179bca9e484e5bc4f6",
+    "ticketHash": "1f7f060fc921a27db28623dacabce56d8b940504d14c58bd6f547f84bd639dbc",
+    "version": 1
+  },
+  "body": "FOUND 2026-08-10 chasing a CI flake to its root at Myk's direction, after two budget raises treated the symptom. MEASURED: test/store/archive.test.ts runs 0.7s on Linux and 12s NOMINAL on a healthy windows runner; three timeouts this week at 15s and 20s under load. The cost is the fixture's SETUP: append writes each delta open->write->fsyncSync->close->rename, synchronously, one at a time. 200 deltas x 30-80ms per Windows fsync = 10-16s of pure serial flushing. The purge sweep the test exists to pin is innocent.\n\nEVERY REAL BATCH PAYS THIS: a federation pull landing N deltas into an archive-backed store flushes N times in series on the event loop.\n\nTHE FIX: overlap the per-delta writes with bounded concurrency (a small pool, ~16), preserving the per-file durability order EXACTLY — each file's bytes fsynced before its rename, temp cleaned on its own failure, first error still refuses loudly after the in-flight chunk settles. The promise does not move; only the wall clock. Purge's rmSync loop may get the same treatment if measurement says it matters (it did not this week).\n\nRAILS: the existing frozen rail (test/store/archive.test.ts, T67) is the behavior rail and stays byte-identical — its 15s budget becomes comfortable headroom everywhere, which is the acceptance signal. A new perf-shaped rail is NOT wanted (a wall-clock assertion is a flake by construction; the honest measure is the CI timing trend).\n\nCONTEXT for the wider worry (Myk, 2026-08-10): CI time must not grow unbounded. This ticket is the pattern's first instance: when a suite leans on a budget raise, ask what the code is doing per unit first. The vitest.config 20s default raise (erasure rails, sqlite) predates this lesson and may deserve the same look — a follow-up observation, not this ticket's scope.\n\nWHO MERGES: self-merge on the ordinary bar — pure performance, no promise moves, the frozen rail is the regression net.",
+  "edges": [],
+  "id": "T155",
+  "phase": "P0",
+  "rails": [],
+  "scope": [
+    "src/store/archive.ts"
+  ],
+  "status": "todo",
+  "title": "ArchiveBackend.append serializes one fsync per delta — a 200-delta batch pays 200 sequential disk flushes"
+}

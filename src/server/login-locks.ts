@@ -18,7 +18,7 @@
 // the FILE keeps the lock word — `login-locks.json`, `locksPath`, `readLocks`, `writeLocks`, and the
 // local `locks` map they hand around — because that file name is on disk, in the erasure report's
 // unswept list, and in what an operator reads. Anything naming the BEHAVIOUR uses the delay word:
-// `FailureRecord`, `delayFor`, `delayMs`, `clearRecord`. So `locks` in this file means "the rows of
+// `FailureRecord`, `delayFor`, `delayMs`. So `locks` in this file means "the rows of
 // login-locks.json", never "a lock somebody holds" — there is no such thing here any more.
 //
 // Deliberate posture on damage: a file this module cannot parse reads as NO RECORDS, and a file with
@@ -192,7 +192,7 @@ export function readLocks(home: string): Map<string, FailureRecord> {
  * what `maxTracked` is small for. The temp-and-rename stays either way — a HALF-WRITTEN file would read
  * as no records at all.
  */
-export function writeLocks(home: string, locks: Map<string, FailureRecord>): void {
+function writeLocks(home: string, locks: Map<string, FailureRecord>): void {
   const target = locksPath(home);
   const temp = `${target}.${process.pid}-${randomBytes(6).toString("hex")}.tmp`;
   const body = `${JSON.stringify({ users: Object.fromEntries(locks) }, null, 2)}\n`;
@@ -363,34 +363,4 @@ export function noteFailure(home: string, name: string, now: number, policy: Lim
 export function forgetFailures(home: string, name: string): void {
   const locks = readLocks(home);
   if (locks.delete(name)) writeLocks(home, locks);
-}
-
-/**
- * Clear EVERY record. What `loam user unlock --all` earns, and the only cure sized to a file a caller
- * filled with names nobody can enumerate in advance. Returns how many records went.
- *
- * Every count starts from zero afterwards, so this hands a guessing caller their whole budget back as
- * well. An operator reaching for it is choosing that over waiting out `forgetMs`.
- */
-export function clearAllRecords(home: string): number {
-  const locks = readLocks(home);
-  if (locks.size === 0) return 0;
-  writeLocks(home, new Map());
-  return locks.size;
-}
-
-/**
- * Clear `name`'s record from the box, and answer what it held — undefined when there was none.
- *
- * It answers the COUNT and its age rather than a wait. A wait is a property of the serving door's
- * policy, and this runs in another process that was never told that policy: naming a count is a fact,
- * naming a wait would be a guess.
- */
-export function clearRecord(home: string, name: string): FailureRecord | undefined {
-  const locks = readLocks(home);
-  const held = locks.get(name);
-  if (held === undefined) return undefined;
-  locks.delete(name);
-  writeLocks(home, locks);
-  return held;
 }
