@@ -60,7 +60,7 @@ import {
 import { grantClaims } from "../gateway/accounts.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
 import { readSeed } from "../cli/config.js";
-import { makeUserDoors, type UserDoorOptions, type UserDoors } from "./session.js";
+import { CSP, makeUserDoors, type UserDoorOptions, type UserDoors } from "./session.js";
 import { makeAdminDoor, type AdminDoor } from "./admin.js";
 
 export { type UserDoorOptions } from "./session.js";
@@ -154,7 +154,14 @@ const sha = (s: string): Buffer => createHash("sha256").update(s).digest();
 // What GET / answers, whole: self-contained HTML (no external asset could ride a tokenless GET
 // anyway), served verbatim to every caller. Editing it is safe exactly as long as it stays
 // ignorant of the store it fronts — no mount names, no counts, no hint of what is declared
-// public. The words say where the doors are; they never say which doors exist.
+// public, no hint of whether accounts exist. The words say where the doors are; they never say
+// which doors exist. Naming FIXED paths is fine: `/login` sits at the same address on every
+// store, and where no accounts are configured it refuses exactly as any unresolved name does —
+// so the sentence stays true, and constant, either way.
+// The prose promises only what the store honours. History is the DEFAULT, never a guarantee: an
+// erasure (SPEC §11) really removes bytes, so no line here may say the ground remembers whatever
+// it was told. Federation is the same shape — a store admits what its trust policy admits (SPEC
+// §8), so meeting a peer is not merging with it.
 const GREETING = `<!doctype html>
 <html lang="en">
 <head>
@@ -170,19 +177,27 @@ const GREETING = `<!doctype html>
   code { font: 0.92em ui-monospace, "Cascadia Mono", monospace; background: #00000012;
          padding: 0.1em 0.4em; border-radius: 0.3em; }
   .quiet { color: #6f675c; font-size: 0.92em; margin-top: 1.5rem; }
+  a { color: #7a5a2e; }
   @media (prefers-color-scheme: dark) {
     body { color: #e6dfd4; background: #1f1b17; }
     code { background: #ffffff1f; }
     .quiet { color: #a89e90; }
+    a { color: #cfa86a; }
   }
 </style>
 </head>
 <body>
 <main>
 <h1>A Loam store serves here.</h1>
+<p>Loam is a database that writes by adding: signed, content-addressed deltas whose merge is
+union — order-blind, idempotent, conflict-free. A claim is added rather than edited in place, so
+the past stays legible by default — and an erasure is the one act that takes bytes back, on
+purpose. Two stores merge what each has agreed to admit from the other. This is one of them.</p>
 <p>Its doors are the mounts: <code>/&lt;mount&gt;/graphql</code> to ask,
 <code>/&lt;mount&gt;/subscribe</code> to listen, <code>/&lt;mount&gt;/rest</code> and
 <code>/&lt;mount&gt;/mcp</code> for the same worlds in other tongues.</p>
+<p>If you are a person with a name here, <a href="/login">/login</a> is your door: sign in,
+and the store meets you in pages instead of JSON.</p>
 <p>What the operator has declared public answers without a token; every other door wants
 <code>Authorization: Bearer &hellip;</code> — and a door that refuses you is not saying
 nothing is there, only that it will not say.</p>
@@ -971,7 +986,21 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
   // token presented, and every public declaration, because a front page that varied on any of
   // them would be an oracle the uniform refusals below pay to prevent. It names no mount, ever.
   const greeted = (res: ServerResponse): void => {
-    res.writeHead(200, { "content-type": "text/html; charset=utf-8", ...CORS });
+    // same-origin is the house policy for pages this store serves (T143): the greeting links to
+    // /login, and a document policy weaker than that would leak this store's URL to wherever a
+    // future link points — while no-referrer on HTML is banned outright, because it makes Chrome
+    // send `Origin: null` on any form a page like this ever grows.
+    // The same CSP the session pages carry: no script, no framing, no form retargeting, no base
+    // rewriting. This page has no script and no form today; the header is what keeps that true of
+    // whatever it grows into. And the body is a compile-time constant, identical for every caller
+    // by design — so a shared cache can hold it, and cannot leak anything by holding it.
+    res.writeHead(200, {
+      "content-type": "text/html; charset=utf-8",
+      "content-security-policy": CSP,
+      "cache-control": "public, max-age=300",
+      "referrer-policy": "same-origin",
+      ...CORS,
+    });
     res.end(GREETING);
   };
 
