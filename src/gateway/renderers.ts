@@ -31,6 +31,34 @@ import { lawfulNegated, lawfulSnapshot, lensOf, type LensName } from "./registra
 
 export const CTX_RENDERER = "loam.renderer";
 
+// A pen's PUBLIC half, on the ground (SPEC §23.3, T102). The seed itself never lands — custody is
+// the filesystem — but WHICH AUTHOR a named pen signs as is not a secret, and without it a pen's
+// standing outlives every trace of the pen it belonged to. That is the re-keying hole: an operator
+// whose seed leaked deletes the file and mints a new one, and the leaked key keeps full write
+// standing under an author derivable only from the file they were told to delete. This record is
+// how a later `loam pen create` NAMES the key it replaces, which is what lets it strike it.
+export const CTX_PEN = "loam.pen";
+export const penEntity = (name: string): string => `pen:${name}`;
+
+export function penRecordClaims(
+  name: string,
+  penAuthor: string,
+  author: string,
+  timestamp: number,
+): Claims {
+  return {
+    timestamp,
+    author,
+    pointers: [
+      {
+        role: "pen",
+        target: { kind: "entity", entity: { id: penEntity(name), context: CTX_PEN } },
+      },
+      { role: "author", target: { kind: "primitive", value: penAuthor } },
+    ],
+  };
+}
+
 // What a route + schema + UI share, at input and at rest.
 interface RendererCore {
   readonly route: string;
@@ -740,10 +768,25 @@ export async function writeRouteImpl(
       };
     }
   }
-  // The pen must be PROVISIONED (its seed in config) — custody. Absent → refuse (nothing to sign with).
+  // The pen must be PROVISIONED (its seed in config) — custody. Absent → refuse (nothing to sign
+  // with). The refusal NAMES THE CURE, but only on the token door: a stranger gets the same uniform
+  // body as any refused write below, because the pen's name and the store's file layout are the
+  // operator's business, not the anonymous fan's.
   const penSeed = gw.options.pens?.[binding.pen];
   if (penSeed === undefined) {
-    return { status: 403, contentType: text, body: "this renderer's pen is not provisioned" };
+    if (door === "public") {
+      return { status: 403, contentType: text, body: "the write was refused" };
+    }
+    return {
+      status: 403,
+      contentType: text,
+      body:
+        `this renderer's pen ("${binding.pen}") is not provisioned — no seed was supplied for it, ` +
+        `so the store has nothing to sign this write with. A CLI-served store provisions a pen ` +
+        `from a pen.${binding.pen}.seed file in its home: \`loam pen create ${binding.pen}\` mints ` +
+        `the seed and grants the pen write standing, and the next \`loam serve\` reads it. An ` +
+        `embedding provisions it in GatewayOptions.pens.`,
+    };
   }
   // A PROBATIONARY POOL ASKS ITS HOST'S LIVE WORD (SPEC §24.7, following the §12 precedent in
   // mounts.ts). A pool holds a SEEDED COPY of the operator's grants, frozen until someone calls

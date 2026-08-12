@@ -3,7 +3,9 @@
   "edges": [],
   "id": "T96",
   "phase": "P0",
-  "rails": [],
+  "rails": [
+    "test/gateway/registration-template-swallow.test.ts"
+  ],
   "scope": [
     "src/gateway/registration.ts",
     "src/gateway/genesis.ts"
