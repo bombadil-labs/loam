@@ -70,6 +70,33 @@
       "to": "toBe(CSP.replace(\"form-action 'self'\", `form-action 'self' ${ALLOW_ORIGIN}`));",
       "files": ["test/server/oauth-consent.test.ts"],
       "authorized": "Myk, 2026-08-05 — authorized in chat: widen the consent page's pinned form-action by the registered redirect origin so real Chrome can land the approval"
+    },
+    {
+      "//": "T159 rail REPAIR — one pair across 19 frozen rails. vitest.config.mjs sets testTimeout: 20_000 and its comment says why: real sqlite fsync and WAL cycles legitimately cost seconds on a loaded windows runner. 32 test files then set 15000 and pull themselves BELOW that default; 19 of them are frozen. None of the 32 sets hookTimeout, so every one of them already runs its HOOKS at 20s while capping its TESTS at 15s — the line is a copied habit, not a considered budget. The 32 breach in turn, so the flake picks a different file each week: archive.test.ts measured 20.1s against its own 15s ceiling with #359's Defender exclusion applied, and even on a healthy main run its slowest test burned 11098ms of the 15000 (2026-08-11, Actions run 31522995407); path-resolution.test.ts timed out at 15s on PR #363. THIS RAISES NO BUDGET ABOVE THE DEFAULT. It stops 19 frozen rails from asking for less room than the repo already grants every other test file. Myk authorized this exact pair once before, for archive.test.ts alone (#356, merged); the edit was closed at #357 pending a root cause; that root cause landed as T155 and #359; and the pair then left this file unconsumed in #358, on the stated belief that 15s now carried real headroom. The 11098ms is what falsified that belief. No assertion moves in any of the 19 files — the only bytes that change are the digits in the budget.",
+      "from": "vi.setConfig({ testTimeout: 15000 });",
+      "to": "vi.setConfig({ testTimeout: 20_000 });",
+      "files": [
+        "test/board/board-app.test.ts",
+        "test/board/board-render.test.ts",
+        "test/cli/pack-slate.test.ts",
+        "test/cli/pack.test.ts",
+        "test/cli/path-resolution.test.ts",
+        "test/cli/serve-host.test.ts",
+        "test/cli/serve-login.test.ts",
+        "test/cli/serve-oauth-register.test.ts",
+        "test/cli/serve-public-url.test.ts",
+        "test/cli/serve-staleness-warning.test.ts",
+        "test/gateway/closure-inbound.test.ts",
+        "test/gateway/erase-inmemory-reach.test.ts",
+        "test/server/dynamic-mounts.test.ts",
+        "test/server/front-door.test.ts",
+        "test/server/health-route.test.ts",
+        "test/server/mcp-tool-honesty.test.ts",
+        "test/server/oauth-discovery.test.ts",
+        "test/store/archive.test.ts",
+        "test/store/contract.test.ts"
+      ],
+      "authorized": "PENDING MYK — a branch cannot self-authorize, so merging this entry IS the authorization. One pair, 19 frozen rails, only the timeout digits change."
     }
   ]
 }
