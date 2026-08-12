@@ -235,6 +235,12 @@ export interface Bound extends Registration {
   readonly origin: "manual" | "store";
 }
 
+// The two names a registration answers to when something binds to it BY NAME: the reading it is,
+// and the program it is over. They coincide until a sibling reading exists (H6), and a binding
+// definition may legitimately name either — data outlives the distinction. Kept as one function
+// because both `materializationFor` and `materializationNames` read it.
+const bindableNames = (r: Bound): string[] => [lensOf(r), programOf(r)];
+
 // ── The internals seam (ticket T19) ─────────────────────────────────────────────────────────────
 // The Gateway's behaviors are decomposed into concern modules (erase.ts, quarantine-pool.ts,
 // adopt.ts, …): each public method stays on the class with its exact signature as a THIN DELEGATE,
@@ -1008,8 +1014,16 @@ export class Gateway {
   // NOTE: the resolution is AS OF NOW — after an evolution, work bound to the superseded
   // generation keeps watching the old shape until it re-attaches.
   materializationFor(name: string): string {
-    const hit = this.registered.find((r) => lensOf(r) === name || programOf(r) === name);
+    const hit = this.registered.find((r) => bindableNames(r).includes(name));
     return hit !== undefined ? this.matName(hit.hyperschema.name) : name;
+  }
+
+  // Every name `materializationFor` can RESOLVE, deduplicated and ordered — so a caller can ask
+  // "will this resolve?" before binding to the pass-through, and cite the alternatives when it
+  // does not. Same source as the resolution above, deliberately: a check and its cure that read
+  // the registered set through two expressions drift into disagreeing.
+  materializationNames(): string[] {
+    return [...new Set(this.registered.flatMap(bindableNames))].sort();
   }
 
   /** @internal — T19 seam (erase.ts, adopt.ts) */

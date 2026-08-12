@@ -63,6 +63,17 @@ export interface SupersededBinding {
   readonly name: string;
 }
 
+// A definition that reads perfectly and still cannot be honored: it names a materialization no
+// registered schema provides, so the host would watch a name nothing ever changes and the binding
+// would compute nothing, forever, while reporting `installed`. That is the H7 shape at the binding
+// layer — a success whose visible effect has not happened and never will — so the definition is
+// refused at install and named here instead, with the cure in its own sentence.
+export interface UnboundBinding {
+  readonly name: string; // the binding
+  readonly materialization: string; // the name it asked for and did not get
+  readonly reason: string;
+}
+
 // The two ways a considered binding delta fails to become law. They are kept apart on purpose:
 // `malformed` is a damage report an operator must act on, `superseded` is a healthy recipe that
 // evolved. Folding one into the other would either hide damage or accuse a working binding.
@@ -74,6 +85,25 @@ export interface BindingDropSinks {
 const primitive = (claims: Claims, role: string): string | number | boolean | undefined => {
   const p = claims.pointers.find((x) => x.role === role);
   return p?.target.kind === "primitive" ? p.target.value : undefined;
+};
+
+// The contexts of the ONE admissible JSON emit strategy, `{keyed: ["<context>", …]}` — or
+// undefined for anything else that happens to parse. Three shapes are refused here that a bare
+// `JSON.parse` admits, and each fails at a different distance from the definition:
+//   - `null` — `typeof null === "object"`, so rhizomatic reads `.keyed` off it and THROWS inside
+//     a later ingest, wearing the face of a write failure.
+//   - `{}` (and any object without `keyed`) — `keyed` is undefined, so every emission takes the
+//     empty key and APPENDS. Nothing errors, ever; the store just writes a different shape than
+//     its definition asked for. The silent one is the dangerous one.
+//   - `{"keyed": []}` — the same silent degradation by a different road: the key of an emission
+//     is built from the substantive pointers whose context is in the set, so an empty set keys
+//     everything as "", which is append under a keyed spelling.
+const keyedContexts = (parsed: unknown): string[] | undefined => {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
+  const keyed = (parsed as { keyed?: unknown }).keyed;
+  if (!Array.isArray(keyed) || keyed.length === 0) return undefined;
+  if (!keyed.every((c) => typeof c === "string" && c.length > 0)) return undefined;
+  return keyed as string[];
 };
 
 // Every surviving binding definition in the store. In a governed store (an operator is named)
@@ -144,8 +174,9 @@ export function readBindingDefinitions(
     } else {
       // A hand-planted typo ("supercede") is a malformed definition like any other: dropped,
       // never fatal to the attach of every OTHER binding in the store.
+      let parsed: unknown;
       try {
-        emit = JSON.parse(emitRaw) as { keyed: string[] };
+        parsed = JSON.parse(emitRaw);
       } catch {
         sinks.onMalformed?.({
           deltaId: delta.id,
@@ -153,6 +184,22 @@ export function readBindingDefinitions(
         });
         continue;
       }
+      // "It parsed" is not "it is a strategy". The gate used to be the parse alone, so a payload
+      // that parsed to anything at all installed and then failed later, far from the definition
+      // that caused it (keyedContexts names the three shapes and their distances). Refuse here,
+      // and name what IS admissible — the sentence is the cure.
+      const keyed = keyedContexts(parsed);
+      if (keyed === undefined) {
+        sinks.onMalformed?.({
+          deltaId: delta.id,
+          reason:
+            `emit parses but is not an emit strategy: ${JSON.stringify(emitRaw)} — ` +
+            `admissible are "append", "supersede", or {"keyed": ["<context>", …]} ` +
+            `naming at least one context`,
+        });
+        continue;
+      }
+      emit = { keyed };
     }
     const { timestamp } = delta.claims;
     const prev = best.get(name);
@@ -181,11 +228,11 @@ export interface RunnerOptions {
   readonly implementations: Record<string, DerivedFn>; // fnId → the code to run
 }
 
-// The four lists account for every binding delta the reader CONSIDERED — that is, every surviving,
+// The five lists account for every binding delta the reader CONSIDERED — that is, every surviving,
 // operator-blessed delta filed at a `loam.binding` entity. Each such delta is either the law for
-// its name (counted once, by name, in `installed` or `skipped`), or it is named in `superseded` or
-// `malformed`. So `installed + skipped + superseded + malformed` equals the number of considered
-// deltas, since exactly one delta wins each name.
+// its name (counted once, by name, in `installed`, `skipped` or `unbound`), or it is named in
+// `superseded` or `malformed`. So `installed + skipped + unbound + superseded + malformed` equals
+// the number of considered deltas, since exactly one delta wins each name.
 //
 // Two deltas are deliberately NOT considered and so appear nowhere: one lawfully struck (retired),
 // and one authored by anybody but the operator of a governed store (never this store's law).
@@ -199,24 +246,50 @@ export interface Runner {
   readonly host: DerivationHost;
   readonly installed: string[]; // binding names the runner could run
   readonly skipped: string[]; // binding names whose implementation it lacks
+  readonly unbound: UnboundBinding[]; // definitions naming a materialization nothing provides
   readonly superseded: SupersededBinding[]; // definitions a later one of the same name replaced
   readonly malformed: MalformedBinding[]; // binding deltas that would not read as a definition
 }
 
-// Attach a runner to a gateway: install every stored binding whose implementation is on hand,
-// and animate the gateway so its ingest drains derivations. Bindings whose fnId the runner does
-// not hold are skipped (another runner may hold them) — an orphan definition simply waits.
+// Attach a runner to a gateway: install every stored binding whose implementation is on hand AND
+// whose materialization this store provides, and animate the gateway so its ingest drains
+// derivations. Bindings whose fnId the runner does not hold are skipped (another runner may hold
+// them) — an orphan definition simply waits.
 export const Runner = {
   attach(gateway: Gateway, options: RunnerOptions): Runner {
     const host = new DerivationHost(gateway.reactor);
     const installed: string[] = [];
     const skipped: string[] = [];
+    const unbound: UnboundBinding[] = [];
     const malformed: MalformedBinding[] = [];
     const superseded: SupersededBinding[] = [];
+    // The names a definition may bind to, asked once. `materializationFor` falls back to the raw
+    // name on a miss, which is what let an unhonorable definition install; this is the same
+    // lookup, kept, so the refusal below can never disagree with the resolution above it.
+    const provided = gateway.materializationNames();
     for (const spec of readBindingDefinitions(gateway.reactor, gateway.operator, {
       onMalformed: (m) => malformed.push(m),
       onSuperseded: (s) => superseded.push(s),
     })) {
+      // The materialization is checked BEFORE the implementation on purpose: a missing fnId is a
+      // fact about THIS runner ("another one may hold it"), while a materialization nothing
+      // provides is damage in the store that no runner could honor. Report the damage.
+      if (!provided.includes(spec.materialization)) {
+        unbound.push({
+          name: spec.name,
+          materialization: spec.materialization,
+          // Read by whoever attached the runner, and they already hold the gateway — so naming
+          // the alternatives tells them nothing they could not read for themselves. It is a cure,
+          // not an oracle.
+          reason:
+            `no registered schema answers to "${spec.materialization}", so this binding would ` +
+            `watch a name nothing ever changes and compute nothing. ` +
+            (provided.length === 0
+              ? "This store has registered no schema yet — register one, then attach again."
+              : `Name one this store already serves: ${provided.join(", ")}.`),
+        });
+        continue;
+      }
       const fn = options.implementations[spec.fnId];
       if (fn === undefined) {
         skipped.push(spec.name);
@@ -232,6 +305,6 @@ export const Runner = {
       installed.push(spec.name);
     }
     gateway.animate(host);
-    return { host, installed, skipped, superseded, malformed };
+    return { host, installed, skipped, unbound, superseded, malformed };
   },
 };

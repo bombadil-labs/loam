@@ -307,12 +307,20 @@ const byteDoorOf = (
 // { hyperschema: { name, alg?, body }, schema, roots, entity?, mutations? } (see
 // parseRegistrationInput). Anything malformed throws; the caller answers 400 with the reason.
 // Operator gating happens BEFORE this is called: shaping the store is constitutional.
+//
+// A publish can PERSIST without BINDING — valid law, written to append-only ground, that this
+// store's fixpoint does not serve (a process-local binding shadowing it, a rival body under the
+// same name). The outcome was discarded here, so both doors answered 200 with the name and the
+// entity and said nothing about whether anything now serves it: the H7 shape, the same one the
+// CLI's register carried. `bound` now rides the answer, and `reason` — the proximate cause the
+// fixpoint actually caught, never a guess — rides it when `bound` is false. Only the operator
+// reaches this door, so a reason naming the law in the way is a cure, not an oracle.
 async function performRegistration(
   gateway: Gateway,
   raw: unknown,
-): Promise<{ registered: string; entity: string }> {
+): Promise<{ registered: string; entity: string; bound: boolean; reason?: string }> {
   const input = parseRegistrationInput(raw);
-  await gateway.publishRegistration(
+  const outcome = await gateway.publishRegistration(
     input.hyperschema,
     input.schema,
     input.roots,
@@ -325,6 +333,8 @@ async function performRegistration(
   return {
     registered: input.hyperschema.name,
     entity: schemaEntityFor(input.hyperschema, input.entity),
+    bound: outcome.bound,
+    ...(outcome.bound || outcome.reason === undefined ? {} : { reason: outcome.reason }),
   };
 }
 
