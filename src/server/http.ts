@@ -318,7 +318,7 @@ const byteDoorOf = (
 async function performRegistration(
   gateway: Gateway,
   raw: unknown,
-): Promise<{ registered: string; entity: string; bound: boolean; reason?: string }> {
+): Promise<{ registered: string; entity: string; bound: boolean; reason?: string | undefined }> {
   const input = parseRegistrationInput(raw);
   const outcome = await gateway.publishRegistration(
     input.hyperschema,
@@ -330,12 +330,15 @@ async function performRegistration(
     input.writable,
     input.resolvers,
   );
-  return {
+  const answer = {
     registered: input.hyperschema.name,
     entity: schemaEntityFor(input.hyperschema, input.entity),
     bound: outcome.bound,
-    ...(outcome.bound || outcome.reason === undefined ? {} : { reason: outcome.reason }),
   };
+  // The outcome pairs the two by construction (lifecycle.ts): a bound publish carries no reason,
+  // an unbound one always carries one. So the answer turns on `bound` alone — a second condition
+  // beside it would be free to disagree with it, and could only ever disagree by staying silent.
+  return outcome.bound ? answer : { ...answer, reason: outcome.reason };
 }
 
 export async function serve(options: ServeOptions): Promise<ServerHandle> {
