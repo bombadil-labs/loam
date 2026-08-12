@@ -171,14 +171,11 @@ function shellSource(): string {
     return epoch !== live;
   }
 
-  // The settle-function of every render since the last discard — usually one, and never more than the
-  // gestures a viewer landed between two paints. A settled render's entry stays until the next discard
-  // and re-invoking it is a no-op, so this is "not yet discarded" rather than "still running".
-  //
-  // CALLERS OWE AN EPOCH BUMP FIRST. discard() paints nothing only because every caller has already
-  // moved the epoch past these renders, so each one folds through the stale branch of done(). Discarding
-  // without bumping would paint a refusal for a render nothing was wrong with. The list is emptied
-  // before the walk, so a settle that somehow spawns cannot re-enter it mid-walk.
+  // The STOP function of the render last started — at most one, since every paint discards before
+  // pushing its own. A settled render's entry stays until the next discard and re-invoking it is a
+  // no-op, so this is "not yet discarded" rather than "still running". Stopping paints nothing by
+  // construction: stop() takes no message and touches no DOM, so discard() cannot report anything,
+  // whatever epoch the caller left behind.
   var crew = [];
   function discard() {
     var held = crew;
@@ -187,13 +184,11 @@ function shellSource(): string {
   }
 
   function paint(node) {
-    var worker;
-    try {
-      worker = new Worker(realm(), { type: "module" });
-    } catch (noWorker) {
-      mount.textContent = "this renderer could not be mounted in this viewer";
-      return;
-    }
+    // THE EPOCH MOVES BEFORE ANYTHING CAN FAIL. Bumping it after the Worker constructor left the
+    // failure path neither final nor first: the refusal painted below, then a render still in flight
+    // kept a live epoch and overwrote it with markup composed from the PREVIOUS node — a stale view
+    // presented as current, with nothing saying so. Worker construction fails exactly on the loaded
+    // device this whole clock is written for, so that path is not hypothetical.
     live += 1;
     var epoch = live;
     // Every render already in flight stops HERE, rather than when its own clock expires. Without this a
@@ -201,22 +196,33 @@ function shellSource(): string {
     // terminated, so a viewer clicking through gestures on a slow device accumulates worker threads and
     // deepens the very contention that made the spawn slow.
     discard();
+    var worker;
+    try {
+      worker = new Worker(realm(), { type: "module" });
+    } catch (noWorker) {
+      mount.textContent = "this renderer could not be mounted in this viewer";
+      return;
+    }
     var settled = false;
     var started = false;
     var timer = setTimeout(function () { done({ kind: "noStart" }); }, C.renderSpawnTimeoutMs);
-    function done(msg) {
+    // STOP is the internal teardown and it takes NO message. Keeping it off the reporting ladder is
+    // what stops the compartment reaching the shell's own bookkeeping: done() is called with whatever
+    // the worker posted, and a bundle can reach a bare postMessage, so any kind the ladder handles
+    // specially is a kind a bundle can send. An unknown kind is a fault, which is the right answer.
+    function stop() {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       try { worker.terminate(); } catch (gone) { /* already down */ }
+    }
+    function done(msg) {
+      if (settled) return;
+      stop();
       // A render the world has moved past writes NOTHING. Its worker is still terminated above, so a
       // superseded bundle cannot keep running either.
       if (stale(epoch)) return;
       if (msg.kind === "ok") { mount.innerHTML = msg.html; return; }
-      // A superseded render that somehow reached here writes nothing. It is normally caught by the
-      // stale branch above; without this arm, a future discard site that forgot the epoch bump would
-      // paint "the renderer faulted" for a renderer that faulted nothing.
-      if (msg.kind === "superseded") return;
       // A spawn overrun gets its OWN sentence. Saying "timed out" would claim the renderer ran.
       mount.textContent = msg.kind === "noStart"
         ? "the renderer could not start"
@@ -226,12 +232,12 @@ function shellSource(): string {
             ? "the renderer did not return HTML"
             : "the renderer faulted";
     }
-    crew.push(function () { done({ kind: "superseded" }); });
+    crew.push(stop);
     worker.addEventListener("message", function (ev) {
       var msg = ev.data || {};
       if (msg.kind === "live") {
         if (settled || started) return;
-        if (stale(epoch)) { done({ kind: "superseded" }); return; }
+        if (stale(epoch)) { stop(); return; }
         started = true;
         clearTimeout(timer);
         timer = setTimeout(function () { done({ kind: "timeout" }); }, C.renderTimeoutMs);

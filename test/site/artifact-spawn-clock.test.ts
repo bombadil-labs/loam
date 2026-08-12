@@ -67,6 +67,12 @@ const BUNDLE = `export default function (node) { return "<div id=body>h=" + node
 // signals at all — a spawn that never completes.
 let liveAfterMs = 0;
 let answerAfterMs = 0;
+// When true, the NEXT `new Worker` throws — the shell's mount-failure path, which a loaded device
+// reaches for real when the tab hits its worker-thread limit.
+let refuseNextWorker = false;
+// When set, the realm answers with THIS kind instead of `ok` — the way to post a kind the shell's own
+// bookkeeping uses, from the one channel a bundle can reach.
+let answerKind = "";
 // When > 0, the realm keeps re-posting `live` on this interval and NEVER answers. That models a bundle
 // reaching a bare `postMessage` — `self` is sealed but the bare identifier is not in SEALED_CHANNELS —
 // and it is the only way to hold the render clock open from inside the compartment.
@@ -139,6 +145,10 @@ const load = (page: string): Harness => {
     private readonly timers: ReturnType<typeof setTimeout>[] = [];
     terminated = false;
     constructor() {
+      if (refuseNextWorker) {
+        refuseNextWorker = false;
+        throw new Error("no worker for you");
+      }
       spawned.push(this);
       if (liveAfterMs >= 0) {
         this.timers.push(setTimeout(() => this.emit({ kind: "live" }), liveAfterMs));
@@ -173,6 +183,10 @@ const load = (page: string): Harness => {
       this.timers.push(
         setTimeout(() => {
           if (liveAfterMs < 0) return; // never went live: it cannot answer either
+          if (answerKind !== "") {
+            this.emit({ kind: answerKind });
+            return;
+          }
           this.emit({ kind: "ok", html: `<div id=body>h=${String(msg.node.view.height)}</div>` });
         }, at),
       );
@@ -248,6 +262,8 @@ beforeEach(() => {
   liveAfterMs = 0;
   answerAfterMs = 0;
   liveRepeatMs = 0;
+  refuseNextWorker = false;
+  answerKind = "";
 });
 
 describe("T158 at the BYTES: the page carries two budgets, not one", () => {
@@ -350,7 +366,6 @@ describe("T158 at the BEHAVIOUR: driving the emitted shell in a DOM", () => {
     // the spawn ceiling, and a future ticket lowering that constant would otherwise turn this green
     // with the repair reverted and nothing would say so.
     const patience = Math.min(2_000, ARTIFACT_SPAWN_TIMEOUT_MS / 4);
-    expect(patience).toBeLessThan(ARTIFACT_SPAWN_TIMEOUT_MS);
     liveAfterMs = patience * 2; // this render can only be stopped by being superseded
     answerAfterMs = 5;
     const page = await pack();
@@ -390,6 +405,38 @@ describe("T158 at the BEHAVIOUR: driving the emitted shell in a DOM", () => {
     expect(h.spawned[0]?.terminated ?? false).toBe(true);
     // …and the darkened mount stays darkened: the render that was in flight paints nothing at all.
     expect(h.html("loam-app")).toBe("");
+  });
+
+  it("a render that CANNOT be mounted keeps its refusal — no earlier render paints over it", async () => {
+    // The mount-failure path is a teardown too, and a teardown has to be final rather than merely
+    // first. The refusal is painted synchronously; a render still in flight would land afterwards and
+    // overwrite it with markup composed from the PREVIOUS node — a stale view presented as current.
+    liveAfterMs = 40;
+    answerAfterMs = 5;
+    const page = await pack();
+    const h = load(page);
+    h.deliver(); // render 1 — in flight
+    refuseNextWorker = true;
+    h.deliver(); // render 2 — its worker cannot be constructed
+    expect(h.html("loam-app")).toContain("could not be mounted");
+    // Render 1's answer is due at 45 ms; wait past it and past a couple of macrotasks.
+    await new Promise((r) => setTimeout(r, 300));
+    expect(h.html("loam-app")).toContain("could not be mounted");
+    expect(h.html("loam-app")).not.toContain("h=7");
+    expect(h.spawned[0]!.terminated).toBe(true);
+  });
+
+  it("a realm posting the shell's OWN bookkeeping kind is a fault, not a silent blank", async () => {
+    // `done` is called with whatever the worker posted, and a bundle can reach a bare postMessage, so
+    // any kind the ladder handles specially is a kind a bundle can send. `superseded` is the shell's
+    // internal word for a render the world moved past; if the ladder answered it, a bundle could
+    // terminate itself into a blank mount with no diagnostic. It is not on the ladder — an unknown
+    // kind is a fault — and the internal teardown takes no message at all.
+    answerKind = "superseded";
+    const page = await pack();
+    const h = load(page);
+    h.deliver();
+    expect(await h.until("the renderer faulted", 5_000)).toBe(true);
   });
 
   it("the spawn ceiling is HARD — a page with a tiny one refuses a slow start rather than waiting", async () => {
