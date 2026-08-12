@@ -8,6 +8,22 @@ import type { Delta } from "@bombadil/rhizomatic";
 import type { FederationReport, Gateway } from "../gateway/gateway.js";
 import { fromWire, type WireDelta } from "./wire.js";
 
+// The pull report: federate's report plus the one dimension only the wire crossing can produce.
+// A delta that fails RECONSTRUCTION (its id does not recompute from its claims) never reaches
+// federate, so `FederationReport` cannot carry the count — the field lives here, on the door
+// where it can be nonzero, and `offered` is restored to what the peer actually SENT. Without it
+// the report was false (H7): a peer offering 100 deltas of which 40 rot on the wire read
+// "offered 60, rejected 0", and every later pull repeated the lie.
+//
+// The invariant this buys is `offered === unreconstructable + (what reached federate)`, and that
+// is the whole of it. `offered`, `rejected` and `unreconstructable` count OCCURRENCES while
+// `accepted` and `held` count unique ids (federateImpl says so, and warns the two dimensions are
+// never subtracted from each other), so `accepted + rejected + held + unreconstructable` is NOT
+// `offered` — a peer that sends one delta twice breaks it. Do not infer a fifth number from these.
+export interface PullReport extends FederationReport {
+  readonly unreconstructable: number;
+}
+
 const DEFAULT_MAX_OFFER = 64 * 1024 * 1024; // a peer's offer, capped so it cannot OOM the puller
 
 export interface PullOptions {
@@ -109,7 +125,7 @@ export async function pullFrom(
   peerUrl: string,
   peerToken: string,
   opts: PullOptions = {},
-): Promise<FederationReport> {
+): Promise<PullReport> {
   const doFetch = opts.fetch ?? fetch;
   let res: Response;
   let text: string;
@@ -137,14 +153,33 @@ export async function pullFrom(
   } catch {
     throw new Error("federation: the peer's offer was not the expected JSON");
   }
+  // A delta that will not reconstruct is dropped and the REST still land (a live peer's stream
+  // may be partially good — offer.ts holds the divergence note). The drop is deliberate; hiding
+  // it from the report is not (H7). What the count DOES prove is that the same bytes fail the
+  // same way on every pull, so "the next pull heals" is false for this class. What it does NOT
+  // prove is whose fault it is: `fromWire` refuses both a delta whose id does not recompute (the
+  // peer's bytes rotted) and one whose claims `parseClaims` will not read (H5 fails closed on an
+  // unknown key — a peer on a NEWER rhizomatic looks identical from here, and the cure is to
+  // upgrade this puller, not the peer). The report says the count and stops; naming a cause the
+  // catch discarded would be the same overclaim in a new place.
   const deltas: Delta[] = [];
+  let unreconstructable = 0;
   for (const wire of body.deltas ?? []) {
     try {
       deltas.push(fromWire(wire));
     } catch {
-      // A delta that will not reconstruct is dropped here; `federate` counts what it admits.
+      unreconstructable += 1;
     }
   }
   // No explicit admit → federate resolves the local trust policy itself (fresh per call).
-  return local.federate(deltas, opts.admit === undefined ? {} : { admit: opts.admit });
+  const report = await local.federate(
+    deltas,
+    opts.admit === undefined ? {} : { admit: opts.admit },
+  );
+  // `offered` restored to what the peer actually SENT — federate can only count what reached it.
+  return {
+    ...report,
+    offered: report.offered + unreconstructable,
+    unreconstructable,
+  };
 }

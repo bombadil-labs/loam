@@ -1,0 +1,12 @@
+{
+  "body": "FOUND 2026-08-11 by the T139 lane while fixing the server-side instance (PR #383). Same shape, different surface, not in T139's scope: `src/gateway/artifact-page.ts` around lines 156 and 178 bounds two distinct waits with a single budget — the pattern T139 proved is a SPEC-ACCURACY bug rather than a flake.\n\nWHY IT MATTERS THE SAME WAY. A budget that covers both the thing being measured and the machinery that starts it does not measure the thing. On the server this made a legitimate render return a false 500 whenever the host was loaded past ~150 average — the failure blamed the bundle for the box. Whatever the browser-side equivalent is (a slow fetch, a slow parse, a contended tab), the same conflation means the page can report a budget overrun it did not observe. That is the H7 family: a report that can be false.\n\nBEFORE BUILDING, MEASURE. T139's value came from reproducing the failure deliberately and recording the threshold, not from reasoning about the code. Do the same here: find the load or latency at which the shared budget misattributes, and record it in the ticket. If it turns out the two waits are genuinely bounded by the same promise on this surface, that is a valid answer — say so and close the ticket rather than splitting a timer for symmetry.\n\nTHE REPAIR, if measurement earns it: split the clocks, give the start-up wait its own ceiling and its own message (never a timeout message, which would claim the work ran), and put the ceiling in the operator's hands if it bounds anything an anonymous caller can occupy.\n\nCARE, learned from T139's own review: a start-up ceiling that is generous widens the worst-case time one caller can hold a slot. If any slot on this surface is anonymous, that widening is a decision about availability, not a repair — state it in one line in the PR and hand the merge to Myk.\n\nRAILS: two-sided at both levels — a slow start does not report a budget overrun, and a genuine overrun still does.",
+  "edges": [],
+  "id": "T158",
+  "phase": "P0",
+  "rails": [],
+  "scope": [
+    "src/gateway/artifact-page.ts"
+  ],
+  "status": "todo",
+  "title": "The browser-side renderer arms one number on two clocks — `artifact-page.ts` carries T139's defect shape"
+}
