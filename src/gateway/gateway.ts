@@ -1010,7 +1010,11 @@ export class Gateway {
   // The reactor materialization currently backing a registered schema — internal names are
   // generation-qualified, so anything that binds to a materialization by name (the runner's
   // BindingSpecs) resolves through here. An unregistered name passes through unchanged: it may
-  // name a materialization registered outside the gateway, or an orphan that simply waits.
+  // name a materialization registered outside the gateway, or an orphan that simply waits. The
+  // pass-through is a RESOLUTION rule, never a licence — it cannot tell those two apart, so a
+  // caller that would ACT on the result asks `materializationNames()` first and decides for
+  // itself (Runner.attach refuses to install on a name it cannot resolve, rather than watching
+  // one nothing here will ever change).
   // NOTE: the resolution is AS OF NOW — after an evolution, work bound to the superseded
   // generation keeps watching the old shape until it re-attaches.
   materializationFor(name: string): string {
@@ -1022,6 +1026,10 @@ export class Gateway {
   // "will this resolve?" before binding to the pass-through, and cite the alternatives when it
   // does not. Same source as the resolution above, deliberately: a check and its cure that read
   // the registered set through two expressions drift into disagreeing.
+  //
+  // It MIXES the two kinds (H6): a reading's own name and the program's, because a definition may
+  // name either and this answers what resolves. It is not a list of what any door serves — sibling
+  // readings share one materialization, so two names here can resolve to one gather.
   materializationNames(): string[] {
     return [...new Set(this.registered.flatMap(bindableNames))].sort();
   }

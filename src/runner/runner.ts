@@ -272,21 +272,27 @@ export const Runner = {
       onSuperseded: (s) => superseded.push(s),
     })) {
       // The materialization is checked BEFORE the implementation on purpose: a missing fnId is a
-      // fact about THIS runner ("another one may hold it"), while a materialization nothing
+      // fact about THIS runner ("another one may hold it"), while a materialization no schema
       // provides is damage in the store that no runner could honor. Report the damage.
+      //
+      // The claim is SCOPED to what was actually checked. A host may register a materialization
+      // straight onto `gateway.reactor`, and rhizomatic offers no way to enumerate those — so the
+      // sentence says what the gateway can see rather than pronouncing on the whole reactor, and
+      // the refusal is a refusal to guess. Such a host names its own materialization by a plain
+      // name; every gateway-owned one is NUL-qualified (matName), so the two alphabets never meet.
       if (!provided.includes(spec.materialization)) {
         unbound.push({
           name: spec.name,
           materialization: spec.materialization,
           // Read by whoever attached the runner, and they already hold the gateway — so naming
-          // the alternatives tells them nothing they could not read for themselves. It is a cure,
-          // not an oracle.
+          // the registered schemas tells them nothing they could not read for themselves. It is a
+          // cure, not an oracle.
           reason:
-            `no registered schema answers to "${spec.materialization}", so this binding would ` +
-            `watch a name nothing ever changes and compute nothing. ` +
+            `no registered schema provides a materialization named "${spec.materialization}", ` +
+            `so this binding would watch a name the gateway never changes and compute nothing. ` +
             (provided.length === 0
               ? "This store has registered no schema yet — register one, then attach again."
-              : `Name one this store already serves: ${provided.join(", ")}.`),
+              : `Name a schema this store has registered: ${provided.join(", ")}.`),
         });
         continue;
       }

@@ -312,13 +312,27 @@ const byteDoorOf = (
 // store's fixpoint does not serve (a process-local binding shadowing it, a rival body under the
 // same name). The outcome was discarded here, so both doors answered 200 with the name and the
 // entity and said nothing about whether anything now serves it: the H7 shape, the same one the
-// CLI's register carried. `bound` now rides the answer, and `reason` — the proximate cause the
-// fixpoint actually caught, never a guess — rides it when `bound` is false. Only the operator
-// reaches this door, so a reason naming the law in the way is a cure, not an oracle.
+// CLI's `register` and the admin panel's `POST /admin/register` still carry today. `bound` now
+// rides the answer, and `reason` — the proximate cause the fixpoint actually caught, never a
+// guess — rides it when `bound` is false. Only the operator reaches this door, so a reason naming
+// the law in the way is a cure, not an oracle.
+//
+// `bound` is a fact about a LENS, not about a program (H6): `publishRegistration` decides it at
+// (entity, lens), and one program may carry sibling readings of which some bind and some do not.
+// So the answer names the lens it is reporting on. `registered` keeps its original meaning — the
+// program name, what the operator typed under `hyperschema.name` — because callers already read
+// it; the two coincide until a request names its schema, and that is exactly the case where a
+// single name would be reporting on the wrong thing.
 async function performRegistration(
   gateway: Gateway,
   raw: unknown,
-): Promise<{ registered: string; entity: string; bound: boolean; reason?: string | undefined }> {
+): Promise<{
+  registered: string;
+  lens: string;
+  entity: string;
+  bound: boolean;
+  reason?: string | undefined;
+}> {
   const input = parseRegistrationInput(raw);
   const outcome = await gateway.publishRegistration(
     input.hyperschema,
@@ -332,6 +346,7 @@ async function performRegistration(
   );
   const answer = {
     registered: input.hyperschema.name,
+    lens: input.schema.name ?? input.hyperschema.name,
     entity: schemaEntityFor(input.hyperschema, input.entity),
     bound: outcome.bound,
   };

@@ -4,10 +4,12 @@
 //    computed nothing, forever: `materializationFor` falls back to the raw name and attach never
 //    asked whether anything answered to it. The H7 shape at the binding layer.
 // 2. `emit` was gated on "JSON.parse succeeded" rather than "this is an emit strategy", so a
-//    payload that merely parsed installed and failed LATER. Two spellings are railed here because
-//    they fail differently: `null` THROWS inside a later ingest, and `{}` SILENTLY DEGRADES to
-//    append — no error ever, a store writing a shape its definition did not ask for. The silent
-//    one is the dangerous one, and a rail covering only the loud one leaves it open.
+//    payload that merely parsed installed and failed LATER. Both measured spellings are railed
+//    because they fail differently: `null` THROWS inside a later ingest, and `{}` SILENTLY
+//    DEGRADES to append — no error ever, a store writing a shape its definition did not ask for.
+//    The silent one is the dangerous one, so the list also carries the other spellings that reach
+//    it: an empty `keyed`, an empty-string context, a non-string context, and a JSON-quoted
+//    strategy name. A rail covering only the loud one leaves the whole silent class open.
 //
 // Two-sided throughout, at both levels. For each refusal: the bad definition is named with its
 // cure AND a well-formed definition of the same shape still installs and computes; the delta is
@@ -25,7 +27,7 @@
 import { describe, expect, it } from "vitest";
 import type { Claims, DerivedFn, HView, Pointer, Schema } from "@bombadil/rhizomatic";
 import { authorForSeed, parseSchema, signClaims } from "@bombadil/rhizomatic";
-import { bindingDefinitionClaims, Runner } from "../../src/runner/runner.js";
+import { bindingDefinitionClaims, CTX_BINDING, Runner } from "../../src/runner/runner.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER_SEED, SURVEYOR_SEED, observed } from "../spike/garden.js";
@@ -127,6 +129,11 @@ describe("T157/1 — a definition naming a materialization nothing provides refu
     expect(refused!.reason).toContain('"Compost"');
     expect(refused!.reason).toContain("Plant");
     expect(refused!.reason).toMatch(/compute nothing/);
+    // The claim is SCOPED to what was checked — the gateway's registrations, not the whole
+    // reactor, which rhizomatic gives no way to enumerate. A sentence that pronounced on the
+    // reactor would be asserting a fact this code never established.
+    expect(refused!.reason).toMatch(/no registered schema provides/);
+    expect(refused!.reason).not.toMatch(/nothing (in|on) the reactor/);
 
     // Object level: the well-formed sibling of the SAME shape still computes, so the refusal is
     // a refusal and not a blanket. 30 and 34 average to 32.
@@ -188,15 +195,70 @@ describe("T157/1 — a definition naming a materialization nothing provides refu
     expect(runner.unbound).toEqual([]);
     await gateway.close();
   });
+
+  it("the FIVE lists are a partition: every considered binding delta lands in exactly one", async () => {
+    // The four-list identity is a prior ticket's frozen rail, and its fixture has no `unbound`
+    // definition — so the fifth list is documented in the interface and measured nowhere. Here
+    // the store holds one of each kind, and one name is defined TWICE, so the arithmetic cannot
+    // pass on a fixture where names and deltas happen to agree.
+    const gateway = await plantStore();
+    const oldGood = signClaims(
+      bindingDefinitionClaims({ ...SPEC, fnId: "fn:stale" }, RUNNER, 1),
+      RUNNER_SEED,
+    ); // superseded
+    const good = signClaims(bindingDefinitionClaims(SPEC, RUNNER, 9), RUNNER_SEED); // installed
+    const orphan = signClaims(
+      bindingDefinitionClaims({ ...SPEC, name: "binding:orphan", fnId: "fn:nobody" }, RUNNER, 2),
+      RUNNER_SEED,
+    ); // skipped
+    const lost = signClaims(
+      bindingDefinitionClaims(
+        { ...SPEC, name: "binding:lost", materialization: "Compost" },
+        RUNNER,
+        3,
+      ),
+      RUNNER_SEED,
+    ); // unbound
+    const broken = signClaims(withEmit("binding:broken", "{}", 4), RUNNER_SEED); // malformed
+    await gateway.append([oldGood, good, orphan, lost, broken]);
+
+    const runner = attach(gateway);
+    expect(runner.installed).toEqual(["binding:avgHeight"]);
+    expect(runner.skipped).toEqual(["binding:orphan"]);
+    expect(runner.unbound.map((u) => u.name)).toEqual(["binding:lost"]);
+    expect(runner.superseded).toEqual([{ deltaId: oldGood.id, name: "binding:avgHeight" }]);
+    expect(runner.malformed.map((m) => m.deltaId)).toEqual([broken.id]);
+
+    const considered = [...gateway.reactor.snapshot()].filter((d) =>
+      d.claims.pointers.some(
+        (p) => p.target.kind === "entity" && p.target.entity.context === CTX_BINDING,
+      ),
+    );
+    expect(considered).toHaveLength(5); // five deltas over four names
+    expect(
+      runner.installed.length +
+        runner.skipped.length +
+        runner.unbound.length +
+        runner.superseded.length +
+        runner.malformed.length,
+    ).toBe(considered.length);
+    await gateway.close();
+  });
 });
 
 describe("T157/2 — an `emit` that merely parses refuses at install", () => {
-  // The two MEASURED spellings, plus the third road to the same silent degradation. Written by
-  // hand rather than generated, so narrowing the code cannot narrow the list.
+  // The two MEASURED spellings, plus three more roads to the same silent degradation. Written by
+  // hand rather than generated, so narrowing the code cannot narrow the list. Every entry after
+  // the first is the SILENT class: a key that can never match a pointer keys every emission as
+  // "", and "" appends (rhizomatic's derivation.ts). They are cheap to add and each one is a
+  // spelling an operator could plausibly type.
   const REFUSED: readonly [string, string][] = [
     ["null", "the one that threw inside a later ingest"],
     ["{}", "the one that silently degraded to append"],
     ['{"keyed":[]}', "append under a keyed spelling: no context can ever key an emission"],
+    ['{"keyed":[""]}', "an empty context name matches no pointer, so every emission keys as empty"],
+    ['{"keyed":[7]}', "a context that is not a string can never equal a pointer's context"],
+    ['"append"', "the strategy name JSON-quoted: a parsed string is not one of the two bare names"],
   ];
 
   it.each(REFUSED)("refuses emit: %s — %s", async (emit) => {
