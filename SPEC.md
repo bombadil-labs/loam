@@ -61,7 +61,7 @@ name begins with that number.
 | §29 | [Two-phase erasure — slating, the cut, and the graveyard](spec/29-slating-and-graveyards.md) |
 | §31 | [The mount table — which world answers at a name, asked per request](spec/31-mount-table.md) |
 | §34 | [The board — our status page as a Loam app](spec/34-the-board.md) |
-| §36 | [Users and sessions — credentials at rest](spec/36-users-and-sessions.md) *(phases 1, 2 and 4 of 10 landed; the section grows as later phases land)* |
+| §36 | [Users and sessions — credentials at rest](spec/36-users-and-sessions.md) *(all ten user/session phases of the plan landed — see the Provenance footers; the plan's remaining five are §37)* |
 | §37 | [Connectors — OAuth-based access for MCP clients](spec/37-connectors.md) *(all 15 phases landed — the connector is complete)* |
 | §39 | [A connection binds to a container — the inbox model](spec/39-connection-container.md) |
 | §40 | [The admin page — a user's containers, through the browser](spec/40-the-admin-page.md) |
@@ -75,7 +75,7 @@ Provenance footer; §21.7's coexistence design is accepted with its implementati
 **§24** (quarantine) has its full design decided ([#115](https://github.com/bombadil-labs/loam/pull/115))
 with slice 1 and promote-outputs built ([#109](https://github.com/bombadil-labs/loam/pull/109),
 [#111](https://github.com/bombadil-labs/loam/pull/111)); later slices are queued in
-`.adlc/tickets.json`. **§27** (containers) and **§28** (container trust) are **design-stage drafts** —
+`.adlc/tickets/`. **§27** (containers) and **§28** (container trust) are **design-stage drafts** —
 the decided layer is recorded, implementation queued. §28 collects the residual §7 has carried since
 step 13 and generalizes §8's trust from a store-wide scalar to a property of every container; read it
 before §27's trust knob, which it re-founds. A reserved number lands here as its own `spec/NN-*.md`
