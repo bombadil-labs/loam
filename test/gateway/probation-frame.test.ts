@@ -221,6 +221,34 @@ describe("T35 §24.7 — the frame, and the sentence it may never say", () => {
     await c.drop();
   });
 
+  it("a container name is escaped into the banner, never injected as markup", async () => {
+    // The name reaches the frame from a DECLARATION, and a declaration is content — a store that
+    // federated one in, or an operator who pasted one, must not thereby author markup on a page the
+    // renderer door composes. (`hollow-test` found this uncovered: the escape survived mutation.)
+    const { gw } = await primary();
+    const hostile = 'container:<script>alert("x")</script>&';
+    await gw.append([
+      signClaims(
+        containerClaims({ container: hostile, trust: "untrusted", posture: "separate" }, OP, 9_500),
+        OP_SEED,
+      ),
+    ]);
+    const c = await gw.openContainer({ name: hostile });
+    await c.gateway!.publishRenderer({
+      route: "hostile",
+      schema: "Plant",
+      consumes: ["message"],
+      bundle: APP,
+    });
+    const html = bodyOf(await c.gateway!.serveRoute("hostile", FERN, "full"));
+    expect(html).toContain("On probation");
+    expect(html).not.toContain("<script>"); // no tag the name spelled reaches the document
+    expect(html).toContain("&lt;script&gt;");
+    expect(html).toContain("&amp;"); // and the ampersand is escaped, not left to start an entity
+    expect(html).toContain(`name=${encodeURIComponent(hostile)}`); // the href carries it encoded
+    await c.drop();
+  });
+
   it("a store that is not a quarantine frames nothing — canonical reads are untouched", async () => {
     const { gw } = await primary();
     const mine = bodyOf(await gw.serveRoute("mine", FERN, "full"));
