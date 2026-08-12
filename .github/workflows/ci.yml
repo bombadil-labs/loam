@@ -35,7 +35,7 @@ jobs:
               Add-MpPreference -ExclusionPath $p -ErrorAction Stop
               Write-Host "excluded $p from Defender's real-time scan"
             } catch {
-              Write-Warning "could not exclude $p from Defender ($($_.Exception.Message)) — the suite will pay the per-file scan tax on this runner"
+              Write-Warning "could not exclude $p from Defender ($($_.Exception.Message)); the suite pays the per-file scan tax on this runner"
             }
           }
           exit 0
