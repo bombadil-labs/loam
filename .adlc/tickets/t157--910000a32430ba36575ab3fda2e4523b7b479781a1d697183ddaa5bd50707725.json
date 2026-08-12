@@ -2,12 +2,17 @@
   "body": "FOUND 2026-08-11 by an independent lens reading for T60 (PR #376), which fixed the ACCOUNTING of dropped bindings and deliberately left these two alone: they are not about counting, they are about admission. Both are the same shape — install says yes to a definition it can never honor, and the failure arrives much later wearing a different face.\n\n1. A DEFINITION NAMING A MATERIALIZATION NO SCHEMA PROVIDES IS REPORTED `installed`, AND THEN COMPUTES NOTHING FOREVER. `materializationFor` falls back to the raw name, and `host.install` never validates that anything answers to it. The operator reads `installed` and waits for a view that will never appear. This is the H7 shape at the binding layer: a success report whose visible effect has not happened and never will.\n\n2. `emit` IS GATED ON \"JSON.parse SUCCEEDED\", NOT ON \"THIS IS AN EMIT STRATEGY\". Measured consequences: `emit: \"null\"` installs and then THROWS inside a later ingest — the error surfaces at write time, far from the definition that caused it. `emit: \"{}\"` installs and SILENTLY DEGRADES to append semantics, which is worse: no error ever, and a store quietly writing a different shape than its definition asked for.\n\nTHE REPAIR, one principle under both: validate at INSTALL what install is claiming. A materialization name that nothing provides refuses at install, naming the name and what is available. An `emit` payload that parses but is not an emit strategy refuses at install, naming which strategy shapes are admissible. Neither refusal may become an oracle — say what is wrong with the DEFINITION, never enumerate the store's contents to a caller who cannot already read them.\n\nRAILS, two-sided per item: the bad definition refuses at install with its cure named, AND a well-formed definition of the same shape still installs and computes. For item 2, rail both measured spellings (`null` and `{}`) — they fail differently, and a rail that only covers the throwing one leaves the silent-degradation path open, which is the more dangerous of the two.\n\nWHO MERGES: these make a report more honest and refuse earlier at a surface that already refuses; ordinary bar. But state in the PR, in one line, what now refuses at install that used to install — that is the sentence a reader needs.",
   "edges": [],
   "id": "T157",
-  "phase": "P0",
-  "rails": [],
-  "scope": [
-    "src/gateway/lifecycle.ts",
-    "src/gateway/registration.ts"
+  "phase": "P5",
+  "rails": [
+    "test/runner/install-validation.test.ts",
+    "test/server/register-outcome.test.ts"
   ],
-  "status": "todo",
+  "scope": [
+    "src/runner/runner.ts",
+    "src/gateway/gateway.ts",
+    "src/gateway/lifecycle.ts",
+    "src/server/http.ts"
+  ],
+  "status": "in_progress",
   "title": "Binding install accepts what it cannot honor — a named materialization nobody provides, and an `emit` that is merely parseable"
 }
