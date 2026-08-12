@@ -19,7 +19,7 @@
 // source of truth for the door and the lenses.
 
 import type { Claims, Reactor } from "@bombadil/rhizomatic";
-import { lawfulNegated, lawfulSnapshot } from "./registration.js";
+import { lawfulDeltasAt, lawfulNegated } from "./registration.js";
 
 export const TRUST_ENTITY = "loam:trust";
 export const CTX_TRUST = "loam.trust";
@@ -117,14 +117,8 @@ export function readTrustPolicyAt(
   const negated = lawfulNegated(reactor, operator);
   const roster = new Set<string>();
   let latest: { mode: TrustMode; timestamp: number; id: string } | undefined;
-  for (const delta of lawfulSnapshot(reactor, operator)) {
-    const declares = delta.claims.pointers.some(
-      (p) =>
-        p.target.kind === "entity" &&
-        p.target.entity.id === subject &&
-        p.target.entity.context === CTX_TRUST,
-    );
-    if (!declares || negated(delta.id)) continue;
+  for (const delta of lawfulDeltasAt(reactor, { entity: subject, context: CTX_TRUST }, operator)) {
+    if (negated(delta.id)) continue;
 
     let mode: string | undefined;
     for (const p of delta.claims.pointers) {
