@@ -42,7 +42,7 @@ export {
   publicDefect,
   readPublicSchemas,
 } from "./gateway/public.js";
-export { pullFrom, type PullOptions } from "./federation/pull.js";
+export { pullFrom, type PullOptions, type PullReport } from "./federation/pull.js";
 export { exportOffer, parseOffer } from "./federation/offer.js";
 export { toWire, fromWire, type WireDelta } from "./federation/wire.js";
 // The health DOOR is `Gateway.health()` (SPEC §11, T70); `StoreHealth` and its component shapes
@@ -240,7 +240,10 @@ export {
   Runner,
   bindingDefinitionClaims,
   readBindingDefinitions,
+  type BindingDropSinks,
+  type MalformedBinding,
   type RunnerOptions,
+  type SupersededBinding,
 } from "./runner/runner.js";
 export { migrate, MIGRATIONS, type Migration, type MigrationReport } from "./migrate/migrate.js";
 export { run, main, type IO, type RunOptions } from "./cli/cli.js";

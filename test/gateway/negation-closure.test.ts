@@ -28,6 +28,12 @@ import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { PLANT } from "./fixtures.js";
+import {
+  assertClosureDoesNotLeak,
+  assertPreservesSuppression,
+  isPresent,
+  isSuppressed,
+} from "./narrowing.js";
 import { FERN, observed } from "../spike/garden.js";
 
 const OP_SEED = "0e".repeat(32);
@@ -66,14 +72,14 @@ const HEIGHTS = {
   in: "input",
 };
 
-const holds = (gw: Gateway, id: string): boolean =>
-  [...gw.reactor.snapshot()].some((d) => d.id === id);
-
 describe("T38 — the seeding edge carries the negation closure", () => {
   it("a claim retracted in the primary does not read as live in a Term-seeded pool", async () => {
     const gw = await boot();
+    // An older LIVE height beneath the struck one, so the reading below has something to fall back
+    // to: `null` would also be what a pool that resolved nothing returns.
+    const earlier = observed(FERN, "height", 28, 900, OP_SEED);
     const claim = observed(FERN, "height", 30, 1000, OP_SEED);
-    await gw.append([claim]);
+    await gw.append([earlier, claim]);
     const retraction = strike(claim.id, 1100);
     await gw.append([retraction]);
 
@@ -83,9 +89,30 @@ describe("T38 — the seeding edge carries the negation closure", () => {
     expect(members).not.toContain(retraction.id);
 
     const pool = await gw.openQuarantine({ membership: HEIGHTS });
-    // Assert what a READER sees, not merely that a delta crossed: the claim must still be
-    // suppressed inside the pool, exactly as it is in the primary.
-    expect(pool.gateway.reactor.negationsOf(claim.id).length).toBeGreaterThan(0);
+    // The shared H1 rail asks the resolved question — struck at the destination as it was at the
+    // source — and checks the fixture is real before believing the answer.
+    assertPreservesSuppression({
+      what: "the quarantine seeding edge",
+      source: gw,
+      destination: pool.gateway,
+      struckClaim: claim.id,
+    });
+    // The helper accepts EXCLUSION as a correct outcome, because a narrowing operation stays free
+    // to decide what it admits. Here the Term selects the claim, so exclusion is not on the table:
+    // pin the crossing separately, or a pool that seeded nothing would satisfy the rail above.
+    expect(isPresent(pool.gateway, claim.id)).toBe(true);
+    expect(isPresent(pool.gateway, retraction.id)).toBe(true);
+
+    // OBJECT LEVEL, and everything above it is still delta-level structure. `isSuppressed` asks
+    // whether a negation is present; this asks what a reader RESOLVES through the Plant Schema
+    // inside the pool. Two-sided in one reading: the struck height is gone and the older live one
+    // is what survives, so a pool that resolved nothing at all cannot pass.
+    // (`test/gateway/closure-inbound.test.ts` does the same for the `admit` PREDICATE knob; this
+    // is the membership-Term knob, which no other file reads at this level.)
+    pool.gateway.register(PLANT, SCHEMA, [FERN], undefined, ["height"]);
+    const seen = await pool.gateway.query(`{ plant(entity: "${FERN}") { height } }`);
+    expect(seen.errors).toBeUndefined();
+    expect((seen.data as { plant: { height: number | null } }).plant.height).toBe(28);
     await pool.drop();
     await gw.close();
   });
@@ -103,8 +130,14 @@ describe("T38 — the seeding edge carries the negation closure", () => {
     // In the primary the claim is LIVE again. The pool must agree, which requires the closure to
     // have followed TWO links. A one-link closure carries the retraction and stops, leaving the
     // claim wrongly suppressed in the pool — the same class of bug, mirrored.
-    expect(holds(pool.gateway, retraction.id)).toBe(true);
-    expect(holds(pool.gateway, counter.id)).toBe(true);
+    expect(isPresent(pool.gateway, retraction.id)).toBe(true);
+    expect(isPresent(pool.gateway, counter.id)).toBe(true);
+    // Said once more in the shared vocabulary, so the file reads in one voice: the strike is
+    // itself struck inside the pool, which is what makes the claim live there. Note this is the
+    // same fact as the line above and not a second level — `isSuppressed` asks whether a negation
+    // is PRESENT, so it is delta-level too. `assertPreservesSuppression` cannot state the revival
+    // case at all; it asks only that a struck claim never reads live.
+    expect(isSuppressed(pool.gateway, retraction.id)).toBe(true);
     await pool.drop();
     await gw.close();
   });
@@ -119,10 +152,15 @@ describe("T38 — the seeding edge carries the negation closure", () => {
 
     const pool = await gw.openQuarantine({ membership: HEIGHTS });
     // The closure follows negations OF admitted deltas. It must not run the other direction and
-    // pull in a target because something negating it happens to exist.
-    expect(holds(pool.gateway, member.id)).toBe(true);
-    expect(holds(pool.gateway, outsider.id)).toBe(false);
-    expect(holds(pool.gateway, strikesOutsider.id)).toBe(false);
+    // pull in a target because something negating it happens to exist. Two-sided: the admitted
+    // member survives, or a seeding edge that admitted nothing would pass the leak rail.
+    expect(isPresent(pool.gateway, member.id)).toBe(true);
+    assertClosureDoesNotLeak({
+      what: "the quarantine seeding edge",
+      destination: pool.gateway,
+      excludedTarget: outsider.id,
+      itsRetraction: strikesOutsider.id,
+    });
     await pool.drop();
     await gw.close();
   });
@@ -132,12 +170,23 @@ describe("T38 — the seeding edge carries the negation closure", () => {
     const claim = observed(FERN, "height", 30, 1000, OP_SEED);
     await gw.append([claim]);
     const pool = await gw.openQuarantine({ membership: HEIGHTS });
-    expect(pool.gateway.reactor.negationsOf(claim.id).length).toBe(0); // live at seed time
+    expect(isSuppressed(pool.gateway, claim.id)).toBe(false); // live at seed time
+    expect(isPresent(pool.gateway, claim.id)).toBe(true); // ...and really there, not merely absent
 
-    await gw.append([strike(claim.id, 1100)]);
+    const late = strike(claim.id, 1100);
+    await gw.append([late]);
     await pool.reseed();
     // The scope is live; so is what it suppresses.
-    expect(pool.gateway.reactor.negationsOf(claim.id).length).toBeGreaterThan(0);
+    assertPreservesSuppression({
+      what: "the quarantine seeding edge, on reseed",
+      source: gw,
+      destination: pool.gateway,
+      struckClaim: claim.id,
+    });
+    // Again the crossing itself, which the helper tolerates losing: a reseed that emptied the pool
+    // would pass the rail above and fail here.
+    expect(isPresent(pool.gateway, claim.id)).toBe(true);
+    expect(isPresent(pool.gateway, late.id)).toBe(true);
     await pool.drop();
     await gw.close();
   });
@@ -170,7 +219,8 @@ describe("T38 — the offered lens carries it too (the same bug, pointed outward
     );
     const claim = observed(FERN, "height", 30, 1000, OP_SEED);
     await gw.append([claim]);
-    await gw.append([strike(claim.id, 1100)]);
+    const retraction = strike(claim.id, 1100);
+    await gw.append([retraction]);
 
     const offered = gw.offeredDeltas();
     expect(offered.map((d) => d.id)).toContain(claim.id);
@@ -180,7 +230,16 @@ describe("T38 — the offered lens carries it too (the same bug, pointed outward
     // form of the same failure.
     const peer = await boot();
     await peer.federate(offered);
-    expect(peer.reactor.negationsOf(claim.id).length).toBeGreaterThan(0);
+    assertPreservesSuppression({
+      what: "the offered lens",
+      source: gw,
+      destination: peer,
+      struckClaim: claim.id,
+    });
+    // The offer is asserted above to CONTAIN the claim, so the peer must hold both it and the
+    // retraction. Exclusion — which the helper would accept — is not a lawful outcome here.
+    expect(isPresent(peer, claim.id)).toBe(true);
+    expect(isPresent(peer, retraction.id)).toBe(true);
     await peer.close();
     await gw.close();
   });
