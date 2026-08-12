@@ -157,6 +157,7 @@ import {
   subscribeViaImpl,
   watchEntityImpl,
 } from "./reads.js";
+import { listImpl, type ListOptions } from "./listing.js";
 
 export interface AppendReceipt {
   readonly accepted: number;
@@ -472,6 +473,7 @@ export class Gateway {
         this.severEntity(name, entity, field, targets, actorSeed),
       watch: (name, entity) => this.watchEntity(name, entity, door),
       claim: (pointers, actorSeed) => this.claimEntity(pointers, actorSeed),
+      list: (name, opts) => this.list(name, opts),
     };
   }
 
@@ -846,6 +848,15 @@ export class Gateway {
   // QUERY time — this never rewrites the default door reads.
   containerScope(opts: { containers?: readonly string[] } = {}): Delta[] {
     return containerScopeImpl(this, opts);
+  }
+
+  // The listing door (ticket T110): one page of the distinct entities holding evidence a lens's
+  // hyperschema reads, each resolved through that lens. The maintained candidate set is a shared
+  // CONTAINER backing the hyperschema (declared here when absent, refreshed when a sibling lens
+  // widens the context union), read through the container scope — governed, negation-closed,
+  // erasure-reachable. AUTHED surface only; the public projection never builds a listing field.
+  async list(name: string, opts: ListOptions = {}): Promise<ResolvedNode[]> {
+    return listImpl(this, name, opts);
   }
 
   // Bind a connection to a container (SPEC §39): spawn a per-connection inbox pool and provision its

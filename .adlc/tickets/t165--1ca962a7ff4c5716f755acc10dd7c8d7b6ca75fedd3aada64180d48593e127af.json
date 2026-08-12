@@ -1,0 +1,14 @@
+{
+  "body": "T110's GraphQL generator derives a listing field by appending one character: `${fieldName}s`. That silently reserves the plural of EVERY lens name in every store, and nothing was migrated. Found by T110's P5 prosecutor.\n\nTHREE FACES OF THE SAME DECISION.\n\n1. A STORE ALREADY SERVING BOTH NAMES BREAKS. A store with a lens `Item` and a lens `Items` was well-formed before T110 and is refused after it: `gql.ts` throws `its listing field \"items\" collides with an earlier schema`. That is a breaking on-wire change to what a store can serve, and CLAUDE.md's standing rule is that every breaking change ships a migration in the same PR. T110 shipped none. A migration here is not a delta rewrite — no bytes changed — but an operator holding such a store needs a named upgrade path, and today they get a build failure with no instruction in it.\n\n2. THE THROW IS SWALLOWED FOR A STORE-ORIGIN REGISTRATION. `lifecycle.ts` catches a candidate's bind failure by design (one bad registration must not take a boot down). So the collision refuses LOUDLY for a manual `register()` and SILENTLY for a published one: a lens simply stops appearing on the surface, with the reason recorded only in the per-gateway why-it-failed map. Which of the colliding pair survives depends on replay order, which is not a rule anyone chose.\n\n3. ENGLISH IS NOT A NAMING SCHEME. `${name}s` is wrong for `Person`, `Datum`, `Series`, and any non-English name. A collision-free derivation (a distinct field shape, or a declared plural on the registration) would make faces 1 and 2 disappear rather than manage them.\n\nT110's rail `a lens whose name IS another lens's listing field refuses at build, both orders` pins today's behaviour and must be revisited, not preserved, by whatever this decides.\n\nMYK'S CALL on the derivation — this changes what the system PROMISES about the shape of the surface, so it is a design-stage decision, not a repair.\n\nDONE WHEN: the listing field's name cannot collide with a lens name by construction, or the collision refuses in one voice on every registration path and ships its migration.",
+  "edges": [],
+  "id": "T165",
+  "phase": "P0",
+  "scope": [
+    "src/gateway/gql.ts",
+    "src/gateway/lifecycle.ts",
+    "src/migrate/",
+    "test/gateway/"
+  ],
+  "status": "todo",
+  "title": "The listing field reserves the plural of every lens name, with no §20 migration and a swallowed collision"
+}
