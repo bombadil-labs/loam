@@ -27,6 +27,14 @@ import type { RendererBinding } from "./renderers.js";
 // at pack time rather than emitting a page that can never connect to anything.
 export const MAX_CONNECTOR_NAME = 128;
 
+// The ceiling on the page's SPAWN wait: worker thread start plus the blob: module import, measured from
+// `new Worker` to the realm's `live` signal. Sized to a contended device rather than to a bundle —
+// measured spawn on a 16-core box was 4 ms idle, 91 ms at load ~150 and 803 ms worst at load ~550, so
+// 10 s is roughly twelve times the worst observed rather than a guess. It is a CONSTANT and not an
+// operator option, unlike the server host's: the server's spawn ceiling bounds how long one anonymous
+// caller may hold a `maxPublicRenders` slot, and this clock holds nothing but the viewer's own tab.
+export const ARTIFACT_SPAWN_TIMEOUT_MS = 10_000;
+
 // A GraphQL-legal name from a store-native one — the SAME mangling `legal()` runs in gql.ts, which is
 // where the store-side truth lives. It is duplicated here because the shell is a standalone page that
 // cannot import from the gateway, and `test/gateway/artifact-reads.test.ts` pins the two to agree.
@@ -80,6 +88,7 @@ export interface ArtifactCoordinates {
   readonly storeAddress: string;
   readonly refetchInterval: number;
   readonly renderTimeoutMs: number;
+  readonly renderSpawnTimeoutMs: number;
 }
 
 const escapeHtml = (s: string): string =>
@@ -130,8 +139,15 @@ function shellSource(): string {
   // One render, one realm. The bundle rides VERBATIM into a worker spawned for this render and
   // terminated after it — which is both the time bound and the whole answer to what a compartment may
   // RETAIN: a bundle handed a fresh realm per render cannot hold a copy across renders, because there is
-  // nothing for it to hold the copy in. TWO CLOCKS: a spawn bound armed at construction, re-armed as a
-  // fresh render bound when the realm signals it is live.
+  // nothing for it to hold the copy in.
+  //
+  // TWO CLOCKS, AND TWO NUMBERS. Construction arms a SPAWN bound; the live signal — the moment the
+  // bundle can actually run — re-arms a fresh RENDER bound. Arming both from C.renderTimeoutMs measured
+  // the viewer's DEVICE against a budget written for the bundle: a worker thread start plus a blob:
+  // module import is machinery the bundle has no part in, and on a contended tab it alone can outrun
+  // the render budget. The page then painted "the renderer timed out" for a bundle that never executed
+  // a line. So the spawn window reads C.renderSpawnTimeoutMs and reports "could not start"; only the
+  // render window reads the operator's render budget. Both windows stay hard; no path is unbounded.
   // Every render carries an EPOCH, and a render whose epoch has passed paints nothing. Without this a
   // real spawn plus a blob: module import is tens of milliseconds during which the world can move: root
   // answer A arrives, worker A spawns, an erasure lands and clears the mount, then worker A posts and
@@ -153,7 +169,7 @@ function shellSource(): string {
     live += 1;
     var epoch = live;
     var settled = false;
-    var timer = setTimeout(function () { done({ kind: "timeout" }); }, C.renderTimeoutMs);
+    var timer = setTimeout(function () { done({ kind: "noStart" }); }, C.renderSpawnTimeoutMs);
     function done(msg) {
       if (settled) return;
       settled = true;
@@ -163,11 +179,14 @@ function shellSource(): string {
       // superseded bundle cannot keep running either.
       if (stale(epoch)) return;
       if (msg.kind === "ok") { mount.innerHTML = msg.html; return; }
-      mount.textContent = msg.kind === "timeout"
-        ? "the renderer timed out"
-        : msg.kind === "notHtml"
-          ? "the renderer did not return HTML"
-          : "the renderer faulted";
+      // A spawn overrun gets its OWN sentence. Saying "timed out" would claim the renderer ran.
+      mount.textContent = msg.kind === "noStart"
+        ? "the renderer could not start"
+        : msg.kind === "timeout"
+          ? "the renderer timed out"
+          : msg.kind === "notHtml"
+            ? "the renderer did not return HTML"
+            : "the renderer faulted";
     }
     worker.addEventListener("message", function (ev) {
       var msg = ev.data || {};

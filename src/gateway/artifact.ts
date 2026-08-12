@@ -29,7 +29,7 @@
 
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import type { Claims, Reactor } from "@bombadil/rhizomatic";
-import { artifactPage } from "./artifact-page.js";
+import { ARTIFACT_SPAWN_TIMEOUT_MS, artifactPage } from "./artifact-page.js";
 import { HOST_GLOBALS, scanHostReferences } from "./artifact-scan.js";
 import type { Gateway, RequestContext } from "./gateway.js";
 import { RENDER_TIMEOUT_MS } from "./render-worker.js";
@@ -67,6 +67,7 @@ export interface ArtifactCoordinates {
   readonly storeAddress: string;
   readonly refetchInterval: number;
   readonly renderTimeoutMs: number;
+  readonly renderSpawnTimeoutMs: number;
 }
 
 // The polling floor the runtime clamps a watch to (~30 s). Named rather than guessed, so the emitted
@@ -409,6 +410,7 @@ export function packArtifactImpl(
     storeAddress: opts.storeAddress ?? "your Loam store's /:mount/mcp door",
     refetchInterval: Math.max(opts.refetchInterval ?? DEFAULT_REFETCH_MS, DEFAULT_REFETCH_MS),
     renderTimeoutMs: gw.options.renderTimeoutMs ?? RENDER_TIMEOUT_MS,
+    renderSpawnTimeoutMs: ARTIFACT_SPAWN_TIMEOUT_MS,
   };
   return {
     page: artifactPage({ coordinates, binding, capability }),
