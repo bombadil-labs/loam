@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { run } from "../../src/cli/cli.js";
 
-vi.setConfig({ testTimeout: 15000 }); // real listening servers
+vi.setConfig({ testTimeout: 20_000 }); // real listening servers
 
 let home: string;
 const out: string[] = [];

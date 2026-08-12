@@ -26,7 +26,7 @@ import { FERN, GARDENER_SEED, SURVEYOR_SEED, observed } from "../spike/garden.js
 // many-ids purge sweep writes ~100 of them, which blows vitest's 5s default on a loaded CI
 // runner. The same generous hang-guard the other heavy suites carry; it only ever matters when
 // something is genuinely stuck.
-vi.setConfig({ testTimeout: 15000 });
+vi.setConfig({ testTimeout: 20_000 });
 
 const signed = observed(FERN, "height", 30, 1000, GARDENER_SEED);
 const other = observed(FERN, "height", 34, 2000, SURVEYOR_SEED);

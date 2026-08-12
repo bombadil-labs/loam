@@ -34,7 +34,7 @@ const secondLoopbackIsLocal = await new Promise<boolean>((resolve) => {
 // nothing else, so the title is the whole message a reader gets.
 const NEEDS = "needs 127.0.0.2 local — Linux only";
 
-vi.setConfig({ testTimeout: 15000 }); // real listening servers
+vi.setConfig({ testTimeout: 20_000 }); // real listening servers
 
 let home: string;
 const out: string[] = [];

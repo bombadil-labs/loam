@@ -13,7 +13,7 @@ import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER_SEED, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
 
-vi.setConfig({ testTimeout: 15000 });
+vi.setConfig({ testTimeout: 20_000 });
 
 const OP_SEED = "0e".repeat(32);
 const target = observed(FERN, "height", 30, 1000, OP_SEED);

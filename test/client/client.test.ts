@@ -10,7 +10,7 @@ import {
   verifyDelta,
 } from "@bombadil/rhizomatic";
 
-vi.setConfig({ testTimeout: 15000 });
+vi.setConfig({ testTimeout: 20_000 });
 import { loamClient, mintSeed } from "../../src/client/index.js";
 import { fromWire } from "../../src/federation/wire.js";
 import { grantClaims } from "../../src/gateway/accounts.js";

@@ -45,7 +45,7 @@ import {
   retraction,
 } from "./narrowing.js";
 
-vi.setConfig({ testTimeout: 15000 });
+vi.setConfig({ testTimeout: 20_000 });
 
 const OP_SEED = "0e".repeat(32);
 const OP = authorForSeed(OP_SEED);

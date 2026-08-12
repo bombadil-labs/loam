@@ -28,7 +28,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 
-vi.setConfig({ testTimeout: 15000 }); // real sqlite homes and a real HTTP server
+vi.setConfig({ testTimeout: 20_000 }); // real sqlite homes and a real HTTP server
 
 const WARNING = /will not see what just landed until it restarts/;
 
