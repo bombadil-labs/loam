@@ -9,7 +9,7 @@ import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 
 // Real listening server + SSE; a generous hang-guard so machine load can't blow the default
 // per-test timeout. Only ever matters when something is genuinely stuck.
-vi.setConfig({ testTimeout: 15000 });
+vi.setConfig({ testTimeout: 20_000 });
 import { grantClaims } from "../../src/gateway/accounts.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";

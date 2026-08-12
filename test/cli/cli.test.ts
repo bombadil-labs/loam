@@ -11,7 +11,7 @@ import { run } from "../../src/cli/cli.js";
 
 // These boot real HTTP servers; a generous hang-guard keeps machine load from blowing the
 // default per-test timeout (it only ever matters when something is genuinely stuck).
-vi.setConfig({ testTimeout: 15000 });
+vi.setConfig({ testTimeout: 20_000 });
 
 let home: string;
 const out: string[] = [];

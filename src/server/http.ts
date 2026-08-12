@@ -307,12 +307,36 @@ const byteDoorOf = (
 // { hyperschema: { name, alg?, body }, schema, roots, entity?, mutations? } (see
 // parseRegistrationInput). Anything malformed throws; the caller answers 400 with the reason.
 // Operator gating happens BEFORE this is called: shaping the store is constitutional.
+//
+// A publish can PERSIST without BINDING — valid law, written to append-only ground, that this
+// store's fixpoint does not serve (a process-local binding shadowing it, a rival body under the
+// same name). The outcome was discarded here, so both doors answered 200 with the name and the
+// entity and said nothing about whether anything now serves it: the H7 shape, the same one the
+// CLI's `register` and the admin panel's `POST /admin/register` still carry today. `bound` now
+// rides the answer, and `reason` — the proximate cause the fixpoint actually caught, never a
+// guess — rides it when `bound` is false. Only the operator reaches this door, so a reason naming
+// the law in the way is a cure, not an oracle.
+//
+// `bound` is a fact about a LENS, not about a program (H6): `publishRegistration` decides it at
+// (entity, lens), and one program may carry sibling readings of which some bind and some do not.
+// So the answer names the lens it is reporting on, READ FROM THE OUTCOME rather than re-derived
+// here — a second derivation beside the deciding one is free to drift, and a rail over a request
+// this door composed itself could not see the drift. `registered` keeps its original meaning: the
+// program name, what the operator typed under `hyperschema.name`, because callers already read
+// it. The two coincide until a request names its schema, and that is exactly the case where a
+// single name would be reporting on the wrong thing.
 async function performRegistration(
   gateway: Gateway,
   raw: unknown,
-): Promise<{ registered: string; entity: string }> {
+): Promise<{
+  registered: string;
+  lens: string;
+  entity: string;
+  bound: boolean;
+  reason?: string | undefined;
+}> {
   const input = parseRegistrationInput(raw);
-  await gateway.publishRegistration(
+  const outcome = await gateway.publishRegistration(
     input.hyperschema,
     input.schema,
     input.roots,
@@ -322,10 +346,16 @@ async function performRegistration(
     input.writable,
     input.resolvers,
   );
-  return {
+  const answer = {
     registered: input.hyperschema.name,
+    lens: outcome.lens,
     entity: schemaEntityFor(input.hyperschema, input.entity),
+    bound: outcome.bound,
   };
+  // The outcome pairs the two by construction (lifecycle.ts): a bound publish carries no reason,
+  // an unbound one always carries one. So the answer turns on `bound` alone — a second condition
+  // beside it would be free to disagree with it, and could only ever disagree by staying silent.
+  return outcome.bound ? answer : { ...answer, reason: outcome.reason };
 }
 
 export async function serve(options: ServeOptions): Promise<ServerHandle> {

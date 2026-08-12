@@ -244,6 +244,7 @@ export {
   type MalformedBinding,
   type RunnerOptions,
   type SupersededBinding,
+  type UnboundBinding,
 } from "./runner/runner.js";
 export { migrate, MIGRATIONS, type Migration, type MigrationReport } from "./migrate/migrate.js";
 export { run, main, type IO, type RunOptions } from "./cli/cli.js";

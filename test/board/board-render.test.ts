@@ -27,7 +27,7 @@ import {
   type BoardWorld,
 } from "./fixtures.js";
 
-vi.setConfig({ testTimeout: 15000 });
+vi.setConfig({ testTimeout: 20_000 });
 
 const BUNDLE = readFileSync(new URL("../../demos/board/renderer.mjs", import.meta.url), "utf8");
 

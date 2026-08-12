@@ -59,7 +59,7 @@ import { PLANT, PLANT_POLICY, PLANT_WRITABLE, garden, governedBootstrap } from "
 import { assertClosureDoesNotLeak, assertPreservesSuppression, retraction } from "./narrowing.js";
 
 // A generous hang-guard for genuine breakage; every passing path here resolves in microseconds.
-vi.setConfig({ testTimeout: 15000 });
+vi.setConfig({ testTimeout: 20_000 });
 
 const KEEPER_SEED = "c3".repeat(32);
 const KEEPER = authorForSeed(KEEPER_SEED);

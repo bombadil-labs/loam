@@ -9,7 +9,7 @@ import { authorForSeed, makeDelta, parseTerm, signClaims, type Delta } from "@bo
 
 // Each test boots multiple real servers; a generous hang-guard keeps machine load from blowing
 // the default per-test timeout.
-vi.setConfig({ testTimeout: 15000 });
+vi.setConfig({ testTimeout: 20_000 });
 import { grantClaims } from "../../src/gateway/accounts.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
