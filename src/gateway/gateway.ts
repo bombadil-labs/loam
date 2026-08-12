@@ -235,6 +235,12 @@ export interface Bound extends Registration {
   readonly origin: "manual" | "store";
 }
 
+// The two names a registration answers to when something binds to it BY NAME: the reading it is,
+// and the program it is over. They coincide until a sibling reading exists (H6), and a binding
+// definition may legitimately name either — data outlives the distinction. Kept as one function
+// because both `materializationFor` and `materializationNames` read it.
+const bindableNames = (r: Bound): string[] => [lensOf(r), programOf(r)];
+
 // ── The internals seam (ticket T19) ─────────────────────────────────────────────────────────────
 // The Gateway's behaviors are decomposed into concern modules (erase.ts, quarantine-pool.ts,
 // adopt.ts, …): each public method stays on the class with its exact signature as a THIN DELEGATE,
@@ -1004,12 +1010,28 @@ export class Gateway {
   // The reactor materialization currently backing a registered schema — internal names are
   // generation-qualified, so anything that binds to a materialization by name (the runner's
   // BindingSpecs) resolves through here. An unregistered name passes through unchanged: it may
-  // name a materialization registered outside the gateway, or an orphan that simply waits.
+  // name a materialization registered outside the gateway, or an orphan that simply waits. The
+  // pass-through is a RESOLUTION rule, never a licence — it cannot tell those two apart, so a
+  // caller that would ACT on the result asks `materializationNames()` first and decides for
+  // itself (Runner.attach refuses to install on a name it cannot resolve, rather than watching
+  // one nothing here will ever change).
   // NOTE: the resolution is AS OF NOW — after an evolution, work bound to the superseded
   // generation keeps watching the old shape until it re-attaches.
   materializationFor(name: string): string {
-    const hit = this.registered.find((r) => lensOf(r) === name || programOf(r) === name);
+    const hit = this.registered.find((r) => bindableNames(r).includes(name));
     return hit !== undefined ? this.matName(hit.hyperschema.name) : name;
+  }
+
+  // Every name `materializationFor` can RESOLVE, deduplicated and ordered — so a caller can ask
+  // "will this resolve?" before binding to the pass-through, and cite the alternatives when it
+  // does not. Same source as the resolution above, deliberately: a check and its cure that read
+  // the registered set through two expressions drift into disagreeing.
+  //
+  // It MIXES the two kinds (H6): a reading's own name and the program's, because a definition may
+  // name either and this answers what resolves. It is not a list of what any door serves — sibling
+  // readings share one materialization, so two names here can resolve to one gather.
+  materializationNames(): string[] {
+    return [...new Set(this.registered.flatMap(bindableNames))].sort();
   }
 
   /** @internal — T19 seam (erase.ts, adopt.ts) */

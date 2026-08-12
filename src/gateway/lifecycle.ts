@@ -146,6 +146,10 @@ function assertReadingsNamed(schema: HyperSchema): void {
 // Hence: reaching a return means `persisted` — always. `bound` says whether the surface moved.
 export interface PublishOutcome {
   readonly persisted: true;
+  /** The LENS this publish is about (H6): `schema.name ?? hyperschema.name`, decided here so no
+   *  caller has to re-derive it. `bound` and `reason` are facts about THIS reading, never about
+   *  the program — sibling readings over one program bind independently. */
+  readonly lens: string;
   readonly bound: boolean;
   /** When `bound` is false: the proximate cause the fixpoint actually caught. */
   readonly reason?: string;
@@ -708,7 +712,7 @@ export async function publishRegistrationImpl(
   const bound = gw.registered.some(
     (r) => r.origin === "store" && r.entity === schemaEntity && lensOf(r) === lensName,
   );
-  if (bound) return { persisted: true, bound: true };
+  if (bound) return { persisted: true, lens: lensName, bound: true };
   // Valid law, written, not serving HERE. Reported, never thrown: the deltas exist and would bind on
   // a peer that pulls them, or on a later boot without whatever shadows them. Throwing would call a
   // successful write a failure; swallowing it silently would hide a surface the caller expects. The
@@ -716,6 +720,7 @@ export async function publishRegistrationImpl(
   // body, a GraphQL field already answered), not a guess.
   return {
     persisted: true,
+    lens: lensName,
     bound: false,
     reason:
       lastBindFailure(gw, failureKey(schemaEntity, lensName)) ??

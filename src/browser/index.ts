@@ -81,6 +81,7 @@ export {
   type MalformedBinding,
   type RunnerOptions,
   type SupersededBinding,
+  type UnboundBinding,
 } from "../runner/runner.js";
 
 // Key custody, page-side: mint where the seed will live; show the author around instead.
