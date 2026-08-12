@@ -162,6 +162,13 @@ export function readPenSeed(home: string, name: string): UserSeedRead {
   }
 }
 
+/**
+ * What a PROVISIONED seed is, in one place, so `loam serve` and `loam pen create` cannot disagree
+ * about it: a create that accepted what a boot rejects would mint a pen dead on arrival. A refusal
+ * built on this test must never quote the file — a string that fails it may still be a key.
+ */
+export const isSeedHex = (seed: string): boolean => /^[0-9a-f]{64}$/.test(seed);
+
 export interface PenSeeds {
   readonly pens: Readonly<Record<string, string>>; // name → seed, the GatewayOptions.pens shape
   readonly faults: readonly string[]; // one line per file that exists and could not provision
@@ -179,8 +186,20 @@ export function readPenSeeds(home: string): PenSeeds {
   let entries: string[];
   try {
     entries = readdirSync(home);
-  } catch {
-    return { pens, faults }; // no home directory yet → nothing is provisioned, nothing to report
+  } catch (err) {
+    // ONLY "there is no home yet" means "nothing is provisioned" (H9). Every other refusal — a
+    // directory this process may not list, a bad device, a path that is not a directory — leaves
+    // the pens UNKNOWN, and an unknown set reported as an empty one boots a server whose every
+    // form POST answers 403 with nothing on the log to explain it.
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { pens, faults };
+    return {
+      pens,
+      faults: [
+        `no pen could be provisioned — ${home} could not be listed ` +
+          `(${err instanceof Error ? err.message : String(err)}), so every pen.<name>.seed it ` +
+          `holds is invisible to this serve`,
+      ],
+    };
   }
   for (const entry of entries) {
     const match = /^pen\.(.+)\.seed$/.exec(entry);
@@ -194,7 +213,7 @@ export function readPenSeeds(home: string): PenSeeds {
       continue;
     }
     if (read.kind === "absent") continue; // raced away between readdir and read; absent is absent
-    if (!/^[0-9a-f]{64}$/.test(read.seed)) {
+    if (!isSeedHex(read.seed)) {
       faults.push(
         `pen "${name}" is not provisioned — ${penSeedPath(home, name)} does not hold a 64-hex seed`,
       );

@@ -30,6 +30,7 @@ import {
   schemaEntityFor,
   type RegistrationInput,
 } from "../gateway/registration.js";
+import { CTX_PEN, penEntity, penRecordClaims } from "../gateway/renderers.js";
 import { serve, type ServerHandle } from "../server/http.js";
 import { revokeConnector } from "../server/oauth.js";
 import { grantFor, readOAuthFile, type OAuthGrant } from "../server/oauth-file.js";
@@ -64,6 +65,7 @@ import {
   archivePath,
   homeDefect,
   initHome,
+  isSeedHex,
   penSeedPath,
   readPenSeed,
   readPenSeeds,
@@ -1395,14 +1397,24 @@ async function cmdUserCreate(
 // not just what a reader resolves. Single-level survival (does an OPERATOR-authored negation target
 // this id), matching the trust the substrate's own `mask: {trust: ...}` already applies when
 // resolving a role or a grant — this file does not re-derive a deeper chain.
-function survivingClaimIds(
+//
+// SPLIT BY SURVIVAL, because "struck" and "never planted" are opposite answers that a surviving-set
+// alone cannot tell apart: one is a standing nobody has retired, the other is a standing somebody
+// DID, and re-planting the second silently un-revokes it.
+interface ClaimStanding {
+  readonly surviving: string[];
+  readonly struck: string[];
+}
+
+function claimIdsBySurvival(
   reactor: Reactor,
   operator: string,
   entity: string,
   context: string,
   matches: (delta: Delta) => boolean,
-): string[] {
-  const out: string[] = [];
+): ClaimStanding {
+  const surviving: string[] = [];
+  const struck: string[] = [];
   for (const id of reactor.byTarget(entity)) {
     const delta = reactor.get(id);
     if (delta === undefined) continue;
@@ -1413,13 +1425,21 @@ function survivingClaimIds(
         p.target.entity.context === context,
     );
     if (!filedHere || !matches(delta)) continue;
-    const struck = reactor
+    const negated = reactor
       .negationsOf(id)
       .some((negId) => reactor.get(negId)?.claims.author === operator);
-    if (!struck) out.push(id);
+    (negated ? struck : surviving).push(id);
   }
-  return out;
+  return { surviving, struck };
 }
+
+const survivingClaimIds = (
+  reactor: Reactor,
+  operator: string,
+  entity: string,
+  context: string,
+  matches: (delta: Delta) => boolean,
+): string[] => claimIdsBySurvival(reactor, operator, entity, context, matches).surviving;
 
 const survivingRoleClaimIds = (
   reactor: Reactor,
@@ -1433,10 +1453,18 @@ const survivingRoleClaimIds = (
     ),
   );
 
-// Every SURVIVING grant this store's own seed authored for `subject` — the CURRENT holder of a
-// name's seed file, never a historical one (the working spec's §36.3.1.7 names that residual).
-const survivingGrantClaimIds = (reactor: Reactor, operator: string, subject: string): string[] =>
-  survivingClaimIds(
+// Every grant this store's own seed authored for `subject` — the CURRENT holder of a name's seed
+// file, never a historical one (the working spec's §36.3.1.7 names that residual) — split by
+// whether the operator has struck it. `verb` narrows to one action: a grant naming the subject is
+// not the same fact as a grant naming the subject FOR WRITE, and asking the loose question of a
+// pen would read an `admin` grant as write standing the door would then refuse.
+const grantStanding = (
+  reactor: Reactor,
+  operator: string,
+  subject: string,
+  verb?: string,
+): ClaimStanding =>
+  claimIdsBySurvival(
     reactor,
     operator,
     STORE_ENTITY,
@@ -1445,8 +1473,39 @@ const survivingGrantClaimIds = (reactor: Reactor, operator: string, subject: str
       delta.claims.author === operator &&
       delta.claims.pointers.some(
         (p) => p.role === "subject" && p.target.kind === "primitive" && p.target.value === subject,
-      ),
+      ) &&
+      (verb === undefined ||
+        delta.claims.pointers.some(
+          (p) => p.role === "verb" && p.target.kind === "primitive" && p.target.value === verb,
+        )),
   );
+
+const survivingGrantClaimIds = (reactor: Reactor, operator: string, subject: string): string[] =>
+  grantStanding(reactor, operator, subject).surviving;
+
+// Which author a named pen signs as, according to the ground, and the record deltas that say so.
+// A record whose author no longer matches the seed file on disk is the whole point: that is a
+// RE-KEY, and the author it names is the standing that must be struck.
+function penRecordsFor(
+  reactor: Reactor,
+  operator: string,
+  name: string,
+): readonly { readonly id: string; readonly author: string }[] {
+  const out: { id: string; author: string }[] = [];
+  for (const id of survivingClaimIds(
+    reactor,
+    operator,
+    penEntity(name),
+    CTX_PEN,
+    (delta) => delta.claims.author === operator,
+  )) {
+    const pointer = reactor.get(id)?.claims.pointers.find((p) => p.role === "author");
+    if (pointer?.target.kind === "primitive" && typeof pointer.target.value === "string") {
+      out.push({ id, author: pointer.target.value });
+    }
+  }
+  return out;
+}
 
 async function cmdUserRole(
   name: string,
@@ -1627,12 +1686,13 @@ async function cmdPen(args: readonly string[], io: IO): Promise<number> {
   const init = initHome(home);
   if (init.created) io.out(`loam: initialized ${home}\n  operator ${init.operator}`);
 
-  // The pen's two keys (§6): the seed file is CUSTODY, the ground's grant is AUTHORIZATION, and
-  // either can exist without the other (a crash between the two writes, a hand-copied file). So
-  // this command asks BOTH halves before it writes anything, and each run converges the pair:
-  // seed absent → mint the file, then plant the grant; seed present without a grant → repair the
-  // grant alone; both present → refuse, because overwriting a live pen's seed would orphan the
-  // grant its author holds.
+  // The pen's THREE facts (§6). The seed file is CUSTODY; the ground's grant is AUTHORIZATION; the
+  // ground's PEN RECORD says which author this NAME is supposed to sign as. Any of them can exist
+  // without the others — a crash between two writes, a hand-copied file, a deleted seed — and the
+  // record is what makes the third case survivable: without it, a replaced key keeps its standing
+  // under an author derivable only from the file that is gone.
+  //
+  // Every outcome is decided from all three BEFORE anything moves, because two of them are refusals.
   const seedRead = readPenSeed(home, name);
   if (seedRead.kind === "unreadable") {
     io.err(
@@ -1641,59 +1701,118 @@ async function cmdPen(args: readonly string[], io: IO): Promise<number> {
     );
     return 1;
   }
+  if (seedRead.kind === "present" && !isSeedHex(seedRead.seed)) {
+    // The same test `loam serve` applies at boot. Granting around it would mint standing for a pen
+    // the next boot refuses to provision. The file is NOT quoted back: a string that fails this
+    // test may still be a key, and a refusal is no place to print one.
+    io.err(
+      `pen create: ${penSeedPath(home, name)} exists but does not hold a 64-hex seed, which is ` +
+        `what \`loam serve\` requires of a pen at boot — so this command refuses it too, rather ` +
+        `than granting write standing to a pen the next boot would skip. Nothing was written, and ` +
+        `the file's contents are not printed here. Move the file aside and run this again to ` +
+        `provision ${name} under a fresh key.`,
+    );
+    return 1;
+  }
 
   const path = storePath(home, parsed.flags.get("store"));
   const seed = readSeed(home);
   const operator = authorForSeed(seed);
 
-  // The seed file lands BEFORE the grant (the `user create` ordering, for the same reason): if the
-  // grant append then fails, a re-run finds the seed present, the grant absent, and repairs the
-  // grant alone. The other order would strand a live grant whose freshly-minted key was lost.
-  let penSeed: string;
-  if (seedRead.kind === "absent") {
-    penSeed = randomBytes(32).toString("hex");
-    try {
-      writePenSeed(home, name, penSeed);
-    } catch (err) {
-      io.err(
-        `pen create: writing ${penSeedPath(home, name)} failed: ` +
-          `${err instanceof Error ? err.message : String(err)}. Nothing was written.`,
-      );
-      return 1;
-    }
-  } else {
-    penSeed = seedRead.seed;
-  }
-  const penAuthor = authorForSeed(penSeed);
-
   const gateway = await Gateway.boot(openStore(path, io), assembleGenesis({ operatorSeed: seed }));
-  let granted: boolean;
+  let penSeed: string;
+  let outcome: "provisioned" | "repaired" | "re-keyed";
+  const retired: { author: string; grants: number }[] = [];
   try {
-    // ASK THE GROUND for the pen's write standing rather than trusting this run's own memory —
-    // a second grant for an already-granted author would be noise a `revoke` then has to strike twice.
-    granted = survivingGrantClaimIds(gateway.reactor, operator, penAuthor).length > 0;
-    if (seedRead.kind === "present" && granted) {
-      io.err(
-        `pen create: ${name} is already provisioned — ${penSeedPath(home, name)} exists and its ` +
-          `author holds a write grant. Nothing was written. To retire the pen, strike its grant; ` +
-          `to re-key it, remove the seed file first (past writes stay attributed to the old key).`,
-      );
-      return 2;
+    const records = penRecordsFor(gateway.reactor, operator, name);
+
+    if (seedRead.kind === "present") {
+      // ASK THE GROUND for this key's write standing rather than trusting this run's own memory,
+      // and read the STRUCK grants too: a revoked pen and a never-granted one look identical to a
+      // "does anything survive" question, and re-planting the first would un-revoke it silently.
+      const held = authorForSeed(seedRead.seed);
+      const standing = grantStanding(gateway.reactor, operator, held, "write");
+      if (standing.surviving.length > 0) {
+        io.err(
+          `pen create: ${name} is already provisioned — ${penSeedPath(home, name)} exists and its ` +
+            `author holds a write grant. Nothing was written. To retire the pen, strike its ` +
+            `grant; to RE-KEY it — the answer to a leaked seed — remove ` +
+            `${penSeedPath(home, name)} and run this again: the next run mints a fresh key AND ` +
+            `strikes the old author's standing, so the leaked key can no longer write. Past ` +
+            `writes stay attributed to the old key either way.`,
+        );
+        return 2;
+      }
+      if (standing.struck.length > 0) {
+        io.err(
+          `pen create: ${name} was RETIRED — ${penSeedPath(home, name)} still holds a key, but ` +
+            `its author's write grant was struck on the ground, and this command will not ` +
+            `resurrect a standing somebody revoked. Nothing was written. To provision ${name} ` +
+            `again under a FRESH key, remove ${penSeedPath(home, name)} and run this again.`,
+        );
+        return 2;
+      }
+      penSeed = seedRead.seed;
+      outcome = "repaired";
+    } else {
+      // The seed file lands BEFORE the grant (the `user create` ordering, for the same reason): if
+      // the append then fails, a re-run finds the seed present, the grant absent, and repairs the
+      // grant alone. The other order would strand a live grant whose freshly-minted key was lost.
+      penSeed = randomBytes(32).toString("hex");
+      try {
+        writePenSeed(home, name, penSeed);
+      } catch (err) {
+        io.err(
+          `pen create: writing ${penSeedPath(home, name)} failed: ` +
+            `${err instanceof Error ? err.message : String(err)}. Nothing was written.`,
+        );
+        return 1;
+      }
+      outcome = records.length > 0 ? "re-keyed" : "provisioned";
     }
-    if (!granted) {
-      await gateway.append([
-        signClaims(grantClaims(STORE_ENTITY, penAuthor, "write", operator, Date.now()), seed),
-      ]);
+    const penAuthor = authorForSeed(penSeed);
+
+    // A record naming a DIFFERENT author is a key this run replaces, so its standing goes with it:
+    // the record, and EVERY surviving grant that author holds — any verb, because a key you are
+    // replacing because it leaked must not keep signing anything at all.
+    const deltas: Delta[] = [];
+    let at = Date.now();
+    for (const stale of records.filter((r) => r.author !== penAuthor)) {
+      const held = grantStanding(gateway.reactor, operator, stale.author).surviving;
+      for (const id of [stale.id, ...held]) {
+        deltas.push(signClaims(makeNegationClaims(operator, at++, id), seed));
+      }
+      retired.push({ author: stale.author, grants: held.length });
     }
+    if (!records.some((r) => r.author === penAuthor)) {
+      deltas.push(signClaims(penRecordClaims(name, penAuthor, operator, at++), seed));
+    }
+    if (grantStanding(gateway.reactor, operator, penAuthor, "write").surviving.length === 0) {
+      deltas.push(signClaims(grantClaims(STORE_ENTITY, penAuthor, "write", operator, at++), seed));
+    }
+    if (deltas.length > 0) await gateway.append(deltas);
   } finally {
     await gateway.close();
   }
 
+  const struckLines = retired.map(({ author, grants }) =>
+    grants === 0
+      ? `  the previous key ${author} held no live grant — its record is retired`
+      : `  the previous key ${author} is struck: ${grants} grant${grants === 1 ? "" : "s"} it held no longer bind${grants === 1 ? "s" : ""}`,
+  );
   io.out(
-    seedRead.kind === "present"
+    outcome === "repaired"
       ? `loam: repaired pen ${name} — the seed file was already at ${penSeedPath(home, name)}, ` +
           `and the missing write grant for its author is now in ${path}`
-      : `loam: provisioned pen ${name}\n` +
+      : outcome === "re-keyed"
+        ? [
+            `loam: re-keyed pen ${name}`,
+            `  a fresh seed is at ${penSeedPath(home, name)} (0600) — it never enters the ground`,
+            ...struckLines,
+            `  past writes stay attributed to the old key; new form POSTs are signed by the new one`,
+            `  the write grant for the new author is in ${path}; the next serve reads the seed file`,
+          ].join("\n")
+        : `loam: provisioned pen ${name}\n` +
           `  the seed is at ${penSeedPath(home, name)} (0600) — it never enters the ground\n` +
           `  a write grant for its author is in ${path}\n` +
           `  a renderer binding names it with pen: "${name}"; the next serve reads the seed file`,
