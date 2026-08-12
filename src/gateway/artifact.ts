@@ -33,7 +33,7 @@ import { artifactPage } from "./artifact-page.js";
 import { HOST_GLOBALS, scanHostReferences } from "./artifact-scan.js";
 import type { Gateway, RequestContext } from "./gateway.js";
 import { RENDER_TIMEOUT_MS } from "./render-worker.js";
-import { lawfulNegated, lawfulSnapshot, lensOf } from "./registration.js";
+import { lawfulDeltasAt, lawfulNegated, lensOf } from "./registration.js";
 import type { Registered } from "../surface/surface.js";
 import type { RendererBinding } from "./renderers.js";
 
@@ -124,14 +124,12 @@ export function readArtifactRoutes(reactor: Reactor, operator?: string): Readonl
   const open = new Set<string>();
   if (operator === undefined) return open;
   const negated = lawfulNegated(reactor, operator);
-  for (const delta of lawfulSnapshot(reactor, operator)) {
-    const declares = delta.claims.pointers.some(
-      (p) =>
-        p.target.kind === "entity" &&
-        p.target.entity.id === ARTIFACT_ENTITY &&
-        p.target.entity.context === CTX_ARTIFACT,
-    );
-    if (!declares || negated(delta.id)) continue;
+  for (const delta of lawfulDeltasAt(
+    reactor,
+    { entity: ARTIFACT_ENTITY, context: CTX_ARTIFACT },
+    operator,
+  )) {
+    if (negated(delta.id)) continue;
     for (const p of delta.claims.pointers) {
       if (
         p.role === "route" &&

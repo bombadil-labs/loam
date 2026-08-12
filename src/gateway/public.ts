@@ -13,7 +13,7 @@
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import type { Claims, Reactor } from "@bombadil/rhizomatic";
 import type { Gateway, RequestContext } from "./gateway.js";
-import { lawfulNegated, lawfulSnapshot, lensOf, type LensName } from "./registration.js";
+import { lawfulDeltasAt, lawfulNegated, lensOf, type LensName } from "./registration.js";
 
 export const PUBLIC_ENTITY = "loam:public";
 export const CTX_PUBLIC = "loam.public";
@@ -76,14 +76,12 @@ export function readPublicSchemas(reactor: Reactor, operator?: string): Readonly
   const open = new Set<string>();
   if (operator === undefined) return open;
   const negated = lawfulNegated(reactor, operator);
-  for (const delta of lawfulSnapshot(reactor, operator)) {
-    const declares = delta.claims.pointers.some(
-      (p) =>
-        p.target.kind === "entity" &&
-        p.target.entity.id === PUBLIC_ENTITY &&
-        p.target.entity.context === CTX_PUBLIC,
-    );
-    if (!declares || negated(delta.id)) continue;
+  for (const delta of lawfulDeltasAt(
+    reactor,
+    { entity: PUBLIC_ENTITY, context: CTX_PUBLIC },
+    operator,
+  )) {
+    if (negated(delta.id)) continue;
     for (const p of delta.claims.pointers) {
       // The same shape the door enforces (publicDefect): non-empty strings only, so a
       // declaration that slipped past a door somewhere still reads exactly as the law says.
