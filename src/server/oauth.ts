@@ -572,11 +572,25 @@ function pkceChallengeDefect(challenge: string): string | undefined {
  * re-checked on the approval POST, so a doomed flow refuses HERE — on the page, with the parameter
  * named — instead of minting a code whose redemption fails late wearing `invalid_grant`.
  *
- * Each parameter is judged only when PRESENT. Every flow this store has ever completed omits both
- * (the redeemer reads neither; it verifies S256 and nothing else), so absence stays a working
- * spelling — but a caller that NAMES a value asks for the flow that value means, and `token`,
- * `plain` or any other unsupported value names a flow this store cannot finish. The refusal
- * states the supported value and never reflects the caller's own text.
+ * Each parameter is judged only when PRESENT, and absence stays a working spelling: neither
+ * parameter survives to the token door. The mint copies `code_challenge` alone, `OAuthCode` has no
+ * method field, and the redeemer reads only `grant_type`, `code`, `client_id`, `redirect_uri` and
+ * `code_verifier`. So a declared method is INERT here — only the challenge value decides, and the
+ * redeemer always verifies it as S256.
+ *
+ * That inertness is what this gate ends, and it ends two working shapes:
+ *
+ * - A client that declares `code_challenge_method=plain` while computing an S256 challenge
+ *   redeems successfully today. It now refuses at the door. RFC 7636 §4.3 requires the server to
+ *   honour the DECLARED method, and this store implements S256 only, so honouring `plain` means
+ *   saying no — a store that silently verified S256 against a request for `plain` would be
+ *   claiming a transform it never ran.
+ * - A client that sends `response_type=token` and then reads `?code=` off the redirect also
+ *   redeems today. The register door has always advertised `response_types: ["code"]`
+ *   unconditionally, so that client was reading a grant it never asked for.
+ *
+ * Both are misconfigurations that happened to work. The refusal names the parameter, states the
+ * supported value, and never reflects the caller's own text.
  */
 export function authorizeRequestDefect(
   responseType: string,

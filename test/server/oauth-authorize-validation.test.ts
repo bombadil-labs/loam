@@ -16,6 +16,13 @@
 //   - An ABSENT `code_challenge` still renders consent and still mints (the ticket's remaining
 //     vacuous case): the frozen oauth-consent suite asserts exactly that behaviour, so closing it
 //     needs a rail-evolution decision, not a workaround. See the T148 PR.
+//   - An ABSENT `code_challenge_method` is, per RFC 7636 §4.3, a declaration of `plain`. So an
+//     RFC-conformant plain client sends no method, passes this validation BY DESIGN, mints a code,
+//     and still fails late at the token door wearing `invalid_grant` — the exact late failure this
+//     ticket exists to remove. It is not closable here: T135's frozen `oauth-consent.test.ts`
+//     sends neither parameter, so making absence refuse would break a frozen rail. Closing it
+//     needs a decision about what an omitted method means to this store, plus an authorization
+//     pair to evolve that rail. Tracked as T167.
 
 import { createHash, randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -217,6 +224,34 @@ describe("T148 — the authorize door refuses a doomed request at the door", () 
       expect(res.headers.get("location")).toBeNull();
       expect(codeCount(home)).toBe(0);
     }
+  });
+
+  // The POSITIVE control for the POST gate. The end-to-end approval below copies the form's hidden
+  // fields, which carry NEITHER parameter, so it could not tell an inverted POST condition from a
+  // correct one. This POST names both supported values explicitly and must still mint.
+  it("a hand-built POST naming the SUPPORTED values still mints: the POST gate refuses only the doomed", async () => {
+    const { base, home } = await authorizeServer();
+    const sessionId = await signIn(base, "myk", PASSWORD);
+    const { challenge } = pkce();
+    const page = await getAuthorize(base, sessionId, {
+      client_id: CLIENT_ID,
+      redirect_uri: REDIRECT,
+      state: "st-ok",
+      code_challenge: challenge,
+    });
+    const html = await page.text();
+    const res = await postApprove(base, sessionId, {
+      form_token: formTokenOf(html),
+      client_id: CLIENT_ID,
+      redirect_uri: REDIRECT,
+      state: "st-ok",
+      code_challenge: challenge,
+      response_type: "code",
+      code_challenge_method: "S256",
+    });
+    expect(res.status).toBe(302);
+    expect(new URL(res.headers.get("location")!).searchParams.get("code")).not.toBe("");
+    expect(codeCount(home)).toBe(1);
   });
 
   it("the fully-explicit correct request completes the WHOLE flow: consent, code, token", async () => {
