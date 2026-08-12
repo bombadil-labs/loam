@@ -1,0 +1,13 @@
+{
+  "body": "`ensureListingContainer` (src/gateway/listing.ts) calls `gw.append` with an operator-signed container declaration, and its only caller is `listImpl` — the body of a GraphQL QUERY. A read mints law. Found by T110's P5 prosecutor.\n\nT110's repair closed the two consequences that were cheap to close, and left the shape itself. What is already fixed, so a builder here does not re-fix it:\n\n- the re-declaration now CARRIES the standing record's `parent`, `version` and `inboxOf`, so a refresh no longer silently re-roots a container an operator had nested (a declaration is latest-wins over the whole record, so omitting a knob deletes it);\n- a standing container whose membership lives at a published ADDRESS is now REFUSED rather than served, because the door compares the inline Term and could never tell an address already said the right thing — it would have minted one declaration per read, forever.\n\nWHAT REMAINS, and it is the interesting half.\n\n1. THE WRITE ITSELF. A query that signs operator law is a surprise to every reader of the code and to every operator watching their store grow. The declaration wants to happen where registrations are bound (`rebindImpl`/`registerImpl`), not where they are read. Then `list` is a pure read that refuses if no container backs the program — the same shape as every other fail-closed door.\n\n2. THE FLAP. The membership Term is the union of the prop contexts of the SURVIVING lenses of the program. A lens that transiently fails to bind (`lifecycle.ts` swallows a store-origin registration's throw by design, so a boot never dies on one bad candidate) narrows that union. The next read re-declares narrower; the read after the lens rebinds declares wider again. Each flap mints one permanent operator-signed delta, and nothing ever collects them. Moving the declaration to bind time makes this rarer and does not by itself make it impossible — a declaration that only ever WIDENS, or one that refuses to narrow without an explicit authorisation, is the shape that would.\n\nDONE WHEN: no read path signs a delta, and a narrowing of the membership union is either impossible or deliberate.",
+  "edges": [],
+  "id": "T164",
+  "phase": "P0",
+  "scope": [
+    "src/gateway/listing.ts",
+    "src/gateway/lifecycle.ts",
+    "test/gateway/"
+  ],
+  "status": "todo",
+  "title": "A read door signs law: the listing declares its backing container from inside a GraphQL query"
+}
