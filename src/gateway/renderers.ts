@@ -26,6 +26,7 @@ import { holdsGrant } from "./accounts.js";
 import { STORE_ENTITY } from "./genesis.js";
 import { frameProbation } from "./probation.js";
 import { renderInWorker } from "./render-worker.js";
+import { workerLimitsOf } from "./envelope.js";
 import { lawfulNegated, lawfulSnapshot, lensOf, type LensName } from "./registration.js";
 
 export const CTX_RENDERER = "loam.renderer";
@@ -534,6 +535,56 @@ export async function serveRouteImpl(
       reads[readKey(g.lens, g.entity)] = resolveGesture(gw, g);
     }
   }
+  // Built LAZILY: a refused render must cost nothing, and `bytesEnvelope` walks the whole view. The
+  // §23.9 cap's own comment ("the slot is acquired after every refusal that costs nothing") is only
+  // true while this stays behind the gates.
+  const payload = (): Record<string, unknown> => ({
+    entity,
+    view: bytesEnvelope(node.view),
+    hex: node.hex,
+    reads,
+    state,
+  });
+  // A QUARANTINE POOL renders on its OWN envelope (SPEC §24.5, ticket T34) — slots, wall clock, and
+  // memory the operator declared on the PARENT's ground, re-resolved here so a widening is a delta
+  // and not a restart. It supersedes the §23.9 cap on BOTH doors, deliberately: on the primary the
+  // token door is the operator's own, but inside a quarantine every render is untrusted code whichever
+  // door asked for it. The slot is acquired after every refusal that costs nothing, covers exactly the
+  // worker execution, and is released in `finally` so a completed, timed-out or faulted render always
+  // gives it back. Over the cap: a clean 503 leaking no route, lens or entity — the operator learns
+  // which pool hit which limit from `envelopeReports()`, never the caller.
+  const envelope = gw.envelope;
+  if (envelope !== undefined) {
+    const limits = envelope.resolve();
+    if (envelope.inFlight >= limits.maxConcurrentRenders) {
+      envelope.refusedForSlots += 1;
+      return {
+        status: 503,
+        contentType: "text/plain; charset=utf-8",
+        body: "the renderer is busy",
+      };
+    }
+    envelope.inFlight += 1;
+    try {
+      // FRAMED like every other render path (SPEC §24.7). An enveloped pool is an untrusted one, so
+      // this branch is where the sequestered frame matters MOST — a metered render that skipped the
+      // wrap would drop the probation chrome exactly where the app is least trusted. The refusal above
+      // is left bare on purpose: `framed` touches only a 200 text/html body, so a 503 says nothing
+      // about whether it came from a quarantine.
+      return framed(
+        await renderInWorker(binding.bundle, payload(), limits.renderTimeoutMs, {
+          ...workerLimitsOf(limits),
+          onOutcome: (outcome) => {
+            if (outcome === "timeout") envelope.timedOut += 1;
+            else if (outcome === "fault") envelope.faulted += 1;
+            else if (outcome === "notHtml") envelope.malformed += 1;
+          },
+        }),
+      );
+    } finally {
+      envelope.inFlight -= 1;
+    }
+  }
   // The anonymous render fan is CAPPED (SPEC §23.9, ticket T18): the slot is acquired only here —
   // after every refusal that costs nothing — and covers exactly the worker execution, released in
   // finally so a completed (or timed-out, or faulted) render always gives its slot back. Over the
@@ -549,19 +600,7 @@ export async function serveRouteImpl(
     }
     gw.publicRendersInFlight += 1;
     try {
-      return framed(
-        await renderInWorker(
-          binding.bundle,
-          {
-            entity,
-            view: bytesEnvelope(node.view) as Record<string, unknown>,
-            hex: node.hex,
-            reads,
-            state,
-          },
-          gw.options.renderTimeoutMs,
-        ),
-      );
+      return framed(await renderInWorker(binding.bundle, payload(), gw.options.renderTimeoutMs));
     } finally {
       gw.publicRendersInFlight -= 1;
     }
@@ -571,19 +610,7 @@ export async function serveRouteImpl(
   // renderer is a view consumer like gql/REST — hand it the §23.7 envelope (a bytes leaf becomes
   // { mime, ref, base64url? }, primitives pass through), which is also what makes the node JSON/clone-safe
   // to cross the thread boundary. renderInWorker never rejects; every fault folds to a clean refusal.
-  return framed(
-    await renderInWorker(
-      binding.bundle,
-      {
-        entity,
-        view: bytesEnvelope(node.view) as Record<string, unknown>,
-        hex: node.hex,
-        reads,
-        state,
-      },
-      gw.options.renderTimeoutMs,
-    ),
-  );
+  return framed(await renderInWorker(binding.bundle, payload(), gw.options.renderTimeoutMs));
 }
 
 // Resolve ONE mediated read on the server-rendered host, mapping every failure onto the floor's own

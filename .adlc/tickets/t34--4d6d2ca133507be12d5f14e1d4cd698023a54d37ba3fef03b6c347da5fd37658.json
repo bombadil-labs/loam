@@ -7,15 +7,22 @@
     }
   ],
   "id": "T34",
-  "phase": "P1",
-  "rails": [],
+  "phase": "P5",
+  "rails": [
+    "test/gateway/quarantine-envelope.test.ts",
+    "test/gateway/quarantine-envelope-isolation.test.ts",
+    "test/gateway/quarantine-envelope-memory.test.ts"
+  ],
   "scope": [
+    "src/gateway/envelope.ts",
     "src/gateway/render-worker.ts",
-    "src/gateway/budget.ts",
-    "src/gateway/quarantine-pool.ts",
+    "src/gateway/renderers.ts",
+    "src/gateway/container.ts",
+    "src/gateway/gateway.ts",
+    "src/gateway/accounts.ts",
     "spec/24-quarantine.md",
     "test/gateway/"
   ],
-  "status": "todo",
+  "status": "in-progress",
   "title": "§24.5: the quarantine resource envelope — a budget that cannot starve the primary's doors"
 }

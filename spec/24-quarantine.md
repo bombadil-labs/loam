@@ -252,7 +252,7 @@ carries a negation of the incumbent, which the prose above did not anticipate. A
 has no Policy** — the root-name guard is a fail-fast DOOR, and federation has no door, so law arriving by
 federation meets no guard at all; that is ticket **T89** (§27.8 states the gap precisely).
 
-### 24.5 Resource discipline — the wild end running for real (question 5, RECOMMENDATION)
+### 24.5 Resource discipline — the wild end running for real (question 5, BUILT — T34)
 
 Quarantined code is §22's purity ladder's WILD END running for real. The rungs v1 refused for the
 operator's own resolvers — (c) store-querying, (d) effectful, (e) synthetic — are exactly what a
@@ -283,6 +283,115 @@ effect budget, and the highest purity rung it admits (a–e, §22.1) — enforce
 running in the quarantine's own pool. The declared rung ceiling is what a reader trusts: a quarantine
 that admits rung (d) is saying, in the open, "effectful code runs here, its values are not facts about
 the ground, and its cost is bounded to this pool."
+
+**CLOSED (T34), the resource half only.** The recommendation held, with one correction and two flags
+the draft did not carry. The envelope is an operator-authored DECLARATION at `loam:envelope`
+(`src/gateway/envelope.ts`), not a constructor argument: three dimensions — `maxConcurrentRenders`,
+`renderTimeoutMs`, `maxMemoryMb` — re-resolved from the live deltas on every render, so widening a
+pool is a delta and not a restart, exactly as §25's door budgets are. `envelopeReports()` on the
+parent is the operator's instrument: one row per live pool, naming which pool hit which limit, while
+the refusal a caller meets stays a leak-free 503.
+
+**Why the envelope is read from the PARENT, and why that is the point.** This is one of exactly TWO
+powers an operator cannot delegate to a child container — the other is erasure reach (§24.8, built).
+A child may admit deltas its parent does not trust; what keeps that safe to HOST is that the operator
+can still forget AND can still cap the bill. So the pool's resolver is closed over the PARENT's
+reactor. A declaration appended inside the pool, however lawful there, moves nothing: a ceiling read
+from the child's own ground could be raised by a delta the child admitted, which is delegation of the
+one thing that does not delegate.
+
+Four things the build settled that the recommendation could only gesture at:
+
+- **No declaration means the DEFAULT, never "unmetered".** This is the one deliberate divergence from
+  `loam:budget`, where an author with no declaration is unmetered. An unmetered author is the
+  operator's own grantee; an unmetered quarantine is the unbounded bill this subsection exists to
+  close. The floor is `{ maxConcurrentRenders: 4, renderTimeoutMs: 500, maxMemoryMb: 128 }` — tighter
+  than §23.9's anonymous render fan, so nothing here widens what an unconfigured store already
+  allowed.
+- **Resolution is PER DIMENSION** — the pool's own subject, else the wildcard `*`, else the floor,
+  each dimension on its own. `readBudgetPolicy` picks a latest declaration per subject wholesale; that
+  shape would let a per-pool tightening of one dimension silently reset another to the floor. Within
+  ONE subject the latest declaration still supersedes wholesale, as a budget does.
+- **A pool may open a pool, and both the report and the ceiling follow it down.** `envelopeReports()`
+  recurses because erasure reach does — a depth-1 report would hide a nested pool's entire bill while
+  the operator's erasure still reached it. And a descendant's envelope is clamped per dimension to its
+  opener's, resolved from the OPENER'S LIVE GROUND. The clamp rides every separate container, not only
+  the enveloped ones. And a descendant resolves its OWN envelope from the ROOT's ground, not from the
+  copy it sits on: a container's ground is a one-way seeded copy, so a declaration struck on the
+  parent after seeding stays live inside it, and a pool that read its ceiling from there would resolve
+  a retraction as live at the report and at the gate together. Nothing below the operator widens.
+- **The door and the reader BOTH check, and they check the same things.** The append door refuses a
+  declaration that names two subjects, or one dimension twice, or a dimension that is not a positive
+  integer. `federate` never asks the door, and that is the path a foreign store's bytes arrive on, so
+  the reader re-checks rather than trusting that a door saw it: a delta that names a dimension twice
+  binds nothing at all. Reading the last such pointer would let the ORDER of a delta's pointers pick
+  a ceiling, and last-wins is the widening direction.
+- **A per-pool declaration this store can read nothing from takes the TIGHTER of the floor and the
+  wildcard, per dimension.** `readBudgetPolicy` drops such a subject, which for a quota means
+  unmetered; for a ceiling the conservative reading is the tightest one available. The floor alone
+  would widen wherever the operator's wildcard is tighter than the floor.
+- **Every failing outcome moves a counter** — slot refusals, timeouts, faults, and malformed returns.
+  A pool whose every render fails must never read like a pool that served everything cleanly.
+- **A handle is not a subject.** A pool opened by `openQuarantine` has no container entity, so the
+  report carries a synthetic handle (`anonymous#1`) and the declared `container` as separate fields.
+  Only a declared container can be a subject. Printing the handle where a subject goes would invite a
+  declaration the door accepts and the resolver ignores, and would collide with real container names.
+- **The envelope governs BOTH of the pool's doors, and only UNTRUSTED containers.** On the primary
+  `maxPublicRenders` caps the anonymous fan alone, because the token door is the operator's own;
+  inside a quarantine every render is untrusted code whichever door asked for it. A trusted or curated
+  separate container opened on the PRIMARY is not enveloped — the argument for the cap is about a child
+  that admits what its parent does not trust. One opened INSIDE a pool is metered whatever it declares:
+  its trust knob is read from the pool's seeded copy of the container table, where a strike on the
+  parent never lands, so that knob must not be what decides metering. Trust decides at the top; below
+  an untrusted container, everything is metered.
+- **Governing both doors makes a pool's ANONYMOUS door operator-raisable, on the clock as well as the
+  slots.** The envelope supersedes §23.9's cap entirely inside a pool, so `maxPublicRenders` (16) and
+  the host's `renderTimeoutMs` are both unreachable there. With no declaration this is strictly
+  tighter — 4 slots and 500ms against 16 and the host's clock. But a declaration above 16 slots, or
+  above 500ms, means an anonymous caller to a mounted pool may hold more workers, or hold one longer,
+  than §23.9 alone allowed. That is deliberate: the envelope is the pool's whole bill, and a second
+  ceiling the operator could not raise for their own quarantine would be a hidden one. It is stated
+  here because the widening is real, and the operator writing the declaration should know it.
+- **The memory ceiling reaches the Worker's `resourceLimits`, is asserted two-sided, and names a
+  TOTAL.** A declared bound that never crossed into the worker would print in a report and hold
+  nothing. `maxMemoryMb` is the whole heap: V8 sizes the old and young generations independently and
+  a worker may hold both at once, so handing the declared number to each would permit roughly twice
+  what the report prints — a ceiling an operator lowers to contain a leak, that does not bound what
+  it names. The generations SPLIT the declaration instead; the young takes a quarter, capped at
+  §23.9's constant and floored at 1MB, so the sum is exactly what was declared. This also makes the
+  floor genuinely tighter than §23.9's own worker on memory (128 against 128 + 32), not merely equal.
+
+**Two flags stay OPEN, and this subsection does not outgrow either.** First, the one the draft above
+already states: until the full no-fs/no-net ocap layer ships (SES-in-worker or isolated-vm, §23.9's
+named further work — its own ticket, and a dependency conversation), a quarantine that admits rung (d)
+effectful code bounds resource exhaustion and does NOT bound ambient-authority reach. A worker can
+still reach `node:fs` or open a socket. Second, and unstated before T34: a stranger's bundle has no
+path INTO a pool today — `publishRenderer` admits the operator's voice only, and a pool runs on the
+parent's operator seed, so every renderer a pool executes is one the operator published. Foreign law
+federates in as data and stays inert (§8/§12/§15). The bill is therefore built ahead of the admission
+path it will meter. Neither flag is a defect; both are the difference between a shipped budget and a
+claimed confinement.
+
+Named residuals: the outbound-effect budget and the declared purity-rung ceiling are not built;
+`envelopeReports()` is an in-process method and reaching it from the admin door is a disclosure
+decision taken elsewhere; `drop()` does not terminate a render already in the worker, so the last
+window of a dropped pool's spending is unreported (the counters are the pool's own object, so nothing
+leaks into a pool opened afterwards); and the envelope gates the RENDER path only — a pool's §22
+resolvers still run in-process on the host with no slot, no clock, and no counter, which matters the
+day a promotion inside a pool binds one. Two more, found by this ticket's own prosecution and left
+open rather than papered over: a report row's name is the container's, and container names are only
+constrained to be non-empty and NUL-free — so an operator who names a container `anonymous#1`, or uses
+`/` in a name, can make two live rows read alike. And `drop()` on an intermediate container purges and
+byte-verifies THAT container only; a pool nested inside it is neither closed nor enumerated, so its
+seeded copies survive outside both the report and §11's fan-out. The report now recurses; drop does
+not, and that asymmetry is a ticket, not a residual to accept quietly.
+
+**Provenance.** Realized by T34. Implementation: `src/gateway/envelope.ts` (the declaration, its
+door-side well-formedness, per-dimension resolution, and the per-pool accounting),
+`src/gateway/container.ts` (the envelope attaches to an untrusted separate container at open),
+`src/gateway/renderers.ts` (the pool's slot gate on both doors), `src/gateway/render-worker.ts` (the
+memory bound and the outcome report become parameters). Rails: `test/gateway/quarantine-envelope.test.ts`,
+`test/gateway/quarantine-envelope-isolation.test.ts`, `test/gateway/quarantine-envelope-memory.test.ts`.
 
 ### 24.6 The quarantine-first workflow (question 6, DECIDED — Myk, 2026-07-12)
 
