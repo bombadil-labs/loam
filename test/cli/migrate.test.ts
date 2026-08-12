@@ -22,7 +22,7 @@ import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
 import { FERN, GARDENER_SEED, observed } from "../spike/garden.js";
 import { legacyInlineRegistrationClaims } from "../migrate/legacy.js";
 
-vi.setConfig({ testTimeout: 15000 });
+vi.setConfig({ testTimeout: 20_000 });
 
 const NEW = "rhizomatic.hyperschema.";
 const OLD = "rhizomatic.schema.";

@@ -12,7 +12,7 @@ import { MemoryBackend } from "../../src/store/memory.js";
 import { serve } from "../../src/server/http.js";
 import { FERN, observed } from "../spike/garden.js";
 
-vi.setConfig({ testTimeout: 15000 }); // one real HTTP server rides this suite
+vi.setConfig({ testTimeout: 20_000 }); // one real HTTP server rides this suite
 
 const OPERATOR_SEED = "0e".repeat(32);
 

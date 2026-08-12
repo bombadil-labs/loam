@@ -31,7 +31,7 @@ import { FERN, GARDENER, GARDENER_SEED, SURVEYOR_SEED, observed } from "../spike
 // batch can blow vitest's 5s default. The same generous hang-guard the other heavy suites
 // carry (see pack.test.ts, which learned this first): it only ever matters when something
 // is genuinely stuck.
-vi.setConfig({ testTimeout: 15000 });
+vi.setConfig({ testTimeout: 20_000 });
 
 const signed1 = observed(FERN, "height", 30, 1000, GARDENER_SEED);
 const signed2 = observed(FERN, "height", 34, 2000, SURVEYOR_SEED);

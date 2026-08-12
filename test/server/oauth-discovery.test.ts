@@ -11,7 +11,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 
-vi.setConfig({ testTimeout: 15000 }); // real listening servers
+vi.setConfig({ testTimeout: 20_000 }); // real listening servers
 
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";

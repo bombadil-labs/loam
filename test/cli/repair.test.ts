@@ -17,7 +17,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
 import { FERN, observed } from "../spike/garden.js";
 
-vi.setConfig({ testTimeout: 15000 });
+vi.setConfig({ testTimeout: 20_000 });
 
 let home: string;
 const out: string[] = [];

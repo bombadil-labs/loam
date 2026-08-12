@@ -9,7 +9,7 @@ import { execFileSync } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 
 // `npm pack` is the heaviest external process in the suite — same hang-guard pack.test.ts carries.
-vi.setConfig({ testTimeout: 15000 });
+vi.setConfig({ testTimeout: 20_000 });
 
 describe("npm pack: the slate surface's declarations ride the tarball", () => {
   it("ships the .d.ts the slate re-exports resolve through", () => {

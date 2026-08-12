@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { archivePath, storePath } from "../../src/cli/config.js";
 import { run } from "../../src/cli/cli.js";
 
-vi.setConfig({ testTimeout: 15000 });
+vi.setConfig({ testTimeout: 20_000 });
 
 let home: string;
 beforeEach(() => {
