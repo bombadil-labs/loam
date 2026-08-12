@@ -20,12 +20,25 @@ jobs:
       # helps — the byte-heavy suites (archive: one file per delta; sqlite: WAL churn) pay it per
       # file. Excluding the workspace and the temp dir is the standard runner treatment; measured
       # need: archive.test.ts at 12-14s on windows vs 0.7s on linux, timing out under load (T155).
-      - name: exempt the workspace from Defender's per-file scan (windows)
+      # BEST EFFORT, and the try/catch is the point: this step buys SPEED, never correctness, so it
+      # must not be able to fail the build. It did once — `Add-MpPreference` answered
+      # `HRESULT 0x80041013` on a runner whose Defender service would not take the call, and a bare
+      # `run:` turned an optimization into a red gate on a pull request that changed one JSON file.
+      # A warning keeps the loss visible (the suite simply pays the scan tax) without pretending
+      # nothing happened.
+      - name: exempt the workspace from Defender's per-file scan (windows, best effort)
         if: runner.os == 'Windows'
         shell: powershell
         run: |
-          Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE"
-          Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP"
+          foreach ($p in @($env:GITHUB_WORKSPACE, $env:RUNNER_TEMP)) {
+            try {
+              Add-MpPreference -ExclusionPath $p -ErrorAction Stop
+              Write-Host "excluded $p from Defender's real-time scan"
+            } catch {
+              Write-Warning "could not exclude $p from Defender ($($_.Exception.Message)); the suite pays the per-file scan tax on this runner"
+            }
+          }
+          exit 0
       - uses: actions/setup-node@v4
         with:
           node-version: 24

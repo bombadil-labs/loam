@@ -35,7 +35,7 @@ import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bomb
 
 // Real listening server + SSE: a generous hang-guard, so machine load cannot masquerade as a stuck
 // stream. Only ever matters when something is genuinely stuck.
-vi.setConfig({ testTimeout: 15000 });
+vi.setConfig({ testTimeout: 20_000 });
 import { containerClaims } from "../../src/gateway/container.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";

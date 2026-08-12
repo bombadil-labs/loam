@@ -10,7 +10,7 @@ import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
 
 // Each HTTP case boots real servers; a generous hang-guard keeps machine load from tripping the
 // default per-test timeout.
-vi.setConfig({ testTimeout: 15000 });
+vi.setConfig({ testTimeout: 20_000 });
 
 import { grantClaims } from "../../src/gateway/accounts.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";

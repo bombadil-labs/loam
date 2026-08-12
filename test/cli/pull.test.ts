@@ -21,7 +21,7 @@ import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
 
-vi.setConfig({ testTimeout: 15000 }); // real sqlite homes and a real HTTP server ride here
+vi.setConfig({ testTimeout: 20_000 }); // real sqlite homes and a real HTTP server ride here
 
 const TAB_SEED = "7a".repeat(32); // the browser store's operator — the seed that walks out
 const TAB_OPERATOR = authorForSeed(TAB_SEED);

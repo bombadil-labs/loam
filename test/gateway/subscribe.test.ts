@@ -12,7 +12,7 @@ import { PLANT, PLANT_POLICY, PLANT_WRITABLE, garden, governedBootstrap } from "
 // A generous hang-guard for genuine failures; the passing paths resolve in microseconds (patches
 // are queued synchronously by the awaited mutation), so this only ever matters if something is
 // actually broken, and it gives a loaded machine ample headroom over the default.
-vi.setConfig({ testTimeout: 15000 });
+vi.setConfig({ testTimeout: 20_000 });
 
 const KEEPER_SEED = "c3".repeat(32);
 
