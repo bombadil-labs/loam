@@ -70,6 +70,27 @@
       "to": "toBe(CSP.replace(\"form-action 'self'\", `form-action 'self' ${ALLOW_ORIGIN}`));",
       "files": ["test/server/oauth-consent.test.ts"],
       "authorized": "Myk, 2026-08-05 — authorized in chat: widen the consent page's pinned form-action by the registered redirect origin so real Chrome can land the approval"
+    },
+    {
+      "//": "T156 rail-driver REPAIR, teardown again. Browser.close() has failed the windows-latest leg five times (#362, #368, #375, #379, and one before them) with EPERM on the throwaway Chrome profile. #379 is the sharpest of them: it adds one JSON file and no code. The error names the profile ROOT and the syscall rm: node removed the contents and failed on the directory, which is what Windows does while any handle beneath it is open. child.kill() reaches Chrome's browser process alone, and the renderer, GPU and crashpad_handler processes outlive it holding handles there. #353 awaited the parent's exit and gave the removal ten retries; both address the parent, so neither reaches a live child. Pair 1 of 3 drops rmSync from the imports and brings in the new file that does the work.",
+      "from": "import { existsSync, mkdtempSync, readFileSync, rmSync } from \"node:fs\";",
+      "to": "import { existsSync, mkdtempSync, readFileSync } from \"node:fs\"; import { dropProfile, killTree } from \"./teardown.js\";",
+      "files": ["test/browser/cdp.ts"],
+      "authorized": "PENDING MYK — a branch cannot self-authorize, so merging this entry IS the authorization. The whole fix lives in a new file, test/browser/teardown.ts; cdp.ts keeps every assertion and every launch argument. Pair 1 of 3."
+    },
+    {
+      "//": "Pair 2 of 3. killTree runs taskkill /T /F /PID on win32 through spawnSync (no shell, argv as an array) and then calls child.kill(). It replaces the kill so that the tree walk happens while the parent is still alive: taskkill refuses a pid that has already exited, and the orphans it would have collected would outlive the call. The exit-await below it is untouched.",
+      "from": "this.child.kill();",
+      "to": "killTree(this.child);",
+      "files": ["test/browser/cdp.ts"],
+      "authorized": "PENDING MYK — a branch cannot self-authorize, so merging this entry IS the authorization. Pair 2 of 3."
+    },
+    {
+      "//": "Pair 3 of 3. dropProfile keeps the same retrying removal and adds one thing: on win32 a removal that still loses the race prints the leftover path and does not fail the rail. The profile is scratch in the runner's temp directory, and this rail's job is proving the doors work in a real browser rather than proving Windows released a handle. Every other platform still throws.",
+      "from": "rmSync(this.userDataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });",
+      "to": "dropProfile(this.userDataDir);",
+      "files": ["test/browser/cdp.ts"],
+      "authorized": "PENDING MYK — a branch cannot self-authorize, so merging this entry IS the authorization. Pair 3 of 3."
     }
   ]
 }
