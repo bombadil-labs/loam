@@ -700,11 +700,36 @@ export async function writeRouteImpl(
   // reason that is not true. Climbing to the root matters for the same reason the check exists: an
   // intermediate pool's copy is frozen too, so a pool of a pool must not ask its frozen parent.
   if (gw.probation !== undefined) {
+    // The chain is VERIFIED, not chased. Following `attachedTo` alone would trust whatever store the
+    // pointer lands on, and a detached intermediate is exactly that: still readable, permanently
+    // frozen, and now the end of the chain. So each link must still be a live attachment, and the
+    // terminal store must not itself be a pool. A chain that cannot be verified — a detached pool, a
+    // handle held past a failed drop — refuses: "I cannot tell" is not "permitted" (H9).
+    let child = gw;
     let root = gw.attachedTo;
-    while (root?.attachedTo !== undefined) root = root.attachedTo;
+    while (root !== undefined && root.quarantinePools.has(child) && root.attachedTo !== undefined) {
+      child = root;
+      root = root.attachedTo;
+    }
+    const authority =
+      root !== undefined && root.quarantinePools.has(child) && root.probation === undefined
+        ? root
+        : undefined;
+    if (authority === undefined) {
+      return {
+        status: 403,
+        contentType: text,
+        body: "this pool is not attached to a store that can answer for its pen",
+      };
+    }
     if (
-      root !== undefined &&
-      !holdsGrant(root.reactor, STORE_ENTITY, authorForSeed(penSeed), "write", root.operatorAuthor)
+      !holdsGrant(
+        authority.reactor,
+        STORE_ENTITY,
+        authorForSeed(penSeed),
+        "write",
+        authority.operatorAuthor,
+      )
     ) {
       // States the CONDITION rather than asserting a revocation happened: the pen may have been
       // struck, or may never have held standing outside this pool at all.

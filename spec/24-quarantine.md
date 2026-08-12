@@ -630,7 +630,7 @@ word about the pen's grant, because a pool's seeded copy of that grant is frozen
 calls, and a revocation must arrive. The probation mark is set for UNTRUSTED containers only, so a curated
 container is never framed as probation. Promotion controls at the frame's edge are a link to the
 container's admin page, where §24.3 adoption and §24.4 blessing already live; the anonymous door gets the
-statement and no link. Fourteen rails in `test/gateway/probation-frame.test.ts`, at both levels: a pen write
+statement and no link. Sixteen rails in `test/gateway/probation-frame.test.ts`, at both levels: a pen write
 lands in the pool's reactor AND its bytes and is absent from the primary's, the app reads its own write
 back across two gestures, a struck grant refuses the next write with no reseed at either depth, a drop leaves the primary's
 delta set and rendered answer identical, erasure in the primary blanks a field the pool did not overwrite
@@ -638,9 +638,18 @@ while the pool's own output survives, the container name is escaped into the ban
 and the copy is tested against thirteen spellings of §24.7's forbidden sentence. HONEST SCOPE, stated
 rather than implied: the frame is chrome and not confinement — a hostile bundle can restyle or cover it,
 and the sandboxed iframe that would fix that drops the same-origin credentials §23.3's write path needs.
-Two known gaps carried forward, neither introduced here: a pool's `probation` mark is read from the
-declaration at ATTACH rather than per request, so a trust flip that strikes the earliest declaration under
-a live attachment is not seen until reattach; and `drop()`'s enumeration is the pool's read union its
-session reactor, which on a mirror backend across a detach-and-reattach cycle can be narrower than the
-bytes on the mirror tier. Additive
+The root question is asked over a VERIFIED chain rather than a chased pointer: each link must still be a
+live attachment and the terminal store must not itself be a pool, so a detached intermediate — readable,
+frozen, and now the end of the chain — refuses instead of vouching. A separate container also may no
+longer take the store it was opened from as its own; sequestration that shares the host's bytes is not
+sequestration, and the frame would state the opposite. Four gaps stated rather than closed: a pool's
+`probation` mark is read from the declaration at ATTACH rather than per request, so a trust flip that
+strikes the earliest declaration under a live attachment is not seen until reattach; `drop()`'s
+enumeration is the pool's read union its session reactor, which on a mirror backend across a
+detach-and-reattach cycle can be narrower than the bytes on the mirror tier; the WHOLE pen table crosses
+into an untrusted pool, so a quarantined renderer may name any pen the primary provisioned and its writes
+carry that pen's name inside the pool (custody is unchanged — the pool holds the operator seed — but the
+attribution an operator reads before promoting is the stranger's to choose); and a pen granted ONLY inside
+the quarantine is refused, because the second key is asked of the root, which makes the safer-looking
+configuration the refused one. Additive
 vocabulary only → no §20 migration. Renderer + capability surface → Myk's merge (P6).

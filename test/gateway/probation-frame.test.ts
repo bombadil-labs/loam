@@ -387,6 +387,7 @@ describe("T35 §24.7 — the pen's second key is asked of the HOST, live", () =>
 
     const refused = await inner.gateway.writeRoute("deep", FERN, { message: "after" }, "full");
     expect(refused.status).toBe(403);
+    expect(refused.body).toContain("holds no write grant in the store this pool reads");
     expect(
       [...inner.gateway.reactor.snapshot()].some((d) =>
         JSON.stringify(d.claims).includes('"after"'),
@@ -394,6 +395,45 @@ describe("T35 §24.7 — the pen's second key is asked of the HOST, live", () =>
     ).toBe(false);
     await inner.drop();
     await outer.drop();
+  });
+
+  it("a pool whose chain is broken refuses rather than trusting a frozen store", async () => {
+    const { gw } = await primary();
+    const outer = await gw.openQuarantine();
+    const inner = await outer.gateway.openQuarantine();
+    await inner.gateway.publishRenderer({
+      route: "deep",
+      schema: "Plant",
+      consumes: ["message", "note"],
+      bundle: APP,
+      writable: ["message"],
+      pen: "stranger-pen",
+    });
+    expect((await inner.gateway.writeRoute("deep", FERN, { message: "a" }, "full")).status).toBe(
+      200,
+    );
+
+    // Detaching the middle pool makes it the END of the pointer chain — still readable, permanently
+    // frozen, and never again told about a revocation. A check that trusted whatever `attachedTo`
+    // landed on would now believe it. "I cannot verify the chain" must refuse.
+    await outer.detach();
+    const refused = await inner.gateway.writeRoute("deep", FERN, { message: "b" }, "full");
+    expect(refused.status).toBe(403);
+    expect(refused.body).toContain("not attached to a store that can answer");
+    expect(
+      [...inner.gateway.reactor.snapshot()].some((d) => JSON.stringify(d.claims).includes('"b"')),
+    ).toBe(false);
+    await inner.drop();
+  });
+
+  it("a separate container may not take the store it was opened from", async () => {
+    const { gw, backend } = await primary();
+    await expect(gw.openQuarantine({ backend })).rejects.toThrow(/may not take the store/);
+    // Two-sided: its own backend opens fine, and the primary is still whole afterwards.
+    const ok = await gw.openQuarantine({ backend: new MemoryBackend() });
+    expect(ok.gateway.probation).toEqual({});
+    await ok.drop();
+    expect(bodyOf(await gw.serveRoute("mine", FERN, "full"))).toContain("the operator's own words");
   });
 });
 
@@ -456,13 +496,16 @@ describe("T35 §24.7 — the frame's other shapes", () => {
     const c = await quarantine(gw);
     // Packing lifts a route out of the store into a page that outlives the pool and carries no
     // chrome — a probationary face with its probation removed. Refused, and the reason says why.
+    await c.gateway!.declareArtifact(["stranger"]); // declared, so only the probation refuses it
     expect(() => c.gateway!.packArtifact("stranger", FERN, { server: "Loam" })).toThrow(
       /quarantine pool/,
     );
     // Two-sided, and it has to be a SUCCESS: the guard reads the store it was asked about, so a
     // non-probationary store still packs. (A second refusal would prove only that packing refuses.)
     await gw.declareArtifact(["mine"]);
-    expect(gw.packArtifact("mine", FERN, { server: "Loam" }).page).toContain("<");
+    const packed = gw.packArtifact("mine", FERN, { server: "Loam" }).page;
+    expect(packed).toContain("<");
+    expect(packed).not.toContain("data-loam-probation"); // and a page from a real store is not framed
     await c.drop();
   });
 });
@@ -497,6 +540,8 @@ describe("T35 §24.7 — erasure reaches through a mounted frame (§24.8)", () =
     // held by BOTH stores. A rail that only proves removal cannot see an over-purge.
     expect(await gw.backend.holds(bystander)).toBe(true);
     expect(await pool.backend.holds(bystander)).toBe(true);
+    // And at the OBJECT level, on the side that can still show it: the primary's own route.
+    expect(bodyOf(await gw.serveRoute("mine", FERN, "full"))).toContain("the operator's own words");
     const after = bodyOf(await pool.serveRoute("stranger", FERN, "full"));
     expect(after).not.toContain("a note only the operator wrote");
     expect(after).toContain("the stranger's own");

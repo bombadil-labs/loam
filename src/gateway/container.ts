@@ -1010,6 +1010,16 @@ async function openSeparate(
       `${voice}: "${spec.entity}" is already attached here — drop() or detach() it first`,
     );
   }
+  // A SEPARATE container's store may not BE the store it is opened from. The whole posture is that
+  // its bytes are its own and can be discarded whole; handed the host's backend, a "sequestered"
+  // write lands in canonical ground while every surface says it did not, and a drop purges the host.
+  // Identity only — two handles onto one file are not decidable here — but the obvious mistake is.
+  if (spec.backend !== undefined && spec.backend === gw.backend) {
+    throw new Error(
+      `${voice}: a separate container may not take the store it is opened from as its own — its ` +
+        `bytes must be discardable without touching the host's`,
+    );
+  }
   const backend: StoreBackend = spec.backend ?? new MemoryBackend();
   // SETTLE ERASURE DEBT BEFORE THE CONTAINER OPENS (T72). A durable store being (re)opened may hold
   // bytes whose tombstones landed at the primary while it was detached — the seeding edge
