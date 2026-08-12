@@ -17,24 +17,43 @@
 // Enumeration is exactly what the uniform-404 discipline prevents elsewhere — a public listing
 // door can inventory a store — so public enumeration waits for §12's per-lens `enumerable` flag.
 
-import { signClaims } from "@bombadil/rhizomatic";
+import { signClaims, termToJson, type Term } from "@bombadil/rhizomatic";
 import { containerClaims, readContainerTable } from "./container.js";
 import type { Gateway } from "./gateway.js";
 import { groupPrograms } from "./lifecycle.js";
 import { programOf, type ProgramName } from "./registration.js";
 import type { ResolvedNode } from "../surface/surface.js";
 
-// Each listed entity costs one resolution, so the page size is bounded here — an unbounded
-// listing is H8's full-scan cost multiplied by the member count, on one request. MEASURED
-// (T110 open item b, 2026-08-11, memory backend): the candidate set is NOT maintained
-// incrementally — `watch` re-evaluates the whole Term per pulse (~0.3s at a 2k-delta ground,
-// ~2s at 10k), and a cold per-entity resolution is itself O(ground) (~0.12s per entity at 2k,
-// ~0.8s at 10k). So a page costs roughly (limit × point-read) + one membership evaluation:
-// exactly N point-reads a client would otherwise issue blind, never more — but a page should
-// default modest, and holding this door honest past ~10k deltas needs warm materializations
-// (the read side's own affordance), not a wider page.
-export const LISTING_DEFAULT_LIMIT = 25;
-export const LISTING_MAX_LIMIT = 500;
+// WHAT A PAGE COSTS, and it is NOT "N point-reads and nothing else" — that reading flatters the
+// door and is the trap this comment exists to close. Every page pays three separate costs:
+//
+//   1. one full membership evaluation over the whole ground — the candidate set is NOT maintained
+//      incrementally, so `select` re-runs per call;
+//   2. the projection of EVERY member delta into entity ids, and a sort of the whole id set,
+//      before `after`/`limit` slice it — so walking N entities with `limit: 1` is O(N) pages ×
+//      O(N) ids = QUADRATIC in the kind's size, whatever the page size;
+//   3. one cold resolution per listed entity, itself O(ground).
+//
+// MEASURED (memory backend, 2026-08-12), and the numbers are the argument for the cap below:
+//
+//   ground     membership eval   per entity   list(limit 25)
+//   2k deltas            150ms        120ms            3.2s
+//   10k deltas           874ms        655ms           17.6s
+//
+// The first cap was 500. At a 10k-delta ground that is 500 × 655ms ≈ 330 SECONDS on one authed
+// request — and `resolvedNode` is synchronous, so all of it was a stalled event loop: every other
+// mount and the tokenless public door waited behind one caller's page.
+//
+// Two fixes, and both are needed. The cap is 25 and the default 10, so the worst page a client
+// can ask for costs ~16s at 10k rather than ~330s. And the resolutions YIELD between entities, so
+// what remains is the CALLER'S latency rather than the server's — a blocked loop is what turns one
+// slow request into a slow server, and that part is now gone at any page size.
+//
+// Neither makes this door cheap; they make it bounded and interruptible. A large kind wants warm
+// materializations (the read side's own affordance) for cost 3 and an incrementally maintained
+// candidate set for costs 1 and 2 — H8 on all three, and T163 owns them.
+export const LISTING_DEFAULT_LIMIT = 10;
+export const LISTING_MAX_LIMIT = 25;
 
 export interface ListOptions {
   /** Page size: 1..LISTING_MAX_LIMIT; defaults to LISTING_DEFAULT_LIMIT. */
@@ -62,16 +81,54 @@ export function listingContexts(gw: Gateway, program: ProgramName): string[] {
   return [...contexts].sort();
 }
 
+// The negation posture the PROGRAM reads under, lifted out of its own body. The candidate set and
+// the reading must suppress by the same rule or an entity can vanish from the enumeration while
+// still resolving through the point door — and "absent from the list" reads as "there is no such
+// entity", which is a strictly bigger claim than any single read makes. A hardcoded "drop" was
+// exactly that bug: `governedGatherBody` exists to make a stranger's strike inert (the heckler's
+// veto), and a `drop` candidate set handed the veto straight back at the enumeration.
+//
+// Lifted rather than recomputed, so the two can never drift: one hyperschema per program is
+// enforced (`groupPrograms` refuses a rival body), so the program HAS one body, and its mask is
+// the one the readings run under whatever computed it. `undefined` means the body masks nothing —
+// then the membership masks nothing either, rather than inventing a suppression the reading does
+// not perform.
+export function programMaskJson(body: Term): unknown {
+  const policies = new Map<string, unknown>();
+  // Follow the TERM's own operand positions and nothing else. A trust policy's predicate carries
+  // an `inView.term` with a mask of its own (`lawfulStrikersJson` has one: the grants survive only
+  // the operator's strikes), and that mask is part of the PREDICATE, not the body's posture — a
+  // blind walk over every key finds it and reports the governed gather as masking two ways.
+  const walk = (node: unknown): void => {
+    if (node === null || typeof node !== "object" || Array.isArray(node)) return;
+    const rec = node as Record<string, unknown>;
+    if (rec.op === "mask" && "policy" in rec) policies.set(JSON.stringify(rec.policy), rec.policy);
+    for (const key of ["in", "left", "right", "of", "without"]) walk(rec[key]);
+  };
+  walk(termToJson(body));
+  if (policies.size > 1) {
+    throw new Error(
+      `the hyperschema body masks negations ${policies.size} different ways, and a listing has ` +
+        `one candidate set — it cannot suppress by two rules at once. Give the program a single ` +
+        `mask, or leave this hyperschema unlisted.`,
+    );
+  }
+  return [...policies.values()][0];
+}
+
 // The membership Term: the gather's selection, un-rooted. The per-root gather selects deltas
 // pointing at ONE root and buckets them byTargetContext; this selects every delta carrying a
-// pointer in one of those buckets, for ANY root — the pre-filtered candidate set. Mask "drop"
-// runs over the whole ground, so a struck claim is not a member and an entity whose every
-// relevant claim is struck drops out of the listing.
-export function listingMembershipJson(contexts: readonly string[]): Record<string, unknown> {
+// pointer in one of those buckets, for ANY root — the pre-filtered candidate set. The mask is the
+// PROGRAM'S OWN (`programMaskJson`), so a strike removes a claim from the candidate set exactly
+// when it removes it from the reading; `undefined` selects over the raw input, masking nothing.
+export function listingMembershipJson(
+  contexts: readonly string[],
+  mask: unknown,
+): Record<string, unknown> {
   return {
     op: "select",
     pred: { hasPointer: { context: { inSet: [...contexts].sort() } } },
-    in: { op: "mask", policy: "drop", in: "input" },
+    in: mask === undefined ? "input" : { op: "mask", policy: mask, in: "input" },
   };
 }
 
@@ -89,7 +146,20 @@ export function listingMembershipJson(contexts: readonly string[]): Record<strin
 //   - the container is DETACHED — a detached container contributes nothing to a scope read by
 //     design, which for a caller who never named a container would turn "off the record" into a
 //     complete-looking empty page; the exclusion knob is the deliberate way to empty a listing,
-//     and it stays honored downstream.
+//     and it stays honored downstream;
+//   - the standing membership lives at a published ADDRESS rather than inline — this door compares
+//     the INLINE Term to decide whether anything changed, so an addressed one never matches and
+//     every read would mint one more operator-signed declaration, forever. A refusal is the honest
+//     answer to a container this door cannot tell is already correct.
+//
+// The re-declaration CARRIES the standing record's other knobs (`parent`, `version`, `inboxOf`).
+// A declaration is latest-wins over the whole record, not per-pointer, so re-declaring with only
+// the knobs this door knows about would silently RE-ROOT a container an operator had nested — a
+// read quietly undoing a write.
+//
+// What is NOT fixed here, and is ticketed rather than hidden (T164): this writes operator-signed
+// law from inside a read. A transiently unbound sibling lens narrows the context union, so the
+// next read re-declares, and the read after it declares back — one permanent delta per flap.
 async function ensureListingContainer(
   gw: Gateway,
   lens: string,
@@ -115,6 +185,14 @@ async function ensureListingContainer(
         `Reattach it, or exclude the container if an empty listing is what you mean.`,
     );
   }
+  if (standing?.membershipAt !== undefined && standing.membership === undefined) {
+    throw new Error(
+      `list ${lens}: the backing container "${name}" carries its membership at a published ` +
+        `address (${standing.membershipAt}), and this door compares the INLINE Term — it cannot ` +
+        `tell whether that address already says what it would declare, so every read would mint ` +
+        `one more declaration. Re-declare it inline, or leave this lens unlisted.`,
+    );
+  }
   if (
     standing?.membership !== undefined &&
     JSON.stringify(standing.membership) === JSON.stringify(membership)
@@ -124,7 +202,16 @@ async function ensureListingContainer(
   await gw.append([
     signClaims(
       containerClaims(
-        { container: name, trust: "curated", posture: "shared", membership },
+        {
+          container: name,
+          trust: "curated",
+          posture: "shared",
+          membership,
+          // Latest-wins is per DECLARATION: omitting a knob that stands is deleting it.
+          ...(standing?.parent === undefined ? {} : { parent: standing.parent }),
+          ...(standing?.version === undefined ? {} : { version: standing.version }),
+          ...(standing?.inboxOf === undefined ? {} : { inboxOf: standing.inboxOf }),
+        },
         law.operator,
         gw.nextTimestamp(),
       ),
@@ -167,16 +254,13 @@ export async function listImpl(
     );
   }
   const contexts = listingContexts(gw, program);
-  const container = await ensureListingContainer(
-    gw,
-    name,
-    program,
-    listingMembershipJson(contexts),
-    {
-      operator: gw.operatorAuthor,
-      seed: gw.options.seed,
-    },
-  );
+  // The mask comes off THIS program's body — one hyperschema per program is enforced upstream, so
+  // the lens the caller asked through carries the program's single body and its single posture.
+  const membership = listingMembershipJson(contexts, programMaskJson(def.hyperschema.body));
+  const container = await ensureListingContainer(gw, name, program, membership, {
+    operator: gw.operatorAuthor,
+    seed: gw.options.seed,
+  });
   const members = gw.containerScope({ containers: [container] });
   const inContexts = new Set(contexts);
   const ids = new Set<string>();
@@ -192,5 +276,22 @@ export async function listImpl(
     .sort()
     .filter((id) => after === undefined || id > after)
     .slice(0, limit);
-  return page.map((entity) => gw.resolvedNode(name, entity));
+  // `resolvedNode` is synchronous and O(ground), so a page resolved in one run holds the event
+  // loop for its whole duration — one authed request stalling every other mount and the tokenless
+  // public door. Yield BETWEEN entities: the caller waits exactly as long, and nobody else does.
+  const nodes: ResolvedNode[] = [];
+  for (const entity of page) {
+    if (nodes.length > 0) await yieldToLoop();
+    nodes.push(gw.resolvedNode(name, entity));
+  }
+  return nodes;
 }
+
+// A macrotask, not a microtask: `await Promise.resolve()` drains into the same run and yields to
+// nothing. `setImmediate` is Node's cheapest real yield; `setTimeout(…, 0)` is the portable
+// fallback for a runtime without it.
+const yieldToLoop = (): Promise<void> =>
+  new Promise<void>((resolve) => {
+    if (typeof setImmediate === "function") setImmediate(resolve);
+    else setTimeout(resolve, 0);
+  });

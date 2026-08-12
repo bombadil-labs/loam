@@ -17,8 +17,14 @@
 // dynamic-only entity is invisible to the listing by design.
 
 import { describe, expect, it } from "vitest";
-import { authorForSeed, makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
-import { grantClaims } from "../../src/gateway/accounts.js";
+import {
+  authorForSeed,
+  makeNegationClaims,
+  parseTerm,
+  signClaims,
+  type HyperSchema,
+} from "@bombadil/rhizomatic";
+import { governedGatherBody, grantClaims } from "../../src/gateway/accounts.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import {
@@ -26,13 +32,20 @@ import {
   listingContainerName,
   listingMembershipJson,
 } from "../../src/gateway/listing.js";
-import { containerClaims, detachClaims, exclusionClaims } from "../../src/gateway/container.js";
+import {
+  containerClaims,
+  detachClaims,
+  exclusionClaims,
+  termClaims,
+} from "../../src/gateway/container.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE, pickLatest } from "./fixtures.js";
 
 const OPERATOR_SEED = "0e".repeat(32);
 const OPERATOR = authorForSeed(OPERATOR_SEED);
+const MALLORY_SEED = "ee".repeat(32);
+const MALLORY = authorForSeed(MALLORY_SEED);
 const MOSS = "plant:moss";
 const OAK = "plant:oak";
 
@@ -96,19 +109,47 @@ describe("the listing door — object level: what the authed door serves", () =>
       /between 1 and/,
     );
     // The bounds are PROMISES, pinned as literals so a drifted constant is a red bar, not a
-    // silently wider door (a hollow-test survivor bought these two lines).
-    await expect(gw.list("Plant", { limit: 501 })).rejects.toThrow(/between 1 and 500/);
-    await expect(gw.list("Plant", { limit: 500 })).resolves.toEqual([]);
+    // silently wider door (a hollow-test survivor bought these two lines). The literal is 25
+    // because a resolution costs ~655ms at a 10k-delta ground: 25 is ~16s of work for one caller
+    // and the old 500 was ~330s. Widening it is a measurement, not a preference.
+    await expect(gw.list("Plant", { limit: 26 })).rejects.toThrow(/between 1 and 25/);
+    await expect(gw.list("Plant", { limit: 25 })).resolves.toEqual([]);
     await gw.close();
   });
 
-  it("defaults to a modest page: exactly 25 entities when none is asked for", async () => {
+  it("defaults to a modest page: exactly 10 entities when none is asked for", async () => {
     const gw = await governedGarden();
     const names = Array.from({ length: 30 }, (_, i) => `plant:p${String(i).padStart(2, "0")}`);
     await gw.append(names.map((n, i) => observed(n, "height", i, 1000 + i, GARDENER_SEED)));
     const page = await gw.list("Plant");
-    expect(page).toHaveLength(25); // the literal IS the promise; widen it deliberately or not at all
-    expect(entitiesOf(page)).toEqual(names.slice(0, 25));
+    expect(page).toHaveLength(10); // the literal IS the promise; widen it deliberately or not at all
+    expect(entitiesOf(page)).toEqual(names.slice(0, 10));
+    await gw.close();
+  });
+
+  it("yields the event loop between resolutions — one page cannot stall the process", async () => {
+    const gw = await governedGarden();
+    const names = Array.from({ length: 8 }, (_, i) => `plant:y${i}`);
+    await gw.append(names.map((n, i) => observed(n, "height", i, 1000 + i, GARDENER_SEED)));
+    // Warm first: the FIRST listing declares the container, and that `append` is real async I/O
+    // which would let a timer through on its own. After it, the only macrotask a listing schedules
+    // is the deliberate yield — so this measures the yield and nothing else.
+    await gw.list("Plant", { limit: 1 });
+    const tickDuring = async (limit: number): Promise<boolean> => {
+      let ticked = false;
+      const timer = setTimeout(() => {
+        ticked = true;
+      }, 0);
+      await gw.list("Plant", { limit });
+      clearTimeout(timer);
+      return ticked;
+    };
+    // A one-entity page resolves in one run and needs no yield — the negative control that keeps
+    // this from passing on some other await hiding in the door.
+    expect(await tickDuring(1)).toBe(false);
+    // An eight-entity page yields between resolutions: the timer fires mid-page. Under the old
+    // synchronous `page.map` every other mount waited for the whole page.
+    expect(await tickDuring(8)).toBe(true);
     await gw.close();
   });
 
@@ -157,7 +198,7 @@ describe("the listing door — delta level: what the container actually holds", 
     expect(declared!.posture).toBe("shared");
     // The membership Term is the gather's selection un-rooted: the lens's prop contexts, sorted.
     expect(declared!.membership).toEqual(
-      listingMembershipJson(["height", "readings", "tag", "watered"]),
+      listingMembershipJson(["height", "readings", "tag", "watered"], "drop"),
     );
     // And the container HOLDS exactly the evidence, as deltas.
     const members = gw.containerScope({ containers: [name] });
@@ -194,7 +235,7 @@ describe("the listing door — delta level: what the container actually holds", 
     await gw.list("Sketch");
     const declared = gw.containers().containers.get(listingContainerName("Plant"));
     expect(declared!.membership).toEqual(
-      listingMembershipJson(["height", "note", "readings", "tag", "watered"]),
+      listingMembershipJson(["height", "note", "readings", "tag", "watered"], "drop"),
     );
     // ...and object level: the ONE maintained candidate set now feeds EVERY lens over the
     // hyperschema — moss lists through Sketch and through Plant alike.
@@ -243,7 +284,7 @@ describe("the listing door — delta level: what the container actually holds", 
     expect(entitiesOf(await gw.list("Sketch"))).toEqual([FERN]); // the refresh rides the read
     const declared = gw.containers().containers.get(listingContainerName("Plant"));
     expect(declared!.membership).toEqual(
-      listingMembershipJson(["height", "readings", "tag", "watered"]),
+      listingMembershipJson(["height", "readings", "tag", "watered"], "drop"),
     );
     await gw.close();
   });
@@ -286,6 +327,94 @@ describe("the listing door — delta level: what the container actually holds", 
     await gw.close();
   });
 
+  it("a refresh carries the standing knobs — a read never re-roots a nested container", async () => {
+    const gw = await governedGarden();
+    await gw.append([observed(FERN, "height", 30, 1000, GARDENER_SEED)]);
+    await gw.list("Plant");
+    const name = listingContainerName("Plant");
+    // The operator nests the listing container under a parent and cites a version. Both are
+    // knobs this door never sets, and a declaration is latest-wins over the WHOLE record.
+    await gw.append([
+      signClaims(
+        containerClaims(
+          {
+            container: "container:garden",
+            trust: "curated",
+            posture: "shared",
+            membership: {
+              op: "select",
+              pred: { hasPointer: { context: { exact: "nothing" } } },
+              in: "input",
+            },
+          },
+          OPERATOR,
+          gw.nextTimestamp(),
+        ),
+        OPERATOR_SEED,
+      ),
+      signClaims(
+        containerClaims(
+          {
+            container: name,
+            trust: "curated",
+            posture: "shared",
+            parent: "container:garden",
+            version: "deadbeef",
+            membership: gw.containers().containers.get(name)!.membership,
+          },
+          OPERATOR,
+          gw.nextTimestamp(),
+        ),
+        OPERATOR_SEED,
+      ),
+    ]);
+    // A sibling lens widens the context union, so the next read MUST re-declare.
+    await gw.publishRegistration(
+      PLANT,
+      { name: "Sketch", props: new Map([["note", pickLatest]]), default: pickLatest },
+      [FERN],
+    );
+    await gw.list("Sketch");
+    const after = gw.containers().containers.get(name)!;
+    expect(after.membership).toEqual(
+      listingMembershipJson(["height", "note", "readings", "tag", "watered"], "drop"),
+    );
+    // The knobs the refresh knew nothing about survive it. Dropping them would silently un-nest
+    // a container the operator placed — a read undoing a write.
+    expect(after.parent).toBe("container:garden");
+    expect(after.version).toBe("deadbeef");
+    await gw.close();
+  });
+
+  it("refuses a backing container whose membership lives at an address, not inline", async () => {
+    const gw = await governedGarden();
+    await gw.append([observed(FERN, "height", 30, 1000, GARDENER_SEED)]);
+    const name = listingContainerName("Plant");
+    const published = signClaims(
+      termClaims(
+        listingMembershipJson(["height", "readings", "tag", "watered"], "drop"),
+        OPERATOR,
+        2000,
+      ),
+      OPERATOR_SEED,
+    );
+    await gw.append([published]);
+    await gw.append([
+      signClaims(
+        containerClaims(
+          { container: name, trust: "curated", posture: "shared", membershipAt: published.id },
+          OPERATOR,
+          2100,
+        ),
+        OPERATOR_SEED,
+      ),
+    ]);
+    // The door compares the INLINE Term. An addressed membership can never match it, so serving
+    // would mint one operator-signed declaration per read, forever. Refuse instead.
+    await expect(gw.list("Plant")).rejects.toThrow(/membership at a published address/);
+    await gw.close();
+  });
+
   it("the container algebra is load-bearing: excluding the container empties the listing", async () => {
     const gw = await governedGarden();
     await gw.append([observed(FERN, "height", 30, 1000, GARDENER_SEED)]);
@@ -297,6 +426,119 @@ describe("the listing door — delta level: what the container actually holds", 
     expect(await gw.list("Plant")).toEqual([]);
     const read = await gw.query(`{ plants { _entity } }`);
     expect((read.data as { plants: unknown[] }).plants).toEqual([]);
+    await gw.close();
+  });
+});
+
+// The candidate set suppresses by the PROGRAM'S OWN mask, never by a hardcoded posture. Every
+// rail above strikes with the AUTHOR'S OWN retraction, which binds under `drop` and under a trust
+// mask alike — so none of them can see the difference, and a hardcoded `drop` passed all of them
+// while handing a federated stranger a veto over the enumeration. These strike with a STRANGER:
+// no standing, no grant, arriving by `federate`, which asks for none.
+describe("the listing door — the candidate set reads under the program's own mask", () => {
+  const GUARDED: HyperSchema = { name: "Guarded", alg: 1, body: governedGatherBody(OPERATOR) };
+  // No mask at all: nothing suppresses, and the membership must invent no suppression either.
+  const UNMASKED: HyperSchema = {
+    name: "Unmasked",
+    alg: 1,
+    body: parseTerm({
+      op: "group",
+      key: "byTargetContext",
+      in: { op: "select", pred: { hasPointer: { targetEntity: { var: "root" } } }, in: "input" },
+    }),
+  };
+
+  // A governed store where the gardener has made moss's ONLY claim, and a stranger has struck it.
+  async function heckled(hyperschema: HyperSchema): Promise<{ gw: Gateway; struck: string }> {
+    const gw = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
+    await gw.append([
+      signClaims(grantClaims(STORE_ENTITY, GARDENER, "write", OPERATOR, 1), OPERATOR_SEED),
+    ]);
+    gw.register(hyperschema, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
+    const mossTag = observed(MOSS, "tag", "soft", 1200, GARDENER_SEED);
+    await gw.append([observed(FERN, "height", 30, 1000, GARDENER_SEED), mossTag]);
+    // Federation asks for no standing: mallory holds no grant and is nobody's trusted striker.
+    await gw.federate([signClaims(makeNegationClaims(MALLORY, 3000, mossTag.id), MALLORY_SEED)]);
+    return { gw, struck: mossTag.id };
+  }
+
+  it("a stranger's strike cannot delete an entity from a governed listing", async () => {
+    const { gw, struck } = await heckled(GUARDED);
+    // The point door still resolves moss — the trust mask makes the stranger inert (the rail at
+    // test/gateway/lenses.test.ts pins that for the reading). The listing must AGREE: an entity
+    // missing from an enumeration reads as "there is no such entity", a bigger claim than any
+    // point read makes, and it must not be a stranger's to make.
+    const point = await gw.query(`{ guarded(entity: "${MOSS}") { tag } }`);
+    expect((point.data as { guarded: { tag: string[] } }).guarded.tag).toEqual(["soft"]);
+    // Object level: moss is listed, beside its live bystander.
+    expect(entitiesOf(await gw.list("Guarded"))).toEqual([FERN, MOSS]);
+    // Delta level: the struck claim is still a member, and the membership Term says why — a
+    // TRUST policy, hand-read here rather than recomputed from the code under test (H10).
+    const name = listingContainerName("Guarded");
+    expect(gw.containerScope({ containers: [name] }).some((d) => d.id === struck)).toBe(true);
+    const membership = gw.containers().containers.get(name)!.membership as {
+      in: { op: string; policy: Record<string, unknown> };
+    };
+    expect(membership.in.op).toBe("mask");
+    expect(membership.in.policy).not.toBe("drop");
+    expect(Object.keys(membership.in.policy)).toEqual(["trust"]);
+    await gw.close();
+  });
+
+  it("a LAWFUL striker still empties it — the mask is honored, not merely bypassed", async () => {
+    const { gw } = await heckled(GUARDED);
+    // The gardener holds a surviving operator grant, so she is in the trusted set: her own
+    // retraction binds where mallory's did not. Without this the rail above would pass equally
+    // well against a listing that suppressed NOTHING.
+    const mine = [...gw.reactor.snapshot()].find(
+      (d) => d.claims.author === GARDENER && d.claims.timestamp === 1200,
+    )!;
+    await gw.append([signClaims(makeNegationClaims(GARDENER, 4000, mine.id), GARDENER_SEED)]);
+    expect(entitiesOf(await gw.list("Guarded"))).toEqual([FERN]); // two-sided: fern survives
+    await gw.close();
+  });
+
+  it("an unmasked body masks nothing in its candidate set either — no invented suppression", async () => {
+    const { gw, struck } = await heckled(UNMASKED);
+    const name = listingContainerName("Unmasked");
+    expect(entitiesOf(await gw.list("Unmasked"))).toEqual([FERN, MOSS]);
+    // `in: "input"` — the select runs over the raw ground, because the reading does too.
+    expect(gw.containers().containers.get(name)!.membership).toEqual({
+      op: "select",
+      pred: { hasPointer: { context: { inSet: ["height", "readings", "tag", "watered"] } } },
+      in: "input",
+    });
+    expect(gw.containerScope({ containers: [name] }).some((d) => d.id === struck)).toBe(true);
+    // And the author's OWN retraction leaves it listed too: an unmasked body suppresses nothing,
+    // so a candidate set that dropped anything here would be narrower than its own reading.
+    await gw.append([signClaims(makeNegationClaims(GARDENER, 4000, struck), GARDENER_SEED)]);
+    expect(entitiesOf(await gw.list("Unmasked"))).toEqual([FERN, MOSS]);
+    await gw.close();
+  });
+
+  it("refuses a body that masks two ways — one listing, one candidate set", async () => {
+    const gw = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
+    // `annotate` over the ordinary `drop`: two postures in one program, and no answer to "which
+    // one is the candidate set". Guessing would silently pick a suppression rule the operator
+    // never wrote; the door names the problem instead.
+    gw.register(
+      {
+        name: "TwoMinds",
+        alg: 1,
+        body: parseTerm({
+          op: "group",
+          key: "byTargetContext",
+          in: {
+            op: "select",
+            pred: { hasPointer: { targetEntity: { var: "root" } } },
+            in: { op: "mask", policy: "annotate", in: { op: "mask", policy: "drop", in: "input" } },
+          },
+        }),
+      },
+      PLANT_POLICY,
+      [FERN],
+    );
+    await expect(gw.list("TwoMinds")).rejects.toThrow(/masks negations 2 different ways/);
     await gw.close();
   });
 });
