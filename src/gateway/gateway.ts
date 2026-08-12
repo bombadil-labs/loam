@@ -77,6 +77,12 @@ import {
 } from "./gql.js";
 import { declarePublicImpl, readPublicSchemas } from "./public.js";
 import {
+  envelopeReportsImpl,
+  type EnvelopeReport,
+  type PoolEnvelope,
+  type QuarantineEnvelope,
+} from "./envelope.js";
+import {
   cutImpl,
   deriveReceiptImpl,
   readGraveyards,
@@ -256,6 +262,28 @@ export class Gateway {
   registered: Bound[] = [];
   /** @internal — T19 seam (renderers.ts: the §23.9 anonymous-render cap's in-flight count) */
   publicRendersInFlight = 0;
+  // The §24.5 RESOURCE ENVELOPE, present iff this gateway is an UNTRUSTED separate container's pool
+  // (container.ts sets it at open). It carries the pool's live slot/timeout/memory accounting and a
+  // resolver closed over the PARENT's ground — a child that may admit what its parent distrusts must
+  // never be able to admit a delta that raises its own ceiling. Absent on a primary and on a
+  // trusted/curated container, which keep the ordinary door budgets.
+  /** @internal — T34 seam (renderers.ts, container.ts, envelope.ts) */
+  envelope: PoolEnvelope | undefined = undefined;
+  // The §24.5 CEILING every separate container carries, enveloped or not: what the operator's LIVE
+  // ground allows this container, composed with its opener's. Absent on a primary.
+  /** @internal — T34 seam (container.ts) */
+  envelopeCeiling: (() => QuarantineEnvelope) | undefined = undefined;
+  // The ROOT ground every descendant resolves its own envelope from — the operator's real store, not
+  // the seeded copy it sits on. A container's ground is a one-way copy where a later STRIKE never
+  // lands, so a pool that resolved from the ground beneath it would read a ceiling the operator has
+  // already retracted, at both levels at once. Passed down unchanged at every depth. Absent on a
+  // primary, which is its own root.
+  /** @internal — T34 seam (container.ts) */
+  envelopeGround: ((subject?: string) => QuarantineEnvelope) | undefined = undefined;
+  // This container's display handle in an envelope report (its entity, or `anonymous#N`). Present on
+  // every separate container so a nested pool's row is attributable even under a non-enveloped one.
+  /** @internal — T34 seam (container.ts, envelope.ts) */
+  poolHandle: string | undefined = undefined;
   // The resolver memo (SPEC §22.5): (resolver-content-address, bucket-delta-set) → value. Keyed on the
   // surviving bucket, so it invalidates by construction when the ground moves — an erased fact drops
   // from the bucket and its old value can never be served again. A pure cache; safe to clear anytime.
@@ -749,11 +777,26 @@ export class Gateway {
   /** @internal — T19 seam (container.ts) */
   readonly attachedContainers = new Map<string, Gateway>();
 
+  // How many ANONYMOUS pools this store has ever opened. An anonymous pool has no container entity
+  // to name, and a nameless row in an envelope report would be exactly the unattributable failure
+  // §24.5's report exists to prevent — so each gets a stable synthetic handle (`anonymous#1`, …).
+  // Grow-only on purpose: reusing a handle after a drop would make two different pools' spending
+  // read as one pool's.
+  /** @internal — T34 seam (container.ts) */
+  anonymousPoolsOpened = 0;
+
   // The live per-connection inbox handles (SPEC §39), keyed by inbox name. A binding is DURABLE: a
   // second bindConnection of the same (container, connection key) resumes the same handle rather than
   // spawning a new pool. Cleared only by a drop().
   /** @internal — T138 seam (container.ts) */
   readonly connectionInboxes = new Map<string, Container>();
+
+  // The §24.5 envelope rows for every enveloped pool attached here: which pool, its resolved
+  // ceilings, and what it has spent. The refusal a caller meets stays leak-free; this is the
+  // operator-facing half of "exhaustion is loud". Body in envelope.ts.
+  envelopeReports(): EnvelopeReport[] {
+    return envelopeReportsImpl(this);
+  }
 
   // Open a QUARANTINE POOL over this store (SPEC §24): the body lives in quarantine-pool.ts,
   // which re-expresses it as the untrusted-and-separate PRESET of the container primitive below.

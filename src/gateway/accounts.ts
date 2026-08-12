@@ -28,6 +28,7 @@ import { publicDefect } from "./public.js";
 import { artifactDefect } from "./artifact.js";
 import { trustDefect } from "./trust.js";
 import { budgetDefect } from "./budget.js";
+import { envelopeDefect } from "./envelope.js";
 import { containerDefect } from "./container.js";
 import { slateDefect } from "./slate.js";
 
@@ -397,6 +398,7 @@ export function authorize(
     publicDefect(delta.claims) ??
     artifactDefect(delta.claims) ??
     budgetDefect(delta.claims) ??
+    envelopeDefect(delta.claims) ??
     containerDefect(delta, reactor, operator) ??
     eraseDefect(delta, reactor, operator) ??
     slateDefect(delta, reactor, operator);

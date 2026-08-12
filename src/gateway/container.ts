@@ -35,6 +35,12 @@ import { isRepairable } from "../store/quarantine.js";
 import { CTX_GRANTS, grantClaims, holdsGrant, revocationClaims } from "./accounts.js";
 import { STORE_ENTITY } from "./genesis.js";
 import { isTombstone, readTombstones } from "./erase.js";
+import {
+  clampedTo,
+  newPoolEnvelope,
+  resolveEnvelope,
+  type QuarantineEnvelope,
+} from "./envelope.js";
 import { withNegationClosure, withNegationClosureAcross } from "./ingest.js";
 import { lawfulNegated, lawfulSnapshot } from "./registration.js";
 import { readTrustPolicyAt, type TrustPolicy } from "./trust.js";
@@ -1046,6 +1052,41 @@ async function openSeparate(
     }
   }
   const pool = await Gateway.open(backend, { seed: gw.options.seed });
+  // THE §24.5 RESOURCE ENVELOPE — the operator's second undelegatable power (the first is erasure
+  // reach, §24.8). A child may admit deltas its parent does not trust, and what keeps that safe to
+  // HOST is that the operator can still cap the bill.
+  //
+  // THE CEILING RIDES EVERY SEPARATE CONTAINER, enveloped or not, and the reason is a strike. A
+  // container's ground is a one-way seeded COPY, re-pulsed only on reseed — so a declaration that
+  // crossed the edge and was later STRUCK on the parent stays live in the copy (H1: the strike does
+  // not follow it). A pool opened INSIDE that container resolves against the copy. So the ceiling
+  // below is resolved from the OPENER's live reactor and composed downward: every descendant is
+  // bounded by what the operator's ground says right now, however stale the ground it sits on.
+  // Nothing below the operator can widen; it can only tighten.
+  pool.poolHandle = spec.entity ?? `anonymous#${(gw.anonymousPoolsOpened += 1)}`;
+  // The ground is the ROOT's, passed down unchanged: a container's own reactor is a seeded copy, and
+  // resolving a descendant's ceiling from it would read a declaration the operator struck after the
+  // seeding as still live — at the report AND at the gate, so the two would agree on the wrong
+  // answer and no single-sided assertion could see it.
+  const ground =
+    gw.envelopeGround ??
+    ((subject?: string): QuarantineEnvelope =>
+      resolveEnvelope(gw.reactor, gw.operatorAuthor, subject));
+  pool.envelopeGround = ground;
+  const ownEnvelope = (): QuarantineEnvelope => ground(spec.entity);
+  const outerCeiling = gw.envelopeCeiling;
+  const ceiling = outerCeiling === undefined ? ownEnvelope : clampedTo(ownEnvelope, outerCeiling);
+  pool.envelopeCeiling = ceiling;
+  // ENFORCEMENT attaches to an UNTRUSTED container, and to EVERYTHING BELOW ONE. A curated container
+  // opened directly on the primary keeps the store's ordinary door budgets — the argument for
+  // metering a child is that it admits what its parent does not trust. But a curated container opened
+  // INSIDE a pool is still inside the pool: its `trust` knob is read from the pool's seeded copy of
+  // the container table, where a strike on the parent never lands, so letting that knob decide
+  // metering would let a metered pool host an unmetered child at the operator's expense. Once you are
+  // below an untrusted container, you are metered.
+  if (spec.trust === "untrusted" || gw.envelope !== undefined) {
+    pool.envelope = newPoolEnvelope(pool.poolHandle, spec.entity, ceiling);
+  }
   if (spec.admit !== undefined && spec.membership !== undefined) {
     throw new Error(
       `${voice}: give a membership Term OR an admit predicate, not both — admit is the ` +
