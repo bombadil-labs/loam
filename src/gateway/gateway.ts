@@ -761,9 +761,14 @@ export class Gateway {
   // The store THIS gateway was attached FROM, for a separate container's own gateway (SPEC §27).
   // A pool holds a SEEDED COPY of the host's law, frozen until someone re-pulses the edge — and
   // nothing re-pulses it on its own. So any question whose stale answer would make a REVOCATION
-  // never arrive must be asked of the host, live. Exactly one is asked through it today: does a
-  // renderer's pen still hold write standing (§23.3 × §24.7)? It is not a back-channel for reading
-  // the host's ground, which is the thing the one-way glass exists to prevent.
+  // never arrive must be asked of the host, live. One is asked through it today: does a renderer's
+  // pen still hold write standing (§23.3 × §24.7)? It is not a back-channel for reading the host's
+  // ground, which is the thing the one-way glass exists to prevent. Cleared when the container
+  // detaches — a detached pool is nobody's replica.
+  //
+  // THE CLASS IS NOT CLOSED, and nothing here should read as if it were: a pool's copy of the
+  // striker set, of the registrations, and of the public declarations is stale in exactly the same
+  // way, and those are READS. They are older than this field and are not fixed here.
   /** @internal — T35 seam (container.ts, renderers.ts) */
   attachedTo: Gateway | undefined = undefined;
 

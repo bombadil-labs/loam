@@ -252,7 +252,7 @@ describe("T35 §24.7 — the frame, and the sentence it may never say", () => {
   it("a container name is escaped into the banner, never injected as markup", async () => {
     // The name reaches the frame from a DECLARATION, and a declaration is content — a store that
     // federated one in, or an operator who pasted one, must not thereby author markup on a page the
-    // renderer door composes. (`hollow-test` found this uncovered: the escape survived mutation.)
+    // renderer door composes.
     const { gw } = await primary();
     const hostile = 'container:<script>alert("x")</script>&';
     await gw.append([
@@ -305,6 +305,21 @@ describe("T35 §24.7 — the frame, and the sentence it may never say", () => {
     const curated = bodyOf(await c.gateway!.serveRoute("curated", FERN, "full"));
     expect(curated).toContain("the operator's own words");
     expect(curated).not.toContain("data-loam-probation");
+
+    // And it inherits no PENS either. The pens travel into the container the frame exists for and no
+    // other: a curated container and a §39 inbox pool build authority in their own ground on purpose,
+    // and handing them the host's signing keys would widen what they may do in the host's name.
+    await c.gateway!.publishRenderer({
+      route: "curated-write",
+      schema: "Plant",
+      consumes: ["message", "note"],
+      bundle: APP,
+      writable: ["message"],
+      pen: "stranger-pen",
+    });
+    const refused = await c.gateway!.writeRoute("curated-write", FERN, { message: "x" }, "full");
+    expect(refused.status).toBe(403);
+    expect(refused.body).toContain("not provisioned");
     await c.drop();
   });
 });
@@ -332,7 +347,7 @@ describe("T35 §24.7 — the pen's second key is asked of the HOST, live", () =>
 
     const refused = await pool.writeRoute("stranger", FERN, { message: "after" }, "full");
     expect(refused.status).toBe(403);
-    expect(refused.body).toContain("no longer granted");
+    expect(refused.body).toContain("holds no write grant in the store this pool reads");
     // At the delta level: nothing the pen authored after the strike is in the pool.
     expect(
       [...pool.reactor.snapshot()].some((d) => JSON.stringify(d.claims).includes("after")),
@@ -342,6 +357,43 @@ describe("T35 §24.7 — the pen's second key is asked of the HOST, live", () =>
     expect(html).toContain("<p id=msg>before</p>");
     expect(html).toContain("On probation");
     await c.drop();
+  });
+
+  it("a pool of a pool asks the ROOT, not its own frozen parent", async () => {
+    const { gw } = await primary();
+    const outer = await gw.openQuarantine();
+    const inner = await outer.gateway.openQuarantine();
+    await inner.gateway.publishRenderer({
+      route: "deep",
+      schema: "Plant",
+      consumes: ["message", "note"],
+      bundle: APP,
+      writable: ["message"],
+      pen: "stranger-pen",
+    });
+    expect(
+      (await inner.gateway.writeRoute("deep", FERN, { message: "before" }, "full")).status,
+    ).toBe(200);
+
+    // Strike at the ROOT. The intermediate pool's copy of the grant is as frozen as the inner one's,
+    // so a check that climbed only one link would ask a store that still says yes.
+    const grant = [...gw.reactor.snapshot()].find((d) =>
+      d.claims.pointers.some((p) => p.role === "subject" && JSON.stringify(p.target).includes(PEN)),
+    )!;
+    await gw.append([
+      signClaims(makeNegationClaims(OP, 9_700_000, grant.id, "revoke the pen"), OP_SEED),
+    ]);
+    expect(holdsGrant(outer.gateway.reactor, STORE_ENTITY, PEN, "write", OP)).toBe(true);
+
+    const refused = await inner.gateway.writeRoute("deep", FERN, { message: "after" }, "full");
+    expect(refused.status).toBe(403);
+    expect(
+      [...inner.gateway.reactor.snapshot()].some((d) =>
+        JSON.stringify(d.claims).includes('"after"'),
+      ),
+    ).toBe(false);
+    await inner.drop();
+    await outer.drop();
   });
 });
 
@@ -369,6 +421,7 @@ describe("T35 §24.7 — the frame's other shapes", () => {
     // A fragment: the banner precedes the app's own markup.
     const fragment = bodyOf(await c.gateway!.serveRoute("stranger", FERN, "full"));
     expect(fragment.indexOf("data-loam-probation")).toBeLessThan(fragment.indexOf("<main>"));
+    expect(fragment).toContain('data-loam-probation-stage="1"'); // the app sits in its own stage
 
     // A whole document: the banner lands INSIDE the body, before the app, and the document's own
     // head is left where the bundle put it.
@@ -387,9 +440,12 @@ describe("T35 §24.7 — the frame's other shapes", () => {
     await c.drop();
   });
 
-  it("the promotion link points at the admin page that actually exists", () => {
+  it("the promotion link uses the admin door's own container path", () => {
     // The frame hardcodes the path (a gateway may not import a server module), so pin the literal to
-    // the door's own constant here rather than letting the two rot apart.
+    // the door's own constant here rather than letting the two rot apart. WHAT THIS DOES NOT PIN:
+    // the query key. `?name=` is a literal on both sides, so a door that renamed the parameter would
+    // keep this green while the link landed on a page that cannot name the container. Closing it
+    // wants a rail that drives the admin door itself, which lives in test/server.
     expect(probationBanner({ container: "container:x" }, "full")).toContain(
       `${ADMIN_CONTAINER_PATH}?name=`,
     );
@@ -403,11 +459,10 @@ describe("T35 §24.7 — the frame's other shapes", () => {
     expect(() => c.gateway!.packArtifact("stranger", FERN, { server: "Loam" })).toThrow(
       /quarantine pool/,
     );
-    // Two-sided: the primary refuses this route for its OWN reason, never the probation one — the
-    // guard reads the store it was asked about rather than every store.
-    expect(() => gw.packArtifact("mine", FERN, { server: "Loam" })).toThrow(
-      /not declared publishable/,
-    );
+    // Two-sided, and it has to be a SUCCESS: the guard reads the store it was asked about, so a
+    // non-probationary store still packs. (A second refusal would prove only that packing refuses.)
+    await gw.declareArtifact(["mine"]);
+    expect(gw.packArtifact("mine", FERN, { server: "Loam" }).page).toContain("<");
     await c.drop();
   });
 });
@@ -429,12 +484,19 @@ describe("T35 §24.7 — erasure reaches through a mounted frame (§24.8)", () =
       JSON.stringify(d.claims).includes("a note only the operator wrote"),
     )!.id;
     expect(await pool.backend.holds(canonical)).toBe(true); // the pool really held the byte
+    const bystander = [...gw.reactor.snapshot()].find((d) =>
+      JSON.stringify(d.claims).includes("the operator's own words"),
+    )!.id;
 
     await gw.erase(canonical, { reason: "the author asked" });
 
     // The byte is gone from the pool's store, and the frame — still mounted, still serving — can no
     // longer paint it. Two-sided: the pool's own output and the operator's un-erased words both live.
     expect(await pool.backend.holds(canonical)).toBe(false);
+    // TWO-SIDED at the bytes: a named live bystander — the operator's un-erased `message` — is still
+    // held by BOTH stores. A rail that only proves removal cannot see an over-purge.
+    expect(await gw.backend.holds(bystander)).toBe(true);
+    expect(await pool.backend.holds(bystander)).toBe(true);
     const after = bodyOf(await pool.serveRoute("stranger", FERN, "full"));
     expect(after).not.toContain("a note only the operator wrote");
     expect(after).toContain("the stranger's own");

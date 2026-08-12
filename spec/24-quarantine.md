@@ -324,13 +324,17 @@ rather than left to mislead the next builder.
 Two things were genuinely missing, and both are now built. The PEN could not write: a pool opened without
 the primary's provisioned pen seeds refused every form-submit with "this renderer's pen is not
 provisioned", so a probationary app could only ever paint a frozen preview — the exact failure clause (1)
-forbids. A pool now inherits the primary's pens; custody is unchanged, because the pool already holds the
-operator seed, which is strictly stronger. Authorization is not loosened either, and the SECOND KEY IS
-ASKED OF THE HOST: a pool holds only a seeded COPY of the operator's grants, frozen until someone
-re-pulses the edge, and nothing re-pulses it on its own — so a pen whose grant the operator strikes in the
-primary would have gone on signing in the pool forever, anonymously wherever the route is public. The
-renderer door now re-reads the host's live word before it signs, which is the call `mounts.ts` already
-makes about §12 publicness, for the same reason: a revocation must arrive. And the FRAME did not exist:
+forbids. An UNTRUSTED pool now inherits the primary's pens — only that one, since a curated container and
+a §39 inbox pool build authority in their own ground on purpose and are left exactly as they were. Custody
+is unchanged, because the pool already holds the operator seed, which is strictly stronger. Authorization
+is not loosened either, and the SECOND KEY IS ASKED OF THE ROOT STORE: a pool holds only a seeded COPY of
+the operator's grants, frozen until someone re-pulses the edge, and nothing re-pulses it on its own — so a
+pen whose grant the operator strikes in the primary would have gone on signing in the pool forever,
+anonymously wherever the route is public. The renderer door now re-reads the root's live word before it
+signs, climbing past any intermediate pool (whose copy is frozen too). That is the call `mounts.ts`
+already makes about §12 publicness, for the same reason: a revocation must arrive. The class is NOT
+closed, and the code says so rather than implying otherwise: a pool's copies of the striker set, the
+registrations, and the public declarations are stale in the same way, and those are reads. And the FRAME did not exist:
 a pool's gateway now carries a `probation` mark, set by the attach for UNTRUSTED containers only, and
 every 200-with-HTML render from such a gateway is wrapped in `src/gateway/probation.ts`'s banner — the
 probation, the live writes named to their pool, promotion as the only crossing, and the droppability. The
@@ -626,9 +630,9 @@ word about the pen's grant, because a pool's seeded copy of that grant is frozen
 calls, and a revocation must arrive. The probation mark is set for UNTRUSTED containers only, so a curated
 container is never framed as probation. Promotion controls at the frame's edge are a link to the
 container's admin page, where §24.3 adoption and §24.4 blessing already live; the anonymous door gets the
-statement and no link. Thirteen rails in `test/gateway/probation-frame.test.ts`, at both levels: a pen write
+statement and no link. Fourteen rails in `test/gateway/probation-frame.test.ts`, at both levels: a pen write
 lands in the pool's reactor AND its bytes and is absent from the primary's, the app reads its own write
-back across two gestures, a struck grant refuses the next write with no reseed, a drop leaves the primary's
+back across two gestures, a struck grant refuses the next write with no reseed at either depth, a drop leaves the primary's
 delta set and rendered answer identical, erasure in the primary blanks a field the pool did not overwrite
 while the pool's own output survives, the container name is escaped into the banner, packing is refused,
 and the copy is tested against thirteen spellings of §24.7's forbidden sentence. HONEST SCOPE, stated

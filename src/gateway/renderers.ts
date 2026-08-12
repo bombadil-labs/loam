@@ -686,19 +686,34 @@ export async function writeRouteImpl(
   if (penSeed === undefined) {
     return { status: 403, contentType: text, body: "this renderer's pen is not provisioned" };
   }
-  // A POOL ASKS ITS HOST'S LIVE WORD (SPEC §24.7, following the §12 precedent in mounts.ts). A
-  // container's gateway holds a SEEDED COPY of the operator's grants, frozen until someone calls
+  // A PROBATIONARY POOL ASKS ITS HOST'S LIVE WORD (SPEC §24.7, following the §12 precedent in
+  // mounts.ts). A pool holds a SEEDED COPY of the operator's grants, frozen until someone calls
   // reseed() — and nothing calls it on its own. Asking the pool alone would make a revocation
-  // unrevocable at every container mount: strike the pen's grant in the primary and the pool would
-  // keep signing with it forever, anonymously where the route is public. So the pen must hold write
-  // standing at the HOST as well as here, re-read per request. `authorize` still asks this store's
-  // own question below; this is the second key, not a replacement for the first.
-  const host = gw.attachedTo;
-  if (
-    host !== undefined &&
-    !holdsGrant(host.reactor, STORE_ENTITY, authorForSeed(penSeed), "write", host.operatorAuthor)
-  ) {
-    return { status: 403, contentType: text, body: "this renderer's pen is no longer granted" };
+  // unrevocable at every quarantine mount: strike the pen's grant in the primary and the pool would
+  // go on signing with it forever, anonymously wherever the route is public. So the pen must hold
+  // write standing at the ROOT store as well as here, re-read per request. `authorize` still asks
+  // this store's own question below; this is the second key, not a replacement for the first.
+  //
+  // ONLY where the grant is a seeded copy — i.e. a QUARANTINE. A curated container and a §39 inbox
+  // pool build authority in their OWN ground on purpose (container.ts's grant chain), and asking
+  // the host about a grant the host was never meant to hold would refuse every write there with a
+  // reason that is not true. Climbing to the root matters for the same reason the check exists: an
+  // intermediate pool's copy is frozen too, so a pool of a pool must not ask its frozen parent.
+  if (gw.probation !== undefined) {
+    let root = gw.attachedTo;
+    while (root?.attachedTo !== undefined) root = root.attachedTo;
+    if (
+      root !== undefined &&
+      !holdsGrant(root.reactor, STORE_ENTITY, authorForSeed(penSeed), "write", root.operatorAuthor)
+    ) {
+      // States the CONDITION rather than asserting a revocation happened: the pen may have been
+      // struck, or may never have held standing outside this pool at all.
+      return {
+        status: 403,
+        contentType: text,
+        body: "this renderer's pen holds no write grant in the store this pool reads",
+      };
+    }
   }
   try {
     // Sign AS the pen (not the caller). append→authorize checks the pen's GRANT — provisioning is not

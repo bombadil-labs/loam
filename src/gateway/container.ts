@@ -1052,15 +1052,19 @@ async function openSeparate(
   // seed, which is strictly stronger custody than any pen, so carrying the pens across adds no key the
   // pool did not have. Authorization is NOT loosened either, and the door is where that is enforced:
   // the pen's grant reaches the pool as data, but a seeded copy is frozen until someone re-pulses the
-  // edge, so `writeRouteImpl` asks the HOST's live word through `attachedTo` before it signs — the same
-  // call mounts.ts makes about §12 publicness, for the same reason (a revocation must arrive).
+  // edge, so `writeRouteImpl` asks the ROOT store's live word through `attachedTo` before it signs —
+  // the same call mounts.ts makes about §12 publicness, for the same reason (a revocation must
+  // arrive). The pens travel only into an UNTRUSTED pool: that is the container the frame exists for,
+  // and it leaves a curated container and a §39 inbox pool — which build authority in their OWN
+  // ground on purpose — exactly as they were.
+  const probationary = spec.trust === "untrusted";
   const pool = await Gateway.open(backend, {
     seed: gw.options.seed,
-    ...(gw.options.pens === undefined ? {} : { pens: gw.options.pens }),
+    ...(probationary && gw.options.pens !== undefined ? { pens: gw.options.pens } : {}),
   });
   pool.attachedTo = gw;
   // A probationary pool KNOWS it is one, for the renderer door's sequestered frame (SPEC §24.7).
-  if (spec.trust === "untrusted") {
+  if (probationary) {
     pool.probation = spec.entity === undefined ? {} : { container: spec.entity };
   }
   if (spec.admit !== undefined && spec.membership !== undefined) {
@@ -1109,6 +1113,9 @@ async function openSeparate(
   const unregister = (): void => {
     gw.quarantinePools.delete(pool);
     if (spec.entity !== undefined) gw.attachedContainers.delete(spec.entity);
+    // The back-pointer goes with the attachment. A detached pool is nobody's replica, and a stale
+    // host would be a live handle into a store this one no longer reaches.
+    pool.attachedTo = undefined;
   };
 
   if (spec.entity !== undefined) {
