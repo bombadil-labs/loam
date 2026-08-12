@@ -47,7 +47,7 @@ export const ENVELOPE_ANY = "*";
 export interface QuarantineEnvelope {
   readonly maxConcurrentRenders: number; // slots: how many of this pool's renders may run at once
   readonly renderTimeoutMs: number; // the pool's own wall clock, per render
-  readonly maxMemoryMb: number; // per-worker old-generation ceiling
+  readonly maxMemoryMb: number; // per-worker heap ceiling, old + young together
 }
 
 // The floor a pool starts from with no declaration at all. Deliberately TIGHTER than the primary's
@@ -59,8 +59,8 @@ export const DEFAULT_QUARANTINE_ENVELOPE: QuarantineEnvelope = {
   maxMemoryMb: 128,
 };
 
-// Young-generation size scales with the declared ceiling but never exceeds §23.9's constant: a
-// squeezed pool must not be handed a scavenger bigger than its whole heap.
+// The largest scavenger a pool is ever handed — §23.9's own constant, and the cap on the share the
+// split below gives the young generation.
 const YOUNG_MB = 32;
 
 const DIMENSIONS = ["maxConcurrentRenders", "renderTimeoutMs", "maxMemoryMb"] as const;
@@ -155,6 +155,13 @@ export function readEnvelopePolicy(
     // things binds neither; taking the last would have the reader honor a shape the door refuses.
     const named = delta.claims.pointers.filter((p) => p.role === "subject");
     if (named.length !== 1) continue;
+    // And at most one pointer per DIMENSION, as the door also requires. Taking the last of several
+    // would let the ORDER of a delta's pointers pick the ceiling, and last-wins is the widening
+    // direction — a federated declaration carrying `maxConcurrentRenders: 1, maxConcurrentRenders:
+    // 64` would meter at 64 on a path that never met a door.
+    if (DIMENSIONS.some((d) => delta.claims.pointers.filter((p) => p.role === d).length > 1)) {
+      continue;
+    }
     let subject: string | undefined;
     const limits: { -readonly [K in Dimension]?: number } = {};
     for (const p of delta.claims.pointers) {
@@ -220,13 +227,18 @@ export function resolveEnvelope(
   };
 }
 
-// The `resourceLimits` an envelope hands the Worker (§23.9's constructor).
+// The `resourceLimits` an envelope hands the Worker (§23.9's constructor). `maxMemoryMb` is the
+// pool's WHOLE heap, so the two generations SPLIT it rather than each taking it: V8 sizes old and
+// young independently and the process may hold both at once, so handing 32 to each permits ~64 while
+// the report prints 32 — a ceiling an operator lowers to contain a leak, that does not bound what it
+// names (H7). The young generation takes a quarter, capped at §23.9's constant so a roomy pool is not
+// handed an enormous scavenger, and floored at 1 so a 1MB declaration still starts a worker.
 export const workerLimitsOf = (
   env: QuarantineEnvelope,
-): { maxOldMb: number; maxYoungMb: number } => ({
-  maxOldMb: env.maxMemoryMb,
-  maxYoungMb: Math.min(YOUNG_MB, env.maxMemoryMb),
-});
+): { maxOldMb: number; maxYoungMb: number } => {
+  const maxYoungMb = Math.max(1, Math.min(YOUNG_MB, Math.floor(env.maxMemoryMb / 4)));
+  return { maxOldMb: Math.max(1, env.maxMemoryMb - maxYoungMb), maxYoungMb };
+};
 
 // A pool's LIVE accounting: the resolver (closed over the parent's reactor — see divergence 1 above)
 // plus the counters an operator reads. The object belongs to the pool's gateway, which is what makes

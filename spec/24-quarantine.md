@@ -320,6 +320,12 @@ Four things the build settled that the recommendation could only gesture at:
   copy it sits on: a container's ground is a one-way seeded copy, so a declaration struck on the
   parent after seeding stays live inside it, and a pool that read its ceiling from there would resolve
   a retraction as live at the report and at the gate together. Nothing below the operator widens.
+- **The door and the reader BOTH check, and they check the same things.** The append door refuses a
+  declaration that names two subjects, or one dimension twice, or a dimension that is not a positive
+  integer. `federate` never asks the door, and that is the path a foreign store's bytes arrive on, so
+  the reader re-checks rather than trusting that a door saw it: a delta that names a dimension twice
+  binds nothing at all. Reading the last such pointer would let the ORDER of a delta's pointers pick
+  a ceiling, and last-wins is the widening direction.
 - **A per-pool declaration this store can read nothing from takes the TIGHTER of the floor and the
   wildcard, per dimension.** `readBudgetPolicy` drops such a subject, which for a quota means
   unmetered; for a ceiling the conservative reading is the tightest one available. The floor alone
@@ -338,8 +344,22 @@ Four things the build settled that the recommendation could only gesture at:
   its trust knob is read from the pool's seeded copy of the container table, where a strike on the
   parent never lands, so that knob must not be what decides metering. Trust decides at the top; below
   an untrusted container, everything is metered.
-- **The memory ceiling reaches the Worker's `resourceLimits`, and is asserted two-sided.** A declared
-  bound that never crossed into the worker would print in a report and hold nothing.
+- **Governing both doors makes a pool's ANONYMOUS door operator-raisable, on the clock as well as the
+  slots.** The envelope supersedes §23.9's cap entirely inside a pool, so `maxPublicRenders` (16) and
+  the host's `renderTimeoutMs` are both unreachable there. With no declaration this is strictly
+  tighter — 4 slots and 500ms against 16 and the host's clock. But a declaration above 16 slots, or
+  above 500ms, means an anonymous caller to a mounted pool may hold more workers, or hold one longer,
+  than §23.9 alone allowed. That is deliberate: the envelope is the pool's whole bill, and a second
+  ceiling the operator could not raise for their own quarantine would be a hidden one. It is stated
+  here because the widening is real, and the operator writing the declaration should know it.
+- **The memory ceiling reaches the Worker's `resourceLimits`, is asserted two-sided, and names a
+  TOTAL.** A declared bound that never crossed into the worker would print in a report and hold
+  nothing. `maxMemoryMb` is the whole heap: V8 sizes the old and young generations independently and
+  a worker may hold both at once, so handing the declared number to each would permit roughly twice
+  what the report prints — a ceiling an operator lowers to contain a leak, that does not bound what
+  it names. The generations SPLIT the declaration instead; the young takes a quarter, capped at
+  §23.9's constant and floored at 1MB, so the sum is exactly what was declared. This also makes the
+  floor genuinely tighter than §23.9's own worker on memory (128 against 128 + 32), not merely equal.
 
 **Two flags stay OPEN, and this subsection does not outgrow either.** First, the one the draft above
 already states: until the full no-fs/no-net ocap layer ships (SES-in-worker or isolated-vm, §23.9's

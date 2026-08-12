@@ -29,9 +29,10 @@ const ROOMY = "loam:pool:roomy";
 // space — measured, both sail past a 32MB `maxOldGenerationSizeMb` untouched. Many small ordinary
 // objects are what the old-generation ceiling actually bounds, so that is what this allocates. A
 // filler that could not be refused would make this whole rail assert nothing while looking thorough.
-// MEASURED BOUNDARY for this filler: it faults at a 48MB ceiling and serves at 64MB. So the 32MB
-// side has headroom below and the 128MB default has headroom above — the margins are stated rather
-// than hoped, because the failure direction on the serving side is a red bar on a loaded machine.
+// MEASURED BOUNDARY for this filler, with the generations splitting the declared total: it faults at
+// a 64MB ceiling and serves at 80MB. So the 32MB side has headroom below and the 128MB default has
+// headroom above — the margins are stated rather than hoped, because the failure direction on the
+// serving side is a red bar on a loaded machine.
 const GREEDY = `export default () => {
   const keep = [];
   for (let i = 0; i < 48; i += 1) {

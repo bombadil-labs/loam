@@ -86,11 +86,26 @@ describe("T34: the floor a pool starts from", () => {
       renderTimeoutMs: 500,
       maxMemoryMb: 128,
     });
+    // `maxMemoryMb` is the WHOLE heap, so the generations SPLIT it. V8 sizes old and young
+    // independently and a worker may hold both at once — giving each the declared number would
+    // permit twice what the report prints, which is a ceiling that does not bound what it names.
+    // The sum is the declaration, exactly, at every size.
+    for (const maxMemoryMb of [1, 4, 16, 32, 128, 4096]) {
+      const { maxOldMb, maxYoungMb } = workerLimitsOf({
+        ...DEFAULT_QUARANTINE_ENVELOPE,
+        maxMemoryMb,
+      });
+      expect(maxYoungMb).toBeGreaterThanOrEqual(1); // a 1MB pool still starts a worker
+      expect(maxYoungMb).toBeLessThanOrEqual(32); // never a scavenger bigger than §23.9's constant
+      expect(maxOldMb + maxYoungMb).toBe(Math.max(maxMemoryMb, 2));
+    }
     expect(workerLimitsOf({ ...DEFAULT_QUARANTINE_ENVELOPE, maxMemoryMb: 16 })).toEqual({
-      maxOldMb: 16,
-      maxYoungMb: 16, // a squeezed pool is never handed a scavenger bigger than its whole heap
+      maxOldMb: 12,
+      maxYoungMb: 4,
     });
-    expect(workerLimitsOf(DEFAULT_QUARANTINE_ENVELOPE)).toEqual({ maxOldMb: 128, maxYoungMb: 32 });
+    // The floor is now strictly tighter than §23.9's own worker (128 + 32 = 160), on memory too —
+    // not merely equal to it, which is what the old un-split reading made it.
+    expect(workerLimitsOf(DEFAULT_QUARANTINE_ENVELOPE)).toEqual({ maxOldMb: 96, maxYoungMb: 32 });
   });
 
   it("an anonymous pool has a HANDLE for the report and no subject a declaration could name", async () => {
@@ -356,6 +371,46 @@ describe("T34 delta level: the envelope is one operator-authored declaration, re
     expect(envelopeDefect(envelopeClaims(ENVELOPE_ANY, { maxConcurrentRenders: 2 }, OP, 1))).toBe(
       undefined,
     );
+    await gw.close();
+  }, 20000);
+
+  it("a DUPLICATED dimension is refused by the reader too, not resolved by pointer order", async () => {
+    // The door refuses a declaration that names one dimension twice. `federate` never asks the door,
+    // and it is the path a foreign store's bytes arrive on — so the reader re-checks, exactly as it
+    // already re-checks the subject. Reading the LAST pointer would let the ORDER of a delta's
+    // pointers pick the ceiling, and last-wins is the widening direction.
+    const gw = await primary();
+    await declare(gw, ENVELOPE_ANY, { maxConcurrentRenders: 1, renderTimeoutMs: 3000 }, 9100);
+    const twice: Claims = {
+      timestamp: 9200, // later than the honest one, so a reader that accepted it would supersede
+      author: OP,
+      pointers: [
+        {
+          role: "declares",
+          target: { kind: "entity", entity: { id: ENVELOPE_ENTITY, context: CTX_ENVELOPE } },
+        },
+        { role: "subject", target: { kind: "primitive", value: ENVELOPE_ANY } },
+        { role: "renderTimeoutMs", target: { kind: "primitive", value: 3000 } },
+        { role: "maxConcurrentRenders", target: { kind: "primitive", value: 1 } },
+        { role: "maxConcurrentRenders", target: { kind: "primitive", value: 64 } },
+      ],
+    };
+    const signed = signClaims(twice, OP_SEED);
+    expect(envelopeDefect(twice)).toMatch(/at most one maxConcurrentRenders/);
+    await expect(gw.append([signed])).rejects.toThrow(/at most one maxConcurrentRenders/);
+    // In through the door-less path. It lands as bytes; it must bind nothing.
+    await gw.federate([signed], { admit: () => true });
+    expect(gw.reactor.get(signed.id)).toBeDefined();
+
+    // Delta level: the reader drops the whole declaration, so the honest earlier one still governs.
+    expect(readEnvelopePolicy(gw.reactor, OP).get(ENVELOPE_ANY)?.maxConcurrentRenders).toBe(1);
+    // Object level: the pool meters at 1, not at the duplicate's 64.
+    const pool = await gw.openQuarantine();
+    expect(gw.envelopeReports()[0]!.envelope.maxConcurrentRenders).toBe(1);
+    const both = await Promise.all([serve(pool.gateway, "ok"), serve(pool.gateway, "ok")]);
+    expect(both.map((r) => r.status).sort()).toEqual([200, 503]);
+
+    await pool.drop();
     await gw.close();
   }, 20000);
 });
@@ -649,6 +704,53 @@ describe("T34 reach: metering rides DOWN, whatever the child declares", () => {
     expect(rows[1]!.envelope.maxConcurrentRenders).toBe(1);
     const both = await Promise.all([serve(inner.gateway!, "ok"), serve(inner.gateway!, "ok")]);
     expect(both.map((r) => r.status).sort()).toEqual([200, 503]);
+
+    await inner.drop();
+    await pool.drop();
+    await gw.close();
+  }, 30000);
+
+  it("a descendant with a GENEROUS subject of its own is still clamped to its opener's slots", async () => {
+    // THE RAIL THAT ISOLATES THE CLAMP. Every other nested fixture in this file gives the inner pool
+    // an anonymous handle, so its own ceiling resolves through the wildcard to the same number the
+    // clamp would produce — root-ground resolution and the clamp are two independent mechanisms and
+    // those fixtures make them coincide. Delete the clamp and they all stay green.
+    //
+    // Here the two mechanisms DISAGREE by 63 slots. The operator's wildcard is 1, and the operator
+    // also wrote a per-pool declaration of 64 for a container named `loam:pool:big`. An anonymous
+    // pool (ceiling 1) then opens a container by that name, so its OWN envelope resolves to 64 — from
+    // the root's ground, and from the pool's seeded copy of it, which is why neither wrong path can
+    // masquerade as the right one. Only the clamp brings it back to 1.
+    const gw = await primary();
+    await declare(gw, ENVELOPE_ANY, { maxConcurrentRenders: 1, renderTimeoutMs: 3000 }, 9970);
+    await declare(gw, "loam:pool:big", { maxConcurrentRenders: 64, renderTimeoutMs: 3000 }, 9971);
+    // The generous subject is real and readable: without this the rail could pass because the
+    // declaration never bound, rather than because the clamp caught it.
+    expect(readEnvelopePolicy(gw.reactor, OP).get("loam:pool:big")?.maxConcurrentRenders).toBe(64);
+
+    const pool = await gw.openQuarantine();
+    expect(gw.envelopeReports()[0]!.envelope.maxConcurrentRenders).toBe(1);
+    await pool.gateway.append([
+      signClaims(
+        containerClaims(
+          { container: "loam:pool:big", trust: "untrusted", posture: "separate" },
+          OP,
+          9972,
+        ),
+        OP_SEED,
+      ),
+    ]);
+    const inner = await pool.gateway.openContainer({ name: "loam:pool:big" });
+
+    // Report level: the operator reads 1, not the 64 the inner pool's own subject grants.
+    const rows = gw.envelopeReports();
+    expect(rows.map((r) => r.pool)).toEqual(["anonymous#1", "anonymous#1/loam:pool:big"]);
+    expect(rows[1]!.envelope.maxConcurrentRenders).toBe(1);
+    // Gate level, asserted with the report because a clamp that printed 1 and admitted 64 would be
+    // the same defect wearing an honest report. Two concurrent renders, one slot: one is refused.
+    const both = await Promise.all([serve(inner.gateway!, "ok"), serve(inner.gateway!, "ok")]);
+    expect(both.map((r) => r.status).sort()).toEqual([200, 503]);
+    expect(gw.envelopeReports()[1]!.refusedForSlots).toBe(1);
 
     await inner.drop();
     await pool.drop();
