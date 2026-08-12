@@ -129,11 +129,11 @@ describe("T157/1 — a definition naming a materialization nothing provides refu
     expect(refused!.reason).toContain('"Compost"');
     expect(refused!.reason).toContain("Plant");
     expect(refused!.reason).toMatch(/compute nothing/);
-    // The claim is SCOPED to what was checked — the gateway's registrations, not the whole
-    // reactor, which rhizomatic gives no way to enumerate. A sentence that pronounced on the
-    // reactor would be asserting a fact this code never established.
-    expect(refused!.reason).toMatch(/no registered schema provides/);
-    expect(refused!.reason).not.toMatch(/nothing (in|on) the reactor/);
+    // The claim is SCOPED to what was checked — what this runner can SEE, not the whole reactor,
+    // which rhizomatic gives no way to enumerate. A sentence pronouncing on the reactor would be
+    // asserting a fact this code never established. And the cure names the escape hatch.
+    expect(refused!.reason).toMatch(/nothing this runner can see provides/);
+    expect(refused!.reason).toMatch(/RunnerOptions\.materializations/);
 
     // Object level: the well-formed sibling of the SAME shape still computes, so the refusal is
     // a refusal and not a blanket. 30 and 34 average to 32.
@@ -158,7 +158,7 @@ describe("T157/1 — a definition naming a materialization nothing provides refu
     const runner = attach(bare);
     expect(runner.installed).toEqual([]);
     expect(runner.unbound.map((u) => u.name)).toEqual(["binding:avgHeight"]);
-    expect(runner.unbound[0]!.reason).toMatch(/registered no schema yet/);
+    expect(runner.unbound[0]!.reason).toMatch(/This runner can see none/);
     await bare.close();
   });
 
@@ -244,6 +244,61 @@ describe("T157/1 — a definition naming a materialization nothing provides refu
     ).toBe(considered.length);
     await gateway.close();
   });
+
+  it("a HOST-registered materialization is bindable once the host declares it, and computes", async () => {
+    // `materializationFor` documents a pass-through for a materialization registered outside the
+    // gateway, and `attach` refuses what it cannot resolve — so without a declaration that case
+    // is refused, which would silently narrow a supported one. The host knows what it registered;
+    // `RunnerOptions.materializations` is how it says so. Both sides are railed here, because a
+    // rail that only proved the refusal would call the narrowing correct.
+    const gateway = await Gateway.open(new MemoryBackend());
+    gateway.reactor.register("plant", PLANT.body, [FERN]); // the host's own, not the gateway's
+    await gateway.append([
+      signClaims(
+        bindingDefinitionClaims({ ...SPEC, materialization: "plant" }, RUNNER, 1),
+        RUNNER_SEED,
+      ),
+    ]);
+
+    // Undeclared: refused, and the sentence points at the declaration rather than at a schema.
+    const blind = Runner.attach(gateway, {
+      seed: RUNNER_SEED,
+      implementations: { "fn:avgHeight": avgHeight },
+    });
+    expect(blind.installed).toEqual([]);
+    expect(blind.unbound[0]!.reason).toMatch(/RunnerOptions\.materializations/);
+
+    // Declared: installed, and it really computes — the object level, at the host's own name.
+    const runner = Runner.attach(gateway, {
+      seed: RUNNER_SEED,
+      implementations: { "fn:avgHeight": avgHeight },
+      materializations: ["plant"],
+    });
+    expect(runner.installed).toEqual(["binding:avgHeight"]);
+    expect(runner.unbound).toEqual([]);
+    await measureTwice(gateway);
+    const entries = gateway.reactor.materializedView("plant", FERN)?.props.get(DERIVED) ?? [];
+    expect(entries).toHaveLength(1);
+    const value = entries[0]!.delta.claims.pointers.find((p) => p.role === "value");
+    expect(value?.target.kind === "primitive" && value.target.value).toBe(32);
+    await gateway.close();
+  });
+
+  it("a declared name may not enter the gateway's own NUL alphabet", () => {
+    // Every gateway-owned materialization is NUL-qualified. If a declaration could carry a NUL it
+    // could name one of those and re-open exactly the hole the refusal closes, so it refuses
+    // loudly rather than accepting a name it has no business honoring.
+    return Gateway.open(new MemoryBackend()).then(async (gateway) => {
+      expect(() =>
+        Runner.attach(gateway, {
+          seed: RUNNER_SEED,
+          implementations: {},
+          materializations: ["Plant\u0000g1"],
+        }),
+      ).toThrow(/may not contain NUL/);
+      await gateway.close();
+    });
+  });
 });
 
 describe("T157/2 — an `emit` that merely parses refuses at install", () => {
@@ -260,6 +315,12 @@ describe("T157/2 — an `emit` that merely parses refuses at install", () => {
     ['{"keyed":[7]}', "a context that is not a string can never equal a pointer's context"],
     ['"append"', "the strategy name JSON-quoted: a parsed string is not one of the two bare names"],
   ];
+
+  it("the refused list has a FLOOR — narrowing it back to the loud case cannot pass quietly", () => {
+    // `it.each` over a list is only as strong as the list. Six is what round two established;
+    // dropping one is then a deliberate edit to this number rather than a silent narrowing.
+    expect(REFUSED.length).toBeGreaterThanOrEqual(6);
+  });
 
   it.each(REFUSED)("refuses emit: %s — %s", async (emit) => {
     const gateway = await plantStore();
@@ -285,10 +346,15 @@ describe("T157/2 — an `emit` that merely parses refuses at install", () => {
     await gateway.close();
   });
 
-  it("a well-formed keyed emit still installs AND supersedes per subject", async () => {
+  it("a well-formed keyed emit still installs and keys its emissions rather than appending", async () => {
     // The other side of the refusal: JSON emit is not banned, it is CHECKED. A real keyed
     // strategy over the emitted subject's context keys every emission the same way, so the
     // second measurement supersedes the first instead of piling up beside it.
+    //
+    // GAP, named: this fixture has ONE emitted subject, so it separates keyed from APPEND (2
+    // entries vs 1) and cannot separate keyed from wholesale `supersede` — both leave one live
+    // entry. Distinguishing those two needs the count of NEGATIONS emitted, not the live count,
+    // which is a rail about rhizomatic's derivation host rather than about this refusal.
     const gateway = await plantStore();
     await gateway.append([
       signClaims(withEmit("binding:avgHeight", `{"keyed":["${DERIVED}"]}`, 1), RUNNER_SEED),

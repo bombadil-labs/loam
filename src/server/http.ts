@@ -319,9 +319,11 @@ const byteDoorOf = (
 //
 // `bound` is a fact about a LENS, not about a program (H6): `publishRegistration` decides it at
 // (entity, lens), and one program may carry sibling readings of which some bind and some do not.
-// So the answer names the lens it is reporting on. `registered` keeps its original meaning — the
-// program name, what the operator typed under `hyperschema.name` — because callers already read
-// it; the two coincide until a request names its schema, and that is exactly the case where a
+// So the answer names the lens it is reporting on, READ FROM THE OUTCOME rather than re-derived
+// here — a second derivation beside the deciding one is free to drift, and a rail over a request
+// this door composed itself could not see the drift. `registered` keeps its original meaning: the
+// program name, what the operator typed under `hyperschema.name`, because callers already read
+// it. The two coincide until a request names its schema, and that is exactly the case where a
 // single name would be reporting on the wrong thing.
 async function performRegistration(
   gateway: Gateway,
@@ -346,7 +348,7 @@ async function performRegistration(
   );
   const answer = {
     registered: input.hyperschema.name,
-    lens: input.schema.name ?? input.hyperschema.name,
+    lens: outcome.lens,
     entity: schemaEntityFor(input.hyperschema, input.entity),
     bound: outcome.bound,
   };

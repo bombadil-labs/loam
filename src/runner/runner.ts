@@ -13,7 +13,7 @@ import {
   type DerivedFn,
   type Reactor,
 } from "@bombadil/rhizomatic";
-import type { Gateway } from "../gateway/gateway.js";
+import { NUL, type Gateway } from "../gateway/gateway.js";
 import { lawfulNegated } from "../gateway/registration.js";
 
 export const CTX_BINDING = "loam.binding";
@@ -63,11 +63,11 @@ export interface SupersededBinding {
   readonly name: string;
 }
 
-// A definition that reads perfectly and still cannot be honored: it names a materialization no
-// registered schema provides, so the host would watch a name nothing ever changes and the binding
-// would compute nothing, forever, while reporting `installed`. That is the H7 shape at the binding
-// layer — a success whose visible effect has not happened and never will — so the definition is
-// refused at install and named here instead, with the cure in its own sentence.
+// A definition that reads perfectly and still cannot be honored: it names a materialization
+// nothing this runner can see provides, so the host would watch a name that never changes and the
+// binding would compute nothing, forever, while reporting `installed`. That is the H7 shape at the
+// binding layer — a success whose visible effect has not happened and never will — so the
+// definition is refused at install and named here instead, with the cure in its own sentence.
 export interface UnboundBinding {
   readonly name: string; // the binding
   readonly materialization: string; // the name it asked for and did not get
@@ -226,6 +226,14 @@ export function readBindingDefinitions(
 export interface RunnerOptions {
   readonly seed: string; // the runner's signing identity — every emission is authored by it
   readonly implementations: Record<string, DerivedFn>; // fnId → the code to run
+  /**
+   * Materializations the HOST registered itself, straight onto `gateway.reactor`. The gateway can
+   * only enumerate its own registrations and rhizomatic exposes no way to list the reactor's, so
+   * a host that registered its own DECLARES them — attach refuses what it cannot resolve, and
+   * this is how it learns to resolve these. Names are taken verbatim, and a NUL is refused: every
+   * gateway-owned materialization is NUL-qualified, so this option can never name one of those.
+   */
+  readonly materializations?: readonly string[];
 }
 
 // The five lists account for every binding delta the reader CONSIDERED — that is, every surviving,
@@ -246,7 +254,7 @@ export interface Runner {
   readonly host: DerivationHost;
   readonly installed: string[]; // binding names the runner could run
   readonly skipped: string[]; // binding names whose implementation it lacks
-  readonly unbound: UnboundBinding[]; // definitions naming a materialization nothing provides
+  readonly unbound: UnboundBinding[]; // definitions naming a materialization nothing provides here
   readonly superseded: SupersededBinding[]; // definitions a later one of the same name replaced
   readonly malformed: MalformedBinding[]; // binding deltas that would not read as a definition
 }
@@ -263,10 +271,19 @@ export const Runner = {
     const unbound: UnboundBinding[] = [];
     const malformed: MalformedBinding[] = [];
     const superseded: SupersededBinding[] = [];
-    // The names a definition may bind to, asked once. `materializationFor` falls back to the raw
-    // name on a miss, which is what let an unhonorable definition install; this is the same
-    // lookup, kept, so the refusal below can never disagree with the resolution above it.
-    const provided = gateway.materializationNames();
+    // The names a definition may bind to, asked once: the gateway's registrations, plus whatever
+    // the host says it registered on the reactor itself. `materializationFor` falls back to the
+    // raw name on a miss, which is what let an unhonorable definition install; the registration
+    // half is that same lookup, kept, so the refusal below cannot disagree with the resolution
+    // above it, and the declared half is the caller's own knowledge rather than a guess.
+    const declared = options.materializations ?? [];
+    const bad = declared.find((m) => m.includes(NUL));
+    if (bad !== undefined) {
+      throw new Error(
+        `a declared materialization may not contain NUL — that alphabet is the gateway's own: ${JSON.stringify(bad)}`,
+      );
+    }
+    const provided = [...gateway.materializationNames(), ...declared];
     for (const spec of readBindingDefinitions(gateway.reactor, gateway.operator, {
       onMalformed: (m) => malformed.push(m),
       onSuperseded: (s) => superseded.push(s),
@@ -275,11 +292,10 @@ export const Runner = {
       // fact about THIS runner ("another one may hold it"), while a materialization no schema
       // provides is damage in the store that no runner could honor. Report the damage.
       //
-      // The claim is SCOPED to what was actually checked. A host may register a materialization
-      // straight onto `gateway.reactor`, and rhizomatic offers no way to enumerate those — so the
-      // sentence says what the gateway can see rather than pronouncing on the whole reactor, and
-      // the refusal is a refusal to guess. Such a host names its own materialization by a plain
-      // name; every gateway-owned one is NUL-qualified (matName), so the two alphabets never meet.
+      // The claim is SCOPED to what was actually checked: the gateway's registrations and the
+      // host's declarations. A host that registered a materialization on the reactor itself and
+      // did not declare it lands here — correctly, because attach cannot see it and will not
+      // guess; `RunnerOptions.materializations` is how it says so.
       if (!provided.includes(spec.materialization)) {
         unbound.push({
           name: spec.name,
@@ -288,11 +304,14 @@ export const Runner = {
           // the registered schemas tells them nothing they could not read for themselves. It is a
           // cure, not an oracle.
           reason:
-            `no registered schema provides a materialization named "${spec.materialization}", ` +
-            `so this binding would watch a name the gateway never changes and compute nothing. ` +
+            `nothing this runner can see provides a materialization named ` +
+            `"${spec.materialization}", so this binding would watch a name that never changes ` +
+            `and compute nothing. ` +
             (provided.length === 0
-              ? "This store has registered no schema yet — register one, then attach again."
-              : `Name a schema this store has registered: ${provided.join(", ")}.`),
+              ? "This runner can see none — register a schema on the gateway"
+              : `Name one this runner can see: ${provided.join(", ")} — or register a schema`) +
+            `, or, if the host registered this materialization on the reactor itself, declare it ` +
+            `in RunnerOptions.materializations.`,
         });
         continue;
       }

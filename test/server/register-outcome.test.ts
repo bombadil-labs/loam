@@ -177,7 +177,17 @@ describe("the registration doors report whether anything now serves the name", (
     // thing. Every fixture above has an anonymous schema, where lens and program COINCIDE and no
     // assertion could tell them apart. The quarry mount does not: its law is held in-process
     // under the reading `StoneRough` over the program `Stone`.
-    const res = await register(STONE, "quarry");
+    // The published reading carries an EXTRA field the in-process one does not. That is the
+    // object-level witness: if this publish ever bound, `grit` would appear on `stoneRough`. A
+    // fixture publishing the identical schema could not tell a bound publish from a shadowed one.
+    const res = await register(
+      {
+        ...STONE,
+        schema: { ...STONE.schema, props: { color: PICK, grit: PICK } },
+        writable: ["color", "grit"],
+      },
+      "quarry",
+    );
     expect(res.status).toBe(200); // written — the process-local override is not a refusal
     const body = (await res.json()) as Answer;
     expect(body.registered).toBe("Stone"); // the PROGRAM the operator typed
@@ -187,11 +197,15 @@ describe("the registration doors report whether anything now serves the name", (
     expect(body.reason).toMatch(/collides with an earlier schema/);
 
     // Object level: the door named the reading, and the reading is what the surface answers to.
-    // `stone` is not a field; `stoneRough` is.
+    // `stone` is not a field; `stoneRough` is — and it still has no `grit`, so the publish that
+    // said it did not bind really did not.
     const byLens = await gql(`{ stoneRough(entity: "stone:1") { _hex } }`, "quarry");
     expect(((await byLens.json()) as { errors?: string[] }).errors).toBeUndefined();
     const byProgram = await gql(`{ stone(entity: "stone:1") { _hex } }`, "quarry");
     expect(((await byProgram.json()) as { errors?: string[] }).errors).toBeDefined();
+    const withGrit = await gql(`{ stoneRough(entity: "stone:1") { grit } }`, "quarry");
+    const gritErrors = ((await withGrit.json()) as { errors?: string[] }).errors;
+    expect(gritErrors?.join(" ")).toMatch(/grit/);
   });
 
   it("POST /:mount/register: an ordinary registration says bound: true, with no reason to give", async () => {
