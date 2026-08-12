@@ -142,6 +142,16 @@ economics ladder, §22.3 / §23.10 — `inline → content-addressed ref → Mer
 byte-blob and here pointed at a delta-SET). Two consumers loading the same module version get the same
 bytes: dedup, verification, reproducibility. A package hash.
 
+**A version's members EXCEED the Term's dset, and this is the keystone property** (built; the record here
+was behind the code until [#375](https://github.com/bombadil-labs/loam/pull/375)). `freeze` is `select` plus the **forward negation closure** of what it
+selected (hazard H1): a version exists to be SHIPPED, and a version carrying a claim without the retraction
+that struck it hands its consumer a withdrawn claim reading as live. The closure runs forward only — from an
+admitted delta to the negations *of* it, transitively, never the reverse — so a strike whose target the Term
+excluded stays out, and a scope does not become a leak. It is author-blind on purpose: "in the members" means
+only *somebody struck this*, and who may take a word back is the reading side's question (§27.8). The
+consequence that looks like a wart and is not: two stores freezing the SAME Term, where only one holds a
+retraction, get DIFFERENT addresses. They are genuinely different sets, and the address says so.
+
 ### 27.3 Reference or merge — the load fork, and it is promotion (DECIDED provenance — Myk, 2026-07-15)
 
 Everything hinges on what LOAD means, and there are exactly two answers:
