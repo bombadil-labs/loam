@@ -141,25 +141,26 @@ function shellSource(): string {
   // RETAIN: a bundle handed a fresh realm per render cannot hold a copy across renders, because there is
   // nothing for it to hold the copy in.
   //
-  // TWO CLOCKS, AND TWO NUMBERS (T158). Construction arms a SPAWN bound; the realm's live signal
-  // re-arms a fresh RENDER bound. Arming both from C.renderTimeoutMs charged the viewer's DEVICE to a
-  // budget written for the bundle: worker thread start plus the realm's own module import is machinery
-  // the bundle has no part in, and it alone outruns the default 500 ms budget on a contended device —
-  // measured through CDP on a 16-core box at 4 ms idle, 91 ms at load average 150, and 803 ms worst at
-  // load 550. The page then painted "the renderer timed out" for a renderer that had not executed a
-  // line. So the spawn window reads C.renderSpawnTimeoutMs and says "could not start" instead.
+  // TWO CLOCKS, AND TWO NUMBERS, because the two waits measure different things. The SPAWN window runs
+  // to the realm's live signal and measures the viewer's DEVICE — worker thread start plus the realm's
+  // own module import, machinery the bundle has no part in. It reads C.renderSpawnTimeoutMs and says
+  // "could not start", never "timed out", which would claim the renderer ran. Only the RENDER window
+  // reads the operator's budget. Charging spawn to that budget refuses healthy bundles on a busy
+  // device: measured through a real Chrome on a 16-core box, spawn is 4 ms idle, 91 ms at load average
+  // 150, and 803 ms at load 550, against a 500 ms default.
   //
   // WHAT THE RENDER WINDOW STILL COVERS, stated because the number is not small. The realm signals live
   // when ITS module has evaluated, which is before the bundle arrives — so the render window carries the
-  // bundle's own blob: import and module evaluation as well as its call. Measured the same way, with a
-  // trivial bundle: 2 ms idle, 127 ms median and 801 ms worst at load 550. That residual cannot be split
-  // off here, because import() resolves only AFTER the bundle's top-level has run: the loader plumbing
-  // and the bundle's own code share one window and no signal can sit between them. Under load past
-  // roughly 500 on this box, a trivial bundle can therefore still be reported as timing out. Naming the
-  // number is the honest half; closing it needs a wider operator budget, and that is a §23.9 decision.
+  // bundle's own blob: import and module evaluation as well as its call. Measured the same way with a
+  // trivial bundle: 2 ms idle, 127 ms median and 801 ms at load 550. It cannot be split further, because
+  // import() resolves only AFTER the bundle's top-level has run — the loader plumbing and the bundle's
+  // own code share one window and no signal can sit between them. So on a device past roughly load 500,
+  // a trivial bundle can still be reported as timing out. Closing that needs a wider operator budget,
+  // which is a §23.9 decision and not this shell's to make.
   //
   // Both windows are HARD, and the live re-arm fires ONCE — a bundle that reaches a bare postMessage
-  // could otherwise re-arm the render clock forever and hold its own worker alive.
+  // (self is sealed in the realm; the bare identifier is not) could otherwise re-arm the render clock
+  // forever and hold its own worker alive.
   // Every render carries an EPOCH, and a render whose epoch has passed paints nothing. Without this a
   // real spawn plus a blob: module import is tens of milliseconds during which the world can move: root
   // answer A arrives, worker A spawns, an erasure lands and clears the mount, then worker A posts and
@@ -170,9 +171,14 @@ function shellSource(): string {
     return epoch !== live;
   }
 
-  // The settle-functions of renders still in flight. Calling one terminates its worker and paints
-  // nothing, because its epoch has already passed. Emptied first, so a settle that somehow spawns
-  // cannot re-enter this list mid-walk.
+  // The settle-function of every render since the last discard — usually one, and never more than the
+  // gestures a viewer landed between two paints. A settled render's entry stays until the next discard
+  // and re-invoking it is a no-op, so this is "not yet discarded" rather than "still running".
+  //
+  // CALLERS OWE AN EPOCH BUMP FIRST. discard() paints nothing only because every caller has already
+  // moved the epoch past these renders, so each one folds through the stale branch of done(). Discarding
+  // without bumping would paint a refusal for a render nothing was wrong with. The list is emptied
+  // before the walk, so a settle that somehow spawns cannot re-enter it mid-walk.
   var crew = [];
   function discard() {
     var held = crew;
@@ -207,6 +213,10 @@ function shellSource(): string {
       // superseded bundle cannot keep running either.
       if (stale(epoch)) return;
       if (msg.kind === "ok") { mount.innerHTML = msg.html; return; }
+      // A superseded render that somehow reached here writes nothing. It is normally caught by the
+      // stale branch above; without this arm, a future discard site that forgot the epoch bump would
+      // paint "the renderer faulted" for a renderer that faulted nothing.
+      if (msg.kind === "superseded") return;
       // A spawn overrun gets its OWN sentence. Saying "timed out" would claim the renderer ran.
       mount.textContent = msg.kind === "noStart"
         ? "the renderer could not start"

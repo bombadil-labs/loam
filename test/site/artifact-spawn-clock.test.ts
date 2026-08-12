@@ -36,10 +36,13 @@
 //       its windows from one number, and `test/gateway/render-sandbox.test.ts` pins the resulting
 //       "the renderer timed out" for what can only be a spawn overrun. T139 is that ticket; this file
 //       is deliberately the page half and asserts nothing about the server.
-//   (d) That a coordinates object built BY HAND, without `renderSpawnTimeoutMs`, is refused. The
-//       field is required on both `ArtifactCoordinates` declarations, so only a JS caller can omit it,
-//       and the shell would then read undefined and refuse in the same tick. A pack-time validation
-//       of coordinates is the rail, and no ticket has asked for one.
+//   (d) That a coordinates object built BY HAND, without `renderSpawnTimeoutMs`, is refused. The field
+//       is required on both `ArtifactCoordinates` declarations, so only a JS caller reaching the
+//       exported `artifactPage` can omit it — and the damage is worse than it sounds: setTimeout
+//       coerces undefined to 0, so the page would paint "the renderer could not start" on the next
+//       macrotask for EVERY render, including a fast local one. `renderTimeoutMs` has carried the same
+//       exposure since it was added. The rail is pack-time validation of coordinates, and no ticket has
+//       asked for one.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -75,6 +78,8 @@ interface Harness {
   /** Every worker the shell constructed, in order, so a rail can ask which ones were terminated. */
   readonly spawned: { terminated: boolean }[];
   deliver(): void;
+  /** A non-data watch event — the shell's `degrade` path, which darkens the mount. */
+  fail(): void;
   html(id: string): string;
   /** Poll until `text` is in the mount, or the deadline passes. Never sleeps a fixed span. */
   until(text: string, ms: number): Promise<boolean>;
@@ -225,6 +230,11 @@ const load = (page: string): Harness => {
   };
   return {
     spawned,
+    fail: () =>
+      watchHandler?.({
+        type: "error",
+        error: { code: "server_not_connected", message: "no connector" },
+      }),
     deliver: () =>
       watchHandler?.({ type: "data", result: { payload: answerFor(document_ ?? "") } }),
     html,
@@ -336,14 +346,19 @@ describe("T158 at the BEHAVIOUR: driving the emitted shell in a DOM", () => {
     // The cost of a generous spawn ceiling, paid down. A render the world has moved past must stop
     // when it is superseded; waiting out a 10 s ceiling would let a viewer clicking through gestures
     // on a slow device stack up worker threads and deepen the contention that made spawn slow.
-    liveAfterMs = 3_000; // far beyond this rail's patience, and far short of the shipped ceiling
+    // The deadline is DERIVED, never a literal: the rail discriminates only while it is shorter than
+    // the spawn ceiling, and a future ticket lowering that constant would otherwise turn this green
+    // with the repair reverted and nothing would say so.
+    const patience = Math.min(2_000, ARTIFACT_SPAWN_TIMEOUT_MS / 4);
+    expect(patience).toBeLessThan(ARTIFACT_SPAWN_TIMEOUT_MS);
+    liveAfterMs = patience * 2; // this render can only be stopped by being superseded
     answerAfterMs = 5;
     const page = await pack();
     const h = load(page);
     h.deliver(); // render 1 — spawned, not yet live
     h.deliver(); // render 2 — supersedes it
     const gone = await (async (): Promise<boolean> => {
-      const deadline = Date.now() + 2_000;
+      const deadline = Date.now() + patience;
       while (!(h.spawned[0]?.terminated ?? false) && Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 5));
       }
@@ -354,6 +369,27 @@ describe("T158 at the BEHAVIOUR: driving the emitted shell in a DOM", () => {
     // …and the superseded render paints NOTHING on its way out.
     expect(h.html("loam-app")).not.toContain("could not start");
     expect(h.html("loam-app")).not.toContain("timed out");
+  });
+
+  it("DARKENING tears down a render in flight — the teardown takes the worker, not just the markup", async () => {
+    // The other discard site, and the one that matters most. `darken` drops `reads` and `state` whole,
+    // and the shell's header calls that a completeness claim: no pre-erasure answer replayable from the
+    // viewer's side. A render still in flight holds the PRE-teardown maps in its own closure, so a
+    // teardown that clears the mount and leaves the worker running keeps exactly what it says it drops.
+    const patience = Math.min(2_000, ARTIFACT_SPAWN_TIMEOUT_MS / 4);
+    liveAfterMs = patience * 2;
+    answerAfterMs = 5;
+    const page = await pack();
+    const h = load(page);
+    h.deliver(); // a render is in flight, not yet live
+    h.fail(); // a non-data event: the mount darkens
+    const deadline = Date.now() + patience;
+    while (!(h.spawned[0]?.terminated ?? false) && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(h.spawned[0]?.terminated ?? false).toBe(true);
+    // …and the darkened mount stays darkened: the render that was in flight paints nothing at all.
+    expect(h.html("loam-app")).toBe("");
   });
 
   it("the spawn ceiling is HARD — a page with a tiny one refuses a slow start rather than waiting", async () => {
