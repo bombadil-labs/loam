@@ -5,10 +5,8 @@
 // and on the tokenless PUBLIC door the listing field is a validation impossibility — the same
 // refusal a field that never existed gets, so no prober learns the authed surface can enumerate.
 
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
-
-vi.setConfig({ testTimeout: 15000 });
 import { grantClaims } from "../../src/gateway/accounts.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
