@@ -17,6 +17,7 @@ import {
   type Reactor,
 } from "@bombadil/rhizomatic";
 import { Gateway, type FederationReport } from "../gateway/gateway.js";
+import type { PublishOutcome } from "../gateway/lifecycle.js";
 import { parseOffer } from "../federation/offer.js";
 import { toWire } from "../federation/wire.js";
 import { migrate } from "../migrate/migrate.js";
@@ -30,6 +31,7 @@ import {
   schemaEntityFor,
   type RegistrationInput,
 } from "../gateway/registration.js";
+import { STOCK_SCHEMAS, stockNames, stockSchema } from "../stock/index.js";
 import { CTX_PEN, penEntity, penRecordClaims } from "../gateway/renderers.js";
 import { serve, type ServerHandle } from "../server/http.js";
 import { revokeConnector } from "../server/oauth.js";
@@ -145,12 +147,21 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
   },
   register: {
     summary: "define a schema from a file and register it in the home's store",
-    usage: "loam register <schema.json> [options]",
-    flags: new Set(["home", "store"]),
+    usage: "loam register <schema.json> | --stock <name> [options]",
+    flags: new Set(["home", "store", "stock"]),
     notes: [
       "The file: { hyperschema: { name, alg?, body }, schema, roots, entity?, mutations?, writable? }",
       "— the same object POST /:mount/register and the MCP loam_register tool take. The store is",
       "single-writer, so register before serving (a running server takes the same body over HTTP).",
+      "",
+      "--stock registers a shipped shape instead, so day one needs no hand-written gather term:",
+      ...STOCK_SCHEMAS.map((s) => `  ${s.name.padEnd(8)}${s.summary}`),
+      "It is an ordinary registration through the ordinary door — the very object you could have",
+      "typed. So it is ungoverned in both directions, as every hand-written example is: any",
+      "negation binds, whoever signed it, AND the gather names no author, so any peer's claim binds",
+      "too. Props are latest-wins, so a federated peer's later timestamp takes a field and keeps",
+      "it. A trust mask alone answers only the strikes — a store that federates wants `authoredBy`",
+      "in its gather, or `byAuthorRank` in its schema. Outgrow the shelf and write one.",
     ],
   },
   pull: {
@@ -305,6 +316,10 @@ const FLAG_HELP: Readonly<
   "oauth-allow-redirect": {
     arg: "<origins>",
     note: "comma-separated origins a connector may redirect to — opens §37 registration (needs --public-url)",
+  },
+  stock: {
+    arg: "<name>",
+    note: "register a shipped shape instead of a file — the shelf is listed below",
   },
   out: { arg: "<file>", note: "write the output here (default stdout)" },
   url: { arg: "<base>", note: "the running gateway to ask (default http://127.0.0.1:4321)" },
@@ -689,18 +704,50 @@ async function cmdServe(
   return 0;
 }
 
-// Register a schema from a file: { name, alg?, body, policy, roots, entity? } — the body and
-// policy in their JSON profiles. The definition and its registration land as operator-signed
-// deltas in the home's store; the next serve generates the surface from them. Offline by
-// design (the store is single-writer): register before serving, or use POST /:mount/register
-// against a running server.
-async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
-  const parsed = parseFor("register", args);
+// The shelf, as a sentence — every refusal that names a stock name owes the reader the full set.
+// Stock names are shipped constants and public by construction, so listing them discloses nothing:
+// this is a menu, not an oracle.
+const stockShelf = (): string => stockNames().join(", ");
+
+// WHERE A REGISTRATION CAME FROM — a file the operator wrote, or a shape we ship. The two differ in
+// exactly one respect (how the JSON is obtained) and in no other: both hand the same `unknown` to
+// the same `parseRegistrationInput`, so a stock shape has no privileged path and no weaker check.
+// `origin` is only what a refusal names, so the reader knows which of the two to go fix.
+interface RegistrationSource {
+  readonly origin: string;
+  readonly json: unknown;
+}
+
+// Resolve `loam register`'s arguments to one source, or to an exit code and a said reason.
+function registrationSource(parsed: Parsed, io: IO): RegistrationSource | number {
+  const stock = parsed.flags.get("stock");
   const file = parsed.positionals[0];
+  if (stock !== undefined && file !== undefined) {
+    io.err(
+      `register: --stock ${stock} and ${file} are two registrations — name one. ` +
+        "A stock shape is a starting point, not an overlay on your file.",
+    );
+    return 2;
+  }
+  if (stock !== undefined) {
+    const entry = stockSchema(stock);
+    if (entry === undefined) {
+      io.err(
+        `register: no stock schema named "${stock}" — the shelf is: ${stockShelf()}. ` +
+          "Or hand `loam register` a file of your own.",
+      );
+      return 2;
+    }
+    // A CLONE, deliberately: `parseRegistrationInput` passes arrays through by reference, and the
+    // shelf is a module-level constant shared by every call in the process. Handing it out once
+    // would let a downstream mutation rewrite the shape every later `--stock` registers.
+    return { origin: `--stock ${entry.name}`, json: structuredClone(entry.registration) };
+  }
   if (file === undefined) {
     io.err(
       "register wants a schema file: `loam register <schema.json>` — " +
-        "{ hyperschema: { name, alg?, body }, schema, roots, entity? }",
+        "{ hyperschema: { name, alg?, body }, schema, roots, entity? } — " +
+        `or a shipped shape: \`loam register --stock <name>\` (${stockShelf()})`,
     );
     return 2;
   }
@@ -715,11 +762,29 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
     io.err(`register: cannot read ${file}: ${err instanceof Error ? err.message : String(err)}`);
     return 1;
   }
-  let input: RegistrationInput;
   try {
-    input = parseRegistrationInput(JSON.parse(raw));
+    return { origin: file, json: JSON.parse(raw) };
   } catch (err) {
     io.err(`register: ${file}: ${err instanceof Error ? err.message : String(err)}`);
+    return 2;
+  }
+}
+
+// Register a schema from a file: { name, alg?, body, policy, roots, entity? } — the body and
+// policy in their JSON profiles. `--stock <name>` reads a shipped shape instead of a file, and
+// changes nothing downstream of that. The definition and its registration land as operator-signed
+// deltas in the home's store; the next serve generates the surface from them. Offline by
+// design (the store is single-writer): register before serving, or use POST /:mount/register
+// against a running server.
+async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
+  const parsed = parseFor("register", args);
+  const source = registrationSource(parsed, io);
+  if (typeof source === "number") return source;
+  let input: RegistrationInput;
+  try {
+    input = parseRegistrationInput(source.json);
+  } catch (err) {
+    io.err(`register: ${source.origin}: ${err instanceof Error ? err.message : String(err)}`);
     return 2;
   }
 
@@ -731,8 +796,9 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
     openStore(path, io),
     assembleGenesis({ operatorSeed: readSeed(home) }),
   );
+  let outcome: PublishOutcome;
   try {
-    await gateway.publishRegistration(
+    outcome = await gateway.publishRegistration(
       input.hyperschema,
       input.schema,
       input.roots,
@@ -751,6 +817,17 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
     `loam: registered ${input.hyperschema.name} at ${schemaEntityFor(input.hyperschema, input.entity)}\n` +
       `  the definition is deltas now — the next serve grows the surface from it`,
   );
+  // PERSISTED IS NOT BOUND. `publishRegistration` reports a publish whose replay could not bind —
+  // a rival body under the same program name, a lens another entity already answers for — and the
+  // deltas are down either way, so the line above stays true. What would be false is leaving the
+  // operator to read "the next serve grows the surface from it" when it will not. Qualified rather
+  // than blocked, exactly as the staleness warning below is: the write happened.
+  if (!outcome.bound) {
+    io.err(
+      `loam: the deltas landed, but this registration does not bind here — ${outcome.reason}\n` +
+        `  a serve of this home will not grow the surface from it until that is settled`,
+    );
+  }
   // The success is true and incomplete on its own: a server already holding this store will keep
   // serving the surface it booted with. The warning qualifies the report; it never blocks it.
   const staleness = servingWarning(home, path);

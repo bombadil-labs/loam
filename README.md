@@ -59,15 +59,50 @@ store driver — a native addon with prebuilt binaries for common platforms).
 # create a home directory and mint an operator identity (the seed is written 0600, never printed)
 loam init --home ./my-store
 
-# give the store a shape: define + register a schema from a file (see "Schemas are data")
-loam register plant.json --home ./my-store
-
-# serve it over HTTP with a bearer token
-loam serve --http --home ./my-store --token "$(openssl rand -hex 16)" --port 4321
+# give the store a shape. `--stock` registers one Loam ships, so day one needs no hand-written
+# gather term: the shelf is event, note, person, post (`loam register --help` describes each).
+loam register --stock note --home ./my-store
 
 # inspect a store
 loam store --home ./my-store
+
+# serve it over HTTP with a bearer token. `serve` holds the terminal until you stop it, so run it
+# in the background — the curl below reads $TOKEN from this same shell.
+export TOKEN=$(openssl rand -hex 16)
+loam serve --http --home ./my-store --token "$TOKEN" --port 4321 &
 ```
+
+Then write a note and read it back. Nothing was configured but the registration — the GraphQL
+surface is generated from it:
+
+```sh
+curl -s localhost:4321/default/graphql \
+  -H "authorization: Bearer $TOKEN" -H "content-type: application/json" \
+  -d '{"query":"mutation { note(entity: \"note:groceries\", title: \"milk\") { title _hex } }"}'
+
+curl -s localhost:4321/default/graphql \
+  -H "authorization: Bearer $TOKEN" -H "content-type: application/json" \
+  -d '{"query":"{ note(entity: \"note:groceries\") { title } }"}'
+```
+
+Run `kill %1` when you are done. To use a second terminal instead, export the same `TOKEN` there —
+`serve` never prints it.
+
+A stock schema is an **ordinary registration**, never a shortcut past one: it crosses the same
+door, meets the same validation, and lands the same deltas as a file you wrote. Outgrow the shelf
+and you register your own by path — `loam register my-schema.json --home ./my-store`.
+[Schemas are data](#schemas-are-data) spells that file out stage by stage. The shelf itself is
+exported as `STOCK_SCHEMAS` if you would rather start from a working shape than a blank file —
+it is frozen through, so copy an entry (`structuredClone`) and edit the copy.
+
+One thing the shelf does not decide for you: a stock shape reads **every author's claims, and
+every author's strikes**. Its gather selects on the pointer alone — no `authoredBy` — and masks
+negations with `drop`, so on a store that federates, a peer can both retract a field and set one.
+Every stock prop is `pick byTimestamp desc`, so a peer's `Note.title` with a later timestamp wins
+your view and keeps winning. Both halves need answering, and a trust mask alone answers only the
+strikes: pass `authoredBy` to the gather so the outer select admits your operator only, or order
+the props `byAuthorRank` so a stranger cannot outrank you. A store that federates writes its own
+body. This is why the shelf is a starting point rather than a deployment.
 
 `loam serve` self-initializes: a fresh home mints (or, via `LOAM_SEED`, imports) an operator
 identity, so a container serves with nothing but a token. Configuration is by flag or environment:
