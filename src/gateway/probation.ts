@@ -21,6 +21,12 @@
 // PRIMARY, so "your store is unchanged" is false at the delta level. The claim the code actually keeps
 // is the one that matters to a person: the writes go with the store, and none of them crossed.
 //
+// AND THE DROP SENTENCE CARRIES THE SAME QUALIFIER THE CROSSING SENTENCE DOES. "Nothing it wrote
+// crosses into your ground" is flatly false the moment an operator promotes an output (§24.3) — a
+// promoted delta is in canonical ground and the drop does not take it back. Two adjacent sentences,
+// one hedged and one absolute, describing the same boundary, is how a frame ends up lying in the
+// direction it was built to prevent. Both say "unless you promote it".
+//
 // The frame is CHROME, not confinement. It cannot stop untrusted markup from restyling or covering it —
 // visual containment wants a sandboxed iframe, and a sandboxed iframe drops the same-origin credentials
 // the §23.3 write path needs, so it is a later slice with its own design, not a flag flipped here. What
@@ -47,8 +53,13 @@ const CONTAINER_PAGE = "/admin/container";
  * gets the truth about what they are looking at, and no link into the operator's controls.
  */
 export function probationBanner(p: Probation, door: "full" | "public"): string {
+  // THE NAME IS THE OPERATOR'S, NOT THE STRANGER'S (finding 3). A container name is chosen by the
+  // operator and routinely names a counterparty — "container:acme-trial" tells an anonymous reader who
+  // the operator is talking to. The anonymous door already withholds the promotion link for the same
+  // reason; the name it links to is no less the operator's business. A stranger still gets the whole
+  // sequestration statement, which is the part that is about THEM.
   const where =
-    p.container === undefined
+    door !== "full" || p.container === undefined
       ? "this quarantine pool"
       : `the quarantine pool &quot;${escape(p.container)}&quot;`;
   const controls =
@@ -72,7 +83,7 @@ export function probationBanner(p: Probation, door: "full" | "public"): string {
     `<span data-loam-probation-says="crossing">Promotion is the only crossing. Nothing it wrote ` +
     `reaches your canonical ground until you promote it.</span> ` +
     `<span data-loam-probation-says="drop">Drop the pool and this app's writes go with the store. ` +
-    `Nothing it wrote crosses into your ground.</span>` +
+    `Nothing it wrote crosses into your ground unless you promoted it first.</span>` +
     controls +
     `</aside>`
   );

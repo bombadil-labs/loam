@@ -26,7 +26,7 @@ import { containerClaims } from "../../src/gateway/container.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
-import { publicClaims } from "../../src/gateway/public.js";
+import { publicClaims, PUBLIC_ENTITY } from "../../src/gateway/public.js";
 import { probationBanner } from "../../src/gateway/probation.js";
 import { ADMIN_CONTAINER_PATH } from "../../src/server/admin-pages.js";
 import { PLANT } from "./fixtures.js";
@@ -112,6 +112,23 @@ const quarantine = async (gw: Gateway) => {
 };
 
 const bodyOf = (r: { body: string }): string => r.body;
+
+// The same primary, with `Plant` declared open to tokenless callers BEFORE the container opens — so the
+// pool inherits the declaration through the seeding edge, exactly as a real quarantine does. This is the
+// configuration the anonymous write door needs, and the one the root's second key is asked about.
+const publicPrimary = async (): Promise<{ gw: Gateway; backend: MemoryBackend }> => {
+  const made = await primary();
+  await made.gw.append([signClaims(publicClaims(["Plant"], OP, 9_800), OP_SEED)]);
+  return made;
+};
+
+// The primary's surviving `loam:public` declaration, for a rail that needs to strike it.
+const publicDeclarationIn = (gw: Gateway): string =>
+  [...gw.reactor.snapshot()].find((d) =>
+    d.claims.pointers.some(
+      (p) => p.target.kind === "entity" && p.target.entity.id === PUBLIC_ENTITY,
+    ),
+  )!.id;
 
 describe("T35 §24.7 — the pen writes into the pool, never into canonical", () => {
   it("a quarantined route's write lands in the pool's store and nowhere in the primary's", async () => {
@@ -247,6 +264,39 @@ describe("T35 §24.7 — the frame, and the sentence it may never say", () => {
     expect(pub).toContain("Promotion is the only crossing");
     expect(pub).not.toContain("/admin/container");
     await c.drop();
+  });
+
+  it("the anonymous door withholds the container's declared name, as it withholds the link", async () => {
+    // A container name is the OPERATOR's choice and routinely names a counterparty — "the quarantine
+    // pool \"container:acme-trial\"" tells a stranger who this store is talking to. The door that
+    // withholds the promotion controls withholds what they point at.
+    const { gw } = await primary();
+    const c = await quarantine(gw);
+    await c.gateway!.append([signClaims(publicClaims(["Plant"], OP, 9_410), OP_SEED)]);
+
+    const pub = bodyOf(await c.gateway!.serveRoute("stranger", FERN, "public"));
+    expect(pub).not.toContain(CONTAINER);
+    expect(pub).not.toContain("stranger"); // nor the bare name inside it
+    // TWO-SIDED, and the second half is what stops this passing with the name deleted everywhere: the
+    // operator's own door still names the pool, because an operator must know WHICH pool this is.
+    expect(pub).toContain("this quarantine pool");
+    const full = bodyOf(await c.gateway!.serveRoute("stranger", FERN, "full"));
+    expect(full).toContain(CONTAINER);
+    await c.drop();
+  });
+
+  it("the drop sentence carries the same qualifier the crossing sentence does", () => {
+    // "Nothing it wrote crosses into your ground" is flatly false once an operator promotes an output
+    // (§24.3) — and it sat one sentence away from the hedged version of the same claim. A frame that
+    // overclaims the drop is the §24.7 failure pointed the other way.
+    for (const door of ["full", "public"] as const) {
+      const html = probationBanner({ container: CONTAINER }, door);
+      expect(html).toContain(
+        "Nothing it wrote crosses into your ground unless you promoted it first",
+      );
+      // The absolute form must not survive anywhere in the banner, under either door.
+      expect(html).not.toMatch(/crosses into your ground\.\s*<\/span>/);
+    }
   });
 
   it("a container name is escaped into the banner, never injected as markup", async () => {
@@ -434,6 +484,143 @@ describe("T35 §24.7 — the pen's second key is asked of the HOST, live", () =>
     expect(ok.gateway.probation).toEqual({});
     await ok.drop();
     expect(bodyOf(await gw.serveRoute("mine", FERN, "full"))).toContain("the operator's own words");
+  });
+});
+
+// THE WIDENING THIS PR DECLARED, RAILED. Carrying the primary's pen seeds into an untrusted pool made
+// one input newly permitted: a TOKENLESS caller can now POST a form on a public route in a quarantine
+// pool and have it signed. Every other rail in this file drives the "full" (token) door, so the widened
+// input had no rail at all. These drive it, at both levels, in both directions.
+describe("T35 §24.7 — the anonymous write door into a quarantine pool", () => {
+  it("an anonymous form-write over a public route lands in the pool and nowhere else", async () => {
+    const { gw, backend } = await publicPrimary();
+    const c = await quarantine(gw);
+    const pool = c.gateway!;
+    const before = new Set((await backend.deltasSince(new Set())).map((d) => d.id));
+
+    const wrote = await pool.writeRoute(
+      "stranger",
+      FERN,
+      { message: "a stranger, no token" },
+      "public",
+    );
+    expect(wrote.status).toBe(200);
+    // The re-render a browser form submit lands on is the PUBLIC door's, so it is framed and carries no
+    // link into the operator's controls.
+    expect(wrote.body).toContain("<p id=msg>a stranger, no token</p>");
+    expect(wrote.body).toContain("On probation");
+    expect(wrote.body).not.toContain("/admin/container");
+
+    // DELTA LEVEL, positive: the pool holds one PEN-authored delta carrying what the stranger posted.
+    const inPool = [...pool.reactor.snapshot()].filter((d) => d.claims.author === PEN);
+    expect(inPool.length).toBe(1);
+    expect(JSON.stringify(inPool[0]!.claims)).toContain("a stranger, no token");
+
+    // DELTA LEVEL, negative — the failure that matters. The primary's byte set is unchanged, and its
+    // reactor holds nothing the pen authored.
+    expect([...gw.reactor.snapshot()].some((d) => d.claims.author === PEN)).toBe(false);
+    expect(await backend.holds(inPool[0]!.id)).toBe(false);
+    expect([...new Set((await backend.deltasSince(new Set())).map((d) => d.id))]).toEqual([
+      ...before,
+    ]);
+
+    // OBJECT LEVEL, both sides: the pool's reader sees it; the primary's own route does not.
+    expect(bodyOf(await pool.serveRoute("stranger", FERN, "public"))).toContain(
+      "a stranger, no token",
+    );
+    expect(bodyOf(await gw.serveRoute("mine", FERN, "full"))).not.toContain("a stranger, no token");
+    await c.drop();
+  });
+
+  it("striking the primary's public declaration closes the pool's anonymous write door", async () => {
+    const { gw } = await publicPrimary();
+    const c = await quarantine(gw);
+    const pool = c.gateway!;
+    expect((await pool.writeRoute("stranger", FERN, { message: "before" }, "public")).status).toBe(
+      200,
+    );
+
+    // The operator closes the anonymous door in the PRIMARY, and nothing re-pulses the seeding edge.
+    // The pool's own copy of the declaration still says open — that is the point of the rail.
+    await gw.append([
+      signClaims(
+        makeNegationClaims(OP, 9_900_000, publicDeclarationIn(gw), "close the anonymous door"),
+        OP_SEED,
+      ),
+    ]);
+    expect(pool.isPublicLatest("Plant")).toBe(true); // stale copy stands
+
+    const refused = await pool.writeRoute("stranger", FERN, { message: "after" }, "public");
+    expect(refused.status).toBe(404);
+    // DELTA LEVEL: nothing the pen authored after the strike reached the pool.
+    expect(
+      [...pool.reactor.snapshot()].some((d) => JSON.stringify(d.claims).includes("after")),
+    ).toBe(false);
+    // TWO-SIDED, and it has to be a SUCCESS: only the ANONYMOUS door closed. The operator's own token
+    // door still writes the same route, so the rail cannot pass with the whole route disabled.
+    const still = await pool.writeRoute("stranger", FERN, { message: "after" }, "full");
+    expect(still.status).toBe(200);
+    expect(bodyOf(await pool.serveRoute("stranger", FERN, "full"))).toContain(
+      "<p id=msg>after</p>",
+    );
+    await c.drop();
+  });
+
+  it("the closed anonymous door is the same 404 an absent route is — no oracle", async () => {
+    const { gw } = await publicPrimary();
+    const c = await quarantine(gw);
+    const pool = c.gateway!;
+    await gw.append([
+      signClaims(
+        makeNegationClaims(OP, 9_910_000, publicDeclarationIn(gw), "close the anonymous door"),
+        OP_SEED,
+      ),
+    ]);
+    const closed = await pool.writeRoute("stranger", FERN, { message: "x" }, "public");
+    const absent = await pool.writeRoute("no-such-route", FERN, { message: "x" }, "public");
+    expect(closed.status).toBe(absent.status);
+    expect(closed.body).toBe(absent.body);
+
+    await c.drop();
+  });
+
+  it("a store refusal stays uniform on the anonymous door — the reason is the token door's", async () => {
+    const { gw } = await publicPrimary();
+    const c = await quarantine(gw);
+    const pool = c.gateway!;
+    // A route whose OWN writable list is wider than the registration's: `note` clears the renderer's
+    // allow-list and the STORE refuses it. The route is open and the pen holds both keys, so this is
+    // the one refusal that comes from §14 rather than from the door.
+    await pool.publishRenderer({
+      route: "wider",
+      schema: "Plant",
+      consumes: ["message", "note"],
+      bundle: APP,
+      writable: ["message", "note"],
+      pen: "stranger-pen",
+    });
+    const anon = await pool.writeRoute("wider", FERN, { note: "x" }, "public");
+    const token = await pool.writeRoute("wider", FERN, { note: "x" }, "full");
+    expect(anon.status).toBe(403);
+    expect(anon.body).toBe("the write was refused");
+    // TWO-SIDED: the token door DOES carry the reason, so this cannot pass with both doors muted.
+    expect(token.status).toBe(403);
+    expect(token.body).not.toBe("the write was refused");
+    await c.drop();
+  });
+
+  it("a pool whose chain is broken refuses the anonymous write, not just the token one", async () => {
+    const { gw } = await publicPrimary();
+    const c = await quarantine(gw);
+    const pool = c.gateway!;
+    expect((await pool.writeRoute("stranger", FERN, { message: "a" }, "public")).status).toBe(200);
+    // Detached: the root can no longer be asked, and "I cannot tell" is not "permitted".
+    await c.detach();
+    const refused = await pool.writeRoute("stranger", FERN, { message: "b" }, "public");
+    expect(refused.status).toBe(404);
+    expect([...pool.reactor.snapshot()].some((d) => JSON.stringify(d.claims).includes('"b"'))).toBe(
+      false,
+    );
   });
 });
 

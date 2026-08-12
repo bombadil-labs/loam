@@ -632,6 +632,27 @@ function routeServableOn(gw: Gateway, binding: RendererBinding, door: "full" | "
     .some((v) => v.deltaId === binding.versionId && lensOf(v) === binding.schemaName);
 }
 
+// The store that can answer for a pool, LIVE (SPEC §24.7). A pool holds a seeded COPY of the host's
+// law, frozen until someone re-pulses the edge, and nothing re-pulses it on its own — so any question
+// whose stale answer would make a REVOCATION never arrive is asked of the root instead.
+//
+// The chain is VERIFIED, not chased. Following `attachedTo` alone would trust whatever store the
+// pointer lands on, and a detached intermediate is exactly that: still readable, permanently frozen,
+// and now the end of the chain. So each link must still be a live attachment, and the terminal store
+// must not itself be a pool. Undefined means "I cannot tell", which every caller must read as a
+// refusal rather than a permission (H9).
+function rootAuthorityOf(gw: Gateway): Gateway | undefined {
+  let child = gw;
+  let root = gw.attachedTo;
+  while (root !== undefined && root.quarantinePools.has(child) && root.attachedTo !== undefined) {
+    child = root;
+    root = root.attachedTo;
+  }
+  return root !== undefined && root.quarantinePools.has(child) && root.probation === undefined
+    ? root
+    : undefined;
+}
+
 // Write through a rendered route (the body of `Gateway.writeRoute`, SPEC §23.3): a form on a mounted
 // renderer POSTs its fields, and the STORE signs the resulting delta as the renderer's PEN — a
 // granted-author identity whose seed is provisioned in config (options.pens), NEVER the caller's token.
@@ -659,6 +680,17 @@ export async function writeRouteImpl(
   // Visible on this door (the same discipline as a GET), so a stranger can only write where they could
   // read, and an undeclared route stays a uniform 404 rather than revealing itself.
   if (!routeServableOn(gw, binding, door)) return gone;
+  // THE ANONYMOUS DOOR'S OPENNESS IS THE ROOT'S LIVE WORD TOO (SPEC §24.7). `loam:public` is a READ
+  // declaration everywhere else, and stale copies of a read are the documented cost of a seeded pool.
+  // Here it is a WRITE GATE: it is the only thing standing between a stranger's form and an anonymous
+  // author, so a pool's frozen copy of it would keep an anonymous write door open after the operator
+  // struck the declaration that opened it. `mounts.ts` asks the host WHETHER any public surface is
+  // open; this asks the root about THIS route's own lens, which is the half a write turns on. The
+  // refusal is the same uniform 404 an undeclared route gives, so the door gains no oracle.
+  const authority = gw.probation === undefined ? undefined : rootAuthorityOf(gw);
+  if (gw.probation !== undefined && door === "public") {
+    if (authority === undefined || !routeServableOn(authority, binding, "public")) return gone;
+  }
   // A read-only renderer (no pen/writable) declared no way to author — refuse the write, not the route.
   if (
     binding.pen === undefined ||
@@ -700,21 +732,8 @@ export async function writeRouteImpl(
   // reason that is not true. Climbing to the root matters for the same reason the check exists: an
   // intermediate pool's copy is frozen too, so a pool of a pool must not ask its frozen parent.
   if (gw.probation !== undefined) {
-    // The chain is VERIFIED, not chased. Following `attachedTo` alone would trust whatever store the
-    // pointer lands on, and a detached intermediate is exactly that: still readable, permanently
-    // frozen, and now the end of the chain. So each link must still be a live attachment, and the
-    // terminal store must not itself be a pool. A chain that cannot be verified — a detached pool, a
+    // `rootAuthorityOf` above verified the chain. A chain that cannot be verified — a detached pool, a
     // handle held past a failed drop — refuses: "I cannot tell" is not "permitted" (H9).
-    let child = gw;
-    let root = gw.attachedTo;
-    while (root !== undefined && root.quarantinePools.has(child) && root.attachedTo !== undefined) {
-      child = root;
-      root = root.attachedTo;
-    }
-    const authority =
-      root !== undefined && root.quarantinePools.has(child) && root.probation === undefined
-        ? root
-        : undefined;
     if (authority === undefined) {
       return {
         status: 403,

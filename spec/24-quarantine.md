@@ -332,9 +332,17 @@ the operator's grants, frozen until someone re-pulses the edge, and nothing re-p
 pen whose grant the operator strikes in the primary would have gone on signing in the pool forever,
 anonymously wherever the route is public. The renderer door now re-reads the root's live word before it
 signs, climbing past any intermediate pool (whose copy is frozen too). That is the call `mounts.ts`
-already makes about §12 publicness, for the same reason: a revocation must arrive. The class is NOT
-closed, and the code says so rather than implying otherwise: a pool's copies of the striker set, the
-registrations, and the public declarations are stale in the same way, and those are reads. And the FRAME did not exist:
+already makes about §12 publicness, for the same reason: a revocation must arrive. THE PUBLIC
+DECLARATION IS ASKED OF THE ROOT TOO, because on this one door it is not a read. `loam:public` is a read
+grant everywhere else in the spec; at the renderer's WRITE door it is the whole gate between a
+stranger's form and an anonymous author, so a frozen copy of it would hold an anonymous WRITE door open
+after the operator struck the declaration that opened it. An anonymous form-write into a quarantine pool
+therefore needs the lens declared public in the pool AND still declared public at the root, re-read per
+request. A route that fails either half gives the same uniform 404 an undeclared route gives, so the
+door gains no oracle. The class is NOT closed, and the code says so rather than implying otherwise: a
+pool's copies of the striker set and of the registrations are stale in the same way, and those are
+READS — a lens the operator withdraws in the primary stays readable through a mounted pool until
+someone re-pulses the edge. That gap is named here, not closed here. And the FRAME did not exist:
 a pool's gateway now carries a `probation` mark, set by the attach for UNTRUSTED containers only, and
 every 200-with-HTML render from such a gateway is wrapped in `src/gateway/probation.ts`'s banner — the
 probation, the live writes named to their pool, promotion as the only crossing, and the droppability. The
@@ -630,7 +638,11 @@ word about the pen's grant, because a pool's seeded copy of that grant is frozen
 calls, and a revocation must arrive. The probation mark is set for UNTRUSTED containers only, so a curated
 container is never framed as probation. Promotion controls at the frame's edge are a link to the
 container's admin page, where §24.3 adoption and §24.4 blessing already live; the anonymous door gets the
-statement and no link. Sixteen rails in `test/gateway/probation-frame.test.ts`, at both levels: a pen write
+statement, and neither the link nor the container's declared NAME — a name is the operator's choice and
+routinely names a counterparty, so the door that withholds the controls withholds what they point at. The
+anonymous WRITE door asks the root about the route's own lens for the same reason the pen's grant is
+asked there: `loam:public` is a read grant everywhere else, but here it is the gate a write turns on, and
+a pool's copy of it is frozen. Rails in `test/gateway/probation-frame.test.ts`, at both levels: a pen write
 lands in the pool's reactor AND its bytes and is absent from the primary's, the app reads its own write
 back across two gestures, a struck grant refuses the next write with no reseed at either depth, a drop leaves the primary's
 delta set and rendered answer identical, erasure in the primary blanks a field the pool did not overwrite
@@ -642,7 +654,7 @@ The root question is asked over a VERIFIED chain rather than a chased pointer: e
 live attachment and the terminal store must not itself be a pool, so a detached intermediate — readable,
 frozen, and now the end of the chain — refuses instead of vouching. A separate container also may no
 longer take the store it was opened from as its own; sequestration that shares the host's bytes is not
-sequestration, and the frame would state the opposite. Four gaps stated rather than closed: a pool's
+sequestration, and the frame would state the opposite. Five gaps stated rather than closed: a pool's
 `probation` mark is read from the declaration at ATTACH rather than per request, so a trust flip that
 strikes the earliest declaration under a live attachment is not seen until reattach; `drop()`'s
 enumeration is the pool's read union its session reactor, which on a mirror backend across a
@@ -651,5 +663,7 @@ into an untrusted pool, so a quarantined renderer may name any pen the primary p
 carry that pen's name inside the pool (custody is unchanged — the pool holds the operator seed — but the
 attribution an operator reads before promoting is the stranger's to choose); and a pen granted ONLY inside
 the quarantine is refused, because the second key is asked of the root, which makes the safer-looking
-configuration the refused one. Additive
+configuration the refused one; and a pool's copies of the striker set and the registrations stay stale,
+so a lens the operator withdraws in the primary is still READABLE through a mounted pool until the edge
+is re-pulsed — the write door climbs to the root, the read doors do not. Additive
 vocabulary only → no §20 migration. Renderer + capability surface → Myk's merge (P6).
