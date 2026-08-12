@@ -758,6 +758,15 @@ export class Gateway {
   /** @internal — T35 seam (container.ts, renderers.ts) */
   probation: Probation | undefined = undefined;
 
+  // The store THIS gateway was attached FROM, for a separate container's own gateway (SPEC §27).
+  // A pool holds a SEEDED COPY of the host's law, frozen until someone re-pulses the edge — and
+  // nothing re-pulses it on its own. So any question whose stale answer would make a REVOCATION
+  // never arrive must be asked of the host, live. Exactly one is asked through it today: does a
+  // renderer's pen still hold write standing (§23.3 × §24.7)? It is not a back-channel for reading
+  // the host's ground, which is the thing the one-way glass exists to prevent.
+  /** @internal — T35 seam (container.ts, renderers.ts) */
+  attachedTo: Gateway | undefined = undefined;
+
   // The live per-connection inbox handles (SPEC §39), keyed by inbox name. A binding is DURABLE: a
   // second bindConnection of the same (container, connection key) resumes the same handle rather than
   // spawning a new pool. Cleared only by a drop().

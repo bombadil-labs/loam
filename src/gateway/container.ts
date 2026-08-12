@@ -1050,13 +1050,15 @@ async function openSeparate(
   // config — so a quarantined app's every write refused "this renderer's pen is not provisioned", and a
   // probationary app could only ever paint a frozen preview. The pool already holds the operator's own
   // seed, which is strictly stronger custody than any pen, so carrying the pens across adds no key the
-  // pool did not have. Authorization is untouched: the pen still needs a surviving GRANT, which reaches
-  // the pool as data over the seeding edge, and striking that grant in the primary darkens the pen here
-  // on the next pulse (§6's two keys, both still asked).
+  // pool did not have. Authorization is NOT loosened either, and the door is where that is enforced:
+  // the pen's grant reaches the pool as data, but a seeded copy is frozen until someone re-pulses the
+  // edge, so `writeRouteImpl` asks the HOST's live word through `attachedTo` before it signs — the same
+  // call mounts.ts makes about §12 publicness, for the same reason (a revocation must arrive).
   const pool = await Gateway.open(backend, {
     seed: gw.options.seed,
     ...(gw.options.pens === undefined ? {} : { pens: gw.options.pens }),
   });
+  pool.attachedTo = gw;
   // A probationary pool KNOWS it is one, for the renderer door's sequestered frame (SPEC §24.7).
   if (spec.trust === "untrusted") {
     pool.probation = spec.entity === undefined ? {} : { container: spec.entity };

@@ -14,13 +14,21 @@
 // bytes on every rendered response from a probationary pool.
 
 import { describe, expect, it } from "vitest";
-import { authorForSeed, signClaims, type Policy, type Schema } from "@bombadil/rhizomatic";
-import { grantClaims } from "../../src/gateway/accounts.js";
+import {
+  authorForSeed,
+  makeNegationClaims,
+  signClaims,
+  type Policy,
+  type Schema,
+} from "@bombadil/rhizomatic";
+import { grantClaims, holdsGrant } from "../../src/gateway/accounts.js";
 import { containerClaims } from "../../src/gateway/container.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { publicClaims } from "../../src/gateway/public.js";
+import { probationBanner } from "../../src/gateway/probation.js";
+import { ADMIN_CONTAINER_PATH } from "../../src/server/admin-pages.js";
 import { PLANT } from "./fixtures.js";
 import { FERN, observed } from "../spike/garden.js";
 
@@ -30,12 +38,24 @@ const PEN_SEED = "5a".repeat(32); // the stranger renderer's granted author
 const PEN = authorForSeed(PEN_SEED);
 
 const pick: Policy = { kind: "pick", order: { kind: "byTimestamp", dir: "desc" } };
-const GUESTBOOK: Schema = { props: new Map<string, Policy>([["message", pick]]), default: pick };
+// TWO fields, and the second one is load-bearing. `message` is what the stranger's form writes;
+// `note` only the operator ever authors — so an erasure rail can watch a canonical value disappear
+// from a field the pool's own write is not sitting on top of. With one field, `pick`-by-timestamp
+// would hide the erased value behind the pool's newer write and the rail would pass with the
+// erasure fan-out deleted.
+const GUESTBOOK: Schema = {
+  props: new Map<string, Policy>([
+    ["message", pick],
+    ["note", pick],
+  ]),
+  default: pick,
+};
 
-// The stranger's app: it paints whatever `message` currently resolves to, and offers the form that
-// writes it. Deliberately ordinary — the point of §24.7 is that a NORMAL app is what runs behind glass.
+// The stranger's app: it paints what the lens currently resolves, and offers the form that writes
+// `message`. Deliberately ordinary — the point of §24.7 is that a NORMAL app is what runs behind glass.
 const APP =
   'export default (n) => `<main><p id=msg>${n.view.message ?? ""}</p>' +
+  '<p id=note>${n.view.note ?? ""}</p>' +
   "<form method=post><input name=message></form></main>`;";
 
 const CONTAINER = "container:stranger";
@@ -55,9 +75,17 @@ const primary = async (): Promise<{ gw: Gateway; backend: MemoryBackend }> => {
     }),
     { pens: { "stranger-pen": PEN_SEED } },
   );
-  await gw.append([observed(FERN, "message", "the operator's own words", 9_100, OP_SEED)]);
+  await gw.append([
+    observed(FERN, "message", "the operator's own words", 9_100, OP_SEED),
+    observed(FERN, "note", "a note only the operator wrote", 9_110, OP_SEED),
+  ]);
   // The operator's OWN route over the same lens — the canonical control for every frame assertion.
-  await gw.publishRenderer({ route: "mine", schema: "Plant", consumes: ["message"], bundle: APP });
+  await gw.publishRenderer({
+    route: "mine",
+    schema: "Plant",
+    consumes: ["message", "note"],
+    bundle: APP,
+  });
   return { gw, backend };
 };
 
@@ -75,7 +103,7 @@ const quarantine = async (gw: Gateway) => {
   await c.gateway!.publishRenderer({
     route: "stranger",
     schema: "Plant",
-    consumes: ["message"],
+    consumes: ["message", "note"],
     bundle: APP,
     writable: ["message"],
     pen: "stranger-pen",
@@ -177,7 +205,7 @@ describe("T35 §24.7 — the frame, and the sentence it may never say", () => {
     expect(html.toLowerCase()).toContain("writes are live");
     expect(html).toContain(CONTAINER);
     expect(html).toContain("Promotion is the only crossing");
-    expect(html).toContain("Drop the pool");
+    expect(html).toContain("Drop the pool and this app's writes go with the store");
 
     // ABSENT — §24.7's named lie, in every spelling this repo could think of. The frame must never
     // tell an operator the app is inert: its writes are real, and they are in the pool.
@@ -237,7 +265,7 @@ describe("T35 §24.7 — the frame, and the sentence it may never say", () => {
     await c.gateway!.publishRenderer({
       route: "hostile",
       schema: "Plant",
-      consumes: ["message"],
+      consumes: ["message", "note"],
       bundle: APP,
     });
     const html = bodyOf(await c.gateway!.serveRoute("hostile", FERN, "full"));
@@ -271,12 +299,115 @@ describe("T35 §24.7 — the frame, and the sentence it may never say", () => {
     await c.gateway!.publishRenderer({
       route: "curated",
       schema: "Plant",
-      consumes: ["message"],
+      consumes: ["message", "note"],
       bundle: APP,
     });
     const curated = bodyOf(await c.gateway!.serveRoute("curated", FERN, "full"));
     expect(curated).toContain("the operator's own words");
     expect(curated).not.toContain("data-loam-probation");
+    await c.drop();
+  });
+});
+
+describe("T35 §24.7 — the pen's second key is asked of the HOST, live", () => {
+  it("striking the grant in the primary refuses the pool's write, with no reseed", async () => {
+    const { gw } = await primary();
+    const c = await quarantine(gw);
+    const pool = c.gateway!;
+    // Granted: the pen writes.
+    expect((await pool.writeRoute("stranger", FERN, { message: "before" }, "full")).status).toBe(
+      200,
+    );
+
+    // The operator strikes the pen's grant in the PRIMARY, and nothing re-pulses the seeding edge —
+    // the pool's own copy of the grant still stands. The write must refuse anyway: a revocation that
+    // only arrives on a pulse nobody calls is not a revocation.
+    const grant = [...gw.reactor.snapshot()].find((d) =>
+      d.claims.pointers.some((p) => p.role === "subject" && JSON.stringify(p.target).includes(PEN)),
+    )!;
+    await gw.append([
+      signClaims(makeNegationClaims(OP, 9_600_000, grant.id, "revoke the pen"), OP_SEED),
+    ]);
+    expect(holdsGrant(pool.reactor, STORE_ENTITY, PEN, "write", OP)).toBe(true); // stale copy stands
+
+    const refused = await pool.writeRoute("stranger", FERN, { message: "after" }, "full");
+    expect(refused.status).toBe(403);
+    expect(refused.body).toContain("no longer granted");
+    // At the delta level: nothing the pen authored after the strike is in the pool.
+    expect(
+      [...pool.reactor.snapshot()].some((d) => JSON.stringify(d.claims).includes("after")),
+    ).toBe(false);
+    // Two-sided: the page still SERVES, still framed, still showing what was written while granted.
+    const html = bodyOf(await pool.serveRoute("stranger", FERN, "full"));
+    expect(html).toContain("<p id=msg>before</p>");
+    expect(html).toContain("On probation");
+    await c.drop();
+  });
+});
+
+describe("T35 §24.7 — the frame's other shapes", () => {
+  it("an anonymous openQuarantine pool is framed too, and names no page it cannot name", async () => {
+    const { gw } = await primary();
+    const pool = await gw.openQuarantine();
+    await pool.gateway.publishRenderer({
+      route: "anon",
+      schema: "Plant",
+      consumes: ["message", "note"],
+      bundle: APP,
+    });
+    const html = bodyOf(await pool.gateway.serveRoute("anon", FERN, "full"));
+    expect(html).toContain("On probation");
+    expect(html).toContain("this quarantine pool"); // no declared name to point at
+    expect(html).toContain("Promote or drop it where it was opened");
+    expect(html).not.toContain("/admin/container");
+    await pool.drop();
+  });
+
+  it("the banner is the first thing in the body, fragment or whole document", async () => {
+    const { gw } = await primary();
+    const c = await quarantine(gw);
+    // A fragment: the banner precedes the app's own markup.
+    const fragment = bodyOf(await c.gateway!.serveRoute("stranger", FERN, "full"));
+    expect(fragment.indexOf("data-loam-probation")).toBeLessThan(fragment.indexOf("<main>"));
+
+    // A whole document: the banner lands INSIDE the body, before the app, and the document's own
+    // head is left where the bundle put it.
+    await c.gateway!.publishRenderer({
+      route: "doc",
+      schema: "Plant",
+      consumes: ["message", "note"],
+      bundle:
+        'export default () => "<!doctype html><html><head><title>t</title></head>' +
+        '<body class=x><main>app</main></body></html>";',
+    });
+    const doc = bodyOf(await c.gateway!.serveRoute("doc", FERN, "full"));
+    expect(doc.indexOf("<title>")).toBeLessThan(doc.indexOf("data-loam-probation"));
+    expect(doc.indexOf("<body class=x>")).toBeLessThan(doc.indexOf("data-loam-probation"));
+    expect(doc.indexOf("data-loam-probation")).toBeLessThan(doc.indexOf("<main>app</main>"));
+    await c.drop();
+  });
+
+  it("the promotion link points at the admin page that actually exists", () => {
+    // The frame hardcodes the path (a gateway may not import a server module), so pin the literal to
+    // the door's own constant here rather than letting the two rot apart.
+    expect(probationBanner({ container: "container:x" }, "full")).toContain(
+      `${ADMIN_CONTAINER_PATH}?name=`,
+    );
+  });
+
+  it("a probationary store refuses to pack a route into a standalone page", async () => {
+    const { gw } = await primary();
+    const c = await quarantine(gw);
+    // Packing lifts a route out of the store into a page that outlives the pool and carries no
+    // chrome — a probationary face with its probation removed. Refused, and the reason says why.
+    expect(() => c.gateway!.packArtifact("stranger", FERN, { server: "Loam" })).toThrow(
+      /quarantine pool/,
+    );
+    // Two-sided: the primary refuses this route for its OWN reason, never the probation one — the
+    // guard reads the store it was asked about rather than every store.
+    expect(() => gw.packArtifact("mine", FERN, { server: "Loam" })).toThrow(
+      /not declared publishable/,
+    );
     await c.drop();
   });
 });
@@ -291,17 +422,21 @@ describe("T35 §24.7 — erasure reaches through a mounted frame (§24.8)", () =
       "the operator's own words",
     );
     await pool.writeRoute("stranger", FERN, { message: "the stranger's own" }, "full");
+    // ERASE THE FIELD THE POOL DID NOT WRITE. Erasing `message` would prove nothing: the pool's own
+    // newer write already wins `pick`-by-timestamp, so the value would vanish from the page whether
+    // or not the fan-out ever reached this store. `note` is the operator's alone.
     const canonical = [...gw.reactor.snapshot()].find((d) =>
-      JSON.stringify(d.claims).includes("the operator's own words"),
+      JSON.stringify(d.claims).includes("a note only the operator wrote"),
     )!.id;
+    expect(await pool.backend.holds(canonical)).toBe(true); // the pool really held the byte
 
     await gw.erase(canonical, { reason: "the author asked" });
 
     // The byte is gone from the pool's store, and the frame — still mounted, still serving — can no
-    // longer paint it. Two-sided: what the pool authored ITSELF survives the erasure untouched.
+    // longer paint it. Two-sided: the pool's own output and the operator's un-erased words both live.
     expect(await pool.backend.holds(canonical)).toBe(false);
     const after = bodyOf(await pool.serveRoute("stranger", FERN, "full"));
-    expect(after).not.toContain("the operator's own words");
+    expect(after).not.toContain("a note only the operator wrote");
     expect(after).toContain("the stranger's own");
     expect(after).toContain("On probation");
     await c.drop();

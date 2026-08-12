@@ -272,6 +272,16 @@ export function packArtifactImpl(
   entity: string,
   opts: PackArtifactOptions,
 ): PackedArtifact {
+  // A PROBATIONARY STORE PACKS NOTHING (SPEC §24.7). Packing lifts a route into a self-contained page
+  // that outlives the pool and carries none of the served route's chrome — a probationary face with its
+  // probation removed, which is precisely the "fooled into thinking it is load-bearing" failure the
+  // sequestered frame exists to prevent. Promotion is the only crossing out; a packed page is not one.
+  if (gw.probation !== undefined) {
+    refuse(
+      "artifact: this store is a quarantine pool, and a packed page would carry none of the " +
+        "probation its served route shows — promote what you want to keep, then pack it there",
+    );
+  }
   // (6) An unusable connector display name. Decidable here; a cross-publisher name COLLISION is not —
   // the packer cannot see what else a viewer installed — so that hazard is documentation plus the
   // `selection_required` degraded state, never a refusal.

@@ -324,15 +324,24 @@ rather than left to mislead the next builder.
 Two things were genuinely missing, and both are now built. The PEN could not write: a pool opened without
 the primary's provisioned pen seeds refused every form-submit with "this renderer's pen is not
 provisioned", so a probationary app could only ever paint a frozen preview — the exact failure clause (1)
-forbids. A pool now inherits the primary's pens; custody is unchanged (the pool already holds the operator
-seed, which is strictly stronger), and authorization is untouched — the pen still needs a surviving GRANT,
-which reaches the pool as data and darkens there when the primary strikes it. And the FRAME did not exist:
+forbids. A pool now inherits the primary's pens; custody is unchanged, because the pool already holds the
+operator seed, which is strictly stronger. Authorization is not loosened either, and the SECOND KEY IS
+ASKED OF THE HOST: a pool holds only a seeded COPY of the operator's grants, frozen until someone
+re-pulses the edge, and nothing re-pulses it on its own — so a pen whose grant the operator strikes in the
+primary would have gone on signing in the pool forever, anonymously wherever the route is public. The
+renderer door now re-reads the host's live word before it signs, which is the call `mounts.ts` already
+makes about §12 publicness, for the same reason: a revocation must arrive. And the FRAME did not exist:
 a pool's gateway now carries a `probation` mark, set by the attach for UNTRUSTED containers only, and
 every 200-with-HTML render from such a gateway is wrapped in `src/gateway/probation.ts`'s banner — the
 probation, the live writes named to their pool, promotion as the only crossing, and the droppability. The
 promotion controls at the frame's edge are a link to the container's own admin page, where blessing law
 (§24.4) and adopting an output (§24.3) already live; the anonymous door gets the sequestration statement
-and no link into the operator's controls.
+and no link into the operator's controls. The frame's copy is held to the same standard in the other
+direction: `drop()` refuses rather than reporting a discard it cannot prove, and a named container's drop
+strikes its own declaration in the primary — so the banner claims what the code keeps ("the writes go with
+the store; nothing it wrote crosses into your ground") rather than a completeness nothing verified. And a
+probationary store now REFUSES to pack a route into a §30 artifact: a packed page outlives the pool and
+carries none of the chrome, which is a probationary face with its probation removed.
 
 The frame is chrome, not confinement, and the spec says so rather than letting a reader over-trust it: it
 shares a document with untrusted markup, which can restyle or cover it. Visual containment wants a
@@ -612,15 +621,22 @@ wraps every 200-with-HTML render from a probationary pool in `src/gateway/probat
 §24.7's wording is corrected in place above. Handles were already scoped to the pool in every respect but
 one — the pool inherited no pen seeds, so a write-enabled quarantined renderer refused every form-submit
 and could only paint a preview; `openSeparate` now carries the primary's `pens` across, custody unchanged
-(the pool already holds the operator seed) and authorization unchanged (the grant is still asked, still
-strikeable from the primary). The probation mark is set for UNTRUSTED containers only, so a curated
+(the pool already holds the operator seed) and authorization TIGHTENED — the door asks the HOST's live
+word about the pen's grant, because a pool's seeded copy of that grant is frozen until a pulse nobody
+calls, and a revocation must arrive. The probation mark is set for UNTRUSTED containers only, so a curated
 container is never framed as probation. Promotion controls at the frame's edge are a link to the
 container's admin page, where §24.3 adoption and §24.4 blessing already live; the anonymous door gets the
-statement and no link. Seven rails in `test/gateway/probation-frame.test.ts`, at both levels: a pen write
+statement and no link. Thirteen rails in `test/gateway/probation-frame.test.ts`, at both levels: a pen write
 lands in the pool's reactor AND its bytes and is absent from the primary's, the app reads its own write
-back across two gestures, a drop leaves the primary's delta set and rendered answer identical, erasure in
-the primary blanks the value behind a live frame while the pool's own output survives, and the copy is
-tested against thirteen spellings of §24.7's forbidden sentence. HONEST SCOPE, stated rather than implied:
-the frame is chrome and not confinement — a hostile bundle can restyle or cover it, and the sandboxed
-iframe that would fix that drops the same-origin credentials §23.3's write path needs. Additive
+back across two gestures, a struck grant refuses the next write with no reseed, a drop leaves the primary's
+delta set and rendered answer identical, erasure in the primary blanks a field the pool did not overwrite
+while the pool's own output survives, the container name is escaped into the banner, packing is refused,
+and the copy is tested against thirteen spellings of §24.7's forbidden sentence. HONEST SCOPE, stated
+rather than implied: the frame is chrome and not confinement — a hostile bundle can restyle or cover it,
+and the sandboxed iframe that would fix that drops the same-origin credentials §23.3's write path needs.
+Two known gaps carried forward, neither introduced here: a pool's `probation` mark is read from the
+declaration at ATTACH rather than per request, so a trust flip that strikes the earliest declaration under
+a live attachment is not seen until reattach; and `drop()`'s enumeration is the pool's read union its
+session reactor, which on a mirror backend across a detach-and-reattach cycle can be narrower than the
+bytes on the mirror tier. Additive
 vocabulary only → no §20 migration. Renderer + capability surface → Myk's merge (P6).

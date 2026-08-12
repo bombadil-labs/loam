@@ -13,6 +13,14 @@
 // dismissing a face that is genuinely doing things; a frame that said nothing would fool them into
 // treating a probationary face as load-bearing. Both are the same failure, and §24.7 names it.
 //
+// THE COPY MAY NOT OVERCLAIM THE DROP EITHER, and that is the harder half to get right. `drop()`
+// REFUSES rather than reporting a discard it cannot prove at the bytes, and it says in its own words
+// that a straggler no read ever named is heal's domain — so a banner promising "everything this app
+// wrote is gone" would report a completeness nothing verified (H7), from the one surface an operator
+// reads before deciding. And a NAMED container's drop appends a retraction of its declaration into the
+// PRIMARY, so "your store is unchanged" is false at the delta level. The claim the code actually keeps
+// is the one that matters to a person: the writes go with the store, and none of them crossed.
+//
 // The frame is CHROME, not confinement. It cannot stop untrusted markup from restyling or covering it —
 // visual containment wants a sandboxed iframe, and a sandboxed iframe drops the same-origin credentials
 // the §23.3 write path needs, so it is a later slice with its own design, not a flag flipped here. What
@@ -63,8 +71,8 @@ export function probationBanner(p: Probation, door: "full" | "public"): string {
     `where this app reads them back. They are not in your store.</span> ` +
     `<span data-loam-probation-says="crossing">Promotion is the only crossing. Nothing it wrote ` +
     `reaches your canonical ground until you promote it.</span> ` +
-    `<span data-loam-probation-says="drop">Drop the pool and everything this app wrote is gone. ` +
-    `Your store is unchanged.</span>` +
+    `<span data-loam-probation-says="drop">Drop the pool and this app's writes go with the store. ` +
+    `Nothing it wrote crosses into your ground.</span>` +
     controls +
     `</aside>`
   );

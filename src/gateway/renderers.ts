@@ -22,6 +22,8 @@ import { bytesEnvelope, findBytesByRef } from "./bytes.js";
 import { importEsm, loadedEsm } from "./esm.js";
 import type { Gateway, RequestContext } from "./gateway.js";
 import type { ResolvedNode } from "./gql.js";
+import { holdsGrant } from "./accounts.js";
+import { STORE_ENTITY } from "./genesis.js";
 import { frameProbation } from "./probation.js";
 import { renderInWorker } from "./render-worker.js";
 import { lawfulNegated, lawfulSnapshot, lensOf, type LensName } from "./registration.js";
@@ -683,6 +685,20 @@ export async function writeRouteImpl(
   const penSeed = gw.options.pens?.[binding.pen];
   if (penSeed === undefined) {
     return { status: 403, contentType: text, body: "this renderer's pen is not provisioned" };
+  }
+  // A POOL ASKS ITS HOST'S LIVE WORD (SPEC §24.7, following the §12 precedent in mounts.ts). A
+  // container's gateway holds a SEEDED COPY of the operator's grants, frozen until someone calls
+  // reseed() — and nothing calls it on its own. Asking the pool alone would make a revocation
+  // unrevocable at every container mount: strike the pen's grant in the primary and the pool would
+  // keep signing with it forever, anonymously where the route is public. So the pen must hold write
+  // standing at the HOST as well as here, re-read per request. `authorize` still asks this store's
+  // own question below; this is the second key, not a replacement for the first.
+  const host = gw.attachedTo;
+  if (
+    host !== undefined &&
+    !holdsGrant(host.reactor, STORE_ENTITY, authorForSeed(penSeed), "write", host.operatorAuthor)
+  ) {
+    return { status: 403, contentType: text, body: "this renderer's pen is no longer granted" };
   }
   try {
     // Sign AS the pen (not the caller). append→authorize checks the pen's GRANT — provisioning is not
