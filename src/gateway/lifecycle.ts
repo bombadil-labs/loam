@@ -426,7 +426,7 @@ export function replayRegistrationsImpl(gw: Gateway): void {
       // (SPEC §14) the store booted with the operator's declared write surface silently revoked —
       // and "quietly absent" is byte-identical to "deliberately locked" for every reader downstream.
       const templateless: Bound = Object.fromEntries(
-        Object.entries(reg).filter(([k]) => k !== "mutations"),
+        Object.entries(reg).filter(([k]) => k !== "mutations" && k !== "mutationsDefect"),
       ) as Bound;
       if (attempt(reg)) {
         progressed = true;
