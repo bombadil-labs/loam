@@ -141,13 +141,25 @@ function shellSource(): string {
   // RETAIN: a bundle handed a fresh realm per render cannot hold a copy across renders, because there is
   // nothing for it to hold the copy in.
   //
-  // TWO CLOCKS, AND TWO NUMBERS. Construction arms a SPAWN bound; the live signal — the moment the
-  // bundle can actually run — re-arms a fresh RENDER bound. Arming both from C.renderTimeoutMs measured
-  // the viewer's DEVICE against a budget written for the bundle: a worker thread start plus a blob:
-  // module import is machinery the bundle has no part in, and on a contended tab it alone can outrun
-  // the render budget. The page then painted "the renderer timed out" for a bundle that never executed
-  // a line. So the spawn window reads C.renderSpawnTimeoutMs and reports "could not start"; only the
-  // render window reads the operator's render budget. Both windows stay hard; no path is unbounded.
+  // TWO CLOCKS, AND TWO NUMBERS (T158). Construction arms a SPAWN bound; the realm's live signal
+  // re-arms a fresh RENDER bound. Arming both from C.renderTimeoutMs charged the viewer's DEVICE to a
+  // budget written for the bundle: worker thread start plus the realm's own module import is machinery
+  // the bundle has no part in, and it alone outruns the default 500 ms budget on a contended device —
+  // measured through CDP on a 16-core box at 4 ms idle, 91 ms at load average 150, and 803 ms worst at
+  // load 550. The page then painted "the renderer timed out" for a renderer that had not executed a
+  // line. So the spawn window reads C.renderSpawnTimeoutMs and says "could not start" instead.
+  //
+  // WHAT THE RENDER WINDOW STILL COVERS, stated because the number is not small. The realm signals live
+  // when ITS module has evaluated, which is before the bundle arrives — so the render window carries the
+  // bundle's own blob: import and module evaluation as well as its call. Measured the same way, with a
+  // trivial bundle: 2 ms idle, 127 ms median and 801 ms worst at load 550. That residual cannot be split
+  // off here, because import() resolves only AFTER the bundle's top-level has run: the loader plumbing
+  // and the bundle's own code share one window and no signal can sit between them. Under load past
+  // roughly 500 on this box, a trivial bundle can therefore still be reported as timing out. Naming the
+  // number is the honest half; closing it needs a wider operator budget, and that is a §23.9 decision.
+  //
+  // Both windows are HARD, and the live re-arm fires ONCE — a bundle that reaches a bare postMessage
+  // could otherwise re-arm the render clock forever and hold its own worker alive.
   // Every render carries an EPOCH, and a render whose epoch has passed paints nothing. Without this a
   // real spawn plus a blob: module import is tens of milliseconds during which the world can move: root
   // answer A arrives, worker A spawns, an erasure lands and clears the mount, then worker A posts and
@@ -156,6 +168,16 @@ function shellSource(): string {
   // stale render is discarded rather than raced.
   function stale(epoch) {
     return epoch !== live;
+  }
+
+  // The settle-functions of renders still in flight. Calling one terminates its worker and paints
+  // nothing, because its epoch has already passed. Emptied first, so a settle that somehow spawns
+  // cannot re-enter this list mid-walk.
+  var crew = [];
+  function discard() {
+    var held = crew;
+    crew = [];
+    for (var i = 0; i < held.length; i += 1) held[i]();
   }
 
   function paint(node) {
@@ -168,7 +190,13 @@ function shellSource(): string {
     }
     live += 1;
     var epoch = live;
+    // Every render already in flight stops HERE, rather than when its own clock expires. Without this a
+    // superseded render that has not yet gone live waits out the whole spawn ceiling before its worker is
+    // terminated, so a viewer clicking through gestures on a slow device accumulates worker threads and
+    // deepens the very contention that made the spawn slow.
+    discard();
     var settled = false;
+    var started = false;
     var timer = setTimeout(function () { done({ kind: "noStart" }); }, C.renderSpawnTimeoutMs);
     function done(msg) {
       if (settled) return;
@@ -188,11 +216,13 @@ function shellSource(): string {
             ? "the renderer did not return HTML"
             : "the renderer faulted";
     }
+    crew.push(function () { done({ kind: "superseded" }); });
     worker.addEventListener("message", function (ev) {
       var msg = ev.data || {};
       if (msg.kind === "live") {
-        if (settled) return;
+        if (settled || started) return;
         if (stale(epoch)) { done({ kind: "superseded" }); return; }
+        started = true;
         clearTimeout(timer);
         timer = setTimeout(function () { done({ kind: "timeout" }); }, C.renderTimeoutMs);
         return;
@@ -225,6 +255,9 @@ function shellSource(): string {
     // Bump the epoch so any render already in flight paints nothing when it lands. Clearing the mount
     // without this leaves a race whose loser is the viewer: the old markup comes back a moment later.
     live += 1;
+    // …and stop them now rather than at their own clocks: darkening is a teardown, and a worker still
+    // running someone else's bundle behind a cleared mount is the residue a teardown is supposed to take.
+    discard();
     mount.textContent = "";
     line.textContent = text;
   }

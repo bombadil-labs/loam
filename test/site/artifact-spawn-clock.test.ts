@@ -21,11 +21,28 @@
 // timers, so its shim only decides WHEN `live` and WHEN the answer arrive. It proves nothing about
 // the seal and claims nothing about it.
 //
-// WHAT NO RAIL HERE PROVES: that a REAL browser Worker's spawn ever exceeds a real budget. No seam
-// makes Chrome's thread start slow on demand, and a rail that manufactured host load would be the
-// flake it exists to prevent. That direction is the load table in the PR, measured through CDP
-// against the shipped realm program.
+// WHAT NO RAIL HERE PROVES, each with the reason and the direction that would close it.
+//
+//   (a) That a REAL browser Worker's spawn ever exceeds a real budget. No seam makes Chrome's thread
+//       start slow on demand, and a rail that manufactured host load would be the flake it exists to
+//       prevent. That direction is the load table in the PR, measured through CDP against the shipped
+//       realm program.
+//   (b) That the render window is now PURE bundle time. It is not, and the source says so: the realm
+//       signals live when its OWN module has evaluated, so the bundle's blob: import and top-level
+//       evaluation are still inside the render budget — measured at 127 ms median and 801 ms worst
+//       under load 550, against a 500 ms default. It cannot be split further, because import()
+//       resolves only after the bundle's top-level has run. Closing it is an operator budget decision.
+//   (c) That the SERVER host's clocks are split the same way. `render-worker.ts` still arms both of
+//       its windows from one number, and `test/gateway/render-sandbox.test.ts` pins the resulting
+//       "the renderer timed out" for what can only be a spawn overrun. T139 is that ticket; this file
+//       is deliberately the page half and asserts nothing about the server.
+//   (d) That a coordinates object built BY HAND, without `renderSpawnTimeoutMs`, is refused. The
+//       field is required on both `ArtifactCoordinates` declarations, so only a JS caller can omit it,
+//       and the shell would then read undefined and refuse in the same tick. A pack-time validation
+//       of coordinates is the rail, and no ticket has asked for one.
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -47,10 +64,16 @@ const BUNDLE = `export default function (node) { return "<div id=body>h=" + node
 // signals at all — a spawn that never completes.
 let liveAfterMs = 0;
 let answerAfterMs = 0;
+// When > 0, the realm keeps re-posting `live` on this interval and NEVER answers. That models a bundle
+// reaching a bare `postMessage` — `self` is sealed but the bare identifier is not in SEALED_CHANNELS —
+// and it is the only way to hold the render clock open from inside the compartment.
+let liveRepeatMs = 0;
 
 let attached: Array<[string, EventListener]> = [];
 
 interface Harness {
+  /** Every worker the shell constructed, in order, so a rail can ask which ones were terminated. */
+  readonly spawned: { terminated: boolean }[];
   deliver(): void;
   html(id: string): string;
   /** Poll until `text` is in the mount, or the deadline passes. Never sleeps a fixed span. */
@@ -103,14 +126,20 @@ const answerFor = (document: string): unknown => {
 const load = (page: string): Harness => {
   let watchHandler: ((ev: unknown) => void) | undefined;
   let document_: string | undefined;
+  const spawned: ShimWorker[] = [];
 
   class ShimWorker {
     private readonly listeners = new Map<string, Array<(ev: unknown) => void>>();
     private alive = true;
     private readonly timers: ReturnType<typeof setTimeout>[] = [];
+    terminated = false;
     constructor() {
+      spawned.push(this);
       if (liveAfterMs >= 0) {
         this.timers.push(setTimeout(() => this.emit({ kind: "live" }), liveAfterMs));
+      }
+      if (liveRepeatMs > 0) {
+        this.timers.push(setInterval(() => this.emit({ kind: "live" }), liveRepeatMs));
       }
     }
     addEventListener(type: string, fn: (ev: unknown) => void): void {
@@ -124,12 +153,18 @@ const load = (page: string): Harness => {
     }
     terminate(): void {
       this.alive = false;
-      for (const t of this.timers) clearTimeout(t);
+      this.terminated = true;
+      // Both kinds share one list; in Node a Timeout is cleared by either call, so this is exact.
+      for (const t of this.timers) {
+        clearTimeout(t);
+        clearInterval(t);
+      }
     }
     postMessage(msg: { node: { view: { height: unknown } } }): void {
       // The answer is scheduled relative to the SPAWN, exactly as a real realm's would be: the realm
       // cannot render before it is live, so the shim adds its render span to the live moment.
       const at = (liveAfterMs < 0 ? 0 : liveAfterMs) + answerAfterMs;
+      if (liveRepeatMs > 0) return; // a realm that only re-arms never answers
       this.timers.push(
         setTimeout(() => {
           if (liveAfterMs < 0) return; // never went live: it cannot answer either
@@ -189,6 +224,7 @@ const load = (page: string): Harness => {
     return ok();
   };
   return {
+    spawned,
     deliver: () =>
       watchHandler?.({ type: "data", result: { payload: answerFor(document_ ?? "") } }),
     html,
@@ -201,6 +237,7 @@ beforeEach(() => {
   vi.useRealTimers();
   liveAfterMs = 0;
   answerAfterMs = 0;
+  liveRepeatMs = 0;
 });
 
 describe("T158 at the BYTES: the page carries two budgets, not one", () => {
@@ -227,9 +264,21 @@ describe("T158 at the BYTES: the page carries two budgets, not one", () => {
   it("a spawn overrun has its OWN sentence — it never claims the renderer ran", async () => {
     const page = await pack();
     expect(page).toContain("the renderer could not start");
-    // Distinct from every other fold's text, so a viewer can tell the device from the bundle.
+    // The other two are pre-existing text, asserted here only to show the new sentence was ADDED
+    // beside them rather than replacing one. That they behave distinctly is the behaviour rails' job.
     expect(page).toContain("the renderer timed out");
     expect(page).toContain("this renderer could not be mounted in this viewer");
+  });
+});
+
+describe("T158: the spawn ceiling is the page's own constant, not an operator option", () => {
+  it("artifact.ts fills the coordinate from the constant, with no gateway option in the path", () => {
+    // The server host's spawn ceiling bounds how long one anonymous caller may hold a
+    // `maxPublicRenders` slot, so it belongs to the operator. This clock holds nothing but the
+    // viewer's own tab. Pinned at the SOURCE because no fixture can set an option that does not
+    // exist: wiring one in later would leave every behaviour rail in this file green.
+    const source = readFileSync(join(process.cwd(), "src", "gateway", "artifact.ts"), "utf8");
+    expect(source).toContain("renderSpawnTimeoutMs: ARTIFACT_SPAWN_TIMEOUT_MS,");
   });
 });
 
@@ -266,6 +315,44 @@ describe("T158 at the BEHAVIOUR: driving the emitted shell in a DOM", () => {
     const h = load(page);
     h.deliver();
     expect(await h.until("the renderer could not start", 5_000)).toBe(true);
+    expect(h.html("loam-app")).not.toContain("timed out");
+  });
+
+  it("a realm that keeps re-signalling LIVE cannot hold the render clock open", async () => {
+    // The live re-arm fires ONCE. `self` is sealed in the realm, but a bare `postMessage` identifier
+    // is not in SEALED_CHANNELS, so a bundle can reach the shell's own protocol. Without the guard
+    // each `live` re-armed a fresh render budget and the fold never landed — an unbounded window,
+    // and the worker running that bundle stayed alive for as long as it kept beating.
+    liveAfterMs = 5;
+    liveRepeatMs = 20;
+    const page = await pack();
+    const h = load(page);
+    h.deliver();
+    expect(await h.until("the renderer timed out", 5_000)).toBe(true);
+    expect(h.spawned[0]!.terminated).toBe(true);
+  });
+
+  it("a SUPERSEDED render that has not yet started is torn down at once, not at its own ceiling", async () => {
+    // The cost of a generous spawn ceiling, paid down. A render the world has moved past must stop
+    // when it is superseded; waiting out a 10 s ceiling would let a viewer clicking through gestures
+    // on a slow device stack up worker threads and deepen the contention that made spawn slow.
+    liveAfterMs = 3_000; // far beyond this rail's patience, and far short of the shipped ceiling
+    answerAfterMs = 5;
+    const page = await pack();
+    const h = load(page);
+    h.deliver(); // render 1 — spawned, not yet live
+    h.deliver(); // render 2 — supersedes it
+    const gone = await (async (): Promise<boolean> => {
+      const deadline = Date.now() + 2_000;
+      while (!(h.spawned[0]?.terminated ?? false) && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      return h.spawned[0]?.terminated ?? false;
+    })();
+    expect(h.spawned.length).toBeGreaterThanOrEqual(2);
+    expect(gone).toBe(true);
+    // …and the superseded render paints NOTHING on its way out.
+    expect(h.html("loam-app")).not.toContain("could not start");
     expect(h.html("loam-app")).not.toContain("timed out");
   });
 
