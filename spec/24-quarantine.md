@@ -408,7 +408,7 @@ until blessed, and now "blessed" has a shape — it graduated from probation.
 A quarantined renderer is the vivid case, and §23 already built most of the path. §23.3 decided that a
 sandboxed renderer writes under a per-renderer granted author into the SANDBOX POOL (a separate store the
 operator can drop), never canonical — and §24.1 supplies that pool. What §24 adds is the FRAME.
-RECOMMENDATION: the stock React host (§23.2), when it mounts a quarantined renderer, must (1) inject
+RECOMMENDATION: the SERVING PATH, when it mounts a quarantined renderer, must (1) inject
 handles scoped to the quarantine pool — writes land IN the quarantine (§23.3's pen-into-pool) and the app
 reads them back (the pool's read view is `primary-ground ⊎ its-own-writes`, §24.2), so a probationary app
 is genuinely RUNNING, statefully: the operator watches it DO things, not paint a frozen preview, (2) render
@@ -422,6 +422,53 @@ renders against your real ground, its every write LIVE in the pool and sequester
 promotion controls are the only door out. No new renderer
 machinery — §23.3 built the pen-into-sandbox-pool path and §23.9 built the confinement; §24 supplies the
 pool, the glass, and the visible frame around them.
+
+**BUILT, and one word of the recommendation was wrong.** The paragraph above said "the stock React host
+(§23.2)", and no such host exists: §23.2 is the host CONTRACT, and the code that mounts a renderer is
+`serveRouteImpl` in `src/gateway/renderers.ts`, which resolves the node under the door's discipline and
+runs the bundle in the §23.9 worker. The frame is therefore CHROME THE SERVING PATH WRAPS around a
+quarantined route's output — a server-side wrap, no component, and the sentence is corrected in place
+rather than left to mislead the next builder.
+
+Two things were genuinely missing, and both are now built. The PEN could not write: a pool opened without
+the primary's provisioned pen seeds refused every form-submit with "this renderer's pen is not
+provisioned", so a probationary app could only ever paint a frozen preview — the exact failure clause (1)
+forbids. An UNTRUSTED pool now inherits the primary's pens — only that one, since a curated container and
+a §39 inbox pool build authority in their own ground on purpose and are left exactly as they were. Custody
+is unchanged, because the pool already holds the operator seed, which is strictly stronger. Authorization
+is not loosened either, and the SECOND KEY IS ASKED OF THE ROOT STORE: a pool holds only a seeded COPY of
+the operator's grants, frozen until someone re-pulses the edge, and nothing re-pulses it on its own — so a
+pen whose grant the operator strikes in the primary would have gone on signing in the pool forever,
+anonymously wherever the route is public. The renderer door now re-reads the root's live word before it
+signs, climbing past any intermediate pool (whose copy is frozen too). That is the call `mounts.ts`
+already makes about §12 publicness, for the same reason: a revocation must arrive. THE PUBLIC
+DECLARATION IS ASKED OF THE ROOT TOO, because on this one door it is not a read. `loam:public` is a read
+grant everywhere else in the spec; at the renderer's WRITE door it is the whole gate between a
+stranger's form and an anonymous author, so a frozen copy of it would hold an anonymous WRITE door open
+after the operator struck the declaration that opened it. An anonymous form-write into a quarantine pool
+therefore needs the lens declared public in the pool AND still declared public at the root, re-read per
+request. A route that fails either half gives the same uniform 404 an undeclared route gives, so the
+door gains no oracle. The class is NOT closed, and the code says so rather than implying otherwise: a
+pool's copies of the striker set and of the registrations are stale in the same way, and those are
+READS — a lens the operator withdraws in the primary stays readable through a mounted pool until
+someone re-pulses the edge. That gap is named here, not closed here. And the FRAME did not exist:
+a pool's gateway now carries a `probation` mark, set by the attach for UNTRUSTED containers only, and
+every 200-with-HTML render from such a gateway is wrapped in `src/gateway/probation.ts`'s banner — the
+probation, the live writes named to their pool, promotion as the only crossing, and the droppability. The
+promotion controls at the frame's edge are a link to the container's own admin page, where blessing law
+(§24.4) and adopting an output (§24.3) already live; the anonymous door gets the sequestration statement
+and no link into the operator's controls. The frame's copy is held to the same standard in the other
+direction: `drop()` refuses rather than reporting a discard it cannot prove, and a named container's drop
+strikes its own declaration in the primary — so the banner claims what the code keeps ("the writes go with
+the store; nothing it wrote crosses into your ground") rather than a completeness nothing verified. And a
+probationary store now REFUSES to pack a route into a §30 artifact: a packed page outlives the pool and
+carries none of the chrome, which is a probationary face with its probation removed.
+
+The frame is chrome, not confinement, and the spec says so rather than letting a reader over-trust it: it
+shares a document with untrusted markup, which can restyle or cover it. Visual containment wants a
+sandboxed iframe, and `sandbox` without `allow-same-origin` drops the credentials §23.3's write path
+needs — so it is a later slice with its own design, not a flag flipped here. What holds today is that the
+sequestration statement is IN the served bytes of every rendered response a probationary pool makes.
 
 ### 24.8 Erasure must reach the quarantine (question 8, HARD REQUIREMENT)
 
@@ -688,3 +735,44 @@ Designed under `.adlc/specs/27-trust-on-load.md` (T31, accepted at
 names one gap rather than implying coverage: §28.1's effectiveness attenuation is unbuilt, so a wall shares
 the host's operator and a stranger's renderer is inert THERE too — criterion 7 asserts the 404 that is
 true. Additive vocabulary only → no §20 migration. Capability/federation surface → Myk's merge (P6).
+
+**THE SEQUESTERED FRAME BUILT** (realizes ticket T35, 2026-08-12) — §24.7's three parts, and the one
+correction the prose owed. The frame is chrome the SERVING PATH wraps, not a React host: `serveRouteImpl`
+wraps every 200-with-HTML render from a probationary pool in `src/gateway/probation.ts`'s banner, and
+§24.7's wording is corrected in place above. Handles were already scoped to the pool in every respect but
+one — the pool inherited no pen seeds, so a write-enabled quarantined renderer refused every form-submit
+and could only paint a preview; `openSeparate` now carries the primary's `pens` across, custody unchanged
+(the pool already holds the operator seed) and authorization TIGHTENED — the door asks the HOST's live
+word about the pen's grant, because a pool's seeded copy of that grant is frozen until a pulse nobody
+calls, and a revocation must arrive. The probation mark is set for UNTRUSTED containers only, so a curated
+container is never framed as probation. Promotion controls at the frame's edge are a link to the
+container's admin page, where §24.3 adoption and §24.4 blessing already live; the anonymous door gets the
+statement, and neither the link nor the container's declared NAME — a name is the operator's choice and
+routinely names a counterparty, so the door that withholds the controls withholds what they point at. The
+anonymous WRITE door asks the root about the route's own lens for the same reason the pen's grant is
+asked there: `loam:public` is a read grant everywhere else, but here it is the gate a write turns on, and
+a pool's copy of it is frozen. Rails in `test/gateway/probation-frame.test.ts`, at both levels: a pen write
+lands in the pool's reactor AND its bytes and is absent from the primary's, the app reads its own write
+back across two gestures, a struck grant refuses the next write with no reseed at either depth, a drop leaves the primary's
+delta set and rendered answer identical, erasure in the primary blanks a field the pool did not overwrite
+while the pool's own output survives, the container name is escaped into the banner, packing is refused,
+and the copy is tested against thirteen spellings of §24.7's forbidden sentence. HONEST SCOPE, stated
+rather than implied: the frame is chrome and not confinement — a hostile bundle can restyle or cover it,
+and the sandboxed iframe that would fix that drops the same-origin credentials §23.3's write path needs.
+The root question is asked over a VERIFIED chain rather than a chased pointer: each link must still be a
+live attachment and the terminal store must not itself be a pool, so a detached intermediate — readable,
+frozen, and now the end of the chain — refuses instead of vouching. A separate container also may no
+longer take the store it was opened from as its own; sequestration that shares the host's bytes is not
+sequestration, and the frame would state the opposite. Five gaps stated rather than closed: a pool's
+`probation` mark is read from the declaration at ATTACH rather than per request, so a trust flip that
+strikes the earliest declaration under a live attachment is not seen until reattach; `drop()`'s
+enumeration is the pool's read union its session reactor, which on a mirror backend across a
+detach-and-reattach cycle can be narrower than the bytes on the mirror tier; the WHOLE pen table crosses
+into an untrusted pool, so a quarantined renderer may name any pen the primary provisioned and its writes
+carry that pen's name inside the pool (custody is unchanged — the pool holds the operator seed — but the
+attribution an operator reads before promoting is the stranger's to choose); and a pen granted ONLY inside
+the quarantine is refused, because the second key is asked of the root, which makes the safer-looking
+configuration the refused one; and a pool's copies of the striker set and the registrations stay stale,
+so a lens the operator withdraws in the primary is still READABLE through a mounted pool until the edge
+is re-pulsed — the write door climbs to the root, the read doors do not. Additive
+vocabulary only → no §20 migration. Renderer + capability surface → Myk's merge (P6).

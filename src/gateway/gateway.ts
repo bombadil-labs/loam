@@ -123,6 +123,7 @@ import {
   type ContainerOptions,
   type ContainerTable,
 } from "./container.js";
+import type { Probation } from "./probation.js";
 import {
   declareArtifactImpl,
   packArtifactImpl,
@@ -784,6 +785,28 @@ export class Gateway {
   // read as one pool's.
   /** @internal — T34 seam (container.ts) */
   anonymousPoolsOpened = 0;
+
+  // THIS gateway is a quarantine pool's own gateway (SPEC §24.7) — set by the attach that opened it,
+  // and held for the pool's whole life. The renderer door reads it to wrap a served route in the
+  // SEQUESTERED FRAME, so a probationary app is visibly on probation. Only an UNTRUSTED container
+  // sets it: a curated container holds the operator's own law, and framing that as probation would be
+  // the same lie pointed the other way.
+  /** @internal — T35 seam (container.ts, renderers.ts) */
+  probation: Probation | undefined = undefined;
+
+  // The store THIS gateway was attached FROM, for a separate container's own gateway (SPEC §27).
+  // A pool holds a SEEDED COPY of the host's law, frozen until someone re-pulses the edge — and
+  // nothing re-pulses it on its own. So any question whose stale answer would make a REVOCATION
+  // never arrive must be asked of the host, live. One is asked through it today: does a renderer's
+  // pen still hold write standing (§23.3 × §24.7)? It is not a back-channel for reading the host's
+  // ground, which is the thing the one-way glass exists to prevent. Cleared when the container
+  // detaches — a detached pool is nobody's replica.
+  //
+  // THE CLASS IS NOT CLOSED, and nothing here should read as if it were: a pool's copy of the
+  // striker set, of the registrations, and of the public declarations is stale in exactly the same
+  // way, and those are READS. They are older than this field and are not fixed here.
+  /** @internal — T35 seam (container.ts, renderers.ts) */
+  attachedTo: Gateway | undefined = undefined;
 
   // The live per-connection inbox handles (SPEC §39), keyed by inbox name. A binding is DURABLE: a
   // second bindConnection of the same (container, connection key) resumes the same handle rather than

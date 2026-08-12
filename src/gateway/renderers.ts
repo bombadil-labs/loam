@@ -22,6 +22,9 @@ import { bytesEnvelope, findBytesByRef } from "./bytes.js";
 import { importEsm, loadedEsm } from "./esm.js";
 import type { Gateway, RequestContext } from "./gateway.js";
 import type { ResolvedNode } from "./gql.js";
+import { holdsGrant } from "./accounts.js";
+import { STORE_ENTITY } from "./genesis.js";
+import { frameProbation } from "./probation.js";
 import { renderInWorker } from "./render-worker.js";
 import { workerLimitsOf } from "./envelope.js";
 import { lawfulNegated, lawfulSnapshot, lensOf, type LensName } from "./registration.js";
@@ -506,6 +509,16 @@ export async function serveRouteImpl(
       body: err instanceof Error ? err.message : String(err),
     };
   }
+  // THE SEQUESTERED FRAME (SPEC §24.7): a route served by a QUARANTINE POOL's own gateway is chrome-
+  // wrapped, so a person sees the probation without reading the spec. Applied to the rendered HTML only —
+  // a refusal is already text and says nothing about the ground. This is the one place it can live: the
+  // bundle is untrusted and would simply not draw it, and the door below serves whatever bytes it is
+  // handed. A store that is not a quarantine is untouched, and that is what keeps canonical reads honest.
+  const framed = (r: { status: number; contentType: string; body: string }) => {
+    const p = gw.probation;
+    if (p === undefined || r.status !== 200 || !r.contentType.startsWith("text/html")) return r;
+    return { ...r, body: frameProbation(r.body, p, door) };
+  };
   // The bundle must be loadable (unloaded → unmounted, a 404, not a 500 — prepareRoute pre-loads it on
   // the serve path). The read-discipline + resolve above stayed on THIS thread (authority never leaves
   // it); only the untrusted render runs in the bounded worker (SPEC §23.9).
@@ -553,14 +566,21 @@ export async function serveRouteImpl(
     }
     envelope.inFlight += 1;
     try {
-      return await renderInWorker(binding.bundle, payload(), limits.renderTimeoutMs, {
-        ...workerLimitsOf(limits),
-        onOutcome: (outcome) => {
-          if (outcome === "timeout") envelope.timedOut += 1;
-          else if (outcome === "fault") envelope.faulted += 1;
-          else if (outcome === "notHtml") envelope.malformed += 1;
-        },
-      });
+      // FRAMED like every other render path (SPEC §24.7). An enveloped pool is an untrusted one, so
+      // this branch is where the sequestered frame matters MOST — a metered render that skipped the
+      // wrap would drop the probation chrome exactly where the app is least trusted. The refusal above
+      // is left bare on purpose: `framed` touches only a 200 text/html body, so a 503 says nothing
+      // about whether it came from a quarantine.
+      return framed(
+        await renderInWorker(binding.bundle, payload(), limits.renderTimeoutMs, {
+          ...workerLimitsOf(limits),
+          onOutcome: (outcome) => {
+            if (outcome === "timeout") envelope.timedOut += 1;
+            else if (outcome === "fault") envelope.faulted += 1;
+            else if (outcome === "notHtml") envelope.malformed += 1;
+          },
+        }),
+      );
     } finally {
       envelope.inFlight -= 1;
     }
@@ -580,7 +600,7 @@ export async function serveRouteImpl(
     }
     gw.publicRendersInFlight += 1;
     try {
-      return await renderInWorker(binding.bundle, payload(), gw.options.renderTimeoutMs);
+      return framed(await renderInWorker(binding.bundle, payload(), gw.options.renderTimeoutMs));
     } finally {
       gw.publicRendersInFlight -= 1;
     }
@@ -590,7 +610,7 @@ export async function serveRouteImpl(
   // renderer is a view consumer like gql/REST — hand it the §23.7 envelope (a bytes leaf becomes
   // { mime, ref, base64url? }, primitives pass through), which is also what makes the node JSON/clone-safe
   // to cross the thread boundary. renderInWorker never rejects; every fault folds to a clean refusal.
-  return renderInWorker(binding.bundle, payload(), gw.options.renderTimeoutMs);
+  return framed(await renderInWorker(binding.bundle, payload(), gw.options.renderTimeoutMs));
 }
 
 // Resolve ONE mediated read on the server-rendered host, mapping every failure onto the floor's own
@@ -639,6 +659,27 @@ function routeServableOn(gw: Gateway, binding: RendererBinding, door: "full" | "
     .some((v) => v.deltaId === binding.versionId && lensOf(v) === binding.schemaName);
 }
 
+// The store that can answer for a pool, LIVE (SPEC §24.7). A pool holds a seeded COPY of the host's
+// law, frozen until someone re-pulses the edge, and nothing re-pulses it on its own — so any question
+// whose stale answer would make a REVOCATION never arrive is asked of the root instead.
+//
+// The chain is VERIFIED, not chased. Following `attachedTo` alone would trust whatever store the
+// pointer lands on, and a detached intermediate is exactly that: still readable, permanently frozen,
+// and now the end of the chain. So each link must still be a live attachment, and the terminal store
+// must not itself be a pool. Undefined means "I cannot tell", which every caller must read as a
+// refusal rather than a permission (H9).
+function rootAuthorityOf(gw: Gateway): Gateway | undefined {
+  let child = gw;
+  let root = gw.attachedTo;
+  while (root !== undefined && root.quarantinePools.has(child) && root.attachedTo !== undefined) {
+    child = root;
+    root = root.attachedTo;
+  }
+  return root !== undefined && root.quarantinePools.has(child) && root.probation === undefined
+    ? root
+    : undefined;
+}
+
 // Write through a rendered route (the body of `Gateway.writeRoute`, SPEC §23.3): a form on a mounted
 // renderer POSTs its fields, and the STORE signs the resulting delta as the renderer's PEN — a
 // granted-author identity whose seed is provisioned in config (options.pens), NEVER the caller's token.
@@ -666,6 +707,17 @@ export async function writeRouteImpl(
   // Visible on this door (the same discipline as a GET), so a stranger can only write where they could
   // read, and an undeclared route stays a uniform 404 rather than revealing itself.
   if (!routeServableOn(gw, binding, door)) return gone;
+  // THE ANONYMOUS DOOR'S OPENNESS IS THE ROOT'S LIVE WORD TOO (SPEC §24.7). `loam:public` is a READ
+  // declaration everywhere else, and stale copies of a read are the documented cost of a seeded pool.
+  // Here it is a WRITE GATE: it is the only thing standing between a stranger's form and an anonymous
+  // author, so a pool's frozen copy of it would keep an anonymous write door open after the operator
+  // struck the declaration that opened it. `mounts.ts` asks the host WHETHER any public surface is
+  // open; this asks the root about THIS route's own lens, which is the half a write turns on. The
+  // refusal is the same uniform 404 an undeclared route gives, so the door gains no oracle.
+  const authority = gw.probation === undefined ? undefined : rootAuthorityOf(gw);
+  if (gw.probation !== undefined && door === "public") {
+    if (authority === undefined || !routeServableOn(authority, binding, "public")) return gone;
+  }
   // A read-only renderer (no pen/writable) declared no way to author — refuse the write, not the route.
   if (
     binding.pen === undefined ||
@@ -692,6 +744,47 @@ export async function writeRouteImpl(
   const penSeed = gw.options.pens?.[binding.pen];
   if (penSeed === undefined) {
     return { status: 403, contentType: text, body: "this renderer's pen is not provisioned" };
+  }
+  // A PROBATIONARY POOL ASKS ITS HOST'S LIVE WORD (SPEC §24.7, following the §12 precedent in
+  // mounts.ts). A pool holds a SEEDED COPY of the operator's grants, frozen until someone calls
+  // reseed() — and nothing calls it on its own. Asking the pool alone would make a revocation
+  // unrevocable at every quarantine mount: strike the pen's grant in the primary and the pool would
+  // go on signing with it forever, anonymously wherever the route is public. So the pen must hold
+  // write standing at the ROOT store as well as here, re-read per request. `authorize` still asks
+  // this store's own question below; this is the second key, not a replacement for the first.
+  //
+  // ONLY where the grant is a seeded copy — i.e. a QUARANTINE. A curated container and a §39 inbox
+  // pool build authority in their OWN ground on purpose (container.ts's grant chain), and asking
+  // the host about a grant the host was never meant to hold would refuse every write there with a
+  // reason that is not true. Climbing to the root matters for the same reason the check exists: an
+  // intermediate pool's copy is frozen too, so a pool of a pool must not ask its frozen parent.
+  if (gw.probation !== undefined) {
+    // `rootAuthorityOf` above verified the chain. A chain that cannot be verified — a detached pool, a
+    // handle held past a failed drop — refuses: "I cannot tell" is not "permitted" (H9).
+    if (authority === undefined) {
+      return {
+        status: 403,
+        contentType: text,
+        body: "this pool is not attached to a store that can answer for its pen",
+      };
+    }
+    if (
+      !holdsGrant(
+        authority.reactor,
+        STORE_ENTITY,
+        authorForSeed(penSeed),
+        "write",
+        authority.operatorAuthor,
+      )
+    ) {
+      // States the CONDITION rather than asserting a revocation happened: the pen may have been
+      // struck, or may never have held standing outside this pool at all.
+      return {
+        status: 403,
+        contentType: text,
+        body: "this renderer's pen holds no write grant in the store this pool reads",
+      };
+    }
   }
   try {
     // Sign AS the pen (not the caller). append→authorize checks the pen's GRANT — provisioning is not
