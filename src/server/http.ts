@@ -60,7 +60,7 @@ import {
 import { grantClaims } from "../gateway/accounts.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
 import { readSeed } from "../cli/config.js";
-import { makeUserDoors, type UserDoorOptions, type UserDoors } from "./session.js";
+import { CSP, makeUserDoors, type UserDoorOptions, type UserDoors } from "./session.js";
 import { makeAdminDoor, type AdminDoor } from "./admin.js";
 
 export { type UserDoorOptions } from "./session.js";
@@ -158,6 +158,10 @@ const sha = (s: string): Buffer => createHash("sha256").update(s).digest();
 // which doors exist. Naming FIXED paths is fine: `/login` sits at the same address on every
 // store, and where no accounts are configured it refuses exactly as any unresolved name does —
 // so the sentence stays true, and constant, either way.
+// The prose promises only what the store honours. History is the DEFAULT, never a guarantee: an
+// erasure (SPEC §11) really removes bytes, so no line here may say the ground remembers whatever
+// it was told. Federation is the same shape — a store admits what its trust policy admits (SPEC
+// §8), so meeting a peer is not merging with it.
 const GREETING = `<!doctype html>
 <html lang="en">
 <head>
@@ -185,9 +189,10 @@ const GREETING = `<!doctype html>
 <body>
 <main>
 <h1>A Loam store serves here.</h1>
-<p>Loam is a database that only ever learns: signed, content-addressed deltas whose merge is
-union — order-blind, idempotent, conflict-free. Nothing is overwritten; the ground remembers.
-Two stores that meet simply merge. This is one of them.</p>
+<p>Loam is a database that writes by adding: signed, content-addressed deltas whose merge is
+union — order-blind, idempotent, conflict-free. A claim is added rather than edited in place, so
+the past stays legible by default — and an erasure is the one act that takes bytes back, on
+purpose. Two stores merge what each has agreed to admit from the other. This is one of them.</p>
 <p>Its doors are the mounts: <code>/&lt;mount&gt;/graphql</code> to ask,
 <code>/&lt;mount&gt;/subscribe</code> to listen, <code>/&lt;mount&gt;/rest</code> and
 <code>/&lt;mount&gt;/mcp</code> for the same worlds in other tongues.</p>
@@ -985,8 +990,14 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     // /login, and a document policy weaker than that would leak this store's URL to wherever a
     // future link points — while no-referrer on HTML is banned outright, because it makes Chrome
     // send `Origin: null` on any form a page like this ever grows.
+    // The same CSP the session pages carry: no script, no framing, no form retargeting, no base
+    // rewriting. This page has no script and no form today; the header is what keeps that true of
+    // whatever it grows into. And the body is a compile-time constant, identical for every caller
+    // by design — so a shared cache can hold it, and cannot leak anything by holding it.
     res.writeHead(200, {
       "content-type": "text/html; charset=utf-8",
+      "content-security-policy": CSP,
+      "cache-control": "public, max-age=300",
       "referrer-policy": "same-origin",
       ...CORS,
     });

@@ -7,7 +7,13 @@
 //   * object level — what a browser at `/` actually receives: a page that says what Loam is,
 //     names `/login` as the human door (a fixed path, not store knowledge), and carries
 //     `Referrer-Policy: same-origin`, the house policy for documents this store serves
-//     (test/server/referrer-policy.test.ts bans the no-referrer combination outright);
+//     (test/server/referrer-policy.test.ts bans the no-referrer combination outright), plus the
+//     no-script CSP and a cache policy the constant body earns;
+//   * TRUTH level — the page may not promise what the store cannot honour. Two claims are named
+//     here because the page made both and neither was true: permanence is a DEFAULT, since an
+//     erasure (SPEC §11) really removes bytes; and federation merges what a store's trust policy
+//     admits (SPEC §8), not whatever it meets. The rail asserts the qualifiers are present AND
+//     that the unqualified spellings are gone — a reworded overpromise is the failure to catch;
 //   * delta level — the greeting's bytes across the ONE axis the frozen file could not know
 //     about: whether the operator configured human accounts. A greeting that varied on `users`
 //     would be an oracle for "this store has people"; it must be byte-identical either way.
@@ -20,10 +26,8 @@
 import { join } from "node:path";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
-
-vi.setConfig({ testTimeout: 15000 }); // real listening servers
 
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
@@ -102,11 +106,40 @@ describe("T104 — the greeting's words and headers", () => {
     expect(text).toMatch(/sign in/i);
   });
 
+  it("promises only what the store honours: history is a default an erasure can take back, and federation admits", async () => {
+    const base = await bareStore();
+    const text = await (await fetch(`${base}/`)).text();
+    // Writes add rather than replace — and the page says so as a DEFAULT, then names the act
+    // that undoes it. A page that mentions permanence without erasure is the overpromise.
+    expect(text).toMatch(/by default/i);
+    expect(text).toMatch(/erasure/i);
+    expect(text).toMatch(/takes bytes back/i);
+    // Federation names the gate: a peer's deltas arrive because the trust policy admits them.
+    expect(text).toMatch(/agreed to admit/i);
+    // And the unqualified spellings stay gone. These are the exact claims the page made before
+    // they were measured against SPEC §11 and §8; a rewrite that reintroduces the sense of any
+    // of them should extend this list rather than delete it.
+    expect(text).not.toMatch(/nothing is overwritten/i);
+    expect(text).not.toMatch(/the ground remembers/i);
+    expect(text).not.toMatch(/stores that meet simply merge/i);
+    expect(text).not.toMatch(/only ever learns/i);
+  });
+
   it("sends Referrer-Policy: same-origin — the document policy, not the JSON refusals' no-referrer", async () => {
     const base = await bareStore();
     const res = await fetch(`${base}/`);
     expect(res.headers.get("content-type")).toContain("text/html");
     expect(res.headers.get("referrer-policy")).toBe("same-origin");
+    // The same no-script CSP the session pages carry: the greeting has no script and no form
+    // today, and the header is what keeps that true of whatever it grows into.
+    const csp = res.headers.get("content-security-policy") ?? "";
+    expect(csp).toContain("script-src 'none'");
+    expect(csp).toContain("frame-ancestors 'none'");
+    expect(csp).toContain("form-action 'self'");
+    expect(csp).toContain("base-uri 'none'");
+    // Cacheable on purpose: the body is a compile-time constant, identical for every caller, so
+    // a shared cache cannot leak by holding it. `no-store` here would only cost round trips.
+    expect(res.headers.get("cache-control")).toBe("public, max-age=300");
   });
 
   it("is byte-identical whether or not accounts exist — naming /login reveals nothing about people", async () => {
@@ -128,8 +161,8 @@ describe("T104 — the greeting's words and headers", () => {
     expect(await peopledAnswer.text()).toBe(bareText);
     // The header rides constant too — a policy that appeared only when /login was live would be
     // the same oracle in a different field.
-    expect(peopledAnswer.headers.get("referrer-policy")).toBe(
-      bareAnswer.headers.get("referrer-policy"),
-    );
+    for (const header of ["referrer-policy", "content-security-policy", "cache-control"]) {
+      expect(peopledAnswer.headers.get(header), header).toBe(bareAnswer.headers.get(header));
+    }
   });
 });
