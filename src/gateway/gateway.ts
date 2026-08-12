@@ -117,6 +117,7 @@ import {
   type ContainerOptions,
   type ContainerTable,
 } from "./container.js";
+import type { Probation } from "./probation.js";
 import {
   declareArtifactImpl,
   packArtifactImpl,
@@ -748,6 +749,14 @@ export class Gateway {
   // readers ask both, so the two can never silently diverge on erasure reach.
   /** @internal — T19 seam (container.ts) */
   readonly attachedContainers = new Map<string, Gateway>();
+
+  // THIS gateway is a quarantine pool's own gateway (SPEC §24.7) — set by the attach that opened it,
+  // and held for the pool's whole life. The renderer door reads it to wrap a served route in the
+  // SEQUESTERED FRAME, so a probationary app is visibly on probation. Only an UNTRUSTED container
+  // sets it: a curated container holds the operator's own law, and framing that as probation would be
+  // the same lie pointed the other way.
+  /** @internal — T35 seam (container.ts, renderers.ts) */
+  probation: Probation | undefined = undefined;
 
   // The live per-connection inbox handles (SPEC §39), keyed by inbox name. A binding is DURABLE: a
   // second bindConnection of the same (container, connection key) resumes the same handle rather than

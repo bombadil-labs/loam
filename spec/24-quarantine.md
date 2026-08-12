@@ -299,7 +299,7 @@ until blessed, and now "blessed" has a shape — it graduated from probation.
 A quarantined renderer is the vivid case, and §23 already built most of the path. §23.3 decided that a
 sandboxed renderer writes under a per-renderer granted author into the SANDBOX POOL (a separate store the
 operator can drop), never canonical — and §24.1 supplies that pool. What §24 adds is the FRAME.
-RECOMMENDATION: the stock React host (§23.2), when it mounts a quarantined renderer, must (1) inject
+RECOMMENDATION: the SERVING PATH, when it mounts a quarantined renderer, must (1) inject
 handles scoped to the quarantine pool — writes land IN the quarantine (§23.3's pen-into-pool) and the app
 reads them back (the pool's read view is `primary-ground ⊎ its-own-writes`, §24.2), so a probationary app
 is genuinely RUNNING, statefully: the operator watches it DO things, not paint a frozen preview, (2) render
@@ -313,6 +313,32 @@ renders against your real ground, its every write LIVE in the pool and sequester
 promotion controls are the only door out. No new renderer
 machinery — §23.3 built the pen-into-sandbox-pool path and §23.9 built the confinement; §24 supplies the
 pool, the glass, and the visible frame around them.
+
+**BUILT, and one word of the recommendation was wrong.** The paragraph above said "the stock React host
+(§23.2)", and no such host exists: §23.2 is the host CONTRACT, and the code that mounts a renderer is
+`serveRouteImpl` in `src/gateway/renderers.ts`, which resolves the node under the door's discipline and
+runs the bundle in the §23.9 worker. The frame is therefore CHROME THE SERVING PATH WRAPS around a
+quarantined route's output — a server-side wrap, no component, and the sentence is corrected in place
+rather than left to mislead the next builder.
+
+Two things were genuinely missing, and both are now built. The PEN could not write: a pool opened without
+the primary's provisioned pen seeds refused every form-submit with "this renderer's pen is not
+provisioned", so a probationary app could only ever paint a frozen preview — the exact failure clause (1)
+forbids. A pool now inherits the primary's pens; custody is unchanged (the pool already holds the operator
+seed, which is strictly stronger), and authorization is untouched — the pen still needs a surviving GRANT,
+which reaches the pool as data and darkens there when the primary strikes it. And the FRAME did not exist:
+a pool's gateway now carries a `probation` mark, set by the attach for UNTRUSTED containers only, and
+every 200-with-HTML render from such a gateway is wrapped in `src/gateway/probation.ts`'s banner — the
+probation, the live writes named to their pool, promotion as the only crossing, and the droppability. The
+promotion controls at the frame's edge are a link to the container's own admin page, where blessing law
+(§24.4) and adopting an output (§24.3) already live; the anonymous door gets the sequestration statement
+and no link into the operator's controls.
+
+The frame is chrome, not confinement, and the spec says so rather than letting a reader over-trust it: it
+shares a document with untrusted markup, which can restyle or cover it. Visual containment wants a
+sandboxed iframe, and `sandbox` without `allow-same-origin` drops the credentials §23.3's write path
+needs — so it is a later slice with its own design, not a flag flipped here. What holds today is that the
+sequestration statement is IN the served bytes of every rendered response a probationary pool makes.
 
 ### 24.8 Erasure must reach the quarantine (question 8, HARD REQUIREMENT)
 
@@ -579,3 +605,22 @@ Designed under `.adlc/specs/27-trust-on-load.md` (T31, accepted at
 names one gap rather than implying coverage: §28.1's effectiveness attenuation is unbuilt, so a wall shares
 the host's operator and a stranger's renderer is inert THERE too — criterion 7 asserts the 404 that is
 true. Additive vocabulary only → no §20 migration. Capability/federation surface → Myk's merge (P6).
+
+**THE SEQUESTERED FRAME BUILT** (realizes ticket T35, 2026-08-12) — §24.7's three parts, and the one
+correction the prose owed. The frame is chrome the SERVING PATH wraps, not a React host: `serveRouteImpl`
+wraps every 200-with-HTML render from a probationary pool in `src/gateway/probation.ts`'s banner, and
+§24.7's wording is corrected in place above. Handles were already scoped to the pool in every respect but
+one — the pool inherited no pen seeds, so a write-enabled quarantined renderer refused every form-submit
+and could only paint a preview; `openSeparate` now carries the primary's `pens` across, custody unchanged
+(the pool already holds the operator seed) and authorization unchanged (the grant is still asked, still
+strikeable from the primary). The probation mark is set for UNTRUSTED containers only, so a curated
+container is never framed as probation. Promotion controls at the frame's edge are a link to the
+container's admin page, where §24.3 adoption and §24.4 blessing already live; the anonymous door gets the
+statement and no link. Seven rails in `test/gateway/probation-frame.test.ts`, at both levels: a pen write
+lands in the pool's reactor AND its bytes and is absent from the primary's, the app reads its own write
+back across two gestures, a drop leaves the primary's delta set and rendered answer identical, erasure in
+the primary blanks the value behind a live frame while the pool's own output survives, and the copy is
+tested against thirteen spellings of §24.7's forbidden sentence. HONEST SCOPE, stated rather than implied:
+the frame is chrome and not confinement — a hostile bundle can restyle or cover it, and the sandboxed
+iframe that would fix that drops the same-origin credentials §23.3's write path needs. Additive
+vocabulary only → no §20 migration. Renderer + capability surface → Myk's merge (P6).

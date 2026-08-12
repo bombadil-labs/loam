@@ -22,6 +22,7 @@ import { bytesEnvelope, findBytesByRef } from "./bytes.js";
 import { importEsm, loadedEsm } from "./esm.js";
 import type { Gateway, RequestContext } from "./gateway.js";
 import type { ResolvedNode } from "./gql.js";
+import { frameProbation } from "./probation.js";
 import { renderInWorker } from "./render-worker.js";
 import { lawfulNegated, lawfulSnapshot, lensOf, type LensName } from "./registration.js";
 
@@ -505,6 +506,16 @@ export async function serveRouteImpl(
       body: err instanceof Error ? err.message : String(err),
     };
   }
+  // THE SEQUESTERED FRAME (SPEC §24.7): a route served by a QUARANTINE POOL's own gateway is chrome-
+  // wrapped, so a person sees the probation without reading the spec. Applied to the rendered HTML only —
+  // a refusal is already text and says nothing about the ground. This is the one place it can live: the
+  // bundle is untrusted and would simply not draw it, and the door below serves whatever bytes it is
+  // handed. A store that is not a quarantine is untouched, and that is what keeps canonical reads honest.
+  const framed = (r: { status: number; contentType: string; body: string }) => {
+    const p = gw.probation;
+    if (p === undefined || r.status !== 200 || !r.contentType.startsWith("text/html")) return r;
+    return { ...r, body: frameProbation(r.body, p, door) };
+  };
   // The bundle must be loadable (unloaded → unmounted, a 404, not a 500 — prepareRoute pre-loads it on
   // the serve path). The read-discipline + resolve above stayed on THIS thread (authority never leaves
   // it); only the untrusted render runs in the bounded worker (SPEC §23.9).
@@ -536,16 +547,18 @@ export async function serveRouteImpl(
     }
     gw.publicRendersInFlight += 1;
     try {
-      return await renderInWorker(
-        binding.bundle,
-        {
-          entity,
-          view: bytesEnvelope(node.view) as Record<string, unknown>,
-          hex: node.hex,
-          reads,
-          state,
-        },
-        gw.options.renderTimeoutMs,
+      return framed(
+        await renderInWorker(
+          binding.bundle,
+          {
+            entity,
+            view: bytesEnvelope(node.view) as Record<string, unknown>,
+            hex: node.hex,
+            reads,
+            state,
+          },
+          gw.options.renderTimeoutMs,
+        ),
       );
     } finally {
       gw.publicRendersInFlight -= 1;
@@ -556,16 +569,18 @@ export async function serveRouteImpl(
   // renderer is a view consumer like gql/REST — hand it the §23.7 envelope (a bytes leaf becomes
   // { mime, ref, base64url? }, primitives pass through), which is also what makes the node JSON/clone-safe
   // to cross the thread boundary. renderInWorker never rejects; every fault folds to a clean refusal.
-  return renderInWorker(
-    binding.bundle,
-    {
-      entity,
-      view: bytesEnvelope(node.view) as Record<string, unknown>,
-      hex: node.hex,
-      reads,
-      state,
-    },
-    gw.options.renderTimeoutMs,
+  return framed(
+    await renderInWorker(
+      binding.bundle,
+      {
+        entity,
+        view: bytesEnvelope(node.view) as Record<string, unknown>,
+        hex: node.hex,
+        reads,
+        state,
+      },
+      gw.options.renderTimeoutMs,
+    ),
   );
 }
 

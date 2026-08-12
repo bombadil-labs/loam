@@ -1045,7 +1045,22 @@ async function openSeparate(
       );
     }
   }
-  const pool = await Gateway.open(backend, { seed: gw.options.seed });
+  // THE PEN WRITES INTO THE POOL (SPEC §23.3 × §24.7). A write-enabled renderer signs its form-submits
+  // as a per-renderer granted author whose SEED lives in config, and the pool was opened without that
+  // config — so a quarantined app's every write refused "this renderer's pen is not provisioned", and a
+  // probationary app could only ever paint a frozen preview. The pool already holds the operator's own
+  // seed, which is strictly stronger custody than any pen, so carrying the pens across adds no key the
+  // pool did not have. Authorization is untouched: the pen still needs a surviving GRANT, which reaches
+  // the pool as data over the seeding edge, and striking that grant in the primary darkens the pen here
+  // on the next pulse (§6's two keys, both still asked).
+  const pool = await Gateway.open(backend, {
+    seed: gw.options.seed,
+    ...(gw.options.pens === undefined ? {} : { pens: gw.options.pens }),
+  });
+  // A probationary pool KNOWS it is one, for the renderer door's sequestered frame (SPEC §24.7).
+  if (spec.trust === "untrusted") {
+    pool.probation = spec.entity === undefined ? {} : { container: spec.entity };
+  }
   if (spec.admit !== undefined && spec.membership !== undefined) {
     throw new Error(
       `${voice}: give a membership Term OR an admit predicate, not both — admit is the ` +
