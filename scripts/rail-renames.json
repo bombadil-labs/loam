@@ -97,6 +97,13 @@
         "test/store/contract.test.ts"
       ],
       "authorized": "PENDING MYK — a branch cannot self-authorize, so merging this entry IS the authorization. One pair, 19 frozen rails, only the timeout digits change."
+    },
+    {
+      "//": "T139 rail REPAIR. render-sandbox.test.ts:103 asserts a 1ms budget times out even a TRIVIAL bundle, to prove renderTimeoutMs genuinely reaches the worker. That was only ever true because worker SPAWN sat inside the budget: T139 split the clocks (a legitimate spec-accuracy fix -- spawn latency measured the host, not the bundle, and 500ms of it turned a healthy render into a false 500 under load), so a trivial render now finishes inside 1ms and the assertion's premise is gone. The rail's INTENT survives and the fixture does not. This pair points it at the 'hang' route the same fixture already publishes (an infinite loop, line 42), which can only ever end at the clock -- so the knob is still proven to reach the worker. The sharper property the old spelling accidentally carried, that the OPERATOR'S number governs rather than some default, moves to T139's own unfrozen render-spawn-clock.test.ts with a bounded-duration bundle that distinguishes 1ms from 10s. No assertion changes: it still demands 500 and 'the renderer timed out'.",
+      "from": "    const out = await gw.serveRoute(\"ok\", FERN, \"full\");",
+      "to": "    const out = await gw.serveRoute(\"hang\", FERN, \"full\");",
+      "files": ["test/gateway/render-sandbox.test.ts"],
+      "authorized": "PENDING MYK - a branch cannot self-authorize, so merging this entry IS the authorization."
     }
   ]
 }
