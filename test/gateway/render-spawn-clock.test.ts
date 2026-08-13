@@ -98,7 +98,9 @@ describe("§23.9 / T139: the split reaches the DOOR, and the spawn budget is the
   // door, the public door, and the metered quarantine pool. One rail per site, because a site that
   // stops forwarding the budget is invisible to the other two — which is this file's own recited
   // history, one door over. Rails (e)/(f) take the token door, (g) the public door; (h), in the
-  // describe below, takes the pool — where the budget is the pool's own, not the host's.
+  // describe below, takes the pool — where the budget is the pool's own, not the host's. Behaviour
+  // only: which number each site FORWARDS is railed at the seam in render-spawn-forwarding.test.ts,
+  // because one of these mutants is invisible to every wall clock.
   const boot = (options: {
     renderTimeoutMs?: number;
     renderSpawnTimeoutMs?: number;
@@ -173,8 +175,9 @@ describe("§23.9 × §24.5 / T139: a metered pool's spawn window is its OWN cloc
   // The THIRD call site, and the one place §23.9's spawn ceiling deliberately does not reach. A
   // pool holds its slot across BOTH windows, so the host's 10s ceiling here would let a pool that
   // declared a 120ms render clock occupy its slot for 10120ms — invisible in `envelopeReports()`
-  // and never declared. §24.5 promises the envelope is the pool's whole bill. Nothing else in this
-  // file reaches this site, so deleting its budget leaves every other rail green.
+  // and never declared. §24.5 promises the envelope is the pool's whole bill. This rail proves the
+  // pool's clock BOUNDS a wedge; it cannot prove which number was forwarded, and that half lives in
+  // render-spawn-forwarding.test.ts.
   const pooled = async (poolRenderMs: number): Promise<Gateway> => {
     const gw = await Gateway.boot(
       new MemoryBackend(),
@@ -215,9 +218,15 @@ describe("§23.9 × §24.5 / T139: a metered pool's spawn window is its OWN cloc
     return gw;
   };
 
-  it("a wedged pool render gives its slot back on the POOL's clock, not the host's (rail h)", async () => {
-    // The bill, measured. One slot, a 300ms declared clock, a bundle that never finishes. A pool
-    // reading the host's 10s spawn ceiling returns here at ~10.3s and reddens this rail.
+  it("a wedged pool render gives its slot back on the POOL's clock (rail h)", async () => {
+    // The bill, measured: one slot, a 300ms declared clock, a bundle that never finishes, and the
+    // slot back inside 3s.
+    //
+    // WHAT IT DOES NOT CATCH, stated because an earlier draft of this comment claimed it did: a
+    // pool reading the HOST's 10s spawn ceiling passes this rail. Probed, not assumed. The render
+    // window re-arms at `online` and stops the wedge on the pool's clock however spawn was armed,
+    // so the 10s shows only under slow spawn — which no rail can force. The forwarding itself is
+    // railed at the seam in render-spawn-forwarding.test.ts, which does redden on that mutant.
     const gw = await pooled(300);
     const pool = await gw.openQuarantine();
     const t0 = Date.now();
