@@ -214,6 +214,10 @@ export interface Registration {
   readonly entity?: string;
   // The write discipline, traveling with the read program.
   readonly mutations?: ClaimTemplates;
+  // Why `mutations` is absent although the binding's bytes carry a payload: the payload could not
+  // be read. Present ONLY on a stored registration whose templates were dropped at parse, so the
+  // replay can report the loss instead of serving a surface quietly missing its declared door.
+  readonly mutationsDefect?: string;
   // Front-door writability (SPEC §14, immutable-by-default): when present, ONLY these fields accept
   // a surface write; the rest are read-only. Absent → NO field is writable (silence means "you may
   // not" — the deny-by-default posture §21's wave flipped in). Every registration Loam mints names
@@ -289,6 +293,10 @@ export function parseClaimTemplates(raw: unknown): ClaimTemplates {
       if (o["each"] === true) {
         throw new Error(`template "${name}" pointer ${i}: each belongs to entity pointers only`);
       }
+      // A `context` beside a literal value is inert, not malformed: nothing downstream reads it
+      // (gql.ts consults `context` only on an `at` pointer), so such a template has always bound
+      // and served. Refusing it here would delete a working mutation door from every store that
+      // already holds one, with no migration — so the key is dropped, as it always was.
       const value = o["value"];
       const hole = value as { arg?: unknown };
       if (typeof hole === "object" && hole !== null) {
@@ -698,6 +706,7 @@ interface Candidate {
   snapshotEntity: string;
   roots: readonly string[];
   mutations?: ClaimTemplates;
+  mutationsDefect?: string;
   writable?: readonly string[];
   resolvers?: ResolverSpecs;
   timestamp: number;
@@ -762,15 +771,19 @@ function survivingCandidates(
     } catch {
       continue;
     }
-    // A malformed template payload is dropped QUIETLY (the schema still binds; the surface
-    // just lacks the mutation) — the loud refusal belongs to publish, not replay.
+    // A malformed template payload does not refuse the binding (the schema still binds; the
+    // surface just lacks the mutation) — the loud refusal belongs to publish, not replay. But the
+    // drop is NOT silent: the defect rides along so the replay can report it, exactly as a
+    // bind-time shed is reported. A surface quietly missing its declared door is T96.
     let mutations: ClaimTemplates | undefined;
+    let mutationsDefect: string | undefined;
     const mutationsJson = primitive(delta.claims, "mutations");
     if (typeof mutationsJson === "string") {
       try {
         mutations = parseClaimTemplates(JSON.parse(mutationsJson));
-      } catch {
+      } catch (err) {
         mutations = undefined;
+        mutationsDefect = err instanceof Error ? err.message : String(err);
       }
     }
     // Writability is a plain string[] — a malformed payload is likewise dropped quietly, leaving
@@ -805,6 +818,7 @@ function survivingCandidates(
       snapshotEntity,
       roots,
       ...(mutations === undefined ? {} : { mutations }),
+      ...(mutationsDefect === undefined ? {} : { mutationsDefect }),
       ...(writable === undefined ? {} : { writable }),
       ...(resolvers === undefined ? {} : { resolvers }),
       timestamp: delta.claims.timestamp,
@@ -877,6 +891,7 @@ export function readRegistrations(reactor: Reactor, operator?: string): Registra
         entity: cand.schemaEntity,
         lensName: lensNameOf(cand),
         ...(cand.mutations === undefined ? {} : { mutations: cand.mutations }),
+        ...(cand.mutationsDefect === undefined ? {} : { mutationsDefect: cand.mutationsDefect }),
         ...(cand.writable === undefined ? {} : { writable: cand.writable }),
         ...(cand.resolvers === undefined ? {} : { resolvers: cand.resolvers }),
       });

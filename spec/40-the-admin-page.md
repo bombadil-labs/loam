@@ -39,7 +39,7 @@ the answer for a container that does not exist. Existence is not a thing the pag
 | Schemas | register `{hyperschema, schema, roots, writable}` — the same body `loam register` sends | operator; registration is store law |
 | Data | a container's members, and a resolved View through a registered schema | read-only |
 | Promotion | promote a delta from a container into the primary ground | operator, subtree-checked |
-| Federation | pull an offer URL or a pasted offer body into a container of the subtree | the user's seed |
+| Federation | paste an offer body (a peer's `GET /federate` JSON or a store's export) into a container of the subtree — paste-only, the network leg of a pull stays with `loam pull`, and the page never fetches a caller-named URL | the pasted deltas' own signatures; the page adds no authorship |
 | Connections | the MCP connections bound to subtree containers, and revoking one | the user's seed |
 
 Deliberately absent: user management (CLI-only, the standing §36 decision), erasure and slating (an

@@ -1,0 +1,13 @@
+{
+  "body": "FOUND 2026-08-12 by the T102 repair lane, which fixed the identical shape in `loam pen create` (PR #367, finding F4) and correctly declined to widen its diff into landed behaviour with its own frozen rails.\n\nWHAT IS WRONG. `cmdUserRole` (src/cli/cli.ts, around line 1519) passes `seedRead.seed` straight to `authorForSeed` with none of the `^[0-9a-f]{64}$` validation that the boot path applies. A malformed `user.<name>.seed` therefore dies on a raw parser error rather than a crafted refusal — and that error QUOTES CHARACTERS OF THE KEY FILE back to the terminal. Measured on the pen twin before it was fixed: `loam: hex string expected, got non-hex character \"no\" at index 0`. No command prefix, no file path, no advice, and two bytes of a secret on screen.\n\nWHY IT MATTERS BEYOND TIDINESS. Two reasons, and the second is the one that bites. First, a key file is the one class of input whose contents must never reach a log, a terminal transcript, or a screenshare; an error that echoes it turns a typo into a disclosure. Second, `create` and the boot path DISAGREE about what counts as a provisioned seed — the boot path refuses what this command accepts — so an operator can be told a seed is fine by one command and invisible by another. That split is what T102's F4 named, and it is the same split here.\n\nTHE REPAIR, mirroring what #367 already landed for pens: share the `isSeedHex` predicate the config module now exports, refuse BEFORE calling `authorForSeed`, name the path and the rule in the repo's crafted voice, and print nothing that was read from the file.\n\nCARE: `cmdUserRole` has landed rails, and some are frozen. If the refusal's wording collides with a frozen assertion, that needs an authorization pair rather than a quiet edit — check the shards before touching a test.\n\nRAILS: two-sided — a malformed user seed refuses with the cure named and NO file bytes in the output (assert the absence positively, matching a substring of the planted garbage), and a well-formed seed still assigns the role exactly as it does today.\n\nWHO MERGES: ordinary bar. It makes a refusal more honest and stops a disclosure; it widens nothing.",
+  "edges": [],
+  "id": "T166",
+  "phase": "P0",
+  "rails": [],
+  "scope": [
+    "src/cli/cli.ts",
+    "src/cli/config.ts"
+  ],
+  "status": "todo",
+  "title": "`loam user role` reads a user seed without validating it, and its failure quotes bytes from the key file"
+}

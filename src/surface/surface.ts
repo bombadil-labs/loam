@@ -129,6 +129,11 @@ export interface SurfaceHooks {
   ): Promise<ResolvedNode>;
   watch(schemaName: string, entity: string): AsyncGenerator<PatchNode>;
   claim(pointers: readonly ClaimPointerSpec[], actorSeed?: string): Promise<{ delta: string }>;
+  // The listing door (T110): the distinct entities the lens's backing container holds evidence
+  // for, resolved through the lens — one page, ascending by entity id, `after` exclusive. Only
+  // a FULL projection may derive a field from this hook: enumeration is authed-only (public
+  // enumeration is §12's deferred question), so a read door that offered it would be widening.
+  list(schemaName: string, opts?: { limit?: number; after?: string }): Promise<ResolvedNode[]>;
 }
 
 // A projection is a door's capability posture (SPEC §17): "full" derives reads and writes;

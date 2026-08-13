@@ -777,6 +777,12 @@ export const CHAPTERS = [
             door: "Gateway",
           },
           {
+            says: "A stranger's app served out of a [[quarantine]] arrives wrapped in a frame that says it is on probation, names the pool its writes are living in, and offers the promotion controls — and it never claims those writes go nowhere.",
+            spec: "spec/24-quarantine.md",
+            proof: "test/gateway/probation-frame.test.ts",
+            door: "Gateway",
+          },
+          {
             says: "If a pool genuinely cannot be made to forget, the erase call fails — it never reports a completeness it did not verify.",
             spec: "spec/24-quarantine.md",
             proof: "test/gateway/erasure-fanout.test.ts",

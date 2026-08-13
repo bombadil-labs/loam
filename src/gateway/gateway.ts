@@ -77,6 +77,12 @@ import {
 } from "./gql.js";
 import { declarePublicImpl, readPublicSchemas } from "./public.js";
 import {
+  envelopeReportsImpl,
+  type EnvelopeReport,
+  type PoolEnvelope,
+  type QuarantineEnvelope,
+} from "./envelope.js";
+import {
   cutImpl,
   deriveReceiptImpl,
   readGraveyards,
@@ -117,6 +123,7 @@ import {
   type ContainerOptions,
   type ContainerTable,
 } from "./container.js";
+import type { Probation } from "./probation.js";
 import {
   declareArtifactImpl,
   packArtifactImpl,
@@ -150,6 +157,7 @@ import {
   subscribeViaImpl,
   watchEntityImpl,
 } from "./reads.js";
+import { listImpl, type ListOptions } from "./listing.js";
 
 export interface AppendReceipt {
   readonly accepted: number;
@@ -262,6 +270,28 @@ export class Gateway {
   registered: Bound[] = [];
   /** @internal — T19 seam (renderers.ts: the §23.9 anonymous-render cap's in-flight count) */
   publicRendersInFlight = 0;
+  // The §24.5 RESOURCE ENVELOPE, present iff this gateway is an UNTRUSTED separate container's pool
+  // (container.ts sets it at open). It carries the pool's live slot/timeout/memory accounting and a
+  // resolver closed over the PARENT's ground — a child that may admit what its parent distrusts must
+  // never be able to admit a delta that raises its own ceiling. Absent on a primary and on a
+  // trusted/curated container, which keep the ordinary door budgets.
+  /** @internal — T34 seam (renderers.ts, container.ts, envelope.ts) */
+  envelope: PoolEnvelope | undefined = undefined;
+  // The §24.5 CEILING every separate container carries, enveloped or not: what the operator's LIVE
+  // ground allows this container, composed with its opener's. Absent on a primary.
+  /** @internal — T34 seam (container.ts) */
+  envelopeCeiling: (() => QuarantineEnvelope) | undefined = undefined;
+  // The ROOT ground every descendant resolves its own envelope from — the operator's real store, not
+  // the seeded copy it sits on. A container's ground is a one-way copy where a later STRIKE never
+  // lands, so a pool that resolved from the ground beneath it would read a ceiling the operator has
+  // already retracted, at both levels at once. Passed down unchanged at every depth. Absent on a
+  // primary, which is its own root.
+  /** @internal — T34 seam (container.ts) */
+  envelopeGround: ((subject?: string) => QuarantineEnvelope) | undefined = undefined;
+  // This container's display handle in an envelope report (its entity, or `anonymous#N`). Present on
+  // every separate container so a nested pool's row is attributable even under a non-enveloped one.
+  /** @internal — T34 seam (container.ts, envelope.ts) */
+  poolHandle: string | undefined = undefined;
   // The resolver memo (SPEC §22.5): (resolver-content-address, bucket-delta-set) → value. Keyed on the
   // surviving bucket, so it invalidates by construction when the ground moves — an erased fact drops
   // from the bucket and its old value can never be served again. A pure cache; safe to clear anytime.
@@ -449,6 +479,7 @@ export class Gateway {
         this.severEntity(name, entity, field, targets, actorSeed),
       watch: (name, entity) => this.watchEntity(name, entity, door),
       claim: (pointers, actorSeed) => this.claimEntity(pointers, actorSeed),
+      list: (name, opts) => this.list(name, opts),
     };
   }
 
@@ -755,11 +786,48 @@ export class Gateway {
   /** @internal — T19 seam (container.ts) */
   readonly attachedContainers = new Map<string, Gateway>();
 
+  // How many ANONYMOUS pools this store has ever opened. An anonymous pool has no container entity
+  // to name, and a nameless row in an envelope report would be exactly the unattributable failure
+  // §24.5's report exists to prevent — so each gets a stable synthetic handle (`anonymous#1`, …).
+  // Grow-only on purpose: reusing a handle after a drop would make two different pools' spending
+  // read as one pool's.
+  /** @internal — T34 seam (container.ts) */
+  anonymousPoolsOpened = 0;
+
+  // THIS gateway is a quarantine pool's own gateway (SPEC §24.7) — set by the attach that opened it,
+  // and held for the pool's whole life. The renderer door reads it to wrap a served route in the
+  // SEQUESTERED FRAME, so a probationary app is visibly on probation. Only an UNTRUSTED container
+  // sets it: a curated container holds the operator's own law, and framing that as probation would be
+  // the same lie pointed the other way.
+  /** @internal — T35 seam (container.ts, renderers.ts) */
+  probation: Probation | undefined = undefined;
+
+  // The store THIS gateway was attached FROM, for a separate container's own gateway (SPEC §27).
+  // A pool holds a SEEDED COPY of the host's law, frozen until someone re-pulses the edge — and
+  // nothing re-pulses it on its own. So any question whose stale answer would make a REVOCATION
+  // never arrive must be asked of the host, live. One is asked through it today: does a renderer's
+  // pen still hold write standing (§23.3 × §24.7)? It is not a back-channel for reading the host's
+  // ground, which is the thing the one-way glass exists to prevent. Cleared when the container
+  // detaches — a detached pool is nobody's replica.
+  //
+  // THE CLASS IS NOT CLOSED, and nothing here should read as if it were: a pool's copy of the
+  // striker set, of the registrations, and of the public declarations is stale in exactly the same
+  // way, and those are READS. They are older than this field and are not fixed here.
+  /** @internal — T35 seam (container.ts, renderers.ts) */
+  attachedTo: Gateway | undefined = undefined;
+
   // The live per-connection inbox handles (SPEC §39), keyed by inbox name. A binding is DURABLE: a
   // second bindConnection of the same (container, connection key) resumes the same handle rather than
   // spawning a new pool. Cleared only by a drop().
   /** @internal — T138 seam (container.ts) */
   readonly connectionInboxes = new Map<string, Container>();
+
+  // The §24.5 envelope rows for every enveloped pool attached here: which pool, its resolved
+  // ceilings, and what it has spent. The refusal a caller meets stays leak-free; this is the
+  // operator-facing half of "exhaustion is loud". Body in envelope.ts.
+  envelopeReports(): EnvelopeReport[] {
+    return envelopeReportsImpl(this);
+  }
 
   // Open a QUARANTINE POOL over this store (SPEC §24): the body lives in quarantine-pool.ts,
   // which re-expresses it as the untrusted-and-separate PRESET of the container primitive below.
@@ -786,6 +854,15 @@ export class Gateway {
   // QUERY time — this never rewrites the default door reads.
   containerScope(opts: { containers?: readonly string[] } = {}): Delta[] {
     return containerScopeImpl(this, opts);
+  }
+
+  // The listing door (ticket T110): one page of the distinct entities holding evidence a lens's
+  // hyperschema reads, each resolved through that lens. The maintained candidate set is a shared
+  // CONTAINER backing the hyperschema (declared here when absent, refreshed when a sibling lens
+  // widens the context union), read through the container scope — governed, negation-closed,
+  // erasure-reachable. AUTHED surface only; the public projection never builds a listing field.
+  async list(name: string, opts: ListOptions = {}): Promise<ResolvedNode[]> {
+    return listImpl(this, name, opts);
   }
 
   // Bind a connection to a container (SPEC §39): spawn a per-connection inbox pool and provision its

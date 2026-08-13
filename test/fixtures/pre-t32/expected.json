@@ -10,6 +10,8 @@
     "1e20d7390c2de806bc74ac39f0519b2399cbe3c828cbcba808c40f33577cf50488ca"
   ],
   "view": {
-    "errors": ["Cannot query field \"Plant\" on type \"Query\". Did you mean \"plant\"?"]
+    "errors": [
+      "Cannot query field \"Plant\" on type \"Query\". Did you mean \"plant\" or \"plants\"?"
+    ]
   }
 }

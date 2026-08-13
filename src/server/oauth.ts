@@ -567,6 +567,44 @@ function pkceChallengeDefect(challenge: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Is this authorize request one the token door could ever finish? Checked at the consent GET and
+ * re-checked on the approval POST, so a doomed flow refuses HERE — on the page, with the parameter
+ * named — instead of minting a code whose redemption fails late wearing `invalid_grant`.
+ *
+ * Each parameter is judged only when PRESENT, and absence stays a working spelling: neither
+ * parameter survives to the token door. The mint copies `code_challenge` alone, `OAuthCode` has no
+ * method field, and the redeemer reads only `grant_type`, `code`, `client_id`, `redirect_uri` and
+ * `code_verifier`. So a declared method is INERT here — only the challenge value decides, and the
+ * redeemer always verifies it as S256.
+ *
+ * That inertness is what this gate ends, and it ends two working shapes:
+ *
+ * - A client that declares `code_challenge_method=plain` while computing an S256 challenge
+ *   redeems successfully today. It now refuses at the door. RFC 7636 §4.3 requires the server to
+ *   honour the DECLARED method, and this store implements S256 only, so honouring `plain` means
+ *   saying no — a store that silently verified S256 against a request for `plain` would be
+ *   claiming a transform it never ran.
+ * - A client that sends `response_type=token` and then reads `?code=` off the redirect also
+ *   redeems today. The register door has always advertised `response_types: ["code"]`
+ *   unconditionally, so that client was reading a grant it never asked for.
+ *
+ * Both are misconfigurations that happened to work. The refusal names the parameter, states the
+ * supported value, and never reflects the caller's own text.
+ */
+export function authorizeRequestDefect(
+  responseType: string,
+  codeChallengeMethod: string,
+): string | undefined {
+  if (responseType !== "" && responseType !== "code") {
+    return 'This store issues authorization codes and nothing else: response_type, when sent, must be "code".';
+  }
+  if (codeChallengeMethod !== "" && codeChallengeMethod !== "S256") {
+    return 'This store verifies PKCE one way only: code_challenge_method, when sent, must be "S256".';
+  }
+  return undefined;
+}
+
 /** RFC 7636 S256: does `verifier` hash to `challenge`? Constant-time on the digest comparison. */
 function pkceVerifies(verifier: string, challenge: string): boolean {
   if (!PKCE_SHAPE.test(verifier) || challenge === "") return false;
@@ -682,6 +720,14 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
       refuse(res, 400, "The state value is too long.");
       return;
     }
+    const requestDefect = authorizeRequestDefect(
+      params.get("response_type") ?? "",
+      params.get("code_challenge_method") ?? "",
+    );
+    if (requestDefect !== undefined) {
+      refuse(res, 400, requestDefect);
+      return;
+    }
     const challengeDefect = pkceChallengeDefect(codeChallenge);
     if (challengeDefect !== undefined) {
       refuse(res, 400, challengeDefect);
@@ -744,6 +790,16 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
     const codeChallenge = fields.get("code_challenge") ?? "";
     if (state.length > MAX_STATE) {
       refuse(res, 400, "The state value is too long.");
+      return;
+    }
+    // The same gate the GET ran, on the POST's OWN fields — the consent form does not carry these,
+    // but a hand-built POST may, and a value the GET would refuse must not mint here either.
+    const requestDefect = authorizeRequestDefect(
+      fields.get("response_type") ?? "",
+      fields.get("code_challenge_method") ?? "",
+    );
+    if (requestDefect !== undefined) {
+      refuse(res, 400, requestDefect);
       return;
     }
     const challengeDefect = pkceChallengeDefect(codeChallenge);

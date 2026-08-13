@@ -1,0 +1,14 @@
+{
+  "body": "FOUND BY THE T148 PROSECUTION (PR #363, CONFIRMED by reading the code).\n\nT148 made the authorize door refuse a request that NAMES an unsupported `code_challenge_method`. It left one shape open, and the shape is the RFC-conformant one.\n\nTHE GAP. RFC 7636 section 4.3 says an omitted `code_challenge_method` defaults to `plain`. So a correct plain client sends no method at all. That request passes T148's validation by design, renders consent, mints a code, and then fails at the token door wearing `invalid_grant` — because the redeemer verifies every challenge as S256 and never learns the method. That late failure is the exact defect T148 exists to remove. T148 closed the loud half and left the conformant half.\n\nWHY T148 COULD NOT CLOSE IT. Absence must keep passing today. T135's `test/server/oauth-consent.test.ts` is frozen and sends neither `response_type` nor `code_challenge_method`. Making absence refuse turns that rail red. The CI rail backstop refuses the edit, and it is correct to refuse.\n\nWHAT THIS TICKET NEEDS FIRST — A DECISION (Myk). Pick one meaning for an omitted method.\n  (a) Absence means S256 in this store. Document the divergence from RFC 7636 section 4.3, keep minting, and state it in `/.well-known` and in the register door's advice. Cheapest. Least honest.\n  (b) Absence means `plain` per the RFC, so absence REFUSES at the authorize door exactly as a named `plain` does. Most correct. It requires evolving the frozen consent rail through an authorization pair: land the rail change, then land the behaviour, because the frozen set is read from the base tree.\n  (c) Absence is not permitted: refuse a request that omits the method. A stricter form of (b), same rail cost.\n\nUNTIL THEN. The gap is NAMED in the header of `test/server/oauth-authorize-validation.test.ts`. It is a late-failure gap, not a security gap. No wrong grant is issued. The redeemer still verifies S256 with a constant-time digest comparison, so a plain-declaring client cannot obtain a token by either path.\n\nWHO MERGES: Myk. This changes what the door promises about a parameter, and options (b) and (c) break a frozen rail on the auth path.",
+  "edges": [],
+  "id": "T167",
+  "notes": "",
+  "phase": "P0",
+  "rails": [],
+  "scope": [
+    "src/server/oauth.ts",
+    "test/server/oauth-consent.test.ts"
+  ],
+  "status": "todo",
+  "title": "An omitted code_challenge_method means `plain` to RFC 7636, and this store still mints for it"
+}

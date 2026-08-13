@@ -4,7 +4,8 @@
   "id": "T104",
   "phase": "P1",
   "rails": [
-    "test/server/front-door.test.ts"
+    "test/server/front-door.test.ts",
+    "test/server/front-door-greeting.test.ts"
   ],
   "scope": [
     "src/server/http.ts",

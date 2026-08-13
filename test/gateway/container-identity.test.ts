@@ -18,6 +18,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { PLANT } from "./fixtures.js";
 import { FERN, GARDENER_SEED, observed } from "../spike/garden.js";
+import { assertPreservesSuppression } from "./narrowing.js";
 
 const OP_SEED = "0e".repeat(32);
 const pick: Policy = { kind: "pick", order: { kind: "byTimestamp", dir: "desc" } };
@@ -232,6 +233,14 @@ describe("§27.2 freeze — a membership Term becomes a content-addressed module
     // read a withdrawn claim as live (hazard H1, T38).
     const version = gw.freeze(byIds([claim.id]));
     expect(version.members.map((d) => d.id).sort()).toEqual([claim.id, retraction.id].sort());
+
+    // Membership alone is the weaker rail (T52): route the same version through the shared H1
+    // narrowing rail, which asks what a consumer LOADING it reads — struck, as at the source.
+    // The freeze-specific leak and transitivity rails live in freeze-narrowing.test.ts.
+    const destination = await boot();
+    await destination.append([...version.members]);
+    assertPreservesSuppression({ what: "freeze", source: gw, destination, struckClaim: claim.id });
+    await destination.close();
 
     // And the address reflects it: freezing the same Term BEFORE the retraction existed is a
     // different version, because it is a different set. That is the address working, not a wart.

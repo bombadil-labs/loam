@@ -24,6 +24,13 @@ const OP_SEED = "0e".repeat(32);
 // envelope, so the door's bundle reads `n.view.height`.
 const OK = "export default (n) => `<p>height: ${n.height ?? n.view.height}</p>`;";
 const HANG = "export default () => { while (true) {} };";
+// The 1ms rails need a bundle that cannot finish inside their window and CAN finish inside a wide
+// one. HANG proves neither direction (any clock stops it); OK proves neither reliably — it finishes
+// in well under a millisecond, so a 1ms window is a coin flip on scheduling, measured red on a
+// windows runner and green 5/5 on linux. 200ms of busy-wait refuses at 1ms every time and renders
+// at 10s every time, which is exactly the pair of outcomes the mutant has to separate.
+const SLOW =
+  "export default () => { const end = Date.now() + 200; while (Date.now() < end); return `<p>slow</p>`; };";
 const NODE = { height: 42 };
 
 describe("§23.9 / T139: spawn and render are bounded by SEPARATE budgets", () => {
@@ -31,7 +38,7 @@ describe("§23.9 / T139: spawn and render are bounded by SEPARATE budgets", () =
     // 1ms of spawn against a 10s render budget. No thread starts in a millisecond, so this can only
     // refuse — and it can only refuse if the spawn clock is armed with the spawn number. Sharing one
     // budget (the pre-T139 code) arms 10s here and this renders 200.
-    const out = await renderInWorker(OK, NODE, 10_000, 1);
+    const out = await renderInWorker(OK, NODE, 10_000, { spawnTimeoutMs: 1 });
     expect(out.status).toBe(500);
     expect(out.body).toBe("the renderer could not start"); // the host failed to start it; it never ran
   });
@@ -41,7 +48,8 @@ describe("§23.9 / T139: spawn and render are bounded by SEPARATE budgets", () =
     // with `spawnTimeoutMs` (10s), which would render this 200. It does NOT go red on a full revert
     // to one shared budget — pre-T139 both clocks fired the same `timedOut` body, so 1ms refuses
     // here either way. Rail (a) is the revert-probe; this one guards the direction (a) cannot see.
-    const out = await renderInWorker(OK, NODE, 1, 10_000);
+    // SLOW, not OK: 200ms of work is the only thing that tells a 1ms window from a 10s one.
+    const out = await renderInWorker(SLOW, NODE, 1, { spawnTimeoutMs: 10_000 });
     expect(out.status).toBe(500);
     expect(out.body).toBe("the renderer timed out"); // it ran, and it overran — a different cause
   });
@@ -50,7 +58,9 @@ describe("§23.9 / T139: spawn and render are bounded by SEPARATE budgets", () =
     // Named a control because it holds under the pre-T139 code and under a build with the spawn
     // budget deleted outright. It observes that the split did not break the happy path; it
     // constrains nothing about the split itself.
-    const out = await renderInWorker(OK, NODE, RENDER_SPAWN_TIMEOUT_MS, RENDER_SPAWN_TIMEOUT_MS);
+    const out = await renderInWorker(OK, NODE, RENDER_SPAWN_TIMEOUT_MS, {
+      spawnTimeoutMs: RENDER_SPAWN_TIMEOUT_MS,
+    });
     expect(out.status).toBe(200);
     expect(out.contentType).toContain("text/html");
     expect(out.body).toBe("<p>height: 42</p>");
@@ -61,7 +71,7 @@ describe("§23.9 / T139: spawn and render are bounded by SEPARATE budgets", () =
     // spawn ceiling of 10s must not become the hang's allowance. A wedged bundle gets 200ms and no
     // more, so the call returns in spawn + 200ms — nowhere near the 10s ceiling.
     const t0 = Date.now();
-    const out = await renderInWorker(HANG, NODE, 200, RENDER_SPAWN_TIMEOUT_MS);
+    const out = await renderInWorker(HANG, NODE, 200, { spawnTimeoutMs: RENDER_SPAWN_TIMEOUT_MS });
     const elapsed = Date.now() - t0;
     expect(out.status).toBe(500);
     expect(out.body).toBe("the renderer timed out");
@@ -105,6 +115,12 @@ describe("§23.9 / T139: the split reaches the DOOR, and the spawn budget is the
     const gw = await boot(options);
     await gw.append([observed(FERN, "height", 42, 1000, OP_SEED)]);
     await gw.publishRenderer({ route: "ok", schema: "Plant", consumes: ["height"], bundle: OK });
+    await gw.publishRenderer({
+      route: "slow",
+      schema: "Plant",
+      consumes: ["height"],
+      bundle: SLOW,
+    });
     return gw;
   };
 
@@ -122,7 +138,7 @@ describe("§23.9 / T139: the split reaches the DOOR, and the spawn budget is the
     // The mirror at the door: 1ms of render under a 10s spawn ceiling still refuses, and refuses
     // with the RENDER cause. A door that fed the spawn budget to the render window renders 200.
     const gw = await staged({ renderTimeoutMs: 1, renderSpawnTimeoutMs: 10_000 });
-    const out = await gw.serveRoute("ok", FERN, "full");
+    const out = await gw.serveRoute("slow", FERN, "full");
     expect(out.status).toBe(500);
     expect(out.body).toBe("the renderer timed out");
     await gw.close();

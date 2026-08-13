@@ -13,7 +13,9 @@
 // A function cannot cross the thread boundary, so we pass the bundle SOURCE + the (already §23.7-enveloped,
 // so JSON/structured-clone-safe) node; the worker imports the bundle from a `data:` URL and calls
 // `default(node)`. v1 spawns a worker per render (~ms) — acceptable, and noted; a small warm pool is the
-// obvious follow-on. Every failure — timeout, throw, crash, non-string — folds into a CLEAN refusal that
+// obvious follow-on. §24.5 (envelope.ts) took the CONCURRENCY half of that follow-on: a quarantine's
+// renders run against a per-pool slot count, wall clock, and memory ceiling the operator declares as
+// data. Warming the threads themselves is still unbuilt. Every failure — timeout, throw, crash, non-string — folds into a CLEAN refusal that
 // leaks nothing of the bundle's internals (serveRoute's own discipline, now enforced across the boundary).
 
 import { Worker } from "node:worker_threads";
@@ -30,6 +32,23 @@ export const RENDER_TIMEOUT_MS = 500;
 export const RENDER_SPAWN_TIMEOUT_MS = 10_000;
 export const RENDER_MAX_OLD_MB = 128;
 export const RENDER_MAX_YOUNG_MB = 32;
+
+// What a caller may learn about a render's fate WITHOUT reading its body. §24.5's envelope needs to
+// tell an operator which limit a pool hit; comparing refusal strings would couple the accounting to
+// prose that is free to change, so the outcome is reported explicitly instead.
+export type RenderOutcome = "ok" | "timeout" | "fault" | "notHtml";
+
+// Per-call overrides of §23.9's ceilings. The memory bound is a PARAMETER rather than a constant
+// because §24.5 lets an operator declare a quarantine's own ceiling — a limit that never reached the
+// Worker's `resourceLimits` would print in a report and bound nothing.
+export interface RenderWorkerOptions {
+  // §23.9's SPAWN ceiling (T139), an option rather than a positional parameter because §24.5's
+  // options bag reached this signature first. Nothing below the operator sets it.
+  readonly spawnTimeoutMs?: number | undefined;
+  readonly maxOldMb?: number;
+  readonly maxYoungMb?: number;
+  readonly onOutcome?: (outcome: RenderOutcome) => void;
+}
 
 export interface RenderResult {
   status: number;
@@ -82,22 +101,35 @@ export function renderInWorker(
   bundle: string,
   node: unknown,
   timeoutMs: number | undefined = RENDER_TIMEOUT_MS,
-  spawnTimeoutMs: number | undefined = RENDER_SPAWN_TIMEOUT_MS,
+  opts: RenderWorkerOptions = {},
 ): Promise<RenderResult> {
   return new Promise((resolve) => {
-    const worker = new Worker(WORKER_SRC, {
-      eval: true,
-      resourceLimits: {
-        maxOldGenerationSizeMb: RENDER_MAX_OLD_MB,
-        maxYoungGenerationSizeMb: RENDER_MAX_YOUNG_MB,
-      },
-    });
+    // The thread may refuse to start at all (ERR_WORKER_INIT_FAILED, under fd or thread exhaustion) —
+    // exactly the state a resource envelope exists for. An uncaught constructor throw would REJECT
+    // this promise, which the header above promises never happens: the door would leak a Node error
+    // instead of a clean refusal, and §24.5's accounting would record nothing for a render that
+    // failed. So it folds like every other failure, and it counts.
+    let worker: Worker;
+    try {
+      worker = new Worker(WORKER_SRC, {
+        eval: true,
+        resourceLimits: {
+          maxOldGenerationSizeMb: opts.maxOldMb ?? RENDER_MAX_OLD_MB,
+          maxYoungGenerationSizeMb: opts.maxYoungMb ?? RENDER_MAX_YOUNG_MB,
+        },
+      });
+    } catch {
+      opts.onOutcome?.("fault");
+      resolve(faulted);
+      return;
+    }
     let settled = false;
-    const finish = (r: RenderResult): void => {
+    const finish = (r: RenderResult, outcome: RenderOutcome): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       void worker.terminate();
+      opts.onOutcome?.(outcome);
       resolve(r);
     };
     // TWO clocks, not one, AND TWO BUDGETS. Armed only at construction, the timer charged worker
@@ -110,23 +142,31 @@ export function renderInWorker(
     // `online` — the moment the bundle can actually run — re-arms a fresh RENDER bound at the
     // operator's number. Both windows stay hard; no path is unbounded.
     const budget = timeoutMs ?? RENDER_TIMEOUT_MS;
-    let timer = setTimeout(() => finish(noStart), spawnTimeoutMs ?? RENDER_SPAWN_TIMEOUT_MS);
+    // The spawn window folds as `fault`, not `timeout`: the pool's `timedOut` counter means "the
+    // pool's clock fired on a render", and a thread that never started ran no render to overrun.
+    // Charging it there would send an operator to widen `renderTimeoutMs`, which cannot help. The
+    // COUNTER is coarser than the BODY, and deliberately: `noStart` still names the host as the
+    // cause where an operator reads a cause, while §24.5's report has no finer bucket than
+    // `faulted` (whose own contract already covers a worker that died rather than a bundle that
+    // threw). A fifth counter is a §24.5 report widening, and belongs to that section, not here.
+    const spawnBudget = opts.spawnTimeoutMs ?? RENDER_SPAWN_TIMEOUT_MS;
+    let timer = setTimeout(() => finish(noStart, "fault"), spawnBudget);
     worker.once("online", () => {
       if (settled) return;
       clearTimeout(timer);
-      timer = setTimeout(() => finish(timedOut), budget);
+      timer = setTimeout(() => finish(timedOut, "timeout"), budget);
     });
     worker.on("message", (msg: { kind?: string; html?: string }) => {
       if (msg.kind === "ok" && typeof msg.html === "string") {
-        finish({ status: 200, contentType: HTML, body: msg.html });
+        finish({ status: 200, contentType: HTML, body: msg.html }, "ok");
       } else if (msg.kind === "notHtml") {
-        finish(notHtml);
+        finish(notHtml, "notHtml");
       } else {
-        finish(faulted);
+        finish(faulted, "fault");
       }
     });
-    worker.on("error", () => finish(faulted));
-    worker.on("exit", () => finish(faulted)); // exited before posting (e.g. OOM-reclaimed) → clean refusal
+    worker.on("error", () => finish(faulted, "fault"));
+    worker.on("exit", () => finish(faulted, "fault")); // exited before posting (e.g. OOM-reclaimed) → clean refusal
     worker.postMessage({ bundle, node });
   });
 }

@@ -64,8 +64,12 @@ const addressOf = (memberIds: readonly string[]): string =>
  * Freeze an already-evaluated membership into a module version (SPEC §27.2).
  *
  * Takes the members rather than the Term, so the door's one refusal voice for a non-dset Term stays
- * in `select` and is not restated here — `freeze` IS `select` plus an address, and it must never
- * widen what `select` accepts.
+ * in `select` and is not restated here: the Term this addresses must never be one `select` refuses.
+ *
+ * That is a statement about the DOOR, not about the members. The member set is deliberately WIDER
+ * than the Term's dset — `Gateway.freeze` hands in `withNegationClosure(select(term))`, so a struck
+ * claim always ships with what struck it (H1, §27.2). Read "freeze is select plus an address" as a
+ * claim about what freeze ACCEPTS, never about what it CARRIES.
  */
 export function freezeMembers(members: readonly Delta[]): ModuleVersion {
   const frozen = Object.freeze([...members]);

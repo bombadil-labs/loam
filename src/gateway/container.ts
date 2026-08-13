@@ -35,6 +35,12 @@ import { isRepairable } from "../store/quarantine.js";
 import { CTX_GRANTS, grantClaims, holdsGrant, revocationClaims } from "./accounts.js";
 import { STORE_ENTITY } from "./genesis.js";
 import { isTombstone, readTombstones } from "./erase.js";
+import {
+  clampedTo,
+  newPoolEnvelope,
+  resolveEnvelope,
+  type QuarantineEnvelope,
+} from "./envelope.js";
 import { withNegationClosure, withNegationClosureAcross } from "./ingest.js";
 import { lawfulNegated, lawfulSnapshot } from "./registration.js";
 import { readTrustPolicyAt, type TrustPolicy } from "./trust.js";
@@ -1010,6 +1016,16 @@ async function openSeparate(
       `${voice}: "${spec.entity}" is already attached here — drop() or detach() it first`,
     );
   }
+  // A SEPARATE container's store may not BE the store it is opened from. The whole posture is that
+  // its bytes are its own and can be discarded whole; handed the host's backend, a "sequestered"
+  // write lands in canonical ground while every surface says it did not, and a drop purges the host.
+  // Identity only — two handles onto one file are not decidable here — but the obvious mistake is.
+  if (spec.backend !== undefined && spec.backend === gw.backend) {
+    throw new Error(
+      `${voice}: a separate container may not take the store it is opened from as its own — its ` +
+        `bytes must be discardable without touching the host's`,
+    );
+  }
   const backend: StoreBackend = spec.backend ?? new MemoryBackend();
   // SETTLE ERASURE DEBT BEFORE THE CONTAINER OPENS (T72). A durable store being (re)opened may hold
   // bytes whose tombstones landed at the primary while it was detached — the seeding edge
@@ -1045,7 +1061,63 @@ async function openSeparate(
       );
     }
   }
-  const pool = await Gateway.open(backend, { seed: gw.options.seed });
+  // THE PEN WRITES INTO THE POOL (SPEC §23.3 × §24.7). A write-enabled renderer signs its form-submits
+  // as a per-renderer granted author whose SEED lives in config, and the pool was opened without that
+  // config — so a quarantined app's every write refused "this renderer's pen is not provisioned", and a
+  // probationary app could only ever paint a frozen preview. The pool already holds the operator's own
+  // seed, which is strictly stronger custody than any pen, so carrying the pens across adds no key the
+  // pool did not have. Authorization is NOT loosened either, and the door is where that is enforced:
+  // the pen's grant reaches the pool as data, but a seeded copy is frozen until someone re-pulses the
+  // edge, so `writeRouteImpl` asks the ROOT store's live word through `attachedTo` before it signs —
+  // the same call mounts.ts makes about §12 publicness, for the same reason (a revocation must
+  // arrive). The pens travel only into an UNTRUSTED pool: that is the container the frame exists for,
+  // and it leaves a curated container and a §39 inbox pool — which build authority in their OWN
+  // ground on purpose — exactly as they were.
+  const probationary = spec.trust === "untrusted";
+  const pool = await Gateway.open(backend, {
+    seed: gw.options.seed,
+    ...(probationary && gw.options.pens !== undefined ? { pens: gw.options.pens } : {}),
+  });
+  pool.attachedTo = gw;
+  // A probationary pool KNOWS it is one, for the renderer door's sequestered frame (SPEC §24.7).
+  if (probationary) {
+    pool.probation = spec.entity === undefined ? {} : { container: spec.entity };
+  }
+  // THE §24.5 RESOURCE ENVELOPE — the operator's second undelegatable power (the first is erasure
+  // reach, §24.8). A child may admit deltas its parent does not trust, and what keeps that safe to
+  // HOST is that the operator can still cap the bill.
+  //
+  // THE CEILING RIDES EVERY SEPARATE CONTAINER, enveloped or not, and the reason is a strike. A
+  // container's ground is a one-way seeded COPY, re-pulsed only on reseed — so a declaration that
+  // crossed the edge and was later STRUCK on the parent stays live in the copy (H1: the strike does
+  // not follow it). A pool opened INSIDE that container resolves against the copy. So the ceiling
+  // below is resolved from the OPENER's live reactor and composed downward: every descendant is
+  // bounded by what the operator's ground says right now, however stale the ground it sits on.
+  // Nothing below the operator can widen; it can only tighten.
+  pool.poolHandle = spec.entity ?? `anonymous#${(gw.anonymousPoolsOpened += 1)}`;
+  // The ground is the ROOT's, passed down unchanged: a container's own reactor is a seeded copy, and
+  // resolving a descendant's ceiling from it would read a declaration the operator struck after the
+  // seeding as still live — at the report AND at the gate, so the two would agree on the wrong
+  // answer and no single-sided assertion could see it.
+  const ground =
+    gw.envelopeGround ??
+    ((subject?: string): QuarantineEnvelope =>
+      resolveEnvelope(gw.reactor, gw.operatorAuthor, subject));
+  pool.envelopeGround = ground;
+  const ownEnvelope = (): QuarantineEnvelope => ground(spec.entity);
+  const outerCeiling = gw.envelopeCeiling;
+  const ceiling = outerCeiling === undefined ? ownEnvelope : clampedTo(ownEnvelope, outerCeiling);
+  pool.envelopeCeiling = ceiling;
+  // ENFORCEMENT attaches to an UNTRUSTED container, and to EVERYTHING BELOW ONE. A curated container
+  // opened directly on the primary keeps the store's ordinary door budgets — the argument for
+  // metering a child is that it admits what its parent does not trust. But a curated container opened
+  // INSIDE a pool is still inside the pool: its `trust` knob is read from the pool's seeded copy of
+  // the container table, where a strike on the parent never lands, so letting that knob decide
+  // metering would let a metered pool host an unmetered child at the operator's expense. Once you are
+  // below an untrusted container, you are metered.
+  if (spec.trust === "untrusted" || gw.envelope !== undefined) {
+    pool.envelope = newPoolEnvelope(pool.poolHandle, spec.entity, ceiling);
+  }
   if (spec.admit !== undefined && spec.membership !== undefined) {
     throw new Error(
       `${voice}: give a membership Term OR an admit predicate, not both — admit is the ` +
@@ -1092,6 +1164,9 @@ async function openSeparate(
   const unregister = (): void => {
     gw.quarantinePools.delete(pool);
     if (spec.entity !== undefined) gw.attachedContainers.delete(spec.entity);
+    // The back-pointer goes with the attachment. A detached pool is nobody's replica, and a stale
+    // host would be a live handle into a store this one no longer reaches.
+    pool.attachedTo = undefined;
   };
 
   if (spec.entity !== undefined) {

@@ -3,7 +3,9 @@
   "edges": [],
   "id": "T148",
   "phase": "P0",
-  "rails": [],
+  "rails": [
+    "test/server/oauth-authorize-validation.test.ts"
+  ],
   "scope": [
     "src/server/oauth.ts",
     "src/server/session.ts"
