@@ -602,9 +602,16 @@ export async function serveRouteImpl(
       return framed(
         await renderInWorker(binding.bundle, payload(), limits.renderTimeoutMs, {
           ...workerLimitsOf(limits),
-          // The pool declares its RENDER ceiling (§24.5); the SPAWN ceiling stays the operator's,
-          // because spawn measures the host and no quarantine may lengthen the host's leash.
-          spawnTimeoutMs: gw.options.renderSpawnTimeoutMs,
+          // The pool's spawn window is the POOL'S clock, not the host's ceiling — the one place
+          // §23.9's spawn budget deliberately does not reach. A slot is held across BOTH windows,
+          // so the host's 10s ceiling here would let a pool that declared `renderTimeoutMs: 120`
+          // occupy its single slot for 10120ms: a ceiling the operator never declared and cannot
+          // read in `envelopeReports()`. §24.5 promises the envelope is the pool's WHOLE bill, and
+          // a bound that big and that invisible would falsify it. Stated rather than omitted,
+          // because omitting the key falls back to RENDER_SPAWN_TIMEOUT_MS — the 10s, not the 120.
+          // The cost is honest and accepted: a host too slow to spawn inside the pool's own clock
+          // refuses that render. Untrusted code fails closed, and the operator holds the lever.
+          spawnTimeoutMs: limits.renderTimeoutMs,
           onOutcome: (outcome) => {
             if (outcome === "timeout") envelope.timedOut += 1;
             else if (outcome === "fault") envelope.faulted += 1;

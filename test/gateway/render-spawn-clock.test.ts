@@ -18,6 +18,8 @@ import { MemoryBackend } from "../../src/store/memory.js";
 import { RENDER_SPAWN_TIMEOUT_MS, renderInWorker } from "../../src/gateway/render-worker.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
 import { FERN, observed } from "../spike/garden.js";
+import { ENVELOPE_ANY, envelopeClaims } from "../../src/gateway/envelope.js";
+import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 
 const OP_SEED = "0e".repeat(32);
 // The function-level rails feed the node straight to the bundle; the door wraps it in a §23.7
@@ -67,9 +69,12 @@ describe("§23.9 / T139: spawn and render are bounded by SEPARATE budgets", () =
   });
 
   it("a generous SPAWN ceiling does not widen the wedge window for a hanging bundle (rail d)", async () => {
-    // The security half. §23.9's whole claim is that author-provided code cannot spin unbounded; a
-    // spawn ceiling of 10s must not become the hang's allowance. A wedged bundle gets 200ms and no
-    // more, so the call returns in spawn + 200ms — nowhere near the 10s ceiling.
+    // The wedge-window half, and it constrains ONE direction: a render window re-armed with the
+    // spawn budget. It is not a revert probe — under one shared budget this returns in ~200ms and
+    // passes — and its 25x margin sees no regression smaller than that. §23.9's unbounded-spin
+    // guarantee is railed in render-sandbox.test.ts; what this adds is that a
+    // generous spawn ceiling does not become the hang's allowance: a wedged bundle gets 200ms and
+    // no more, so the call returns in spawn + 200ms, nowhere near the 10s ceiling.
     const t0 = Date.now();
     const out = await renderInWorker(HANG, NODE, 200, { spawnTimeoutMs: RENDER_SPAWN_TIMEOUT_MS });
     const elapsed = Date.now() - t0;
@@ -86,8 +91,14 @@ describe("§23.9 / T139: the split reaches the DOOR, and the spawn budget is the
   // The object-level half. Every rail above calls `renderInWorker` directly, and this file's own
   // history says that is not enough: the first `renderTimeoutMs` fed ONE of the two render call
   // sites and the flake it existed to fix kept firing (render-sandbox.test.ts). A door-collapse
-  // mutant — either call site in renderers.ts handing `renderTimeoutMs` to BOTH parameters, i.e.
-  // the pre-T139 single budget restored at the seam — leaves the function-level rails green.
+  // mutant — a call site in renderers.ts handing `renderTimeoutMs` to BOTH parameters, i.e. the
+  // pre-T139 single budget restored at the seam — leaves the function-level rails green.
+  //
+  // renderers.ts calls `renderInWorker` at THREE sites, and each one needs its own rail: the token
+  // door, the public door, and the metered quarantine pool. One rail per site, because a site that
+  // stops forwarding the budget is invisible to the other two — which is this file's own recited
+  // history, one door over. Rails (e)/(f) take the token door, (g) the public door; (h), in the
+  // describe below, takes the pool — where the budget is the pool's own, not the host's.
   const boot = (options: {
     renderTimeoutMs?: number;
     renderSpawnTimeoutMs?: number;
@@ -134,6 +145,19 @@ describe("§23.9 / T139: the split reaches the DOOR, and the spawn budget is the
     await gw.close();
   });
 
+  it("the PUBLIC door carries the spawn budget too (rail g)", async () => {
+    // The second of three call sites, and the one where the budget matters most: on the anonymous
+    // door the spawn window is what really bounds how long one stranger's request may hold a
+    // `maxPublicRenders` slot. Deleting `spawnTimeoutMs` from that site leaves every other rail in
+    // this file green, so the site earns its own.
+    const gw = await staged({ renderTimeoutMs: 10_000, renderSpawnTimeoutMs: 1 });
+    await gw.declarePublic(["Plant"]);
+    const out = await gw.serveRoute("ok", FERN, "public");
+    expect(out.status).toBe(500);
+    expect(out.body).toBe("the renderer could not start");
+    await gw.close();
+  });
+
   it("a generous SPAWN budget does not lift the door's RENDER budget (rail f)", async () => {
     // The mirror at the door: 1ms of render under a 10s spawn ceiling still refuses, and refuses
     // with the RENDER cause. A door that fed the spawn budget to the render window renders 200.
@@ -141,6 +165,77 @@ describe("§23.9 / T139: the split reaches the DOOR, and the spawn budget is the
     const out = await gw.serveRoute("slow", FERN, "full");
     expect(out.status).toBe(500);
     expect(out.body).toBe("the renderer timed out");
+    await gw.close();
+  });
+});
+
+describe("§23.9 × §24.5 / T139: a metered pool's spawn window is its OWN clock", () => {
+  // The THIRD call site, and the one place §23.9's spawn ceiling deliberately does not reach. A
+  // pool holds its slot across BOTH windows, so the host's 10s ceiling here would let a pool that
+  // declared a 120ms render clock occupy its slot for 10120ms — invisible in `envelopeReports()`
+  // and never declared. §24.5 promises the envelope is the pool's whole bill. Nothing else in this
+  // file reaches this site, so deleting its budget leaves every other rail green.
+  const pooled = async (poolRenderMs: number): Promise<Gateway> => {
+    const gw = await Gateway.boot(
+      new MemoryBackend(),
+      assembleGenesis({
+        operatorSeed: OP_SEED,
+        registrations: [
+          {
+            hyperschema: PLANT,
+            schema: PLANT_POLICY,
+            roots: [FERN],
+            writable: [...PLANT_WRITABLE],
+          },
+        ],
+      }),
+      // A host ceiling 10000x the pool's clock. If the pool ever reads it, the rail below hangs
+      // past its own budget instead of refusing.
+      { renderTimeoutMs: 10_000, renderSpawnTimeoutMs: 10_000 },
+    );
+    await gw.append([observed(FERN, "height", 42, 1000, OP_SEED)]);
+    await gw.publishRenderer({ route: "ok", schema: "Plant", consumes: ["height"], bundle: OK });
+    await gw.publishRenderer({
+      route: "hang",
+      schema: "Plant",
+      consumes: ["height"],
+      bundle: HANG,
+    });
+    await gw.append([
+      signClaims(
+        envelopeClaims(
+          ENVELOPE_ANY,
+          { maxConcurrentRenders: 1, renderTimeoutMs: poolRenderMs },
+          authorForSeed(OP_SEED),
+          9001,
+        ),
+        OP_SEED,
+      ),
+    ]);
+    return gw;
+  };
+
+  it("a wedged pool render gives its slot back on the POOL's clock, not the host's (rail h)", async () => {
+    // The bill, measured. One slot, a 300ms declared clock, a bundle that never finishes. A pool
+    // reading the host's 10s spawn ceiling returns here at ~10.3s and reddens this rail.
+    const gw = await pooled(300);
+    const pool = await gw.openQuarantine();
+    const t0 = Date.now();
+    const out = await pool.gateway.serveRoute("hang", FERN, "full");
+    const elapsed = Date.now() - t0;
+    expect(out.status).toBe(500);
+    expect(elapsed).toBeLessThan(3000); // real spawn included; 10x under the host ceiling
+    expect(gw.envelopeReports()[0]!.inFlight).toBe(0); // the slot came back
+    await gw.close();
+  });
+
+  it("CONTROL: the same pool renders a healthy bundle on an honest clock", async () => {
+    // Without this, rail (h) passes on a build where every pool render is broken outright.
+    const gw = await pooled(10_000);
+    const pool = await gw.openQuarantine();
+    const out = await pool.gateway.serveRoute("ok", FERN, "full");
+    expect(out.status).toBe(200);
+    expect(gw.envelopeReports()[0]!.faulted).toBe(0);
     await gw.close();
   });
 });
