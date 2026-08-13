@@ -21,9 +21,10 @@
 //   • STRIKES. The negation posture is `drop`: every negation present binds, whoever signed it, so
 //     a peer's strike can retract a field from a stock view.
 //   • CLAIMS. `entityGatherJson()` is called with NO `authoredBy`, so the outer select admits every
-//     author's claims too — not only their strikes. Every prop here is `pick byTimestamp desc`, so
-//     a peer who signs `Note.title` at your entity with a later timestamp wins your view and keeps
-//     winning it.
+//     author's claims too — not only their strikes. Single-value props are `pick byTimestamp desc`,
+//     so a peer who signs `Note.title` at your entity with a later timestamp wins your view and
+//     keeps winning it; the list props (`tags`, `attending`, `follows`) are `all`, so a peer's
+//     entry joins the list and no later claim of yours displaces it.
 //
 // A trust mask answers only the first half. The second wants `authoredBy` in the BODY (the select
 // admits your operator alone) or `byAuthorRank` in the SCHEMA (a stranger cannot outrank you).
