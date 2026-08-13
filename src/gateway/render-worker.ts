@@ -23,6 +23,13 @@ import { Worker } from "node:worker_threads";
 // Tunable ceilings (exported so a host may tighten them). The timeout bounds a hanging bundle; the memory
 // limits bound one that tries to exhaust the host. Conservative defaults for a single v1 render.
 export const RENDER_TIMEOUT_MS = 500;
+// The SPAWN ceiling is a SEPARATE clock with a separate job. It bounds thread start, isolate init and
+// first schedule — host scheduling no bundle can reach, since a bundle cannot run before `online`. So it
+// must not share the render budget: a busy host makes spawn slow, and spawn charged against the render's
+// 500ms refuses a healthy render that never executed a line. It is sized to what it measures (a loaded
+// 16-core box spawns in ~0.8s) and stays HARD, so a thread that never starts folds to a clean refusal
+// rather than hanging.
+export const RENDER_SPAWN_TIMEOUT_MS = 10_000;
 export const RENDER_MAX_OLD_MB = 128;
 export const RENDER_MAX_YOUNG_MB = 32;
 
@@ -35,6 +42,9 @@ export type RenderOutcome = "ok" | "timeout" | "fault" | "notHtml";
 // because §24.5 lets an operator declare a quarantine's own ceiling — a limit that never reached the
 // Worker's `resourceLimits` would print in a report and bound nothing.
 export interface RenderWorkerOptions {
+  // §23.9's SPAWN ceiling (T139), an option rather than a positional parameter because §24.5's
+  // options bag reached this signature first. Nothing below the operator sets it.
+  readonly spawnTimeoutMs?: number | undefined;
   readonly maxOldMb?: number;
   readonly maxYoungMb?: number;
   readonly onOutcome?: (outcome: RenderOutcome) => void;
@@ -49,6 +59,14 @@ export interface RenderResult {
 const TEXT = "text/plain; charset=utf-8";
 const HTML = "text/html; charset=utf-8";
 const timedOut: RenderResult = { status: 500, contentType: TEXT, body: "the renderer timed out" };
+// A spawn overrun is the HOST failing to start a thread, not the bundle overrunning its budget. Reporting
+// it as "timed out" would claim the renderer ran and was too slow, which is false: it never executed a
+// line. The two refusals stay distinguishable so an operator reads the right cause.
+const noStart: RenderResult = {
+  status: 500,
+  contentType: TEXT,
+  body: "the renderer could not start",
+};
 const faulted: RenderResult = { status: 500, contentType: TEXT, body: "the renderer faulted" };
 const notHtml: RenderResult = {
   status: 500,
@@ -114,15 +132,25 @@ export function renderInWorker(
       opts.onOutcome?.(outcome);
       resolve(r);
     };
-    // TWO clocks, not one. Armed only at construction, the timer charged worker SPAWN — thread
-    // start, isolate init, first schedule — against the render's budget, and under host load spawn
-    // alone consumed most of it: legitimate renders timed out before executing a line, and the
-    // memory bound could never win its race with the timer (the T73 flake — the §23.9 rail was
-    // right and the clock was wrong). So construction arms a SPAWN bound, and `online` — the
-    // moment the bundle can actually run — re-arms a fresh RENDER bound. Both windows stay hard;
-    // no path is unbounded.
+    // TWO clocks, not one, AND TWO BUDGETS. Armed only at construction, the timer charged worker
+    // SPAWN — thread start, isolate init, first schedule — against the render's budget, and under
+    // host load spawn alone consumed most of it: legitimate renders timed out before executing a
+    // line, and the memory bound could never win its race with the timer (the T73 flake — the §23.9
+    // rail was right and the clock was wrong). Splitting the clocks was only half the repair: both
+    // windows still read the render's number, so a host slow enough to spawn past 500ms refused a
+    // healthy render anyway (T139). Spawn now carries its OWN budget, sized to host scheduling;
+    // `online` — the moment the bundle can actually run — re-arms a fresh RENDER bound at the
+    // operator's number. Both windows stay hard; no path is unbounded.
     const budget = timeoutMs ?? RENDER_TIMEOUT_MS;
-    let timer = setTimeout(() => finish(timedOut, "timeout"), budget);
+    // The spawn window folds as `fault`, not `timeout`: the pool's `timedOut` counter means "the
+    // pool's clock fired on a render", and a thread that never started ran no render to overrun.
+    // Charging it there would send an operator to widen `renderTimeoutMs`, which cannot help. The
+    // COUNTER is coarser than the BODY, and deliberately: `noStart` still names the host as the
+    // cause where an operator reads a cause, while §24.5's report has no finer bucket than
+    // `faulted` (whose own contract already covers a worker that died rather than a bundle that
+    // threw). A fifth counter is a §24.5 report widening, and belongs to that section, not here.
+    const spawnBudget = opts.spawnTimeoutMs ?? RENDER_SPAWN_TIMEOUT_MS;
+    let timer = setTimeout(() => finish(noStart, "fault"), spawnBudget);
     worker.once("online", () => {
       if (settled) return;
       clearTimeout(timer);

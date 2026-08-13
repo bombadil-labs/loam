@@ -271,7 +271,10 @@ export interface EnvelopeReport {
   readonly inFlight: number;
   readonly refusedForSlots: number;
   readonly timedOut: number; // the pool's clock fired
-  readonly faulted: number; // the bundle threw, or the worker died (the memory ceiling shows here)
+  // Three causes share this bucket: the bundle threw, the worker died (the memory ceiling shows
+  // here), or the host never started the thread (§23.9's spawn ceiling). None of them is the
+  // pool's clock firing on a render, which is what `timedOut` alone must mean.
+  readonly faulted: number;
   readonly malformed: number; // the bundle returned something that is not HTML
 }
 

@@ -100,7 +100,7 @@ describe("§23.9: a bounded worker keeps a bad bundle from wedging the host", ()
     // that silently reaches nothing reads exactly like a fix that didn't work. One millisecond
     // against a trivial bundle can only time out if the knob genuinely governs the worker.
     const gw = await staged({ renderTimeoutMs: 1 });
-    const out = await gw.serveRoute("ok", FERN, "full");
+    const out = await gw.serveRoute("hang", FERN, "full");
     expect(out.status).toBe(500);
     expect(out.body).toBe("the renderer timed out");
     await gw.close();

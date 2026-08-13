@@ -602,6 +602,16 @@ export async function serveRouteImpl(
       return framed(
         await renderInWorker(binding.bundle, payload(), limits.renderTimeoutMs, {
           ...workerLimitsOf(limits),
+          // The pool's spawn window is the POOL'S clock, not the host's ceiling — the one place
+          // §23.9's spawn budget deliberately does not reach. A slot is held across BOTH windows,
+          // so the host's 10s ceiling here would let a pool that declared `renderTimeoutMs: 120`
+          // occupy its single slot for 10120ms: a ceiling the operator never declared and cannot
+          // read in `envelopeReports()`. §24.5 promises the envelope is the pool's WHOLE bill, and
+          // a bound that big and that invisible would falsify it. Stated rather than omitted,
+          // because omitting the key falls back to RENDER_SPAWN_TIMEOUT_MS — the 10s, not the 120.
+          // The cost is honest and accepted: a host too slow to spawn inside the pool's own clock
+          // refuses that render. Untrusted code fails closed, and the operator holds the lever.
+          spawnTimeoutMs: limits.renderTimeoutMs,
           onOutcome: (outcome) => {
             if (outcome === "timeout") envelope.timedOut += 1;
             else if (outcome === "fault") envelope.faulted += 1;
@@ -628,7 +638,11 @@ export async function serveRouteImpl(
     }
     gw.publicRendersInFlight += 1;
     try {
-      return framed(await renderInWorker(binding.bundle, payload(), gw.options.renderTimeoutMs));
+      return framed(
+        await renderInWorker(binding.bundle, payload(), gw.options.renderTimeoutMs, {
+          spawnTimeoutMs: gw.options.renderSpawnTimeoutMs,
+        }),
+      );
     } finally {
       gw.publicRendersInFlight -= 1;
     }
@@ -638,7 +652,11 @@ export async function serveRouteImpl(
   // renderer is a view consumer like gql/REST — hand it the §23.7 envelope (a bytes leaf becomes
   // { mime, ref, base64url? }, primitives pass through), which is also what makes the node JSON/clone-safe
   // to cross the thread boundary. renderInWorker never rejects; every fault folds to a clean refusal.
-  return framed(await renderInWorker(binding.bundle, payload(), gw.options.renderTimeoutMs));
+  return framed(
+    await renderInWorker(binding.bundle, payload(), gw.options.renderTimeoutMs, {
+      spawnTimeoutMs: gw.options.renderSpawnTimeoutMs,
+    }),
+  );
 }
 
 // Resolve ONE mediated read on the server-rendered host, mapping every failure onto the floor's own

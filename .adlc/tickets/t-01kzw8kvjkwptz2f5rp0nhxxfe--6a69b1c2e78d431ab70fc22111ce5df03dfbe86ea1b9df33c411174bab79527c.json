@@ -1,0 +1,14 @@
+{
+  "body": "Two findings a P5 identity lens raised on T139's diff. Neither blocked that merge. Both are real.\n\nONE: ONE NAME, TWO CLOCKS. `GatewayOptions.renderSpawnTimeoutMs` bounds the SERVER's worker_threads\nstart. `ArtifactCoordinates.renderSpawnTimeoutMs` bounds the BROWSER TAB's Worker start, and it is\nset from the hard constant ARTIFACT_SPAWN_TIMEOUT_MS. The two are not wired together and should not\nbe: the page's clock is genuinely the device's.\n\nThe defect is the shared identifier on an operator-facing surface. An operator sets\n`renderSpawnTimeoutMs: 2000` on the Gateway, packs an artifact, reads `coordinates.renderSpawnTimeoutMs`,\nand gets 10000. Nothing is broken. The name answers a question it was not asked, which is H6's shape.\nA distinct name -- `pageSpawnTimeoutMs` -- removes the ambiguity and costs nothing.\n\nTWO: THE ANONYMOUS FAN HOLDS ITS SLOTS LONGER. Splitting the clocks moved the public door's\nworst-case slot hold from renderTimeoutMs (500ms default) to renderSpawnTimeoutMs + renderTimeoutMs\n(10500ms default). With the default cap of 16, sustained host contention can pin the anonymous fan\nfor ten seconds at a time where it used to recycle in half a second.\n\nThis is the right SHAPE -- gateway.ts names the consequence and makes the number operator-settable,\nwhich is what a knob is for -- but the DEFAULT moved and no rail measures the new worst case. The\nquestion to answer is whether 10s of spawn ceiling belongs on the anonymous door at all, or whether\nthat door deserves a tighter one than the token door. Spawn measures the host either way; what\ndiffers is who pays for a slow host, and on the public door the payer is every other stranger.\n\nRAILS: (a) a rail that the artifact coordinate and the gateway option are separately settable and\nseparately reported, under whatever names the rename settles on; (b) a rail measuring the public\ndoor's worst-case slot hold against the numbers actually configured, so the default cannot move\nagain without a red bar.",
+  "edges": [],
+  "id": "T-01KZW8KVJKWPTZ2F5RP0NHXXFE",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "src/gateway/gateway.ts",
+    "src/gateway/artifact.ts",
+    "src/gateway/renderers.ts"
+  ],
+  "status": "todo",
+  "title": "renderSpawnTimeoutMs names two different clocks, and the public door's worst-case slot hold grew 20x"
+}

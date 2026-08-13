@@ -1,0 +1,13 @@
+{
+  "body": "T139 left this behind, deliberately and visibly.\n\nWHAT IS TRUE NOW. The test titled \"the render clock is the OPERATOR'S clock: a 1ms budget times out\neven the trivial renderer\" no longer serves the trivial renderer. It serves the `hang` route, under\nthe authorization merged in #405. That swap was forced: a trivial bundle finishes inside 1ms often\nenough that the assertion decided on scheduling, and the rail fired red on a windows runner after\npassing on linux.\n\nWHAT IS WRONG. The rail's COMMENT still argues from the trivial bundle -- \"One millisecond against a\ntrivial bundle can only time out if the knob genuinely governs the worker.\" A hang stops under any\nclock, so the assertion no longer carries that argument. The comment is frozen, so #405's one-line\npair could not reach it. This is the exact shape CLAUDE.md names: an honest-looking comment over a\nweaker test.\n\nNOTHING IS UNCOVERED. The property the comment claims is railed deterministically in\ntest/gateway/render-spawn-forwarding.test.ts -- the token door hands the worker\n`gw.options.renderTimeoutMs`, and a site that stops doing so reddens. The defect here is a stale\nargument in a file a reader will trust, not a hole in coverage.\n\nTHE WORK. Two PRs, the usual discipline. (1) An authorization in scripts/rail-renames.json carrying\nthe pairs that rewrite the comment lines to state what the assertion now reaches, and to name the\nforwarding rail that carries the rest. (2) The edit. Each pair is one line of printable ASCII, 120\nchars or fewer, expression-only -- the guard refuses a pair that adds a line.\n\nCONSIDER WHILE THERE. The stronger repair is a bounded-duration fixture in this file: a bundle that\nbusy-waits ~200ms refuses at 1ms every time and renders at 500ms every time, which restores the\noriginal argument rather than retiring it. It needs a new `const`, which one-line pairs cannot add.\nIf that is wanted, the pair set must rewrite an existing line into the const, or the rail moves to a\nnew unfrozen file and this one is retired.\n\nRAILS: three consecutive green runs of the edited file, plus the rails-guard exemption proving base\nplus the declared pairs is byte-identical to the branch.",
+  "edges": [],
+  "id": "T-01KZW8KBMQRV0K4V2D7Z0PHYCX",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "test/gateway/render-sandbox.test.ts",
+    "scripts/rail-renames.json"
+  ],
+  "status": "todo",
+  "title": "render-sandbox's 1ms rail carries a comment that outlives its assertion"
+}
