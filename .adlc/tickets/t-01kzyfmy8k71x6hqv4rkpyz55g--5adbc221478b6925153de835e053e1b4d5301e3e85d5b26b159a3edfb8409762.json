@@ -1,0 +1,15 @@
+{
+  "body": "Found by the post-arc audit, 2026-08-13. Four merged PRs added user-facing capability and none\ngrew the spec: #385 (T85, loam register --stock), #361 (T104, the front-door greeting), #371\n(T110, the listing door), #367 (T102, pen provisioning -- partial, its ticket is still open). None\nhad a working spec in .adlc/specs/ either, so there is nothing to transcribe: the sections must be\nwritten FROM the landed code and the PR bodies, which is backwards from the process and is why this\nis a ticket rather than a follow-up commit.\n\nWHY IT MATTERS. spec/ is the record of what IS; a capability that lives only in its PR body is\ninvisible to the next design stage, and the capabilities book cannot be red for a section that was\nnever written -- test/site/capabilities.test.ts passes vacuously today. The promise record and the\nbook drift together.\n\nTHE WORK, per surface: write the spec/NN-slug.md section with its Provenance footer (the PR link +\nimplementation note), add the SPEC.md index row, add the capabilities chapter and its\n{says, spec, proof} claim. T102's section waits for its ticket to close or covers only the landed\nhalf, saying so. Numbering: pick unclaimed NN values against the reserved-number rule; do not\nrenumber anything.\n\nMERGE: Myk's, every time -- these sections state what the system promises, and writing them\npost-hoc is exactly when an overclaim slips in. The drafts should cite their rails the way a\nworking spec would, so the book claims are transcription.\n\nRAILS: test/site/capabilities.test.ts goes red if a section lands without its chapter -- that\nexisting rail is the enforcement once the sections exist.",
+  "edges": [],
+  "id": "T-01KZYFMY8K71X6HQV4RKPYZ55G",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "spec/",
+    "SPEC.md",
+    "demos/capabilities/chapters.mjs",
+    "test/site/capabilities.test.ts"
+  ],
+  "status": "todo",
+  "title": "Four landings owe the spec their sections — the stock shelf, the front door, the listing door, and pens"
+}
