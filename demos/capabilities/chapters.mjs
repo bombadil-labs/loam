@@ -842,13 +842,18 @@ export const CHAPTERS = [
             proof: "test/server/dynamic-mounts.test.ts",
             door: "serve",
           },
+          {
+            says: "A quarantine pool renders on a bill the operator writes — slots, a wall clock and a memory ceiling, declared as ordinary signed data and re-read live — and a saturated pool never starves the primary's own doors.",
+            spec: "spec/24-quarantine.md",
+            proof: "test/gateway/quarantine-envelope-isolation.test.ts",
+            door: "serve",
+          },
         ],
       },
       {
         kind: "notYet",
         items: [
-          "A resource envelope for a container — its own time, memory and outbound budget, so a child region cannot starve the doors that host it — is named as load-bearing rather than a nicety, and is not built (T34). Until it is, a quarantine bounds crashes and hangs but not appetite.",
-          "Confining a quarantined program from the filesystem and the network is the deeper half of the sandbox and is unbuilt (T35); today the code is bounded but trusted not to reach.",
+          "Confining a quarantined program from the filesystem and the network is the deeper half of the sandbox and is unbuilt (T172); today the code is bounded but trusted not to reach.",
           "A quarantine sees all the facts it was seeded with — narrowing what it may read is a future design, not a knob.",
           "Sharing only what a peer does not already hold, by chunking a frozen region into a verifiable tree, is designed and deferred (T76); a frozen address today is a flat hash over the whole member set.",
           "Depending on modules that depend on modules — version ranges, a solver, a resolved graph — is named and deferred. A single minimum floor is what exists.",
