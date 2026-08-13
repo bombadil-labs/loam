@@ -1,4 +1,12 @@
 {
+  "_adlcArchive": {
+    "archivedAt": "2026-08-13T21:12:59.121Z",
+    "reason": "completed",
+    "sourceRevision": null,
+    "sourceStoreHash": "6628e2a8863a53462152da471ad2e31689500da2edaca2ff889b35d33b446cc9",
+    "ticketHash": "6ad511e77e3237a242e8d023d262422560ab5a85d1a0df2862b406558dfdb974",
+    "version": 1
+  },
   "body": "FOUND BY MYK, 2026-07-26, first thing in the morning: he opened a served store's root in a browser and got `{\"errors\":[\"a bearer token is required, and this one opens nothing\"]}`. Two defects in one small surface, and the poetry rule (errors are first-class craft) owns both:\n\n(1) THE MESSAGE OVERPROMISES. No bearer token opens `/` — there is no route there; the mounts are the doors. A refusal that names a remedy which would not work is a false report in miniature.\n\n(2) THE MOST HUMAN-VISITED PATH IS THE LEAST HUMAN ANSWER. The first thing anyone does with a served store's URL is open its root in a browser. The uniform-refusal discipline (a mount that exists and one that does not must answer identically to a tokenless caller — dynamic-mounts rails pin this) applies to MOUNT paths and does not require the bare root to be rude: a greeting that names NO mount enumerates nothing.\n\nTHE SHAPE: `GET /` (and probably `GET /favicon.ico` → 204, since every browser asks) answers a small static page or text: a Loam store serves here; its doors are at `/:mount`; what an operator has declared public answers without a token; everything else wants one. Content-negotiate if cheap (text/html for browsers, JSON for curl), or just serve HTML — a human is the only caller with a reason to GET `/`.\n\nCARE: the greeting must be CONSTANT — independent of how many mounts exist, what they are named, and whether any public declaration exists — or it becomes an oracle. The rail is two-sided: the greeting is identical for a store with three mounts and a store with none (delta level: byte-identical body), AND every existing uniform-refusal rail in `test/server/dynamic-mounts.test.ts` stays untouched and green (those are frozen — do not edit them; new rails in a new file).\n\nSelf-merge bar: this changes what `/` answers, which no spec section promises today — it is a new tiny surface, so flag it in the PR and let Myk glance at the words themselves; the words are the deliverable.",
   "edges": [],
   "id": "T104",
