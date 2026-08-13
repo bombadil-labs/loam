@@ -159,9 +159,11 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "It is an ordinary registration through the ordinary door — the very object you could have",
       "typed. So it is ungoverned in both directions, as every hand-written example is: any",
       "negation binds, whoever signed it, AND the gather names no author, so any peer's claim binds",
-      "too. Props are latest-wins, so a federated peer's later timestamp takes a field and keeps",
-      "it. A trust mask alone answers only the strikes — a store that federates wants `authoredBy`",
-      "in its gather, or `byAuthorRank` in its schema. Outgrow the shelf and write one.",
+      "too. Single-value props are latest-wins — a peer's later timestamp takes the field and",
+      "keeps it — and the list props (tags, attending, follows) hold every author's entries, which",
+      "no later claim of yours displaces. A trust mask alone answers only the strikes — a store",
+      "that federates wants `authoredBy` in its gather, or `byAuthorRank` in its schema. Outgrow",
+      "the shelf and write one.",
     ],
   },
   pull: {
@@ -1879,8 +1881,11 @@ async function cmdPen(args: readonly string[], io: IO): Promise<number> {
   );
   io.out(
     outcome === "repaired"
-      ? `loam: repaired pen ${name} — the seed file was already at ${penSeedPath(home, name)}, ` +
-          `and the missing write grant for its author is now in ${path}`
+      ? [
+          `loam: repaired pen ${name} — the seed file was already at ${penSeedPath(home, name)}`,
+          ...struckLines,
+          `  the missing write grant for its author is now in ${path}`,
+        ].join("\n")
       : outcome === "re-keyed"
         ? [
             `loam: re-keyed pen ${name}`,
