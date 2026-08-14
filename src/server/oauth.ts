@@ -572,8 +572,9 @@ function pkceChallengeDefect(challenge: string): string | undefined {
  * re-checked on the approval POST, so a doomed flow refuses HERE — on the page, with the parameter
  * named — instead of minting a code whose redemption fails late wearing `invalid_grant`.
  *
- * Each parameter is judged only when PRESENT, and absence stays a working spelling: neither
- * parameter survives to the token door. The mint copies `code_challenge` alone, `OAuthCode` has no
+ * Each named parameter is judged when PRESENT, and an omitted method beside a present challenge
+ * is judged as what RFC 7636 §4.3 says it is — `plain`. Neither parameter survives to the token
+ * door. The mint copies `code_challenge` alone, `OAuthCode` has no
  * method field, and the redeemer reads only `grant_type`, `code`, `client_id`, `redirect_uri` and
  * `code_verifier`. So a declared method is INERT here — only the challenge value decides, and the
  * redeemer always verifies it as S256.
@@ -595,12 +596,21 @@ function pkceChallengeDefect(challenge: string): string | undefined {
 export function authorizeRequestDefect(
   responseType: string,
   codeChallengeMethod: string,
+  codeChallenge = "",
 ): string | undefined {
   if (responseType !== "" && responseType !== "code") {
     return 'This store issues authorization codes and nothing else: response_type, when sent, must be "code".';
   }
   if (codeChallengeMethod !== "" && codeChallengeMethod !== "S256") {
     return 'This store verifies PKCE one way only: code_challenge_method, when sent, must be "S256".';
+  }
+  // RFC 7636 §4.3: a code_challenge with no method IS a `plain` declaration — and this store
+  // honours a plain declaration the only honest way an S256-only verifier can, by refusing it at
+  // the door. Before T167 this shape passed, minted, and died late at the token door wearing
+  // `invalid_grant`. A request with no challenge at all is untouched here: PKCE is then not in
+  // play, and that (still-doomed) shape is the ticket's named remaining case.
+  if (codeChallenge !== "" && codeChallengeMethod === "") {
+    return 'RFC 7636 reads an omitted code_challenge_method as "plain", and this store verifies S256 only: send code_challenge_method="S256".';
   }
   return undefined;
 }
@@ -671,6 +681,7 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
     registeredUri: string,
     state: string,
     codeChallenge: string,
+    codeChallengeMethod: string,
     formToken: string,
   ): string =>
     page(
@@ -685,6 +696,7 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
 <input type="hidden" name="redirect_uri" value="${escapeHtml(registeredUri)}">
 <input type="hidden" name="state" value="${escapeHtml(state)}">
 <input type="hidden" name="code_challenge" value="${escapeHtml(codeChallenge)}">
+<input type="hidden" name="code_challenge_method" value="${escapeHtml(codeChallengeMethod)}">
 <button type="submit">approve</button>
 </form>`,
     );
@@ -723,6 +735,7 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
     const requestDefect = authorizeRequestDefect(
       params.get("response_type") ?? "",
       params.get("code_challenge_method") ?? "",
+      codeChallenge,
     );
     if (requestDefect !== undefined) {
       refuse(res, 400, requestDefect);
@@ -757,7 +770,14 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
     htmlOut(
       res,
       200,
-      consentPage(client, redirectUri, state, codeChallenge, session.formToken),
+      consentPage(
+        client,
+        redirectUri,
+        state,
+        codeChallenge,
+        params.get("code_challenge_method") ?? "",
+        session.formToken,
+      ),
       undefined,
       consentCsp,
     );
@@ -792,11 +812,14 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
       refuse(res, 400, "The state value is too long.");
       return;
     }
-    // The same gate the GET ran, on the POST's OWN fields — the consent form does not carry these,
-    // but a hand-built POST may, and a value the GET would refuse must not mint here either.
+    // The same gate the GET ran, on the POST's OWN fields: the form now carries the method beside
+    // the challenge (a form whose own re-check refuses it would be a door that mints only for
+    // hand-built POSTs), and a hand-built POST may send anything, so a value the GET would refuse
+    // must not mint here either.
     const requestDefect = authorizeRequestDefect(
       fields.get("response_type") ?? "",
       fields.get("code_challenge_method") ?? "",
+      codeChallenge,
     );
     if (requestDefect !== undefined) {
       refuse(res, 400, requestDefect);

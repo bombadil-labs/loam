@@ -386,6 +386,7 @@ async function connectorServer(): Promise<{
     client_id: CLIENT_ID,
     redirect_uri: REDIRECT,
     code_challenge: challenge,
+    code_challenge_method: "S256",
     state: "st-1",
   }).toString();
   const consent = await fetch(`${base}/oauth/authorize?${query}`, {
@@ -405,6 +406,7 @@ async function connectorServer(): Promise<{
       client_id: fieldOf(consentHtml, "client_id"),
       redirect_uri: fieldOf(consentHtml, "redirect_uri"),
       code_challenge: fieldOf(consentHtml, "code_challenge"),
+      code_challenge_method: "S256",
       state: fieldOf(consentHtml, "state"),
     }).toString(),
     redirect: "manual",

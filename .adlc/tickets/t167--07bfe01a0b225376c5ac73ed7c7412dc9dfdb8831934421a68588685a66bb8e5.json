@@ -4,11 +4,13 @@
   "id": "T167",
   "notes": "",
   "phase": "P0",
-  "rails": [],
+  "rails": [
+    "test/server/oauth-pkce-method.test.ts"
+  ],
   "scope": [
     "src/server/oauth.ts",
     "test/server/oauth-consent.test.ts"
   ],
-  "status": "todo",
+  "status": "doing",
   "title": "An omitted code_challenge_method means `plain` to RFC 7636, and this store still mints for it"
 }

@@ -171,6 +171,7 @@ describe("T143 — the doors, driven by a real browser", () => {
       redirect_uri: `${landingOrigin}/cb`,
       state: "st-42",
       code_challenge: CODE_CHALLENGE,
+      code_challenge_method: "S256",
     });
     const authorize = `${base}/oauth/authorize?${query.toString()}`;
     await tab.navigate(authorize);

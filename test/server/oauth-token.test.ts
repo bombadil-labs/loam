@@ -153,6 +153,7 @@ async function mintCode(
     client_id: over.clientId ?? CLIENT_ID,
     redirect_uri: over.redirectUri ?? REDIRECT,
     code_challenge: challenge,
+    code_challenge_method: "S256",
     state: "st-1",
   }).toString();
   const page = await fetch(`${base}/oauth/authorize?${query}`, {
@@ -173,6 +174,7 @@ async function mintCode(
       client_id: fieldOf(html, "client_id"),
       redirect_uri: fieldOf(html, "redirect_uri"),
       code_challenge: fieldOf(html, "code_challenge"),
+      code_challenge_method: "S256",
       state: fieldOf(html, "state"),
     }).toString(),
     redirect: "manual",

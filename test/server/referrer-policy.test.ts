@@ -149,6 +149,7 @@ describe("criterion 1 — form-hosting pages send the policy that keeps a real O
       redirect_uri: REDIRECT,
       state: "st-42",
       code_challenge: CODE_CHALLENGE,
+      code_challenge_method: "S256",
     });
     expect(consent.status).toBe(200);
     expect(policyOf(consent)).toBe("origin");
@@ -165,6 +166,7 @@ describe("criterion 1 — form-hosting pages send the policy that keeps a real O
       client_id: "connector-nope",
       redirect_uri: REDIRECT,
       code_challenge: CODE_CHALLENGE,
+      code_challenge_method: "S256",
     });
     expect(refused.status).toBe(400);
     expect(policyOf(refused)).toBe("origin");
@@ -203,6 +205,7 @@ describe("criterion 2 — the non-documents kept no-referrer (positive control: 
         redirect_uri: REDIRECT,
         state: "st-42",
         code_challenge: CODE_CHALLENGE,
+        code_challenge_method: "S256",
       })}`,
       { headers: { cookie: `${SESSION_COOKIE}=${session}` } },
     );
@@ -223,6 +226,7 @@ describe("criterion 2 — the non-documents kept no-referrer (positive control: 
         redirect_uri: field("redirect_uri"),
         state: field("state"),
         code_challenge: field("code_challenge"),
+        code_challenge_method: "S256",
       }).toString(),
     });
     expect(approved.status).toBe(302);
