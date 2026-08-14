@@ -16,9 +16,13 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { authorForSeed } from "@bombadil/rhizomatic";
+import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { run } from "../../src/cli/cli.js";
-import { penSeedPath, writePenSeed } from "../../src/cli/config.js";
+import { penSeedPath, readSeed, storePath, writePenSeed } from "../../src/cli/config.js";
+import { grantClaims } from "../../src/gateway/accounts.js";
+import { Gateway } from "../../src/gateway/gateway.js";
+import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
+import { SqliteBackend } from "../../src/store/sqlite.js";
 
 let home: string;
 const out: string[] = [];
@@ -82,5 +86,83 @@ describe("loam register --help — the shelf's federation warning", () => {
     expect(printed).toContain("Single-value props are latest-wins");
     expect(printed).toContain("tags, attending, follows");
     expect(printed).not.toMatch(/Props are latest-wins/);
+  });
+});
+
+// A short-lived read-only Gateway over the store the CLI just wrote — never held open across a
+// `run()` call (the store is single-writer).
+async function ground(): Promise<Gateway> {
+  return Gateway.boot(
+    new SqliteBackend(storePath(home)),
+    assembleGenesis({ operatorSeed: readSeed(home) }),
+  );
+}
+
+describe("loam pen create — the promises beyond the report text", () => {
+  it("the seed never enters the ground, on any arm — mint, hand-replace, repair", async () => {
+    // The report's own sentence ("it never enters the ground") gets the house-standard rail the
+    // operator keys already have: search every arrived delta for the seed hex. Custody is the
+    // FILE's job; the ground holds only the derived author.
+    await run(["init", "--home", home], io());
+    await run(["pen", "create", "guest-pen", "--home", home], io());
+    const minted = readFileSync(penSeedPath(home, "guest-pen"), "utf8").trim();
+    const replacement = "7a".repeat(32);
+    writePenSeed(home, "guest-pen", replacement);
+    await run(["pen", "create", "guest-pen", "--home", home], io()); // the repaired arm, strikes included
+    const gw = await ground();
+    try {
+      for (const seed of [minted, replacement]) {
+        const leaked = gw.reactor.arrivalLog().some((d) => JSON.stringify(d.claims).includes(seed));
+        expect(leaked, "a pen seed appeared in a delta's claims").toBe(false);
+      }
+    } finally {
+      await gw.close();
+    }
+  });
+
+  it("a struck key loses EVERY verb it held, not only write", async () => {
+    // The strike loop reads standing with the verb deliberately omitted — a key being replaced
+    // because it leaked must not keep signing anything at all. Every other rail stages a single
+    // write grant, where a verb-narrowed strike is indistinguishable; this one hands the old
+    // author an admin grant too, and demands both fall.
+    await run(["init", "--home", home], io());
+    await run(["pen", "create", "guest-pen", "--home", home], io());
+    const oldSeed = readFileSync(penSeedPath(home, "guest-pen"), "utf8").trim();
+    const oldAuthor = authorForSeed(oldSeed);
+    const seed = readSeed(home);
+    const gw0 = await ground();
+    try {
+      await gw0.append([
+        signClaims(
+          grantClaims(STORE_ENTITY, oldAuthor, "admin", authorForSeed(seed), Date.now()),
+          seed,
+        ),
+      ]);
+    } finally {
+      await gw0.close();
+    }
+
+    writePenSeed(home, "guest-pen", "7a".repeat(32));
+    out.length = 0;
+    const code = await run(["pen", "create", "guest-pen", "--home", home], io());
+    expect(code).toBe(0);
+    expect(out.join("\n")).toContain("2 grants it held no longer bind");
+
+    // Object level: no surviving grant of ANY verb names the old author.
+    const gw = await ground();
+    try {
+      const surviving = [...gw.reactor.snapshot()].filter((d) => {
+        if (gw.reactor.negationsOf(d.id).length > 0) return false;
+        return d.claims.pointers.some(
+          (pt) =>
+            pt.role === "subject" &&
+            pt.target.kind === "primitive" &&
+            pt.target.value === oldAuthor,
+        );
+      });
+      expect(surviving.map((d) => d.id)).toEqual([]);
+    } finally {
+      await gw.close();
+    }
   });
 });
