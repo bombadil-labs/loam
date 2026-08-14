@@ -113,7 +113,7 @@
         "test/server/oauth-revoke.test.ts",
         "test/server/admin-connections.test.ts"
       ],
-      "//": "T167 rail EVOLUTION, 24 pairs -- Myk decided in chat (2026-08-14): an omitted code_challenge_method beside a present code_challenge is a `plain` declaration per RFC 7636 s4.3, and the door refuses it as it refuses explicit plain. Every frozen fixture that used the RFC-plain spelling declares S256; POST field builders copy the method from the form; the validation suite's header bullets are recomposed to state the new truth (ASCII fragments only -- the base's em-dashes and section signs survive in place, which is why several pairs are sentence fragments rather than whole lines). The refusal's own rails are a NEW file, test/server/oauth-pkce-method.test.ts. REMOVE these pairs once the T167 PR merges: several from-strings are prefixes of their own to-strings and would re-fire on the new base (the spent-pair poison).",
+      "//": "T167 rail EVOLUTION, 25 pairs -- Myk decided in chat (2026-08-14): an omitted code_challenge_method beside a present code_challenge is a `plain` declaration per RFC 7636 s4.3, and the door refuses it as it refuses explicit plain. Every frozen fixture that used the RFC-plain spelling declares S256; POST field builders copy the method from the form; the validation suite's header bullets are recomposed to state the new truth (ASCII fragments only -- the base's em-dashes and section signs survive in place, which is why several pairs are sentence fragments rather than whole lines). PAIR ORDER IS LOAD-BEARING: the 6-space append fires as a substring inside the 8-space loops, and the undo pair right after it puts those back. The refusal's own rails are a NEW file, test/server/oauth-pkce-method.test.ts. REMOVE these pairs once the T167 PR merges: several from-strings are prefixes of their own to-strings and would re-fire on the new base (the spent-pair poison).",
       "authorized": "Myk, 2026-08-14 -- decided in chat, delegated: refuse the omitted PKCE method as plain (T167 option b)."
     },
     {
@@ -143,6 +143,13 @@
     {
       "from": "      code_challenge: challenge,",
       "to": "      code_challenge: challenge, code_challenge_method: \"S256\",",
+      "files": ["test/server/oauth-authorize-validation.test.ts"],
+      "authorized": "Myk, 2026-08-14 -- decided in chat, delegated: refuse the omitted PKCE method as plain (T167 option b)."
+    },
+    {
+      "//": "Ordered AFTER the append above, which as a substring also fires inside this file's two 8-space loop fixtures -- one of which already carries its own method line, so the append would leave a duplicate key. Both loops are refusal tests where the named-value rule fires first, so the bare spelling is the correct one; this pair puts it back.",
+      "from": "        code_challenge: challenge, code_challenge_method: \"S256\",",
+      "to": "        code_challenge: challenge,",
       "files": ["test/server/oauth-authorize-validation.test.ts"],
       "authorized": "Myk, 2026-08-14 -- decided in chat, delegated: refuse the omitted PKCE method as plain (T167 option b)."
     },
