@@ -38,6 +38,7 @@ import { isTombstone, readTombstones } from "./erase.js";
 import {
   clampedTo,
   newPoolEnvelope,
+  poolsBeneath,
   resolveEnvelope,
   type QuarantineEnvelope,
 } from "./envelope.js";
@@ -1218,18 +1219,18 @@ async function openSeparate(
           cause === undefined ? undefined : { cause },
         );
       };
-      try {
-        // The dead set is everything this container can NAME — and a read alone cannot name it all
-        // (the erasure lens's finding): a mirror's `deltasSince` is primary-only, and a RETRY
-        // after a partial purge reads EMPTY. The session reactor remembers what the read cannot,
-        // so the enumeration is their union; and the §25 quarantine pen — rows a read SET ASIDE
-        // as corrupt, still legible bytes on disk — is swept by its own door, since no id-keyed
-        // purge can reach a row whose id was never returned.
-        const ids = new Set((await pool.backend.deltasSince(new Set())).map((d) => d.id));
-        for (const d of pool.reactor.snapshot()) ids.add(d.id);
-        if (isRepairable(pool.backend)) {
-          for (const row of await pool.backend.quarantine()) {
-            await pool.backend.discardRow(row.key);
+      // One store's discard, proven at the bytes. The dead set is everything the pool can NAME —
+      // and a read alone cannot name it all (a mirror's `deltasSince` is primary-only, and a RETRY
+      // after a partial purge reads EMPTY): the session reactor remembers what the read cannot,
+      // so the enumeration is their union; and the §25 quarantine pen — rows a read SET ASIDE
+      // as corrupt, still legible bytes on disk — is swept by its own door, since no id-keyed
+      // purge can reach a row whose id was never returned.
+      const discardBytes = async (target: Gateway, who: string): Promise<void> => {
+        const ids = new Set((await target.backend.deltasSince(new Set())).map((d) => d.id));
+        for (const d of target.reactor.snapshot()) ids.add(d.id);
+        if (isRepairable(target.backend)) {
+          for (const row of await target.backend.quarantine()) {
+            await target.backend.discardRow(row.key);
             // A pen key is the row's id where the driver knows one (sqlite) — feed it to the
             // byte verdict below too; discardRow's boolean is evidence, never the verdict (H7).
             ids.add(row.key);
@@ -1237,19 +1238,19 @@ async function openSeparate(
         }
         if (ids.size > 0) {
           const batch = [...ids];
-          await pool.backend.purge(batch);
+          await target.backend.purge(batch);
           // The verdict, H9-closed: a probe that cannot answer has proven nothing, so a
           // rejecting store refuses the drop exactly like a retaining one.
           let survivors: Set<string>;
-          if (pool.backend.heldAmong) {
-            survivors = await pool.backend.heldAmong(batch);
+          if (target.backend.heldAmong) {
+            survivors = await target.backend.heldAmong(batch);
           } else {
             survivors = new Set<string>();
-            for (const id of batch) if (await pool.backend.holds(id)) survivors.add(id);
+            for (const id of batch) if (await target.backend.holds(id)) survivors.add(id);
           }
           if (survivors.size > 0) {
             refuse(
-              `this pool's store still holds ${survivors.size} of ${batch.length} delta(s) ` +
+              `${who}'s store still holds ${survivors.size} of ${batch.length} delta(s) ` +
                 `after the discard purge`,
             );
           }
@@ -1257,15 +1258,23 @@ async function openSeparate(
         // The pen's own byte verdict: quarantine() recomputes only when a read walks the origin,
         // so walk it again and ask — a discardRow that returned true while removing nothing
         // (or a storage-keyed row the id probe cannot see) must refuse here, not read as clean.
-        if (isRepairable(pool.backend)) {
-          await pool.backend.deltasSince(new Set());
-          const pen = await pool.backend.quarantine();
+        if (isRepairable(target.backend)) {
+          await target.backend.deltasSince(new Set());
+          const pen = await target.backend.quarantine();
           if (pen.length > 0) {
-            refuse(
-              `this pool's §25 pen still holds ${pen.length} set-aside row(s) after the sweep`,
-            );
+            refuse(`${who}'s §25 pen still holds ${pen.length} set-aside row(s) after the sweep`);
           }
         }
+      };
+      // The subtree, in the SAME walk the §24.5 envelope report runs (`poolsBeneath` — one
+      // traversal, two consumers, so what a report can bill a drop can always reach). Collected
+      // before anything is purged: a pool attached mid-drop is outside this order's jurisdiction.
+      const beneath = [...poolsBeneath(pool, `${pool.poolHandle ?? "?"}/`)];
+      try {
+        for (const { pool: nested, handle } of beneath) {
+          await discardBytes(nested, `the nested pool "${handle}"`);
+        }
+        await discardBytes(pool, "this pool");
         // What no read and no session ever named is outside drop's jurisdiction — a straggler
         // bearing an unlisted id is heal's domain (§11), stated rather than implied clean.
       } catch (err) {
@@ -1286,6 +1295,12 @@ async function openSeparate(
             signClaims(retractionOf(id, gw.operatorAuthor!, gw.nextTimestamp()), gw.options.seed!),
           ]);
         }
+      }
+      // The whole subtree closes with the drop, deepest first: a nested pool proven empty must
+      // not survive as a live handle on a discarded store.
+      for (const { pool: nested } of [...beneath].reverse()) {
+        nested.attachedTo = undefined;
+        await nested.close();
       }
       await pool.close();
     },

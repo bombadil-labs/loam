@@ -309,38 +309,46 @@ export const clampedTo =
     };
   };
 
-// The rows for every enveloped pool in this store's reach. Derived from `quarantinePools`, the
-// canonical runtime registry of container attachment, and RECURSIVE for the same reason erasure's
-// fan-out is: a pool may open a pool. A depth-1 report would hide a nested pool's whole bill while
-// the operator's erasure still reached it — the two registries disagreeing in the one direction that
-// costs money. A separate container that is not untrusted carries no envelope and is absent by
-// construction. `seen` guards a cycle the attach rules already forbid.
-export function envelopeReportsImpl(
+// THE ONE TRAVERSAL of the runtime container tree: `quarantinePools`, the canonical registry of
+// attachment, walked recursively because a pool may open a pool. Two consumers on purpose — the
+// §24.5 envelope report and drop()'s discard fan-out (container.ts) — so they cannot drift: a
+// second hand-rolled walk is a second registry, and two registries disagree in exactly the
+// direction that costs bytes — a pool the report bills but no discard reaches (T162). Every
+// separate container carries a handle, enveloped or not, so a pool nested under a CURATED
+// container is still attributable; an unnamed prefix would collide across two such containers and
+// read two pools as one. `seen` guards a cycle the attach rules already forbid.
+export function* poolsBeneath(
   gw: Gateway,
   prefix = "",
   seen = new Set<Gateway>(),
-): EnvelopeReport[] {
-  const rows: EnvelopeReport[] = [];
+): Generator<{ pool: Gateway; handle: string }> {
   for (const pool of gw.quarantinePools) {
     if (seen.has(pool)) continue;
     seen.add(pool);
+    const handle = pool.poolHandle ?? "?";
+    yield { pool, handle: prefix + handle };
+    yield* poolsBeneath(pool, `${prefix}${handle}/`, seen);
+  }
+}
+
+// The rows for every enveloped pool in this store's reach — one consumer of `poolsBeneath`. A
+// depth-1 report would hide a nested pool's whole bill while the operator's erasure still reached
+// it. A separate container that is not untrusted carries no envelope and is absent by construction.
+export function envelopeReportsImpl(gw: Gateway): EnvelopeReport[] {
+  const rows: EnvelopeReport[] = [];
+  for (const { pool, handle } of poolsBeneath(gw)) {
     const env = pool.envelope;
-    if (env !== undefined) {
-      rows.push({
-        pool: prefix + env.handle,
-        ...(env.container === undefined ? {} : { container: env.container }),
-        envelope: env.resolve(),
-        inFlight: env.inFlight,
-        refusedForSlots: env.refusedForSlots,
-        timedOut: env.timedOut,
-        faulted: env.faulted,
-        malformed: env.malformed,
-      });
-    }
-    // Every separate container carries a handle, enveloped or not, so a pool nested under a CURATED
-    // container is still attributable. An unnamed prefix would collide across two such containers and
-    // read two pools' spending as one.
-    rows.push(...envelopeReportsImpl(pool, `${prefix}${pool.poolHandle ?? "?"}/`, seen));
+    if (env === undefined) continue;
+    rows.push({
+      pool: handle,
+      ...(env.container === undefined ? {} : { container: env.container }),
+      envelope: env.resolve(),
+      inFlight: env.inFlight,
+      refusedForSlots: env.refusedForSlots,
+      timedOut: env.timedOut,
+      faulted: env.faulted,
+      malformed: env.malformed,
+    });
   }
   return rows;
 }
