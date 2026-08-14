@@ -12,7 +12,8 @@ CLI's answer — how a pen is provisioned on disk, how `loam serve` picks it up,
 
 One file per pen, `pen.<name>.seed`, in the home, beside `operator.seed` and the `user.<name>.seed`
 files — same 0600 mode, same law: the seed never enters the ground, and **the filesystem is the
-trust root**. The file's contents are a 64-hex seed and nothing else; its *name* is the
+trust root**. The file's contents are a 64-hex seed (lowercase — the one spelling every reader
+of a seed file shares) and nothing else; its *name* is the
 provisioning. `loam serve` reads every `pen.<name>.seed` at boot — the same moment users and
 credentials are read — and hands the map to `Gateway.boot` as `GatewayOptions.pens`, keyed by the
 `<name>` a renderer binding cites (`pen: "<name>"`). The boot summary names the provisioned pens, so

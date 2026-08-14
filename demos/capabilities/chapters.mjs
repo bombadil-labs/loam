@@ -576,7 +576,7 @@ export const CHAPTERS = [
             door: "buildGqlSchema",
           },
           {
-            says: "The bare root greets a browser with one constant page — blind to mounts, tokens, and public declarations, so a stranger reading it learns where the doors are, never which doors exist.",
+            says: "The bare root greets a browser with one constant page — blind to the mount table and to the token presented, valid, junk or absent — so a stranger reading it learns where the doors are, never which doors exist.",
             spec: "spec/44-front-door.md",
             proof: "test/server/front-door.test.ts",
             door: "serve",
@@ -1156,11 +1156,11 @@ export const CHAPTERS = [
           {
             says: "Provisioning a [[pen]] is one command and one file: `loam pen create` mints a seed at `pen.<name>.seed` (0600) and grants the pen write standing, the next serve reads every such file at boot and says which pens it holds — and the seed never prints and never enters the [[ground]].",
             spec: "spec/45-pens.md",
-            proof: "test/cli/pen.test.ts",
+            proof: "test/cli/pen-repaired-report.test.ts",
             door: "run",
           },
           {
-            says: "Re-keying a leaked [[pen]] retires the old key completely — its record and every grant it held are struck, and the run that struck a key always says so, on the repaired arm as on the re-keyed one.",
+            says: "Replacing a leaked [[pen]] key retires the old one completely — every grant it held falls, whatever the verb, and the run that struck a key always says so, on the repaired arm as on the re-keyed one.",
             spec: "spec/45-pens.md",
             proof: "test/cli/pen-repaired-report.test.ts",
             door: "run",

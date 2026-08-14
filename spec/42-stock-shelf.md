@@ -55,7 +55,8 @@ registration of its own. The shelf is a starting point, not a deployment.
 An entity outside the roots is materialized lazily on first read (§21.7), so `--stock note` serves
 `note:groceries` without having been told about it — and the ceiling is real: one gateway holds at
 most 1024 unregistered entities live, and the read past it throws rather than growing the reactor
-without bound. A store meant to serve more names its roots, by re-registering a file of its own.
+without bound (the anonymous door meets a smaller ceiling first — 256 public watches). A store
+meant to serve more names its roots, by re-registering a file of its own.
 
 ### 42.3 The shelf is frozen through, and cloned out
 
@@ -64,7 +65,9 @@ runtime — not merely `readonly`, which the CLI's `unknown`-typed registration 
 consumer, this repo's or an embedder's, can edit what a later `--stock` registers. The rail asserts
 the freeze at depth: the negation mask four hops down and the timestamp ordering three hops down
 both throw on write. `--stock` additionally hands out a `structuredClone`, so a downstream consumer
-that normalized its input in place would edit its own copy, never the shelf.
+that normalized its input in place would edit its own copy, never the shelf — the clone is belt
+over the freeze's braces, and the freeze rail is the one that bites (its own header says it cannot
+see the clone).
 
 ### 42.4 Refusals and the qualified success
 

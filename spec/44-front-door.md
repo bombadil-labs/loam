@@ -21,10 +21,12 @@ with credentials on disk and a store with none serve the same bytes under the sa
 rail first proves the two stores genuinely differ at `/login` so the parity means something.
 
 The constancy also settles the headers. The body being identical for every caller means a shared
-cache can hold it and cannot leak by holding it — so the greeting is the one page that ships
-`Cache-Control: public, max-age=300` where the JSON doors say nothing cacheable. It carries the
-same no-script CSP the session pages carry (`script-src 'none'`, `frame-ancestors 'none'`,
-`form-action 'self'`, `base-uri 'none'`) — the page has no script and no form today, and the header
+cache can hold it and cannot leak by holding it — so the greeting is the one door that DECLARES
+itself cacheable, `Cache-Control: public, max-age=300`; the JSON doors set no cache header at all,
+which leaves them to a cache's heuristics rather than to a promise. It carries the session pages'
+own CSP constant, all six directives (`default-src 'none'`, `script-src 'none'`,
+`style-src 'unsafe-inline'` — the page's one inline style block — `form-action 'self'`,
+`frame-ancestors 'none'`, `base-uri 'none'`) — the page has no script and no form today, and the header
 is what keeps that true of whatever it grows into — and `Referrer-Policy: same-origin`, the house
 policy for documents this store serves (§36's T143 lesson: `no-referrer` on HTML makes Chrome send
 `Origin: null` on any form such a page ever grows, and a weaker policy leaks the store's URL to
@@ -59,8 +61,8 @@ The one companion is `GET /favicon.ico` → `204`: every browser asks for the ic
 else, and 204 is the quiet true answer — nothing is here, and nothing is wrong.
 
 **Provenance.** Landed in [#273](https://github.com/bombadil-labs/loam/pull/273) (the constant
-greeting, the favicon 204, and the frozen shape rails — byte-identity across mounts, tokens, and
-public declarations in `test/server/front-door.test.ts`) and
+greeting, the favicon 204, and the frozen shape rails — byte-identity across mounts and tokens in
+`test/server/front-door.test.ts`, with a declared store compared against a bare one) and
 [#361](https://github.com/bombadil-labs/loam/pull/361) (T104: the words — what Loam is, the
 `/login` link, `Referrer-Policy: same-origin` — with the truth-level and accounts-parity rails in
 `test/server/front-door-greeting.test.ts`). Implementation: the `GREETING` constant and `greeted`

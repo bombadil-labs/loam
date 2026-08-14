@@ -90,9 +90,11 @@ Enumeration is exactly what the uniform-refusal discipline (§12) prevents elsew
 listing door can inventory a store. So on the read/public projection the listing field **is never
 built** — a validation impossibility, not a guarded field. The rails pin the honesty at the byte
 level: a tokenless query for `plants` gets the same error a field that never existed gets
-(identical modulo the field name), so no prober learns the authed surface can enumerate; a missing
-token and a foreign token meet byte-identical 401s, so bad credentials never downgrade to
-anonymous. Public enumeration waits for §12's per-lens `enumerable` flag, deliberately.
+(identical modulo the field name), so no prober learns the authed surface can enumerate; and a
+PRESENTED-but-wrong token is refused before mount resolution, byte-identically across its every
+probe, so bad credentials never downgrade to anonymous. (A request with no token at all is not a
+bad credential — it reaches exactly what public declarations grant, which never includes this
+field.) Public enumeration waits for §12's per-lens `enumerable` flag, deliberately.
 
 ### 43.5 Open edges, ticketed rather than hidden
 
@@ -115,7 +117,8 @@ anonymous. Public enumeration waits for §12's per-lens `enumerable` flag, delib
   both-orders refusal is to be revisited, not preserved, by whatever T165 decides — Myk's call.
 - **T90 adjacency:** `select` applies no dead-set filter, so a condemned-but-not-yet-purged delta
   lists until its purge lands; and a frozen backing container would make erase's pinning guard
-  refuse erasures of that evidence — a fail-closed surprise, named in the rails.
+  refuse erasures of that evidence — a fail-closed surprise this section names; no rail covers it
+  yet.
 
 **Provenance.** [#371](https://github.com/bombadil-labs/loam/pull/371) (T110; design settled by
 Myk 2026-07-26, authed-only ruled the same day). Implementation: `src/gateway/listing.ts` (the
