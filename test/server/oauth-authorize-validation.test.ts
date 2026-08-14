@@ -10,19 +10,19 @@
 // WHOLE flow through the token exchange — the door and the redeemer agree.
 //
 // What this file deliberately does NOT assert, and why:
-//   - ABSENT `response_type` / `code_challenge_method` stay accepted. The frozen suites
-//     (oauth-consent, oauth-token, oauth-revoke, admin-connections, referrer-policy, door-smoke)
-//     all omit both, and the redeemer reads neither — absence is a working spelling.
-//   - An ABSENT `code_challenge` still renders consent and still mints (the ticket's remaining
-//     vacuous case): the frozen oauth-consent suite asserts exactly that behaviour, so closing it
-//     needs a rail-evolution decision, not a workaround. See the T148 PR.
-//   - An ABSENT `code_challenge_method` is, per RFC 7636 §4.3, a declaration of `plain`. So an
-//     RFC-conformant plain client sends no method, passes this validation BY DESIGN, mints a code,
-//     and still fails late at the token door wearing `invalid_grant` — the exact late failure this
-//     ticket exists to remove. It is not closable here: T135's frozen `oauth-consent.test.ts`
-//     sends neither parameter, so making absence refuse would break a frozen rail. Closing it
-//     needs a decision about what an omitted method means to this store, plus an authorization
-//     pair to evolve that rail. Tracked as T167.
+//   - An ABSENT `response_type` stays accepted: the register door only ever advertises `code`,
+//     so omission is unambiguous. An absent method is judged by what rides beside it: with a
+//     challenge it refuses (the T167 bullet below); with no challenge at all — the whole-PKCE-absent spelling still passes this gate.
+//   - An ABSENT `code_challenge` still renders consent and still mints (T167's named remaining
+//     case): the frozen oauth-consent suite asserts exactly that behaviour, and such a code still
+//     dies at redemption as issued-without-PKCE. Closing it is a further decision, not this one.
+//   - CLOSED (T167). An ABSENT method beside a PRESENT challenge is, per RFC 7636 §4.3, a `plain` declaration, and the door
+//     now honours it the only honest way an S256-only verifier can: it refuses, naming the
+//     parameter, where it used to mint a code that died late as `invalid_grant` — the late failure this
+//     ticket existed to remove. The refusal's rails live in test/server/oauth-pkce-method.test.ts
+//     (new with T167, so unfrozen there); the fixtures HERE declare `S256` beside every challenge
+//     because this file's subject is the OTHER refusals, and a fixture must not trip the rule
+//     it is not testing.
 
 import { createHash, randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -147,6 +147,7 @@ describe("T148 — the authorize door refuses a doomed request at the door", () 
         redirect_uri: REDIRECT,
         state: "st-1",
         code_challenge: challenge,
+        code_challenge_method: "S256",
         response_type: responseType,
       });
       expect(res.status).toBe(400);
@@ -169,6 +170,7 @@ describe("T148 — the authorize door refuses a doomed request at the door", () 
         redirect_uri: REDIRECT,
         state: "st-1",
         code_challenge: challenge,
+        code_challenge_method: "S256",
         code_challenge_method: method,
       });
       expect(res.status).toBe(400);
@@ -206,6 +208,7 @@ describe("T148 — the authorize door refuses a doomed request at the door", () 
       redirect_uri: REDIRECT,
       state: "st-1",
       code_challenge: challenge,
+      code_challenge_method: "S256",
     });
     const html = await page.text();
     expect(html).toContain("Approve a connector?");
@@ -218,6 +221,7 @@ describe("T148 — the authorize door refuses a doomed request at the door", () 
         redirect_uri: REDIRECT,
         state: "st-1",
         code_challenge: challenge,
+        code_challenge_method: "S256",
         ...doomed,
       });
       expect(res.status).toBe(400);
@@ -238,6 +242,7 @@ describe("T148 — the authorize door refuses a doomed request at the door", () 
       redirect_uri: REDIRECT,
       state: "st-ok",
       code_challenge: challenge,
+      code_challenge_method: "S256",
     });
     const html = await page.text();
     const res = await postApprove(base, sessionId, {
@@ -246,8 +251,9 @@ describe("T148 — the authorize door refuses a doomed request at the door", () 
       redirect_uri: REDIRECT,
       state: "st-ok",
       code_challenge: challenge,
-      response_type: "code",
       code_challenge_method: "S256",
+      response_type: "code",
+      // the method rides the code_challenge line since T167 (one declaration, not two)
     });
     expect(res.status).toBe(302);
     expect(new URL(res.headers.get("location")!).searchParams.get("code")).not.toBe("");
@@ -265,8 +271,9 @@ describe("T148 — the authorize door refuses a doomed request at the door", () 
       redirect_uri: REDIRECT,
       state: "st-42",
       code_challenge: challenge,
-      response_type: "code",
       code_challenge_method: "S256",
+      response_type: "code",
+      // the method rides the code_challenge line since T167 (one declaration, not two)
     });
     expect(page.status).toBe(200);
     const html = await page.text();
@@ -279,6 +286,7 @@ describe("T148 — the authorize door refuses a doomed request at the door", () 
       redirect_uri: fieldOf(html, "redirect_uri"),
       state: fieldOf(html, "state"),
       code_challenge: fieldOf(html, "code_challenge"),
+      code_challenge_method: fieldOf(html, "code_challenge_method"),
     });
     expect(approve.status).toBe(302);
     const location = new URL(approve.headers.get("location")!);
