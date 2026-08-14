@@ -104,6 +104,157 @@
       "to": "    const out = await gw.serveRoute(\"hang\", FERN, \"full\");",
       "files": ["test/gateway/render-sandbox.test.ts"],
       "authorized": "PENDING MYK - a branch cannot self-authorize, so merging this entry IS the authorization."
+    },
+    {
+      "from": "    code_challenge: challenge,",
+      "to": "    code_challenge: challenge, code_challenge_method: \"S256\",",
+      "files": [
+        "test/server/oauth-token.test.ts",
+        "test/server/oauth-revoke.test.ts",
+        "test/server/admin-connections.test.ts"
+      ],
+      "//": "T167 rail EVOLUTION, 24 pairs -- Myk decided in chat (2026-08-14): an omitted code_challenge_method beside a present code_challenge is a `plain` declaration per RFC 7636 s4.3, and the door refuses it as it refuses explicit plain. Every frozen fixture that used the RFC-plain spelling declares S256; POST field builders copy the method from the form; the validation suite's header bullets are recomposed to state the new truth (ASCII fragments only -- the base's em-dashes and section signs survive in place, which is why several pairs are sentence fragments rather than whole lines). The refusal's own rails are a NEW file, test/server/oauth-pkce-method.test.ts. REMOVE these pairs once the T167 PR merges: several from-strings are prefixes of their own to-strings and would re-fire on the new base (the spent-pair poison).",
+      "authorized": "Myk, 2026-08-14 -- decided in chat, delegated: refuse the omitted PKCE method as plain (T167 option b)."
+    },
+    {
+      "from": "      code_challenge: fieldOf(html, \"code_challenge\"),",
+      "to": "      code_challenge: fieldOf(html, \"code_challenge\"), code_challenge_method: \"S256\",",
+      "files": ["test/server/oauth-token.test.ts", "test/server/oauth-revoke.test.ts"],
+      "authorized": "Myk, 2026-08-14 -- decided in chat, delegated: refuse the omitted PKCE method as plain (T167 option b)."
+    },
+    {
+      "from": "      code_challenge: fieldOf(consentHtml, \"code_challenge\"),",
+      "to": "      code_challenge: fieldOf(consentHtml, \"code_challenge\"), code_challenge_method: \"S256\",",
+      "files": ["test/server/admin-connections.test.ts"],
+      "authorized": "Myk, 2026-08-14 -- decided in chat, delegated: refuse the omitted PKCE method as plain (T167 option b)."
+    },
+    {
+      "from": "      code_challenge: CODE_CHALLENGE,",
+      "to": "      code_challenge: CODE_CHALLENGE, code_challenge_method: \"S256\",",
+      "files": ["test/server/referrer-policy.test.ts", "test/browser/door-smoke.test.ts"],
+      "authorized": "Myk, 2026-08-14 -- decided in chat, delegated: refuse the omitted PKCE method as plain (T167 option b)."
+    },
+    {
+      "from": "        code_challenge: field(\"code_challenge\"),",
+      "to": "        code_challenge: field(\"code_challenge\"), code_challenge_method: \"S256\",",
+      "files": ["test/server/referrer-policy.test.ts"],
+      "authorized": "Myk, 2026-08-14 -- decided in chat, delegated: refuse the omitted PKCE method as plain (T167 option b)."
+    },
+    {
+      "from": "      code_challenge: challenge,",
+      "to": "      code_challenge: challenge, code_challenge_method: \"S256\",",
+      "files": ["test/server/oauth-authorize-validation.test.ts"],
+      "authorized": "Myk, 2026-08-14 -- decided in chat, delegated: refuse the omitted PKCE method as plain (T167 option b)."
+    },
+    {
+      "from": "      code_challenge_method: \"S256\",",
+      "to": "      // the method rides the code_challenge line since T167 (one declaration, not two)",
+      "files": ["test/server/oauth-authorize-validation.test.ts"],
+      "//": "Absorbs the two tests that already declared: their standalone method line becomes a comment, or the append above would leave a duplicate key.",
+      "authorized": "Myk, 2026-08-14 -- decided in chat, delegated: refuse the omitted PKCE method as plain (T167 option b)."
+    },
+    {
+      "from": "      code_challenge: fieldOf(html, \"code_challenge\"),",
+      "to": "      code_challenge: fieldOf(html, \"code_challenge\"), code_challenge_method: fieldOf(html, \"code_challenge_method\"),",
+      "files": ["test/server/oauth-authorize-validation.test.ts"],
+      "//": "The whole-flow approval copies the form's own hidden fields, which now include the method -- fieldOf, not a literal, so the rail also proves the form carries it.",
+      "authorized": "Myk, 2026-08-14 -- decided in chat, delegated: refuse the omitted PKCE method as plain (T167 option b)."
+    },
+    {
+      "from": "//   - ABSENT `response_type` / `code_challenge_method` stay accepted. The frozen suites",
+      "to": "//   - An ABSENT `response_type` stays accepted: the register door only ever advertises `code`,",
+      "files": ["test/server/oauth-authorize-validation.test.ts"],
+      "authorized": "Myk, 2026-08-14 -- decided in chat, delegated: refuse the omitted PKCE method as plain (T167 option b)."
+    },
+    {
+      "from": "//     (oauth-consent, oauth-token, oauth-revoke, admin-connections, referrer-policy, door-smoke)",
+      "to": "//     so omission is unambiguous. An absent method is judged by what rides beside it: with a",
+      "files": ["test/server/oauth-authorize-validation.test.ts"],
+      "authorized": "Myk, 2026-08-14 -- decided in chat, delegated: refuse the omitted PKCE method as plain (T167 option b)."
+    },
+    {
+      "from": "all omit both, and the redeemer reads neither",
+      "to": "challenge it refuses (the T167 bullet below); with no challenge at all",
+      "files": ["test/server/oauth-authorize-validation.test.ts"],
+      "authorized": "Myk, 2026-08-14 -- decided in chat, delegated: refuse the omitted PKCE method as plain (T167 option b)."
+    },
+    {
+      "from": "absence is a working spelling.",
+      "to": "the whole-PKCE-absent spelling still passes this gate.",
+      "files": ["test/server/oauth-authorize-validation.test.ts"],
+      "authorized": "Myk, 2026-08-14 -- decided in chat, delegated: refuse the omitted PKCE method as plain (T167 option b)."
+    },
+    {
+      "from": "//   - An ABSENT `code_challenge` still renders consent and still mints (the ticket's remaining",
+      "to": "//   - An ABSENT `code_challenge` still renders consent and still mints (T167's named remaining",
+      "files": ["test/server/oauth-authorize-validation.test.ts"],
+      "authorized": "Myk, 2026-08-14 -- decided in chat, delegated: refuse the omitted PKCE method as plain (T167 option b)."
+    },
+    {
+      "from": "//     vacuous case): the frozen oauth-consent suite asserts exactly that behaviour, so closing it",
+      "to": "//     case): the frozen oauth-consent suite asserts exactly that behaviour, and such a code still",
+      "files": ["test/server/oauth-authorize-validation.test.ts"],
+      "authorized": "Myk, 2026-08-14 -- decided in chat, delegated: refuse the omitted PKCE method as plain (T167 option b)."
+    },
+    {
+      "from": "//     needs a rail-evolution decision, not a workaround. See the T148 PR.",
+      "to": "//     dies at redemption as issued-without-PKCE. Closing it is a further decision, not this one.",
+      "files": ["test/server/oauth-authorize-validation.test.ts"],
+      "authorized": "Myk, 2026-08-14 -- decided in chat, delegated: refuse the omitted PKCE method as plain (T167 option b)."
+    },
+    {
+      "from": "//   - An ABSENT `code_challenge_method` is, per RFC 7636 ",
+      "to": "//   - CLOSED (T167). An ABSENT method beside a PRESENT challenge is, per RFC 7636 ",
+      "files": ["test/server/oauth-authorize-validation.test.ts"],
+      "authorized": "Myk, 2026-08-14 -- decided in chat, delegated: refuse the omitted PKCE method as plain (T167 option b)."
+    },
+    {
+      "from": "4.3, a declaration of `plain`. So an",
+      "to": "4.3, a `plain` declaration, and the door",
+      "files": ["test/server/oauth-authorize-validation.test.ts"],
+      "authorized": "Myk, 2026-08-14 -- decided in chat, delegated: refuse the omitted PKCE method as plain (T167 option b)."
+    },
+    {
+      "from": "//     RFC-conformant plain client sends no method, passes this validation BY DESIGN, mints a code,",
+      "to": "//     now honours it the only honest way an S256-only verifier can: it refuses, naming the",
+      "files": ["test/server/oauth-authorize-validation.test.ts"],
+      "authorized": "Myk, 2026-08-14 -- decided in chat, delegated: refuse the omitted PKCE method as plain (T167 option b)."
+    },
+    {
+      "from": "//     and still fails late at the token door wearing `invalid_grant` ",
+      "to": "//     parameter, where it used to mint a code that died late as `invalid_grant` ",
+      "files": ["test/server/oauth-authorize-validation.test.ts"],
+      "authorized": "Myk, 2026-08-14 -- decided in chat, delegated: refuse the omitted PKCE method as plain (T167 option b)."
+    },
+    {
+      "from": "the exact late failure this",
+      "to": "the late failure this",
+      "files": ["test/server/oauth-authorize-validation.test.ts"],
+      "authorized": "Myk, 2026-08-14 -- decided in chat, delegated: refuse the omitted PKCE method as plain (T167 option b)."
+    },
+    {
+      "from": "//     ticket exists to remove. It is not closable here: T135's frozen `oauth-consent.test.ts`",
+      "to": "//     ticket existed to remove. The refusal's rails live in test/server/oauth-pkce-method.test.ts",
+      "files": ["test/server/oauth-authorize-validation.test.ts"],
+      "authorized": "Myk, 2026-08-14 -- decided in chat, delegated: refuse the omitted PKCE method as plain (T167 option b)."
+    },
+    {
+      "from": "//     sends neither parameter, so making absence refuse would break a frozen rail. Closing it",
+      "to": "//     (new with T167, so unfrozen there); the fixtures HERE declare `S256` beside every challenge",
+      "files": ["test/server/oauth-authorize-validation.test.ts"],
+      "authorized": "Myk, 2026-08-14 -- decided in chat, delegated: refuse the omitted PKCE method as plain (T167 option b)."
+    },
+    {
+      "from": "//     needs a decision about what an omitted method means to this store, plus an authorization",
+      "to": "//     because this file's subject is the OTHER refusals, and a fixture must not trip the rule",
+      "files": ["test/server/oauth-authorize-validation.test.ts"],
+      "authorized": "Myk, 2026-08-14 -- decided in chat, delegated: refuse the omitted PKCE method as plain (T167 option b)."
+    },
+    {
+      "from": "//     pair to evolve that rail. Tracked as T167.",
+      "to": "//     it is not testing.",
+      "files": ["test/server/oauth-authorize-validation.test.ts"],
+      "authorized": "Myk, 2026-08-14 -- decided in chat, delegated: refuse the omitted PKCE method as plain (T167 option b)."
     }
   ]
 }
