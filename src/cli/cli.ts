@@ -1702,6 +1702,20 @@ async function cmdUserRole(
         );
         return 1;
       }
+      if (seedRead.kind === "present" && !isSeedHex(seedRead.seed)) {
+        // The same test `loam serve` applies at boot, applied BEFORE authorForSeed can throw a
+        // parser error that quotes the file — a string that fails this test may still be a key,
+        // and a refusal is no place to print one. Malformed is not absent: the grant in the
+        // ground names a key this file no longer derives, so striking the role alone would
+        // report a partial success (H9); the whole command refuses instead.
+        io.err(
+          `user remove-role: ${userSeedPath(home, name)} exists but does not hold a 64-hex seed, ` +
+            `so this command cannot derive which key's grants to strike — nothing was struck, and ` +
+            `the file's contents are not printed here. If the key is lost, move the file aside ` +
+            `and run this again: the role is struck and the orphaned grant is named in the report.`,
+        );
+        return 1;
+      }
       if (seedRead.kind === "present") {
         const subject = authorForSeed(seedRead.seed);
         grantIds = survivingGrantClaimIds(gateway.reactor, operator, subject);
