@@ -147,7 +147,6 @@ describe("T148 — the authorize door refuses a doomed request at the door", () 
         redirect_uri: REDIRECT,
         state: "st-1",
         code_challenge: challenge,
-        code_challenge_method: "S256",
         response_type: responseType,
       });
       expect(res.status).toBe(400);
@@ -170,7 +169,6 @@ describe("T148 — the authorize door refuses a doomed request at the door", () 
         redirect_uri: REDIRECT,
         state: "st-1",
         code_challenge: challenge,
-        code_challenge_method: "S256",
         code_challenge_method: method,
       });
       expect(res.status).toBe(400);
@@ -221,7 +219,6 @@ describe("T148 — the authorize door refuses a doomed request at the door", () 
         redirect_uri: REDIRECT,
         state: "st-1",
         code_challenge: challenge,
-        code_challenge_method: "S256",
         ...doomed,
       });
       expect(res.status).toBe(400);

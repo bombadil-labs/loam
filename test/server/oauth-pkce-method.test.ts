@@ -110,7 +110,9 @@ describe("T167: the omitted method beside a present challenge", () => {
     // A request wrong in TWO ways names the named-value defect first — the fixtures of the
     // validation suite rely on that ordering.
     expect(authorizeRequestDefect("token", "", CHALLENGE)).toContain("response_type");
-    expect(authorizeRequestDefect("code", "plain", CHALLENGE)).toContain("code_challenge_method");
+    // "when sent" appears only in the named-value message, so this can tell WHICH rule fired —
+    // the omission message says "send code_challenge_method" instead.
+    expect(authorizeRequestDefect("code", "plain", CHALLENGE)).toContain("when sent");
   });
 });
 
