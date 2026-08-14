@@ -7,6 +7,15 @@
 // Every rail here is TWO-SIDED: the condemned store is proven empty at the bytes AND a named live
 // bystander — a sibling container, and the primary itself — is proven to keep its bytes and still
 // answer a read. A rail that only proves removal cannot see over-purging.
+//
+// NAMED GAPS (the both-levels rule — what this file deliberately does not assert):
+// - The nested §25 pen re-verify (discardBytes' second quarantine() walk in container.ts) has no
+//   red-capable rail here: none of these fixtures can stage a set-aside row inside a NESTED
+//   store. The rail that would close it: corrupt one row of a nested SqliteBackend on disk so a
+//   read pens it, drop the intermediate, and assert the drop either sweeps the pen or refuses.
+// - Two windows leave bytes outside erasure reach with no surviving name, stated in the code but
+//   not quarantined: a mirror-only straggler beneath a dropped store (deltasSince is
+//   primary-only), and a pool attached mid-drop after the subtree snapshot. T173 tracks both.
 
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -90,7 +99,8 @@ describe("T162: drop() on an intermediate container discards the whole subtree, 
 
   it("the discard is TRANSITIVE — a grandchild pool two levels beneath the drop is emptied too", async () => {
     const gw = await boot();
-    await gw.append([observed(FERN, "height", 30, 2000, OP_SEED)]);
+    const bystander = observed(FERN, "height", 30, 2000, OP_SEED);
+    await gw.append([bystander]);
     const mid = await gw.openContainer({
       trust: "curated",
       posture: "separate",
@@ -109,6 +119,9 @@ describe("T162: drop() on an intermediate container discards the whole subtree, 
     expect(await reopened.deltasSince(new Set())).toEqual([]);
     await reopened.close();
     expect(readFileSync(grandPath).includes(Buffer.from(NESTED_MARKER))).toBe(false);
+    // The other side: the primary is a named live bystander, at the bytes and at the reader.
+    expect(await gw.backend.holds(bystander.id)).toBe(true);
+    expect(gw.reactor.has(bystander.id)).toBe(true);
     await gw.close();
   });
 
@@ -141,6 +154,94 @@ describe("T162: drop() on an intermediate container discards the whole subtree, 
     expect(mid.gateway!.quarantinePools.has(nested.gateway)).toBe(true);
     expect(await inner.holds(secret.id)).toBe(true); // the retained byte is still where §11 can see it
     expect(await gw.backend.holds(note.id)).toBe(true); // and the primary bystander kept its own
+    // REACH, not just set-membership: the retained pool still appears in a fresh report walk,
+    // and a second drop still finds — and refuses over — the same retained byte.
+    const rows = gw.envelopeReports();
+    expect(rows.some((r) => r.pool === "anonymous#1/anonymous#1")).toBe(true);
+    await expect(mid.drop()).rejects.toThrow(/still holds/);
+    expect(await inner.holds(secret.id)).toBe(true);
+    await gw.close();
+  });
+
+  it("when the SECOND nested store refuses, the refusal names the first as already emptied — and a re-run completes", async () => {
+    const gw = await boot();
+    const note = observed(FERN, "note", PRIMARY_MARKER, 4000, OP_SEED);
+    await gw.append([note]);
+    const mid = await gw.openContainer({
+      trust: "curated",
+      posture: "separate",
+      backend: new MemoryBackend(),
+    });
+    const first = await mid.gateway!.openQuarantine({ backend: new MemoryBackend() });
+    const secret = observed(FERN, "note", NESTED_MARKER, 4001, OP_SEED);
+    const inner = new MemoryBackend();
+    let retain = true; // the fault, clearable — so the retry path can be proven, not assumed
+    const flaky: StoreBackend = {
+      append: (d) => inner.append(d),
+      deltasSince: (k) => inner.deltasSince(k),
+      purge: async (ids) =>
+        inner.purge(retain ? [...ids].filter((id) => id !== secret.id) : [...ids]),
+      holds: (id) => inner.holds(id),
+      // A no-op close: `inner` stays open as the test's own inspection handle, so the
+      // post-drop byte verdict below reads the store the drop actually swept.
+      close: () => Promise.resolve(),
+    };
+    const second = await mid.gateway!.openQuarantine({ backend: flaky });
+    await second.gateway.append([secret]);
+
+    const failure = await mid.drop().then(
+      () => undefined,
+      (err: unknown) => err as Error,
+    );
+    // The refusal cannot be false: the first pool's store was swept before the fault, and the
+    // message says so by handle — and it does NOT offer detach() as if the tree were intact.
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure!.message).toMatch(/^drop refused:/);
+    expect(failure!.message).toContain("already emptied");
+    expect(failure!.message).toContain('"anonymous#1/anonymous#1"');
+    expect(failure!.message).not.toContain("detach() to keep it deliberately");
+    // Everything is still attached — the swept prefix included.
+    expect(gw.quarantinePools.has(mid.gateway!)).toBe(true);
+    expect(mid.gateway!.quarantinePools.has(first.gateway)).toBe(true);
+    expect(mid.gateway!.quarantinePools.has(second.gateway)).toBe(true);
+    expect(await inner.holds(secret.id)).toBe(true);
+
+    // Clear the fault; the re-run completes — session reactors still name every purged id.
+    retain = false;
+    await mid.drop();
+    expect(await inner.holds(secret.id)).toBe(false);
+    expect(await gw.backend.holds(note.id)).toBe(true); // the bystander survived both runs
+    await gw.close();
+  });
+
+  it("a nested pool cannot take an ANCESTOR's or a SIBLING's store — refused by name, nothing purged", async () => {
+    const gw = await boot();
+    const note = observed(FERN, "note", PRIMARY_MARKER, 5000, OP_SEED);
+    await gw.append([note]);
+    const sibBackend = new MemoryBackend();
+    const sibling = await gw.openContainer({
+      trust: "curated",
+      posture: "separate",
+      backend: sibBackend,
+    });
+    expect(sibling.posture).toBe("separate");
+    const mid = await gw.openContainer({
+      trust: "curated",
+      posture: "separate",
+      backend: new MemoryBackend(),
+    });
+
+    // The ROOT's ground: a nested pool handed it would put the whole store inside mid's drop.
+    await expect(mid.gateway!.openQuarantine({ backend: gw.backend })).rejects.toThrow(
+      /already inside this tree/,
+    );
+    // A SIBLING pool's ground: same refusal — the tree is the unit, not the immediate opener.
+    await expect(mid.gateway!.openQuarantine({ backend: sibBackend })).rejects.toThrow(
+      /already inside this tree/,
+    );
+    // Nothing was purged by either refusal: root and sibling keep their bytes.
+    expect(await gw.backend.holds(note.id)).toBe(true);
+    expect(await sibBackend.holds(note.id)).toBe(true); // the seeded copy survives
     await gw.close();
   });
 });

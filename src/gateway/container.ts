@@ -1017,15 +1017,32 @@ async function openSeparate(
       `${voice}: "${spec.entity}" is already attached here — drop() or detach() it first`,
     );
   }
-  // A SEPARATE container's store may not BE the store it is opened from. The whole posture is that
-  // its bytes are its own and can be discarded whole; handed the host's backend, a "sequestered"
-  // write lands in canonical ground while every surface says it did not, and a drop purges the host.
-  // Identity only — two handles onto one file are not decidable here — but the obvious mistake is.
-  if (spec.backend !== undefined && spec.backend === gw.backend) {
-    throw new Error(
-      `${voice}: a separate container may not take the store it is opened from as its own — its ` +
-        `bytes must be discardable without touching the host's`,
-    );
+  // A SEPARATE container's store may not BE a store already in this tree. The whole posture is
+  // that its bytes are its own and can be discarded whole; handed the opener's backend, a
+  // "sequestered" write lands in canonical ground while every surface says it did not — and since
+  // drop()'s fan-out walks the WHOLE tree (poolsBeneath), a nested pool handed ANY ancestor's or
+  // sibling's backend would have that store purged wholesale by a drop above it: parent ground,
+  // bystanders, tombstones. Identity only — two handles onto one file are not decidable here —
+  // but the obvious mistake is, at every level.
+  if (spec.backend !== undefined) {
+    if (spec.backend === gw.backend) {
+      throw new Error(
+        `${voice}: a separate container may not take the store it is opened from as its own — its ` +
+          `bytes must be discardable without touching the host's`,
+      );
+    }
+    let root: Gateway = gw;
+    while (root.attachedTo !== undefined) root = root.attachedTo;
+    if (
+      spec.backend === root.backend ||
+      [...poolsBeneath(root)].some(({ pool: p }) => p.backend === spec.backend)
+    ) {
+      throw new Error(
+        `${voice}: a separate container may not take a store already inside this tree as its ` +
+          `own — a drop's fan-out walks the whole tree, and a shared store would let one ` +
+          `container's discard purge another's ground`,
+      );
+    }
   }
   const backend: StoreBackend = spec.backend ?? new MemoryBackend();
   // SETTLE ERASURE DEBT BEFORE THE CONTAINER OPENS (T72). A durable store being (re)opened may hold
@@ -1211,11 +1228,24 @@ async function openSeparate(
     // and on any survivor REFUSE while leaving it attached: a store that cannot prove
     // discard stays inside the erasure fan-out rather than slipping out of it.
     drop: async () => {
+      // Nested stores sweep sequentially, so a later refusal arrives over an already-swept
+      // prefix. The refusal must say so — a report claiming an intact tree over a partially
+      // emptied one is a report that can be false — and it must not offer detach()-to-keep
+      // when part of what would be "kept" is already gone.
+      const emptied: string[] = [];
       const refuse = (why: string, cause?: unknown): never => {
+        const forward =
+          emptied.length === 0
+            ? `The pool remains ATTACHED (still in erasure reach); resolve the store ` +
+              `fault and drop again, or detach() to keep it deliberately.`
+            : `The tree remains ATTACHED (still in erasure reach), but ${emptied.length} nested ` +
+              `store(s) were already emptied before the fault: ${emptied.join(", ")}. ` +
+              `detach() would keep only what the sweep left, so resolve the store fault and ` +
+              `drop again — the session reactors still name every purged id, and the re-run ` +
+              `completes the discard.`;
         throw new Error(
           `drop refused: ${why} — a dropped pool must not become bytes outside the erasure ` +
-            `fan-out. The pool remains ATTACHED (still in erasure reach); resolve the store ` +
-            `fault and drop again, or detach() to keep it deliberately.`,
+            `fan-out. ${forward}`,
           cause === undefined ? undefined : { cause },
         );
       };
@@ -1273,6 +1303,7 @@ async function openSeparate(
       try {
         for (const { pool: nested, handle } of beneath) {
           await discardBytes(nested, `the nested pool "${handle}"`);
+          emptied.push(`"${handle}"`);
         }
         await discardBytes(pool, "this pool");
         // What no read and no session ever named is outside drop's jurisdiction — a straggler
@@ -1287,15 +1318,6 @@ async function openSeparate(
         );
       }
       unregister();
-      // A NAMED container proven empty strikes its own declaration: leaving it standing would turn
-      // every future erase into a completeness refusal over a store that provably ceased.
-      if (spec.entity !== undefined) {
-        for (const id of survivingDeclarationIds(gw.reactor, gw.operatorAuthor!, spec.entity)) {
-          await gw.append([
-            signClaims(retractionOf(id, gw.operatorAuthor!, gw.nextTimestamp()), gw.options.seed!),
-          ]);
-        }
-      }
       // The whole subtree closes with the drop, deepest first: a nested pool proven empty must
       // not survive as a live handle on a discarded store.
       for (const { pool: nested } of [...beneath].reverse()) {
@@ -1303,6 +1325,32 @@ async function openSeparate(
         await nested.close();
       }
       await pool.close();
+      // A NAMED container proven empty strikes its own declaration: leaving it standing would turn
+      // every future erase into a completeness refusal over a store that provably ceased. Last of
+      // all, and wrapped — at this point the BYTES are settled, so a failure here is a LISTING
+      // fault, and the caller must be told exactly what state they hold rather than handed a raw
+      // append error that claims nothing.
+      if (spec.entity !== undefined) {
+        try {
+          for (const id of survivingDeclarationIds(gw.reactor, gw.operatorAuthor!, spec.entity)) {
+            await gw.append([
+              signClaims(
+                retractionOf(id, gw.operatorAuthor!, gw.nextTimestamp()),
+                gw.options.seed!,
+              ),
+            ]);
+          }
+        } catch (err) {
+          throw new Error(
+            `drop discarded "${spec.entity}" at the bytes — every store in its subtree is ` +
+              `proven empty and closed — but the declaration could not be struck, so the ` +
+              `LISTING still names it. When the primary recovers, openContainer({ name }) and ` +
+              `drop() again to settle the listing; the re-run is safe over the empty store. ` +
+              `${err instanceof Error ? err.message : String(err)}`,
+            { cause: err },
+          );
+        }
+      }
     },
     // Detach KEEPS — the deliberate act, distinct in name from the discard. No purge, no
     // verification: the caller is choosing to hold these bytes outside the fan-out, and
