@@ -193,7 +193,7 @@ export const TERMS = [
     word: "pen",
     gloss:
       "A separate, revocable identity a page writes under, so a form on a public route never signs with the operator's own key. Revoking it stops future writes and leaves past ones correctly attributed.",
-    where: { kind: "prose" },
+    where: { kind: "spec", section: "spec/45-pens.md" },
   },
   {
     word: "as-of",
@@ -511,7 +511,14 @@ export const CHAPTERS = [
     title: "One surface, many doors",
     thesis:
       "Publish a reading and you get a GraphQL API, a documented REST API, and a live subscription feed — generated from the same facts, and guaranteed to never disagree with each other.",
-    covers: ["spec/03-scope.md", "spec/05-gateway.md", "spec/17-surfaces.md"],
+    covers: [
+      "spec/03-scope.md",
+      "spec/05-gateway.md",
+      "spec/17-surfaces.md",
+      "spec/42-stock-shelf.md",
+      "spec/43-listing-door.md",
+      "spec/44-front-door.md",
+    ],
     body: [
       {
         kind: "prose",
@@ -543,6 +550,42 @@ export const CHAPTERS = [
             spec: "spec/03-scope.md",
             proof: "test/gateway/read.test.ts",
             door: "buildGqlSchema",
+          },
+          {
+            says: "A shipped shape is an ordinary [[registration]], never a shortcut past one: `--stock` hands the very JSON a person could have typed to the same validator and the same publish a file crosses, and one command later a served store takes a write and answers a read with it.",
+            spec: "spec/42-stock-shelf.md",
+            proof: "test/cli/stock.test.ts",
+            door: "run",
+          },
+          {
+            says: "A stock registration that persists but cannot bind — a rival body already answers for the name — says so instead of promising a surface, and a wrong stock name is refused with the whole shelf spelled out.",
+            spec: "spec/42-stock-shelf.md",
+            proof: "test/cli/stock.test.ts",
+            door: "run",
+          },
+          {
+            says: "An authed caller lists a kind's entities one bounded page at a time — the candidate set is a governed [[container]] the door itself maintains, so excluding that container empties the listing and a struck claim de-lists its entity at both levels.",
+            spec: "spec/43-listing-door.md",
+            proof: "test/gateway/listing.test.ts",
+            door: "Gateway",
+          },
+          {
+            says: "The tokenless public door never builds the listing field at all: a probe for it meets the same refusal as a field that never existed, so no stranger learns the store can enumerate.",
+            spec: "spec/43-listing-door.md",
+            proof: "test/server/listing-door.test.ts",
+            door: "buildGqlSchema",
+          },
+          {
+            says: "The bare root greets a browser with one constant page — blind to mounts, tokens, and public declarations, so a stranger reading it learns where the doors are, never which doors exist.",
+            spec: "spec/44-front-door.md",
+            proof: "test/server/front-door.test.ts",
+            door: "serve",
+          },
+          {
+            says: "The greeting promises only what the store honours: history is a default an erasure can take back, federation admits rather than merges, and a store with human accounts serves byte-identical words to one without.",
+            spec: "spec/44-front-door.md",
+            proof: "test/server/front-door-greeting.test.ts",
+            door: "serve",
           },
           {
             says: "Where the bytes live is a choice: the same store contract is honored in memory, in SQLite, in a browser's local storage, in an archive and in a mirror, and a store closed and reopened has lost nothing.",
@@ -1056,7 +1099,12 @@ export const CHAPTERS = [
     title: "Apps are deltas",
     thesis:
       "A page and a background function are records in the store like any other — push them and the store serves them, with no build step, no deploy, and no key handed to the code.",
-    covers: ["spec/06-functions-runner.md", "spec/23-renderers.md", "spec/34-the-board.md"],
+    covers: [
+      "spec/06-functions-runner.md",
+      "spec/23-renderers.md",
+      "spec/34-the-board.md",
+      "spec/45-pens.md",
+    ],
     body: [
       {
         kind: "prose",
@@ -1104,6 +1152,18 @@ export const CHAPTERS = [
             spec: "spec/23-renderers.md",
             proof: "test/gateway/render-sandbox.test.ts",
             door: "Gateway",
+          },
+          {
+            says: "Provisioning a [[pen]] is one command and one file: `loam pen create` mints a seed at `pen.<name>.seed` (0600) and grants the pen write standing, the next serve reads every such file at boot and says which pens it holds — and the seed never prints and never enters the [[ground]].",
+            spec: "spec/45-pens.md",
+            proof: "test/cli/pen.test.ts",
+            door: "run",
+          },
+          {
+            says: "Re-keying a leaked [[pen]] retires the old key completely — its record and every grant it held are struck, and the run that struck a key always says so, on the repaired arm as on the re-keyed one.",
+            spec: "spec/45-pens.md",
+            proof: "test/cli/pen-repaired-report.test.ts",
+            door: "run",
           },
           {
             says: "A page can accept writes under a revocable [[pen]] rather than the operator's key; revoking it refuses future writes while past ones stay attributed to it.",
