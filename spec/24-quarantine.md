@@ -352,6 +352,14 @@ Four things the build settled that the recommendation could only gesture at:
   than §23.9 alone allowed. That is deliberate: the envelope is the pool's whole bill, and a second
   ceiling the operator could not raise for their own quarantine would be a hidden one. It is stated
   here because the widening is real, and the operator writing the declaration should know it.
+  One consequence of T139's clock split is priced in the same spirit (decided 2026-08-14): the
+  worker runs two sequential hard windows — spawn, then render — and inside a pool BOTH read the
+  declared `renderTimeoutMs`, because §23.9's host spawn ceiling deliberately does not reach a pool
+  (a 10-second host allowance inside a 120ms declaration would be exactly the hidden ceiling this
+  paragraph refuses). So the declared number bounds each window, and one render's whole bill is
+  spawn + render: worst case TWICE the declared clock, proportional to the operator's own knob and
+  never the host's. `test/gateway/render-spawn-forwarding.test.ts` pins which number reaches the
+  pool; the wall-clock half lives in `render-spawn-clock.test.ts` (rail h).
 - **The memory ceiling reaches the Worker's `resourceLimits`, is asserted two-sided, and names a
   TOTAL.** A declared bound that never crossed into the worker would print in a report and hold
   nothing. `maxMemoryMb` is the whole heap: V8 sizes the old and young generations independently and
@@ -386,7 +394,8 @@ byte-verifies THAT container only; a pool nested inside it is neither closed nor
 seeded copies survive outside both the report and §11's fan-out. The report now recurses; drop does
 not, and that asymmetry is a ticket, not a residual to accept quietly.
 
-**Provenance.** Realized by T34. Implementation: `src/gateway/envelope.ts` (the declaration, its
+**Provenance.** Realized by T34; the two-window bill amended after T139 (post-arc audit, Myk's
+option (a) in chat). Implementation: `src/gateway/envelope.ts` (the declaration, its
 door-side well-formedness, per-dimension resolution, and the per-pool accounting),
 `src/gateway/container.ts` (the envelope attaches to an untrusted separate container at open),
 `src/gateway/renderers.ts` (the pool's slot gate on both doors), `src/gateway/render-worker.ts` (the
