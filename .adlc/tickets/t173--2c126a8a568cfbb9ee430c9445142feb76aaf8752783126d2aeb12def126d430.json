@@ -1,0 +1,13 @@
+{
+  "body": "FOUND 2026-08-14 by T162's P5 lenses (branch t162-drop-orphan, PR #414). T162 taught drop() to walk the whole subtree; these two windows are what the repaired walk still states but does not close. Both share one shape: bytes at rest that no report names and no sweep will ever visit.\n\nWINDOW A — THE MIRROR-ONLY STRAGGLER. drop()'s dead set is the union of `backend.deltasSince` and the session reactor, and MirrorBackend.deltasSince reads the PRIMARY tier only. A delta that reached a mirror tier but not the primary (a crash between tiers) beneath a store being dropped is invisible to the enumeration: the drop verifies clean over the ids it could name, closes the handles, and the remnant sits in the mirror tier forever. Today heal() cannot reach it either — the store is no longer attached, and nothing surviving names its path. The code states this honestly (\"a straggler bearing an unlisted id is heal's domain\") but for a DROPPED store that statement is false: heal's domain ends at the attachment boundary.\n\nWINDOW B — THE MID-DROP ATTACH. drop() snapshots the subtree (`poolsBeneath`) before purging, deliberately, so the refusal boundary is stable. A pool attached to a gateway in the subtree AFTER that snapshot but before the closes is never enumerated: its store survives the drop, its parent's handle closes, and nothing surviving names it. The snapshot comment states the window (\"a pool attached mid-drop is outside this order's jurisdiction\"); stating it does not quarantine it.\n\nWHAT TO BUILD. Judge by `can this report be false`, not by `does it remove the bytes`. Candidate shapes, to be interrogated at P1: (A) a drop over a repairable/mirrored store performs a per-tier enumeration (or refuses on a backend whose deltasSince cannot speak for every tier it owns); (B) drop() closes the attach door on the whole subtree for its duration — an attach that races a drop refuses, loudly, instead of landing in a closing tree.\n\nRAILS, when built, are TWO-SIDED as always: the straggler/mid-drop bytes are gone (or the operation refuses by name) AND a named live bystander survives.\n\nWHO MERGES: shape A widens what gets purged (a mirror-tier remnant a drop previously left would now be removed) — that direction is MYK'S merge, per the standing erasure rule. Shape B is a refusal and may self-merge on the ordinary bar.",
+  "edges": [],
+  "id": "T173",
+  "phase": "P0",
+  "rails": [],
+  "scope": [
+    "src/gateway/container.ts",
+    "src/store/mirror.ts"
+  ],
+  "status": "todo",
+  "title": "Two drop() windows leave bytes outside erasure reach with no surviving name — stated, not yet quarantined"
+}
