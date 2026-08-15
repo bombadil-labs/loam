@@ -877,7 +877,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           protocolVersion:
             typeof asked === "string" && MCP_PROTOCOLS.includes(asked) ? asked : MCP_PROTOCOLS[0],
           capabilities: { tools: {} },
-          serverInfo: { name: "loam", version: "0.1.0" },
+          serverInfo: { name: "loam", version: "0.2.0" },
         });
         return;
       }
