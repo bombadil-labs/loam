@@ -65,6 +65,10 @@ name begins with that number.
 | §37 | [Connectors — OAuth-based access for MCP clients](spec/37-connectors.md) *(all 15 phases landed — the connector is complete)* |
 | §39 | [A connection binds to a container — the inbox model](spec/39-connection-container.md) |
 | §40 | [The admin page — a user's containers, through the browser](spec/40-the-admin-page.md) |
+| §42 | [The stock shelf — `register --stock`, a shipped shape as an ordinary registration](spec/42-stock-shelf.md) |
+| §43 | [The listing door — a kind's entities, served through a container](spec/43-listing-door.md) |
+| §44 | [The front door — the constant greeting at `/`](spec/44-front-door.md) |
+| §45 | [Pens — provisioning a renderer's signing key](spec/45-pens.md) |
 
 _**§21**, **§22**, **§25**, and **§26** are **landed** — design accepted and implemented (see each
 Provenance footer; §21.7's coexistence design is accepted with its implementation queued as ticket T2).
