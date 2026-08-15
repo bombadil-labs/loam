@@ -37,6 +37,12 @@ jobs:
       - name: install
         run: npm ci
 
+      # The trust-root gate suites drive the REAL adlc CLI and FAIL CLOSED on CI when it is
+      # missing — a runner that lost its provisioning must not report the gate green having run
+      # none of it. ci.yml provisions it; this workflow runs the same gate and must too. Learned
+      # on v0.2.0: the tag landed, the publish never ran, and the failure read as a test bug.
+      - run: npm i -g @adlc/cli
+
       - name: the green gate
         run: npm run check
 
