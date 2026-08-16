@@ -27,7 +27,12 @@ import {
   type Reactor,
   type Term,
 } from "@bombadil/rhizomatic";
-import { containerClaims, readContainerTable, type ContainerTable } from "./container.js";
+import {
+  containerClaims,
+  isContainerLaw,
+  readContainerTable,
+  type ContainerTable,
+} from "./container.js";
 import type { Gateway } from "./gateway.js";
 import { groupPrograms } from "./lifecycle.js";
 import { programOf, type ProgramName } from "./registration.js";
@@ -229,21 +234,31 @@ async function ensureListingContainer(
 // time. It is keyed on the reactor object (a reseat replaces the reactor, orphaning the index) and
 // on the membership Term (a lens evolution that narrows the contexts is a fresh index).
 //
-// A delta advances the index in O(1) only when it cannot REMOVE or REVIVE anything: authored by
-// someone other than the operator (no law), pointing at no delta (no strike, no manifest, no
-// supersession), and itself unstruck at the moment it is folded (federation may deliver a strike
-// before its target). Then it is a member exactly when it carries a pointer in a listing context —
-// the membership `select` matches it, no mask can drop an unstruck delta, and the closure only ever
-// ADDS negations. Every other delta rebuilds the index from the container scope, the one place that
-// owns exclusion, closure, and refusal. So under ordinary writes a page never scans the ground; a
-// strike or an act of law buys exactly one scan, on the next read.
+// A delta advances the index in O(1) only when it cannot REMOVE or REVIVE anything: no container
+// law (`isContainerLaw` — the operator's container records and strikes, the two shapes the table
+// reads), no pointer at a delta (no strike, no manifest, no supersession), unstruck at the moment
+// it is folded (federation may deliver a strike before its target), and unable to feed the mask's
+// trust sub-view (`trustFeeder` — under the governed body that is an operator-minted grant). Then it
+// is a member exactly when it carries a pointer in a listing context — the membership `select`
+// matches it, no mask can drop an unstruck delta, and the closure only ever ADDS negations. Every
+// other delta rebuilds the index from the container scope, the one place that owns exclusion,
+// closure, and refusal. The operator's own DATA folds like anyone's: on a store the operator writes
+// to, "authored by the operator" would collapse every write back to a scan. So under ordinary
+// writes a page never scans the ground; a strike or an act of law buys exactly one scan, on the
+// next read. Fresh ids are folded as ONE sorted merge per read (O(k log k + N) for k arrivals),
+// not a splice per id — a bulk pull would otherwise pay O(k·N) memmoves on the read path.
+//
+// What "law" means here is enumerated from the code that reads it, not guessed: the container
+// table (`computeContainerTable`) reads container-context records and operator strikes; the lens
+// contexts are recomputed per read from the live bindings, so a registration reaches the index
+// through the membership key, never through this fold; grants reach it through `trustFeeder`.
 //
 // The index is consulted only while the container's ALGEBRA is plain — nothing excluded that is
 // declared and active, no active inbox pool bound to this container. An excluded container's
 // members subtract from every scope, and an inbox pool's members compose in from a reactor this
 // index does not follow; both are honored by falling back to the scope read, correct and slow.
 interface ListingIndex {
-  readonly reactor: Reactor;
+  readonly reactor: WeakRef<Reactor>; // weak: a reseat must not keep the old reactor alive
   readonly membership: string; // the Term as JSON, the key that ties the index to one candidate set
   readonly contexts: ReadonlySet<string>;
   swept: number; // arrival-log high-water mark
@@ -276,7 +291,7 @@ function addPointedEntities(d: Delta, contexts: ReadonlySet<string>, into: Set<s
 // Plain claim: cannot remove or revive a member (see the block comment above). `feedsTrust` is the
 // mask's own ground-dependence — see `trustFeeder`.
 const isPlainClaim = (gw: Gateway, d: Delta, feedsTrust: (d: Delta) => boolean): boolean =>
-  d.claims.author !== gw.operatorAuthor &&
+  !isContainerLaw(d, gw.operatorAuthor) &&
   d.claims.pointers.every((p) => p.target.kind !== "delta") &&
   gw.reactor.negationsOf(d.id).length === 0 &&
   !feedsTrust(d);
@@ -395,8 +410,21 @@ function seek(sorted: readonly string[], needle: string, strict: boolean): numbe
   return lo;
 }
 
-function insertSorted(sorted: string[], id: string): void {
-  sorted.splice(seek(sorted, id, false), 0, id);
+// One linear merge of a sorted batch of NEW ids (disjoint from `sorted`) into `sorted`, in place.
+function mergeSorted(sorted: string[], fresh: string[]): void {
+  fresh.sort();
+  let i = sorted.length - 1;
+  let j = fresh.length - 1;
+  sorted.length += fresh.length;
+  for (let k = sorted.length - 1; j >= 0; k -= 1) {
+    if (i >= 0 && sorted[i]! > fresh[j]!) {
+      sorted[k] = sorted[i]!;
+      i -= 1;
+    } else {
+      sorted[k] = fresh[j]!;
+      j -= 1;
+    }
+  }
 }
 
 // The index for (gateway, container), current to the reactor's log — built, rebuilt, or advanced.
@@ -421,7 +449,7 @@ function currentIndex(
       contexts,
     );
     const fresh: ListingIndex = {
-      reactor: gw.reactor,
+      reactor: new WeakRef(gw.reactor),
       membership: key,
       contexts,
       swept: log.length,
@@ -432,24 +460,25 @@ function currentIndex(
     byContainer.set(container, fresh);
     return fresh;
   };
-  if (idx === undefined || idx.reactor !== gw.reactor || idx.membership !== key) {
+  if (idx === undefined || idx.reactor.deref() !== gw.reactor || idx.membership !== key) {
     return rebuild();
   }
   if (idx.feedsTrust === undefined) {
     return idx.swept === log.length ? idx : rebuild();
   }
+  const fresh = new Set<string>();
   for (let i = idx.swept; i < log.length; i += 1) {
-    const d = log[i]!;
-    if (!isPlainClaim(gw, d, idx.feedsTrust)) return rebuild();
-    const pointed = new Set<string>();
-    addPointedEntities(d, contexts, pointed);
-    for (const id of pointed) {
-      if (idx.seen.has(id)) continue;
-      idx.seen.add(id);
-      insertSorted(idx.entities, id);
-    }
-    idx.swept = i + 1;
+    if (!isPlainClaim(gw, log[i]!, idx.feedsTrust)) return rebuild();
+    addPointedEntities(log[i]!, contexts, fresh);
   }
+  const arrivals: string[] = [];
+  for (const id of fresh) {
+    if (idx.seen.has(id)) continue;
+    idx.seen.add(id);
+    arrivals.push(id);
+  }
+  if (arrivals.length > 0) mergeSorted(idx.entities, arrivals);
+  idx.swept = log.length;
   return idx;
 }
 

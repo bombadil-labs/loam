@@ -5,11 +5,12 @@
 //   over the same backend (no index at all). The index may only ever be a faster way to the same
 //   answer.
 //
-//   AND THE COST DROPPED — the warm path is proven not to scan: `reactor.snapshot` (the copy every
-//   O(ground) walk in this codebase pays) and `containerScope` are spied, and a warm page calls
-//   neither; the paths that must rebuild (a strike, an act of law) call `containerScope` exactly
-//   once. Deterministic — no clock — so it cannot flake under load; the numbers themselves live in
-//   `listing-scale.bench.test.ts` and the ticket's PR.
+//   AND THE COST DROPPED — three seams are spied, and a warm page calls neither `reactor.snapshot`
+//   (the copy every O(ground) walk in this codebase pays) nor `containerScope`, and folds each
+//   arrival once (`reactor.negationsOf`, asked once per folded delta, is not asked again on the
+//   next read); the paths that must rebuild (a strike, container law, a trust feeder) call
+//   `containerScope` exactly once. Deterministic — no clock — so it cannot flake under load; the
+//   numbers themselves live in `listing-scale.bench.test.ts` and the ticket's PR.
 //
 //   EVERY PATH THAT CHANGES MEMBERSHIP REACHES THE INDEX (H8's stale-index trap): a plain append,
 //   a strike (H1: the struck member de-lists and a later plain append must not resurrect it), a
@@ -94,15 +95,23 @@ async function agreeOn(gw: Gateway, expected: string[]): Promise<void> {
 }
 
 // The two scans a page must not pay: the snapshot copy and the scope read.
-function scans(gw: Gateway): { snapshots: () => number; scopes: () => number; reset: () => void } {
+function scans(gw: Gateway): {
+  snapshots: () => number;
+  scopes: () => number;
+  folds: () => number;
+  reset: () => void;
+} {
   const snap = vi.spyOn(gw.reactor, "snapshot");
   const scope = vi.spyOn(gw, "containerScope");
+  const fold = vi.spyOn(gw.reactor, "negationsOf");
   return {
     snapshots: () => snap.mock.calls.length,
     scopes: () => scope.mock.calls.length,
+    folds: () => fold.mock.calls.length,
     reset: () => {
       snap.mockClear();
       scope.mockClear();
+      fold.mockClear();
     },
   };
 }
@@ -126,9 +135,37 @@ describe("the maintained candidate set — a warm page does not scan the ground"
     expect(await page(gw)).toEqual([FERN, MOSS, OAK]);
     expect(s.snapshots()).toBe(0);
     expect(s.scopes()).toBe(0);
+    expect(s.folds()).toBe(1); // the one arrival, folded once
+    // The high-water mark advanced: the next read folds NOTHING — it does not re-walk the tail.
+    s.reset();
+    expect(await page(gw)).toEqual([FERN, MOSS, OAK]);
+    expect(s.folds()).toBe(0);
     await agreeOn(gw, [FERN, MOSS, OAK]);
     await gw.close();
   });
+
+  it("a bulk of 5k plain arrivals folds in one read: no scan, and the page equals a cold twin", async () => {
+    const gw = await governedGarden();
+    await gw.append([observed(MOSS, "tag", "soft", 1100, GARDENER_SEED)]);
+    expect(await page(gw)).toEqual([MOSS]);
+    const s = scans(gw);
+    const bulk = Array.from({ length: 5000 }, (_, i) =>
+      observed(`plant:b${String(5000 - i).padStart(5, "0")}`, "height", i, 2000 + i, GARDENER_SEED),
+    );
+    await gw.append(bulk);
+    s.reset();
+    const first = await page(gw, { limit: 25 });
+    expect(s.snapshots()).toBe(0);
+    expect(s.scopes()).toBe(0);
+    expect(s.folds()).toBe(5000);
+    const cold = slow(gw);
+    expect(cold).toHaveLength(5001);
+    expect(first).toEqual(cold.slice(0, 25));
+    // A page from the middle and the tail, seeking, against the same cold projection.
+    expect(await page(gw, { limit: 25, after: cold[2500]! })).toEqual(cold.slice(2501, 2526));
+    expect(await page(gw, { limit: 25, after: cold[4990]! })).toEqual(cold.slice(4991));
+    await gw.close();
+  }, 60_000);
 
   it("the warm fold keeps the order, takes a whole batch, and admits no unread context", async () => {
     const gw = await governedGarden();
@@ -229,16 +266,45 @@ describe("the maintained candidate set — every path that changes membership re
     await gw.close();
   });
 
-  it("an operator-authored claim is law-shaped to the index: it rebuilds, and lists correctly", async () => {
+  it("the operator's own DATA folds as plain; the operator's LAW rebuilds", async () => {
     const gw = await governedGarden();
     await gw.append([observed(FERN, "height", 30, 1000, GARDENER_SEED)]);
     await agreeOn(gw, [FERN]);
     const s = scans(gw);
-    await gw.append([observed(MOSS, "tag", "op", 1100, OPERATOR_SEED)]);
+    // Data signed by the operator: no delta pointer, no container context. It is a member like
+    // anyone's claim, and it must not cost the store a scan (the ~/.loam case: the operator writes).
+    const opClaim = observed(MOSS, "tag", "op", 1100, OPERATOR_SEED);
+    await gw.append([opClaim]);
+    s.reset();
+    expect(await page(gw)).toEqual([FERN, MOSS]);
+    expect(s.scopes()).toBe(0);
+    expect(s.snapshots()).toBe(0);
+    await agreeOn(gw, [FERN, MOSS]);
+    // Law: a container declaration (a container context) — rebuilds.
+    await gw.append([
+      signClaims(
+        containerClaims(
+          {
+            container: "container:other",
+            trust: "curated",
+            posture: "shared",
+            membership: { op: "select", pred: { hasPointer: { targetEntity: OAK } }, in: "input" },
+          },
+          OPERATOR,
+          1200,
+        ),
+        OPERATOR_SEED,
+      ),
+    ]);
     s.reset();
     expect(await page(gw)).toEqual([FERN, MOSS]);
     expect(s.scopes()).toBe(1);
-    await agreeOn(gw, [FERN, MOSS]);
+    // Law: the operator's strike of their own data (a delta pointer) — rebuilds, and moss leaves.
+    await gw.append([signClaims(makeNegationClaims(OPERATOR, 1300, opClaim.id), OPERATOR_SEED)]);
+    s.reset();
+    expect(await page(gw)).toEqual([FERN]);
+    expect(s.scopes()).toBe(1);
+    await agreeOn(gw, [FERN]);
     await gw.close();
   });
 
@@ -410,7 +476,9 @@ describe("the maintained candidate set — under a trust mask that reads the gro
     await gw.append([
       signClaims(grantClaims(STORE_ENTITY, MALLORY, "write", OPERATOR, 3200), OPERATOR_SEED),
     ]);
+    s.reset();
     expect(await ids(gw, "Guarded")).toEqual([FERN, OAK]);
+    expect(s.scopes()).toBe(1); // a grant feeds the governed mask's trust set: law to this index
     expect(await listed(gw, "Guarded")).toEqual([FERN, OAK]);
     await gw.close();
   });
