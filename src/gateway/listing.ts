@@ -24,7 +24,6 @@ import {
   termToJson,
   type Delta,
   type Pred,
-  type PPred,
   type Reactor,
   type Term,
 } from "@bombadil/rhizomatic";
@@ -285,105 +284,63 @@ const isPlainClaim = (gw: Gateway, d: Delta, feedsTrust: (d: Delta) => boolean):
 // A TRUST mask decides which negations count by a predicate, and that predicate may read the
 // ground (`inView`: "struck by an author the surviving grants name"). Then a delta that is no
 // strike and no law can still change membership — by joining the sub-view the predicate reads,
-// which lets a dormant strike bind. This bounds that dependence per delta: it returns a predicate
-// answering "could this delta join any `inView` sub-view of the mask?", built by walking the
-// sub-terms — `select` over a per-delta predicate is decided by that predicate; `mask`, `union`,
-// `intersect`, `difference` pass through to their operands (a mask REMOVES, and only a strike can
-// remove, which is already not plain); a bare `input` is fed by everything. Any node this walk
-// cannot bound — a nested reflective predicate, an aliased closure (expanded against the ground), a
-// hole, an unfamiliar operator — answers `undefined`, and then no delta is plain: every read
-// rebuilds, which is exactly today's cost and never a wrong page. Under the governed body's mask
-// the sub-view selects operator-authored grants, so a stranger's claim never feeds it.
+// which lets a dormant strike bind. This bounds that dependence per delta: it answers "could this
+// delta join any `inView` sub-view of the mask?" for the shapes a listing membership takes — OUR
+// `select` over `input` or over a masked `input`, and inside the mask a trust predicate whose
+// `inView` sub-views are themselves a `select` over a per-delta predicate. Anything else — a nested
+// reflective predicate, an aliased closure (expanded against the ground), a root variable, a hole,
+// an unfamiliar operator — answers `undefined`, and then no delta is plain: every read that finds
+// the log moved rebuilds, which is exactly the old cost and never a wrong page. Under the governed
+// body's mask the sub-view selects operator-authored grants, so a stranger's claim never feeds it.
 export function trustFeeder(membership: unknown): ((d: Delta) => boolean) | undefined {
   const term = parseTerm(membership);
-  const preds: Pred[] = [];
-  const collect = (t: Term): boolean => {
-    switch (t.kind) {
-      case "input":
-        return true;
-      case "select":
-        preds.push(t.pred);
-        return collect(t.of);
-      case "mask":
-        if (t.policy.kind === "trust") preds.push(t.policy.pred);
-        return collect(t.of);
-      case "union":
-      case "intersect":
-        return collect(t.left) && collect(t.right);
-      case "difference":
-        return collect(t.of) && collect(t.without);
-      default:
-        return false;
-    }
-  };
-  if (!collect(term)) return undefined;
+  if (term.kind !== "select" || predUnbounded(term.pred)) return undefined;
+  const of = term.of;
+  if (of.kind === "input") return () => false;
+  if (of.kind !== "mask" || of.of.kind !== "input") return undefined;
+  if (of.policy.kind !== "trust") return () => false;
   const feeders: ((d: Delta) => boolean)[] = [];
-  const walk = (pred: Pred): boolean => {
-    switch (pred.kind) {
-      case "and":
-      case "or":
-        return walk(pred.left) && walk(pred.right);
-      case "not":
-        return walk(pred.pred);
-      case "inView": {
-        const feeder = mayJoin(pred.term);
-        if (feeder === undefined) return false;
-        feeders.push(feeder);
-        return true;
-      }
-      case "hasPointer":
-        return !aliased(pred.ppred);
-      default:
-        return true;
-    }
-  };
-  for (const pred of preds) if (!walk(pred)) return undefined;
-  return (d) => feeders.some((f) => f(d));
+  return boundTrust(of.policy.pred, feeders) ? (d) => feeders.some((f) => f(d)) : undefined;
 }
 
-const aliased = (pp: PPred): boolean =>
-  pp.role?.kind === "aliased" || pp.context?.kind === "aliased";
-
-// Could a delta join `eval(term, ground)`? A per-delta over-approximation, or `undefined` when the
-// term cannot be bounded that way.
-function mayJoin(term: Term): ((d: Delta) => boolean) | undefined {
-  switch (term.kind) {
-    case "input":
-      return () => true;
-    case "select": {
-      const pred = term.pred;
-      if (predUnbounded(pred)) return undefined;
-      const inner = mayJoin(term.of);
-      if (inner === undefined) return undefined;
-      return (d) => {
-        if (!inner(d)) return false;
-        try {
-          return evalPred(pred, d);
-        } catch {
-          return true; // a root variable or a hole this walk cannot bind: assume it may
-        }
-      };
+// Walk a trust predicate: per-delta parts decide nothing about the ground; each `inView` yields a
+// feeder; a part that reads the ground any other way is unbounded (false).
+function boundTrust(pred: Pred, feeders: ((d: Delta) => boolean)[]): boolean {
+  switch (pred.kind) {
+    case "and":
+    case "or":
+      return boundTrust(pred.left, feeders) && boundTrust(pred.right, feeders);
+    case "not":
+      return boundTrust(pred.pred, feeders);
+    case "inView": {
+      const feeder = mayJoin(pred.term);
+      if (feeder === undefined) return false;
+      feeders.push(feeder);
+      return true;
     }
-    case "mask": {
-      if (term.policy.kind === "trust" && predUnbounded(term.policy.pred)) {
-        return undefined;
-      }
-      return mayJoin(term.of);
-    }
-    case "union":
-    case "intersect": {
-      const l = mayJoin(term.left);
-      const r = mayJoin(term.right);
-      return l === undefined || r === undefined ? undefined : (d) => l(d) || r(d);
-    }
-    case "difference":
-      return mayJoin(term.of);
     default:
-      return undefined;
+      return !predUnbounded(pred);
   }
 }
 
-// A predicate that reads the ground — reflective, or aliased — cannot be decided per delta.
+// Could a delta join `eval(term, ground)`? Bounded for a `select` over a per-delta predicate, over
+// `input` or over a masked `input` (a mask only REMOVES, and only a strike removes — which is
+// already not plain): then it is exactly the predicate on the delta.
+function mayJoin(term: Term): ((d: Delta) => boolean) | undefined {
+  if (term.kind !== "select" || predUnbounded(term.pred)) return undefined;
+  const of = term.of;
+  const overInput =
+    of.kind === "input" ||
+    (of.kind === "mask" &&
+      of.of.kind === "input" &&
+      (of.policy.kind !== "trust" || !predUnbounded(of.policy.pred)));
+  if (!overInput) return undefined;
+  const pred = term.pred;
+  return (d) => evalPred(pred, d);
+}
+
+// A predicate that reads the ground (reflective, aliased), the ambient root, or a binding cannot
+// be decided on the delta alone.
 function predUnbounded(pred: Pred): boolean {
   switch (pred.kind) {
     case "and":
@@ -391,14 +348,27 @@ function predUnbounded(pred: Pred): boolean {
       return predUnbounded(pred.left) || predUnbounded(pred.right);
     case "not":
       return predUnbounded(pred.pred);
-    case "hasPointer":
-      return aliased(pred.ppred);
     case "inView":
       return true;
+    case "match":
+      return isHole(pred.constant);
+    case "hasPointer": {
+      const pp = pred.ppred;
+      return (
+        pp.role?.kind === "aliased" ||
+        pp.context?.kind === "aliased" ||
+        pp.targetEntity?.kind === "root" ||
+        pp.targetEntity?.kind === "hole" ||
+        (pp.targetValue?.kind === "vcmp" && isHole(pp.targetValue.value))
+      );
+    }
     default:
       return false;
   }
 }
+
+const isHole = (v: unknown): boolean =>
+  typeof v === "object" && v !== null && (v as { kind?: unknown }).kind === "hole";
 
 const algebraIsPlain = (table: ContainerTable, container: string): boolean => {
   for (const name of table.excluded) {
