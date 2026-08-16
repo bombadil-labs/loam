@@ -1,4 +1,12 @@
 {
+  "_adlcArchive": {
+    "archivedAt": "2026-08-16T23:10:00.052Z",
+    "reason": "completed",
+    "sourceRevision": null,
+    "sourceStoreHash": "7026f3be303d2ac9b36f9acdef724d4ceaef06b6211de569f22793d28dd63497",
+    "ticketHash": "5aeed107b2faf4c4aaaba53f480dd2e3bcca6498e74bfeb436013326411fe61f",
+    "version": 1
+  },
   "body": "T110 shipped the listing door with a bounded page and a yield between resolutions. Both are containments, not fixes. The cost is still linear in the whole ground, three times over.\n\nMEASURED on T110's repair branch (memory backend, 2026-08-12):\n\n| ground | membership eval | per entity | list(limit 25) | list(limit 100) |\n|---|---|---|---|---|\n| 2k deltas / 200 entities | 150ms | 120ms | 3.2s | 13.1s |\n| 10k deltas / 500 entities | 874ms | 655ms | 17.6s | 71.2s |\n\nThree separate costs, and they want three different remedies.\n\n1. THE MEMBERSHIP EVALUATION IS NOT MAINTAINED. `select` re-runs over the whole ground on every page. Myk's design premise was that a container gives a pre-filtered list that follows the ground live; today the container gives the QUERY, and the query is evaluated per read. An incrementally maintained membership is what the design assumed.\n\n2. THE PROJECTION IS QUADRATIC ON A CURSOR WALK. Every page projects every member delta into entity ids, sorts the whole id set, and only then applies `after` and `limit`. Walking N entities at any page size costs O(N) pages x O(N) ids. A cursor that could seek would make the walk linear.\n\n3. A COLD RESOLUTION IS O(ground). `resolvedNode` is the point door's own cost, not the listing's invention — but the listing multiplies it by the page size. Warm materializations are the read side's existing affordance and nothing wires them to this door.\n\nH8 is the hazard on all three: none of them returns a WRONG answer, which is why they keep passing review. The bound grows monotonically with the store.\n\nWHAT THE CAP COSTS TODAY: LISTING_MAX_LIMIT is 25 and LISTING_DEFAULT_LIMIT is 10. Those literals are pinned by test/gateway/listing.test.ts and they are a measurement, not a preference — raising either without re-measuring re-opens the stall T110's P5 caught (the first cap of 500 bought one authed request ~330 seconds of blocked event loop at a 10k ground).\n\nDONE WHEN: a page's cost is independent of the store's size for costs 1 and 2, and the cap can rise on evidence rather than on hope.",
   "edges": [],
   "id": "T163",

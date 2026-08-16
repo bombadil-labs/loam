@@ -98,12 +98,20 @@ field.) Public enumeration waits for §12's per-lens `enumerable` flag, delibera
 
 ### 43.5 Open edges, ticketed rather than hidden
 
-- **T163 — the cost is linear in the ground, three times over.** The membership Term is not
-  maintained incrementally (`select` re-runs over the whole ground per page); the projection is
-  quadratic on a cursor walk (every page projects and sorts the whole id set before slicing); a
-  cold resolution is O(ground) per listed entity. None returns a wrong answer, which is why the
-  shape keeps passing review (H8); the cap of 25 is the containment, and it may rise only on
-  evidence.
+- **CLOSED, two of three (T163) — the candidate set is kept warm.** The listing container holds
+  a per-reactor index of sorted entity ids, folded forward from the arrival log by a swept
+  high-water mark: an ordinary claim (non-law, no delta pointer, unstruck at fold time, not
+  feeding a trust mask's sub-view) inserts in one sorted merge per read; anything else — a
+  strike, an operator container record, a claim that could join the trusted-striker view —
+  rebuilds from `containerScope`, so the index is never a guess (H8: a stale index is worse than
+  a scan, and every miss falls back to the authoritative read). The cursor seeks by binary search.
+  Measured on a memory backend: a warm page at 10k deltas / 500 entities fell from 17.5s to 3ms
+  and a 21-page walk from 329s to 3ms, flat across ground size. The container table is memoized
+  per reactor on the count of law deltas swept, so a stranger's write invalidates nothing. What
+  stays open: a COLD resolution is still O(ground) per listed entity — the warm-materialization
+  budget is shared with the subscription door and a walk would exhaust it, and ~55% of the cost is
+  a snapshot copy in slating's existence probe, which is a follow-up in its own right. The cap of
+  25 is unchanged; it may now rise on evidence, in its own PR.
 - **T164 — a read mints law.** `ensureListingContainer`'s only caller is the body of a GraphQL
   query, and it signs an operator declaration. Beyond the surprise itself: a transiently unbound
   sibling lens narrows the context union, the next read re-declares narrower, the read after the
@@ -127,3 +135,7 @@ whole mechanism) and the listing-field block in `src/gateway/gql.ts`; rails in
 closure, exclusion emptying the listing) and `test/server/listing-door.test.ts` (the transport
 refusal shapes). The page bounds were re-measured and tightened post-landing (the 500→25 cap and
 the inter-resolution yield); T163/T164/T165 were minted by this landing's own P5 panel and audit.
+T163 closed in [#418](https://github.com/bombadil-labs/loam/pull/418): `src/gateway/listing.ts` (the
+index, the fold, `isPlainClaim`, `mergeSorted`, `seek`), `src/gateway/container.ts`
+(`isContainerLaw`, the table memo), rails in `test/gateway/listing-warm.test.ts`; four independent
+lenses and one refutation pass on the law narrowing, all clean.
