@@ -12,7 +12,11 @@ import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
-import { LISTING_MAX_LIMIT, listingContainerName } from "../../src/gateway/listing.js";
+import {
+  LISTING_MAX_LIMIT,
+  listingContainerName,
+  listingPageImpl,
+} from "../../src/gateway/listing.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
@@ -77,6 +81,29 @@ describe.skipIf(process.env.LOAM_BENCH !== "1")("listing cost by ground size", (
       t0 = performance.now();
       await gw.list("Plant", { limit: 1 });
       const afterAppend = ms(t0);
+      // Costs 1 and 2 alone — the candidate page with no resolution — warm, and after one more
+      // plain append; then a cursor walk of ids only. These are the numbers "independent of the
+      // store's size" is claimed on.
+      t0 = performance.now();
+      await listingPageImpl(gw, "Plant", { limit: LISTING_MAX_LIMIT });
+      const idsWarm = ms(t0);
+      await gw.append([observed("plant:zzzzy", "tag", "x", 999_998, GARDENER_SEED)]);
+      t0 = performance.now();
+      await listingPageImpl(gw, "Plant", { limit: LISTING_MAX_LIMIT });
+      const idsPostAppend = ms(t0);
+      t0 = performance.now();
+      let cursor: string | undefined;
+      let idPages = 0;
+      for (;;) {
+        const next = await listingPageImpl(gw, "Plant", {
+          limit: LISTING_MAX_LIMIT,
+          after: cursor,
+        });
+        if (next.length === 0) break;
+        idPages += 1;
+        cursor = next[next.length - 1]!;
+      }
+      const idsWalk = ms(t0);
       // Costs 1 and 3 in isolation, through the gateway's own seams.
       t0 = performance.now();
       const scope = gw.containerScope({ containers: [listingContainerName("Plant")] });
@@ -92,6 +119,9 @@ describe.skipIf(process.env.LOAM_BENCH !== "1")("listing cost by ground size", (
           `  list(limit 25) again     ${page25Again}\n` +
           `  cursor walk, ${pages} pages   ${walk}\n` +
           `  list(limit 1) post-append ${afterAppend}\n` +
+          `  ids only: warm page     ${idsWarm}\n` +
+          `  ids only: post-append   ${idsPostAppend}\n` +
+          `  ids only: walk ${idPages} pages ${idsWalk}\n` +
           `  containerScope (${scope.length} members)  ${membership}\n` +
           `  resolvedNode, one entity ${resolve}\n`,
       );
