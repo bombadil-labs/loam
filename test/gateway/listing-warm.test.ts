@@ -146,20 +146,31 @@ describe("the maintained candidate set — a warm page does not scan the ground"
 
   it("a bulk of 5k plain arrivals folds in one read: no scan, and the page equals a cold twin", async () => {
     const gw = await governedGarden();
-    await gw.append([observed(MOSS, "tag", "soft", 1100, GARDENER_SEED)]);
-    expect(await page(gw)).toEqual([MOSS]);
+    // Several standing members that INTERLEAVE with the arrivals, so the merge has to shift more
+    // than one of them (a merge that mis-steps over the standing array survives a single member).
+    const standing = ["plant:b00500", "plant:b02500", "plant:b04500", MOSS];
+    await gw.append(standing.map((n, i) => observed(n, "tag", "soft", 1100 + i, GARDENER_SEED)));
+    expect(await page(gw)).toEqual(standing);
     const s = scans(gw);
     const bulk = Array.from({ length: 5000 }, (_, i) =>
       observed(`plant:b${String(5000 - i).padStart(5, "0")}`, "height", i, 2000 + i, GARDENER_SEED),
+    ).filter(
+      (d) =>
+        !standing.includes(
+          d.claims.pointers[0]!.target.kind === "entity"
+            ? d.claims.pointers[0]!.target.entity.id
+            : "",
+        ),
     );
     await gw.append(bulk);
     s.reset();
     const first = await page(gw, { limit: 25 });
     expect(s.snapshots()).toBe(0);
     expect(s.scopes()).toBe(0);
-    expect(s.folds()).toBe(5000);
+    expect(s.folds()).toBe(bulk.length);
     const cold = slow(gw);
     expect(cold).toHaveLength(5001);
+    expect(await page(gw, { limit: 25, after: "plant:b00490" })).toEqual(cold.slice(490, 515));
     expect(first).toEqual(cold.slice(0, 25));
     // A page from the middle and the tail, seeking, against the same cold projection.
     expect(await page(gw, { limit: 25, after: cold[2500]! })).toEqual(cold.slice(2501, 2526));
