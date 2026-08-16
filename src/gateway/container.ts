@@ -416,14 +416,66 @@ const byAge = (a: { ts: number; id: string }, b: { ts: number; id: string }): nu
 // declaration (a federated flip is not-binding, named); the parent edges are restored to a
 // forest (per remaining cycle, the latest edge is not-binding, named) — a boot never refuses, a
 // walk never hangs. An ungoverned store has no lawful voice and therefore no containers.
+//
+// MEMOIZED per reactor, keyed on the count of CONTAINER LAW in the arrival log — and that key is
+// what makes the memo unable to lie (H8). The table is a pure function of exactly two kinds of
+// delta, and `computeContainerTable` reads nothing else: an operator-signed record filed at a
+// container context (declaration, exclusion, detach — `containerRef` on the three contexts) and an
+// operator-signed negation (`lawfulNegated`: only the operator's strikes retire law, transitively,
+// and every strike carries a delta pointer). Nothing another author writes binds here, and the
+// operator's own DATA — a claim with no delta pointer at no container context — binds nothing
+// either, so neither invalidates the memo. A reactor only ever GROWS — no delete, no in-place
+// replace; an erasure reseats onto a fresh reactor, which is a fresh key. So the memo sweeps the log
+// forward from a high-water mark counting law (O(new) per call), and recomputes only when that
+// count moved. Nobody mutates a returned table (its fields are read-only views), which is what lets
+// one instance be shared. Without this every door that consulted the table paid a full snapshot
+// copy and walk per call — ~200ms at a 10k-delta ground.
+interface TableMemo {
+  readonly operator: string | undefined;
+  swept: number; // arrival-log high-water mark
+  lawCount: number; // container-law deltas in log[0, swept)
+  builtAt: number; // the lawCount the table was computed from
+  table: ContainerTable;
+}
+const tableMemo = new WeakMap<Reactor, TableMemo>();
+
+/** Could this delta move the container table? The operator's container records and strikes. */
+export function isContainerLaw(d: Delta, operator: string | undefined): boolean {
+  if (operator === undefined || d.claims.author !== operator) return false;
+  return (
+    d.claims.pointers.some((p) => p.target.kind === "delta") ||
+    containerRef(d.claims, CTX_CONTAINER) !== undefined ||
+    containerRef(d.claims, CTX_CONTAINER_EXCLUDED) !== undefined ||
+    containerRef(d.claims, CTX_CONTAINER_DETACHED) !== undefined
+  );
+}
+
 export function readContainerTable(reactor: Reactor, operator: string | undefined): ContainerTable {
-  const empty: ContainerTable = {
-    containers: new Map(),
-    excluded: new Set(),
-    detached: new Map(),
-    defects: [],
-  };
-  if (operator === undefined) return empty;
+  let memo = tableMemo.get(reactor);
+  if (memo === undefined || memo.operator !== operator) {
+    memo = { operator, swept: 0, lawCount: 0, builtAt: -1, table: EMPTY_TABLE };
+    tableMemo.set(reactor, memo);
+  }
+  const log = reactor.arrivalLog();
+  for (; memo.swept < log.length; memo.swept += 1) {
+    if (isContainerLaw(log[memo.swept]!, operator)) memo.lawCount += 1;
+  }
+  if (memo.builtAt !== memo.lawCount) {
+    memo.table = computeContainerTable(reactor, operator);
+    memo.builtAt = memo.lawCount;
+  }
+  return memo.table;
+}
+
+const EMPTY_TABLE: ContainerTable = {
+  containers: new Map(),
+  excluded: new Set(),
+  detached: new Map(),
+  defects: [],
+};
+
+function computeContainerTable(reactor: Reactor, operator: string | undefined): ContainerTable {
+  if (operator === undefined) return EMPTY_TABLE;
   const negated = lawfulNegated(reactor, operator);
   const decls = new Map<string, Decl[]>();
   const excluded = new Set<string>();
