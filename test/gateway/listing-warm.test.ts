@@ -26,6 +26,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   authorForSeed,
   makeNegationClaims,
+  parseTerm,
   signClaims,
   type HyperSchema,
 } from "@bombadil/rhizomatic";
@@ -375,6 +376,26 @@ describe("the maintained candidate set — under a trust mask that reads the gro
     (await gw.list(lens, { limit: 25 })).map((n) => n.entity);
   const ids = (gw: Gateway, lens: string) => listingPageImpl(gw, lens, { limit: 25 });
 
+  it("an unmasked body: nothing suppresses, so nothing feeds — a stranger's claim stays O(1)", async () => {
+    const UNMASKED: HyperSchema = {
+      name: "Unmasked",
+      alg: 1,
+      body: parseTerm({
+        op: "group",
+        key: "byTargetContext",
+        in: { op: "select", pred: { hasPointer: { targetEntity: { var: "root" } } }, in: "input" },
+      }),
+    };
+    const { gw } = await heckled(UNMASKED);
+    expect(await ids(gw, "Unmasked")).toEqual([FERN, MOSS]);
+    const s = scans(gw);
+    await gw.federate([observed(OAK, "height", 1, 3100, MALLORY_SEED)]);
+    s.reset();
+    expect(await ids(gw, "Unmasked")).toEqual([FERN, MOSS, OAK]);
+    expect(s.scopes()).toBe(0);
+    await gw.close();
+  });
+
   it("the governed body: a stranger's claim stays O(1), and a late grant binds the dormant strike", async () => {
     const { gw } = await heckled(GUARDED);
     expect(await ids(gw, "Guarded")).toEqual([FERN, MOSS]); // mallory's strike is inert
@@ -395,22 +416,34 @@ describe("the maintained candidate set — under a trust mask that reads the gro
   });
 
   it("a mask this door cannot bound: every moved read rebuilds, and every page is still right", async () => {
-    // An aliased closure expands against the ground, so no delta is provably plain here.
+    // An aliased closure expands against the ground, so no delta is provably plain here — and it
+    // sits under an `and` inside the sub-view and an `or` at the trust level, so a walk that lets
+    // one bounded side vouch for the pair would wrongly call the whole mask bounded.
     const ALIASED: HyperSchema = {
       name: "Aliased",
       alg: 1,
       body: entityGatherBody({
         mask: {
           trust: {
-            inView: {
-              term: {
-                op: "select",
-                pred: { hasPointer: { role: { aliased: { name: "deputy" } } } },
-                in: "input",
+            or: [
+              {
+                inView: {
+                  term: {
+                    op: "select",
+                    pred: {
+                      and: [
+                        { hasPointer: { role: { exact: "deputize" } } },
+                        { hasPointer: { context: { aliased: { name: "deputy" } } } },
+                      ],
+                    },
+                    in: "input",
+                  },
+                  field: "author",
+                  extract: { field: "author" },
+                },
               },
-              field: "author",
-              extract: { field: "author" },
-            },
+              { match: { field: "author", cmp: "eq", const: OPERATOR } },
+            ],
           },
         },
       }),
