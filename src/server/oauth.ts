@@ -49,11 +49,22 @@ export function issuerFor(publicUrl: string): string {
   return publicUrl.replace(/\/+$/, "");
 }
 
-/** RFC 9728: what a protected resource (this store's MCP door) tells a client about itself. */
-export function protectedResourceDocument(publicUrl: string): Record<string, unknown> {
+/**
+ * RFC 9728: what a protected resource tells a client about itself.
+ *
+ * `resourcePath` names WHICH resource. Empty — the store-wide document at the bare well-known path —
+ * identifies the store itself. A mount's MCP door passes `/<mount>/mcp`, and gets a document whose
+ * `resource` is the exact URL a client dialled, which is what a client validating the identifier
+ * against its own connection compares (T177). The authorization server is the store either way:
+ * one store, one issuer, many protected resources.
+ */
+export function protectedResourceDocument(
+  publicUrl: string,
+  resourcePath = "",
+): Record<string, unknown> {
   const issuer = issuerFor(publicUrl);
   return {
-    resource: issuer,
+    resource: `${issuer}${resourcePath}`,
     authorization_servers: [issuer],
     bearer_methods_supported: ["header"],
     scopes_supported: [CONNECTOR_SCOPE],
@@ -258,10 +269,47 @@ export interface OAuthDoors {
   readonly challenge: string;
 }
 
+const RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource";
+
 const WELL_KNOWN_PATHS = new Set([
-  "/.well-known/oauth-protected-resource",
+  RESOURCE_METADATA_PATH,
   "/.well-known/oauth-authorization-server",
 ]);
+
+/**
+ * RFC 9728 §3.1 PATH INSERTION. A protected resource whose identifier carries a path publishes its
+ * metadata at `/.well-known/oauth-protected-resource` + that path — so this store's MCP door at
+ * `<origin>/<mount>/mcp` is documented at `/.well-known/oauth-protected-resource/<mount>/mcp`. A
+ * client constructs that URI from the URL it dialled, with no discovery hop, so it must answer.
+ *
+ * Returns the resource path (`/<mount>/mcp`) this URI documents, or undefined if the URI is not one.
+ *
+ * IT NEVER CONSULTS THE MOUNT TABLE, and that is the load-bearing property. A document served only
+ * for mounts that exist would answer differently for a live name than for an absent one, and an
+ * anonymous caller could then enumerate the store — the mount-existence oracle §12/T78 closed. The
+ * answer is a pure function of the request path and `publicUrl`, exactly as the two root documents
+ * are. Rails compare a ghost's response against a live mount's, response to response.
+ *
+ * ONE CANONICAL SPELLING. The segment must already be its own `encodeURIComponent` form, so
+ * `resource` echoes the byte sequence the caller sent rather than a re-encoding that might differ
+ * from the URL they are validating against. A non-canonical spelling is simply not this URI: it
+ * falls through to the uniform refusal, like any other unrouted path.
+ */
+const mcpResourcePathOf = (pathname: string): string | undefined => {
+  if (!pathname.startsWith(`${RESOURCE_METADATA_PATH}/`)) return undefined;
+  const segments = pathname.slice(RESOURCE_METADATA_PATH.length + 1).split("/");
+  if (segments.length !== 2 || segments[1] !== "mcp") return undefined;
+  const mount = segments[0] ?? "";
+  if (mount === "") return undefined;
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(mount);
+  } catch {
+    return undefined; // a malformed escape names no resource
+  }
+  if (encodeURIComponent(decoded) !== mount) return undefined;
+  return `/${mount}/mcp`;
+};
 
 const REGISTER_PATH = "/oauth/register";
 
@@ -321,10 +369,13 @@ export function makeOAuthDoors(options: OAuthOptions): OAuthDoors {
     "access-control-allow-origin": "*",
   } as const;
 
-  const documentFor = (pathname: string): Record<string, unknown> =>
-    pathname === "/.well-known/oauth-protected-resource"
+  const documentFor = (pathname: string): Record<string, unknown> => {
+    const resourcePath = mcpResourcePathOf(pathname);
+    if (resourcePath !== undefined) return protectedResourceDocument(publicUrl, resourcePath);
+    return pathname === RESOURCE_METADATA_PATH
       ? protectedResourceDocument(publicUrl)
       : authorizationServerDocument(publicUrl);
+  };
 
   const wellKnown = (pathname: string, req: IncomingMessage, res: ServerResponse): void => {
     if (req.method !== "GET" && req.method !== "HEAD") {
@@ -557,7 +608,10 @@ export function makeOAuthDoors(options: OAuthOptions): OAuthDoors {
     registration !== undefined && atRegisterPath(pathname);
 
   return {
-    owns: (pathname) => WELL_KNOWN_PATHS.has(pathname) || registers(pathname),
+    owns: (pathname) =>
+      WELL_KNOWN_PATHS.has(pathname) ||
+      mcpResourcePathOf(pathname) !== undefined ||
+      registers(pathname),
     challenge: challengeFor(publicUrl),
     handle(pathname, req, res) {
       if (registers(pathname)) {
