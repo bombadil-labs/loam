@@ -36,6 +36,7 @@ import {
   type OAuthToken,
 } from "./oauth-file.js";
 import { CSP, escapeHtml, page, sameSecret, type SessionGate } from "./session.js";
+import { AUTHORIZE_PATH, authorizeContinuation } from "./continuation.js";
 
 /** The one scope §37 ships. A scope LIST replaces it when a second one exists. */
 export const CONNECTOR_SCOPE = "loam.connector";
@@ -635,7 +636,7 @@ export function makeOAuthDoors(options: OAuthOptions): OAuthDoors {
 // redirects to the REGISTERED uri alone. A caller-supplied uri that failed the match is never a
 // redirect target and never reaches the page as displayed text either.
 
-export const AUTHORIZE_PATH = "/oauth/authorize";
+export { AUTHORIZE_PATH } from "./continuation.js";
 
 const atAuthorizePath = doorAt(AUTHORIZE_PATH);
 
@@ -820,13 +821,18 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
     // a bare GET here can be a SameSite=Lax cross-site top-level nav carrying the victim's cookie, and
     // rendering the consent page must not extend their session's idle window. `peek` reads without
     // touching — the same choice handlePost makes, so refused traffic never slides (session.ts).
+    const url = new URL(req.url ?? "", "http://loam.invalid");
     const session = gate.peek(req);
     if (session === undefined) {
-      const form = gate.loginForm(req);
+      // THE CONTINUATION, and it is why a person who signs in here is not stranded (T148). The form
+      // carries this request's own authorize parameters, filtered to the allowlist, so the login
+      // door can re-attach them to ITS OWN copy of this path once the password is right. It carries
+      // a query, never a destination — see continuation.ts for why that distinction is the fence.
+      const form = gate.loginForm(req, authorizeContinuation(url.search));
       htmlOut(res, 200, form.body, form.cookie);
       return;
     }
-    const params = new URL(req.url ?? "", "http://loam.invalid").searchParams;
+    const params = url.searchParams;
     const clientId = params.get("client_id") ?? "";
     const redirectUri = params.get("redirect_uri") ?? "";
     const state = params.get("state") ?? "";
