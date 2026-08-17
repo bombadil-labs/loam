@@ -61,9 +61,18 @@ export const VERBS: ReadonlySet<string> = new Set<Verb>(["write", "admin", "regi
 //    that somehow does. Two independent fail-closed points, on purpose.
 //  - NO NORMALIZATION, NO DECODING, NO CASE FOLDING. `Thread:foo`, `thread%3Afoo`, and `thread：foo`
 //    (fullwidth colon) are three DIFFERENT names, and none of them is inside `thread:`. This is not
-//    laxity: every entity id the store derives from the name is that same literal string, so any
+//    laxity: every ENTITY ID the store derives from the name is that same literal string, so any
 //    folding here would compare a folded form against an unfolded key and could admit a name whose
 //    deltas land outside the fence. The comparison and the derivation must run on one string.
+//
+// AND THE FENCE'S DISJOINTNESS DOES NOT CARRY TO THE GRAPHQL FIELD NAMESPACE. Read the bullet above
+// precisely — it is true of entity ids and FALSE of the served field. `legalNameFor` (gql.ts) maps
+// every `[^_A-Za-z0-9]` to `_` and `queryFieldFor` lowercases an initial capital, so the mapping is
+// MANY-TO-ONE: `x:Foo` and `x_Foo` are disjoint entity namespaces that both serve at the field
+// `x_Foo`. Two prefixes an operator believes are separate can therefore collide at the surface. That
+// fails CLOSED — `buildGqlSchema` refuses the second publisher, whoever it is, the operator
+// included — so the reachable harm is SQUATTING rather than capture. It is written here because the
+// next author to extend this fence will otherwise read the bullet above as covering the field too.
 //
 // This predicate fences ONE name. A registration carries THREE independently-chosen names — the
 // program, the reading, and an optional explicit entity — and each reaches a different part of the
@@ -404,6 +413,13 @@ export function grantsHeldBy(reactor: Reactor, author: string, operator?: string
     }
     if (subject !== author || verb === undefined || !VERBS.has(verb)) continue;
     if (operator !== undefined && d.claims.author !== operator) {
+      // ONLY THE OPERATOR MINTS REGISTER STANDING. `write` and `admin` are delegable through the
+      // admin chain, as they always have been. `register` is not, and the asymmetry is deliberate:
+      // an admin could otherwise sign itself `register` with a one-character prefix, and since the
+      // publish carries no request context the store would sign the result WITH THE OPERATOR'S OWN
+      // SEED — the operator's constitutional schemas superseded under the operator's key. Nobody
+      // decided to delegate that, so it is not delegated.
+      if (verb === "register") continue;
       const branch = new Set([d.id]);
       if (!grantHeld(ctx, STORE_ENTITY, d.claims.author, "admin", branch)) continue;
     }

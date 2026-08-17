@@ -187,7 +187,11 @@ describe("T174 — register standing, read from the ground", () => {
     await gw.close();
   });
 
-  it("...and an effective ADMIN's register grant DOES bind", async () => {
+  it("AND NEITHER DOES AN ADMIN'S — register standing is the operator's alone to mint", async () => {
+    // `write` and `admin` are delegable down the admin chain, as they always have been. `register`
+    // is not. An admin could otherwise sign itself register with a one-character prefix, and since
+    // the publish carries no request context the store signs the result with the OPERATOR'S seed —
+    // the operator's own constitutional schemas superseded under the operator's key.
     const gw = await open();
     await gw.append([
       signClaims(grantClaims(STORE_ENTITY, WRITER, "admin", OPERATOR, 100), OPERATOR_SEED),
@@ -196,6 +200,25 @@ describe("T174 — register standing, read from the ground", () => {
       signClaims(
         grantClaims(STORE_ENTITY, CONNECTOR, "register", WRITER, 101, "note:"),
         WRITER_SEED,
+      ),
+    ]);
+    expect(registerPrefixesOf(gw.reactor, CONNECTOR, OPERATOR)).toEqual([]);
+    // TWO-SIDED: the admin chain still carries `write`, so this is a narrowing of one verb rather
+    // than a change to how grants are honoured.
+    expect(grantsHeldBy(gw.reactor, CONNECTOR, OPERATOR)).toEqual([]);
+    await gw.append([
+      signClaims(grantClaims(STORE_ENTITY, CONNECTOR, "write", WRITER, 102), WRITER_SEED),
+    ]);
+    expect(grantsHeldBy(gw.reactor, CONNECTOR, OPERATOR).map((g) => g.verb)).toEqual(["write"]);
+    await gw.close();
+  });
+
+  it("...and the OPERATOR's own register grant binds, so the narrowing is not a ban", async () => {
+    const gw = await open();
+    await gw.append([
+      signClaims(
+        grantClaims(STORE_ENTITY, CONNECTOR, "register", OPERATOR, 101, "note:"),
+        OPERATOR_SEED,
       ),
     ]);
     expect(registerPrefixesOf(gw.reactor, CONNECTOR, OPERATOR)).toEqual(["note:"]);

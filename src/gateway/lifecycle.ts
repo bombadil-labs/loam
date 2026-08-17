@@ -534,7 +534,7 @@ export function registerImpl(
       schema,
       roots,
       origin: "manual",
-      lensName: schema.name ?? hyperschema.name,
+      lensName: lensNameFor(hyperschema, schema),
       ...(templates ? { mutations: templates } : {}),
       ...(writable ? { writable } : {}),
     },

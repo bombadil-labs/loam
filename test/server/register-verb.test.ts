@@ -16,6 +16,9 @@
 //  3. THE FENCE IS TWO-SIDED. A grant and a revocation move exactly one connection's standing; a
 //     bystander holding a different prefix is untouched by either.
 
+import { existsSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 
@@ -32,6 +35,8 @@ const OPERATOR = authorForSeed(OPERATOR_SEED);
 const THREAD_SEED = "70".repeat(32); // the connector granted `thread:`
 const NOTE_SEED = "e0".repeat(32); // the bystander connector, granted `note:`
 const BARE_SEED = "ba".repeat(32); // a token with no register standing at all
+const ADMIN_SEED = "ad".repeat(32); // an effective store admin
+const ADMIN = authorForSeed(ADMIN_SEED);
 const THREAD = authorForSeed(THREAD_SEED);
 const NOTE = authorForSeed(NOTE_SEED);
 
@@ -102,6 +107,7 @@ async function bench(): Promise<Bench> {
       "note-token": { actor: NOTE_SEED },
       "bare-token": { actor: BARE_SEED },
       "junk-token": { actor: "not-a-signing-seed" },
+      "admin-token": { actor: ADMIN_SEED },
     },
     port: 0,
     host: "127.0.0.1",
@@ -223,6 +229,12 @@ describe("T174 rails 2+3 — the prefix is a fence, and every escape draws ONE r
       const res = await b.register("thread-token", bodyFor(name));
       expect(res.status).toBe(403);
       expect(await errorsOf(res)).toEqual([REFUSAL]);
+      // THE DISCRIMINATING HALF. The refusal is deliberately non-discriminating, so "403 + that
+      // string" alone cannot tell "fenced out of a namespace it holds" from "never had standing at
+      // all" — and with the fence reverted this assertion would still pass. The same token, on the
+      // same bench, registering an IN-FENCE name is what makes the pair mean something.
+      const inside = await b.register("thread-token", bodyFor("thread:ok"));
+      expect(inside.status, "this token DOES hold register standing here").toBe(200);
     });
   }
 
@@ -316,7 +328,7 @@ describe("T174 rail 4 — authority before shape, under BOTH tiers", () => {
     expect(res.status).toBe(400);
     const errors = await errorsOf(res);
     expect(errors).not.toEqual([REFUSAL]);
-    expect(errors.join(" ")).toMatch(/no-such-op|op/);
+    expect(errors.join(" ")).toContain("no-such-op");
   });
 
   it("UNAUTHORIZED caller + the same malformed payload → the AUTHORITY refusal", async () => {
@@ -392,9 +404,13 @@ describe("T174 rail 5 — re-registration inside the fence evolves the type", ()
     // way to a bound surface, silently revoking a declared write door. The fix makes the door refuse
     // at the parse and name the template — so this is two-sided: the bad publish lands nothing, and
     // the writable field declared by the FIRST registration still accepts a write afterwards.
+    //
+    // AT THE OPERATOR TIER, because that is now the only tier where `mutations` exists at all: a
+    // scoped caller is refused the field outright, one gate earlier (see the code/namespace block
+    // below). The T96 defect lives in the template reader, which is tier-independent, so this
+    // exercises it where the field is still reachable.
     const b = await bench();
-    await b.grant(THREAD, "thread:");
-    expect((await b.register("thread-token", bodyFor("thread:groove"))).status).toBe(200);
+    expect((await b.register("op-token", bodyFor("thread:groove"))).status).toBe(200);
     expect(
       (
         await b.gql(
@@ -405,7 +421,7 @@ describe("T174 rail 5 — re-registration inside the fence evolves the type", ()
     ).toBeUndefined();
 
     const bad = await b.register(
-      "thread-token",
+      "op-token",
       bodyFor("thread:groove", {
         // `{ role, context, value }` is the exact shape parseClaimTemplates refuses.
         mutations: { water: { pointers: [{ role: "value", context: "watered", value: true }] } },
@@ -453,5 +469,159 @@ describe("T174 rails 6+7 — revocation binds at once, and it moves exactly one 
     expect(
       (await b.gql("op-token", `{ thread_one(entity: "thing:1") { _hex } }`)).errors,
     ).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// A REGISTRATION CARRIES CODE, AND A SCOPED CALLER MAY NOT SHIP IT.
+//
+// The fence above is about NAMESPACES. These two are not namespace problems, and no prefix could
+// have contained them:
+//
+//   `resolvers[].code` is directly-runnable ESM. `publishRegistrationImpl` calls `loadResolvers`
+//   BEFORE anything persists, and `esm.ts` imports it from a `data:` URL with no sandbox — that
+//   loader's own header states its premise, that only the OPERATOR's code ever loads here. A
+//   scoped grantee shipping a resolver breaks the premise and holds the gateway process: its
+//   filesystem, its network, the operator seed, the store file. And there is no taking it back —
+//   the ESM registry retains a `data:` module for the life of the process, so striking the grant
+//   unloads nothing.
+//
+//   `mutations` names GraphQL fields in a namespace shared with every other lens, unfenced by the
+//   schema name. A template called `user` makes the operator's later `User` registration fail
+//   `buildGqlSchema` outright — its QUERY field disappears with its mutation — and ordering is
+//   first-come by timestamp, so an operator EVOLVING a lens moves behind an earlier squat.
+//
+// Both are DEFERRED, not forbidden forever. Each wants its own fence and its own rails, and
+// resolvers additionally want the confinement `esm.ts` says was deliberately never built.
+// An OPERATOR-token registration keeps both, exactly as before.
+// ---------------------------------------------------------------------------------------------
+describe("T174 — a scoped caller ships no code and claims no global field name", () => {
+  const RESOLVER = (marker: string): Record<string, unknown> => ({
+    color: {
+      rung: "a",
+      type: "string",
+      // If this module is ever imported, the file appears. Its ABSENCE is the assertion.
+      code:
+        `import { writeFileSync } from "node:fs";\n` +
+        `writeFileSync(${JSON.stringify(marker)}, String(process.pid));\n` +
+        `export default () => "owned";\n`,
+    },
+  });
+
+  it("RESOLVERS ARE REFUSED, and the code DOES NOT RUN", async () => {
+    const marker = join(mkdtempSync(join(tmpdir(), "loam-t174-rce-")), "pwned");
+    const b = await bench();
+    await b.grant(THREAD, "thread:");
+    const res = await b.register(
+      "thread-token",
+      bodyFor("thread:pwn", { resolvers: RESOLVER(marker) }),
+    );
+    expect(res.status).toBe(400);
+    const errors = (await errorsOf(res)).join(" ");
+    expect(errors).toContain("resolvers"); // the field is NAMED, so a caller can act on it
+    expect(errors).not.toBe(REFUSAL); // shape, not authority: this caller HAS standing
+    // The load happens before persistence, so "nothing persisted" is not the property. The
+    // property is that the module was never imported at all.
+    expect(existsSync(marker), "the resolver's ESM must never have been imported").toBe(false);
+    // ...and no surface appeared either.
+    expect(
+      (await b.gql("op-token", `{ thread_pwn(entity: "thing:1") { _hex } }`)).errors,
+    ).toBeDefined();
+  });
+
+  it("MUTATION TEMPLATES ARE REFUSED — the field namespace is global and unfenced", async () => {
+    const b = await bench();
+    await b.grant(THREAD, "thread:");
+    const res = await b.register(
+      "thread-token",
+      bodyFor("thread:squat", {
+        mutations: { user: { pointers: [{ role: "color", at: { arg: "on" }, context: "color" }] } },
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect((await errorsOf(res)).join(" ")).toContain("mutations");
+  });
+
+  it("...and the squat it prevents: the operator's own lens still builds afterwards", async () => {
+    // Two-sided, and this is the half that says why the refusal matters. `user` is the field a
+    // lens named `User` answers at; a squat on it took the operator's QUERY field down too.
+    const b = await bench();
+    await b.grant(THREAD, "thread:");
+    await b.register(
+      "thread-token",
+      bodyFor("thread:squat", {
+        mutations: { user: { pointers: [{ role: "color", at: { arg: "on" }, context: "color" }] } },
+      }),
+    );
+    const operatorLens = await b.register("op-token", bodyFor("User"));
+    expect(operatorLens.status).toBe(200);
+    expect((await operatorLens.json()) as { bound: boolean }).toMatchObject({ bound: true });
+    expect(
+      (await b.gql("op-token", `{ user(entity: "thing:1") { _hex } }`)).errors,
+    ).toBeUndefined();
+  });
+
+  it("THE OPERATOR KEEPS BOTH — nothing an operator could do yesterday is refused today", async () => {
+    const b = await bench();
+    const res = await b.register(
+      "op-token",
+      bodyFor("Rock", {
+        mutations: {
+          paint: { pointers: [{ role: "color", at: { arg: "on" }, context: "color" }] },
+        },
+        resolvers: {
+          color: { rung: "a", type: "string", code: `export default () => "granite";\n` },
+        },
+      }),
+    );
+    expect(res.status, JSON.stringify(await res.clone().json())).toBe(200);
+    expect((await res.json()) as { bound: boolean }).toMatchObject({ bound: true });
+  });
+
+  it("the refusals are still gated on standing: an UNAUTHORIZED caller gets AUTHORITY", async () => {
+    // Ordering under the new tier. A stranger shipping a resolver must not learn that `resolvers`
+    // is even a field — it draws the same byte-identical refusal it always has.
+    const marker = join(mkdtempSync(join(tmpdir(), "loam-t174-rce2-")), "pwned");
+    const b = await bench();
+    const res = await b.register(
+      "bare-token",
+      bodyFor("thread:pwn", { resolvers: RESOLVER(marker) }),
+    );
+    expect(res.status).toBe(403);
+    expect(await errorsOf(res)).toEqual([REFUSAL]);
+    expect(existsSync(marker)).toBe(false);
+  });
+});
+
+describe("T174 — only the OPERATOR mints register standing", () => {
+  it("an ADMIN-authored register grant confers nothing", async () => {
+    // An effective admin signing itself `register` with prefix "User" would re-register the
+    // operator's own constitutional schema — and `performRegistration` passes no context, so the
+    // publish is signed with the OPERATOR'S seed. The operator's law would be superseded under
+    // the operator's own key. Delegating a constitutional authority is a decision nobody made.
+    const b = await bench();
+    const adminGrant = signClaims(
+      grantClaims(STORE_ENTITY, ADMIN, "admin", OPERATOR, 500),
+      OPERATOR_SEED,
+    );
+    await b.gateway.append([adminGrant]);
+    await b.gateway.append([
+      signClaims(grantClaims(STORE_ENTITY, ADMIN, "register", ADMIN, 501, "User"), ADMIN_SEED),
+    ]);
+    const res = await b.register("admin-token", bodyFor("User"));
+    expect(res.status).toBe(403);
+    expect(await errorsOf(res)).toEqual([REFUSAL]);
+  });
+
+  it("...while the same grant signed by the OPERATOR does confer it", async () => {
+    const b = await bench();
+    await b.gateway.append([
+      signClaims(grantClaims(STORE_ENTITY, ADMIN, "admin", OPERATOR, 500), OPERATOR_SEED),
+      signClaims(
+        grantClaims(STORE_ENTITY, ADMIN, "register", OPERATOR, 501, "User"),
+        OPERATOR_SEED,
+      ),
+    ]);
+    expect((await b.register("admin-token", bodyFor("User"))).status).toBe(200);
   });
 });

@@ -410,12 +410,64 @@ function registerStanding(
 //       one field that points somewhere no name reaches — unchecked, it plants an operator-signed
 //       registration at `hyperschema:User`.
 //
+// `roots` is DELIBERATELY UNFENCED, and that grants no new reach. A root widens what this lens
+// gathers, but every row it could reach is already listable by any tokened caller through the
+// operator's own lenses, whatever roots those name — so a scoped caller reads nothing here it could
+// not read anyway. What it does do is widen the shared PROGRAM MATERIALIZATION, which is a cost
+// question (H8) rather than an authorization one, and belongs to whichever ticket prices it.
+//
 // A scoped caller may still SEND `entity`; it may only send the one it was going to get anyway.
+//
+// AND THE FENCE IS NOT THE WHOLE GATE. Two fields of a registration are not namespace problems at
+// all, and no prefix could ever have contained them — see `scopedRegistrationDefect` below.
 function registerFenceAdmits(fence: readonly string[], input: RegistrationInput): boolean {
   const inside = (name: string): boolean => fence.some((prefix) => fenceAdmits(prefix, name));
   if (!inside(input.hyperschema.name)) return false;
   if (!inside(lensNameFor(input.hyperschema, input.schema))) return false;
   return input.entity === undefined || input.entity === schemaEntityFor(input.hyperschema);
+}
+
+// WHAT A SCOPED CALLER MAY NOT SHIP AT ALL, whatever namespace it holds. The fence above partitions
+// NAMES; these two fields reach past any name, so they are refused outright rather than fenced.
+//
+//   `resolvers` is CODE. `resolvers[].code` is directly-runnable ESM, and `publishRegistrationImpl`
+//   calls `loadResolvers` BEFORE anything persists — so merely ASKING runs it. `esm.ts` imports it
+//   from a `data:` URL with no confinement, and that loader's own header states the premise it was
+//   built on: only the OPERATOR's code ever loads here, so no parallel sandbox was invented. A
+//   scoped grantee shipping a resolver breaks that premise and holds the gateway process — its
+//   filesystem, its network, the operator seed, the store file. Nor could a grant be taken back:
+//   Node's ESM registry retains a `data:` module for the life of the process, so striking the grant
+//   unloads nothing. Refusing to load is the only revocation there is.
+//
+//   `mutations` names GRAPHQL FIELDS, in a namespace shared across every lens and keyed by nothing
+//   the schema name fences. A template called `user` makes the operator's later `User` registration
+//   fail `buildGqlSchema` outright — its QUERY field disappears along with its mutation — and the
+//   replay orders by timestamp, so an operator EVOLVING an existing lens moves behind an earlier
+//   squat. A scoped caller cannot be allowed to claim a global name first.
+//
+// DEFERRED, NOT FORBIDDEN FOREVER. Each wants its own ticket, its own fence, and its own rails:
+// templates want a field-namespace fence of the same shape as this one, and resolvers additionally
+// want the confinement `esm.ts` says was deliberately never built (§6 / §24's pools). An
+// OPERATOR-token registration keeps both, unchanged.
+//
+// Reported as a SHAPE defect naming the field, so an authorized caller learns what to remove. That
+// is safe precisely because only a caller who already cleared the authority gate can see it.
+function scopedRegistrationDefect(input: RegistrationInput): string | undefined {
+  if (input.resolvers !== undefined) {
+    return (
+      "register: `resolvers` carries executable code, and a scoped registration may not ship it — " +
+      "resolvers run in the gateway process and load before anything persists. Remove the field; " +
+      "an operator token may still publish resolvers."
+    );
+  }
+  if (input.mutations !== undefined) {
+    return (
+      "register: `mutations` names fields in a namespace shared by every schema this store serves, " +
+      "which no prefix fences — a scoped registration may not claim one. Remove the field; an " +
+      "operator token may still publish mutation templates."
+    );
+  }
+  return undefined;
 }
 
 async function performRegistration(
@@ -434,8 +486,12 @@ async function performRegistration(
   // never draws a shape complaint and cannot fingerprint the registration format by probing.
   // A caller WITH standing is entitled to the shape complaint, whatever name it sent.
   const input = parseRegistrationInput(raw);
-  if (fence.length > 0 && !registerFenceAdmits(fence, input)) {
-    throw new NotPermittedToRegister(REGISTRATION_REFUSAL);
+  if (fence.length > 0) {
+    // The FIELD gate runs before the NAME gate on purpose: `resolvers` is refused whatever it is
+    // called, so a caller cannot learn anything about the fence by attaching code to a name probe.
+    const defect = scopedRegistrationDefect(input);
+    if (defect !== undefined) throw new Error(defect);
+    if (!registerFenceAdmits(fence, input)) throw new NotPermittedToRegister(REGISTRATION_REFUSAL);
   }
   const outcome = await gateway.publishRegistration(
     input.hyperschema,
