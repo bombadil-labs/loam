@@ -213,6 +213,23 @@ you and your token.</p>
 // lets a browser page ask, and lets it READ a refusal instead of a mute CORS error. The
 // preflight is knowledge-free by the same logic that keeps refusals uniform below.
 const CORS = { "access-control-allow-origin": "*" } as const;
+
+// The MCP revisions this door speaks — every one in which a Tool may CARRY the annotations the tool
+// list declares. `readOnlyHint` arrived in 2025-03-26; under 2024-11-05 a Tool is
+// name/description/inputSchema and nothing else. So a client told "2024-11-05" while being handed a
+// readOnlyHint has negotiated a protocol in which the field it is asked to honour does not exist —
+// and that field is the second guard against a replayed write, the one the runtime holds rather than
+// us. Newest first: an unrecognised or absent request is answered with the newest we speak, never
+// with a revision that cannot express what we declare.
+//
+// These three constants live at module scope, and are EXPORTED, because two methods now answer with
+// them: `initialize`, which negotiates, and `server/discover`, which announces before any
+// negotiation happens. A client plans its whole session on what discover says, so the two answers
+// must be the same values rather than two copies of them — an announcement the door does not honour
+// is a report that can be false (H7), and no later exchange could catch it.
+export const MCP_PROTOCOLS: readonly string[] = ["2025-06-18", "2025-03-26"];
+export const MCP_CAPABILITIES = { tools: {} } as const;
+export const MCP_SERVER_INFO = { name: "loam", version: "0.2.0" } as const;
 const preflight = (res: ServerResponse): void => {
   res.writeHead(204, {
     ...CORS,
@@ -720,15 +737,6 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     }
   };
 
-  // The MCP revisions this door speaks — every one in which a Tool may CARRY the annotations below.
-  // `readOnlyHint` arrived in 2025-03-26; under 2024-11-05 a Tool is name/description/inputSchema and
-  // nothing else. So a client told "2024-11-05" while being handed a readOnlyHint has negotiated a
-  // protocol in which the field it is asked to honour does not exist — and that field is the second
-  // guard against a replayed write, the one the runtime holds rather than us. Newest first: an
-  // unrecognised or absent request is answered with the newest we speak, never with a revision that
-  // cannot express what we declare.
-  const MCP_PROTOCOLS: readonly string[] = ["2025-06-18", "2025-03-26"];
-
   // The MCP tools: the same two verbs the gateway speaks, in JSON-RPC clothes. `annotations` are
   // part of the authority, not decoration: a shell reads `readOnlyHint: true` as a licence to cache
   // and REPLAY a call, and an explicit `false` is what makes its own machinery refuse to cache a
@@ -876,8 +884,37 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         reply({
           protocolVersion:
             typeof asked === "string" && MCP_PROTOCOLS.includes(asked) ? asked : MCP_PROTOCOLS[0],
-          capabilities: { tools: {} },
-          serverInfo: { name: "loam", version: "0.2.0" },
+          capabilities: MCP_CAPABILITIES,
+          serverInfo: MCP_SERVER_INFO,
+        });
+        return;
+      }
+      // The first word a real client says (MCP draft, `server/discover`): read the supported
+      // protocol revisions, the capabilities and the identity in ONE call, before anything else.
+      // A client that reads -32601 here may treat the connection as dead and cache that, which is
+      // what two Anthropic clients did (T178).
+      //
+      // Every value is the store's own and the SAME value initialize answers — this method
+      // announces, it does not decide. It adds no support for a newer revision: it reports what is
+      // supported so a client can choose, which is precisely the honest answer to a client asking
+      // for a revision the store does not speak.
+      case "server/discover": {
+        // Silence for a notification, like every other method: an id-less request is not owed a
+        // reply, and answering one would be a message the client's dispatcher cannot place.
+        if (isNotification) {
+          res.writeHead(202, CORS).end();
+          return;
+        }
+        reply({
+          resultType: "complete",
+          supportedVersions: [...MCP_PROTOCOLS],
+          capabilities: MCP_CAPABILITIES,
+          instructions:
+            "This is a Loam store. `loam_query` reads it with GraphQL and `loam_mutate` writes " +
+            "to it as your token's identity; call tools/list for their schemas. Every answer is " +
+            "resolved through the store's registered schemas, so a field you cannot see is a " +
+            "field you are not granted.",
+          _meta: { "io.modelcontextprotocol/serverInfo": MCP_SERVER_INFO },
         });
         return;
       }
