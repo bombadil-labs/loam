@@ -3,11 +3,13 @@
   "edges": [],
   "id": "T176",
   "phase": "P2",
-  "rails": [],
+  "rails": [
+    "test/server/oauth-bare-paths.test.ts"
+  ],
   "scope": [
     "src/server/oauth.ts",
     "src/server/http.ts"
   ],
-  "status": "todo",
+  "status": "doing",
   "title": "The OAuth doors are unreachable at the paths a real client guesses, and the guess meets a 401"
 }
