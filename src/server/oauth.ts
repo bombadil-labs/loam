@@ -265,6 +265,28 @@ const WELL_KNOWN_PATHS = new Set([
 
 const REGISTER_PATH = "/oauth/register";
 
+/**
+ * The BARE spellings of the three connector doors, beside the documented `/oauth/*` ones (T176).
+ *
+ * A real MCP client does not read `registration_endpoint` out of the RFC 8414 document: it joins
+ * `/register` onto the authorization server's origin and POSTs there. That path was unrouted, so it
+ * fell past every server-level door into the mount router, where `register` read as a mount name and
+ * drew the uniform 401 — and the connector died on its first request.
+ *
+ * ONE SEGMENT SHADOWS NO MOUNT. Mount doors live at `/:mount/:verb`, two segments, so a bare name
+ * never resolved to anything — the same argument `/login` and `/admin` already stand on.
+ *
+ * AND THE FALLTHROUGH IS UNTOUCHED. These paths become ROUTED; nothing else changes. A name that is
+ * not one of them still falls into the uniform 401, because a 404 there would reopen the
+ * mount-existence oracle §12/T78 closed on purpose (`test/server/oauth-bare-paths.test.ts` compares
+ * an unrouted path against a real mount's refusal, byte for byte).
+ *
+ * The bare form is DERIVED from the documented one rather than spelled a second time, so the two can
+ * never drift apart — and so a door added later cannot be routed at one spelling and not the other.
+ */
+const isDoorPath = (pathname: string, documented: string): boolean =>
+  pathname === documented || pathname === documented.slice("/oauth".length);
+
 /** oauth's cap is a door decision (16 KiB — a registration is a few hundred bytes). */
 const readBody = (req: IncomingMessage): Promise<string | undefined> =>
   readBodyLenient(req, MAX_BODY);
@@ -508,12 +530,18 @@ export function makeOAuthDoors(options: OAuthOptions): OAuthDoors {
     }
   };
 
+  // BOTH halves take the alias, and `handle` is the half that matters: `wellKnown` answers the
+  // authorization-server document for every path that is not the protected-resource one, so an alias
+  // added to `owns` alone would serve a 200 discovery document at `/register` — a failure that looks
+  // like success, and worse than the 401 it replaced.
+  const registers = (pathname: string): boolean =>
+    registration !== undefined && isDoorPath(pathname, REGISTER_PATH);
+
   return {
-    owns: (pathname) =>
-      WELL_KNOWN_PATHS.has(pathname) || (registration !== undefined && pathname === REGISTER_PATH),
+    owns: (pathname) => WELL_KNOWN_PATHS.has(pathname) || registers(pathname),
     challenge: challengeFor(publicUrl),
     handle(pathname, req, res) {
-      if (registration !== undefined && pathname === REGISTER_PATH) {
+      if (registers(pathname)) {
         void handleRegister(req, res);
         return;
       }
@@ -883,7 +911,7 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
   };
 
   return {
-    owns: (pathname) => pathname === AUTHORIZE_PATH,
+    owns: (pathname) => isDoorPath(pathname, AUTHORIZE_PATH),
     async handle(pathname, req, res) {
       try {
         if (req.method === "GET") {
@@ -1235,7 +1263,7 @@ export function makeTokenDoor(options: TokenDoorOptions): TokenDoor {
     readBody(req).then((body) => parseUrlEncoded(body ?? ""));
 
   return {
-    owns: (pathname) => pathname === TOKEN_PATH,
+    owns: (pathname) => isDoorPath(pathname, TOKEN_PATH),
     resolve,
     async handle(pathname, req, res) {
       if (req.method !== "POST") {
