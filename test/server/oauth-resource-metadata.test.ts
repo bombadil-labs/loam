@@ -141,6 +141,25 @@ describe("T177 — (2) two mounts, two documents, neither readable as the other"
     expect(garden["authorization_servers"]).toEqual(meadow["authorization_servers"]);
   });
 
+  it("the advertised identifier IS the served door — the two literals finally meet", async () => {
+    // Every other assertion in this file compares `resource` to a hand-written literal, and posts
+    // to a separately hand-written path. The two never touch, so a door that MOVED would leave the
+    // document advertising an identifier nothing serves and every one of them still green — the
+    // more so because an absent mount answers the same 401 a live one does, so a 401 proves nothing
+    // about whether a door is there. This rail closes that: it takes the path out of the document's
+    // own `resource` value and drives it with a credential, so only a real MCP door can answer.
+    const base = await served();
+    const advertised = doc(await get(`${base}${WELL_KNOWN}/garden/mcp`))["resource"] as string;
+    const res = await fetch(`${base}${pathOf(advertised)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer op-token" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { result?: { tools?: unknown[] } };
+    expect(Array.isArray(body.result?.tools)).toBe(true);
+  });
+
   it("the bare well-known path is untouched — it still names the store", async () => {
     const base = await served();
     const store = doc(await get(`${base}${WELL_KNOWN}`));
@@ -171,11 +190,14 @@ describe("T177 — (4) the metadata surface cannot enumerate mounts", () => {
     const base = await served();
     const live = await get(`${base}${WELL_KNOWN}/garden/mcp`);
     const ghost = await get(`${base}${WELL_KNOWN}/nowhere-at-all/mcp`);
-    // Response against response, never against a literal: same status, same headers a client can
-    // key on, and a body that differs ONLY in the name the caller themselves supplied.
+    // Response against response, never against a literal: same status, the three headers a client
+    // or a cache keys on, and a body that differs ONLY in the name the caller themselves supplied.
     expect(ghost.status).toBe(live.status);
     expect(ghost.headers.get("content-type")).toBe(live.headers.get("content-type"));
     expect(ghost.headers.get("cache-control")).toBe(live.headers.get("cache-control"));
+    expect(ghost.headers.get("access-control-allow-origin")).toBe(
+      live.headers.get("access-control-allow-origin"),
+    );
     expect(ghost.text.replace("/nowhere-at-all/", "/garden/")).toBe(live.text);
     // Positive control: the substitution above is not vacuous — the two bodies really did differ.
     expect(ghost.text).not.toBe(live.text);
@@ -204,6 +226,11 @@ describe("T177 — (4) the metadata surface cannot enumerate mounts", () => {
 
 describe("T177 — (5) end to end: challenge → document → registration, real requests only", () => {
   it("a client that reads only the 401's header reaches a 201 from the registration door", async () => {
+    // THIS TEST IS GREEN WITHOUT T177, and says so rather than borrowing the ticket's credit. The
+    // challenge still names the store-wide document (see this file's header), so every hop below
+    // runs on T133's and T176's work. It is a regression rail for that flow, not a proof of this
+    // one. The test after it is the path-inserted flow the live client actually took, and that one
+    // is red without this ticket.
     const base = await served();
 
     // 1. The client dials the MCP door with no token and is refused.
