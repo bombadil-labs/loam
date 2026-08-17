@@ -15,8 +15,8 @@ const patches = [
   },
   {
     file: "src/server/http.ts",
-    pattern: /serverInfo: \{ name: "loam", version: "[^"]+" \}/,
-    replacement: `serverInfo: { name: "loam", version: "${version}" }`,
+    pattern: /const MCP_SERVER_INFO = \{ name: "loam", version: "[^"]+" \}/,
+    replacement: `const MCP_SERVER_INFO = { name: "loam", version: "${version}" }`,
   },
 ];
 
