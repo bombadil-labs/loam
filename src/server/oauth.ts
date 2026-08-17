@@ -283,9 +283,28 @@ const REGISTER_PATH = "/oauth/register";
  *
  * The bare form is DERIVED from the documented one rather than spelled a second time, so the two can
  * never drift apart — and so a door added later cannot be routed at one spelling and not the other.
+ *
+ * The derivation is a fixed-width slice, so it is only meaningful under `/oauth/`. The prefix is
+ * therefore an INVARIANT, checked once at module load rather than trusted to every future call site:
+ * a door at `/oauth2/x` or a reuse on `/session/token` would otherwise derive a garbage alias in
+ * silence, and `/session/token` in particular would claim the bare `/token` for the wrong door.
+ * Matching stays EXACT — never a prefix or suffix test, so `/anymount/register` and `/register/extra`
+ * belong to no door.
  */
-const isDoorPath = (pathname: string, documented: string): boolean =>
-  pathname === documented || pathname === documented.slice("/oauth".length);
+const OAUTH_PREFIX = "/oauth";
+
+const doorAt = (documented: string): ((pathname: string) => boolean) => {
+  if (!documented.startsWith(`${OAUTH_PREFIX}/`)) {
+    throw new Error(
+      `a connector door is named "${OAUTH_PREFIX}/<door>", and "${documented}" is not — ` +
+        `its bare alias cannot be derived by dropping "${OAUTH_PREFIX}"`,
+    );
+  }
+  const bare = documented.slice(OAUTH_PREFIX.length);
+  return (pathname) => pathname === documented || pathname === bare;
+};
+
+const atRegisterPath = doorAt(REGISTER_PATH);
 
 /** oauth's cap is a door decision (16 KiB — a registration is a few hundred bytes). */
 const readBody = (req: IncomingMessage): Promise<string | undefined> =>
@@ -535,7 +554,7 @@ export function makeOAuthDoors(options: OAuthOptions): OAuthDoors {
   // added to `owns` alone would serve a 200 discovery document at `/register` — a failure that looks
   // like success, and worse than the 401 it replaced.
   const registers = (pathname: string): boolean =>
-    registration !== undefined && isDoorPath(pathname, REGISTER_PATH);
+    registration !== undefined && atRegisterPath(pathname);
 
   return {
     owns: (pathname) => WELL_KNOWN_PATHS.has(pathname) || registers(pathname),
@@ -563,6 +582,8 @@ export function makeOAuthDoors(options: OAuthOptions): OAuthDoors {
 // redirect target and never reaches the page as displayed text either.
 
 export const AUTHORIZE_PATH = "/oauth/authorize";
+
+const atAuthorizePath = doorAt(AUTHORIZE_PATH);
 
 /**
  * How long a minted authorization code lives. RFC 6749 §4.1.2 recommends a 10-minute maximum; a Loam
@@ -911,7 +932,7 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
   };
 
   return {
-    owns: (pathname) => isDoorPath(pathname, AUTHORIZE_PATH),
+    owns: atAuthorizePath,
     async handle(pathname, req, res) {
       try {
         if (req.method === "GET") {
@@ -960,6 +981,8 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
 // standing too. It never touches the connector's past deltas — they keep naming their author.
 
 const TOKEN_PATH = "/oauth/token";
+
+const atTokenPath = doorAt(TOKEN_PATH);
 
 /** The connector identity a presented bearer token resolves to. The `actor` is a SIGNING SEED. */
 export interface ConnectorIdentity {
@@ -1263,7 +1286,7 @@ export function makeTokenDoor(options: TokenDoorOptions): TokenDoor {
     readBody(req).then((body) => parseUrlEncoded(body ?? ""));
 
   return {
-    owns: (pathname) => isDoorPath(pathname, TOKEN_PATH),
+    owns: atTokenPath,
     resolve,
     async handle(pathname, req, res) {
       if (req.method !== "POST") {

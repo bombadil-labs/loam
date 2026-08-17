@@ -16,12 +16,16 @@
 // refusal — response against response, never against a literal, so the rail cannot drift green while
 // both answers change together. That rail fails if this fix is ever widened into a 404.
 //
+// THE OPT-IN NEGATIVE IS ASSERTED HERE, not borrowed. `oauth-discovery.test.ts` enumerates the
+// `/oauth/*` spellings alone and names no bare path, so it cannot see these three at all — and the
+// configuration it does not reach (publicUrl set, connectors ABSENT) is the one where an alias wired
+// into `owns` but not into `handle` serves a 200 authorization-server document at `/register`. So
+// this file stages that server itself.
+//
 // What this file deliberately does NOT assert, and which rail closes each gap:
 //   - Registration validation, consent's redirect fence, redemption, PKCE, revocation. Those are
 //     phases 13-15's own frozen rail files (T134, T135, T136, T148, T167). This file asserts only
 //     that a bare path reaches the SAME door, and lets that door's rails speak for its behaviour.
-//   - The opt-in negative (publicUrl set, connectors absent). The aliases are declared inside the
-//     same `registration !== undefined` guard as `/oauth/register`, so phase 12's rail still owns it.
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -95,6 +99,43 @@ async function serveConnectorDoors(): Promise<Served> {
     publicUrl: "https://store.example",
     connectors: { home, allowRedirectOrigins: [ALLOW_ORIGIN] },
     users: { home, mount: MOUNT },
+  });
+  handles.push(handle);
+  return { base: handle.url, home };
+}
+
+/**
+ * A live serve() with `publicUrl` but NO `connectors` — §37 configured only as far as the two
+ * discovery documents. All three doors are shut, so all six spellings must fall through untouched.
+ */
+async function serveWithoutConnectors(): Promise<Served> {
+  const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
+  gateways.push(gateway);
+  const handle = await serve({
+    mounts: { [MOUNT]: gateway },
+    tokens: { "op-token": { operator: true } },
+    port: 0,
+    host: "127.0.0.1",
+    publicUrl: "https://store.example",
+  });
+  handles.push(handle);
+  return { base: handle.url, home: "" };
+}
+
+/** A live serve() whose ONLY mount is literally named `register` — the shadowing probe. */
+async function serveMountNamedRegister(): Promise<Served> {
+  const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
+  gateways.push(gateway);
+  const home = mkdtempSync(join(tmpdir(), "loam-bare-shadow-"));
+  homes.push(home);
+  initHome(home, OPERATOR_SEED);
+  const handle = await serve({
+    mounts: { register: gateway },
+    tokens: { "op-token": { operator: true } },
+    port: 0,
+    host: "127.0.0.1",
+    publicUrl: "https://store.example",
+    connectors: { home, allowRedirectOrigins: [ALLOW_ORIGIN] },
   });
   handles.push(handle);
   return { base: handle.url, home };
@@ -240,9 +281,26 @@ describe("the bare OAuth paths a real MCP client composes", () => {
     );
     expect(mountExists.status).toBe(401);
 
-    // A neighbour of each alias, plus a name that is nothing at all. `/oauth` is the sharpest case:
-    // it is the PREFIX of all three documented doors and must stay unrouted.
-    for (const path of ["/nonsense", "/registerx", "/authorizex", "/tokenx", "/oauth"]) {
+    // The negative set covers every way an alias could be matched too loosely, not only the suffix:
+    //   - `/default/register` and `/x/register` catch a PREFIX-widened match. A helper that used
+    //     `endsWith` instead of an exact compare passes every other rail in this file while making
+    //     `/anymount/register` answer the registration door with a 201. `/default/register` is also
+    //     the shadowing probe's mirror: a two-segment path belongs to the mount router, never a door.
+    //   - `/register/` and `/register/extra` catch a match that ignores what follows the name.
+    //   - `/Register` pins case-sensitivity.
+    //   - `/oauth` is the PREFIX of all three documented doors and must stay unrouted.
+    for (const path of [
+      "/nonsense",
+      "/registerx",
+      "/authorizex",
+      "/tokenx",
+      "/oauth",
+      "/default/register",
+      "/x/register",
+      "/register/",
+      "/register/extra",
+      "/Register",
+    ]) {
       const unrouted = await fingerprint(await fetch(`${base}${path}`, { redirect: "manual" }));
       expect(unrouted, `${path} must be indistinguishable from a real mount's refusal`).toEqual(
         mountExists,
@@ -255,7 +313,17 @@ describe("the bare OAuth paths a real MCP client composes", () => {
       await fetch(`${base}/${MOUNT}/graphql`, { method: "POST", redirect: "manual" }),
     );
     expect(mountPost.status).toBe(401);
-    for (const path of ["/registerx", "/authorizex", "/tokenx", "/oauth"]) {
+    for (const path of [
+      "/registerx",
+      "/authorizex",
+      "/tokenx",
+      "/oauth",
+      "/default/register",
+      "/x/register",
+      "/register/",
+      "/register/extra",
+      "/Register",
+    ]) {
       const unrouted = await fingerprint(
         await fetch(`${base}${path}`, { method: "POST", redirect: "manual" }),
       );
@@ -263,5 +331,64 @@ describe("the bare OAuth paths a real MCP client composes", () => {
         mountPost,
       );
     }
+  });
+
+  // The opt-in negative, and the mutant it is here to kill: an alias wired into `owns` but not into
+  // `handle` would fall to `wellKnown`, which answers the authorization-server document for every
+  // path it does not recognise — a 200 discovery document at `/register`, in the one configuration no
+  // other rail in this repo visits.
+  it("with connectors absent, all six spellings still draw the uniform 401", async () => {
+    const { base } = await serveWithoutConnectors();
+
+    // The discovery documents DO answer here — so the server is genuinely §37-configured, and a pass
+    // below cannot come from a store where nothing is wired at all.
+    const discovery = await fetch(`${base}/.well-known/oauth-authorization-server`);
+    expect(discovery.status).toBe(200);
+
+    const mountExists = await fingerprint(
+      await fetch(`${base}/${MOUNT}/graphql`, { redirect: "manual" }),
+    );
+    expect(mountExists.status).toBe(401);
+
+    for (const path of [
+      "/register",
+      "/authorize",
+      "/token",
+      "/oauth/register",
+      "/oauth/authorize",
+      "/oauth/token",
+    ]) {
+      for (const method of ["GET", "POST"]) {
+        const shut = await fingerprint(
+          await fetch(`${base}${path}`, { method, redirect: "manual" }),
+        );
+        expect(shut, `${method} ${path} must be shut where connectors are absent`).toEqual(
+          method === "GET"
+            ? mountExists
+            : await fingerprint(
+                await fetch(`${base}/${MOUNT}/graphql`, { method: "POST", redirect: "manual" }),
+              ),
+        );
+      }
+    }
+  });
+
+  // The load-bearing claim in oauth.ts is that one segment shadows no mount. A store whose only mount
+  // IS named `register` proves it: the mount answers at `/register/graphql`, and the door answers at
+  // the bare `/register`, in the same process.
+  it("a mount named `register` still routes, and the bare door answers beside it", async () => {
+    const { base, home } = await serveMountNamedRegister();
+
+    const mount = await fetch(`${base}/register/graphql`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer op-token" },
+      body: JSON.stringify({ query: "{ __typename }" }),
+    });
+    expect(mount.status).toBe(200);
+
+    const door = await register(base, "/register");
+    expect(door.status).toBe(201);
+    const clientId = ((await door.json()) as Record<string, unknown>)["client_id"] as string;
+    expect(clientFor(readOAuthFile(home), clientId)).toBeDefined();
   });
 });
