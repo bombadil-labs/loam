@@ -52,6 +52,7 @@ import {
   type ScryptParams,
 } from "./credentials.js";
 import { rolesOf, userNameDefect, type UserRole } from "./users.js";
+import { CONTINUE_FIELD, authorizeContinuation, resumeTarget } from "./continuation.js";
 import {
   DEFAULT_LIMIT,
   delayMs,
@@ -159,8 +160,16 @@ export interface SessionGate {
   admit(req: IncomingMessage): SessionView | undefined;
   /** Phase-6 provenance: did this request come from this store's own page? */
   fromThisPage(req: IncomingMessage): boolean;
-  /** The stateless login form to render when no session is presented, and the pre-session cookie to set. */
-  loginForm(req: IncomingMessage): { readonly body: string; readonly cookie: string };
+  /**
+   * The stateless login form to render when no session is presented, and the pre-session cookie to
+   * set. `continuation` is a filtered authorize QUERY the form round-trips (T148) — the login POST
+   * re-attaches it to the authorize path itself, so a person who signs in here resumes consent
+   * instead of landing on a page that forgot where they were going.
+   */
+  loginForm(
+    req: IncomingMessage,
+    continuation?: string,
+  ): { readonly body: string; readonly cookie: string };
 }
 
 export interface UserDoors {
@@ -705,6 +714,7 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
     status: number,
     message: string,
     user = "",
+    continuation?: string,
   ): void => {
     if (!isFormNavigation(req)) {
       json(res, status, { errors: [message] });
@@ -720,7 +730,7 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
             `<h1>Sign in.</h1>\n<p>${escapeHtml(message)}</p>\n` +
               `<p><a href="/login">Go to the sign-in page.</a></p>`,
           )
-        : loginPage(formToken, { refusal: message, user }),
+        : loginPage(formToken, { refusal: message, user }, continuation),
     );
   };
 
@@ -788,20 +798,32 @@ export function makeUserDoors(deps: UserDoorDeps): UserDoors {
     return { held: undefined, body };
   };
 
-  const cannotDecide = (req: IncomingMessage, res: ServerResponse, what: string): void =>
-    refuseDoor(req, res, 503, what);
+  const cannotDecide = (
+    req: IncomingMessage,
+    res: ServerResponse,
+    what: string,
+    continuation?: string,
+  ): void => refuseDoor(req, res, 503, what, "", continuation);
 
   // `salvage` is T146's browser path: the form rendered AGAIN after a refused POST, the refusal
   // stated inline and the typed user kept so a person retypes one field, not two. The refusal
   // sentence is EXACTLY the JSON refusal's — the one-refusal rule is about information, and this
   // page changes only the frame. With no salvage the bytes are the GET page, unchanged.
-  const loginPage = (formToken: string, salvage?: { refusal: string; user: string }): string =>
+  const loginPage = (
+    formToken: string,
+    salvage?: { refusal: string; user: string },
+    continuation?: string,
+  ): string =>
     page(
       "sign in to a Loam store",
       `<h1>Sign in.</h1>
 ${salvage === undefined ? "" : `<p>${escapeHtml(salvage.refusal)}</p>\n`}<form method="post" action="/login">
 <input type="hidden" name="form_token" value="${escapeHtml(formToken)}">
-<label>user<input name="user"${
+${
+  continuation === undefined
+    ? ""
+    : `<input type="hidden" name="${CONTINUE_FIELD}" value="${escapeHtml(continuation)}">\n`
+}<label>user<input name="user"${
         salvage === undefined || salvage.user === "" ? "" : ` value="${escapeHtml(salvage.user)}"`
       } autocomplete="username" autocapitalize="none" spellcheck="false"></label>
 <label>password<input name="password" type="password" autocomplete="current-password"></label>
@@ -887,9 +909,14 @@ page will offer.</p>`,
     const body = guard.body;
     const user = body.get("user") ?? "";
     const password = body.get("password") ?? "";
+    // WHERE THIS SIGN-IN WAS GOING, filtered here rather than trusted (see continuation.ts). It is
+    // a query, never a destination, and it rides every answer this door gives: a re-rendered form
+    // keeps it so a mistyped password does not strand the person, and the success below re-attaches
+    // it to the authorize path itself. An ordinary sign-in carries none, and its bytes do not move.
+    const carried = authorizeContinuation(body.get(CONTINUE_FIELD) ?? "");
     if (userNameDefect(user) !== undefined) {
       // Not a name any user could hold, so there is nothing to hash and nothing to count.
-      refuseDoor(req, res, 401, LOGIN_REFUSED, user);
+      refuseDoor(req, res, 401, LOGIN_REFUSED, user, carried);
       return;
     }
     // THE WAIT COMES FIRST, BEFORE THE COMPARE, and the order is the whole design (SPEC §36 phase 9).
@@ -927,6 +954,7 @@ page will offer.</p>`,
         503,
         "the login door is busy: too much unauthenticated work is already in flight",
         user,
+        carried,
       );
       return;
     }
@@ -944,6 +972,7 @@ page will offer.</p>`,
         req,
         res,
         "the login door cannot read its credentials, so it refuses every login",
+        carried,
       );
       return;
     }
@@ -967,6 +996,7 @@ page will offer.</p>`,
         req,
         res,
         "the login door cannot read its credentials, so it refuses every login",
+        carried,
       );
       return;
     } finally {
@@ -977,7 +1007,7 @@ page will offer.</p>`,
       // wait. `recordFailure` fails open — a write fault must not turn this 401 into a 503 (see its
       // definition), because a local disk fault has no say in what this door answers.
       recordFailure(user);
-      refuseDoor(req, res, 401, LOGIN_REFUSED, user);
+      refuseDoor(req, res, 401, LOGIN_REFUSED, user, carried);
       return;
     }
     // The password was right. The GROUND still has to hold a role for this user — `rolesOf`
@@ -986,11 +1016,11 @@ page will offer.</p>`,
     // credential file cannot know that it was erased).
     const roles = groundRoles(user);
     if (roles === undefined) {
-      cannotDecide(req, res, "this store's ground is not reachable, so no session opens");
+      cannotDecide(req, res, "this store's ground is not reachable, so no session opens", carried);
       return;
     }
     if (roles.size === 0) {
-      refuseDoor(req, res, 401, LOGIN_REFUSED, user);
+      refuseDoor(req, res, 401, LOGIN_REFUSED, user, carried);
       return;
     }
     // A NEW id, and any session presented dies with the old cookie value: a session must never
@@ -1000,7 +1030,7 @@ page will offer.</p>`,
     // session exactly as it was.
     const opened = open(user, roles, guard.held?.id);
     if (opened === undefined) {
-      cannotDecide(req, res, "this store is holding all the sessions it can");
+      cannotDecide(req, res, "this store is holding all the sessions it can", carried);
       return;
     }
     // THE CORRECT PASSWORD IS ALREADY ACCEPTED, so nothing after the seat may refuse it. Clearing
@@ -1011,10 +1041,24 @@ page will offer.</p>`,
     forgetCount(user);
     // The browser is told to drop the nonce cookie; the pair itself stays verifiable until the
     // process restarts — the pre-session is stateless, so nothing can spend it server-side.
-    html(res, 200, signedInPage(user, roles, opened.session.formToken), [
-      setCookie(opened.id),
-      clearPreCookie(),
-    ]);
+    const cookies = [setCookie(opened.id), clearPreCookie()];
+    // RESUME, IF THIS SIGN-IN CAME FROM THE AUTHORIZE PATH. `resumeTarget` builds a ROOT-RELATIVE
+    // path from this store's own literal plus a re-encoded query, so the destination is same-origin
+    // by construction and no caller text can reach the scheme, the host, or the path. 303, because
+    // the browser must follow it with a GET. A sign-in carrying nothing lands on the page it always
+    // landed on, byte for byte.
+    const resume = carried === undefined ? undefined : resumeTarget(carried);
+    if (resume !== undefined) {
+      res.writeHead(303, {
+        location: resume,
+        "cache-control": CACHE_NO_STORE,
+        "referrer-policy": "same-origin",
+        "set-cookie": cookies,
+      });
+      res.end();
+      return;
+    }
+    html(res, 200, signedInPage(user, roles, opened.session.formToken), cookies);
   };
 
   const postLogout = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
@@ -1217,9 +1261,12 @@ page will offer.</p>`,
         : { user: held.session.user, formToken: held.session.formToken };
     },
     fromThisPage,
-    loginForm: (req) => {
+    loginForm: (req, continuation) => {
       const nonce = preSessionIdFrom(req) ?? opaqueId();
-      return { body: loginPage(preSessionToken(nonce)), cookie: setPreCookie(nonce) };
+      return {
+        body: loginPage(preSessionToken(nonce), undefined, continuation),
+        cookie: setPreCookie(nonce),
+      };
     },
   };
 
