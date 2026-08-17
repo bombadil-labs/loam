@@ -43,6 +43,7 @@ import {
   schemaEntityFor,
   type ClaimTemplates,
   type ResolverSpecs,
+  lensNameFor,
 } from "./registration.js";
 import { loadRenderers, readRenderers } from "./renderers.js";
 import { loadResolvers } from "./resolvers.js";
@@ -644,7 +645,7 @@ export async function publishRegistrationImpl(
     // resolver the doors cannot run" — the same loud-here/quiet-on-replay discipline as templates.
     await loadResolvers([resolvers]);
   }
-  const lensName = schema.name ?? hyperschema.name;
+  const lensName = lensNameFor(hyperschema, schema);
   const survivors = gw.registered.filter(
     (r) => !(programOf(r) === hyperschema.name && lensOf(r) === lensName),
   );

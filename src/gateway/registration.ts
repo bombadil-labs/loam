@@ -192,6 +192,15 @@ export type ProgramName = string & { readonly __program: unique symbol };
 export const lensOf = (r: { lensName?: string; hyperschema: { name: string } }): LensName =>
   (r.lensName ?? r.hyperschema.name) as LensName;
 
+// The reading a REGISTRATION INPUT is, before anything is bound: the Schema's own name when it
+// carries one, else the program's. This is what decides the living Schema entity `schema:<lens>`
+// and the GraphQL field the surface answers at, so any door deciding what an input may PUBLISH must
+// ask it — `hyperschema.name` answers a different question (H6). Exported so the publish path and
+// the doors that gate it read ONE derivation; a second copy beside this one is free to drift, and
+// could only drift toward admitting a reading the gate never saw.
+export const lensNameFor = (hyperschema: HyperSchema, schema: Schema): LensName =>
+  (schema.name ?? hyperschema.name) as LensName;
+
 // The PROGRAM name (the hyperschema's own name) — the thing sibling lenses SHARE and doors must
 // never gate on. Reading it through here rather than raw `r.hyperschema.name` restores the brand, so
 // comparing it to a lens name is caught. Materializations are per-program, so this is the right key

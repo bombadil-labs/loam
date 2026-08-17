@@ -44,6 +44,7 @@ import {
 } from "../gateway/gateway.js";
 import {
   parseRegistrationInput,
+  lensNameFor,
   schemaEntityFor,
   type LensName,
   type RegistrationInput,
@@ -395,18 +396,25 @@ function registerStanding(
   return prefixes.length === 0 ? undefined : prefixes;
 }
 
-// Does a scoped caller's registration stay inside its fence? Two questions, and both must hold:
+// Does a scoped caller's registration stay inside its fence? THREE questions, and every one must
+// hold. A registration carries three independently-chosen names, and each reaches a different part
+// of the store, so fencing any two of them still leaves a door open:
 //
-//   (a) the hyperschema NAME is inside one granted prefix — which fences every entity the
-//       registration derives from it (`hyperschema:<name>`, `schema:<name>`, the frozen snapshot,
-//       and the `registration:` binding keyed off the first); and
-//   (b) an explicit `entity`, if given, is exactly the entity the name derives. It is the one field
-//       that could point where the name does not reach — an unchecked one would let a `thread:`
-//       connection plant an operator-signed registration at `hyperschema:User`.
+//   (a) the PROGRAM name (`hyperschema.name`) — which fences the definition at
+//       `hyperschema:<name>` and the binding at `registration:hyperschema:<name>`;
+//   (b) the READING (`schema.name ?? hyperschema.name`, H6) — which fences the living Schema at
+//       `schema:<lens>`, its frozen snapshot, and the GraphQL field the surface answers at.
+//       Fencing only (a) lets a `thread:` connection publish a program named `thread:groove` whose
+//       READING is `User`, taking the operator's own living Schema and the root field with it; and
+//   (c) an explicit `entity`, if given, is exactly the entity the program name derives. It is the
+//       one field that points somewhere no name reaches — unchecked, it plants an operator-signed
+//       registration at `hyperschema:User`.
 //
 // A scoped caller may still SEND `entity`; it may only send the one it was going to get anyway.
 function registerFenceAdmits(fence: readonly string[], input: RegistrationInput): boolean {
-  if (!fence.some((prefix) => fenceAdmits(prefix, input.hyperschema.name))) return false;
+  const inside = (name: string): boolean => fence.some((prefix) => fenceAdmits(prefix, name));
+  if (!inside(input.hyperschema.name)) return false;
+  if (!inside(lensNameFor(input.hyperschema, input.schema))) return false;
   return input.entity === undefined || input.entity === schemaEntityFor(input.hyperschema);
 }
 

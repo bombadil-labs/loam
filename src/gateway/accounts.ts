@@ -65,12 +65,10 @@ export const VERBS: ReadonlySet<string> = new Set<Verb>(["write", "admin", "regi
 //    folding here would compare a folded form against an unfolded key and could admit a name whose
 //    deltas land outside the fence. The comparison and the derivation must run on one string.
 //
-// What is fenced is the hyperschema NAME rather than any single entity id, because every id a
-// registration plants is derived from the name: `hyperschema:<name>` (the definition and, through
-// it, `registration:hyperschema:<name>`), `schema:<name>` (the living Schema), and
-// `schema:<name>@<hash>` (the frozen snapshot). Fencing the name fences all four at once. The one
-// field that can point somewhere the name does not reach is an explicit `entity`, and the door
-// requires that to be the derived default — see `registerFenceAdmits` in src/server/http.ts.
+// This predicate fences ONE name. A registration carries THREE independently-chosen names — the
+// program, the reading, and an optional explicit entity — and each reaches a different part of the
+// store, so the door applies this to each of them rather than to one. `registerFenceAdmits` in
+// src/server/http.ts is where that composition lives, and it says which name reaches what.
 export function fenceAdmits(prefix: string, name: string): boolean {
   return prefix.length > 0 && name.startsWith(prefix);
 }

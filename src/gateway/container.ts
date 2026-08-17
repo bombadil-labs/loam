@@ -1445,6 +1445,11 @@ export function inboxName(container: string, connectionKey: string): string {
 
 // The surviving WRITE grant ids naming `subject` at this pool's store entity — what a revocation
 // strikes. "Surviving" is no standing negation; effectiveness is grantHeld's concern, not this.
+//
+// NAMED GAP: this is narrower than the verb vocabulary. A `register` grant naming the same subject
+// would survive an unbind. Nothing mints one for a connection key today — register standing is
+// handed to OAuth connector actors, and `loam grant revoke` strikes every verb — so the gap is not
+// reachable now. It becomes reachable the moment a connection key is granted `register`.
 function survivingWriteGrantIds(reactor: Reactor, subject: string): string[] {
   const out: string[] = [];
   for (const id of reactor.byTarget(STORE_ENTITY)) {

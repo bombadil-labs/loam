@@ -226,6 +226,38 @@ describe("T174 rails 2+3 — the prefix is a fence, and every escape draws ONE r
     });
   }
 
+  it("A SCHEMA NAME MAY NOT REDIRECT THE READING OUT OF THE FENCE (H6)", async () => {
+    // A registration has TWO names: the PROGRAM it is over (`hyperschema.name`) and the READING it
+    // is (`schema.name ?? hyperschema.name`). The reading is what decides the living Schema entity
+    // `schema:<lens>` and the GraphQL field the surface answers at. Fencing only the program would
+    // let a `thread:` connection publish a program called `thread:groove` whose READING is `User` —
+    // clobbering the operator's own living Schema and taking the root GraphQL field with it.
+    const b = await bench();
+    await b.grant(THREAD, "thread:");
+    const res = await b.register(
+      "thread-token",
+      bodyFor("thread:groove", { schema: { name: "User", props: { color: PICK }, default: PICK } }),
+    );
+    expect(res.status).toBe(403);
+    expect(await errorsOf(res)).toEqual([REFUSAL]);
+    // Nothing landed: the root field the escape aimed at does not answer.
+    const probe = await b.gql("op-token", `{ user(entity: "thing:1") { _hex } }`);
+    expect(probe.errors).toBeDefined();
+  });
+
+  it("a schema name INSIDE the fence is fine — a scope may carry sibling readings", async () => {
+    const b = await bench();
+    await b.grant(THREAD, "thread:");
+    const res = await b.register(
+      "thread-token",
+      bodyFor("thread:groove", {
+        schema: { name: "thread:groove:desc", props: { color: PICK }, default: PICK },
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()) as { lens: string }).toMatchObject({ lens: "thread:groove:desc" });
+  });
+
   it("an explicit `entity` may not redirect the registration out of the fence", async () => {
     // The name is inside the fence; the entity points at the operator's own registration slot.
     // Everything a registration plants is derived from the NAME, so the entity is the one field
