@@ -25,7 +25,7 @@ import { pullFrom } from "../federation/pull.js";
 import { tombstonesIn } from "../gateway/erase.js";
 import { assembleGenesis } from "../gateway/genesis.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
-import { CTX_GRANTS, grantClaims } from "../gateway/accounts.js";
+import { CTX_GRANTS, grantClaims, grantsHeldBy } from "../gateway/accounts.js";
 import {
   parseRegistrationInput,
   schemaEntityFor,
@@ -272,12 +272,21 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
   },
   grant: {
     summary: "list or revoke the OAuth connectors this store has granted (SPEC §37)",
-    usage: "loam grant list|revoke <client_id> [options]",
-    flags: new Set(["home", "store"]),
+    usage: "loam grant list|revoke <client_id> | <client_id> --verb=<verb> [options]",
+    flags: new Set(["home", "store", "verb", "prefix"]),
     notes: [
       "subcommands:",
       "  list                  the connectors this store holds — id, name, generation, standing",
       "  revoke <client_id>    bump the connector's generation and strike its write grant",
+      "  <client_id> --verb=register --prefix=<p>",
+      "                        let the connector register schemas whose name starts with <p>",
+      "",
+      "REGISTER STANDING IS SCOPED AND THE SCOPE IS MANDATORY. `--prefix` fences the connector to",
+      "one entity namespace: a connector granted `thread:` may register `thread:groove` and refuses",
+      "everything else, root included. The prefix is a literal prefix of the schema name — it is not",
+      "case-folded, not percent-decoded, and not normalized. Registration at the root stays the",
+      "operator's and no grant can hand it out. The store still signs every registration itself; the",
+      "grant delegates the authority to ask, never a signing key.",
       "",
       "REVOKE BINDS AT ONCE. Bumping the generation makes every live token and in-flight code stop",
       "matching, so a running server refuses that connector on its next request with no restart. It",
@@ -1922,8 +1931,11 @@ async function cmdPen(args: readonly string[], io: IO): Promise<number> {
 async function cmdGrant(args: readonly string[], io: IO): Promise<number> {
   const parsed = parseFor("grant", args);
   const sub = parsed.positionals[0];
-  if (sub !== "list" && sub !== "revoke") {
-    io.err("grant wants a subcommand: `loam grant list` or `loam grant revoke <client_id>`");
+  if (sub === undefined) {
+    io.err(
+      "grant wants a subcommand: `loam grant list`, `loam grant revoke <client_id>`, or " +
+        "`loam grant <client_id> --verb=register --prefix=<prefix>`",
+    );
     return 2;
   }
   const home = parsed.flags.get("home") ?? defaultHome();
@@ -1932,7 +1944,11 @@ async function cmdGrant(args: readonly string[], io: IO): Promise<number> {
     io.err(`grant ${sub}: ${unusable}`);
     return 1;
   }
-  if (sub === "list") return cmdGrantList(home, io);
+  // A bare positional is a CLIENT ID being granted something — `loam grant <id> --verb=…`. The two
+  // reserved words stay subcommands, so a connector whose id is literally "list" or "revoke" is
+  // unreachable this way; the ids this store mints are opaque and never those two.
+  if (sub !== "list" && sub !== "revoke") return cmdGrantMint(sub, parsed, home, io);
+  if (sub === "list") return cmdGrantList(home, parsed, io);
 
   const clientId = parsed.positionals[1];
   if (clientId === undefined) {
@@ -1946,7 +1962,114 @@ async function cmdGrant(args: readonly string[], io: IO): Promise<number> {
   return cmdGrantRevoke(clientId, parsed, home, io);
 }
 
-function cmdGrantList(home: string, io: IO): number {
+// The connector whose actor a `--verb` grant would name, or the reason there is none.
+function connectorActor(
+  home: string,
+  clientId: string,
+  label: string,
+  io: IO,
+): { actor: string } | { code: number } {
+  let file;
+  try {
+    file = readOAuthFile(home);
+  } catch (err) {
+    io.err(
+      `${label}: ${home}'s connector records are unreadable, so this will not guess who to ` +
+        `grant: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return { code: 1 };
+  }
+  const grant = grantFor(file, clientId);
+  if (grant === undefined) {
+    io.err(
+      `${label}: this store holds no acting identity for ${clientId} — a connector gets one when ` +
+        `it first exchanges a token. \`loam grant list\` shows what this store holds.`,
+    );
+    return { code: 2 };
+  }
+  return { actor: grant.actor };
+}
+
+// `loam grant <client_id> --verb=register --prefix=<p>` — the operator hands a connection authority
+// over one entity namespace. Only `register` is minted here: `write` standing is the token
+// exchange's to grant (it mints the actor seed in the same breath), and `admin` is not a connector's
+// to hold. The grant is one operator-signed delta, so revoking it is one strike.
+async function cmdGrantMint(
+  clientId: string,
+  parsed: Parsed,
+  home: string,
+  io: IO,
+): Promise<number> {
+  if (parsed.positionals.length > 1) {
+    io.err("grant: `loam grant <client_id> --verb=<verb>` takes exactly one client id");
+    return 2;
+  }
+  const verb = parsed.flags.get("verb");
+  if (verb === undefined) {
+    io.err(
+      `grant: ${clientId} is not a subcommand, so this reads as a grant and wants --verb — ` +
+        "today that is `--verb=register`, with a `--prefix`",
+    );
+    return 2;
+  }
+  if (verb !== "register") {
+    io.err(
+      `grant: --verb=${verb} is not minted here. \`register\` is the verb an operator hands out; ` +
+        "write standing comes with the token exchange, and admin is not a connector's to hold.",
+    );
+    return 2;
+  }
+  const prefix = parsed.flags.get("prefix");
+  if (prefix === undefined || prefix.length === 0) {
+    io.err(
+      "grant: --verb=register wants a non-empty --prefix — the entity namespace the connector " +
+        "may register inside. Registration at the root is the operator's and is not delegable.",
+    );
+    return 2;
+  }
+  const found = connectorActor(home, clientId, "grant", io);
+  if (!("actor" in found)) return found.code;
+
+  let seed: string;
+  try {
+    seed = readSeed(home);
+  } catch (err) {
+    io.err(
+      `grant: ${home} has no operator identity — \`loam init\` makes one: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    );
+    return 1;
+  }
+  const operator = authorForSeed(seed);
+  const path = storePath(home, parsed.flags.get("store"));
+  const gateway = await Gateway.boot(openStore(path, io), assembleGenesis({ operatorSeed: seed }));
+  try {
+    await gateway.append([
+      signClaims(
+        grantClaims(STORE_ENTITY, found.actor, "register", operator, Date.now(), prefix),
+        seed,
+      ),
+    ]);
+  } catch (err) {
+    io.err(
+      `grant: the ground refused this — nothing was appended: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    );
+    return 1;
+  } finally {
+    await gateway.close();
+  }
+  io.out(
+    `loam: granted ${clientId} register standing under "${prefix}"\n` +
+      `  it may register schemas whose name starts with "${prefix}" and nothing else — not the ` +
+      `root, not a neighbouring namespace\n` +
+      `  the grant is in ${path}; \`loam grant revoke ${clientId}\` strikes it, and the next ` +
+      `request refuses`,
+  );
+  return 0;
+}
+
+async function cmdGrantList(home: string, parsed: Parsed, io: IO): Promise<number> {
   let file;
   try {
     file = readOAuthFile(home);
@@ -1961,22 +2084,51 @@ function cmdGrantList(home: string, io: IO): number {
     io.out("loam: this store has granted no connectors");
     return 0;
   }
-  io.out(`loam: ${file.clients.length} connector${file.clients.length === 1 ? "" : "s"}`);
-  for (const client of file.clients) {
-    const grant = grantFor(file, client.clientId);
-    const tokens = file.tokens.filter((t) => t.clientId === client.clientId).length;
-    // The standing line is the honest one: a client with no grant has registered but never
-    // completed a token exchange, so it can act nowhere yet.
-    const standing =
-      grant === undefined
-        ? "no grant yet"
-        : grant.standing
-          ? `acts as ${grant.actor}`
-          : "grant pending";
-    io.out(
-      `  ${client.clientId}  ${client.clientName}\n` +
-        `    generation ${client.generation} · ${standing} · ${tokens} live token${tokens === 1 ? "" : "s"}`,
+  // The verbs come from the GROUND, through the same derivation the registration door reads — so
+  // this listing cannot show an operator a standing the door would not honour, or hide one it would.
+  let seed: string;
+  try {
+    seed = readSeed(home);
+  } catch (err) {
+    io.err(
+      `grant list: ${home} has no readable operator identity, so the verbs in the ground cannot ` +
+        `be resolved — and a listing that guessed them would be worse than none: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
     );
+    return 1;
+  }
+  const path = storePath(home, parsed.flags.get("store"));
+  const gateway = await Gateway.boot(openStore(path, io), assembleGenesis({ operatorSeed: seed }));
+  try {
+    const operator = authorForSeed(seed);
+    const held = (actor: string): string => {
+      const grants = grantsHeldBy(gateway.reactor, actor, operator);
+      if (grants.length === 0) return "no verb in the ground";
+      return grants
+        .map((g) => (g.prefix === undefined ? g.verb : `${g.verb}("${g.prefix}")`))
+        .sort()
+        .join(", ");
+    };
+    io.out(`loam: ${file.clients.length} connector${file.clients.length === 1 ? "" : "s"}`);
+    for (const client of file.clients) {
+      const grant = grantFor(file, client.clientId);
+      const tokens = file.tokens.filter((t) => t.clientId === client.clientId).length;
+      // The standing line is the honest one: a client with no grant has registered but never
+      // completed a token exchange, so it can act nowhere yet.
+      const standing =
+        grant === undefined
+          ? "no grant yet"
+          : grant.standing
+            ? `acts as ${grant.actor}`
+            : "grant pending";
+      io.out(
+        `  ${client.clientId}  ${client.clientName}\n` +
+          `    generation ${client.generation} · ${standing} · ${tokens} live token${tokens === 1 ? "" : "s"}` +
+          (grant === undefined ? "" : `\n    holds ${held(grant.actor)}`),
+      );
+    }
+  } finally {
+    await gateway.close();
   }
   return 0;
 }

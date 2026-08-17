@@ -42,7 +42,12 @@ import {
   type QueryResult,
   type RequestContext,
 } from "../gateway/gateway.js";
-import { parseRegistrationInput, schemaEntityFor, type LensName } from "../gateway/registration.js";
+import {
+  parseRegistrationInput,
+  schemaEntityFor,
+  type LensName,
+  type RegistrationInput,
+} from "../gateway/registration.js";
 import { parseReadGesture, type ReadGesture } from "../gateway/renderers.js";
 import { makeMountTable, type ResolvedMount } from "./mounts.js";
 import {
@@ -57,7 +62,7 @@ import {
   type OAuthDoors,
   type TokenDoor,
 } from "./oauth.js";
-import { grantClaims } from "../gateway/accounts.js";
+import { fenceAdmits, grantClaims, registerPrefixesOf } from "../gateway/accounts.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
 import { readSeed } from "../cli/config.js";
 import { CSP, makeUserDoors, type UserDoorOptions, type UserDoors } from "./session.js";
@@ -357,9 +362,58 @@ const byteDoorOf = (
 // program name, what the operator typed under `hyperschema.name`, because callers already read
 // it. The two coincide until a request names its schema, and that is exactly the case where a
 // single name would be reporting on the wrong thing.
+// The one string a caller who may not shape this store receives, from either door. It is the same
+// string a tokenless stranger has always drawn, and it says nothing about WHY: root and a
+// neighbour's namespace refuse identically, so nobody learns whether either is grantable to anyone
+// (§12). Never branch this message on the reason.
+const REGISTRATION_REFUSAL = "registration is constitutional: it requires an operator token";
+
+// Thrown for a fence violation so a caller renders it as the AUTHORITY refusal rather than as the
+// shape complaint every other throw from performRegistration becomes.
+class NotPermittedToRegister extends Error {}
+
+// How far a caller may shape this store.
+//   undefined  → not at all. The authority refusal, before anything is parsed.
+//   []         → the operator: the root, unfenced.
+//   [p, …]     → a scoped connection: inside these prefixes and nowhere else.
+//
+// Read from the GROUND on every request and never cached, so a revocation binds on the very next
+// call with nothing to invalidate (§7, and H2's flatten-don't-cache rule).
+function registerStanding(
+  gateway: Gateway,
+  identity: TokenIdentity,
+): readonly string[] | undefined {
+  if (identity.operator === true) return [];
+  if (identity.actor === undefined) return undefined;
+  let author: string;
+  try {
+    author = authorForSeed(identity.actor);
+  } catch {
+    return undefined; // an actor that names no key holds no standing
+  }
+  const prefixes = registerPrefixesOf(gateway.reactor, author, gateway.operatorAuthor);
+  return prefixes.length === 0 ? undefined : prefixes;
+}
+
+// Does a scoped caller's registration stay inside its fence? Two questions, and both must hold:
+//
+//   (a) the hyperschema NAME is inside one granted prefix — which fences every entity the
+//       registration derives from it (`hyperschema:<name>`, `schema:<name>`, the frozen snapshot,
+//       and the `registration:` binding keyed off the first); and
+//   (b) an explicit `entity`, if given, is exactly the entity the name derives. It is the one field
+//       that could point where the name does not reach — an unchecked one would let a `thread:`
+//       connection plant an operator-signed registration at `hyperschema:User`.
+//
+// A scoped caller may still SEND `entity`; it may only send the one it was going to get anyway.
+function registerFenceAdmits(fence: readonly string[], input: RegistrationInput): boolean {
+  if (!fence.some((prefix) => fenceAdmits(prefix, input.hyperschema.name))) return false;
+  return input.entity === undefined || input.entity === schemaEntityFor(input.hyperschema);
+}
+
 async function performRegistration(
   gateway: Gateway,
   raw: unknown,
+  fence: readonly string[],
 ): Promise<{
   registered: string;
   lens: string;
@@ -367,7 +421,14 @@ async function performRegistration(
   bound: boolean;
   reason?: string | undefined;
 }> {
+  // SHAPE, then FENCE — and this order is safe only because the caller already cleared the
+  // authority gate above. A caller with NO register standing never reaches this function, so it
+  // never draws a shape complaint and cannot fingerprint the registration format by probing.
+  // A caller WITH standing is entitled to the shape complaint, whatever name it sent.
   const input = parseRegistrationInput(raw);
+  if (fence.length > 0 && !registerFenceAdmits(fence, input)) {
+    throw new NotPermittedToRegister(REGISTRATION_REFUSAL);
+  }
   const outcome = await gateway.publishRegistration(
     input.hyperschema,
     input.schema,
@@ -942,21 +1003,18 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         const params = rpc.params ?? {};
         const name = params["name"];
         if (name === "loam_register") {
-          // The same constitutional gate as POST /register: shaping the store is the operator's.
-          if (identity.operator !== true) {
+          // The same constitutional gate as POST /register: the root is the operator's, and a
+          // connection holding a scoped `register` grant may shape its own namespace (§7).
+          const fence = registerStanding(gateway, identity);
+          if (fence === undefined) {
             reply({
-              content: [
-                {
-                  type: "text",
-                  text: "registration is constitutional: it requires an operator token",
-                },
-              ],
+              content: [{ type: "text", text: REGISTRATION_REFUSAL }],
               isError: true,
             });
             return;
           }
           try {
-            const outcome = await performRegistration(gateway, params["arguments"] ?? {});
+            const outcome = await performRegistration(gateway, params["arguments"] ?? {}, fence);
             reply({ content: [{ type: "text", text: JSON.stringify(outcome) }] });
           } catch (err) {
             reply({
@@ -1505,10 +1563,11 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           // Registration is constitutional — the schema-schema mutation mechanism, served. An
           // HTTP endpoint rather than a GraphQL mutation because an empty store has no GraphQL
           // surface to mutate through; this is how it gains one.
-          if (identity.operator !== true) {
-            json(res, 403, {
-              errors: ["registration is constitutional: it requires an operator token"],
-            });
+          // AUTHORITY BEFORE SHAPE: this gate runs before the body is read, so a caller with no
+          // register standing draws the same refusal whatever it sent.
+          const fence = registerStanding(gateway, identity);
+          if (fence === undefined) {
+            json(res, 403, { errors: [REGISTRATION_REFUSAL] });
             return;
           }
           let raw: unknown;
@@ -1529,8 +1588,12 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             return;
           }
           try {
-            json(res, 200, await performRegistration(gateway, raw));
+            json(res, 200, await performRegistration(gateway, raw, fence));
           } catch (err) {
+            if (err instanceof NotPermittedToRegister) {
+              json(res, 403, { errors: [err.message] });
+              return;
+            }
             json(res, 400, { errors: [err instanceof Error ? err.message : String(err)] });
           }
           return;
