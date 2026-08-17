@@ -186,10 +186,16 @@ describe("T177 — (4) the metadata surface cannot enumerate mounts", () => {
     const ghostMount = await get(`${base}/nowhere-at-all/mcp`, "POST");
     const unrouted = await get(`${base}/.well-known/oauth-protected-resource/garden`, "POST");
     const nested = await get(`${base}${WELL_KNOWN}/garden/mcp/extra`, "POST");
+    // One canonical spelling per resource: a re-encoded name is not this URI. `resource` must echo
+    // the bytes the caller sent, because that is the string a client compares against its own URL.
+    const reEncoded = await get(`${base}${WELL_KNOWN}/%67arden/mcp`, "POST");
+    // An empty name is not a mount, so it names no resource. Routed, it would answer a document
+    // whose `resource` reads `<origin>//mcp` — an identifier no client can ever have dialled.
+    const empty = await get(`${base}${WELL_KNOWN}//mcp`, "POST");
     expect(ghostMount.status).toBe(401);
-    // Neither shape is a path-inserted URI, so neither is routed — and the fallthrough that catches
+    // No shape here is a path-inserted URI, so none is routed — and the fallthrough that catches
     // them is the SAME uniform refusal, not a 404. A 404 here would reopen §12/T78's oracle.
-    for (const answer of [unrouted, nested]) {
+    for (const answer of [unrouted, nested, reEncoded, empty]) {
       expect(answer.status).toBe(ghostMount.status);
       expect(answer.text).toBe(ghostMount.text);
     }
