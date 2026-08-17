@@ -9,7 +9,7 @@
 //
 // Every store here is a fresh temp home. Nothing in this file touches a real ~/.loam.
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -211,5 +211,50 @@ describe("T174 — the grant form is one connector at a time", () => {
     expect(code).toBe(2);
     expect(await prefixesInGround(CONNECTOR)).toEqual([]);
     expect(await prefixesInGround(BYSTANDER)).toEqual([]);
+  });
+});
+
+describe("T174 — the grant manual and its usage refusals", () => {
+  it("`loam grant --help` documents the verb, the prefix, and the invocation", async () => {
+    // `grant` is absent from test/cli/help.test.ts's table, so the promise that every command
+    // names every flag it accepts is unenforced here. An authority flag with no manual is an
+    // authority nobody can find.
+    expect(await run(["grant", "--help"], io())).toBe(0);
+    const help = printed();
+    expect(help).toContain("--verb");
+    expect(help).toContain("--prefix");
+    expect(help).toContain("<client_id> --verb=register --prefix=<p>");
+    expect(help).toContain("loam grant list|revoke <client_id> | <client_id> --verb=<verb>");
+  });
+
+  it("no subcommand at all names all three forms", async () => {
+    expect(await run(["grant", "--home", home], io())).toBe(2);
+    expect(printed()).toContain("`loam grant <client_id> --verb=register --prefix=<prefix>`");
+  });
+
+  it("a second positional names what it wanted", async () => {
+    expect(
+      await run(
+        ["grant", "cli-thread", "cli-note", "--verb=register", "--prefix=t:", "--home", home],
+        io(),
+      ),
+    ).toBe(2);
+    expect(printed()).toContain(
+      "`loam grant <client_id> --verb=<verb>` takes exactly one client id",
+    );
+  });
+
+  it("UNREADABLE connector records refuse operationally — never as 'no such connector'", async () => {
+    // H9: a read that could not happen must not answer NO. Exit 1 (this store could not tell)
+    // is a different verdict from exit 2 (this store says there is no such connector), and an
+    // operator who confuses them mints a grant they think failed for the other reason.
+    rmSync(join(home, "oauth.json"), { force: true });
+    mkdirSync(join(home, "oauth.json"));
+    const code = await run(
+      ["grant", "cli-thread", "--verb=register", "--prefix=thread:", "--home", home],
+      io(),
+    );
+    expect(code).toBe(1);
+    expect(printed()).toContain("unreadable");
   });
 });
