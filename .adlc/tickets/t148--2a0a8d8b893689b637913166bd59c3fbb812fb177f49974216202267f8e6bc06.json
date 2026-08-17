@@ -4,12 +4,14 @@
   "id": "T148",
   "phase": "P0",
   "rails": [
-    "test/server/oauth-authorize-validation.test.ts"
+    "test/server/oauth-authorize-validation.test.ts",
+    "test/server/oauth-authorize-continuation.test.ts"
   ],
   "scope": [
     "src/server/oauth.ts",
-    "src/server/session.ts"
+    "src/server/session.ts",
+    "src/server/continuation.ts"
   ],
-  "status": "todo",
+  "status": "in-progress",
   "title": "The authorize door forgets where the person was going, and validates a doomed request only after minting its code"
 }

@@ -20,6 +20,8 @@
 //     test/server/oauth-pkce-method.test.ts (T167). Rail (e) asserts only that a RESUMED consent
 //     runs the same gate a direct one runs.
 //   - Redemption of the minted code — phase 15's file.
+//   - The EXACT byte at which an outsized continuation stops being read. (g) proves the ceiling
+//     exists and refuses; nothing depends on the precise number, so no rail pins it.
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -348,6 +350,16 @@ describe("the authorize door's continuation (T148 item 1)", () => {
     expect(ordinary.status).toBe(200);
     expect(ordinary.headers.get("location")).toBeNull();
     expect(await ordinary.text()).toContain("Signed in.");
+  });
+
+  it("(g) an outsized authorize query earns no continuation at all", async () => {
+    const { base } = await authorizeServer();
+    // Far past the ceiling continuation.ts holds. The form still renders — a person may always
+    // sign in — but it carries nothing, so the door never resumes a query it refused to read.
+    const form = await authorizeAsStranger(base, authorizeQuery({ state: "x".repeat(9000) }));
+    expect(form.status).toBe(200);
+    expect(form.html).toContain("Sign in.");
+    expect(hiddenOf(form.html, "continue")).toBeUndefined();
   });
 
   it("(e1) a resumed consent still refuses a PKCE method this store cannot verify (T167)", async () => {
