@@ -19,5 +19,43 @@
     "Remove entries once the rename that consumed them has merged; a spent entry is inert",
     "(the substitution no longer produces the base) but tidiness keeps this file reviewable."
   ],
-  "renames": []
+  "renames": [
+    {
+      "from": "    const many = Array.from({ length: 200 }, (_, i) =>",
+      "to": "    const many = Array.from({ length: 60 }, (_, i) =>",
+      "files": ["test/store/archive.test.ts"],
+      "authorized": "PENDING MYK - a branch cannot self-authorize, so merging this entry IS the authorization. Fixture size only; both probes verified red.",
+      "//": "T180 rail WEIGHT reduction, 6 pairs, one file. Measured 2026-08-17 on a ticket-only PR (#420), so the failure cannot be a regression from content: the purge-sweep case took 511ms on linux and exceeded the 20000ms per-test ceiling on windows, where the whole file ran 22317ms for 8 tests. The Defender hypothesis is REFUTED -- the failing run's log shows both exclusions succeeding, so the cost is windows file creation and fsync on a loaded runner. T155 pooled the fsyncs and T159 already raised this file from 15s to 20s citing it at 20.1s; raising the ceiling a third time is the move that has been made twice. The property under test is that purge sweeps FILES rather than walking id-by-fan and counts DISTINCT IDS ACTUALLY FOUND. Its three populations and their RATIOS carry that proof; the MAGNITUDE does not, because nothing asserts a duration or a pass count. So 200 appended becomes 60, 30 doomed of which 15 carry a crash-left straggler, 15 never present. PROVEN STILL RED, both directions, against the smaller numbers: counting requested ids instead of found ids answers 'expected 45 to be 30', and refusing to match .tmp stragglers leaves 15 behind and reddens the directory sweep. No assertion is weakened and no timeout moves -- only the fixture's size. REMOVE these pairs once the edit merges."
+    },
+    {
+      "from": "    const doomed = many.slice(0, 100);",
+      "to": "    const doomed = many.slice(0, 30);",
+      "files": ["test/store/archive.test.ts"],
+      "authorized": "PENDING MYK - a branch cannot self-authorize, so merging this entry IS the authorization. Fixture size only; both probes verified red."
+    },
+    {
+      "from": "    for (const d of doomed.slice(0, 50)) {",
+      "to": "    for (const d of doomed.slice(0, 15)) {",
+      "files": ["test/store/archive.test.ts"],
+      "authorized": "PENDING MYK - a branch cannot self-authorize, so merging this entry IS the authorization. Fixture size only; both probes verified red."
+    },
+    {
+      "from": "    const neverHere = Array.from({ length: 50 }, (_, i) =>",
+      "to": "    const neverHere = Array.from({ length: 15 }, (_, i) =>",
+      "files": ["test/store/archive.test.ts"],
+      "authorized": "PENDING MYK - a branch cannot self-authorize, so merging this entry IS the authorization. Fixture size only; both probes verified red."
+    },
+    {
+      "from": "    expect(removed).toBe(100);",
+      "to": "    expect(removed).toBe(30);",
+      "files": ["test/store/archive.test.ts"],
+      "authorized": "PENDING MYK - a branch cannot self-authorize, so merging this entry IS the authorization. Fixture size only; both probes verified red."
+    },
+    {
+      "from": "    expect(left.length).toBe(100);",
+      "to": "    expect(left.length).toBe(30);",
+      "files": ["test/store/archive.test.ts"],
+      "authorized": "PENDING MYK - a branch cannot self-authorize, so merging this entry IS the authorization. Fixture size only; both probes verified red."
+    }
+  ]
 }
