@@ -18,15 +18,37 @@
 //   - `capabilities` and `serverInfo` are read out of a LIVE `initialize` reply in the same test and
 //     compared object-against-object. If either side is edited alone, this fails.
 //
+// AGREEMENT IS NOT TRUTH, so agreement is not the only rail here. Both methods read the same three
+// constants, so the comparison above cannot fail while a constant is edited — announce
+// `{ tools: {}, resources: {} }` and every agreement rail stays green while a client's
+// `resources/list` draws -32601. Each announcement therefore also earns an HONOURS rail beside its
+// AGREES rail:
+//   - every key in the announced capabilities must be one this file can PROVE the door serves, and
+//     the set must be non-empty (an emptied constant is an under-claim, but it is also a door that
+//     announces nothing, and it should be a decision rather than an accident);
+//   - the announced versions have a floor, so an emptied list reddens. Their LITERAL values are
+//     pinned by `mcp-tool-honesty.test.ts` (T86, frozen), not here. What no rail can prove is that
+//     ADDING a version to `MCP_PROTOCOLS` came with implementing it — an appended revision is
+//     echoed back by `initialize` and passes both files. That is a claim only a reader can check:
+//     a new entry in that constant is a promise, and it owes an implementation.
+//
 // The auth rail says the opposite of what "discovery" suggests: this method is INSIDE the door. It
 // answers the same 401, with the same www-authenticate challenge, as every other MCP method —
 // compared response-against-response so the rail cannot drift green while both answers change.
 // Discovery of the AUTH surface belongs to the well-known documents (T133/T177), not here.
 //
-// Deliberately NOT asserted: the optional `ttlMs` / `cacheScope` fields, which the store does not
-// send — it has no cache policy to state, and inventing one would be the same overclaim in a
-// smaller shape. Tool CONTENT is `mcp-tool-honesty.test.ts`'s (T86); this file asserts only what the
-// front step announces about itself.
+// Deliberately NOT asserted:
+//   - the optional `ttlMs` / `cacheScope` fields, which the store does not send — it has no cache
+//     policy to state, and inventing one would be the same overclaim in a smaller shape;
+//   - that `instructions` names EVERY tool. Naming fewer tools than exist is an under-claim and
+//     cannot mislead a client into calling something that is not there. The rail below runs the
+//     dangerous direction only: every tool the string names must be a tool `tools/list` returns;
+//   - the era gap. This door answers discover while implementing none of the modern era's
+//     per-request machinery (`_meta` versioning, MCP-Protocol-Version, -32022). It is named in the
+//     code beside the case, and closing it is T181's. No rail here can see it, because the door has
+//     nothing yet to assert against.
+// Tool CONTENT is `mcp-tool-honesty.test.ts`'s (T86); this file asserts only what the front step
+// announces about itself.
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -82,6 +104,21 @@ type Discover = {
   };
 };
 
+const tools = async (): Promise<Array<{ name: string }>> => {
+  const res = await rpc({ id: 9, method: "tools/list", params: {} }, "alice-token");
+  expect(res.status).toBe(200);
+  return ((await res.json()) as { result: { tools: Array<{ name: string }> } }).result.tools;
+};
+
+// One probe per capability the door may announce: what must actually ANSWER for that announcement
+// to be true. A key with no entry here is an announcement no rail can back, and the capability rail
+// fails on it by name rather than skipping it.
+const SERVED: Record<string, () => Promise<void>> = {
+  tools: async () => {
+    expect((await tools()).length).toBeGreaterThan(0);
+  },
+};
+
 const discover = async (): Promise<Discover["result"]> => {
   const res = await rpc({ id: 1, method: "server/discover", params: {} }, "alice-token");
   expect(res.status).toBe(200);
@@ -100,6 +137,9 @@ describe("server/discover: the method a client speaks first", () => {
     // Compared to the EXPORTED constant. A literal here would let the two drift apart in silence,
     // which is the exact failure this rail exists to make impossible.
     expect(result.supportedVersions).toEqual([...MCP_PROTOCOLS]);
+    // A floor, because the line above compares the answer to the constant that produced it: an
+    // emptied list would satisfy the equality and leave a client with nothing to choose.
+    expect(result.supportedVersions.length).toBeGreaterThanOrEqual(2);
     // And the door honours what it advertises: initialize accepts each announced version by name.
     for (const version of MCP_PROTOCOLS) {
       const res = await rpc(
@@ -126,6 +166,38 @@ describe("server/discover: the method a client speaks first", () => {
     const info = honoured.serverInfo as { name?: unknown; version?: unknown };
     expect(info.name).toMatch(/loam/i);
     expect(typeof info.version).toBe("string");
+  });
+
+  it("announces only capabilities the door actually serves", async () => {
+    const announced = await discover();
+    const keys = Object.keys(announced.capabilities);
+    // Non-empty: an announcement of nothing agrees with initialize perfectly and tells a client
+    // there is no reason to stay.
+    expect(keys.length).toBeGreaterThan(0);
+    for (const key of keys) {
+      const honours = SERVED[key];
+      // A capability with no probe is an announcement this file cannot back. Adding a key to
+      // MCP_CAPABILITIES therefore reddens here until a probe proves the door answers for it —
+      // which is the whole difference between agreeing with initialize and being true.
+      expect(
+        honours,
+        `the door announces capability "${key}" and no rail proves it is served: ` +
+          `add the probe, or stop announcing it`,
+      ).toBeDefined();
+      await honours!();
+    }
+  });
+
+  it("its instructions name no tool the door does not have", async () => {
+    const announced = await discover();
+    expect(typeof announced.instructions).toBe("string");
+    expect(announced.instructions!.length).toBeGreaterThan(0);
+    const real = new Set((await tools()).map((t) => t.name));
+    // Every `loam_*` name the guidance mentions must exist. The other direction is deliberately
+    // free (see the header): naming fewer tools than exist cannot mislead anyone.
+    const named = announced.instructions!.match(/loam_[a-z_]+/g) ?? [];
+    expect(named.length).toBeGreaterThan(0);
+    for (const name of named) expect(real).toContain(name);
   });
 
   it("sits behind the same bearer requirement as the rest of the door", async () => {

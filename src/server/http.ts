@@ -898,9 +898,22 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       // announces, it does not decide. It adds no support for a newer revision: it reports what is
       // supported so a client can choose, which is precisely the honest answer to a client asking
       // for a revision the store does not speak.
+      //
+      // AND ANSWERING AT ALL IS ITSELF AN ANNOUNCEMENT — the one this door does not fully honour.
+      // In the draft, `server/discover` is the ERA PROBE: a dual-era client that receives a
+      // DiscoverResult concludes the server is MODERN and may cache that for the origin's lifetime.
+      // Modern era means per-request `_meta` versioning, an MCP-Protocol-Version header, and a
+      // -32022 UnsupportedProtocolVersionError. This door implements none of the three; it answers
+      // discover while remaining legacy-era, so a client that stays modern and sends a newer
+      // revision's `_meta` on a later call is SERVED under legacy semantics rather than refused.
+      // What bounds the damage is the answer itself: `supportedVersions` lists only legacy
+      // revisions, so a compliant client learns there is no mutual version. Per-request version
+      // enforcement is unbuilt and is T181's; do not read this case as evidence it exists.
       case "server/discover": {
-        // Silence for a notification, like every other method: an id-less request is not owed a
-        // reply, and answering one would be a message the client's dispatcher cannot place.
+        // Silence for a notification: an id-less request is not owed a reply, and answering one
+        // would be a message the client's dispatcher cannot place. (`initialize` above does NOT
+        // do this — it answers a notification with `id: null`. That is the older behaviour, not a
+        // house rule this case is following.)
         if (isNotification) {
           res.writeHead(202, CORS).end();
           return;
@@ -912,8 +925,9 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           instructions:
             "This is a Loam store. `loam_query` reads it with GraphQL and `loam_mutate` writes " +
             "to it as your token's identity; call tools/list for their schemas. Every answer is " +
-            "resolved through the store's registered schemas, so a field you cannot see is a " +
-            "field you are not granted.",
+            "resolved through the store's registered schemas, so a field you cannot see MAY be a " +
+            "field you are not granted — it may equally be unset, or resolved absent by the " +
+            "schema. Absence is not a refusal.",
           _meta: { "io.modelcontextprotocol/serverInfo": MCP_SERVER_INFO },
         });
         return;
