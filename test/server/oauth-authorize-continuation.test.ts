@@ -13,15 +13,30 @@
 // here would be a credential-phishing gift — a victim signs in to a real Loam store and is bounced
 // to an attacker's page — so each named shape is asserted separately, not as one class.
 //
+// THE FENCE IS ON THE DESTINATION, NOT ON OWNERSHIP, and (d) is written to say only that. `continue`
+// is an ordinary caller-controlled body field: a browser may put anything in it, and the answer
+// follows the field it SUBMITTED. What no caller can do is aim another browser's sign-in, because
+// the form token is an HMAC over that browser's own pre-session nonce.
+//
+// AND `POST /login` READS `continue` FROM ANY BODY. `GET /login` renders no such field, so an
+// ordinary sign-in never carries one — but a hand-built ordinary login may, and it draws the same
+// 303. That widens nothing: the destination is still this store's consent page, which re-runs the
+// exact-match fence and still demands an explicit approval before any code is minted.
+//
 // What this file deliberately does NOT assert, and which rail closes each gap:
 //   - The consent page's own criteria (the striker warning, the exact-match fence's full negative
 //     set, the code record's shape) — test/server/oauth-consent.test.ts (T135), frozen.
 //   - `authorizeRequestDefect`'s full table — test/server/oauth-authorize-validation.test.ts and
-//     test/server/oauth-pkce-method.test.ts (T167). Rail (e) asserts only that a RESUMED consent
-//     runs the same gate a direct one runs.
+//     test/server/oauth-pkce-method.test.ts (T167). (e1) asserts one thing about it and no more:
+//     a defect carried THROUGH the continuation is refused on arrival, so resumption cannot smuggle
+//     a request past a gate the direct path applies. (e2) is a weaker sibling — it fixes the consent
+//     door's form-token refusal for a session that ARRIVED by resumption, which is a property of the
+//     door rather than of the resume.
 //   - Redemption of the minted code — phase 15's file.
 //   - The EXACT byte at which an outsized continuation stops being read. (g) proves the ceiling
-//     exists and refuses; nothing depends on the precise number, so no rail pins it.
+//     refuses AND that a within-ceiling query still passes; nothing depends on the precise number,
+//     so no rail pins it. (g) drives the GET side deliberately: on the POST side the ceiling is
+//     unreachable, because session.ts's 8 KiB body cap refuses a longer body first.
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -297,6 +312,12 @@ describe("the authorize door's continuation (T148 item 1)", () => {
           headers: { accept: "text/html", cookie: `${SESSION_COOKIE}=${session}` },
         });
         expect(resumed.headers.get("location")).toBeNull();
+      } else {
+        // The other branch is not "nothing happened": the door still signed the person in, and it
+        // still answered the page it answers when no continuation survives. Without this, a shape
+        // that provoked a 500 or a blank body would pass by taking this branch.
+        expect(res.status).toBe(200);
+        expect(await res.text()).toContain("Signed in.");
       }
     });
   }
@@ -323,7 +344,7 @@ describe("the authorize door's continuation (T148 item 1)", () => {
     expect(await resumed.text()).not.toContain("evil.example");
   });
 
-  it("(d) a continuation cannot move a different browser's landing", async () => {
+  it("(d) the pre-session fence stops a continuation stapled onto another browser's sign-in", async () => {
     const { base } = await authorizeServer();
     // Browser A opens the ordinary login form and holds its own pre-session nonce.
     const a = await fetch(`${base}/login`, { redirect: "manual" });
@@ -334,8 +355,9 @@ describe("the authorize door's continuation (T148 item 1)", () => {
     const bContinuation = hiddenOf(b.html, "continue");
     expect(bContinuation).toBeDefined();
 
-    // B's continuation, submitted against A's pre-session, is refused: the form token is bound to
-    // the nonce cookie, so nobody can staple a destination onto another browser's sign-in.
+    // B's form and A's cookie do not go together. The refusal is the PRE-SESSION FENCE, which
+    // predates this ticket: the form token is an HMAC over the nonce cookie the browser presents.
+    // The continuation rides along and changes nothing, which is the point being asserted.
     const crossed = await submitLogin(base, {
       formToken: formTokenOf(b.html),
       nonce: aNonce,
@@ -345,6 +367,23 @@ describe("the authorize door's continuation (T148 item 1)", () => {
     expect(crossed.headers.get("location")).toBeNull();
     expect(cookiesOf(crossed).some((c) => c.startsWith(`${SESSION_COOKIE}=`))).toBe(false);
 
+    // AND THE HONEST OTHER HALF: with its OWN token and its OWN nonce, a browser lands wherever the
+    // field it SUBMITTED says. Nothing binds a continuation to the request that rendered it — the
+    // fence is on the destination, and a substituted query still resolves to this store's own path.
+    const substituted = authorizeQuery({ state: "a-different-state" });
+    const b2 = await authorizeAsStranger(base, authorizeQuery());
+    const own = await submitLogin(base, {
+      formToken: formTokenOf(b2.html),
+      nonce: b2.nonce,
+      continuation: substituted,
+    });
+    expect(own.status).toBe(303);
+    const landed = own.headers.get("location")!;
+    expect(new URL(landed, "https://store.example").pathname).toBe(AUTHORIZE_PATH);
+    expect(new URLSearchParams(landed.slice(landed.indexOf("?") + 1)).get("state")).toBe(
+      "a-different-state",
+    );
+
     // And A's own sign-in still lands where an ordinary sign-in lands.
     const ordinary = await submitLogin(base, { formToken: formTokenOf(aHtml), nonce: aNonce });
     expect(ordinary.status).toBe(200);
@@ -352,14 +391,19 @@ describe("the authorize door's continuation (T148 item 1)", () => {
     expect(await ordinary.text()).toContain("Signed in.");
   });
 
-  it("(g) an outsized authorize query earns no continuation at all", async () => {
+  it("(g) an outsized authorize query earns no continuation, and a normal one does", async () => {
     const { base } = await authorizeServer();
     // Far past the ceiling continuation.ts holds. The form still renders — a person may always
     // sign in — but it carries nothing, so the door never resumes a query it refused to read.
-    const form = await authorizeAsStranger(base, authorizeQuery({ state: "x".repeat(9000) }));
-    expect(form.status).toBe(200);
-    expect(form.html).toContain("Sign in.");
-    expect(hiddenOf(form.html, "continue")).toBeUndefined();
+    const outsized = await authorizeAsStranger(base, authorizeQuery({ state: "x".repeat(9000) }));
+    expect(outsized.status).toBe(200);
+    expect(outsized.html).toContain("Sign in.");
+    expect(hiddenOf(outsized.html, "continue")).toBeUndefined();
+    // THE POSITIVE CONTROL, on the same door: absence has to be the CEILING's doing rather than the
+    // feature's absence. A query under the ceiling, differing only in the length of one value,
+    // renders the field.
+    const within = await authorizeAsStranger(base, authorizeQuery({ state: "x".repeat(100) }));
+    expect(hiddenOf(within.html, "continue")).toBeDefined();
   });
 
   it("(e1) a resumed consent still refuses a PKCE method this store cannot verify (T167)", async () => {
@@ -383,7 +427,7 @@ describe("the authorize door's continuation (T148 item 1)", () => {
     expect(await resumed.text()).toContain("code_challenge_method");
   });
 
-  it("(e2) a resumed consent still refuses an approval with no form token", async () => {
+  it("(e2) the consent door still refuses a form-token-less approval from a resumed session", async () => {
     const { base } = await authorizeServer();
     const form = await authorizeAsStranger(base, authorizeQuery());
     const res = await submitLogin(base, {

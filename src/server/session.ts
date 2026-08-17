@@ -1051,6 +1051,7 @@ page will offer.</p>`,
     if (resume !== undefined) {
       res.writeHead(303, {
         location: resume,
+        "content-security-policy": CSP,
         "cache-control": CACHE_NO_STORE,
         "referrer-policy": "same-origin",
         "set-cookie": cookies,
