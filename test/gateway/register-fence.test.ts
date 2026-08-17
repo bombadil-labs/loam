@@ -27,6 +27,8 @@ const OPERATOR_SEED = "0e".repeat(32);
 const OPERATOR = authorForSeed(OPERATOR_SEED);
 const CONNECTOR = authorForSeed("c0".repeat(32));
 const BYSTANDER = authorForSeed("b7".repeat(32));
+const WRITER_SEED = "77".repeat(32);
+const WRITER = authorForSeed(WRITER_SEED);
 
 describe("T174 — the fence is a literal code-unit prefix on the hyperschema name", () => {
   // The hand-written table. Each row is a decision, not a derivation: the prefix, the proposed
@@ -37,6 +39,7 @@ describe("T174 — the fence is a literal code-unit prefix on the hyperschema na
     ["thread:", "thread:"], // the bare prefix is inside its own fence
     ["thread:", "thread:x@y"], // `@` is not special to the fence; the derived ids stay prefixed
     ["thread", "thread:groove"], // a prefix need not end at a separator
+    ["t", "thread:groove"], // ONE character is a prefix: the floor is non-empty, not some length
   ];
   const REFUSED: readonly (readonly [string, string])[] = [
     ["thread:", "note:anything"], // a different scope
@@ -63,7 +66,7 @@ describe("T174 — the fence is a literal code-unit prefix on the hyperschema na
   }
 
   it("the table is not vacuous: both halves carry cases", () => {
-    expect(ADMITTED.length).toBeGreaterThanOrEqual(5);
+    expect(ADMITTED.length).toBeGreaterThanOrEqual(6);
     expect(REFUSED.length).toBeGreaterThanOrEqual(9);
   });
 });
@@ -162,6 +165,40 @@ describe("T174 — register standing, read from the ground", () => {
     expect(registerPrefixesOf(gw.reactor, CONNECTOR, OPERATOR)).toEqual([]);
     // Two-sided: the strike took its target and nothing else.
     expect(registerPrefixesOf(gw.reactor, BYSTANDER, OPERATOR)).toEqual(["note:"]);
+    await gw.close();
+  });
+
+  it("A GRANT IS EFFECTIVE ONLY IF ITS AUTHORITY CHAIN ROOTS IN THE OPERATOR", async () => {
+    // A mere WRITER may sign a grant-shaped delta — pointing is free, and the door accepts the
+    // append because the author holds write standing. It must bind nothing: register standing a
+    // writer minted for themselves would be self-appointment. Two-sided against the next case,
+    // which is the same act by an author the operator actually made an admin.
+    const gw = await open();
+    await gw.append([
+      signClaims(grantClaims(STORE_ENTITY, WRITER, "write", OPERATOR, 100), OPERATOR_SEED),
+    ]);
+    await gw.append([
+      signClaims(
+        grantClaims(STORE_ENTITY, CONNECTOR, "register", WRITER, 101, "thread:"),
+        WRITER_SEED,
+      ),
+    ]);
+    expect(registerPrefixesOf(gw.reactor, CONNECTOR, OPERATOR)).toEqual([]);
+    await gw.close();
+  });
+
+  it("...and an effective ADMIN's register grant DOES bind", async () => {
+    const gw = await open();
+    await gw.append([
+      signClaims(grantClaims(STORE_ENTITY, WRITER, "admin", OPERATOR, 100), OPERATOR_SEED),
+    ]);
+    await gw.append([
+      signClaims(
+        grantClaims(STORE_ENTITY, CONNECTOR, "register", WRITER, 101, "note:"),
+        WRITER_SEED,
+      ),
+    ]);
+    expect(registerPrefixesOf(gw.reactor, CONNECTOR, OPERATOR)).toEqual(["note:"]);
     await gw.close();
   });
 

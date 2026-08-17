@@ -101,6 +101,7 @@ async function bench(): Promise<Bench> {
       "thread-token": { actor: THREAD_SEED },
       "note-token": { actor: NOTE_SEED },
       "bare-token": { actor: BARE_SEED },
+      "junk-token": { actor: "not-a-signing-seed" },
     },
     port: 0,
     host: "127.0.0.1",
@@ -260,6 +261,16 @@ describe("T174 rails 2+3 — the prefix is a fence, and every escape draws ONE r
   it("a token with no register standing is refused exactly as before this ticket", async () => {
     const b = await bench();
     const res = await b.register("bare-token", bodyFor("Rock"));
+    expect(res.status).toBe(403);
+    expect(await errorsOf(res)).toEqual([REFUSAL]);
+  });
+
+  it("a token whose actor names no key REFUSES rather than faulting", async () => {
+    // `actor` is a signing seed, and the door derives an author from it to read standing. A
+    // configured token carrying junk must fail CLOSED at the refusal, not throw its way to a 500 —
+    // an error the caller can tell apart from a refusal is an oracle, and a crash is one.
+    const b = await bench();
+    const res = await b.register("junk-token", bodyFor("thread:groove"));
     expect(res.status).toBe(403);
     expect(await errorsOf(res)).toEqual([REFUSAL]);
   });

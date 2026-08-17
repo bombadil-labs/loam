@@ -201,3 +201,15 @@ describe("T174 — loam grant revoke kills register standing", () => {
     expect(await prefixesInGround(BYSTANDER)).toEqual(["note:"]);
   });
 });
+
+describe("T174 — the grant form is one connector at a time", () => {
+  it("a second positional is a usage error, not a silently ignored one", async () => {
+    const code = await run(
+      ["grant", "cli-thread", "cli-note", "--verb=register", "--prefix=thread:", "--home", home],
+      io(),
+    );
+    expect(code).toBe(2);
+    expect(await prefixesInGround(CONNECTOR)).toEqual([]);
+    expect(await prefixesInGround(BYSTANDER)).toEqual([]);
+  });
+});
