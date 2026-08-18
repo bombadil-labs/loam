@@ -35,7 +35,52 @@ import { slateDefect } from "./slate.js";
 export const CTX_TENANT = "loam.tenant";
 export const CTX_MEMBERS = "loam.members";
 export const CTX_GRANTS = "loam.grants";
-export type Verb = "write" | "admin";
+// `write` publishes, `admin` additionally mints grants and retires constitution, and `register`
+// (T174) shapes the store — but only inside the entity-namespace PREFIX its own grant names. Root
+// registration is the operator's and stays there.
+export type Verb = "write" | "admin" | "register";
+export const VERBS: ReadonlySet<string> = new Set<Verb>(["write", "admin", "register"]);
+
+// THE FENCE (T174). A register grant carries a prefix, and this is the whole of what "inside the
+// prefix" means — read it before changing anything downstream of it, because an escape from here is
+// an unauthorized registration.
+//
+// The rule: `name` is admitted iff `prefix` is a NON-EMPTY LITERAL prefix of it, compared code unit
+// by code unit, on the strings exactly as they arrived.
+//
+//  - LITERAL, never a pattern and never a namespace-aware match. `thread:` admits `thread:groove`
+//    and `thread:groove:2`; it refuses `x-thread:foo`, where the prefix appears LATER and so is not
+//    a prefix at all. It also admits `threadbare` — a prefix need not stop at a separator, because
+//    inventing a separator here would mean two definitions of a namespace boundary (this one and
+//    the store's, which has none) and the two would drift.
+//  - THE BARE PREFIX IS INSIDE ITS OWN FENCE. `thread:` admits the name `thread:`. Refusing it would
+//    be an arbitrary hole in a range that is otherwise contiguous.
+//  - AN EMPTY PREFIX ADMITS NOTHING. `"".startsWith` is true of every string, so a naive check would
+//    turn a prefixless grant into ROOT authority — the single most expensive way to get this wrong.
+//    `constitutionalDefect` already refuses to let such a grant exist; this refuses to honour one
+//    that somehow does. Two independent fail-closed points, on purpose.
+//  - NO NORMALIZATION, NO DECODING, NO CASE FOLDING. `Thread:foo`, `thread%3Afoo`, and `thread：foo`
+//    (fullwidth colon) are three DIFFERENT names, and none of them is inside `thread:`. This is not
+//    laxity: every ENTITY ID the store derives from the name is that same literal string, so any
+//    folding here would compare a folded form against an unfolded key and could admit a name whose
+//    deltas land outside the fence. The comparison and the derivation must run on one string.
+//
+// AND THE FENCE'S DISJOINTNESS DOES NOT CARRY TO THE GRAPHQL FIELD NAMESPACE. Read the bullet above
+// precisely — it is true of entity ids and FALSE of the served field. `legalNameFor` (gql.ts) maps
+// every `[^_A-Za-z0-9]` to `_` and `queryFieldFor` lowercases an initial capital, so the mapping is
+// MANY-TO-ONE: `x:Foo` and `x_Foo` are disjoint entity namespaces that both serve at the field
+// `x_Foo`. Two prefixes an operator believes are separate can therefore collide at the surface. That
+// fails CLOSED — `buildGqlSchema` refuses the second publisher, whoever it is, the operator
+// included — so the reachable harm is SQUATTING rather than capture. It is written here because the
+// next author to extend this fence will otherwise read the bullet above as covering the field too.
+//
+// This predicate fences ONE name. A registration carries THREE independently-chosen names — the
+// program, the reading, and an optional explicit entity — and each reaches a different part of the
+// store, so the door applies this to each of them rather than to one. `registerFenceAdmits` in
+// src/server/http.ts is where that composition lives, and it says which name reaches what.
+export function fenceAdmits(prefix: string, name: string): boolean {
+  return prefix.length > 0 && name.startsWith(prefix);
+}
 
 // --- the claims vocabulary ----------------------------------------------------------------------
 
@@ -56,13 +101,17 @@ export function membershipClaims(
   };
 }
 
-// `subject` may `verb` within `tenant`: the capability itself, as one signed delta.
+// `subject` may `verb` within `tenant`: the capability itself, as one signed delta. A `register`
+// grant carries a FOURTH pointer, `prefix` — the entity namespace it may shape and no other. The
+// scope rides the grant rather than a table beside it, so revoking the grant revokes the scope in
+// the same strike and there is no second place for the two to disagree.
 export function grantClaims(
   tenant: string,
   subject: string,
   verb: Verb,
   author: string,
   timestamp: number,
+  prefix?: string,
 ): Claims {
   return {
     timestamp,
@@ -71,6 +120,9 @@ export function grantClaims(
       { role: "tenant", target: { kind: "entity", entity: { id: tenant, context: CTX_GRANTS } } },
       { role: "subject", target: { kind: "primitive", value: subject } },
       { role: "verb", target: { kind: "primitive", value: verb } },
+      ...(prefix === undefined
+        ? []
+        : [{ role: "prefix", target: { kind: "primitive" as const, value: prefix } }]),
     ],
   };
 }
@@ -105,6 +157,13 @@ export const TENANT: HyperSchema = { name: "Tenant", alg: 1, body: entityGatherB
 // not by itself remove the revoked author from a trusted set (only the operator's strike
 // does). grantHeld keeps the full recursion; the chain's second link is exactly where lens
 // and door can disagree.
+//
+// NAMED GAP: the wide set matches any grant the operator minted, so a `register` grantee is in it.
+// That is inert today — a register grant confers no write standing, so `authorize` refuses every
+// delta such an author signs, and a striker with no deltas strikes nothing. It stops being inert if
+// a federated pull ever admits deltas authored by that key. Closing it means narrowing this term,
+// which moves the bytes of an exported gather body; the rail that would close it asserts a register
+// grantee's ingested strike is inert in a governed read.
 function lawfulStrikersJson(operator: string, adminsOnly: boolean): unknown {
   const operatorMinted = { match: { field: "author", cmp: "eq", const: operator } };
   const grantShaped = {
@@ -302,7 +361,13 @@ function grantHeld(
       if (p.role === "verb" && typeof p.target.value === "string") granted = p.target.value;
     }
     if (subject !== author) continue;
-    if (granted !== "admin" && granted !== verb) continue;
+    // `admin` covers `write`, and NEVER `register`. An admin grant carries no prefix, so "admin
+    // covers register" could only ever mean register AT ROOT — the one authority that is not
+    // delegable through the verb lattice. An admin who wants to register mints themselves a
+    // prefixed register grant, which is a visible act in the audit rather than an implication.
+    if (verb === "register" ? granted !== "register" : granted !== "admin" && granted !== verb) {
+      continue;
+    }
     // The grant itself must be effective: minted by the operator, or by an effective admin.
     if (ctx.operator !== undefined && d.claims.author !== ctx.operator) {
       const branch = new Set(visited).add(d.id);
@@ -316,6 +381,66 @@ function grantHeld(
 // The tenant `entity` currently belongs to — the latest effective membership claim wins.
 export function tenantOf(reactor: Reactor, entity: string, operator?: string): string | undefined {
   return tenantOfWith({ reactor, operator }, entity, new Set());
+}
+
+// One grant `author` currently holds at the store entity, as an operator reads it.
+export interface HeldGrant {
+  readonly id: string;
+  readonly verb: Verb;
+  /** Present on a `register` grant and on no other: the namespace it may shape. */
+  readonly prefix?: string;
+}
+
+// Every EFFECTIVE surviving grant naming `author` at the store entity — the one derivation both
+// `loam grant list` and the registration door read, so what an operator sees and what a door
+// honours cannot drift. "Effective" is the same discipline `grantHeld` runs: in a governed store a
+// grant binds only if the operator signed it or an effective admin did, and only if it survives
+// strikes that themselves had standing. A revocation therefore removes a row here on the very next
+// read, with nothing to invalidate.
+export function grantsHeldBy(reactor: Reactor, author: string, operator?: string): HeldGrant[] {
+  const ctx: Ctx = { reactor, operator };
+  const out: HeldGrant[] = [];
+  for (const d of survivingAt(ctx, STORE_ENTITY, CTX_GRANTS, new Set())) {
+    if (constitutionalDefect(d) !== undefined) continue; // malformed law binds nothing
+    let subject: string | undefined;
+    let verb: string | undefined;
+    let prefix: string | undefined;
+    for (const p of d.claims.pointers) {
+      if (p.target.kind !== "primitive" || typeof p.target.value !== "string") continue;
+      if (p.role === "subject") subject = p.target.value;
+      if (p.role === "verb") verb = p.target.value;
+      if (p.role === "prefix") prefix = p.target.value;
+    }
+    if (subject !== author || verb === undefined || !VERBS.has(verb)) continue;
+    if (operator !== undefined && d.claims.author !== operator) {
+      // ONLY THE OPERATOR MINTS REGISTER STANDING. `write` and `admin` are delegable through the
+      // admin chain, as they always have been. `register` is not, and the asymmetry is deliberate:
+      // an admin could otherwise sign itself `register` with a one-character prefix, and since the
+      // publish carries no request context the store would sign the result WITH THE OPERATOR'S OWN
+      // SEED — the operator's constitutional schemas superseded under the operator's key. Nobody
+      // decided to delegate that, so it is not delegated.
+      if (verb === "register") continue;
+      const branch = new Set([d.id]);
+      if (!grantHeld(ctx, STORE_ENTITY, d.claims.author, "admin", branch)) continue;
+    }
+    out.push({
+      id: d.id,
+      verb: verb as Verb,
+      ...(prefix === undefined ? {} : { prefix }),
+    });
+  }
+  return out;
+}
+
+// The namespaces `author` may register inside, right now. Empty means no register standing at all,
+// which is the door's cue to answer the ordinary authority refusal — a caller with an empty list
+// and a caller with no token learn exactly the same thing.
+export function registerPrefixesOf(reactor: Reactor, author: string, operator?: string): string[] {
+  const seen = new Set<string>();
+  for (const g of grantsHeldBy(reactor, author, operator)) {
+    if (g.verb === "register" && g.prefix !== undefined) seen.add(g.prefix);
+  }
+  return [...seen];
 }
 
 // Does `author` hold `verb` (admin covers write) on `tenant`, by an effective surviving grant?
@@ -362,6 +487,7 @@ export function constitutionalDefect(delta: Delta): string | undefined {
     // that means three things in three places is malformed law, whoever signed it.
     const subjects = ptrs.filter((p) => p.role === "subject");
     const verbs = ptrs.filter((p) => p.role === "verb");
+    const prefixes = ptrs.filter((p) => p.role === "prefix");
     if (
       subjects.length !== 1 ||
       subjects[0]!.target.kind !== "primitive" ||
@@ -369,12 +495,34 @@ export function constitutionalDefect(delta: Delta): string | undefined {
     ) {
       return "a grant carries exactly one string subject";
     }
+    const verbTarget = verbs[0]?.target;
     if (
       verbs.length !== 1 ||
-      verbs[0]!.target.kind !== "primitive" ||
-      (verbs[0]!.target.value !== "write" && verbs[0]!.target.value !== "admin")
+      verbTarget?.kind !== "primitive" ||
+      typeof verbTarget.value !== "string" ||
+      !VERBS.has(verbTarget.value)
     ) {
-      return 'a grant carries exactly one verb, "write" or "admin"';
+      return 'a grant carries exactly one verb, "write", "admin" or "register"';
+    }
+    // The scope is part of the verb's meaning, so it is checked as law rather than at the door.
+    // A register grant with no prefix is REFUSED rather than read as meaningless: a grant-shaped
+    // delta that binds nothing sits in the audit looking like authority, and the next reader is
+    // as free to read a missing fence as "unrestricted" as to read it as "nothing".
+    if (verbTarget.value === "register") {
+      const prefix = prefixes[0]?.target;
+      if (
+        prefixes.length !== 1 ||
+        prefix?.kind !== "primitive" ||
+        typeof prefix.value !== "string" ||
+        prefix.value.length === 0
+      ) {
+        return (
+          "a register grant carries exactly one non-empty string prefix — the entity namespace it " +
+          "may register inside; registration at the root is the operator's and is not delegable"
+        );
+      }
+    } else if (prefixes.length > 0) {
+      return `a ${verbTarget.value} grant carries no prefix — only a register grant is scoped`;
     }
     return undefined;
   }
