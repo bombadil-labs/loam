@@ -35,11 +35,18 @@ import { slateDefect } from "./slate.js";
 export const CTX_TENANT = "loam.tenant";
 export const CTX_MEMBERS = "loam.members";
 export const CTX_GRANTS = "loam.grants";
-// `write` publishes, `admin` additionally mints grants and retires constitution, and `register`
-// (T174) shapes the store — but only inside the entity-namespace PREFIX its own grant names. Root
-// registration is the operator's and stays there.
-export type Verb = "write" | "admin" | "register";
-export const VERBS: ReadonlySet<string> = new Set<Verb>(["write", "admin", "register"]);
+// `write` publishes, `admin` additionally mints grants and retires constitution, `register` (T174)
+// shapes the store — but only inside the entity-namespace PREFIX its own grant names — and
+// `federate` (T188) opens and tends federation channels, but only on the CONTAINER its own grant
+// names. Root registration is the operator's and stays there.
+//
+// `federate` exists because the alternative was worse: `GET /:mount/federate` demands the OPERATOR
+// token today, and that token also registers root law, mints grants, drops containers and reads
+// everything — so "let me federate with you" cost a peer the entire store. §28 says trust is a
+// property of a CONTAINER, so federation authority is scoped to one, and the operator holds it at
+// root by construction rather than as a special case.
+export type Verb = "write" | "admin" | "register" | "federate";
+export const VERBS: ReadonlySet<string> = new Set<Verb>(["write", "admin", "register", "federate"]);
 
 // THE FENCE (T174). A register grant carries a prefix, and this is the whole of what "inside the
 // prefix" means — read it before changing anything downstream of it, because an escape from here is
@@ -435,6 +442,27 @@ export function grantsHeldBy(reactor: Reactor, author: string, operator?: string
 // The namespaces `author` may register inside, right now. Empty means no register standing at all,
 // which is the door's cue to answer the ordinary authority refusal — a caller with an empty list
 // and a caller with no token learn exactly the same thing.
+/**
+ * The containers this author may federate on, by an effective surviving grant.
+ *
+ * The scope rides the same `prefix` slot T174's register verb uses, because a grant already carries
+ * one scoping string and a second would be a parallel vocabulary for the same idea. What differs is
+ * the COMPARISON: a register prefix is a literal prefix of an entity name, while a federate scope is
+ * a container name matched WHOLE. A channel lives in exactly one container, so prefix-matching here
+ * would silently admit `friends-archive` to a grant that said `friends`.
+ */
+export function federateContainersOf(
+  reactor: Reactor,
+  author: string,
+  operator?: string,
+): string[] {
+  const seen = new Set<string>();
+  for (const g of grantsHeldBy(reactor, author, operator)) {
+    if (g.verb === "federate" && g.prefix !== undefined) seen.add(g.prefix);
+  }
+  return [...seen];
+}
+
 export function registerPrefixesOf(reactor: Reactor, author: string, operator?: string): string[] {
   const seen = new Set<string>();
   for (const g of grantsHeldBy(reactor, author, operator)) {
@@ -502,13 +530,17 @@ export function constitutionalDefect(delta: Delta): string | undefined {
       typeof verbTarget.value !== "string" ||
       !VERBS.has(verbTarget.value)
     ) {
-      return 'a grant carries exactly one verb, "write", "admin" or "register"';
+      return 'a grant carries exactly one verb: "write", "admin", "register" or "federate"';
     }
     // The scope is part of the verb's meaning, so it is checked as law rather than at the door.
     // A register grant with no prefix is REFUSED rather than read as meaningless: a grant-shaped
     // delta that binds nothing sits in the audit looking like authority, and the next reader is
     // as free to read a missing fence as "unrestricted" as to read it as "nothing".
-    if (verbTarget.value === "register") {
+    // Two verbs are SCOPED, and a scoped grant with no scope is REFUSED rather than read as
+    // meaningless: a grant-shaped delta that binds nothing sits in the audit looking like authority,
+    // and the next reader is as free to read a missing fence as "unrestricted" as to read it as
+    // "nothing". `register` names an entity namespace; `federate` (T188) names a container.
+    if (verbTarget.value === "register" || verbTarget.value === "federate") {
       const prefix = prefixes[0]?.target;
       if (
         prefixes.length !== 1 ||
@@ -516,13 +548,14 @@ export function constitutionalDefect(delta: Delta): string | undefined {
         typeof prefix.value !== "string" ||
         prefix.value.length === 0
       ) {
-        return (
-          "a register grant carries exactly one non-empty string prefix — the entity namespace it " +
-          "may register inside; registration at the root is the operator's and is not delegable"
-        );
+        return verbTarget.value === "register"
+          ? "a register grant carries exactly one non-empty string prefix — the entity namespace " +
+              "it may register inside; registration at the root is the operator's and is not delegable"
+          : "a federate grant carries exactly one non-empty string scope — the container it may " +
+              "open channels into; federating the whole store is the operator's and is not delegable";
       }
     } else if (prefixes.length > 0) {
-      return `a ${verbTarget.value} grant carries no prefix — only a register grant is scoped`;
+      return `a ${verbTarget.value} grant carries no scope — only register and federate are scoped`;
     }
     return undefined;
   }
