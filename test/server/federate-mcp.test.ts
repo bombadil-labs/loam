@@ -144,3 +144,82 @@ describe("T188 — federation tools over MCP", () => {
     }
   });
 });
+
+describe("T188 — an agent can stage a sever and can never complete one", () => {
+  it("the drop tool purges NOTHING, and says so", async () => {
+    const gw = await storeWithChannels();
+    const door = await serve({
+      mounts: { default: gw },
+      tokens: { "tok-friend": { actor: FRIEND } },
+      port: 0,
+    });
+    try {
+      const before = gw.channelStatus().map((c) => c.name);
+      const staged = await callTool(door.url, "tok-friend", "loam_federate_drop", {
+        channel: "channel:friends:alice",
+      });
+      expect(staged.isError, staged.text).toBe(false);
+
+      const body = JSON.parse(staged.text) as {
+        staged: string;
+        purgedNothing: boolean;
+        wouldPurge: string[];
+        wouldSurvive: string[];
+      };
+      expect(body.purgedNothing).toBe(true);
+      expect(body.staged).toMatch(/^[0-9a-f]{32}$/);
+
+      // THE CHANNEL IS STILL THERE. Asserted against the store rather than the report, because the
+      // report is the thing under test.
+      expect(gw.channelStatus().map((c) => c.name)).toEqual(before);
+      expect(gw.channelStatus("channel:friends:alice")).toHaveLength(1);
+    } finally {
+      await door.close();
+      await gw.close();
+    }
+  });
+
+  it("the preview is TWO-SIDED — what would go, and what would remain", async () => {
+    // A preview naming only the target cannot show over-purging, which is the failure with no
+    // recovery. The operator must be able to read what SURVIVES before agreeing to anything.
+    const gw = await storeWithChannels();
+    const door = await serve({
+      mounts: { default: gw },
+      tokens: { "tok-op": { operator: true } },
+      port: 0,
+    });
+    try {
+      const staged = await callTool(door.url, "tok-op", "loam_federate_drop", {
+        channel: "channel:friends:alice",
+      });
+      const body = JSON.parse(staged.text) as { wouldPurge: string[]; wouldSurvive: string[] };
+      expect(body.wouldPurge.join(" ")).toContain("channel:friends:alice");
+      expect(body.wouldSurvive).toContain("channel:work:carol");
+      expect(body.wouldSurvive).not.toContain("channel:friends:alice");
+    } finally {
+      await door.close();
+      await gw.close();
+    }
+  });
+
+  it("staging outside the fence is refused, and stages nothing", async () => {
+    const gw = await storeWithChannels();
+    const door = await serve({
+      mounts: { default: gw },
+      tokens: { "tok-friend": { actor: FRIEND } },
+      port: 0,
+    });
+    try {
+      const outside = await callTool(door.url, "tok-friend", "loam_federate_drop", {
+        channel: "channel:work:carol",
+      });
+      expect(outside.isError).toBe(true);
+      expect(outside.text).not.toContain("staged");
+      // Two-sided: the channel it could not stage is untouched and still listed for its owner.
+      expect(gw.channelStatus("channel:work:carol")).toHaveLength(1);
+    } finally {
+      await door.close();
+      await gw.close();
+    }
+  });
+});

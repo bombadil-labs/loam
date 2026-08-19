@@ -904,6 +904,39 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     }
   };
 
+  /**
+   * STAGED CHANNEL SEVERS (T188). An agent may only ever STAGE a purge; the purge itself happens
+   * behind the admin page's session gate, which a connector token can never obtain because the two
+   * surfaces authenticate differently — MCP callers are a `TokenIdentity`, the admin page sits
+   * behind `SessionGate`. That is the whole safety property, and it is structural rather than a flag
+   * an agent could satisfy.
+   *
+   * In memory on purpose: a stage is a ten-minute intention, not a record. Losing them on restart
+   * fails in the safe direction — the operator re-stages — while persisting them would make a stale
+   * intention outlive the state it was computed against.
+   */
+  const stagedDrops = new Map<
+    string,
+    { channel: string; expiresAt: number; preview: { purges: string[]; survives: string[] } }
+  >();
+
+  /**
+   * What a drop of this channel would remove, and what it would leave. TWO-SIDED by construction,
+   * because a preview that named only the target could not show over-purging — the failure that
+   * matters most, and the one with no recovery.
+   */
+  const previewDrop = (gw: Gateway, channel: string): { purges: string[]; survives: string[] } => {
+    const rows = gw.channelStatus();
+    const target = rows.find((c) => c.name === channel);
+    return {
+      purges:
+        target === undefined
+          ? []
+          : [`${target.name} (everything received from "${target.prefix}")`],
+      survives: rows.filter((c) => c.name !== channel).map((c) => c.name),
+    };
+  };
+
   // The MCP tools: the same two verbs the gateway speaks, in JSON-RPC clothes. `annotations` are
   // part of the authority, not decoration: a shell reads `readOnlyHint: true` as a licence to cache
   // and REPLAY a call, and an explicit `false` is what makes its own machinery refuse to cache a
@@ -1007,6 +1040,21 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         required: ["channel"],
       },
       annotations: { readOnlyHint: false },
+    },
+    {
+      name: "loam_federate_drop",
+      description:
+        "STAGE a channel sever. This does NOT purge anything: it returns a staged id, a link, an " +
+        "expiry, and a preview of what would be removed and what would survive. A person completes " +
+        "it in the browser — an agent cannot, by construction. To stop receiving and KEEP what " +
+        "arrived, use loam_federate_set with receiving false instead; that is reversible and this " +
+        "is not.",
+      inputSchema: {
+        type: "object",
+        properties: { channel: { type: "string" } },
+        required: ["channel"],
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
     },
   ];
 
@@ -1179,6 +1227,62 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         // §46 over MCP (T188). Authority is the CONTAINER-SCOPED federate grant, never the operator
         // role — see federateStanding. A caller with no standing meets the same refusal whichever
         // channel it named, so the tool cannot be used to learn which channels exist (§12/T78).
+        if (name === "loam_federate_drop") {
+          const standing = federateStanding(gateway, identity);
+          const target = gateway
+            .channelStatus(args.channel)
+            .find((c) => federateAdmits(standing, c.into));
+          if (target === undefined) {
+            reply({
+              content: [
+                {
+                  type: "text",
+                  text:
+                    "federation is not yours to sever here: it wants a `federate` grant naming the " +
+                    "container the channel receives into.",
+                },
+              ],
+              isError: true,
+            });
+            return;
+          }
+          // STAGE ONLY. Nothing is removed on this path, ever — the purge refuses a TokenIdentity
+          // outright, so an agent calling this a thousand times purges nothing.
+          const id = randomBytes(16).toString("hex");
+          const preview = previewDrop(gateway, target.name);
+          // One stage per channel: a second replaces the first, so a stale intention cannot be
+          // confirmed after the operator has already re-considered.
+          for (const [held, row] of stagedDrops) {
+            if (row.channel === target.name) stagedDrops.delete(held);
+          }
+          stagedDrops.set(id, { channel: target.name, expiresAt: Date.now() + 600_000, preview });
+          reply({
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(
+                  {
+                    staged: id,
+                    channel: target.name,
+                    purgedNothing: true,
+                    expiresInSeconds: 600,
+                    confirmAt: `${options.publicUrl ?? ""}/admin`,
+                    wouldPurge: preview.purges,
+                    wouldSurvive: preview.survives,
+                    note:
+                      "Nothing has been removed. A person must confirm this in the browser; this " +
+                      "tool cannot complete it. `loam_federate_set` with receiving false stops the " +
+                      "channel without destroying anything.",
+                  },
+                  null,
+                  1,
+                ),
+              },
+            ],
+          });
+          return;
+        }
+
         if (name === "loam_federate_status" || name === "loam_federate_set") {
           const standing = federateStanding(gateway, identity);
           if (standing === undefined) {
