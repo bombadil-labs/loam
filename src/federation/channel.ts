@@ -289,3 +289,32 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
   gw.federationChannels.set(name, channel);
   return channel;
 }
+
+/**
+ * Sever a channel and purge its pool — the irreversible half of §46's control surface.
+ *
+ * This is why a channel gets its OWN pool rather than sharing one inbox. `drop()` purges at the
+ * bytes on every backend and REFUSES BY NAME if any byte survives (§27), so severing one peer is a
+ * proven operation. Over a shared ground it would have been a filtered delete by author, and our
+ * erasure rules would rightly demand a proof nobody could give.
+ *
+ * Two properties this must never lose, both pinned by rails:
+ *  - a NAMED bystander channel keeps serving, at the bytes; and
+ *  - a delta that arrived on two channels independently survives in the second pool. Union is
+ *    union, and a purge that keyed on delta identity across the store rather than on the POOL would
+ *    reach into a peer nobody asked to sever.
+ *
+ * Freezing is the reversible act and lives on the toggles; this one does not come back.
+ */
+export async function dropChannelImpl(gw: Gateway, name: string): Promise<void> {
+  const channel = gw.federationChannels.get(name);
+  const pool = channel?.pool ?? (await gw.openContainer({ name }));
+  if (pool.drop === undefined) {
+    throw new Error(
+      `dropChannel refused: ${name} has no drop — only a SEPARATE container purges its own bytes, ` +
+        `and a channel pool that is not separate cannot be severed provably (§46)`,
+    );
+  }
+  await pool.drop();
+  gw.federationChannels.delete(name);
+}

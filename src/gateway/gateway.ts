@@ -28,7 +28,12 @@ import { graphql, type GraphQLSchema } from "graphql";
 import type { StoreBackend } from "../store/backend.js";
 import { isRepairable } from "../store/quarantine.js";
 import { promoteImpl, readAdoptions, type Adoption } from "./adopt.js";
-import { openChannelImpl, type Channel, type OpenChannelOptions } from "../federation/channel.js";
+import {
+  dropChannelImpl,
+  openChannelImpl,
+  type Channel,
+  type OpenChannelOptions,
+} from "../federation/channel.js";
 import {
   adoptLawImpl,
   blessAllImpl,
@@ -851,6 +856,11 @@ export class Gateway {
 
   // Open a container over this store (SPEC §27): a declared one by name, or an anonymous one
   // with explicit knobs. The body lives in container.ts.
+  /** Sever a federation channel and purge its pool. Irreversible; freezing is the reversible act. */
+  async dropChannel(name: string): Promise<void> {
+    return dropChannelImpl(this, name);
+  }
+
   /** Open (or resume) a federation channel receiving into `into` under the receiver's `prefix`. */
   async openChannel(opts: OpenChannelOptions): Promise<Channel> {
     return openChannelImpl(this, opts);
