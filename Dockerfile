@@ -29,4 +29,7 @@ USER loam
 # Supply the token at run time: `docker run -e LOAM_TOKEN=… -p 4321:4321 loam`.
 EXPOSE 4321
 ENTRYPOINT ["node", "dist/cli/bin.js"]
-CMD ["serve", "--http", "--port", "4321"]
+# --host 0.0.0.0 is REQUIRED in a container: the CLI binds loopback by default, and a process
+# bound to 127.0.0.1 inside a container is unreachable through a published port. The container
+# boundary is the isolation here, not the bind address.
+CMD ["serve", "--http", "--host", "0.0.0.0", "--port", "4321"]
