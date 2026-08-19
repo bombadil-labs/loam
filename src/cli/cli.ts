@@ -991,6 +991,12 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
         `loam: channel ${channel.name}\n` +
           `  ${report.accepted} accepted, ${report.duplicates} already held, of ${report.offered} offered\n` +
           (report.bound.length > 0 ? `  bound ${report.bound.join(", ")}\n` : "") +
+          (report.witnessed.length > 0
+            ? `  ALREADY SERVED under another name, so these were NOT created: ` +
+              `${report.witnessed.join(", ")}\n` +
+              `    this store already answers that law through an earlier channel or your own ` +
+              `registration — the peer's data is here, and it reads through the name that exists (T198)\n`
+            : "") +
           (report.parked.length > 0
             ? `  PARKED (a name here is answered by different law — your decision):\n    ${report.parked.join("\n    ")}\n`
             : "") +

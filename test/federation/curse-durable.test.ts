@@ -99,9 +99,11 @@ describe("§46 — cursing one bound law", () => {
       await me.curseChannelLaw(ch.name, "alice:Plant", { lift: true });
 
       const again = await ch.sync();
-      expect(again.bound).toContain("alice:Plant");
-      // The report is not the verdict: assert the lens SERVES again. A lift that re-published a
-      // born-dead binding reported bound and answered nothing, which is how this bug looked.
+      // The lift itself restores the binding, so the following sync correctly reports the law as
+      // WITNESSED (already served) rather than newly bound. What matters is the surface, and the
+      // surface is what this asserts — a lift that re-published a born-dead binding reported
+      // `bound` and answered nothing, which is exactly how the bug looked from the report's side.
+      expect([...again.bound, ...again.witnessed]).toContain("alice:Plant");
       expect(me.def("alice:Plant")).toBeDefined();
       const answer = await me.query('{ alice_Plant(entity: "' + FERN + '") { height } }');
       expect(answer.errors, JSON.stringify(answer)).toBeUndefined();

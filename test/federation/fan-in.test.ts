@@ -27,9 +27,15 @@ describe("§46 — two channels into one receiving container", () => {
     const bob = await store("b0".repeat(32));
     const me = await store("cc".repeat(32));
     try {
-      // The same hyperschema NAME from two different peers — the collision the prefixes answer.
+      // DISTINCT law per peer, which is what this rail is about: two channels serving side by side
+      // under receiver-assigned prefixes. Two peers with byte-IDENTICAL law is a different case and
+      // a currently-broken one — the second name is never created (T198) — so it is asserted in
+      // name-parked.test.ts against the `witnessed` report rather than smuggled in here, where it
+      // would look like a fan-in failure.
       await alice.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
-      await bob.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+      await bob.publishRegistration({ name: "Sprout", alg: 1, body: PLANT.body }, PLANT_POLICY, [
+        FERN,
+      ]);
 
       const one = await me.openChannel({ into: "friends", prefix: "alice", source: feed(alice) });
       const two = await me.openChannel({ into: "friends", prefix: "bob", source: feed(bob) });
@@ -37,7 +43,7 @@ describe("§46 — two channels into one receiving container", () => {
       const rTwo = await two.sync();
 
       expect(rOne.bound).toContain("alice:Plant");
-      expect(rTwo.bound).toContain("bob:Plant");
+      expect(rTwo.bound).toContain("bob:Sprout");
       // Neither parked: identical law under distinct receiver-assigned names is not a collision.
       expect(rTwo.parked).toEqual([]);
     } finally {
@@ -53,7 +59,9 @@ describe("§46 — two channels into one receiving container", () => {
     const me = await store("cc".repeat(32));
     try {
       await alice.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
-      await bob.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+      await bob.publishRegistration({ name: "Sprout", alg: 1, body: PLANT.body }, PLANT_POLICY, [
+        FERN,
+      ]);
       const one = await me.openChannel({ into: "friends", prefix: "alice", source: feed(alice) });
       const two = await me.openChannel({ into: "friends", prefix: "bob", source: feed(bob) });
       await one.sync();

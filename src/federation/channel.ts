@@ -47,6 +47,11 @@ export interface SyncReport {
   readonly bound: string[];
   /** Rows that need a person: a name already answered here by different-content law. */
   readonly parked: string[];
+  /**
+   * Law that was already served under ANOTHER name, so this channel's name was NOT created.
+   * Distinct from `bound` on purpose — see the note in `bindArrived`.
+   */
+  readonly witnessed: string[];
 }
 
 export interface ChannelStatus {
@@ -181,11 +186,12 @@ async function bindArrived(
   gw: Gateway,
   ground: Gateway,
   prefix: string,
-): Promise<{ bound: string[]; parked: string[] }> {
+): Promise<{ bound: string[]; parked: string[]; witnessed: string[] }> {
   const seed = gw.options.seed!;
   const operator = gw.operatorAuthor!;
   const bound: string[] = [];
   const parked: string[] = [];
+  const witnessed: string[] = [];
 
   const members = [...ground.reactor.snapshot()];
   const rows = new Map<string, string>(); // alias -> hyperschema entity
@@ -209,7 +215,7 @@ async function bindArrived(
     // name — what gets served is `prefix:alias`, decided below.
     rows.set(entity.slice("hyperschema:".length), entity);
   }
-  if (rows.size === 0) return { bound, parked };
+  if (rows.size === 0) return { bound, parked, witnessed };
 
   // The manifest rows land in the POOL, so a channel's recognition of a peer is recorded exactly
   // where that peer's bytes live — and is purged with them when the channel is dropped.
@@ -239,15 +245,27 @@ async function bindArrived(
     // operator retired, one interval later and silently (§46 criterion 11).
     if (cursed.has(name)) continue;
     try {
-      await gw.adoptLaw(version, alias, { as: name });
-      bound.push(name);
+      const outcome = await gw.adoptLaw(version, alias, { as: name });
+      // "witnessed" IS NOT "bound", and reporting it as bound was a false report of the plainest
+      // kind: `bound` said the name serves, and the store threw on it.
+      //
+      // adoptLaw refuses to publish law it already serves under another name, deliberately —
+      // `schemaLawAddress` excludes the LIVING NAME, so identical law has one address whatever it
+      // is called, and a module blessed twice must not bind twice. Federation meets that rule from
+      // the other side: two peers who both ran `loam register --stock note` have byte-identical
+      // law, so the SECOND channel's name is never created. That is the default case, not an edge.
+      //
+      // Until a second name can serve the same law (T198), the honest thing is to say so. The
+      // caller learns the name does not answer and which one does, instead of learning it is bound.
+      if (outcome.kind === "witnessed") witnessed.push(name);
+      else bound.push(name);
     } catch (err) {
       // A refusal here is information, not a fault: the common one is that `name` is already
       // answered by different-content law, which is the parked case a person resolves.
       parked.push(`${name}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
-  return { bound, parked };
+  return { bound, parked, witnessed };
 }
 
 /** The alias a manifest row names, or undefined for any other delta. */
@@ -411,7 +429,7 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
       // A frozen channel reports honestly rather than silently doing nothing: it did not fail, and
       // it did not accept anything, and both are true.
       if (before?.receiving === false) {
-        return { offered: 0, accepted: 0, duplicates: 0, bound: [], parked: [] };
+        return { offered: 0, accepted: 0, duplicates: 0, bound: [], parked: [], witnessed: [] };
       }
       let offered: readonly Delta[];
       try {
@@ -441,9 +459,9 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
       // blessing was off — which is the behaviour a person expects from "pause", and the reason a
       // sync that accepted nothing can still bind law.
       const blessing = before?.blessing ?? opts.bless !== false;
-      const { bound, parked } = blessing
+      const { bound, parked, witnessed } = blessing
         ? await bindArrived(gw, ground, opts.prefix)
-        : { bound: [] as string[], parked: [] as string[] };
+        : { bound: [] as string[], parked: [] as string[], witnessed: [] as string[] };
       await stamp(gw, {
         name,
         into: opts.into,
@@ -459,6 +477,7 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
         duplicates: report.offered - report.accepted,
         bound,
         parked,
+        witnessed,
       };
     },
   };
