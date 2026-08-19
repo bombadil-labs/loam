@@ -44,9 +44,7 @@ site-dist/
 /*.tmp
 
 # ADLC runtime
-# NOT un-ignored (CLAUDE.md): the single-file ledger is per-worktree evidence and collides
-# across branches. `adlc init` 1.10.0 adds `!.adlc/manifest.jsonl` here; we remove it every
-# time. The segmented manifest.d/ below is safe to commit and stays allowed.
+!.adlc/manifest.jsonl
 !.adlc/manifest.d/
 !.adlc/manifest.d/**
 .adlc/manifest.d/.lineage
