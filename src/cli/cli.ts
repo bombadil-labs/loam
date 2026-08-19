@@ -22,6 +22,7 @@ import { parseOffer } from "../federation/offer.js";
 import { toWire } from "../federation/wire.js";
 import { migrate } from "../migrate/migrate.js";
 import { pullFrom } from "../federation/pull.js";
+import type { ChannelSource } from "../federation/channel.js";
 import { tombstonesIn } from "../gateway/erase.js";
 import { assembleGenesis } from "../gateway/genesis.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
@@ -100,6 +101,7 @@ type CommandName =
   | "serve"
   | "register"
   | "pull"
+  | "federate"
   | "migrate"
   | "store"
   | "repair"
@@ -173,6 +175,36 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
     notes: [
       "A URL is one anti-entropy step against a live peer (and wants a token); a file is a frozen",
       "offer — the body of GET /federate, saved, or a browser store's export.",
+    ],
+  },
+  federate: {
+    summary: "open, list, adjust, and sever federation channels (SPEC §46)",
+    usage: "loam federate <open|list|set|drop> [options]",
+    flags: new Set([
+      "home",
+      "store",
+      "token",
+      "into",
+      "prefix",
+      "from",
+      "bless",
+      "receiving",
+      "channel",
+      "yes",
+    ]),
+    notes: [
+      "Federation is container-to-container. `open` names the container you receive INTO and the",
+      "PREFIX you assign the peer — the prefix is yours, never theirs, so no peer can take a name",
+      "you serve. Law that arrives binds under that prefix; your own names are untouched.",
+      "",
+      "  loam federate open --from https://peer.example/default --into friends --prefix alice",
+      "  loam federate list",
+      "  loam federate set --channel channel:friends:alice --bless false",
+      "  loam federate drop --channel channel:friends:alice --yes",
+      "",
+      "`set` is reversible: --receiving false freezes the channel and keeps what arrived,",
+      "--bless false stops new law binding and leaves bound law serving. `drop` is NOT reversible:",
+      "it purges that peer's pool at the bytes and needs --yes.",
     ],
   },
   migrate: {
@@ -852,6 +884,163 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
 // Both cross through Gateway.federate: verification, trust-admission, tombstones at the door.
 // No standing needed — union is union; whether the imported law BINDS is decided by whose
 // operator seed this home holds, never by this command.
+// §46 — federation is container-to-container. The verbs mirror the tool surface T188 exposes to an
+// agent, with ONE deliberate asymmetry: `drop` needs `--yes` here and cannot be reached at all by an
+// MCP caller, because an agent staging an irreversible purge and a person confirming it are
+// different acts on different surfaces.
+async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
+  const verb = args[0];
+  const parsed = parseFor("federate", args.slice(1));
+  if (verb === undefined || !["open", "list", "set", "drop"].includes(verb)) {
+    io.err(
+      "federate takes a verb: open (start receiving from a peer), list (what is standing and how " +
+        "it is doing), set (freeze or unbless, both reversible), drop (sever and purge, not " +
+        "reversible) — `loam federate --help`",
+    );
+    return 2;
+  }
+  const home = parsed.flags.get("home") ?? defaultHome();
+  const init = initHome(home);
+  if (init.created) io.out(`loam: initialized ${home}\n  operator ${init.operator}`);
+  const gateway = await Gateway.boot(
+    openStore(storePath(home, parsed.flags.get("store")), io),
+    assembleGenesis({ operatorSeed: readSeed(home) }),
+  );
+  try {
+    if (verb === "list") {
+      const rows = gateway.channelStatus();
+      if (rows.length === 0) {
+        io.out(
+          "loam: no federation channels — `loam federate open --from <url> --into <container> --prefix <name>`",
+        );
+        return 0;
+      }
+      for (const r of rows) {
+        // "never synced" is spelled out rather than shown as a zero: a channel that has never
+        // reached its peer must not read like one that is merely quiet (H9, §46 criterion 8).
+        const when =
+          r.lastSyncedAt === 0
+            ? "never synced"
+            : `last synced ${new Date(r.lastSyncedAt).toISOString()}`;
+        const trouble =
+          r.consecutiveFailures > 0 ? `, ${r.consecutiveFailures} failed attempt(s) since` : "";
+        io.out(
+          `${r.name}\n  into ${r.into}, serving the peer's law under "${r.prefix}:"\n` +
+            `  ${r.receiving ? "receiving" : "FROZEN"}, ${r.blessing ? "blessing" : "NOT blessing"}\n` +
+            `  ${when}${trouble}`,
+        );
+      }
+      return 0;
+    }
+
+    if (verb === "open") {
+      const from = parsed.flags.get("from");
+      const into = parsed.flags.get("into");
+      const prefix = parsed.flags.get("prefix");
+      if (from === undefined || into === undefined || prefix === undefined) {
+        io.err(
+          "federate open wants --from <url|file>, --into <container>, and --prefix <name>. The " +
+            "prefix is YOURS: it is the namespace this store serves the peer's law under, so no " +
+            "peer can take a name you already answer.",
+        );
+        return 2;
+      }
+      const token = parsed.flags.get("token") ?? process.env["LOAM_TOKEN"];
+      const channel = await gateway.openChannel({
+        into,
+        prefix,
+        bless: parsed.flags.get("bless") !== "false",
+        source: sourceFor(gateway, from, token),
+      });
+      const report = await channel.sync();
+      io.out(
+        `loam: channel ${channel.name}\n` +
+          `  ${report.accepted} accepted, ${report.duplicates} already held, of ${report.offered} offered\n` +
+          (report.bound.length > 0 ? `  bound ${report.bound.join(", ")}\n` : "") +
+          (report.parked.length > 0
+            ? `  PARKED (a name here is answered by different law — your decision):\n    ${report.parked.join("\n    ")}\n`
+            : "") +
+          "  union is union; syncing again is safe",
+      );
+      return 0;
+    }
+
+    const name = parsed.flags.get("channel");
+    if (name === undefined) {
+      io.err(`federate ${verb} wants --channel <name> — \`loam federate list\` names them`);
+      return 2;
+    }
+
+    if (verb === "set") {
+      const next: { receiving?: boolean; blessing?: boolean } = {};
+      const receiving = parsed.flags.get("receiving");
+      const bless = parsed.flags.get("bless");
+      if (receiving !== undefined) next.receiving = receiving !== "false";
+      if (bless !== undefined) next.blessing = bless !== "false";
+      if (next.receiving === undefined && next.blessing === undefined) {
+        io.err("federate set wants --receiving <true|false> or --bless <true|false>, or both");
+        return 2;
+      }
+      const now = await gateway.setChannel(name, next);
+      io.out(
+        `loam: ${now.name} is now ${now.receiving ? "receiving" : "FROZEN"} and ` +
+          `${now.blessing ? "blessing" : "NOT blessing"}\n` +
+          (now.blessing ? "" : "  law already bound stays bound — this stops NEW law binding\n") +
+          (now.receiving ? "" : "  what already arrived still reads — this stops NEW deltas\n"),
+      );
+      return 0;
+    }
+
+    // drop
+    if (parsed.flags.get("yes") === undefined) {
+      const held = gateway.channelStatus(name)[0];
+      io.err(
+        `federate drop refused without --yes. This PURGES ${name} at the bytes` +
+          (held === undefined
+            ? ""
+            : ` — everything received from "${held.prefix}" into ${held.into}`) +
+          `. It cannot be undone. To stop receiving and KEEP what arrived, use ` +
+          `\`loam federate set --channel ${name} --receiving false\` instead.`,
+      );
+      return 2;
+    }
+    await gateway.dropChannel(name);
+    io.out(`loam: ${name} is severed and its pool is purged — other channels are untouched`);
+    return 0;
+  } catch (err) {
+    io.err(`federate: ${err instanceof Error ? err.message : String(err)}`);
+    return 2;
+  } finally {
+    await gateway.close();
+  }
+}
+
+// A channel's source: a live peer over the federation door, or a frozen offer file. Both reach the
+// same channel contract, which is what makes "someone sent me an offer" and "I subscribed to a
+// public source" one code path (§46 criteria 1 and 2).
+function sourceFor(gw: Gateway, from: string, token: string | undefined): ChannelSource {
+  const isUrl = /^https?:\/\//i.test(from);
+  if (!isUrl) {
+    return { pull: () => Promise.resolve(parseOffer(readFileSync(from, "utf8"))) };
+  }
+  return {
+    pull: async () => {
+      const res = await fetch(`${from}/federate`, {
+        headers: token === undefined ? {} : { authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        throw new Error(
+          `the peer answered ${res.status} at ${from}/federate` +
+            (res.status === 403
+              ? " — federation wants the peer's operator token today (§46 will scope this)"
+              : ""),
+        );
+      }
+      return parseOffer(await res.text());
+    },
+  };
+}
+
 async function cmdPull(args: readonly string[], io: IO): Promise<number> {
   const parsed = parseFor("pull", args);
   const source = parsed.positionals[0];
@@ -2238,6 +2427,8 @@ export async function run(
         return await cmdRegister(rest, io);
       case "pull":
         return await cmdPull(rest, io);
+      case "federate":
+        return await cmdFederate(rest, io);
       case "migrate":
         return cmdMigrate(rest, io);
       case "store":

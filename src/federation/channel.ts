@@ -486,3 +486,57 @@ export async function setChannelImpl(
   await stamp(gw, status);
   return status;
 }
+
+export interface StandingSync {
+  stop(): Promise<void>;
+}
+
+/**
+ * The standing instruction: keep accepting on every open channel, until stopped.
+ *
+ * Polling is the transport TODAY, and deliberately the only thing here that knows so. Everything
+ * above this function speaks in channels, so a push transport replaces this and changes nothing
+ * else — which was the strongest argument for the container-to-container shape in the first place.
+ *
+ * Safe at any interval because a sync is idempotent by construction: federation is union, and a
+ * second sync of an unchanged peer accepts nothing. A frozen channel is skipped by its own toggle,
+ * read from the ground each time.
+ *
+ * A failing channel must never take the loop down with it. One unreachable peer raises its own
+ * `consecutiveFailures` and the others keep going — the counter is where that failure becomes
+ * visible, which is why swallowing the error here is honest rather than H9: the record is written
+ * before the throw.
+ */
+export function keepSyncingImpl(gw: Gateway, opts: { everyMs?: number } = {}): StandingSync {
+  const everyMs = Math.max(20, opts.everyMs ?? 60_000);
+  let stopped = false;
+  let running: Promise<void> = Promise.resolve();
+
+  const tick = async (): Promise<void> => {
+    for (const channel of [...gw.federationChannels.values()]) {
+      if (stopped) return;
+      try {
+        await channel.sync();
+      } catch {
+        // Recorded on the channel's own record by `sync` before it threw. One dead peer does not
+        // stop the others.
+      }
+    }
+  };
+
+  const timer = setInterval(() => {
+    if (stopped) return;
+    running = running.then(tick);
+  }, everyMs);
+  // Never hold the process open for a poll: a store that cannot exit because it is watching a peer
+  // is a worse bug than a missed sync.
+  timer.unref?.();
+
+  return {
+    stop: async (): Promise<void> => {
+      stopped = true;
+      clearInterval(timer);
+      await running; // an in-flight tick finishes before the caller believes it has stopped
+    },
+  };
+}

@@ -31,11 +31,13 @@ import { promoteImpl, readAdoptions, type Adoption } from "./adopt.js";
 import {
   channelStatusImpl,
   dropChannelImpl,
+  keepSyncingImpl,
   openChannelImpl,
   setChannelImpl,
   type Channel,
   type ChannelStatus,
   type OpenChannelOptions,
+  type StandingSync,
 } from "../federation/channel.js";
 import {
   adoptLawImpl,
@@ -859,6 +861,12 @@ export class Gateway {
 
   // Open a container over this store (SPEC §27): a declared one by name, or an anonymous one
   // with explicit knobs. The body lives in container.ts.
+  /** Keep accepting on every open channel until stopped. Polling today; the transport is
+   * deliberately the only thing that knows so. */
+  keepSyncing(opts: { everyMs?: number } = {}): StandingSync {
+    return keepSyncingImpl(this, opts);
+  }
+
   /** Set a channel's reversible toggles: `receiving` (freeze) and `blessing`. */
   async setChannel(
     name: string,

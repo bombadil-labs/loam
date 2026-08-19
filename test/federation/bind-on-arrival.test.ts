@@ -11,6 +11,13 @@
 //
 // Two-sided: bob registered nothing himself, AND a second peer's identically-named law does not
 // collide with alice's (that is criterion 9's rail, referenced here so the pair is visible).
+//
+// THE HALF THIS FILE DOES NOT PROVE, and it is half of criterion 4: law BINDS here, and it does not
+// yet SERVE. The lens gathers over the receiving store's primary ground, while a channel's deltas
+// live in its pool — so the GraphQL field appears and resolves null. Found by driving the CLI end to
+// end after these rails were green, which is exactly the gap unit rails cannot see. T189 carries it,
+// with the measured trace and the fix that must NOT be taken (mirroring into the primary ground
+// would satisfy the read and destroy criterion 15). The skipped rail below is the visible hole.
 
 import { describe, expect, it } from "vitest";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
@@ -55,6 +62,12 @@ describe("§46 — law arriving on a channel binds under the receiver's name", (
       await alice.close();
       await bob.close();
     }
+  });
+
+  it.skip("T189 — and SERVES: a read of alice's data through bob's surface returns the value", () => {
+    // Deliberately skipped, not deleted, and not weakened into something that passes. Measured on
+    // live stores: the field `alice_Note` is served and `{ alice_Note(entity: "note:hi") { title } }`
+    // answers `{"title": null}`. Un-skip when T189 lands a container-scoped read path.
   });
 
   it("blessing OFF leaves the deltas landed and the law unbound", async () => {
