@@ -150,6 +150,7 @@ exist and are easy to miss.
 | `serve`    | boot a store and serve it (GraphQL + SSE + MCP over HTTP)                    |
 | `register` | define a schema from a file and register it in the home's store              |
 | `pull`     | land a peer's deltas — a live URL or a frozen offer file                     |
+| `federate` | open, list, adjust and sever federation channels                             |
 | `store`    | inspect a store                                                              |
 | `migrate`  | read an offer, re-express it in the current format, write it back            |
 | `user`     | provision a login user and manage role assignments                           |
@@ -548,6 +549,50 @@ curl -s localhost:4321/default/graphql -H "authorization: Bearer $TOKEN" \
 The pull makes their facts live in your store; the register makes a lens you own; the serve
 answers it. A store that pulls and never registers gathered someone else's world with no way to
 read it — the empty-surface refusal is the honest report of exactly that.
+
+### Channels — federation that carries law, not only bytes
+
+A **channel** is federation between two containers. You name a container to receive into and assign
+the peer a **prefix**; their deltas land in a nested pool inside that container, and law that
+arrives binds under your prefix. You register nothing.
+
+```sh
+loam federate open --from https://peer.example/default --into friends --prefix alice --token "$PEER_TOKEN"
+loam federate list
+loam federate set --channel channel:friends:alice --bless false     # reversible
+loam federate drop --channel channel:friends:alice --yes            # not reversible
+```
+
+Then `alice_Note` answers on your own surface, from alice's law, with your operator key. The prefix
+is **yours** — the peer never chooses it, so no peer can take a name your store already serves, and
+a prefix that would collide at the GraphQL door is refused when you assign it.
+
+Two toggles, both reversible and both read live from the ground: `--receiving false` freezes the
+channel and keeps everything already received; `--bless false` stops new law binding and leaves law
+already bound serving. Severing is `drop`, which purges that peer's pool at the bytes and leaves
+every other channel whole.
+
+**What channels do NOT do yet.** Each of these is real today, and each has a ticket:
+
+- **Federating still costs a peer your operator token.** `GET /:mount/federate` demands it, and that
+  token also registers root law, mints grants and reads everything. A container-scoped offer token
+  is designed and blocked on where a runtime-issued credential should live (T196/T188).
+- **The standing sync does not survive a restart.** A channel's source is not persisted, so a store
+  that reboots keeps the data and stops pulling — while `federate list` still says `receiving`
+  (T196).
+- **Two peers publishing identical law give you one name, not two.** If you and a friend both start
+  from `loam register --stock note`, the second channel reports its lens as `witnessed` rather than
+  bound, and that name does not answer. The peer's data is still there, reachable through the first
+  channel's name (T198).
+- **A peer's sibling lenses at one hyperschema entity arrive as one** (T197).
+- **Severing does not retire the lenses it blessed.** Reading one afterwards refuses by name rather
+  than answering — it must never fall back to your own deltas — but the binding stays registered
+  (T199).
+
+**Over MCP**, an agent gets `loam_federate_status`, `_connect`, `_set` and `_drop`, each scoped by a
+`federate` grant naming one container. `_drop` **stages only**: it returns a link and a preview of
+what would go and what would remain, and purges nothing. A person completes the sever in the browser,
+behind a session an agent cannot obtain.
 
 ## Forgetting — erasure, GDPR, and harmful content
 
