@@ -161,13 +161,15 @@ describe("T188 — an agent can stage a sever and can never complete one", () =>
       expect(staged.isError, staged.text).toBe(false);
 
       const body = JSON.parse(staged.text) as {
-        staged: string;
         purgedNothing: boolean;
+        confirmAt: string;
         wouldPurge: string[];
         wouldSurvive: string[];
       };
       expect(body.purgedNothing).toBe(true);
-      expect(body.staged).toMatch(/^[0-9a-f]{32}$/);
+      // It hands back a place for a PERSON to finish, not a token the agent could redeem.
+      expect(body.confirmAt).toContain("/admin/container");
+      expect(body.confirmAt).toContain(encodeURIComponent("channel:friends:alice"));
 
       // THE CHANNEL IS STILL THERE. Asserted against the store rather than the report, because the
       // report is the thing under test.
@@ -214,7 +216,7 @@ describe("T188 — an agent can stage a sever and can never complete one", () =>
         channel: "channel:work:carol",
       });
       expect(outside.isError).toBe(true);
-      expect(outside.text).not.toContain("staged");
+      expect(outside.text).not.toContain("confirmAt");
       // Two-sided: the channel it could not stage is untouched and still listed for its owner.
       expect(gw.channelStatus("channel:work:carol")).toHaveLength(1);
     } finally {

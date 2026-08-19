@@ -75,6 +75,7 @@ import { STORE_ENTITY } from "../gateway/genesis.js";
 import { readSeed } from "../cli/config.js";
 import { CSP, makeUserDoors, type UserDoorOptions, type UserDoors } from "./session.js";
 import { makeAdminDoor, type AdminDoor } from "./admin.js";
+import { ADMIN_CONTAINER_PATH } from "./admin-pages.js";
 
 export { type UserDoorOptions } from "./session.js";
 
@@ -907,25 +908,9 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
   };
 
   /**
-   * STAGED CHANNEL SEVERS (T188). An agent may only ever STAGE a purge; the purge itself happens
-   * behind the admin page's session gate, which a connector token can never obtain because the two
-   * surfaces authenticate differently — MCP callers are a `TokenIdentity`, the admin page sits
-   * behind `SessionGate`. That is the whole safety property, and it is structural rather than a flag
-   * an agent could satisfy.
-   *
-   * In memory on purpose: a stage is a ten-minute intention, not a record. Losing them on restart
-   * fails in the safe direction — the operator re-stages — while persisting them would make a stale
-   * intention outlive the state it was computed against.
-   */
-  const stagedDrops = new Map<
-    string,
-    { channel: string; expiresAt: number; preview: { purges: string[]; survives: string[] } }
-  >();
-
-  /**
    * What a drop of this channel would remove, and what it would leave. TWO-SIDED by construction,
-   * because a preview that named only the target could not show over-purging — the failure that
-   * matters most, and the one with no recovery.
+   * because a preview naming only the target cannot show over-purging — the failure that matters
+   * most, and the one with no recovery.
    */
   const previewDrop = (gw: Gateway, channel: string): { purges: string[]; survives: string[] } => {
     const rows = gw.channelStatus();
@@ -1336,33 +1321,32 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             });
             return;
           }
-          // STAGE ONLY. Nothing is removed on this path, ever — the purge refuses a TokenIdentity
-          // outright, so an agent calling this a thousand times purges nothing.
-          const id = randomBytes(16).toString("hex");
+          // NOTHING IS REMOVED ON THIS PATH, EVER. The tool hands the operator a link and a
+          // preview; the sever itself happens on the admin page, behind the session gate a
+          // connector token can never obtain (MCP callers are a TokenIdentity; the admin door sits
+          // behind SessionGate — different authentication paths, not one with a flag).
+          //
+          // It points at the EXISTING container-drop flow rather than a parallel one. That flow is
+          // already hardened in the ways this needs: a single-use confirm token bound to (user,
+          // container) and consumed before the act, and — the property that matters most — the plan
+          // is RECOMPUTED at confirm time, so the operator cannot approve something larger than
+          // they read. A channel's pool is an inbox container, which that page already reaches.
           const preview = previewDrop(gateway, target.name);
-          // One stage per channel: a second replaces the first, so a stale intention cannot be
-          // confirmed after the operator has already re-considered.
-          for (const [held, row] of stagedDrops) {
-            if (row.channel === target.name) stagedDrops.delete(held);
-          }
-          stagedDrops.set(id, { channel: target.name, expiresAt: Date.now() + 600_000, preview });
           reply({
             content: [
               {
                 type: "text",
                 text: JSON.stringify(
                   {
-                    staged: id,
                     channel: target.name,
                     purgedNothing: true,
-                    expiresInSeconds: 600,
-                    confirmAt: `${options.publicUrl ?? ""}/admin`,
+                    confirmAt: `${options.publicUrl ?? ""}${ADMIN_CONTAINER_PATH}?name=${encodeURIComponent(target.name)}`,
                     wouldPurge: preview.purges,
                     wouldSurvive: preview.survives,
                     note:
-                      "Nothing has been removed. A person must confirm this in the browser; this " +
-                      "tool cannot complete it. `loam_federate_set` with receiving false stops the " +
-                      "channel without destroying anything.",
+                      "Nothing has been removed. A person must complete this in the browser; this " +
+                      "tool cannot. `loam_federate_set` with receiving false stops the channel " +
+                      "without destroying anything, and is reversible.",
                   },
                   null,
                   1,
