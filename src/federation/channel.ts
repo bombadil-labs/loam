@@ -105,7 +105,7 @@ export function channelStatusImpl(gw: Gateway, name?: string): ChannelStatus[] {
       (p) => p.target.kind === "entity" && p.target.entity.context === CTX_CHANNEL,
     );
     if (marker === undefined || marker.target.kind !== "entity") continue;
-    if (gw.reactor.negationsOf(d.id).length > 0) continue;
+    if (struck(gw, d.id)) continue;
     const of = (role: string): string | number | boolean | undefined => {
       const p = d.claims.pointers.find((q) => q.role === role);
       return p?.target.kind === "primitive" ? p.target.value : undefined;
@@ -262,6 +262,19 @@ function manifestAliasOf(claims: { pointers: readonly unknown[] }): string | und
   if (!isRow) return undefined;
   const alias = ps.find((p) => p.role === "alias");
   return alias?.target.kind === "primitive" ? String(alias.target.value) : undefined;
+}
+
+/**
+ * Is this delta STRUCK — that is, does any negation of it SURVIVE?
+ *
+ * `negationsOf(id).length > 0` asks whether a strike EXISTS, which is not the same question: a
+ * struck strike stops binding under the substrate's algebra, and its target revives. Reading
+ * presence where survival is meant is H1's "one link is not enough" clause, and it is what makes
+ * lifting a curse expressible at all — the lift negates the curse's negation, and every reader of
+ * that binding must then see it as live again.
+ */
+function struck(gw: Gateway, id: string): boolean {
+  return gw.reactor.negationsOf(id).some((n) => gw.reactor.negationsOf(n).length === 0);
 }
 
 /** The channel a prefix belongs to, for reading its curses during a bind. */
@@ -657,6 +670,27 @@ export async function curseChannelLawImpl(
   }
 
   if (opts.lift === true) {
+    // LIFT THE STRIKE, NOT ONLY THE RECORD. adoptLaw inherits its source's timestamps, and a delta
+    // id hashes {author, pointers, timestamp} — so a re-published binding re-mints THE SAME ID the
+    // curse struck. Measured: the id is byte-identical, and the blessing then refuses with "the
+    // blessed law persisted but does not serve". The binding is born dead, and no amount of
+    // re-syncing revives it. Negating the curse's own negation is the only thing that can.
+    for (const binding of [...gw.reactor.snapshot()]) {
+      if (!isRegistrationBinding(binding.claims)) continue;
+      const p = binding.claims.pointers.find((pt) => pt.role === "schema");
+      const lens =
+        p?.target.kind === "entity" && p.target.entity.id.startsWith("schema:")
+          ? p.target.entity.id.slice("schema:".length)
+          : undefined;
+      if (lens !== living) continue;
+      for (const negationId of gw.reactor.negationsOf(binding.id)) {
+        if (gw.reactor.negationsOf(negationId).length > 0) continue; // already lifted
+        await gw.append([
+          signClaims(makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), negationId), seed),
+        ]);
+      }
+    }
+    gw.replayRegistrations();
     // Lifting strikes the curse record itself. The next poll re-blesses through the ordinary path,
     // so nothing here needs to know how binding works.
     for (const d of cursesOf(gw, channel)) {
@@ -767,7 +801,7 @@ export function cursesOf(gw: Gateway, channel: string): { living: string; deltaI
     );
     if (marker === undefined || marker.target.kind !== "entity") continue;
     if (marker.target.entity.id !== `channel:${channel}`) continue;
-    if (gw.reactor.negationsOf(d.id).length > 0) continue;
+    if (struck(gw, d.id)) continue;
     const living = d.claims.pointers.find((p) => p.role === "living");
     if (living?.target.kind === "primitive") {
       out.push({ living: String(living.target.value), deltaId: d.id });

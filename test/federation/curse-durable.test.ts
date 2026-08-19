@@ -85,13 +85,7 @@ describe("§46 — cursing one bound law", () => {
     }
   });
 
-  // NOT YET WORKING, and skipped rather than weakened. Criterion 11 asks that a curse retire one law
-  // and SURVIVE a poll; both rails above prove that. Reversibility is beyond the criterion and was my
-  // own addition. `{ lift: true }` strikes the curse record with the substrate's real negation shape
-  // and the next poll still does not re-bless — the name is never re-attempted, and `parked` is
-  // empty, so the skip is happening upstream of the blessing rather than the blessing refusing.
-  // Diagnosed no further; T191 carries it. Do not ship `lift` as working until this rail is green.
-  it.skip("T191 — a curse is reversible: lifting it lets the next poll bind again", async () => {
+  it("a curse is reversible: lifting it lets the next poll bind again", async () => {
     const alice = await peerWithTwoLenses();
     const me = await store("cc".repeat(32));
     try {
@@ -106,6 +100,11 @@ describe("§46 — cursing one bound law", () => {
 
       const again = await ch.sync();
       expect(again.bound).toContain("alice:Plant");
+      // The report is not the verdict: assert the lens SERVES again. A lift that re-published a
+      // born-dead binding reported bound and answered nothing, which is how this bug looked.
+      expect(me.def("alice:Plant")).toBeDefined();
+      const answer = await me.query('{ alice_Plant(entity: "' + FERN + '") { height } }');
+      expect(answer.errors, JSON.stringify(answer)).toBeUndefined();
     } finally {
       await alice.close();
       await me.close();
