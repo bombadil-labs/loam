@@ -93,7 +93,7 @@ one the receiver had retired.
    the GraphQL field the door derives from it, with the receiver having registered nothing — verified
    by `test/federation/bind-on-arrival.test.ts`.
 5. The bare name binds only by an explicit recorded alias, and never by inference from there being
-   one candidate — verified by `test/federation/bare-alias-explicit.test.ts`.
+   one candidate — verified by `test/federation/name-parked.test.ts`.
 6. Two laws on one channel that claim the same living name resolve as one bound and one parked, and
    the parked row names both choices — verified by `test/federation/name-parked.test.ts`.
 7. Deltas added at the publisher after the channel opened arrive without the receiver running a
@@ -113,14 +113,17 @@ one the receiver had retired.
 13. Dropping one channel's inbox removes that peer's deltas from the store at the bytes AND leaves a
     named second peer's data serving — verified by `test/federation/drop-two-sided.test.ts`.
 14. A delta that arrived on two channels independently survives in the second channel's pool after
-    the first is dropped — verified by `test/federation/drop-shared-delta.test.ts`.
+    the first is dropped — verified by `test/federation/drop-two-sided.test.ts`.
 15. A receiver's primary ground contains none of a peer's deltas, which live only in the channel's
-    pool — verified by `test/federation/pool-isolation.test.ts`.
+    pool — verified by `test/federation/channel-open.test.ts`.
 16. The whole friend path runs end to end against live servers — two stores, different operator keys,
     offer, accept, prefix, standing sync, read — verified by
     `test/federation/friend-scenario.test.ts`.
 17. Every user story above is reachable from the CLI with the commands the README documents —
-    verified by `npm run check`.
+    verified by `test/federation/drop-cli.test.ts` (open, list, drop through `run([...])`) and
+    `test/federation/friend-scenario.test.ts` (the whole path across a process boundary). "Verified
+    by `npm run check`" was the previous wording and verified nothing specific: any green suite
+    satisfies it.
 
 ## Deliberately out of scope
 

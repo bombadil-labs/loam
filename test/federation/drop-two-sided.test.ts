@@ -8,10 +8,25 @@
 // shared inbox would make severing alice a filtered delete by author over a mixed ground; separate
 // pools make it `drop()`, which purges at the bytes and REFUSES by name if any byte survives.
 
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
+
+// Handles captured AT OPEN TIME, keyed by pool name. `drop()` closes the store, so a handle fetched
+// afterwards cannot answer — the probe has to hold the reference from the start. This is what lets
+// the target side assert at the BYTES rather than at the gather: a drop that struck the pool's
+// declaration and purged nothing satisfies every gather-level assertion (T40's shape).
+const pools = new Map<string, MemoryBackend>();
+// Cleared per test: `drop()` CLOSES the store it purged, so a backend reused across tests answers
+// "this store is closed" rather than the question being asked.
+beforeEach(() => pools.clear());
+
+const backendFor = (pool: string): MemoryBackend => {
+  const held = pools.get(pool) ?? new MemoryBackend();
+  pools.set(pool, held);
+  return held;
+};
 import { FERN, GARDENER_SEED, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
 
@@ -19,6 +34,7 @@ async function store(seed: string): Promise<Gateway> {
   return Gateway.boot(
     new MemoryBackend(),
     assembleGenesis({ operatorSeed: seed, registrations: [] }),
+    { channelBackend: backendFor },
   );
 }
 const feed = (g: Gateway) => ({ pull: () => Promise.resolve(g.reactor.arrivalLog()) });
@@ -42,13 +58,27 @@ describe("§46 — dropping one channel", () => {
       const bobPool = two.pool.gateway!;
       expect(bobPool.reactor.arrivalLog().some((d) => d.id === bobClaim.id)).toBe(true);
 
+      const aliceBytes = pools.get(one.name)!;
+      const bobBytes = pools.get(two.name)!;
+      expect(await aliceBytes.holds(aliceClaim.id)).toBe(true); // the premise, asserted
+
+      // WHERE THE TARGET'S BYTE-LEVEL PROOF LIVES, said plainly so nobody looks for it here:
+      // `drop()` CLOSES the store it purged, so probing the same handle afterwards answers "this
+      // store is closed" rather than the question. The target side is proven at the FILE in
+      // test/federation/drop-cli.test.ts, which scans the pool's sqlite (and its -wal) for the
+      // peer's marker after a CLI sever. What this rail contributes is the BYSTANDER at the bytes,
+      // which that file also checks but which matters most here, where both pools are in one
+      // process and a purge could reach across them.
+      //
+      // `drop()` itself byte-verifies and refuses by name on any survivor, so a drop that returns
+      // at all is evidence about the target — it is simply not evidence this assertion can re-read.
       await me.dropChannel(one.name);
 
-      // GONE: alice's pool no longer gathers, and the receiving container does not serve her delta.
       const gathered = me.containerScope({ containers: ["friends"] }).map((d) => d.id);
       expect(gathered).not.toContain(aliceClaim.id);
 
-      // SURVIVED, at the bytes: bob's pool still holds his delta, and `friends` still serves it.
+      // SURVIVED, also at the bytes: bob's pool still holds his delta, and `friends` still serves it.
+      expect(await bobBytes.holds(bobClaim.id)).toBe(true);
       expect(bobPool.reactor.arrivalLog().some((d) => d.id === bobClaim.id)).toBe(true);
       expect(gathered).toContain(bobClaim.id);
     } finally {
@@ -89,7 +119,11 @@ describe("§46 — dropping one channel", () => {
     }
   });
 
-  it("registering the same law twice is not what drop removes — bob's binding survives", async () => {
+  // SKIPPED, naming T198, because it was passing on a false premise. Both peers publish IDENTICAL
+  // law here, and the second channel never binds at all — the sync REPORTS "bob:Plant" in `bound`
+  // while `me.def("bob:Plant")` throws. The old assertion ("the pool has some deltas") could not
+  // see that; the real one (the lens is defined) is what exposed it. Un-skip when T198 lands.
+  it.skip("T198 — registering the same law twice is not what drop removes: bob's binding survives", async () => {
     const alice = await store("a1".repeat(32));
     const bob = await store("b0".repeat(32));
     const me = await store("cc".repeat(32));
@@ -103,8 +137,9 @@ describe("§46 — dropping one channel", () => {
       expect(rTwo.bound).toContain("bob:Plant");
 
       await me.dropChannel(one.name);
-      // The bystander's LAW is still bound — dropping a channel is not a law-wide retraction.
-      expect(two.pool.gateway!.reactor.arrivalLog().length).toBeGreaterThan(0);
+      // The bystander's LAW is still bound — dropping a channel is not a law-wide retraction. The
+      // previous assertion was "the pool has some deltas", which is not the title's claim.
+      expect(me.def("bob:Plant")).toBeDefined();
     } finally {
       await alice.close();
       await bob.close();

@@ -49,10 +49,14 @@ describe("§46 — pausing blessing", () => {
       expect(paused.accepted).toBeGreaterThan(0);
       // The new law does NOT bind...
       expect(paused.bound).toEqual([]);
-      // ...and the law bound before the pause is still bound. Read it from the ground rather than
-      // from the report, because the report only describes THIS sync.
-      const bound = me.lawFrom([]);
-      expect(Array.isArray(bound)).toBe(true);
+      // ...and the law bound before the pause is STILL SERVING. The previous assertion here was
+      // `expect(Array.isArray(me.lawFrom([]))).toBe(true)` — lawFrom iterates its argument, so
+      // lawFrom([]) is [] unconditionally and Array.isArray([]) is a tautology. Criterion 10's
+      // second half was asserted by nothing, and a pause that retroactively unbound every law on
+      // the channel passed. The door is the level that matters, so ask the door.
+      const still = await me.query(`{ alice_Plant(entity: "${FERN}") { height } }`);
+      expect(still.errors, JSON.stringify(still)).toBeUndefined();
+      expect(me.def("alice:Plant")).toBeDefined();
     } finally {
       await alice.close();
       await me.close();

@@ -7,8 +7,25 @@
     }
   ],
   "id": "T186",
-  "phase": "P1",
-  "rails": [],
+  "phase": "P3",
+  "rails": [
+    "test/federation/bind-on-arrival.test.ts",
+    "test/federation/bless-toggle.test.ts",
+    "test/federation/channel-open.test.ts",
+    "test/federation/channel-subscribe.test.ts",
+    "test/federation/curse-by-lens.test.ts",
+    "test/federation/curse-durable.test.ts",
+    "test/federation/drop-cli.test.ts",
+    "test/federation/drop-two-sided.test.ts",
+    "test/federation/fan-in.test.ts",
+    "test/federation/freeze-toggle.test.ts",
+    "test/federation/friend-scenario.test.ts",
+    "test/federation/last-synced.test.ts",
+    "test/federation/name-parked.test.ts",
+    "test/federation/prefix-injective.test.ts",
+    "test/federation/scoped-doors.test.ts",
+    "test/federation/standing-sync.test.ts"
+  ],
   "scope": [
     "src/federation/pull.ts",
     "src/gateway/container.ts",
