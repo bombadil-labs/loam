@@ -223,3 +223,64 @@ describe("T188 — an agent can stage a sever and can never complete one", () =>
     }
   });
 });
+
+describe("T188 — opening a channel over MCP", () => {
+  it("a scoped holder opens into its own container and is refused for another", async () => {
+    const gw = await storeWithChannels();
+    const door = await serve({
+      mounts: { default: gw },
+      tokens: { "tok-friend": { actor: FRIEND } },
+      port: 0,
+    });
+    try {
+      // Outside the fence: refused, and nothing is created.
+      const outside = await callTool(door.url, "tok-friend", "loam_federate_connect", {
+        from: "http://127.0.0.1:1/default",
+        into: "work",
+        prefix: "mallory",
+      });
+      expect(outside.isError).toBe(true);
+      expect(gw.channelStatus().some((c) => c.prefix === "mallory")).toBe(false);
+
+      // Inside the fence the FENCE passes — the peer is unreachable here, so the failure that
+      // follows is the peer's, not the fence's. Asserting the refusal TEXT differs is what
+      // distinguishes "you may not" from "it did not work".
+      const inside = await callTool(door.url, "tok-friend", "loam_federate_connect", {
+        from: "http://127.0.0.1:1/default",
+        into: "friends",
+        prefix: "dave",
+      });
+      expect(inside.text).not.toContain("not yours to open");
+    } finally {
+      await door.close();
+      await gw.close();
+    }
+  });
+
+  it("the refusal reads identically for a real container and a fictional one", async () => {
+    // No oracle: a caller must not be able to map this store's containers by comparing refusals.
+    const gw = await storeWithChannels();
+    const door = await serve({
+      mounts: { default: gw },
+      tokens: { "tok-stranger": { actor: STRANGER } },
+      port: 0,
+    });
+    try {
+      const real = await callTool(door.url, "tok-stranger", "loam_federate_connect", {
+        from: "http://127.0.0.1:1/default",
+        into: "friends",
+        prefix: "x",
+      });
+      const fiction = await callTool(door.url, "tok-stranger", "loam_federate_connect", {
+        from: "http://127.0.0.1:1/default",
+        into: "no-such-container",
+        prefix: "x",
+      });
+      expect(real.isError).toBe(true);
+      expect(real.text).toBe(fiction.text);
+    } finally {
+      await door.close();
+      await gw.close();
+    }
+  });
+});

@@ -23,7 +23,7 @@ import { parseOffer } from "../federation/offer.js";
 import { toWire } from "../federation/wire.js";
 import { migrate } from "../migrate/migrate.js";
 import { pullFrom } from "../federation/pull.js";
-import type { ChannelSource } from "../federation/channel.js";
+import { sourceFor } from "../federation/channel.js";
 import { tombstonesIn } from "../gateway/erase.js";
 import { assembleGenesis } from "../gateway/genesis.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
@@ -984,7 +984,7 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
         into,
         prefix,
         bless: parsed.flags.get("bless") !== "false",
-        source: sourceFor(gateway, from, token),
+        source: sourceFor(from, token, (f) => readFileSync(f, "utf8"), parseOffer),
       });
       const report = await channel.sync();
       io.out(
@@ -1053,32 +1053,6 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
   } finally {
     await gateway.close();
   }
-}
-
-// A channel's source: a live peer over the federation door, or a frozen offer file. Both reach the
-// same channel contract, which is what makes "someone sent me an offer" and "I subscribed to a
-// public source" one code path (§46 criteria 1 and 2).
-function sourceFor(gw: Gateway, from: string, token: string | undefined): ChannelSource {
-  const isUrl = /^https?:\/\//i.test(from);
-  if (!isUrl) {
-    return { pull: () => Promise.resolve(parseOffer(readFileSync(from, "utf8"))) };
-  }
-  return {
-    pull: async () => {
-      const res = await fetch(`${from}/federate`, {
-        headers: token === undefined ? {} : { authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
-        throw new Error(
-          `the peer answered ${res.status} at ${from}/federate` +
-            (res.status === 403
-              ? " — federation wants the peer's operator token today (§46 will scope this)"
-              : ""),
-        );
-      }
-      return parseOffer(await res.text());
-    },
-  };
 }
 
 async function cmdPull(args: readonly string[], io: IO): Promise<number> {

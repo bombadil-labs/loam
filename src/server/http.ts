@@ -63,6 +63,8 @@ import {
   type OAuthDoors,
   type TokenDoor,
 } from "./oauth.js";
+import { sourceFor } from "../federation/channel.js";
+import { parseOffer } from "../federation/offer.js";
 import {
   federateContainersOf,
   fenceAdmits,
@@ -1042,6 +1044,26 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       annotations: { readOnlyHint: false },
     },
     {
+      name: "loam_federate_connect",
+      description:
+        "Open a federation channel: receive a peer's deltas into a container you name, under a " +
+        "PREFIX you assign. The prefix is yours, never the peer's, so no peer can take a name this " +
+        "store already answers. Law that arrives binds under that prefix. Works the same whether " +
+        "the address came from an offer someone sent you or from a source you chose to follow.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          from: { type: "string", description: "the peer's mount address" },
+          into: { type: "string", description: "the container to receive into" },
+          prefix: { type: "string", description: "the namespace YOU assign this peer" },
+          token: { type: "string", description: "the peer's door token, if it wants one" },
+          bless: { type: "boolean", description: "bind law that arrives (default true)" },
+        },
+        required: ["from", "into", "prefix"],
+      },
+      annotations: { readOnlyHint: false },
+    },
+    {
       name: "loam_federate_drop",
       description:
         "STAGE a channel sever. This does NOT purge anything: it returns a staged id, a link, an " +
@@ -1222,11 +1244,79 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           channel?: string;
           receiving?: boolean;
           blessing?: boolean;
+          from?: string;
+          into?: string;
+          prefix?: string;
+          token?: string;
+          bless?: boolean;
         };
 
         // §46 over MCP (T188). Authority is the CONTAINER-SCOPED federate grant, never the operator
         // role — see federateStanding. A caller with no standing meets the same refusal whichever
         // channel it named, so the tool cannot be used to learn which channels exist (§12/T78).
+        if (name === "loam_federate_connect") {
+          const standing = federateStanding(gateway, identity);
+          const into = typeof args.into === "string" ? args.into : undefined;
+          const from = typeof args.from === "string" ? args.from : undefined;
+          const prefix = typeof args.prefix === "string" ? args.prefix : undefined;
+          // The fence is checked BEFORE the arguments are examined further, so a caller without
+          // standing cannot learn which containers exist by comparing refusals (§12/T78).
+          if (into === undefined || !federateAdmits(standing, into)) {
+            reply({
+              content: [
+                {
+                  type: "text",
+                  text:
+                    "federation is not yours to open here: it wants a `federate` grant naming the " +
+                    "container you are receiving into.",
+                },
+              ],
+              isError: true,
+            });
+            return;
+          }
+          if (from === undefined || prefix === undefined) {
+            reply({
+              content: [
+                { type: "text", text: "federate_connect wants `from`, `into` and `prefix`." },
+              ],
+              isError: true,
+            });
+            return;
+          }
+          try {
+            const channel = await gateway.openChannel({
+              into,
+              prefix,
+              bless: args.bless !== false,
+              // The SHIPPED source builder, shared with the CLI — never a second copy.
+              source: sourceFor(
+                from,
+                typeof args.token === "string" ? args.token : undefined,
+                () => {
+                  throw new Error("a file offer is a CLI path; give this tool a URL");
+                },
+                parseOffer,
+              ),
+            });
+            const report = await channel.sync();
+            reply({
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({ channel: channel.name, ...report }, null, 1),
+                },
+              ],
+            });
+          } catch (err) {
+            reply({
+              content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
+              isError: true,
+            });
+          }
+          return;
+        }
+
         if (name === "loam_federate_drop") {
           const standing = federateStanding(gateway, identity);
           const target = gateway
