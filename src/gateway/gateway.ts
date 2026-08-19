@@ -29,6 +29,19 @@ import type { StoreBackend } from "../store/backend.js";
 import { isRepairable } from "../store/quarantine.js";
 import { promoteImpl, readAdoptions, type Adoption } from "./adopt.js";
 import {
+  channelStatusImpl,
+  channelsEverImpl,
+  curseChannelLawImpl,
+  dropChannelImpl,
+  keepSyncingImpl,
+  openChannelImpl,
+  setChannelImpl,
+  type Channel,
+  type ChannelStatus,
+  type OpenChannelOptions,
+  type StandingSync,
+} from "../federation/channel.js";
+import {
   adoptLawImpl,
   blessAllImpl,
   lawFromImpl,
@@ -170,6 +183,16 @@ export interface QueryResult {
 }
 
 export interface GatewayOptions {
+  /**
+   * Where a FEDERATION CHANNEL's pool keeps its bytes, by pool name. A separate container defaults
+   * to a fresh in-memory backend, which is right for a quarantine (transient by design) and WRONG
+   * for a channel: without this, a peer's deltas vanish with the process that pulled them, and the
+   * next boot serves a bound lens over an empty ground. Measured exactly that way (T189).
+   *
+   * Supplied by the CLI as a file inside the home. Absent, channels are in-memory and say so only
+   * by forgetting — so a durable deployment sets it.
+   */
+  readonly channelBackend?: (pool: string) => StoreBackend;
   // The OPERATOR's signing identity — the root of the capability chain (SPEC §7). It needs no
   // grant, plants the first tenants and grants, and signs mutations that name no actor. Without
   // a seed the gateway is read-only — unsigned authority does not exist here.
@@ -458,6 +481,12 @@ export class Gateway {
     if (genesis.deltas.length > 0) await gateway.append(genesis.deltas);
     gateway.replayRegistrations();
     await gateway.preloadResolvers();
+    // Standing federation channels are ATTACHED at boot, so a channel opened by one process is
+    // readable by the next. A separate container's bytes are unreadable until it is attached, and
+    // containerScope refuses rather than resolving empty (H9) — correct, and it surfaces as a query
+    // error on a store that merely restarted. Resuming here is what makes a channel outlive the
+    // command that opened it.
+    await gateway.resumeChannels();
     return gateway;
   }
 
@@ -822,6 +851,20 @@ export class Gateway {
   /** @internal — T138 seam (container.ts) */
   readonly connectionInboxes = new Map<string, Container>();
 
+  /** Live federation channels by pool name (§46). Mirrors `connectionInboxes`: same shape, with a
+   * peer on the other end instead of an MCP connection. (Named in full because `channels` is
+   * already this class's live-stream set — two different things, one obvious word.) */
+  readonly federationChannels = new Map<string, Channel>();
+
+  /**
+   * Attached channel POOLS by name (§46). Separate from `federationChannels` because a booted store
+   * has pools but no channels: `resumeChannels` can re-attach the bytes, and cannot rebuild a
+   * `Channel` because a channel's SOURCE is not in the ground (see T196). Without this map,
+   * `dropChannel` on a booted store re-opened a container that was already attached and was refused
+   * — the documented sever verb could not succeed anywhere it mattered.
+   */
+  readonly channelPools = new Map<string, Container>();
+
   // The §24.5 envelope rows for every enveloped pool attached here: which pool, its resolved
   // ceilings, and what it has spent. The refusal a caller meets stays leak-free; this is the
   // operator-facing half of "exhaustion is loud". Body in envelope.ts.
@@ -845,6 +888,73 @@ export class Gateway {
 
   // Open a container over this store (SPEC §27): a declared one by name, or an anonymous one
   // with explicit knobs. The body lives in container.ts.
+  /**
+   * Attach every standing channel's pool. Idempotent, and failure-tolerant per channel: a pool whose
+   * bytes are missing must not stop the store from booting, and anything that reads it will meet
+   * containerScope's refusal by name — louder and more honest than a store that will not start.
+   */
+  async resumeChannels(): Promise<void> {
+    for (const standing of this.channelStatus()) {
+      if (this.federationChannels.has(standing.name)) continue;
+      try {
+        this.channelPools.set(
+          standing.name,
+          await this.openContainer({
+            name: standing.name,
+            ...(this.options.channelBackend === undefined
+              ? {}
+              : { backend: this.options.channelBackend(standing.name) }),
+          }),
+        );
+      } catch {
+        // Deliberately left unattached; see above.
+      }
+    }
+  }
+
+  /** Keep accepting on every open channel until stopped. Polling today; the transport is
+   * deliberately the only thing that knows so. */
+  keepSyncing(opts: { everyMs?: number } = {}): StandingSync {
+    return keepSyncingImpl(this, opts);
+  }
+
+  /** Retire ONE law a channel blessed, durably across polls. `{ lift: true }` reverses it. */
+  async curseChannelLaw(
+    channel: string,
+    living: string,
+    opts: { lift?: boolean } = {},
+  ): Promise<void> {
+    return curseChannelLawImpl(this, channel, living, opts);
+  }
+
+  /** Set a channel's reversible toggles: `receiving` (freeze) and `blessing`. */
+  async setChannel(
+    name: string,
+    next: { receiving?: boolean; blessing?: boolean },
+  ): Promise<ChannelStatus> {
+    return setChannelImpl(this, name, next);
+  }
+
+  /** Every channel's live state, or one by name — read from the ground, not from memory. */
+  /** Every channel ever declared, severed ones included — the read path needs the difference. */
+  channelsEver(name?: string): ChannelStatus[] {
+    return channelsEverImpl(this, name);
+  }
+
+  channelStatus(name?: string): ChannelStatus[] {
+    return channelStatusImpl(this, name);
+  }
+
+  /** Sever a federation channel and purge its pool. Irreversible; freezing is the reversible act. */
+  async dropChannel(name: string): Promise<void> {
+    return dropChannelImpl(this, name);
+  }
+
+  /** Open (or resume) a federation channel receiving into `into` under the receiver's `prefix`. */
+  async openChannel(opts: OpenChannelOptions): Promise<Channel> {
+    return openChannelImpl(this, opts);
+  }
+
   async openContainer(opts: ContainerOptions = {}): Promise<Container> {
     return openContainerImpl(this, opts);
   }
@@ -1399,6 +1509,23 @@ export class Gateway {
   // always releases the backend, even when a latched write failure has to be surfaced.
   async close(): Promise<void> {
     for (const channel of [...this.channels]) await channel.return();
+    // ATTACHED POOLS CLOSE WITH THEIR PARENT. A separate container holds its own store open, and
+    // nothing else will ever close it — so before this, every channel pool leaked its sqlite handle
+    // until the process exited. Invisible on Linux, which happily unlinks an open file; Windows CI
+    // found it, as an EPERM deleting a temp directory whose files were still held.
+    //
+    // Tolerant of an already-closed pool: `drop()` closes the store it purged, so a dropped channel
+    // is normally in this map having already gone.
+    for (const pool of [...this.attachedContainers.values()]) {
+      try {
+        await pool.close();
+      } catch {
+        // already closed — a dropped pool, or a second close
+      }
+    }
+    this.attachedContainers.clear();
+    this.channelPools.clear();
+    this.federationChannels.clear();
     try {
       await this.flush();
     } finally {

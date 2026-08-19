@@ -7,7 +7,8 @@
 // `serve` blocks until the process is signalled.
 
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
 import {
   authorForSeed,
@@ -22,6 +23,7 @@ import { parseOffer } from "../federation/offer.js";
 import { toWire } from "../federation/wire.js";
 import { migrate } from "../migrate/migrate.js";
 import { pullFrom } from "../federation/pull.js";
+import type { ChannelSource } from "../federation/channel.js";
 import { tombstonesIn } from "../gateway/erase.js";
 import { assembleGenesis } from "../gateway/genesis.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
@@ -100,6 +102,7 @@ type CommandName =
   | "serve"
   | "register"
   | "pull"
+  | "federate"
   | "migrate"
   | "store"
   | "repair"
@@ -173,6 +176,39 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
     notes: [
       "A URL is one anti-entropy step against a live peer (and wants a token); a file is a frozen",
       "offer — the body of GET /federate, saved, or a browser store's export.",
+    ],
+  },
+  federate: {
+    summary: "open, list, adjust, and sever federation channels (SPEC §46)",
+    usage: "loam federate <open|list|set|drop> [options]",
+    flags: new Set([
+      "home",
+      "store",
+      "token",
+      "into",
+      "prefix",
+      "from",
+      "bless",
+      "receiving",
+      "channel",
+      "yes",
+    ]),
+    // `--yes` is a bare confirmation, not a value. Without this the parser demanded a value and
+    // `federate drop --channel X --yes` could not be typed correctly by anyone.
+    booleans: new Set(["yes"]),
+    notes: [
+      "Federation is container-to-container. `open` names the container you receive INTO and the",
+      "PREFIX you assign the peer — the prefix is yours, never theirs, so no peer can take a name",
+      "you serve. Law that arrives binds under that prefix; your own names are untouched.",
+      "",
+      "  loam federate open --from https://peer.example/default --into friends --prefix alice",
+      "  loam federate list",
+      "  loam federate set --channel channel:friends:alice --bless false",
+      "  loam federate drop --channel channel:friends:alice --yes",
+      "",
+      "`set` is reversible: --receiving false freezes the channel and keeps what arrived,",
+      "--bless false stops new law binding and leaves bound law serving. `drop` is NOT reversible:",
+      "it purges that peer's pool at the bytes and needs --yes.",
     ],
   },
   migrate: {
@@ -411,6 +447,29 @@ function parseFor(command: CommandName, args: readonly string[]): Parsed {
 // Every store this CLI opens, opened the same way: the sqlite driver's one-time freelist scrub is
 // best-effort — a second handle can refuse it and the store opens regardless — so its deferral
 // rides the operator's log. A scrub nobody hears about is a §11 promise quietly left unkept.
+
+// A federation channel's pool needs DURABLE bytes: a separate container defaults to memory, and a
+// channel that forgets its peer on restart is not federation (T189). One sqlite file per pool,
+// inside the home.
+//
+// THE FILENAME MUST BE INJECTIVE, and folding unsafe characters to "_" is not. `channel:team a:alice`
+// and `channel:team_a:alice` are distinct containers that both folded to `channel_team_a_alice`, so
+// two channels shared one file — and `drop()` enumerates a store's whole contents, so severing one
+// would have purged the bystander's bytes while the CLI printed "other channels are untouched".
+// That is the over-purge direction, which has no recovery.
+//
+// So the name carries a hash of the FULL pool name. The readable slug is kept for a human reading
+// `ls`, but identity lives in the digest, where the folding cannot reach it.
+export function channelBackendFor(home: string, io: IO): (pool: string) => SqliteBackend {
+  return (pool: string) => {
+    const dir = join(home, "channels");
+    mkdirSync(dir, { recursive: true });
+    const slug = pool.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 60);
+    const digest = createHash("sha256").update(pool, "utf8").digest("hex").slice(0, 16);
+    return openStore(join(dir, `${slug}--${digest}.sqlite`), io);
+  };
+}
+
 function openStore(path: string, io: IO): SqliteBackend {
   return new SqliteBackend(path, { onScrubDeferred: (why) => io.err(why) });
 }
@@ -642,7 +701,12 @@ async function cmdServe(
 
   // Boot the store from its genesis (idempotent): a fresh store is born governed; an existing
   // one simply re-lands the same operator identity.
-  const gateway = await Gateway.boot(backend, assembleGenesis({ operatorSeed: seed }), { pens });
+  const gateway = await Gateway.boot(backend, assembleGenesis({ operatorSeed: seed }), {
+    pens,
+    // The serving process must reach a channel's pool that another process opened, or a bound
+    // federated lens resolves over an empty ground and answers null (T189).
+    channelBackend: channelBackendFor(home, io),
+  });
   let server;
   try {
     server = await serve({
@@ -806,6 +870,7 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
   const gateway = await Gateway.boot(
     openStore(path, io),
     assembleGenesis({ operatorSeed: readSeed(home) }),
+    { channelBackend: channelBackendFor(home, io) },
   );
   let outcome: PublishOutcome;
   try {
@@ -852,6 +917,170 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
 // Both cross through Gateway.federate: verification, trust-admission, tombstones at the door.
 // No standing needed — union is union; whether the imported law BINDS is decided by whose
 // operator seed this home holds, never by this command.
+// §46 — federation is container-to-container. The verbs mirror the tool surface T188 exposes to an
+// agent, with ONE deliberate asymmetry: `drop` needs `--yes` here and cannot be reached at all by an
+// MCP caller, because an agent staging an irreversible purge and a person confirming it are
+// different acts on different surfaces.
+async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
+  const verb = args[0];
+  const parsed = parseFor("federate", args.slice(1));
+  if (verb === undefined || !["open", "list", "set", "drop"].includes(verb)) {
+    io.err(
+      "federate takes a verb: open (start receiving from a peer), list (what is standing and how " +
+        "it is doing), set (freeze or unbless, both reversible), drop (sever and purge, not " +
+        "reversible) — `loam federate --help`",
+    );
+    return 2;
+  }
+  const home = parsed.flags.get("home") ?? defaultHome();
+  const init = initHome(home);
+  if (init.created) io.out(`loam: initialized ${home}\n  operator ${init.operator}`);
+  const gateway = await Gateway.boot(
+    openStore(storePath(home, parsed.flags.get("store")), io),
+    assembleGenesis({ operatorSeed: readSeed(home) }),
+    { channelBackend: channelBackendFor(home, io) },
+  );
+  try {
+    if (verb === "list") {
+      const rows = gateway.channelStatus();
+      if (rows.length === 0) {
+        io.out(
+          "loam: no federation channels — `loam federate open --from <url> --into <container> --prefix <name>`",
+        );
+        return 0;
+      }
+      for (const r of rows) {
+        // "never synced" is spelled out rather than shown as a zero: a channel that has never
+        // reached its peer must not read like one that is merely quiet (H9, §46 criterion 8).
+        const when =
+          r.lastSyncedAt === 0
+            ? "never synced"
+            : `last synced ${new Date(r.lastSyncedAt).toISOString()}`;
+        const trouble =
+          r.consecutiveFailures > 0 ? `, ${r.consecutiveFailures} failed attempt(s) since` : "";
+        io.out(
+          `${r.name}\n  into ${r.into}, serving the peer's law under "${r.prefix}:"\n` +
+            `  ${r.receiving ? "receiving" : "FROZEN"}, ${r.blessing ? "blessing" : "NOT blessing"}\n` +
+            `  ${when}${trouble}`,
+        );
+      }
+      return 0;
+    }
+
+    if (verb === "open") {
+      const from = parsed.flags.get("from");
+      const into = parsed.flags.get("into");
+      const prefix = parsed.flags.get("prefix");
+      if (from === undefined || into === undefined || prefix === undefined) {
+        io.err(
+          "federate open wants --from <url|file>, --into <container>, and --prefix <name>. The " +
+            "prefix is YOURS: it is the namespace this store serves the peer's law under, so no " +
+            "peer can take a name you already answer.",
+        );
+        return 2;
+      }
+      const token = parsed.flags.get("token") ?? process.env["LOAM_TOKEN"];
+      const channel = await gateway.openChannel({
+        into,
+        prefix,
+        bless: parsed.flags.get("bless") !== "false",
+        source: sourceFor(gateway, from, token),
+      });
+      const report = await channel.sync();
+      io.out(
+        `loam: channel ${channel.name}\n` +
+          `  ${report.accepted} accepted, ${report.duplicates} already held, of ${report.offered} offered\n` +
+          (report.bound.length > 0 ? `  bound ${report.bound.join(", ")}\n` : "") +
+          (report.witnessed.length > 0
+            ? `  ALREADY SERVED under another name, so these were NOT created: ` +
+              `${report.witnessed.join(", ")}\n` +
+              `    this store already answers that law through an earlier channel or your own ` +
+              `registration — the peer's data is here, and it reads through the name that exists (T198)\n`
+            : "") +
+          (report.parked.length > 0
+            ? `  PARKED (a name here is answered by different law — your decision):\n    ${report.parked.join("\n    ")}\n`
+            : "") +
+          "  union is union; syncing again is safe",
+      );
+      return 0;
+    }
+
+    const name = parsed.flags.get("channel");
+    if (name === undefined) {
+      io.err(`federate ${verb} wants --channel <name> — \`loam federate list\` names them`);
+      return 2;
+    }
+
+    if (verb === "set") {
+      const next: { receiving?: boolean; blessing?: boolean } = {};
+      const receiving = parsed.flags.get("receiving");
+      const bless = parsed.flags.get("bless");
+      if (receiving !== undefined) next.receiving = receiving !== "false";
+      if (bless !== undefined) next.blessing = bless !== "false";
+      if (next.receiving === undefined && next.blessing === undefined) {
+        io.err("federate set wants --receiving <true|false> or --bless <true|false>, or both");
+        return 2;
+      }
+      const now = await gateway.setChannel(name, next);
+      io.out(
+        `loam: ${now.name} is now ${now.receiving ? "receiving" : "FROZEN"} and ` +
+          `${now.blessing ? "blessing" : "NOT blessing"}\n` +
+          (now.blessing ? "" : "  law already bound stays bound — this stops NEW law binding\n") +
+          (now.receiving ? "" : "  what already arrived still reads — this stops NEW deltas\n"),
+      );
+      return 0;
+    }
+
+    // drop
+    if (!parsed.booleans.has("yes")) {
+      const held = gateway.channelStatus(name)[0];
+      io.err(
+        `federate drop refused without --yes. This PURGES ${name} at the bytes` +
+          (held === undefined
+            ? ""
+            : ` — everything received from "${held.prefix}" into ${held.into}`) +
+          `. It cannot be undone. To stop receiving and KEEP what arrived, use ` +
+          `\`loam federate set --channel ${name} --receiving false\` instead.`,
+      );
+      return 2;
+    }
+    await gateway.dropChannel(name);
+    io.out(`loam: ${name} is severed and its pool is purged — other channels are untouched`);
+    return 0;
+  } catch (err) {
+    io.err(`federate: ${err instanceof Error ? err.message : String(err)}`);
+    return 2;
+  } finally {
+    await gateway.close();
+  }
+}
+
+// A channel's source: a live peer over the federation door, or a frozen offer file. Both reach the
+// same channel contract, which is what makes "someone sent me an offer" and "I subscribed to a
+// public source" one code path (§46 criteria 1 and 2).
+function sourceFor(gw: Gateway, from: string, token: string | undefined): ChannelSource {
+  const isUrl = /^https?:\/\//i.test(from);
+  if (!isUrl) {
+    return { pull: () => Promise.resolve(parseOffer(readFileSync(from, "utf8"))) };
+  }
+  return {
+    pull: async () => {
+      const res = await fetch(`${from}/federate`, {
+        headers: token === undefined ? {} : { authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        throw new Error(
+          `the peer answered ${res.status} at ${from}/federate` +
+            (res.status === 403
+              ? " — federation wants the peer's operator token today (§46 will scope this)"
+              : ""),
+        );
+      }
+      return parseOffer(await res.text());
+    },
+  };
+}
+
 async function cmdPull(args: readonly string[], io: IO): Promise<number> {
   const parsed = parseFor("pull", args);
   const source = parsed.positionals[0];
@@ -899,6 +1128,7 @@ async function cmdPull(args: readonly string[], io: IO): Promise<number> {
   const gateway = await Gateway.boot(
     openStore(path, io),
     assembleGenesis({ operatorSeed: readSeed(home) }),
+    { channelBackend: channelBackendFor(home, io) },
   );
   let report: FederationReport;
   // Pull's own dimension: deltas the peer sent that would not even reconstruct (see PullReport).
@@ -2238,6 +2468,8 @@ export async function run(
         return await cmdRegister(rest, io);
       case "pull":
         return await cmdPull(rest, io);
+      case "federate":
+        return await cmdFederate(rest, io);
       case "migrate":
         return cmdMigrate(rest, io);
       case "store":

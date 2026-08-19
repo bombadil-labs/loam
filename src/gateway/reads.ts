@@ -111,6 +111,29 @@ export function gatherImpl(
 ): HView {
   requireMoment(now, `gather ${name}`);
   const closed = readClosedIds(gw, now);
+
+  // A lens that arrived through a federation channel resolves over THAT CHANNEL'S POOL, not over
+  // this store's primary ground — the peer's deltas live in the pool by design (§46), so a lens
+  // gathering the primary ground binds correctly and then answers null (T189, measured).
+  //
+  // THIS RUNS BEFORE THE WARM BRANCH, and that ordering is the bug this cost. Materializations are
+  // keyed by the hyperschema's PROGRAM name (§21.7), so a peer's `Plant` and a local `Plant` share
+  // one — the warm lookup returned a view computed over the primary ground and the scoped path was
+  // never reached. A channel lens must never read a materialization it does not own.
+  //
+  // The scope is derived from data already in the ground: the living name carries the prefix the
+  // receiver assigned, and the channel record maps that prefix to its pool. No new vocabulary.
+  // Deliberately the POOL and not the receiving container — two channels into one container resolve
+  // over their OWN pools, or one peer's claims would answer another peer's lens. Every other lens is
+  // untouched, which is the decision Myk settled: a container shows its own contents, and descent is
+  // explicit (T190).
+  const scoped = channelGroundFor(gw, name, now, asOf);
+  if (scoped !== undefined) {
+    const result = evalTerm(gw.def(name).hyperschema.body, scoped, entity, gw.registry);
+    if (result.sort !== "hview") throw new Error(`schema ${name} does not evaluate to a hyperview`);
+    return result.hview;
+  }
+
   if (asOf !== undefined) {
     const def = gw.def(name);
     const ground = asOfGroundImpl(gw, asOf, closed);
@@ -145,6 +168,60 @@ export function gatherImpl(
       : evalTerm(def.hyperschema.body, readGround(gw, now), entity, gw.registry);
   if (result.sort !== "hview") throw new Error(`schema ${name} does not evaluate to a hyperview`);
   return result.hview;
+}
+
+/**
+ * The ground a channel-bound lens resolves over, or undefined for an ordinary lens.
+ *
+ * Read closure still applies: a read-closed delta must not reappear through a channel's pool, so the
+ * narrowed set is subtracted here exactly as the primary path narrows its own.
+ */
+function channelGroundFor(
+  gw: Gateway,
+  lens: string,
+  now: number,
+  asOf?: number,
+): DeltaSet | undefined {
+  const cut = lens.indexOf(":");
+  if (cut <= 0) return undefined;
+  const prefix = lens.slice(0, cut);
+  const channel = gw.channelStatus().find((c) => c.prefix === prefix);
+  if (channel === undefined) {
+    // A SEVERED channel's lens must not fall back to this store's own ground. Measured before this
+    // guard: after `dropChannel`, `alice_Plant` answered 999 — the receiver's own private claim —
+    // where it had answered the peer's 11. On the ordinary query door, after an act the operator
+    // chose, looking like it worked (T199).
+    const severed = gw.channelsEver().find((c) => c.prefix === prefix);
+    if (severed !== undefined) {
+      throw new Error(
+        `${lens} was served by the federation channel "${severed.name}", which has been severed. ` +
+          `Its pool is purged, so this reading has no ground — it must not fall back to this ` +
+          `store's own deltas. Re-open the channel, or retire the lens.`,
+      );
+    }
+    return undefined;
+  }
+  const closed = readClosedIds(gw, now);
+  // A time pin rides the READ (§26), so it must reach the pool as well — a scoped lens that
+  // silently ignored `asOf` would answer the present while the caller believes it answered the past.
+  //
+  // AND THE RECEIVER'S OWN STRIKES APPLY. containerScope closes negations over whoever CONTRIBUTED
+  // deltas, and requesting one pool makes that pool the only ground — so a strike living HERE was
+  // left behind and the reader saw a retracted claim as live (H1, the store lying upward). Reachable
+  // whenever a receiver both channels a peer and federates with them directly: the retraction lands
+  // in this ground while the channel is frozen or has not polled.
+  //
+  // `struck` rather than `negationsOf(...).length > 0`: a struck strike stops binding, and its
+  // target revives. Presence is not survival.
+  const deltas = gw
+    .containerScope({ containers: [channel.name] })
+    .filter(
+      (d) =>
+        (asOf === undefined || d.claims.timestamp <= asOf) &&
+        !closed.has(d.id) &&
+        !gw.reactor.negationsOf(d.id).some((n) => gw.reactor.negationsOf(n).length === 0),
+    );
+  return DeltaSet.from(deltas);
 }
 
 const asOfGroundImpl = (gw: Gateway, asOf: number, closed: ReadonlySet<string>): DeltaSet =>
@@ -221,6 +298,28 @@ export function resolvedNodeImpl(
 // The two pins are orthogonal (SPEC §26): with an `asOf`, this becomes an OLD lens over an OLD
 // ground — full time travel — resolving the pinned body against the ground as it stood at T
 // (the same gather the live as-of read uses, only the schema is pinned rather than the latest).
+
+/**
+ * Is this lens served from a federation channel's pool?
+ *
+ * A channel lens is scoped in `gatherImpl` and NOWHERE ELSE. Two sibling doors resolve their own
+ * ground — the pinned §17 ladder and the live subscription — and both would answer a channel lens
+ * from the RECEIVER's ground through the PEER's gather body. Measured, before this guard existed:
+ *
+ *   query      { alice_Plant(entity: FERN) { height } }  ->  11   (alice's, correct)
+ *   subscription { alice_Plant(entity: FERN) { height } } -> 999  (the receiver's own claim)
+ *
+ * With the lens declared public that is an operator's private data streamed to a stranger. So these
+ * doors REFUSE a channel lens rather than serve it from the wrong ground: a refusal is always
+ * available, and a disclosure is not recoverable. T193 carries the real fix, which is a per-pool
+ * materialization rather than one keyed by the program name.
+ */
+export function channelLens(gw: Gateway, lens: string): boolean {
+  const cut = lens.indexOf(":");
+  if (cut <= 0) return false;
+  return gw.channelStatus().some((c) => c.prefix === lens.slice(0, cut));
+}
+
 export function resolvePinnedImpl(
   gw: Gateway,
   reg: Registered,
@@ -229,6 +328,13 @@ export function resolvePinnedImpl(
   asOf?: number,
 ): ResolvedNode {
   requireMoment(now, `resolvePinned ${reg.hyperschema.name}`);
+  if (channelLens(gw, lensOf(reg))) {
+    throw new Error(
+      `${lensOf(reg)} arrived through a federation channel, and the pinned door resolves this ` +
+        `store's own ground rather than that channel's pool — it would answer the peer's reading ` +
+        `over your deltas. Read it through the ordinary query door, which scopes correctly (T193).`,
+    );
+  }
   // An OLD LENS OVER TODAY'S GROUND IS STILL A READ DOOR (SPEC §29.3): the live branch takes the
   // same `readGround` substitution the cold gather takes, and the as-of branch narrows after the
   // reconstruction. A pinned version freezes the lens, never the store's obligations.
@@ -292,6 +398,14 @@ export function watchEntityImpl(
   nowAt: () => number = () => Date.now(),
 ): AsyncGenerator<PatchNode, void, unknown> {
   const bound = gw.def(name);
+  if (channelLens(gw, name)) {
+    throw new Error(
+      `${name} arrived through a federation channel, and a live subscription resolves this store's ` +
+        `own ground rather than that channel's pool — it would stream the peer's reading over your ` +
+        `deltas, to whoever is subscribed. Read it through the ordinary query door, which scopes ` +
+        `correctly (T193).`,
+    );
+  }
   const matName = gw.matFor(name, entity, door);
   const resolveCaptured = (): ResolvedNode => {
     // A LIVE SUBSCRIPTION IS A READ DOOR (SPEC §29.3), and here the materialization keeps its real
