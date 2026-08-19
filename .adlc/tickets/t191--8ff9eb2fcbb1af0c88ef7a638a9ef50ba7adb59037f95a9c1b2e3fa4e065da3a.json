@@ -1,0 +1,12 @@
+{
+  "body": "FOUND DURING T186's curse slice, 2026-08-19. Criterion 11 itself is MET and green: cursing one bound\nlaw retires that law only, and the retirement survives a subsequent poll. This ticket is the piece\nBEYOND the criterion that I added and could not finish.\n\nWHAT DOES NOT WORK: `curseChannelLaw(channel, living, { lift: true })`. It strikes the curse record\nusing the substrate's real negation shape (makeNegationClaims — an earlier draft hand-rolled a\n\"negates\" pointer, which appended cleanly and changed nothing, and that bug IS fixed). The next poll\nstill does not re-bless.\n\nTHE EVIDENCE, and it narrows the search: the living name is never re-attempted at all. `parked` comes\nback EMPTY, so the blessing is not refusing — the skip is happening upstream, in the cursed-set\nfilter. Either the strike is not binding (an authority question) or `cursesOf` is reading a stale\nset. Diagnosed no further; the loop moved on rather than burn an iteration on a nice-to-have.\n\nWHY IT MATTERS ANYWAY: a curse the operator cannot lift is a one-way door on a REVERSIBLE control.\n§46's whole toggle design separates reversible acts (freeze, unbless, curse) from the irreversible one\n(drop). A curse that cannot be undone quietly joins the wrong group, and an operator who learns that\nthe hard way has lost a peer's law with only a re-federation to recover it.\n\nRAILS: the skipped rail in test/federation/curse-durable.test.ts is written and ready — un-skip it.\nTwo-sided: lifting a curse on one law must not lift it on a channel-mate that is also cursed.\n\nDO NOT ship `lift` in any doc, help text, or tool description as working until that rail is green.\n",
+  "edges": [],
+  "id": "T191",
+  "phase": "P0",
+  "rails": [],
+  "scope": [
+    "src/federation/channel.ts"
+  ],
+  "status": "todo",
+  "title": "Lifting a curse does not re-bless — the cursed name is never re-attempted"
+}

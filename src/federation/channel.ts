@@ -15,7 +15,7 @@
 
 import type { Delta } from "@bombadil/rhizomatic";
 import type { Claims } from "@bombadil/rhizomatic";
-import { signClaims } from "@bombadil/rhizomatic";
+import { makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
 import type { Container } from "../gateway/container.js";
 import { containerClaims, readContainerTable } from "../gateway/container.js";
 import type { Gateway } from "../gateway/gateway.js";
@@ -232,8 +232,12 @@ async function bindArrived(
   }
 
   const version = freezeMembers([...ground.reactor.snapshot()]);
+  const cursed = new Set(cursesOf(gw, channelNameOf(gw, prefix)).map((c) => c.living));
   for (const [alias] of rows) {
     const name = `${prefix}:${alias}`;
+    // A cursed name is skipped on every poll. Without this the standing sync would re-bless what the
+    // operator retired, one interval later and silently (§46 criterion 11).
+    if (cursed.has(name)) continue;
     try {
       await gw.adoptLaw(version, alias, { as: name });
       bound.push(name);
@@ -258,6 +262,11 @@ function manifestAliasOf(claims: { pointers: readonly unknown[] }): string | und
   if (!isRow) return undefined;
   const alias = ps.find((p) => p.role === "alias");
   return alias?.target.kind === "primitive" ? String(alias.target.value) : undefined;
+}
+
+/** The channel a prefix belongs to, for reading its curses during a bind. */
+function channelNameOf(gw: Gateway, prefix: string): string {
+  return channelStatusImpl(gw).find((c) => c.prefix === prefix)?.name ?? "";
 }
 
 /** Every prefix this receiving container already assigns, read live from the container table. */
@@ -546,4 +555,113 @@ export function keepSyncingImpl(gw: Gateway, opts: { everyMs?: number } = {}): S
       await running; // an in-flight tick finishes before the caller believes it has stopped
     },
   };
+}
+
+export const CTX_CURSE = "loam.channel.curse";
+
+/**
+ * Retire ONE already-bound law from a channel — Myk's "curse", the opposite of a blessing.
+ *
+ * A curse is not a pause. Pausing blessing stops NEW law binding and leaves everything bound; this
+ * reaches one bound lens and retires it. Both are reversible and neither severs the channel.
+ *
+ * IT IS RECORDED, NOT INFERRED, and that is the whole design. A standing sync re-reads the pool
+ * every tick, so a retirement held only in the surface would be silently undone by the next poll —
+ * the operator's judgement would hold for one interval and then quietly stop, with nothing anywhere
+ * saying so. That is H7: a report that becomes false without a further act. The record is what makes
+ * "retired" keep being true.
+ *
+ * Deprecation is negation (§21): the lens leaves the surface because its registration is negated,
+ * not because anything is deleted. The store only learns.
+ */
+export async function curseChannelLawImpl(
+  gw: Gateway,
+  channel: string,
+  living: string,
+  opts: { lift?: boolean } = {},
+): Promise<void> {
+  const seed = gw.options.seed;
+  if (seed === undefined) {
+    throw new Error("curseChannelLaw: only an operated store may retire law it blessed (§46)");
+  }
+  const standing = channelStatusImpl(gw, channel)[0];
+  if (standing === undefined) {
+    throw new Error(`curseChannelLaw refused: this store has no channel named "${channel}"`);
+  }
+
+  if (opts.lift === true) {
+    // Lifting strikes the curse record itself. The next poll re-blesses through the ordinary path,
+    // so nothing here needs to know how binding works.
+    for (const d of cursesOf(gw, channel)) {
+      if (d.living !== living) continue;
+      // The substrate's own negation shape. A hand-rolled "negates" pointer is not one — it appends
+      // cleanly, changes nothing, and the curse silently keeps standing.
+      await gw.append([
+        signClaims(makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), d.deltaId), seed),
+      ]);
+    }
+    return;
+  }
+
+  await gw.append([
+    signClaims(
+      {
+        timestamp: gw.nextTimestamp(),
+        author: gw.operatorAuthor!,
+        pointers: [
+          {
+            role: "curse",
+            target: { kind: "entity", entity: { id: `channel:${channel}`, context: CTX_CURSE } },
+          },
+          { role: "living", target: { kind: "primitive", value: living } },
+        ],
+      },
+      seed,
+    ),
+  ]);
+
+  // Retire the binding NOW as well as recording it, so the surface changes on this call rather than
+  // on the next poll. The record is what KEEPS it retired; this is what makes it immediate.
+  //
+  // Deprecation is negation (§21): strike the REGISTRATION BINDING and the lens leaves the surface.
+  // Nothing is deleted — the definition and the peer's deltas stay exactly where they are, and
+  // lifting the curse re-blesses through the ordinary path.
+  // The binding carries no primitive naming the LIVING name — the living name is the schema's, and
+  // the binding points at the hyperschema entity (H6's distinction, in the bytes). So the def is the
+  // bridge: it maps the name a reader asks by to the entity the binding registers.
+  const entity = gw.def(living).entity;
+  const binding = [...gw.reactor.snapshot()].find(
+    (d) =>
+      isRegistrationBinding(d.claims) &&
+      d.claims.pointers.some(
+        (p) =>
+          p.target.kind === "entity" &&
+          (p.target.entity.id === entity || p.target.entity.id === `registration:${entity}`),
+      ) &&
+      gw.reactor.negationsOf(d.id).length === 0,
+  );
+  if (binding !== undefined) {
+    await gw.append([
+      signClaims(makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), binding.id), seed),
+    ]);
+    gw.replayRegistrations();
+  }
+}
+
+/** The living names cursed on a channel, with the delta that said so. */
+export function cursesOf(gw: Gateway, channel: string): { living: string; deltaId: string }[] {
+  const out: { living: string; deltaId: string }[] = [];
+  for (const d of gw.reactor.snapshot()) {
+    const marker = d.claims.pointers.find(
+      (p) => p.target.kind === "entity" && p.target.entity.context === CTX_CURSE,
+    );
+    if (marker === undefined || marker.target.kind !== "entity") continue;
+    if (marker.target.entity.id !== `channel:${channel}`) continue;
+    if (gw.reactor.negationsOf(d.id).length > 0) continue;
+    const living = d.claims.pointers.find((p) => p.role === "living");
+    if (living?.target.kind === "primitive") {
+      out.push({ living: String(living.target.value), deltaId: d.id });
+    }
+  }
+  return out;
 }

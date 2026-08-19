@@ -30,6 +30,7 @@ import { isRepairable } from "../store/quarantine.js";
 import { promoteImpl, readAdoptions, type Adoption } from "./adopt.js";
 import {
   channelStatusImpl,
+  curseChannelLawImpl,
   dropChannelImpl,
   keepSyncingImpl,
   openChannelImpl,
@@ -902,6 +903,15 @@ export class Gateway {
    * deliberately the only thing that knows so. */
   keepSyncing(opts: { everyMs?: number } = {}): StandingSync {
     return keepSyncingImpl(this, opts);
+  }
+
+  /** Retire ONE law a channel blessed, durably across polls. `{ lift: true }` reverses it. */
+  async curseChannelLaw(
+    channel: string,
+    living: string,
+    opts: { lift?: boolean } = {},
+  ): Promise<void> {
+    return curseChannelLawImpl(this, channel, living, opts);
   }
 
   /** Set a channel's reversible toggles: `receiving` (freeze) and `blessing`. */
