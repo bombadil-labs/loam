@@ -133,12 +133,22 @@ journal already records for the stale pin and the Windows spawn. A ledger that o
 "the gates passed" exactly the unverifiable report our own doctrine refuses to accept (H7). The
 conflict was real, but its answer is upstream's SEGMENTED forest (`manifest.d/`), not deletion.
 
-**Forest mode is available and NOT yet enabled.** `adlc gate-manifest enable` refuses without a
-signing key, and says why: keyless forest mode is single-checkout **permanently**, because
-keyless-minted segments can never be authenticated by a later key, so every other clone fails closed
-on its first write. Enabling it is Myk's call and wants `gate-manifest generate-key` first. Until
-then we run single-file, committed, and resolve a tail conflict by keeping both sides — a JSONL
-append conflict is a union, never a choice.
+**FOREST MODE IS ON** (cut over 2026-08-19). Evidence lives in the segmented store
+`.adlc/manifest.d/`, keyed — the marker reads `{"format":"adlc-manifest-segments","auth":"keyed"}`.
+Segments are per-checkout, so concurrent branches no longer collide on one shared tail, which is the
+problem that made the old (wrong) advice to delete the ledger look reasonable.
+
+**Two things follow, and both bite silently if forgotten.** `ADLC_MANIFEST_KEY` must be in the
+environment to WRITE a segment — it is in `~/.bashrc`, and a checkout without it fails closed rather
+than writing unsigned. And **`gate-manifest verify` now needs `--allow-legacy-unsigned`**: the 290
+pre-cutover entries were never signed, and the ceremony deliberately did NOT back-date signatures
+onto them. It appended one signed `manifest-cutover` record that ATTESTS them and discloses the count
+in its own body. That is the honest shape — you cannot sign what you did not witness — so a bare
+`verify` failing on that history is correct behaviour, not a broken chain.
+
+**CI pins a FLOOR of `@adlc/cli@^1.10.0`** at all three install sites. A pre-forest toolkit does not
+know the segmented store exists; it would write the frozen single-file root instead, silently, and
+report success.
 
 **`adlc run <phase>` asserts the phase's evidence exists, and the names are EXACT.** You record with
 `adlc gate-manifest record <gate-name> --ticket <id>` and assert with `adlc run <phase> --ticket

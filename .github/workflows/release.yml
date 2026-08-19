@@ -41,7 +41,11 @@ jobs:
       # missing — a runner that lost its provisioning must not report the gate green having run
       # none of it. ci.yml provisions it; this workflow runs the same gate and must too. Learned
       # on v0.2.0: the tag landed, the publish never ran, and the failure read as a test bug.
-      - run: npm i -g @adlc/cli
+      # PINNED FLOOR, not a version lock. This repo's evidence store is the segmented forest
+      # (.adlc/manifest.d/), and a pre-1.10 toolkit does not know it exists — it would write the
+      # frozen single-file root instead, silently, and report success. Minors and patches are
+      # welcome; anything below the cutover is not.
+      - run: npm i -g @adlc/cli@^1.10.0
 
       - name: the green gate
         run: npm run check
