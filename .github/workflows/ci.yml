@@ -48,7 +48,11 @@ jobs:
       # against fixture repositories, and it FAILS CLOSED on CI when the CLI is missing — a runner
       # that lost its provisioning must not report the gate suite green having run none of it. So
       # the test job provisions what the suite refuses to fake.
-      - run: npm i -g @adlc/cli
+      # PINNED FLOOR, not a version lock. This repo's evidence store is the segmented forest
+      # (.adlc/manifest.d/), and a pre-1.10 toolkit does not know it exists — it would write the
+      # frozen single-file root instead, silently, and report success. Minors and patches are
+      # welcome; anything below the cutover is not.
+      - run: npm i -g @adlc/cli@^1.10.0
       - name: format + lint + typecheck + tests
         run: npm run check
         env:
@@ -70,7 +74,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - run: npm i -g @adlc/cli
+      # PINNED FLOOR, not a version lock. This repo's evidence store is the segmented forest
+      # (.adlc/manifest.d/), and a pre-1.10 toolkit does not know it exists — it would write the
+      # frozen single-file root instead, silently, and report success. Minors and patches are
+      # welcome; anything below the cutover is not.
+      - run: npm i -g @adlc/cli@^1.10.0
       # The wrapper's rename exemption compares base+substitution to the branch AFTER the repo's
       # own prettier (a longer word rewraps lines) — so the gate needs the repo's exact prettier,
       # which lives in node_modules. Without it the raw compare still runs and a rewrapped rename
