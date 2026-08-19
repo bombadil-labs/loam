@@ -23,7 +23,7 @@ import { describe, expect, it } from "vitest";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
-import { FERN } from "../spike/garden.js";
+import { FERN, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
 
 const ALICE_SEED = "a1".repeat(32);
@@ -64,10 +64,45 @@ describe("§46 — law arriving on a channel binds under the receiver's name", (
     }
   });
 
-  it.skip("T189 — and SERVES: a read of alice's data through bob's surface returns the value", () => {
-    // Deliberately skipped, not deleted, and not weakened into something that passes. Measured on
-    // live stores: the field `alice_Note` is served and `{ alice_Note(entity: "note:hi") { title } }`
-    // answers `{"title": null}`. Un-skip when T189 lands a container-scoped read path.
+  it("T189 — and SERVES: a read of alice's data resolves through bob's own surface", async () => {
+    const alice = await aliceWithPlant();
+    const bob = await store(BOB_SEED);
+    try {
+      // Alice has a real observation, not only a schema — the null this rail exists to catch was a
+      // bound lens over an empty ground.
+      await alice.append([observed(FERN, "height", 62, 1000, ALICE_SEED)]);
+      const channel = await bob.openChannel({
+        into: "friends",
+        prefix: "alice",
+        source: { pull: () => Promise.resolve(alice.reactor.arrivalLog()) },
+      });
+      const report = await channel.sync();
+      expect(report.bound).toContain("alice:Plant");
+
+      const answer = await bob.query('{ alice_Plant(entity: "' + FERN + '") { height } }');
+      expect(answer.errors).toBeUndefined();
+      // The VALUE, not merely a served field: `{"height": null}` was the bug.
+      expect((answer.data as { alice_Plant: { height: unknown } }).alice_Plant.height).toBe(62);
+    } finally {
+      await alice.close();
+      await bob.close();
+    }
+  });
+
+  it("a receiver's OWN lens still resolves over the primary ground", async () => {
+    // Two-sided, and the half that keeps the fix honest: the scoped path must be entered ONLY by
+    // law that arrived through a channel. A change that scoped every lens would pass the rail above
+    // and quietly break every ordinary read.
+    const bob = await store(BOB_SEED);
+    try {
+      await bob.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+      await bob.append([observed(FERN, "height", 99, 2000, BOB_SEED)]);
+      const answer = await bob.query('{ plant(entity: "' + FERN + '") { height } }');
+      expect(answer.errors).toBeUndefined();
+      expect((answer.data as { plant: { height: unknown } }).plant.height).toBe(99);
+    } finally {
+      await bob.close();
+    }
   });
 
   it("blessing OFF leaves the deltas landed and the law unbound", async () => {

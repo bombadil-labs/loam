@@ -111,6 +111,29 @@ export function gatherImpl(
 ): HView {
   requireMoment(now, `gather ${name}`);
   const closed = readClosedIds(gw, now);
+
+  // A lens that arrived through a federation channel resolves over THAT CHANNEL'S POOL, not over
+  // this store's primary ground — the peer's deltas live in the pool by design (§46), so a lens
+  // gathering the primary ground binds correctly and then answers null (T189, measured).
+  //
+  // THIS RUNS BEFORE THE WARM BRANCH, and that ordering is the bug this cost. Materializations are
+  // keyed by the hyperschema's PROGRAM name (§21.7), so a peer's `Plant` and a local `Plant` share
+  // one — the warm lookup returned a view computed over the primary ground and the scoped path was
+  // never reached. A channel lens must never read a materialization it does not own.
+  //
+  // The scope is derived from data already in the ground: the living name carries the prefix the
+  // receiver assigned, and the channel record maps that prefix to its pool. No new vocabulary.
+  // Deliberately the POOL and not the receiving container — two channels into one container resolve
+  // over their OWN pools, or one peer's claims would answer another peer's lens. Every other lens is
+  // untouched, which is the decision Myk settled: a container shows its own contents, and descent is
+  // explicit (T190).
+  const scoped = channelGroundFor(gw, name, now, asOf);
+  if (scoped !== undefined) {
+    const result = evalTerm(gw.def(name).hyperschema.body, scoped, entity, gw.registry);
+    if (result.sort !== "hview") throw new Error(`schema ${name} does not evaluate to a hyperview`);
+    return result.hview;
+  }
+
   if (asOf !== undefined) {
     const def = gw.def(name);
     const ground = asOfGroundImpl(gw, asOf, closed);
@@ -145,6 +168,32 @@ export function gatherImpl(
       : evalTerm(def.hyperschema.body, readGround(gw, now), entity, gw.registry);
   if (result.sort !== "hview") throw new Error(`schema ${name} does not evaluate to a hyperview`);
   return result.hview;
+}
+
+/**
+ * The ground a channel-bound lens resolves over, or undefined for an ordinary lens.
+ *
+ * Read closure still applies: a read-closed delta must not reappear through a channel's pool, so the
+ * narrowed set is subtracted here exactly as the primary path narrows its own.
+ */
+function channelGroundFor(
+  gw: Gateway,
+  lens: string,
+  now: number,
+  asOf?: number,
+): DeltaSet | undefined {
+  const cut = lens.indexOf(":");
+  if (cut <= 0) return undefined;
+  const prefix = lens.slice(0, cut);
+  const channel = gw.channelStatus().find((c) => c.prefix === prefix);
+  if (channel === undefined) return undefined;
+  const closed = readClosedIds(gw, now);
+  // A time pin rides the READ (§26), so it must reach the pool as well — a scoped lens that
+  // silently ignored `asOf` would answer the present while the caller believes it answered the past.
+  const deltas = gw
+    .containerScope({ containers: [channel.name] })
+    .filter((d) => (asOf === undefined || d.claims.timestamp <= asOf) && !closed.has(d.id));
+  return DeltaSet.from(deltas);
 }
 
 const asOfGroundImpl = (gw: Gateway, asOf: number, closed: ReadonlySet<string>): DeltaSet =>

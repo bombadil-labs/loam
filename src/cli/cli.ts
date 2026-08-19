@@ -7,7 +7,7 @@
 // `serve` blocks until the process is signalled.
 
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
   authorForSeed,
@@ -443,6 +443,18 @@ function parseFor(command: CommandName, args: readonly string[]): Parsed {
 // Every store this CLI opens, opened the same way: the sqlite driver's one-time freelist scrub is
 // best-effort — a second handle can refuse it and the store opens regardless — so its deferral
 // rides the operator's log. A scrub nobody hears about is a §11 promise quietly left unkept.
+
+// A federation channel's pool needs DURABLE bytes: a separate container defaults to memory, and a
+// channel that forgets its peer on restart is not federation (T189). One sqlite file per pool,
+// inside the home, named from the pool with the characters a path cannot carry folded out.
+function channelBackendFor(home: string, io: IO): (pool: string) => SqliteBackend {
+  return (pool: string) => {
+    const dir = join(home, "channels");
+    mkdirSync(dir, { recursive: true });
+    return openStore(join(dir, `${pool.replace(/[^A-Za-z0-9._-]/g, "_")}.sqlite`), io);
+  };
+}
+
 function openStore(path: string, io: IO): SqliteBackend {
   return new SqliteBackend(path, { onScrubDeferred: (why) => io.err(why) });
 }
@@ -674,7 +686,12 @@ async function cmdServe(
 
   // Boot the store from its genesis (idempotent): a fresh store is born governed; an existing
   // one simply re-lands the same operator identity.
-  const gateway = await Gateway.boot(backend, assembleGenesis({ operatorSeed: seed }), { pens });
+  const gateway = await Gateway.boot(backend, assembleGenesis({ operatorSeed: seed }), {
+    pens,
+    // The serving process must reach a channel's pool that another process opened, or a bound
+    // federated lens resolves over an empty ground and answers null (T189).
+    channelBackend: channelBackendFor(home, io),
+  });
   let server;
   try {
     server = await serve({
@@ -838,6 +855,7 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
   const gateway = await Gateway.boot(
     openStore(path, io),
     assembleGenesis({ operatorSeed: readSeed(home) }),
+    { channelBackend: channelBackendFor(home, io) },
   );
   let outcome: PublishOutcome;
   try {
@@ -905,6 +923,7 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
   const gateway = await Gateway.boot(
     openStore(storePath(home, parsed.flags.get("store")), io),
     assembleGenesis({ operatorSeed: readSeed(home) }),
+    { channelBackend: channelBackendFor(home, io) },
   );
   try {
     if (verb === "list") {
@@ -1088,6 +1107,7 @@ async function cmdPull(args: readonly string[], io: IO): Promise<number> {
   const gateway = await Gateway.boot(
     openStore(path, io),
     assembleGenesis({ operatorSeed: readSeed(home) }),
+    { channelBackend: channelBackendFor(home, io) },
   );
   let report: FederationReport;
   // Pull's own dimension: deltas the peer sent that would not even reconstruct (see PullReport).

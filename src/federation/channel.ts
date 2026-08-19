@@ -332,7 +332,14 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
     ),
   ]);
 
-  const pool = await gw.openContainer({ name });
+  const pool = await gw.openContainer({
+    name,
+    // Durability is the store's choice, not the channel's: without a backend a separate container
+    // is in-memory, and a channel that forgets its peer on restart is not federation.
+    ...(gw.options.channelBackend === undefined
+      ? {}
+      : { backend: gw.options.channelBackend(name) }),
+  });
   const ground = pool.gateway;
   if (ground === undefined) {
     throw new Error(

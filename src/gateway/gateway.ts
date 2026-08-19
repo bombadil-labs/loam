@@ -181,6 +181,16 @@ export interface QueryResult {
 }
 
 export interface GatewayOptions {
+  /**
+   * Where a FEDERATION CHANNEL's pool keeps its bytes, by pool name. A separate container defaults
+   * to a fresh in-memory backend, which is right for a quarantine (transient by design) and WRONG
+   * for a channel: without this, a peer's deltas vanish with the process that pulled them, and the
+   * next boot serves a bound lens over an empty ground. Measured exactly that way (T189).
+   *
+   * Supplied by the CLI as a file inside the home. Absent, channels are in-memory and say so only
+   * by forgetting — so a durable deployment sets it.
+   */
+  readonly channelBackend?: (pool: string) => StoreBackend;
   // The OPERATOR's signing identity — the root of the capability chain (SPEC §7). It needs no
   // grant, plants the first tenants and grants, and signs mutations that name no actor. Without
   // a seed the gateway is read-only — unsigned authority does not exist here.
@@ -469,6 +479,12 @@ export class Gateway {
     if (genesis.deltas.length > 0) await gateway.append(genesis.deltas);
     gateway.replayRegistrations();
     await gateway.preloadResolvers();
+    // Standing federation channels are ATTACHED at boot, so a channel opened by one process is
+    // readable by the next. A separate container's bytes are unreadable until it is attached, and
+    // containerScope refuses rather than resolving empty (H9) — correct, and it surfaces as a query
+    // error on a store that merely restarted. Resuming here is what makes a channel outlive the
+    // command that opened it.
+    await gateway.resumeChannels();
     return gateway;
   }
 
@@ -861,6 +877,27 @@ export class Gateway {
 
   // Open a container over this store (SPEC §27): a declared one by name, or an anonymous one
   // with explicit knobs. The body lives in container.ts.
+  /**
+   * Attach every standing channel's pool. Idempotent, and failure-tolerant per channel: a pool whose
+   * bytes are missing must not stop the store from booting, and anything that reads it will meet
+   * containerScope's refusal by name — louder and more honest than a store that will not start.
+   */
+  async resumeChannels(): Promise<void> {
+    for (const standing of this.channelStatus()) {
+      if (this.federationChannels.has(standing.name)) continue;
+      try {
+        await this.openContainer({
+          name: standing.name,
+          ...(this.options.channelBackend === undefined
+            ? {}
+            : { backend: this.options.channelBackend(standing.name) }),
+        });
+      } catch {
+        // Deliberately left unattached; see above.
+      }
+    }
+  }
+
   /** Keep accepting on every open channel until stopped. Polling today; the transport is
    * deliberately the only thing that knows so. */
   keepSyncing(opts: { everyMs?: number } = {}): StandingSync {
