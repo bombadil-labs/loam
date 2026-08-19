@@ -670,6 +670,53 @@ export async function curseChannelLawImpl(
     return;
   }
 
+  // (the curse record is written below, AFTER the checks — see the refusal)
+
+  // Retire the binding NOW as well as recording it, so the surface changes on this call rather than
+  // on the next poll. The record is what KEEPS it retired; this is what makes it immediate.
+  //
+  // Deprecation is negation (§21): strike the REGISTRATION BINDING and the lens leaves the surface.
+  // Nothing is deleted — the definition and the peer's deltas stay exactly where they are, and
+  // lifting the curse re-blesses through the ordinary path.
+  // KEYED ON THE LENS, NOT THE ENTITY, and it strikes EVERY live binding that serves the name.
+  //
+  // The first version read `gw.def(living).entity` and struck the FIRST binding whose pointer named
+  // that entity. Three ways that is wrong, and none of them are visible in a corpus where one entity
+  // carries one lens and one version — which is exactly the corpus its rail used (H10):
+  //   - the hyperschema entity is not the lens (H6 in the bytes): under §21.7 coexistence two
+  //     readings share one entity, so it could strike a SIBLING and leave the cursed lens serving;
+  //   - `.find` picks one of however many survive, by snapshot order;
+  //   - and finding none returned SUCCESS, one line below a docstring promising the lens leaves the
+  //     surface (H7).
+  //
+  // Two of the three are not reachable through a channel TODAY — bindArrived derives its alias from
+  // the entity, so a peer's sibling lenses collapse into one (T197), and a republish strikes its
+  // predecessor so only one binding survives. They are fixed anyway: the reachability is an accident
+  // of the aliasing, and the verification below is what makes the report true rather than lucky.
+  // Read BEFORE the record is written: a first draft wrote the curse record first and then asked
+  // whether one existed, so its own write satisfied the check and the refusal was unreachable.
+  const alreadyCursed = cursesOf(gw, channel).some((c) => c.living === living);
+
+  const livesAt = (d: Delta): string | undefined => {
+    const p = d.claims.pointers.find((pt) => pt.role === "schema");
+    if (p?.target.kind !== "entity") return undefined;
+    const id = p.target.entity.id;
+    return id.startsWith("schema:") ? id.slice("schema:".length) : id;
+  };
+  const bindings = [...gw.reactor.snapshot()].filter(
+    (d) =>
+      isRegistrationBinding(d.claims) &&
+      livesAt(d) === living &&
+      gw.reactor.negationsOf(d.id).length === 0,
+  );
+  if (bindings.length === 0 && !alreadyCursed) {
+    throw new Error(
+      `curseChannelLaw refused: "${living}" is not served by this store, so there is nothing to ` +
+        `retire. Nothing was struck and nothing was recorded.`,
+    );
+  }
+
+  // Past every refusal: record the curse (what KEEPS it retired across polls), then strike.
   await gw.append([
     signClaims(
       {
@@ -686,32 +733,28 @@ export async function curseChannelLawImpl(
       seed,
     ),
   ]);
-
-  // Retire the binding NOW as well as recording it, so the surface changes on this call rather than
-  // on the next poll. The record is what KEEPS it retired; this is what makes it immediate.
-  //
-  // Deprecation is negation (§21): strike the REGISTRATION BINDING and the lens leaves the surface.
-  // Nothing is deleted — the definition and the peer's deltas stay exactly where they are, and
-  // lifting the curse re-blesses through the ordinary path.
-  // The binding carries no primitive naming the LIVING name — the living name is the schema's, and
-  // the binding points at the hyperschema entity (H6's distinction, in the bytes). So the def is the
-  // bridge: it maps the name a reader asks by to the entity the binding registers.
-  const entity = gw.def(living).entity;
-  const binding = [...gw.reactor.snapshot()].find(
-    (d) =>
-      isRegistrationBinding(d.claims) &&
-      d.claims.pointers.some(
-        (p) =>
-          p.target.kind === "entity" &&
-          (p.target.entity.id === entity || p.target.entity.id === `registration:${entity}`),
-      ) &&
-      gw.reactor.negationsOf(d.id).length === 0,
-  );
-  if (binding !== undefined) {
+  for (const binding of bindings) {
     await gw.append([
       signClaims(makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), binding.id), seed),
     ]);
-    gw.replayRegistrations();
+  }
+  gw.replayRegistrations();
+
+  // THE VERDICT IS THE SURFACE, NOT THE COUNT. A purge's count is evidence, never the verdict (T70),
+  // and the same holds for a retirement: this refuses rather than reporting a lens left the surface
+  // when it is still being served.
+  let stillServes = true;
+  try {
+    gw.def(living);
+  } catch {
+    stillServes = false;
+  }
+  if (stillServes) {
+    throw new Error(
+      `curseChannelLaw refused: struck ${bindings.length} binding(s) for "${living}" and the lens ` +
+        `is STILL SERVED. Something else binds that name — the curse is recorded, so the standing ` +
+        `sync will not re-bless it, but this store is still answering the name now.`,
+    );
   }
 }
 
