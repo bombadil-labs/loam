@@ -14,6 +14,7 @@
 // while a person is present to choose another.
 
 import type { Delta } from "@bombadil/rhizomatic";
+import type { Claims } from "@bombadil/rhizomatic";
 import { signClaims } from "@bombadil/rhizomatic";
 import type { Container } from "../gateway/container.js";
 import { containerClaims, readContainerTable } from "../gateway/container.js";
@@ -46,6 +47,87 @@ export interface SyncReport {
   readonly bound: string[];
   /** Rows that need a person: a name already answered here by different-content law. */
   readonly parked: string[];
+}
+
+export interface ChannelStatus {
+  readonly name: string;
+  readonly into: string;
+  readonly prefix: string;
+  readonly receiving: boolean;
+  readonly blessing: boolean;
+  /** 0 means NEVER synced — deliberately distinct from "synced a while ago". */
+  readonly lastSyncedAt: number;
+  readonly consecutiveFailures: number;
+}
+
+export const CTX_CHANNEL = "loam.channel";
+
+/**
+ * A channel's own state, as deltas. Myk's rule: channel state is expressible as deltas like
+ * everything else, so a person can query how a channel is doing rather than ask the process.
+ *
+ * Latest-wins by timestamp — each sync appends a fresh record and the newest reading is the live
+ * one. `consecutiveFailures` is the field that makes H9 visible here: "0 accepted" is the same
+ * visible answer for a quiet peer and an unreachable one, and only the second licenses believing
+ * you are current when you are not.
+ */
+export function channelRecordClaims(
+  status: ChannelStatus,
+  author: string,
+  timestamp: number,
+): Claims {
+  return {
+    timestamp,
+    author,
+    pointers: [
+      {
+        role: "channel",
+        target: { kind: "entity", entity: { id: `channel:${status.name}`, context: CTX_CHANNEL } },
+      },
+      { role: "into", target: { kind: "primitive", value: status.into } },
+      { role: "prefix", target: { kind: "primitive", value: status.prefix } },
+      { role: "receiving", target: { kind: "primitive", value: status.receiving } },
+      { role: "blessing", target: { kind: "primitive", value: status.blessing } },
+      { role: "lastSyncedAt", target: { kind: "primitive", value: status.lastSyncedAt } },
+      {
+        role: "consecutiveFailures",
+        target: { kind: "primitive", value: status.consecutiveFailures },
+      },
+    ],
+  };
+}
+
+/** The live reading of every channel record, or one by name. Latest-wins per channel. */
+export function channelStatusImpl(gw: Gateway, name?: string): ChannelStatus[] {
+  const latest = new Map<string, { at: number; status: ChannelStatus }>();
+  for (const d of gw.reactor.snapshot()) {
+    const marker = d.claims.pointers.find(
+      (p) => p.target.kind === "entity" && p.target.entity.context === CTX_CHANNEL,
+    );
+    if (marker === undefined || marker.target.kind !== "entity") continue;
+    if (gw.reactor.negationsOf(d.id).length > 0) continue;
+    const of = (role: string): string | number | boolean | undefined => {
+      const p = d.claims.pointers.find((q) => q.role === role);
+      return p?.target.kind === "primitive" ? p.target.value : undefined;
+    };
+    const channel = marker.target.entity.id.slice("channel:".length);
+    const held = latest.get(channel);
+    if (held !== undefined && held.at >= d.claims.timestamp) continue;
+    latest.set(channel, {
+      at: d.claims.timestamp,
+      status: {
+        name: channel,
+        into: String(of("into") ?? ""),
+        prefix: String(of("prefix") ?? ""),
+        receiving: of("receiving") !== false,
+        blessing: of("blessing") !== false,
+        lastSyncedAt: Number(of("lastSyncedAt") ?? 0),
+        consecutiveFailures: Number(of("consecutiveFailures") ?? 0),
+      },
+    });
+  }
+  const all = [...latest.values()].map((v) => v.status);
+  return name === undefined ? all : all.filter((s) => s.name === name);
 }
 
 export interface Channel {
@@ -258,6 +340,18 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
     );
   }
 
+  // The opening record: `lastSyncedAt: 0` says NEVER SYNCED, which is deliberately distinct from a
+  // stale timestamp. A channel that has never reached its peer must not read as merely quiet.
+  await stamp(gw, {
+    name,
+    into: opts.into,
+    prefix: opts.prefix,
+    receiving: true,
+    blessing: opts.bless !== false,
+    lastSyncedAt: 0,
+    consecutiveFailures: 0,
+  });
+
   const channel: Channel = {
     name,
     into: opts.into,
@@ -267,16 +361,54 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
     // second sync of an unchanged peer accepts nothing and refuses nothing. Polling is therefore
     // safe at any interval, which is what lets the transport stay behind this contract.
     sync: async (): Promise<SyncReport> => {
-      const offered = await opts.source.pull();
+      const before = channelStatusImpl(gw, name)[0];
+      // FROZEN: read the toggle from the ground on every sync, so a freeze takes effect on the next
+      // poll without restarting anything — the same "state is data" discipline as `loam:trust`.
+      // A frozen channel reports honestly rather than silently doing nothing: it did not fail, and
+      // it did not accept anything, and both are true.
+      if (before?.receiving === false) {
+        return { offered: 0, accepted: 0, duplicates: 0, bound: [], parked: [] };
+      }
+      let offered: readonly Delta[];
+      try {
+        offered = await opts.source.pull();
+      } catch (err) {
+        // A peer that did not answer is NOT a peer with nothing new. Record the failure before
+        // rethrowing, so the count survives even when the caller swallows the error (H9).
+        await stamp(gw, {
+          name,
+          into: opts.into,
+          prefix: opts.prefix,
+          receiving: before?.receiving ?? true,
+          blessing: before?.blessing ?? opts.bless !== false,
+          lastSyncedAt: before?.lastSyncedAt ?? 0,
+          consecutiveFailures: (before?.consecutiveFailures ?? 0) + 1,
+        });
+        throw err;
+      }
       // `federate`, never `append`. Admission and authorship are different axes (§28.1): a peer's
       // deltas carry the PEER's signatures and hold no write standing here, so the governed write
       // door refuses them — correctly. Federation is union by signature verification, and the
       // pool is exactly the bounded place that union is allowed to happen.
       const report = await ground.federate([...offered]);
-      const { bound, parked } =
-        opts.bless === false
-          ? { bound: [], parked: [] }
-          : await bindArrived(gw, ground, opts.prefix);
+      // The blessing toggle is read from the GROUND on every sync, not from the open-time option:
+      // a pause must take effect on the next poll without restarting anything. Note this blesses
+      // the pool's CONTENTS rather than this sync's arrivals, so resuming binds what landed while
+      // blessing was off — which is the behaviour a person expects from "pause", and the reason a
+      // sync that accepted nothing can still bind law.
+      const blessing = before?.blessing ?? opts.bless !== false;
+      const { bound, parked } = blessing
+        ? await bindArrived(gw, ground, opts.prefix)
+        : { bound: [] as string[], parked: [] as string[] };
+      await stamp(gw, {
+        name,
+        into: opts.into,
+        prefix: opts.prefix,
+        receiving: before?.receiving ?? true,
+        blessing: before?.blessing ?? opts.bless !== false,
+        lastSyncedAt: gw.nextTimestamp(),
+        consecutiveFailures: 0,
+      });
       return {
         offered: report.offered,
         accepted: report.accepted,
@@ -317,4 +449,40 @@ export async function dropChannelImpl(gw: Gateway, name: string): Promise<void> 
   }
   await pool.drop();
   gw.federationChannels.delete(name);
+}
+
+/** Append one channel record. Latest-wins, so a stamp is an ordinary append rather than an edit. */
+async function stamp(gw: Gateway, status: ChannelStatus): Promise<void> {
+  await gw.append([
+    signClaims(
+      channelRecordClaims(status, gw.operatorAuthor!, gw.nextTimestamp()),
+      gw.options.seed!,
+    ),
+  ]);
+}
+
+/**
+ * Set a channel's toggles. Both are REVERSIBLE and orthogonal, which is Myk's design: receiving
+ * governs whether bytes arrive, blessing governs whether law that arrives has force. Turning
+ * blessing off withdraws a peer's authority WITHOUT severing the relationship — a state neither a
+ * single switch nor `drop` can express.
+ *
+ * A set is an ordinary append: latest-wins, so the next sync reads the new posture from the ground.
+ */
+export async function setChannelImpl(
+  gw: Gateway,
+  name: string,
+  next: { receiving?: boolean; blessing?: boolean },
+): Promise<ChannelStatus> {
+  const held = channelStatusImpl(gw, name)[0];
+  if (held === undefined) {
+    throw new Error(`setChannel refused: this store has no channel named "${name}"`);
+  }
+  const status: ChannelStatus = {
+    ...held,
+    ...(next.receiving === undefined ? {} : { receiving: next.receiving }),
+    ...(next.blessing === undefined ? {} : { blessing: next.blessing }),
+  };
+  await stamp(gw, status);
+  return status;
 }

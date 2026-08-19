@@ -29,9 +29,12 @@ import type { StoreBackend } from "../store/backend.js";
 import { isRepairable } from "../store/quarantine.js";
 import { promoteImpl, readAdoptions, type Adoption } from "./adopt.js";
 import {
+  channelStatusImpl,
   dropChannelImpl,
   openChannelImpl,
+  setChannelImpl,
   type Channel,
+  type ChannelStatus,
   type OpenChannelOptions,
 } from "../federation/channel.js";
 import {
@@ -856,6 +859,19 @@ export class Gateway {
 
   // Open a container over this store (SPEC §27): a declared one by name, or an anonymous one
   // with explicit knobs. The body lives in container.ts.
+  /** Set a channel's reversible toggles: `receiving` (freeze) and `blessing`. */
+  async setChannel(
+    name: string,
+    next: { receiving?: boolean; blessing?: boolean },
+  ): Promise<ChannelStatus> {
+    return setChannelImpl(this, name, next);
+  }
+
+  /** Every channel's live state, or one by name — read from the ground, not from memory. */
+  channelStatus(name?: string): ChannelStatus[] {
+    return channelStatusImpl(this, name);
+  }
+
   /** Sever a federation channel and purge its pool. Irreversible; freezing is the reversible act. */
   async dropChannel(name: string): Promise<void> {
     return dropChannelImpl(this, name);
