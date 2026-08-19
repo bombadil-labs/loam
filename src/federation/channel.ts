@@ -102,15 +102,35 @@ export function channelRecordClaims(
   };
 }
 
+/**
+ * Every channel this store has EVER declared, severed ones included, latest-wins per channel.
+ *
+ * A severed channel is still a fact: its prefix named a peer, and law blessed under that prefix may
+ * still be registered. A reader that sees only LIVE channels cannot tell a name that was never a
+ * channel from one whose channel is gone — and that difference decides whether a lens resolves over
+ * a pool or over the receiver's own ground (T199).
+ */
+export function channelsEverImpl(gw: Gateway, name?: string): ChannelStatus[] {
+  return readChannels(gw, name, true);
+}
+
 /** The live reading of every channel record, or one by name. Latest-wins per channel. */
 export function channelStatusImpl(gw: Gateway, name?: string): ChannelStatus[] {
+  return readChannels(gw, name, false);
+}
+
+function readChannels(
+  gw: Gateway,
+  name: string | undefined,
+  includeSevered: boolean,
+): ChannelStatus[] {
   const latest = new Map<string, { at: number; status: ChannelStatus }>();
   for (const d of gw.reactor.snapshot()) {
     const marker = d.claims.pointers.find(
       (p) => p.target.kind === "entity" && p.target.entity.context === CTX_CHANNEL,
     );
     if (marker === undefined || marker.target.kind !== "entity") continue;
-    if (struck(gw, d.id)) continue;
+    if (!includeSevered && struck(gw, d.id)) continue;
     const of = (role: string): string | number | boolean | undefined => {
       const p = d.claims.pointers.find((q) => q.role === role);
       return p?.target.kind === "primitive" ? p.target.value : undefined;

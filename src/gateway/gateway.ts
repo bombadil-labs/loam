@@ -30,6 +30,7 @@ import { isRepairable } from "../store/quarantine.js";
 import { promoteImpl, readAdoptions, type Adoption } from "./adopt.js";
 import {
   channelStatusImpl,
+  channelsEverImpl,
   curseChannelLawImpl,
   dropChannelImpl,
   keepSyncingImpl,
@@ -935,6 +936,11 @@ export class Gateway {
   }
 
   /** Every channel's live state, or one by name — read from the ground, not from memory. */
+  /** Every channel ever declared, severed ones included — the read path needs the difference. */
+  channelsEver(name?: string): ChannelStatus[] {
+    return channelsEverImpl(this, name);
+  }
+
   channelStatus(name?: string): ChannelStatus[] {
     return channelStatusImpl(this, name);
   }
@@ -1503,6 +1509,23 @@ export class Gateway {
   // always releases the backend, even when a latched write failure has to be surfaced.
   async close(): Promise<void> {
     for (const channel of [...this.channels]) await channel.return();
+    // ATTACHED POOLS CLOSE WITH THEIR PARENT. A separate container holds its own store open, and
+    // nothing else will ever close it — so before this, every channel pool leaked its sqlite handle
+    // until the process exited. Invisible on Linux, which happily unlinks an open file; Windows CI
+    // found it, as an EPERM deleting a temp directory whose files were still held.
+    //
+    // Tolerant of an already-closed pool: `drop()` closes the store it purged, so a dropped channel
+    // is normally in this map having already gone.
+    for (const pool of [...this.attachedContainers.values()]) {
+      try {
+        await pool.close();
+      } catch {
+        // already closed — a dropped pool, or a second close
+      }
+    }
+    this.attachedContainers.clear();
+    this.channelPools.clear();
+    this.federationChannels.clear();
     try {
       await this.flush();
     } finally {

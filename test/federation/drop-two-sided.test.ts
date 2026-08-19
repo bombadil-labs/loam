@@ -119,27 +119,39 @@ describe("§46 — dropping one channel", () => {
     }
   });
 
-  // SKIPPED, naming T198, because it was passing on a false premise. Both peers publish IDENTICAL
-  // law here, and the second channel never binds at all — the sync REPORTS "bob:Plant" in `bound`
-  // while `me.def("bob:Plant")` throws. The old assertion ("the pool has some deltas") could not
-  // see that; the real one (the lens is defined) is what exposed it. Un-skip when T198 lands.
-  it.skip("T198 — registering the same law twice is not what drop removes: bob's binding survives", async () => {
+  it("dropping one channel does not reach across into another peer's law", async () => {
+    // The title's real claim, and it holds. An earlier version staged both peers on IDENTICAL law
+    // and asserted the second's binding survived — but with identical law the second name is never
+    // created at all (T198), so it was asserting something that never existed. Marking it skipped
+    // tripped rails-guard's suppression check, correctly: a disabled test in a rail is a hole
+    // whether or not the person who left it meant well. (The guard scans for the marker as TEXT, so
+    // even naming it in a comment trips it — hence this wording.)
+    //
+    // So it uses DISTINCT law, which is what the claim is actually about — a drop must not reach
+    // sideways. T198's identical-law case is asserted in name-parked.test.ts against the
+    // `witnessed` report, where it belongs.
     const alice = await store("a1".repeat(32));
     const bob = await store("b0".repeat(32));
     const me = await store("cc".repeat(32));
     try {
       await alice.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
-      await bob.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+      await bob.publishRegistration({ name: "Sprout", alg: 1, body: PLANT.body }, PLANT_POLICY, [
+        FERN,
+      ]);
       const one = await me.openChannel({ into: "friends", prefix: "alice", source: feed(alice) });
       const two = await me.openChannel({ into: "friends", prefix: "bob", source: feed(bob) });
       await one.sync();
-      const rTwo = await two.sync();
-      expect(rTwo.bound).toContain("bob:Plant");
+      expect((await two.sync()).bound).toContain("bob:Sprout");
 
       await me.dropChannel(one.name);
-      // The bystander's LAW is still bound — dropping a channel is not a law-wide retraction. The
-      // previous assertion was "the pool has some deltas", which is not the title's claim.
-      expect(me.def("bob:Plant")).toBeDefined();
+
+      // The bystander's LAW still serves — dropping a channel is not a law-wide retraction.
+      expect(me.def("bob:Sprout")).toBeDefined();
+      // And the dropped peer's lens no longer ANSWERS. It stays registered — a drop purges bytes,
+      // not the receiver's own bindings — but reading it must refuse rather than fall back to this
+      // store's own ground. Measured before the guard: it answered the receiver's private claim.
+      const orphaned = await me.query(`{ alice_Plant(entity: "${FERN}") { height } }`);
+      expect(orphaned.errors?.join(" ")).toMatch(/severed/);
     } finally {
       await alice.close();
       await bob.close();

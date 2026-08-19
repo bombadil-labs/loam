@@ -186,7 +186,21 @@ function channelGroundFor(
   if (cut <= 0) return undefined;
   const prefix = lens.slice(0, cut);
   const channel = gw.channelStatus().find((c) => c.prefix === prefix);
-  if (channel === undefined) return undefined;
+  if (channel === undefined) {
+    // A SEVERED channel's lens must not fall back to this store's own ground. Measured before this
+    // guard: after `dropChannel`, `alice_Plant` answered 999 — the receiver's own private claim —
+    // where it had answered the peer's 11. On the ordinary query door, after an act the operator
+    // chose, looking like it worked (T199).
+    const severed = gw.channelsEver().find((c) => c.prefix === prefix);
+    if (severed !== undefined) {
+      throw new Error(
+        `${lens} was served by the federation channel "${severed.name}", which has been severed. ` +
+          `Its pool is purged, so this reading has no ground — it must not fall back to this ` +
+          `store's own deltas. Re-open the channel, or retire the lens.`,
+      );
+    }
+    return undefined;
+  }
   const closed = readClosedIds(gw, now);
   // A time pin rides the READ (§26), so it must reach the pool as well — a scoped lens that
   // silently ignored `asOf` would answer the present while the caller believes it answered the past.
