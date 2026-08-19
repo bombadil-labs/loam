@@ -28,6 +28,7 @@ import { graphql, type GraphQLSchema } from "graphql";
 import type { StoreBackend } from "../store/backend.js";
 import { isRepairable } from "../store/quarantine.js";
 import { promoteImpl, readAdoptions, type Adoption } from "./adopt.js";
+import { openChannelImpl, type Channel, type OpenChannelOptions } from "../federation/channel.js";
 import {
   adoptLawImpl,
   blessAllImpl,
@@ -822,6 +823,11 @@ export class Gateway {
   /** @internal — T138 seam (container.ts) */
   readonly connectionInboxes = new Map<string, Container>();
 
+  /** Live federation channels by pool name (§46). Mirrors `connectionInboxes`: same shape, with a
+   * peer on the other end instead of an MCP connection. (Named in full because `channels` is
+   * already this class's live-stream set — two different things, one obvious word.) */
+  readonly federationChannels = new Map<string, Channel>();
+
   // The §24.5 envelope rows for every enveloped pool attached here: which pool, its resolved
   // ceilings, and what it has spent. The refusal a caller meets stays leak-free; this is the
   // operator-facing half of "exhaustion is loud". Body in envelope.ts.
@@ -845,6 +851,11 @@ export class Gateway {
 
   // Open a container over this store (SPEC §27): a declared one by name, or an anonymous one
   // with explicit knobs. The body lives in container.ts.
+  /** Open (or resume) a federation channel receiving into `into` under the receiver's `prefix`. */
+  async openChannel(opts: OpenChannelOptions): Promise<Channel> {
+    return openChannelImpl(this, opts);
+  }
+
   async openContainer(opts: ContainerOptions = {}): Promise<Container> {
     return openContainerImpl(this, opts);
   }
