@@ -848,3 +848,43 @@ export function cursesOf(gw: Gateway, channel: string): { living: string; deltaI
   }
   return out;
 }
+
+/**
+ * A channel's source: a live peer over the federation door, or a frozen offer file.
+ *
+ * Both reach the same channel contract, which is what makes "someone sent me an offer" and "I
+ * subscribed to a public source" ONE code path (§46 criteria 1 and 2) — a second path would drift,
+ * and the drift would land on whichever direction had fewer tests.
+ *
+ * It lives here rather than in the CLI because the MCP door needs it too, and a server importing the
+ * CLI is the wrong direction. A copy in each caller is how the friend rail broke earlier tonight:
+ * the duplicate diverged from the shipped original and the test kept passing against its own copy.
+ */
+export function sourceFor(
+  from: string,
+  token: string | undefined,
+  readOffer: (path: string) => string,
+  parseOffer: (raw: string) => Delta[],
+): ChannelSource {
+  const isUrl = /^https?:\/\//i.test(from);
+  if (!isUrl) {
+    return { pull: () => Promise.resolve(parseOffer(readOffer(from))) };
+  }
+  return {
+    pull: async () => {
+      const res = await fetch(`${from}/federate`, {
+        headers: token === undefined ? {} : { authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        throw new Error(
+          `the peer answered ${res.status} at ${from}/federate` +
+            (res.status === 403
+              ? " — federation wants the peer's operator token today; a container-scoped offer " +
+                "token is T188's loam_federate_offer, which waits on where a credential lives (T196)"
+              : ""),
+        );
+      }
+      return parseOffer(await res.text());
+    },
+  };
+}

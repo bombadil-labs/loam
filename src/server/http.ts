@@ -63,11 +63,19 @@ import {
   type OAuthDoors,
   type TokenDoor,
 } from "./oauth.js";
-import { fenceAdmits, grantClaims, registerPrefixesOf } from "../gateway/accounts.js";
+import { sourceFor } from "../federation/channel.js";
+import { parseOffer } from "../federation/offer.js";
+import {
+  federateContainersOf,
+  fenceAdmits,
+  grantClaims,
+  registerPrefixesOf,
+} from "../gateway/accounts.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
 import { readSeed } from "../cli/config.js";
 import { CSP, makeUserDoors, type UserDoorOptions, type UserDoors } from "./session.js";
 import { makeAdminDoor, type AdminDoor } from "./admin.js";
+import { ADMIN_CONTAINER_PATH } from "./admin-pages.js";
 
 export { type UserDoorOptions } from "./session.js";
 
@@ -394,6 +402,43 @@ function registerStanding(
   }
   const prefixes = registerPrefixesOf(gateway.reactor, author, gateway.operatorAuthor);
   return prefixes.length === 0 ? undefined : prefixes;
+}
+
+/**
+ * Which containers may this caller federate on? `[]` means UNRESTRICTED (the operator), `undefined`
+ * means no standing at all, and a non-empty list is the fence.
+ *
+ * Same shape and same reasoning as `registerStanding` above, including reading from the GROUND on
+ * every request so a revocation binds on the very next call with nothing to invalidate.
+ *
+ * The point of the verb: `GET /:mount/federate` demands the OPERATOR token, and that token also
+ * registers root law, mints grants and reads everything — so federation cost a peer the whole store.
+ * Authority here is scoped to a container instead (§28: trust is a property of a container).
+ */
+function federateStanding(
+  gateway: Gateway,
+  identity: TokenIdentity,
+): readonly string[] | undefined {
+  if (identity.operator === true) return [];
+  if (identity.actor === undefined) return undefined;
+  let author: string;
+  try {
+    author = authorForSeed(identity.actor);
+  } catch {
+    return undefined;
+  }
+  const containers = federateContainersOf(gateway.reactor, author, gateway.operatorAuthor);
+  return containers.length === 0 ? undefined : containers;
+}
+
+/**
+ * May this caller act on THIS container? A whole-name match, never a prefix one — a channel lives in
+ * exactly one container, and prefix-matching would admit `friends-archive` to a grant saying
+ * `friends`.
+ */
+function federateAdmits(standing: readonly string[] | undefined, container: string): boolean {
+  if (standing === undefined) return false;
+  return standing.length === 0 || standing.includes(container);
 }
 
 // Does a scoped caller's registration stay inside its fence? THREE questions, and every one must
@@ -862,6 +907,23 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     }
   };
 
+  /**
+   * What a drop of this channel would remove, and what it would leave. TWO-SIDED by construction,
+   * because a preview naming only the target cannot show over-purging — the failure that matters
+   * most, and the one with no recovery.
+   */
+  const previewDrop = (gw: Gateway, channel: string): { purges: string[]; survives: string[] } => {
+    const rows = gw.channelStatus();
+    const target = rows.find((c) => c.name === channel);
+    return {
+      purges:
+        target === undefined
+          ? []
+          : [`${target.name} (everything received from "${target.prefix}")`],
+      survives: rows.filter((c) => c.name !== channel).map((c) => c.name),
+    };
+  };
+
   // The MCP tools: the same two verbs the gateway speaks, in JSON-RPC clothes. `annotations` are
   // part of the authority, not decoration: a shell reads `readOnlyHint: true` as a licence to cache
   // and REPLAY a call, and an explicit `false` is what makes its own machinery refuse to cache a
@@ -928,6 +990,78 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         required: ["hyperschema", "schema", "roots"],
       },
       annotations: { readOnlyHint: false },
+    },
+    // §46 over MCP (T188). FIVE tools rather than one `federate` passthrough, because tools are the
+    // unit of CONSENT: a client applies policy per tool, so an operator can auto-approve `status`
+    // while `drop` always asks. One tool collapses that to allow-or-deny-all-federation, and the
+    // choice becomes an agent that cannot read channel health or an agent that can reach a purge.
+    {
+      name: "loam_federate_status",
+      description:
+        "List this store's federation channels and how each is doing: the container it receives " +
+        "into, the prefix its peer's law is served under, whether it is receiving and blessing, " +
+        "when it last synced, and how many attempts have failed since. A channel that has never " +
+        "synced reports so, distinctly from one that is merely quiet.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          channel: { type: "string", description: "one channel by name; omit for all" },
+        },
+      },
+      annotations: { readOnlyHint: true },
+    },
+    {
+      name: "loam_federate_set",
+      description:
+        "Adjust a channel's two REVERSIBLE toggles. `receiving` false freezes it — nothing new " +
+        "arrives and everything already received still reads. `blessing` false stops NEW law " +
+        "binding and leaves law already bound serving. Neither severs the channel; severing is " +
+        "loam_federate_drop, which is a different act on purpose.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          channel: { type: "string" },
+          receiving: { type: "boolean" },
+          blessing: { type: "boolean" },
+        },
+        required: ["channel"],
+      },
+      annotations: { readOnlyHint: false },
+    },
+    {
+      name: "loam_federate_connect",
+      description:
+        "Open a federation channel: receive a peer's deltas into a container you name, under a " +
+        "PREFIX you assign. The prefix is yours, never the peer's, so no peer can take a name this " +
+        "store already answers. Law that arrives binds under that prefix. Works the same whether " +
+        "the address came from an offer someone sent you or from a source you chose to follow.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          from: { type: "string", description: "the peer's mount address" },
+          into: { type: "string", description: "the container to receive into" },
+          prefix: { type: "string", description: "the namespace YOU assign this peer" },
+          token: { type: "string", description: "the peer's door token, if it wants one" },
+          bless: { type: "boolean", description: "bind law that arrives (default true)" },
+        },
+        required: ["from", "into", "prefix"],
+      },
+      annotations: { readOnlyHint: false },
+    },
+    {
+      name: "loam_federate_drop",
+      description:
+        "STAGE a channel sever. This does NOT purge anything: it returns a staged id, a link, an " +
+        "expiry, and a preview of what would be removed and what would survive. A person completes " +
+        "it in the browser — an agent cannot, by construction. To stop receiving and KEEP what " +
+        "arrived, use loam_federate_set with receiving false instead; that is reversible and this " +
+        "is not.",
+      inputSchema: {
+        type: "object",
+        properties: { channel: { type: "string" } },
+        required: ["channel"],
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
     },
   ];
 
@@ -1092,7 +1226,207 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           query?: string;
           mutation?: string;
           variables?: Record<string, unknown>;
+          channel?: string;
+          receiving?: boolean;
+          blessing?: boolean;
+          from?: string;
+          into?: string;
+          prefix?: string;
+          token?: string;
+          bless?: boolean;
         };
+
+        // §46 over MCP (T188). Authority is the CONTAINER-SCOPED federate grant, never the operator
+        // role — see federateStanding. A caller with no standing meets the same refusal whichever
+        // channel it named, so the tool cannot be used to learn which channels exist (§12/T78).
+        if (name === "loam_federate_connect") {
+          const standing = federateStanding(gateway, identity);
+          const into = typeof args.into === "string" ? args.into : undefined;
+          const from = typeof args.from === "string" ? args.from : undefined;
+          const prefix = typeof args.prefix === "string" ? args.prefix : undefined;
+          // The fence is checked BEFORE the arguments are examined further, so a caller without
+          // standing cannot learn which containers exist by comparing refusals (§12/T78).
+          if (into === undefined || !federateAdmits(standing, into)) {
+            reply({
+              content: [
+                {
+                  type: "text",
+                  text:
+                    "federation is not yours to open here: it wants a `federate` grant naming the " +
+                    "container you are receiving into.",
+                },
+              ],
+              isError: true,
+            });
+            return;
+          }
+          if (from === undefined || prefix === undefined) {
+            reply({
+              content: [
+                { type: "text", text: "federate_connect wants `from`, `into` and `prefix`." },
+              ],
+              isError: true,
+            });
+            return;
+          }
+          try {
+            const channel = await gateway.openChannel({
+              into,
+              prefix,
+              bless: args.bless !== false,
+              // The SHIPPED source builder, shared with the CLI — never a second copy.
+              source: sourceFor(
+                from,
+                typeof args.token === "string" ? args.token : undefined,
+                () => {
+                  throw new Error("a file offer is a CLI path; give this tool a URL");
+                },
+                parseOffer,
+              ),
+            });
+            const report = await channel.sync();
+            reply({
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({ channel: channel.name, ...report }, null, 1),
+                },
+              ],
+            });
+          } catch (err) {
+            reply({
+              content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
+              isError: true,
+            });
+          }
+          return;
+        }
+
+        if (name === "loam_federate_drop") {
+          const standing = federateStanding(gateway, identity);
+          const target = gateway
+            .channelStatus(args.channel)
+            .find((c) => federateAdmits(standing, c.into));
+          if (target === undefined) {
+            reply({
+              content: [
+                {
+                  type: "text",
+                  text:
+                    "federation is not yours to sever here: it wants a `federate` grant naming the " +
+                    "container the channel receives into.",
+                },
+              ],
+              isError: true,
+            });
+            return;
+          }
+          // NOTHING IS REMOVED ON THIS PATH, EVER. The tool hands the operator a link and a
+          // preview; the sever itself happens on the admin page, behind the session gate a
+          // connector token can never obtain (MCP callers are a TokenIdentity; the admin door sits
+          // behind SessionGate — different authentication paths, not one with a flag).
+          //
+          // It points at the EXISTING container-drop flow rather than a parallel one. That flow is
+          // already hardened in the ways this needs: a single-use confirm token bound to (user,
+          // container) and consumed before the act, and — the property that matters most — the plan
+          // is RECOMPUTED at confirm time, so the operator cannot approve something larger than
+          // they read. A channel's pool is an inbox container, which that page already reaches.
+          const preview = previewDrop(gateway, target.name);
+          reply({
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(
+                  {
+                    channel: target.name,
+                    purgedNothing: true,
+                    confirmAt: `${options.publicUrl ?? ""}${ADMIN_CONTAINER_PATH}?name=${encodeURIComponent(target.name)}`,
+                    wouldPurge: preview.purges,
+                    wouldSurvive: preview.survives,
+                    note:
+                      "Nothing has been removed. A person must complete this in the browser; this " +
+                      "tool cannot. `loam_federate_set` with receiving false stops the channel " +
+                      "without destroying anything, and is reversible.",
+                  },
+                  null,
+                  1,
+                ),
+              },
+            ],
+          });
+          return;
+        }
+
+        if (name === "loam_federate_status" || name === "loam_federate_set") {
+          const standing = federateStanding(gateway, identity);
+          if (standing === undefined) {
+            reply({
+              content: [
+                {
+                  type: "text",
+                  text:
+                    "federation is not yours to read or adjust here: it wants a `federate` grant " +
+                    "naming the container you are acting on (`loam grant --verb=federate`).",
+                },
+              ],
+              isError: true,
+            });
+            return;
+          }
+          const rows = gateway
+            .channelStatus(args.channel)
+            .filter((c) => federateAdmits(standing, c.into));
+
+          if (name === "loam_federate_status") {
+            reply({
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify(
+                    rows.map((c) => ({
+                      ...c,
+                      // Spelled out rather than left as a zero: a channel that has NEVER reached
+                      // its peer must not read like one that is merely quiet (H9, §46 criterion 8).
+                      lastSyncedAt: c.lastSyncedAt === 0 ? "never synced" : c.lastSyncedAt,
+                    })),
+                    null,
+                    1,
+                  ),
+                },
+              ],
+            });
+            return;
+          }
+
+          const target = rows.find((c) => c.name === args.channel);
+          if (target === undefined) {
+            reply({
+              content: [
+                {
+                  type: "text",
+                  text:
+                    "federate_set wants a `channel` you hold a federate grant for; " +
+                    "loam_federate_status names the ones you may act on.",
+                },
+              ],
+              isError: true,
+            });
+            return;
+          }
+          try {
+            const now = await gateway.setChannel(target.name, {
+              ...(args.receiving === undefined ? {} : { receiving: args.receiving }),
+              ...(args.blessing === undefined ? {} : { blessing: args.blessing }),
+            });
+            reply({ content: [{ type: "text", text: JSON.stringify(now, null, 1) }] });
+          } catch (err) {
+            reply({
+              content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
+              isError: true,
+            });
+          }
+          return;
+        }
         const source = name === "loam_query" ? args.query : args.mutation;
         if ((name !== "loam_query" && name !== "loam_mutate") || typeof source !== "string") {
           json(res, 200, {
