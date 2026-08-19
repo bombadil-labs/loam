@@ -1,0 +1,14 @@
+{
+  "body": "FOUND WHILE FIXING T192, 2026-08-19, and it is bigger than the drop bug that surfaced it.\n\nA CHANNEL'S SOURCE IS NOT IN THE GROUND. channelRecordClaims persists into, prefix, receiving,\nblessing, lastSyncedAt and consecutiveFailures. It does NOT persist where the peer is. So:\n\n- resumeChannels can re-attach a pool's BYTES but cannot rebuild a Channel, because a Channel needs\n  a source to sync with.\n- keepSyncing iterates gw.federationChannels, which is EMPTY on a booted store.\n- Therefore THE STANDING INSTRUCTION DOES NOT SURVIVE A RESTART. §46's user story S7 — \"Alice adds a\n  Post an hour later; Myk queries again and sees it, having run nothing\" — holds only for the life of\n  the process that opened the channel. Restart the store and the channel is inert: it still reads,\n  it still lists as `receiving`, and it never pulls again.\n\n`federate list` reporting `receiving` for a channel that cannot sync is the H9 shape at the worst\npossible place — the field exists precisely so a stopped channel is distinguishable from a quiet one.\n\nWHY THIS IS NOT A SIMPLE FIX, and why it stops here for Myk: the source is a URL AND A BEARER TOKEN.\nThis repo deliberately never puts a secret in the ground — a pen's seed lives in the home's config\nand only its derived author reaches the deltas (§23.3), and the operator seed is 0600 on disk and\nnever printed. Persisting a peer's token as a delta would break that rule in a subsystem whose whole\njob is to hand data to other people.\n\nTHE SHAPE THAT LOOKS RIGHT (not decided):\n- the ADDRESS is ordinary data and belongs on the channel record;\n- the TOKEN belongs in the home's config beside the pen seeds, keyed by channel name;\n- resumeChannels rebuilds each Channel from (record address + config token) and registers it in\n  federationChannels, so the standing instruction resumes;\n- a channel whose token is missing from config must report that it cannot sync — never list as\n  `receiving` while inert.\n\nUNTIL THIS LANDS, the honest position is that federation syncs only in the process that opened the\nchannel. Do not describe the standing instruction as surviving a restart in any doc, help text, or\ntool description.\n\nRAILS:\n1. Open a channel, restart the store, add a delta at the peer, and the standing sync picks it up.\n2. Two-sided: a channel whose token is absent lists as unable to sync rather than as receiving.\n3. No token appears in any delta — the house-standard rail the operator and pen seeds already have\n   (search every arrived delta's claims for the secret).\n\nTIER: Myk's merge. It decides where a federation credential lives.",
+  "edges": [],
+  "id": "T196",
+  "phase": "P1",
+  "rails": [],
+  "scope": [
+    "src/federation/channel.ts",
+    "src/cli/config.ts",
+    "src/gateway/gateway.ts"
+  ],
+  "status": "todo",
+  "title": "A channel's source is not persisted, so the standing sync dies with the process that opened it"
+}

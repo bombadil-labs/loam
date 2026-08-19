@@ -855,6 +855,15 @@ export class Gateway {
    * already this class's live-stream set — two different things, one obvious word.) */
   readonly federationChannels = new Map<string, Channel>();
 
+  /**
+   * Attached channel POOLS by name (§46). Separate from `federationChannels` because a booted store
+   * has pools but no channels: `resumeChannels` can re-attach the bytes, and cannot rebuild a
+   * `Channel` because a channel's SOURCE is not in the ground (see T196). Without this map,
+   * `dropChannel` on a booted store re-opened a container that was already attached and was refused
+   * — the documented sever verb could not succeed anywhere it mattered.
+   */
+  readonly channelPools = new Map<string, Container>();
+
   // The §24.5 envelope rows for every enveloped pool attached here: which pool, its resolved
   // ceilings, and what it has spent. The refusal a caller meets stays leak-free; this is the
   // operator-facing half of "exhaustion is loud". Body in envelope.ts.
@@ -887,12 +896,15 @@ export class Gateway {
     for (const standing of this.channelStatus()) {
       if (this.federationChannels.has(standing.name)) continue;
       try {
-        await this.openContainer({
-          name: standing.name,
-          ...(this.options.channelBackend === undefined
-            ? {}
-            : { backend: this.options.channelBackend(standing.name) }),
-        });
+        this.channelPools.set(
+          standing.name,
+          await this.openContainer({
+            name: standing.name,
+            ...(this.options.channelBackend === undefined
+              ? {}
+              : { backend: this.options.channelBackend(standing.name) }),
+          }),
+        );
       } catch {
         // Deliberately left unattached; see above.
       }

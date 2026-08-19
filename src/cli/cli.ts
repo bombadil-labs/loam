@@ -193,6 +193,9 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "channel",
       "yes",
     ]),
+    // `--yes` is a bare confirmation, not a value. Without this the parser demanded a value and
+    // `federate drop --channel X --yes` could not be typed correctly by anyone.
+    booleans: new Set(["yes"]),
     notes: [
       "Federation is container-to-container. `open` names the container you receive INTO and the",
       "PREFIX you assign the peer — the prefix is yours, never theirs, so no peer can take a name",
@@ -1023,7 +1026,7 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
     }
 
     // drop
-    if (parsed.flags.get("yes") === undefined) {
+    if (!parsed.booleans.has("yes")) {
       const held = gateway.channelStatus(name)[0];
       io.err(
         `federate drop refused without --yes. This PURGES ${name} at the bytes` +

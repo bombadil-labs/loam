@@ -450,6 +450,7 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
     },
   };
   gw.federationChannels.set(name, channel);
+  gw.channelPools.set(name, pool);
   return channel;
 }
 
@@ -483,7 +484,8 @@ export async function dropChannelImpl(gw: Gateway, name: string): Promise<void> 
   // So: sever only through a handle that provably holds the real bytes. If this store cannot
   // produce one, it says so and removes nothing. An honest refusal is always available; a false
   // completion is not recoverable.
-  if (channel === undefined && gw.options.channelBackend === undefined) {
+  const attached = gw.channelPools.get(name);
+  if (channel === undefined && attached === undefined && gw.options.channelBackend === undefined) {
     throw new Error(
       `dropChannel refused: this store has no live handle on "${name}" and no channelBackend to ` +
         `re-open it with, so a purge here would run against an empty in-memory copy and report a ` +
@@ -493,6 +495,7 @@ export async function dropChannelImpl(gw: Gateway, name: string): Promise<void> 
   }
   const pool =
     channel?.pool ??
+    attached ??
     (await gw.openContainer({
       name,
       ...(gw.options.channelBackend === undefined
@@ -507,6 +510,28 @@ export async function dropChannelImpl(gw: Gateway, name: string): Promise<void> 
   }
   await pool.drop();
   gw.federationChannels.delete(name);
+  gw.channelPools.delete(name);
+
+  // THE RECORD GOES WITH THE BYTES. Without this, `federate list` kept printing the channel as
+  // receiving after it was severed, `setChannel` still succeeded on it, and every later boot
+  // re-attempted an attach that cannot work because the declaration is struck. One command said
+  // severed and the next said standing — and of the two, the one that keeps being read is the lie.
+  if (gw.options.seed !== undefined) {
+    for (const d of [...gw.reactor.snapshot()]) {
+      const marker = d.claims.pointers.find(
+        (pt) => pt.target.kind === "entity" && pt.target.entity.context === CTX_CHANNEL,
+      );
+      if (marker === undefined || marker.target.kind !== "entity") continue;
+      if (marker.target.entity.id !== `channel:${name}`) continue;
+      if (gw.reactor.negationsOf(d.id).length > 0) continue;
+      await gw.append([
+        signClaims(
+          makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), d.id),
+          gw.options.seed,
+        ),
+      ]);
+    }
+  }
 }
 
 /** Append one channel record. Latest-wins, so a stamp is an ordinary append rather than an edit. */
