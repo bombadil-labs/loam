@@ -393,7 +393,7 @@ const isRendererBinding = (claims: Claims): boolean =>
       p.target.entity.id.startsWith("renderer:"),
   );
 
-const isRegistrationBinding = (claims: Claims): boolean =>
+export const isRegistrationBinding = (claims: Claims): boolean =>
   claims.pointers.some(
     (p) => p.target.kind === "entity" && p.target.entity.context === CTX_REGISTRATION,
   );

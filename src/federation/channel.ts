@@ -19,6 +19,9 @@ import type { Container } from "../gateway/container.js";
 import { containerClaims, readContainerTable } from "../gateway/container.js";
 import type { Gateway } from "../gateway/gateway.js";
 import { legalNameFor } from "../gateway/gql.js";
+import { CTX_MANIFEST, isRegistrationBinding, manifestExportClaims } from "../gateway/adopt-law.js";
+import { CTX_REGISTRATION } from "../gateway/registration.js";
+import { freezeMembers } from "../gateway/container-identity.js";
 
 /** Where a channel's deltas come from. A live peer, a frozen offer, or a fixture. */
 export interface ChannelSource {
@@ -39,6 +42,10 @@ export interface SyncReport {
   readonly offered: number;
   readonly accepted: number;
   readonly duplicates: number;
+  /** The living names this sync BOUND, each already carrying the receiver's prefix. */
+  readonly bound: string[];
+  /** Rows that need a person: a name already answered here by different-content law. */
+  readonly parked: string[];
 }
 
 export interface Channel {
@@ -68,6 +75,108 @@ const AGGREGATOR = {
 
 /** One pool per (receiving container, prefix): the prefix is the receiver's name for the peer. */
 export const channelName = (into: string, prefix: string): string => `channel:${into}:${prefix}`;
+
+/**
+ * Bless the law that arrived in a channel's pool, under names the RECEIVER owns.
+ *
+ * The peer sends registrations, not a manifest — nothing in production publishes manifest rows, and
+ * a peer has no reason to describe its exports in our vocabulary. So the CHANNEL writes the manifest
+ * the peer did not send: one row per registration found in the pool, authored by the receiver's
+ * operator, in the pool's own ground. That is not a workaround for a missing upstream feature; it is
+ * the design saying the same thing twice — the receiver decides what it recognises from a peer, and
+ * naming is the receiver's act throughout.
+ *
+ * `as` is what makes the name the receiver's. `livingNameOf` is `opts.as ?? ex.lensName`, and law
+ * identity deliberately EXCLUDES the living name, so binding alice's Note at `alice:Note` is the
+ * same law under a name of our choosing rather than a different law.
+ *
+ * A name already answered by different-content law is PARKED, never taken. `adoptLaw` refuses that
+ * case by design ("a blessing must not silently re-point an existing reading"), and a standing
+ * channel must not resolve it either: choosing between supersede and a second name is a decision,
+ * and decisions do not ride a poll that runs while nobody is watching.
+ */
+async function bindArrived(
+  gw: Gateway,
+  ground: Gateway,
+  prefix: string,
+): Promise<{ bound: string[]; parked: string[] }> {
+  const seed = gw.options.seed!;
+  const operator = gw.operatorAuthor!;
+  const bound: string[] = [];
+  const parked: string[] = [];
+
+  const members = [...ground.reactor.snapshot()];
+  const rows = new Map<string, string>(); // alias -> hyperschema entity
+  for (const d of members) {
+    if (!isRegistrationBinding(d.claims)) continue;
+    const target = d.claims.pointers.find(
+      (p) => p.target.kind === "entity" && p.target.entity.context === CTX_REGISTRATION,
+    );
+    if (target === undefined || target.target.kind !== "entity") continue;
+    // A registration delta points at `registration:<hyperschema entity>`. The manifest row must
+    // name the HYPERSCHEMA, which is where the law lives — pointing it at the registration names a
+    // FACT, and adoptLaw refuses a fact by name ("facts bind nothing and need no blessing", §24.3).
+    // That refusal is what caught this, and it is worth keeping the distinction in view: the
+    // registration is the peer's act, the hyperschema is the law that act published.
+    const pointed = target.target.entity.id;
+    const entity = pointed.startsWith("registration:")
+      ? pointed.slice("registration:".length)
+      : pointed;
+    if (!entity.startsWith("hyperschema:")) continue;
+    // The alias is the peer's own name for the export. It is a LOOKUP KEY here, never a served
+    // name — what gets served is `prefix:alias`, decided below.
+    rows.set(entity.slice("hyperschema:".length), entity);
+  }
+  if (rows.size === 0) return { bound, parked };
+
+  // The manifest rows land in the POOL, so a channel's recognition of a peer is recorded exactly
+  // where that peer's bytes live — and is purged with them when the channel is dropped.
+  const pending = [...rows].filter(
+    ([alias]) => !members.some((d) => manifestAliasOf(d.claims) === alias),
+  );
+  if (pending.length > 0) {
+    await ground.federate(
+      pending.map(([alias, entity]) =>
+        signClaims(
+          manifestExportClaims(
+            { alias, targetEntity: entity, kind: "schema" },
+            operator,
+            ground.nextTimestamp(),
+          ),
+          seed,
+        ),
+      ),
+    );
+  }
+
+  const version = freezeMembers([...ground.reactor.snapshot()]);
+  for (const [alias] of rows) {
+    const name = `${prefix}:${alias}`;
+    try {
+      await gw.adoptLaw(version, alias, { as: name });
+      bound.push(name);
+    } catch (err) {
+      // A refusal here is information, not a fault: the common one is that `name` is already
+      // answered by different-content law, which is the parked case a person resolves.
+      parked.push(`${name}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  return { bound, parked };
+}
+
+/** The alias a manifest row names, or undefined for any other delta. */
+function manifestAliasOf(claims: { pointers: readonly unknown[] }): string | undefined {
+  const ps = claims.pointers as readonly {
+    role: string;
+    target: { kind: string; value?: unknown; entity?: { id: string; context: string } };
+  }[];
+  const isRow = ps.some(
+    (p) => p.target.kind === "entity" && p.target.entity?.context === CTX_MANIFEST,
+  );
+  if (!isRow) return undefined;
+  const alias = ps.find((p) => p.role === "alias");
+  return alias?.target.kind === "primitive" ? String(alias.target.value) : undefined;
+}
 
 /** Every prefix this receiving container already assigns, read live from the container table. */
 function standingPrefixes(gw: Gateway, into: string): string[] {
@@ -164,10 +273,16 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
       // door refuses them — correctly. Federation is union by signature verification, and the
       // pool is exactly the bounded place that union is allowed to happen.
       const report = await ground.federate([...offered]);
+      const { bound, parked } =
+        opts.bless === false
+          ? { bound: [], parked: [] }
+          : await bindArrived(gw, ground, opts.prefix);
       return {
         offered: report.offered,
         accepted: report.accepted,
         duplicates: report.offered - report.accepted,
+        bound,
+        parked,
       };
     },
   };
