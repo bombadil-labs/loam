@@ -40,6 +40,17 @@ npm install @bombadil/loam
 It depends on `@bombadil/rhizomatic` (the substrate), `graphql`, and `better-sqlite3` (the durable
 store driver — a native addon with prebuilt binaries for common platforms).
 
+**Running from a clone.** If you were handed this repository rather than the package, build it
+first — the `loam` command lives at `dist/cli/bin.js` and does not exist until you do:
+
+```sh
+npm ci && npm run build
+node dist/cli/bin.js --help
+```
+
+Add `npm link` if you would rather type `loam` than the path. Everything below says `loam`; from a
+clone, read that as `node dist/cli/bin.js`.
+
 ## The model in one breath
 
 - A **delta** is a signed, content-addressed fact. A **store** is a grow-only set of them.
@@ -85,8 +96,11 @@ curl -s localhost:4321/default/graphql \
   -d '{"query":"{ note(entity: \"note:groceries\") { title } }"}'
 ```
 
-Run `kill %1` when you are done. To use a second terminal instead, export the same `TOKEN` there —
-`serve` never prints it.
+Run `kill %1` when you are done — **do this before running the test suite.** The quickstart
+backgrounds a server on port 4321 and the suite binds that same port, so a forgotten server makes
+`npm test` fail with `EADDRINUSE` in `test/cli/pull.test.ts`. That failure is the stray server, not
+the repo. To use a second terminal instead, export the same `TOKEN` there — `serve` never prints
+it.
 
 A stock schema is an **ordinary registration**, never a shortcut past one: it crosses the same
 door, meets the same validation, and lands the same deltas as a file you wrote. Outgrow the shelf
@@ -115,6 +129,35 @@ identity, so a container serves with nothing but a token. Configuration is by fl
 | `--store PATH` |              | override the store file path                   |
 | `--seed HEX`   | `LOAM_SEED`  | import an operator seed instead of minting one |
 
+Four more flags open the store beyond loopback. They are off by default, and each one widens reach,
+so they are listed apart from the table above rather than buried in it:
+
+| flag                      | meaning                                                              |
+| ------------------------- | -------------------------------------------------------------------- |
+| `--host ADDR`             | the bind address (default `127.0.0.1` — loopback only; `0.0.0.0` opens the LAN) |
+| `--archive DIR`           | mirror every delta into a cold store inside the home                 |
+| `--public-url URL`        | the outside address this store is reached at — opens connector discovery |
+| `--oauth-allow-redirect O`| comma-separated origins a connector may redirect to (needs `--public-url`) |
+
+## The commands
+
+`loam <command> --help` describes any of these in full. The quickstart uses the first five; the rest
+exist and are easy to miss.
+
+| command    | what it does                                                                |
+| ---------- | --------------------------------------------------------------------------- |
+| `init`     | create a home, mint or import the operator seed, write config                |
+| `serve`    | boot a store and serve it (GraphQL + SSE + MCP over HTTP)                    |
+| `register` | define a schema from a file and register it in the home's store              |
+| `pull`     | land a peer's deltas — a live URL or a frozen offer file                     |
+| `store`    | inspect a store                                                              |
+| `migrate`  | read an offer, re-express it in the current format, write it back            |
+| `user`     | provision a login user and manage role assignments                           |
+| `grant`    | list or revoke the OAuth connectors this store has granted                   |
+| `pen`      | provision a renderer pen: mint its seed, grant it write standing             |
+| `artifact` | ask whether a route may be published as an artifact, and what it could do    |
+| `repair`   | list and settle a store's quarantine                                         |
+
 ## The HTTP API
 
 A served store exposes three surfaces per mount, behind a `Bearer` token:
@@ -128,7 +171,7 @@ A served store exposes three surfaces per mount, behind a `Bearer` token:
 - **`POST /:mount/mcp`** — a minimal MCP JSON-RPC surface (`initialize`, `tools/list`,
   `tools/call`) exposing `loam_query`, `loam_mutate`, and `loam_register`.
 - **`POST /:mount/register`** — `{ hyperschema: { name, alg?, body }, schema, roots, entity? }` →
-  `{ registered, entity }` (operator token only). The hyperschema-schema mutation mechanism, served:
+  `{ registered, lens, entity, bound }` (operator token only). The hyperschema-schema mutation mechanism, served:
   the definition and its registration land as deltas, and the surface serves the new type
   immediately. Republishing at the same entity evolves it. (An endpoint rather than a GraphQL
   mutation because an empty store has no GraphQL surface to mutate through — this is how it
@@ -145,8 +188,41 @@ unauthenticated caller cannot tell a real mount from a missing one).
 ```sh
 curl -s localhost:4321/default/graphql \
   -H "authorization: Bearer $TOKEN" -H "content-type: application/json" \
-  -d '{"query":"{ plant(entity: \"plant:fern\") { height _hex } }"}'
+  -d '{"query":"{ note(entity: \"note:groceries\") { title _hex } }"}'
 ```
+
+## Connectors — reaching a store from an MCP client
+
+`POST /:mount/mcp` serves MCP with a bearer token, which is enough for a local client. A hosted
+client such as Claude cannot hold a bearer token, so it authenticates through the store's own OAuth
+authorization server. Two flags open that door:
+
+```sh
+loam serve --http --home ./my-store --token "$TOKEN" \
+  --public-url https://store.example \
+  --oauth-allow-redirect https://claude.ai
+```
+
+`--public-url` is the address the outside world reaches, and it must be the address the client
+dials — the store publishes it in its discovery documents, so a mismatch stops the handshake before
+authentication. `--oauth-allow-redirect` names the origins a connector may return to after consent.
+Together they open discovery, dynamic client registration, consent, and token exchange; without
+them the store serves MCP to bearer tokens only.
+
+The store must be reachable over **HTTPS**, terminated in front of Loam — a tunnel, a reverse
+proxy, or a funnel. Serve behind the terminator and name the public address with `--public-url`.
+
+Two practical notes, both learned the hard way. Claude's custom connectors dial **port 443**
+regardless of the port in the URL, so the public address must be reachable there. And a store with
+users refuses a non-loopback bind without HTTPS, because the login session cookie is `Secure` and a
+browser discards it otherwise — the refusal is deliberate and says so.
+
+**What a connector token can reach, stated plainly.** A connector's token resolves against the
+**whole mount**. Loam has no read verb today: reads are not scoped per user, so a connector
+authorized against a store reads every lens and every delta that mount serves, and the same token
+opens `/graphql`, `/subscribe`, `/rest`, and `/append`. Grants scope **writes**, not reads. So
+inviting someone to connect to your store is inviting them to read all of it. Give a guest their own
+store and federate, rather than a connection to yours, unless you mean to share everything.
 
 ## Embedding the library
 
@@ -209,9 +285,12 @@ The GraphQL surface is **generated**: on boot (and after every publish) the gate
 meta-resolves each referenced entity via `loadSchema` over the surviving definitions. The
 consequences are the whole point:
 
-- **Evolution is append.** Republish a definition at the same entity — via
-  `publishRegistration`, `POST /:mount/register`, or `loam register` — and the surface serves
-  the new shape, live, no restart. The schema's identity is the _entity_, not the name.
+- **Evolution is append.** Republish a definition at the same entity and the surface serves the
+  new shape. The schema's identity is the _entity_, not the name. Two of the three doors serve it
+  **live, with no restart** — `publishRegistration` and `POST /:mount/register`, both of which go
+  through the running gateway. **`loam register` does not.** It writes the deltas to the store
+  file, and a server already running answers from the memory it booted with, so it keeps serving
+  the old shape until you restart it. The CLI says so when it sees a live server.
 - **Deprecation is negation.** Negate a definition and its registration is unbound; the type
   drops from the surface. Nothing is deleted; the store only learns.
 - **Foreign law stays inert.** In a governed store only operator-authored definitions and

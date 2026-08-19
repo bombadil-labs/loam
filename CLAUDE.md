@@ -116,14 +116,29 @@ expensive one. Delete each once a released `@adlc/cli` no longer needs it.
   breaks the build is credited as killed by the tests. Admitting TS without that guard would trade a
   gate that refuses for a gate that inflates its own kill rate.
 
-**`.adlc/` is an ALLOWLIST and `adlc init` owns it.** Committed: `config.json`, `tickets/`,
-`ticket-archive/`, `specs/` — the CONTRACT. Local, per-worktree, never committed: `findings.jsonl`,
-`manifest.jsonl`, `ticket-transactions/` — evidence that gates assert against *here*, which would
-collide across branches if shared. Do not hand-add a negation; if an upgrade adds a contract file,
-re-run `adlc init`. **Order is load-bearing** — `.adlc/*` must stay above every negation, and
-`ticket store migrate` has been seen to reorder that block and strand one above it, silently killing
-it (git is last-match-wins). (A committed ledger looks like durability and is really a merge conflict; the
-durable home for a finding is P7 distillation into `SUBSTRATE-HAZARDS.md` and the journal.)
+**`.adlc/` is an ALLOWLIST and `adlc init` owns it — DEFER TO IT** (corrected 2026-08-19). Committed:
+`config.json`, `tickets/`, `ticket-archive/`, `specs/` — the CONTRACT — **and `manifest.jsonl`, the
+gate-evidence ledger.** Local, per-worktree: `findings.jsonl`, `ticket-transactions/`. Do not
+hand-add a negation and **do not hand-REMOVE one**; if an upgrade changes the block, re-run
+`adlc init` and take what it writes. **Order is load-bearing** — `.adlc/*` must stay above every
+negation, and `ticket store migrate` has been seen to reorder that block and strand one above it,
+silently killing it (git is last-match-wins).
+
+**This paragraph used to say `manifest.jsonl` was never committed, "which would collide across
+branches" — and that was wrong in the expensive direction.** ADLC's own constant explains what the
+omission costs: a repo that keeps the ledger local-only leaves "CI, clones, and reviewers" reading an
+empty ledger, and **`rails-guard`'s append-only check with nothing committed to protect**. We bought
+conflict-avoidance by silently disabling a gate — this repo's signature failure, the same one the
+journal already records for the stale pin and the Windows spawn. A ledger that only exists here makes
+"the gates passed" exactly the unverifiable report our own doctrine refuses to accept (H7). The
+conflict was real, but its answer is upstream's SEGMENTED forest (`manifest.d/`), not deletion.
+
+**Forest mode is available and NOT yet enabled.** `adlc gate-manifest enable` refuses without a
+signing key, and says why: keyless forest mode is single-checkout **permanently**, because
+keyless-minted segments can never be authenticated by a later key, so every other clone fails closed
+on its first write. Enabling it is Myk's call and wants `gate-manifest generate-key` first. Until
+then we run single-file, committed, and resolve a tail conflict by keeping both sides — a JSONL
+append conflict is a union, never a choice.
 
 **`adlc run <phase>` asserts the phase's evidence exists, and the names are EXACT.** You record with
 `adlc gate-manifest record <gate-name> --ticket <id>` and assert with `adlc run <phase> --ticket

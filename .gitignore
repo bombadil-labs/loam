@@ -42,3 +42,11 @@ site-dist/
 # <target>.<pid>.tmp then renames); a mutation run does it in the repo root. Never committable —
 # one of these once carried the erasure canary INTO git history on the PR about byte-erasure.
 /*.tmp
+
+# ADLC runtime
+!.adlc/manifest.jsonl
+!.adlc/manifest.d/
+!.adlc/manifest.d/**
+.adlc/manifest.d/.lineage
+.adlc/manifest.d/*.lock
+.adlc/manifest.d/*.tmp-*

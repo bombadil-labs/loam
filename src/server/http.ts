@@ -1685,7 +1685,33 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     });
   });
 
-  await new Promise<void>((resolve) => server.listen(options.port ?? 0, host, resolve));
+  // A bind failure must reach the caller as a REFUSAL, not as an unhandled 'error' event: the
+  // promise below used to only ever resolve, so EADDRINUSE escaped the server object and Node
+  // printed a raw stack trace over a CLI whose every other refusal is a sentence.
+  await new Promise<void>((resolve, reject) => {
+    const onError = (err: NodeJS.ErrnoException): void => {
+      server.removeListener("error", onError);
+      const where = `${host}:${options.port ?? 0}`;
+      reject(
+        err.code === "EADDRINUSE"
+          ? new Error(
+              `${where} is already in use — another process is serving there. Stop it, or choose ` +
+                `another port with --port (0 picks a free one).`,
+            )
+          : err.code === "EACCES"
+            ? new Error(
+                `${where} is not yours to bind — ports below 1024 need privilege. Choose a higher ` +
+                  `port with --port.`,
+              )
+            : err,
+      );
+    };
+    server.once("error", onError);
+    server.listen(options.port ?? 0, host, () => {
+      server.removeListener("error", onError);
+      resolve();
+    });
+  });
   const address = server.address();
   const port = typeof address === "object" && address !== null ? address.port : 0;
 
