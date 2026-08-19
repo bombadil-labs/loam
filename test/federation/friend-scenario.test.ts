@@ -92,16 +92,15 @@ describe("§46 — the friend scenario, end to end", () => {
     const { Gateway } = await import("../../src/gateway/gateway.js");
     const { assembleGenesis } = await import("../../src/gateway/genesis.js");
     const { SqliteBackend } = await import("../../src/store/sqlite.js");
+    const { channelBackendFor } = await import("../../src/cli/cli.js");
     const { readSeed, storePath } = await import("../../src/cli/config.js");
     const reopened = await Gateway.boot(
       new SqliteBackend(storePath(bob)),
       assembleGenesis({ operatorSeed: readSeed(bob) }),
-      {
-        channelBackend: (pool: string) =>
-          new SqliteBackend(
-            join(bob, "channels", `${pool.replace(/[^A-Za-z0-9._-]/g, "_")}.sqlite`),
-          ),
-      },
+      // THE SHIPPED FACTORY, imported — never a copy. A rail that re-implements the path mangling
+      // stays green while the real one diverges: when the filename gained its collision-proof
+      // digest, this test kept pointing at the old name and read null. The duplicate WAS the bug.
+      { channelBackend: channelBackendFor(bob, io()) },
     );
     try {
       const answer = await reopened.query('{ alice_Note(entity: "note:hi") { title body } }');

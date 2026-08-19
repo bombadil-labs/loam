@@ -269,13 +269,22 @@ function channelNameOf(gw: Gateway, prefix: string): string {
   return channelStatusImpl(gw).find((c) => c.prefix === prefix)?.name ?? "";
 }
 
-/** Every prefix this receiving container already assigns, read live from the container table. */
-function standingPrefixes(gw: Gateway, into: string): string[] {
+/**
+ * Every prefix this STORE already assigns, read live from the container table.
+ *
+ * Store-wide, not per-container, and the distinction is a real defect this fixes: a living name is
+ * `<prefix>:<alias>` and carries no container, so two channels in different containers that share a
+ * prefix aim at the same names. Worse, both prefix-to-channel lookups (the scoped read path, and the
+ * curse filter) resolve by prefix ALONE — so one peer's claims could answer a lens blessed from the
+ * other, and a curse recorded on one channel was invisible to the other's poll.
+ */
+function standingPrefixes(gw: Gateway): { channel: string; prefix: string }[] {
   const table = readContainerTable(gw.reactor, gw.operatorAuthor);
-  const lead = `channel:${into}:`;
-  const out: string[] = [];
+  const out: { channel: string; prefix: string }[] = [];
   for (const name of table.containers.keys()) {
-    if (name.startsWith(lead)) out.push(name.slice(lead.length));
+    if (!name.startsWith("channel:")) continue;
+    const cut = name.indexOf(":", "channel:".length);
+    if (cut > 0) out.push({ channel: name, prefix: name.slice(cut + 1) });
   }
   return out;
 }
@@ -298,12 +307,18 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
   // receiver does, and the receiver's own store knows every prefix it has already assigned. So the
   // collision is decidable locally, and it fails closed at assignment rather than at publish.
   const flattened = legalNameFor(opts.prefix);
-  for (const standing of standingPrefixes(gw, opts.into)) {
-    if (standing !== opts.prefix && legalNameFor(standing) === flattened) {
+  for (const standing of standingPrefixes(gw)) {
+    // Skip only THIS channel — re-opening the same (into, prefix) resumes. Any OTHER channel whose
+    // prefix flattens the same is a refusal, including one that is byte-identical in a different
+    // container: the earlier guard compared prefixes and so skipped exactly that case.
+    if (standing.channel === name) continue;
+    if (legalNameFor(standing.prefix) === flattened) {
       throw new Error(
-        `openChannel refused: the prefix "${opts.prefix}" serves at the same GraphQL field as the ` +
-          `prefix "${standing}", which this container already assigns — the door flattens every ` +
-          `non-alphanumeric to "_", so the two would collide at "${flattened}". Choose another prefix.`,
+        `openChannel refused: the prefix "${opts.prefix}" collides with the prefix ` +
+          `"${standing.prefix}" already assigned by "${standing.channel}". A living name is ` +
+          `"<prefix>:<alias>" and carries no container, so two channels sharing a prefix aim at the ` +
+          `same names — and the door flattens every non-alphanumeric to "_", so near-misses collide ` +
+          `too. Choose another prefix.`,
       );
     }
   }
@@ -456,7 +471,34 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
  */
 export async function dropChannelImpl(gw: Gateway, name: string): Promise<void> {
   const channel = gw.federationChannels.get(name);
-  const pool = channel?.pool ?? (await gw.openContainer({ name }));
+
+  // REFUSES RATHER THAN REPORTING A PURGE IT CANNOT PROVE (P5, erasure lens, 2026-08-19).
+  //
+  // The fallback below used to be `openContainer({ name })` with NO backend. A separate container
+  // defaults to a fresh in-memory store, so drop() purged that empty copy, byte-verified it,
+  // reported a clean sever — and left the pool's sqlite file untouched forever, with the container
+  // declaration struck so nothing could re-attach it and no erasure fan-out could reach it. A purge
+  // report that is false, in the one direction that has no recovery (H7, §11).
+  //
+  // So: sever only through a handle that provably holds the real bytes. If this store cannot
+  // produce one, it says so and removes nothing. An honest refusal is always available; a false
+  // completion is not recoverable.
+  if (channel === undefined && gw.options.channelBackend === undefined) {
+    throw new Error(
+      `dropChannel refused: this store has no live handle on "${name}" and no channelBackend to ` +
+        `re-open it with, so a purge here would run against an empty in-memory copy and report a ` +
+        `completeness it never verified. Open the channel in this process first, or configure ` +
+        `channelBackend. Nothing was removed.`,
+    );
+  }
+  const pool =
+    channel?.pool ??
+    (await gw.openContainer({
+      name,
+      ...(gw.options.channelBackend === undefined
+        ? {}
+        : { backend: gw.options.channelBackend(name) }),
+    }));
   if (pool.drop === undefined) {
     throw new Error(
       `dropChannel refused: ${name} has no drop — only a SEPARATE container purges its own bytes, ` +

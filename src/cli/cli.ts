@@ -8,6 +8,7 @@
 
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
 import {
   authorForSeed,
@@ -446,12 +447,23 @@ function parseFor(command: CommandName, args: readonly string[]): Parsed {
 
 // A federation channel's pool needs DURABLE bytes: a separate container defaults to memory, and a
 // channel that forgets its peer on restart is not federation (T189). One sqlite file per pool,
-// inside the home, named from the pool with the characters a path cannot carry folded out.
-function channelBackendFor(home: string, io: IO): (pool: string) => SqliteBackend {
+// inside the home.
+//
+// THE FILENAME MUST BE INJECTIVE, and folding unsafe characters to "_" is not. `channel:team a:alice`
+// and `channel:team_a:alice` are distinct containers that both folded to `channel_team_a_alice`, so
+// two channels shared one file — and `drop()` enumerates a store's whole contents, so severing one
+// would have purged the bystander's bytes while the CLI printed "other channels are untouched".
+// That is the over-purge direction, which has no recovery.
+//
+// So the name carries a hash of the FULL pool name. The readable slug is kept for a human reading
+// `ls`, but identity lives in the digest, where the folding cannot reach it.
+export function channelBackendFor(home: string, io: IO): (pool: string) => SqliteBackend {
   return (pool: string) => {
     const dir = join(home, "channels");
     mkdirSync(dir, { recursive: true });
-    return openStore(join(dir, `${pool.replace(/[^A-Za-z0-9._-]/g, "_")}.sqlite`), io);
+    const slug = pool.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 60);
+    const digest = createHash("sha256").update(pool, "utf8").digest("hex").slice(0, 16);
+    return openStore(join(dir, `${slug}--${digest}.sqlite`), io);
   };
 }
 

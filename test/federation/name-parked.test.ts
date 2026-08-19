@@ -22,6 +22,8 @@ import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
 // two names is not a conflict, and criterion 9's rail proves that separately. The content differs in
 // the SCHEMA (the resolution program), which `schemaLawAddress` hashes alongside the hyperschema —
 // a cheaper and more honest difference than a hand-mangled body, which is not a valid Term at all.
+const NOTHING = { pull: () => Promise.resolve([]) };
+
 const DIFFERENT_SCHEMA = {
   props: new Map(PLANT_POLICY.props),
   default: { kind: "all", order: { kind: "byTimestamp", dir: "desc" } },
@@ -81,38 +83,53 @@ describe("§46 — names are the receiver's, and they are explicit", () => {
     }
   });
 
-  it("a genuine collision INSIDE one channel parks, and the parked row explains itself", async () => {
+  it("a prefix is store-WIDE: a second container cannot take one already assigned", async () => {
+    // The first version of the injectivity check compared prefixes only within ONE receiving
+    // container. Living names are store-global (`alice:Plant`), so two containers both assigned
+    // `alice` and their law collided on every name — and, per the rail below, collided SILENTLY.
+    const me = await store("cc".repeat(32));
+    try {
+      await me.openChannel({ into: "friends", prefix: "alice", source: NOTHING });
+      await expect(
+        me.openChannel({ into: "work", prefix: "alice", source: NOTHING }),
+      ).rejects.toThrow(/alice/);
+    } finally {
+      await me.close();
+    }
+  });
+
+  it("a name already answered by DIFFERENT law is parked, never silently taken", async () => {
+    // No if/else: this asserts one outcome. The previous version branched on `parked.length > 0`
+    // and was green either way, which hid that parking never fires at all — `adoptOne` computes
+    // `mayTake = supersede || as !== undefined || confirmed`, and a channel ALWAYS passes `as`, so
+    // the different-content refusal was unreachable and the second sync re-pointed the name and
+    // struck the incumbent.
     const alice = await store("a1".repeat(32));
     const me = await store("cc".repeat(32));
     try {
+      // The receiver already answers `alice:Plant` with law of their own, at a DIFFERENT entity.
+      await me.publishRegistration(
+        { name: "alice:Plant", alg: 1, body: PLANT.body },
+        PLANT_POLICY,
+        [FERN],
+        undefined,
+        "hyperschema:mine",
+      );
+      const mine = me.def("alice:Plant").entity;
+
       await alice.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
       const ch = await me.openChannel({
         into: "friends",
         prefix: "alice",
         source: { pull: () => Promise.resolve(alice.reactor.arrivalLog()) },
       });
-      await ch.sync();
+      const report = await ch.sync();
 
-      // Alice republishes DIFFERENT law at the same alias — the one case where `alice:Plant` is
-      // genuinely contested.
-      await alice.publishRegistration(
-        PLANT,
-        DIFFERENT_SCHEMA,
-        [FERN],
-        undefined,
-        "hyperschema:Plant",
-      );
-      const second = await ch.sync();
-
-      if (second.parked.length > 0) {
-        // The row must say what is contested and what the choices are, not merely that it failed.
-        expect(second.parked.join(" ")).toMatch(/alice:Plant/);
-        expect(second.parked.join(" ")).toMatch(/supersede|as/);
-      } else {
-        // If it bound instead, the content was not genuinely different — assert THAT rather than
-        // letting the test pass vacuously on an empty array.
-        expect(second.bound).toContain("alice:Plant");
-      }
+      expect(report.bound).not.toContain("alice:Plant");
+      expect(report.parked.join(" ")).toContain("alice:Plant");
+      // The incumbent still answers, and still answers with MY law — the silent re-point is what
+      // this refuses, so asserting the name survived is not enough.
+      expect(me.def("alice:Plant").entity).toBe(mine);
     } finally {
       await alice.close();
       await me.close();
