@@ -523,6 +523,19 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
  * Freezing is the reversible act and lives on the toggles; this one does not come back.
  */
 export async function dropChannelImpl(gw: Gateway, name: string): Promise<void> {
+  // A NAME THIS STORE NEVER HAD gets a sentence, not the container layer's internals. Without this
+  // it surfaced as `openContainer: no surviving declaration names "..."` — true, and it tells a
+  // person nothing about what they typed wrong.
+  if (channelStatusImpl(gw, name).length === 0) {
+    const severed = channelsEverImpl(gw, name)[0];
+    throw new Error(
+      severed === undefined
+        ? `dropChannel refused: this store has no channel named "${name}" — ` +
+            `\`loam federate list\` names the ones it has.`
+        : `dropChannel refused: "${name}" was already severed, so there is nothing left to remove.`,
+    );
+  }
+
   const channel = gw.federationChannels.get(name);
 
   // REFUSES RATHER THAN REPORTING A PURGE IT CANNOT PROVE (P5, erasure lens, 2026-08-19).
