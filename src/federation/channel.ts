@@ -18,6 +18,7 @@ import { signClaims } from "@bombadil/rhizomatic";
 import type { Container } from "../gateway/container.js";
 import { containerClaims, readContainerTable } from "../gateway/container.js";
 import type { Gateway } from "../gateway/gateway.js";
+import { legalNameFor } from "../gateway/gql.js";
 
 /** Where a channel's deltas come from. A live peer, a frozen offer, or a fixture. */
 export interface ChannelSource {
@@ -68,6 +69,17 @@ const AGGREGATOR = {
 /** One pool per (receiving container, prefix): the prefix is the receiver's name for the peer. */
 export const channelName = (into: string, prefix: string): string => `channel:${into}:${prefix}`;
 
+/** Every prefix this receiving container already assigns, read live from the container table. */
+function standingPrefixes(gw: Gateway, into: string): string[] {
+  const table = readContainerTable(gw.reactor, gw.operatorAuthor);
+  const lead = `channel:${into}:`;
+  const out: string[] = [];
+  for (const name of table.containers.keys()) {
+    if (name.startsWith(lead)) out.push(name.slice(lead.length));
+  }
+  return out;
+}
+
 export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Promise<Channel> {
   if (gw.options.seed === undefined) {
     throw new Error(
@@ -78,6 +90,23 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
   const name = channelName(opts.into, opts.prefix);
   const existing = gw.federationChannels.get(name);
   if (existing !== undefined) return existing; // idempotent: re-opening resumes the same pool
+
+  // INJECTIVITY, checked here because here is where a person can still choose differently. The
+  // GraphQL door maps every non-alphanumeric to `_` (`legalNameFor`), so `alice:` and `alice_` are
+  // disjoint entity namespaces that serve at the SAME field — the many-to-one squatting hazard
+  // accounts.ts documents. A peer cannot exploit it because a peer never picks a prefix; the
+  // receiver does, and the receiver's own store knows every prefix it has already assigned. So the
+  // collision is decidable locally, and it fails closed at assignment rather than at publish.
+  const flattened = legalNameFor(opts.prefix);
+  for (const standing of standingPrefixes(gw, opts.into)) {
+    if (standing !== opts.prefix && legalNameFor(standing) === flattened) {
+      throw new Error(
+        `openChannel refused: the prefix "${opts.prefix}" serves at the same GraphQL field as the ` +
+          `prefix "${standing}", which this container already assigns — the door flattens every ` +
+          `non-alphanumeric to "_", so the two would collide at "${flattened}". Choose another prefix.`,
+      );
+    }
+  }
 
   // The receiving container must EXIST before a pool can mark it: `containerScope` skips an
   // inactive parent outright, and an inbox whose parent is not gathered is an inbox nobody reads.
