@@ -42,18 +42,24 @@ prefix rule and read no collision report.
 **S6 — a contested name says so.** Where Myk chose "show me both", the store refuses to serve that
 name and names the two candidates, rather than picking one and being quiet about it.
 
-## 47.3 The bootstrap, which decides the size of this
+## 47.3 The bootstrap — settled by an equivalence, not a spike
 
-Resolving through a Schema needs a Schema, and Schemas come from registrations. Law-about-law must
-start where the fixpoint can reach it.
+Resolving through a Schema needs a Schema, and Schemas come from registrations. Law-about-law has to
+start where the fixpoint can reach it, and `inView` — §8's precedent — is a PREDICATE rather than a
+Policy-resolved View (trust.ts says so itself: it "cannot validate any of this (a predicate sees
+pointers, not shape rules)").
 
-**The precedent is §8.** Trust is data, and its roster resolves through the substrate — an `inView`
-predicate over the very declaration deltas admission reads, one live lens, base law in genesis.
+**Myk's answer dissolves the problem rather than solving it** (2026-08-19): the bootstrap table may
+ship HARD-CODED, *provided the genesis set would resolve to the same shape*.
 
-**The gap is that `inView` is a PREDICATE.** trust.ts says so itself: it "cannot validate any of this
-(a predicate sees pointers, not shape rules)". A Policy-resolved View is a step beyond a predicate.
-Criterion 1 exists to measure that step before anything is built on it, because it decides whether
-this section is an afternoon or an arc.
+So the fast path stays, and an EQUIVALENCE RAIL carries the honesty: resolve the declared law and
+assert the resulting table is identical to the one the hand-rolled path builds. The hardcoded table
+stops being an unexamined shortcut and becomes a cache with a proof. If the two ever diverge — a new
+Policy, a changed default, a subtle ordering — the rail goes red at the moment of divergence rather
+than at the moment someone notices.
+
+This is what makes the section an afternoon rather than an arc: nothing has to bootstrap a Schema
+before the registry exists. Criterion 1 is now that comparison.
 
 ## 47.4 What this folds
 
@@ -63,9 +69,10 @@ them is a separate problem once law resolves like data and binds where it was bl
 
 ## Acceptance criteria
 
-1. A spike resolves a two-delta binding set through a real Schema and Policy, with its base law in
-   genesis and no dependency on `readRegistrations` — establishing that the bootstrap closes before
-   anything else is built — verified by `test/gateway/binding-reading-spike.test.ts`.
+1. THE EQUIVALENCE. Resolving the declared binding law produces a table IDENTICAL to the one the
+   hard-coded path builds, over a corpus that includes a contested name, a superseded binding and a
+   struck one — so the shortcut is a cache with a proof rather than an unexamined shortcut — verified
+   by `test/gateway/binding-equivalence.test.ts`.
 2. Two bindings naming one address under different names both resolve, and both serve — verified by
    `test/gateway/binding-two-names.test.ts`.
 3. Two bindings naming different addresses under one name resolve by the store's DECLARED policy, and
@@ -90,6 +97,9 @@ them is a separate problem once law resolves like data and binds where it was bl
     involved — verified by `test/gateway/binding-policy-is-data.test.ts`.
 12. A store with no declared policy behaves exactly as today's hardcoded latest-wins, so an existing
     store upgrades without choosing anything — verified by `test/gateway/binding-default-policy.test.ts`.
+13. The declaration accepts an optional CONTAINER qualifier and an unqualified declaration governs the
+    root, so per-container policy is a later delta rather than a migration — verified by
+    `test/gateway/binding-policy-qualifier.test.ts`.
 
 ## Deliberately out of scope
 
@@ -97,13 +107,19 @@ Changing what a content address covers. `schemaLawAddress` excluding the living 
 load-bearing — it is what makes "the same law under another name" mean something, and this section
 depends on it rather than revising it.
 
-## Open questions for Myk
+## 47.5 Settled by Myk, 2026-08-19
 
-- **Q1.** Should the default policy be `byAuthorRank` rather than latest-wins? It is the safer default
-  for a federating store (a peer can never take a name from you), and it is a behaviour change for
-  every existing store, which is why criterion 12 keeps today's behaviour as the no-declaration case.
-- **Q2.** Is the policy declared per store, per container, or both? Per container is the §28-shaped
-  answer and the more work.
-- **Q3.** If the bootstrap in criterion 1 does NOT close cheaply, is the fallback acceptable: keep the
-  hand-rolled resolution and make its policy a declared parameter rather than a literal? That buys
-  S1, S5 and S6 without the full reading.
+- **The bootstrap ships hard-coded**, guarded by the equivalence rail in 47.3. No Schema has to exist
+  before the registry does.
+- **`byAuthorRank` is the default.** A peer can never take a name from you, and a federated schema
+  arrives prefixed anyway, so the safe answer costs almost nothing. Criterion 12 still keeps today's
+  latest-wins for a store that declares nothing, so an existing store upgrades without choosing.
+- **Per STORE now, shaped so per CONTAINER is an extension rather than a migration.** The declaration
+  carries an optional container qualifier; unqualified means the root. Adding per-container later is
+  a new delta at a qualified entity, not a rewrite.
+
+  This is the path §8 to §28 already walked — trust began as one store-wide declaration and became a
+  property of a container — and the second step did not invalidate the first. Per container is what
+  you eventually want (`byAuthorRank` at your root, `conflicts` in a container holding a stranger's
+  work, `pick byTimestamp` in a feed you follow but do not curate), and with bindings already scoped
+  per container it is not what you need first.
