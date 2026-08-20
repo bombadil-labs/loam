@@ -13,7 +13,7 @@
 // names stay a build-time collision, and no reader's surface changes shape by upgrading.
 
 import type { Claims, Reactor } from "@bombadil/rhizomatic";
-import { lawfulDeltasAt } from "./registration.js";
+import { lawfulDeltasAt, lawfulNegated } from "./registration.js";
 
 export const BINDING_POLICY_ENTITY = "loam:binding-policy";
 export const CTX_BINDING_POLICY = "loam.binding-policy";
@@ -98,11 +98,19 @@ export function readBindingPolicy(
   container?: string,
 ): BindingPolicyMode | undefined {
   let latest: { at: number; id: string; mode: BindingPolicyMode } | undefined;
+  // lawfulDeltasAt carries NO negation closure — its own header says every caller runs
+  // lawfulNegated over what it returns, and every sibling reader (trust, public, budget, artifact,
+  // envelope) does. This one omitted it and a STRUCK declaration stayed in force: withdrawn law
+  // kept evicting contest losers from every door, and striking the latest declaration left the
+  // corpse shadowing the earlier live one instead of reviving it. Latest-SURVIVING, as the doc
+  // comment always claimed (H1 — the suppression lens's finding, reproduced red before this line).
+  const negated = lawfulNegated(reactor, operator);
   for (const d of lawfulDeltasAt(
     reactor,
     { entity: BINDING_POLICY_ENTITY, context: CTX_BINDING_POLICY },
     operator,
   )) {
+    if (negated(d.id)) continue;
     const of = (role: string): string | undefined => {
       const p = d.claims.pointers.find((q) => q.role === role);
       return p?.target.kind === "primitive" && typeof p.target.value === "string"
@@ -128,8 +136,9 @@ export function readBindingPolicy(
 export interface BindingCandidate {
   /** The living name this binding wants to serve. */
   readonly lens: string;
-  /** The registration entity it files under — identity, so a policy never confuses versions of one
-   * law with a contest between two. */
+  /** The HYPERSCHEMA entity the definition lives at — identity per §21, so a policy never confuses
+   * versions of one law with a contest between two. (Not the `registration:` filing entity: the
+   * door mints them bijectively, and the identity a version evolves at is this one.) */
   readonly entity: string;
   readonly author: string;
   readonly timestamp: number;
@@ -166,8 +175,13 @@ export function interpretBindingPolicy(
 ): ResolvedBindings {
   // Version resolution first: latest per (entity, lens). Identity is the entity (§21).
   const perEntity = new Map<string, BindingCandidate>();
+  // NUL-joined, like every sibling reader (registration.ts's NUL_SEP): a space is legal inside an
+  // explicit entity, so a space join lets ("hyperschema:A B", "C") and ("hyperschema:A", "B C")
+  // collapse into one version family and silently drop a law — the exact confusion this key's own
+  // contract forbids (the lens-name lens's finding, one byte of defect).
+  const NUL = "\u0000";
   for (const c of candidates) {
-    const key = `${c.entity} ${c.lens}`;
+    const key = `${c.entity}${NUL}${c.lens}`;
     const held = perEntity.get(key);
     perEntity.set(key, held === undefined ? c : later(held, c));
   }

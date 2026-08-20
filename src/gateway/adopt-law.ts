@@ -1125,7 +1125,14 @@ async function adoptOne(
 
   const name = livingNameOf(ex, opts);
   const confirmed = opts.repoints?.[row.alias] === row.target;
-  const mayTake = opts.supersede === true || opts.as !== undefined || confirmed;
+  // `as` NAMES; only `supersede` (or a confirmed re-point) TAKES. The door's own refusal presents
+  // them as exactly that pair — supersede to take the name, `as` to serve side by side — yet `as`
+  // used to confer take-the-name too, so an operator following the door's own guidance onto an
+  // OCCUPIED name struck the incumbent's binding silently, with the outcome reading "adopted-from"
+  // and no note that a naming request had become a retirement (the suppression lens's finding;
+  // §47's witness change made the state reachable, since the same law bound under another name no
+  // longer witnesses before this guard runs).
+  const mayTake = opts.supersede === true || confirmed;
 
   // PHASE 1 — the name-check, inside the critical section. It carries the winner it OBSERVED.
   const observed = await withLivingNames(gw, () => {

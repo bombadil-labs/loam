@@ -1,8 +1,14 @@
-// §47 criterion 1 — THE EQUIVALENCE. Production's optimized registration reader and the pure
-// interpreter must produce the identical binding table, over a corpus that includes a contested
-// name, a superseded binding, and a struck one. This is what turns the fast path from an unexamined
-// shortcut into a cache with a proof (Myk, 2026-08-19): a divergence between loop and spec goes red
-// at the moment it is introduced, not when someone notices a wrong surface.
+// §47 criterion 1 — THE EQUIVALENCE. Production's registration reader and the pure interpreter
+// must produce the identical binding table, over a corpus with a contested name, a superseded
+// binding, and a struck one.
+//
+// WHAT THIS FILE PROVES, precisely — production CALLS the interpreter for the contest step, so a
+// bug in the interpreter's contest branch moves both sides in lockstep and this rail cannot see it
+// (H10). What it genuinely pins is the EXTRACTION half: production's independent ground-order
+// version collapse must agree with the interpreter's per-(entity, lens) collapse, or a name drops
+// from one side and the key-set equality fails. The CONTEST semantics are pinned by hand-written
+// literals in the sibling rails (binding-contested-name, binding-conflicts-refuses, and the
+// interpreter tests below) — trust those, not this file, to catch an interpreter edit.
 //
 // Also carries the interpreter-level rails for §47 criterion 5 (byAuthorRank): in a governed store
 // every SERVED binding is operator-authored — foreign law is inert — so the author-rank distinction

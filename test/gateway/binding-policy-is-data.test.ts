@@ -115,3 +115,73 @@ describe("§47 — the policy is data", () => {
     }
   });
 });
+
+describe("§47 — a struck declaration stops governing (H1)", () => {
+  it("striking the only declaration reverts the store to undeclared behavior", async () => {
+    const gw = await store();
+    try {
+      const declared = await (async () => {
+        const claims = bindingPolicyClaims("byTimestamp", gw.operatorAuthor!, gw.nextTimestamp());
+        await gw.append([signClaims(claims, OP_SEED)]);
+        return [...gw.reactor.snapshot()].find((d) =>
+          d.claims.pointers.some(
+            (p) => p.target.kind === "entity" && p.target.entity.id === "loam:binding-policy",
+          ),
+        )!;
+      })();
+      expect(readBindingPolicy(gw.reactor, gw.operatorAuthor)).toBe("byTimestamp");
+
+      const { makeNegationClaims } = await import("@bombadil/rhizomatic");
+      await gw.append([
+        signClaims(
+          makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), declared.id),
+          OP_SEED,
+        ),
+      ]);
+      // The strike binds: withdrawn law governs nothing. Before this rail, the reader picked the
+      // latest declaration by timestamp WITHOUT consulting negation — so a struck declaration kept
+      // silently evicting contest losers from every door, under law the operator withdrew.
+      expect(readBindingPolicy(gw.reactor, gw.operatorAuthor)).toBeUndefined();
+    } finally {
+      await gw.close();
+    }
+  });
+
+  it("striking the LATEST declaration revives the earlier one — latest-SURVIVING, not latest", async () => {
+    const gw = await store();
+    try {
+      await gw.append([
+        signClaims(
+          bindingPolicyClaims("byTimestamp", gw.operatorAuthor!, gw.nextTimestamp()),
+          OP_SEED,
+        ),
+      ]);
+      await gw.append([
+        signClaims(
+          bindingPolicyClaims("conflicts", gw.operatorAuthor!, gw.nextTimestamp()),
+          OP_SEED,
+        ),
+      ]);
+      const conflictsDecl = [...gw.reactor.snapshot()].find(
+        (d) =>
+          d.claims.pointers.some(
+            (p) =>
+              p.role === "mode" && p.target.kind === "primitive" && p.target.value === "conflicts",
+          ) && gw.reactor.negationsOf(d.id).length === 0,
+      )!;
+      expect(readBindingPolicy(gw.reactor, gw.operatorAuthor)).toBe("conflicts");
+
+      const { makeNegationClaims } = await import("@bombadil/rhizomatic");
+      await gw.append([
+        signClaims(
+          makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), conflictsDecl.id),
+          OP_SEED,
+        ),
+      ]);
+      // The corpse must not shadow the living: t1's byTimestamp is the latest SURVIVOR.
+      expect(readBindingPolicy(gw.reactor, gw.operatorAuthor)).toBe("byTimestamp");
+    } finally {
+      await gw.close();
+    }
+  });
+});

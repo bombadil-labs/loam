@@ -83,10 +83,37 @@ describe("§47 — identical law from two peers", () => {
           ),
         ).length;
       const before = lawCount();
+      expect(before).toBeGreaterThan(0); // the floor: an empty filter would make this rail vacuous
       const again = await ch.sync();
       expect(again.witnessed).toContain("alice:Plant");
       expect(again.bound).not.toContain("alice:Plant");
       expect(lawCount()).toBe(before);
+    } finally {
+      await alice.close();
+      await me.close();
+    }
+  });
+});
+
+describe("§47 — the receiver's own bare name survives a peer's arrival", () => {
+  it("after syncing a peer, the bare name still answers with the RECEIVER's entity", async () => {
+    // The hollow-rail lens found the sibling assertion missing in the frozen name-parked file: its
+    // header claimed "a receiver's OWN law keeps its bare name" while nothing asserted the bare
+    // binding after the sync — a sync that struck or re-pointed it would have passed green. This
+    // rail carries the assertion at the level that matters: the ENTITY, not merely the name, since
+    // a re-point keeps the name and swaps what it means.
+    const alice = await S("a1".repeat(32));
+    const me = await S("cc".repeat(32));
+    try {
+      await me.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+      const mine = me.def("Plant").entity;
+
+      await alice.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+      const ch = await me.openChannel({ into: "friends", prefix: "alice", source: feed(alice) });
+      const report = await ch.sync();
+
+      expect(report.bound).toContain("alice:Plant");
+      expect(me.def("Plant").entity).toBe(mine);
     } finally {
       await alice.close();
       await me.close();
