@@ -80,6 +80,18 @@
       "to": "expect(orphaned.errors?.join(\" \")).toMatch(/Cannot query field/);",
       "files": ["test/federation/drop-two-sided.test.ts"],
       "authorized": "Myk, 2026-08-20, in chat (T200 slice 3, 'keep it rollin'): bindings live in the channel's pool, so a drop takes them and the severed-lens guard case stops existing \u2014 the rail's refusal assertion flips to the name being gone from the surface."
+    },
+    {
+      "from": "// LAW deltas only: every sync stamps a channel record, so the raw count always moves. What",
+      "to": "// LAW deltas in the POOL, where blessings land (S47 slice 3); the raw count always moves. What",
+      "files": ["test/federation/identical-law-two-peers.test.ts"],
+      "authorized": "Myk, 2026-08-20, in chat (T200 slice 3): blessings land in the pool, so the repeat-witness law counter reads the pool's ground \u2014 the rail froze when T200 declared it in #442, and the counter must move with the architecture it counts."
+    },
+    {
+      "from": "[...me.reactor.snapshot()].filter((d) =>",
+      "to": "[...ch.pool.gateway!.reactor.snapshot()].filter((d) =>",
+      "files": ["test/federation/identical-law-two-peers.test.ts"],
+      "authorized": "Myk, 2026-08-20, in chat (T200 slice 3): blessings land in the pool, so the repeat-witness law counter reads the pool's ground \u2014 the rail froze when T200 declared it in #442, and the counter must move with the architecture it counts."
     }
   ]
 }
