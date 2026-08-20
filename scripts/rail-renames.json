@@ -1,10 +1,10 @@
 {
   "//": [
-    "Authorized vocabulary renames inside FROZEN rails — read by scripts/rails-guard-ci.mjs.",
+    "Authorized vocabulary renames inside FROZEN rails \u2014 read by scripts/rails-guard-ci.mjs.",
     "",
     "THE GATE READS THIS FILE FROM THE BASE TREE, NEVER FROM THE BRANCH. That is the entire",
     "security model: a branch cannot self-authorize, because the entry that exempts its edit",
-    "must already be on main — i.e. it arrived through a PR a human reviewed. Two-PR",
+    "must already be on main \u2014 i.e. it arrived through a PR a human reviewed. Two-PR",
     "discipline, enforced mechanically (Myk, 2026-07-26): first land the authorization here,",
     "then open the rename.",
     "",
@@ -14,7 +14,7 @@
     "",
     "Shape: { from, to, files?, authorized }. `files` limits the pair to exact paths; an",
     "UNSCOPED pair applies to every frozen rail and must be word-shaped (identifier or quoted",
-    "literal) — a SCOPED pair may carry wider literals (a regex fragment, a title phrase)",
+    "literal) \u2014 a SCOPED pair may carry wider literals (a regex fragment, a title phrase)",
     "because the reviewer reads it against the named files. `authorized` names who and when.",
     "Remove entries once the rename that consumed them has merged; a spent entry is inert",
     "(the substitution no longer produces the base) but tidiness keeps this file reviewable."
@@ -56,6 +56,54 @@
       "to": "    expect(left.length).toBe(30);",
       "files": ["test/store/archive.test.ts"],
       "authorized": "PENDING MYK - a branch cannot self-authorize, so merging this entry IS the authorization. Fixture size only; both probes verified red."
+    },
+    {
+      "from": "\"a bulk of 5k plain arrivals folds",
+      "to": "\"a bulk of plain arrivals folds",
+      "files": ["test/gateway/listing-warm.test.ts"],
+      "authorized": "Myk, 2026-08-19, in chat \u2014 T187: the bulk-fold rail flakes under suite load; authorized shrinking its fixture, explicitly NOT widening its timeout."
+    },
+    {
+      "from": "[\"plant:b00500\", \"plant:b02500\", \"plant:b04500\", MOSS]",
+      "to": "[\"plant:b00150\", \"plant:b00750\", \"plant:b01350\", MOSS]",
+      "files": ["test/gateway/listing-warm.test.ts"],
+      "authorized": "Myk, 2026-08-19, in chat \u2014 T187: the bulk-fold rail flakes under suite load; authorized shrinking its fixture, explicitly NOT widening its timeout."
+    },
+    {
+      "from": "{ length: 5000 }",
+      "to": "{ length: 1500 }",
+      "files": ["test/gateway/listing-warm.test.ts"],
+      "authorized": "Myk, 2026-08-19, in chat \u2014 T187: the bulk-fold rail flakes under suite load; authorized shrinking its fixture, explicitly NOT widening its timeout."
+    },
+    {
+      "from": "String(5000 - i)",
+      "to": "String(1500 - i)",
+      "files": ["test/gateway/listing-warm.test.ts"],
+      "authorized": "Myk, 2026-08-19, in chat \u2014 T187: the bulk-fold rail flakes under suite load; authorized shrinking its fixture, explicitly NOT widening its timeout."
+    },
+    {
+      "from": "toHaveLength(5001)",
+      "to": "toHaveLength(1501)",
+      "files": ["test/gateway/listing-warm.test.ts"],
+      "authorized": "Myk, 2026-08-19, in chat \u2014 T187: the bulk-fold rail flakes under suite load; authorized shrinking its fixture, explicitly NOT widening its timeout."
+    },
+    {
+      "from": "after: \"plant:b00490\" })).toEqual(cold.slice(490, 515))",
+      "to": "after: \"plant:b00140\" })).toEqual(cold.slice(140, 165))",
+      "files": ["test/gateway/listing-warm.test.ts"],
+      "authorized": "Myk, 2026-08-19, in chat \u2014 T187: the bulk-fold rail flakes under suite load; authorized shrinking its fixture, explicitly NOT widening its timeout."
+    },
+    {
+      "from": "cold[2500]! })).toEqual(cold.slice(2501, 2526))",
+      "to": "cold[750]! })).toEqual(cold.slice(751, 776))",
+      "files": ["test/gateway/listing-warm.test.ts"],
+      "authorized": "Myk, 2026-08-19, in chat \u2014 T187: the bulk-fold rail flakes under suite load; authorized shrinking its fixture, explicitly NOT widening its timeout."
+    },
+    {
+      "from": "cold[4990]! })).toEqual(cold.slice(4991))",
+      "to": "cold[1490]! })).toEqual(cold.slice(1491))",
+      "files": ["test/gateway/listing-warm.test.ts"],
+      "authorized": "Myk, 2026-08-19, in chat \u2014 T187: the bulk-fold rail flakes under suite load; authorized shrinking its fixture, explicitly NOT widening its timeout."
     }
   ]
 }
