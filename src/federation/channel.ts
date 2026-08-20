@@ -281,7 +281,12 @@ async function bindArrived(
     // operator retired, one interval later and silently (§46 criterion 11).
     if (cursed.has(name)) continue;
     try {
-      const outcome = await gw.adoptLaw(version, alias, { as: name });
+      // INTO THE POOL (§47 slice 3): the blessing is published on the pool's own gateway, so the
+      // binding lives with the peer's data — dropping the channel takes both, and the receiver's
+      // root ground never holds a channel's law. The pool gateway carries the operator's seed
+      // (openSeparate hands it down), so this is the same operator's act in a narrower ground. The
+      // receiver's surface serves the lens by AGGREGATION at replay, folded below.
+      const outcome = await ground.adoptLaw(version, alias, { as: name });
       // "witnessed" IS NOT "bound", and reporting it as bound was a false report of the plainest
       // kind: `bound` said the name serves, and the store threw on it.
       //
@@ -301,6 +306,9 @@ async function bindArrived(
       parked.push(`${name}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
+  // Fold the receiver's surface: the blessing landed in the pool, and the aggregation in
+  // replayRegistrations is what makes it serve.
+  if (bound.length > 0) gw.replayRegistrations();
   return { bound, parked, witnessed };
 }
 
@@ -607,6 +615,10 @@ export async function dropChannelImpl(gw: Gateway, name: string): Promise<void> 
   await pool.drop();
   gw.federationChannels.delete(name);
   gw.channelPools.delete(name);
+  // The pool's bindings left with its bytes; refold so the surface stops serving them NOW rather
+  // than at the next boot. This is what dissolved T199's retire-on-drop question: there is nothing
+  // to retire, because the binding was never anywhere but the pool.
+  gw.replayRegistrations();
 
   // THE RECORD GOES WITH THE BYTES. Without this, `federate list` kept printing the channel as
   // receiving after it was severed, `setChannel` still succeeded on it, and every later boot
@@ -758,21 +770,27 @@ export async function curseChannelLawImpl(
     // curse struck. Measured: the id is byte-identical, and the blessing then refuses with "the
     // blessed law persisted but does not serve". The binding is born dead, and no amount of
     // re-syncing revives it. Negating the curse's own negation is the only thing that can.
-    for (const binding of [...gw.reactor.snapshot()]) {
-      if (!isRegistrationBinding(binding.claims)) continue;
-      const p = binding.claims.pointers.find((pt) => pt.role === "schema");
-      const lens =
-        p?.target.kind === "entity" && p.target.entity.id.startsWith("schema:")
-          ? p.target.entity.id.slice("schema:".length)
-          : undefined;
-      if (lens !== living) continue;
-      for (const negationId of gw.reactor.negationsOf(binding.id)) {
-        if (gw.reactor.negationsOf(negationId).length > 0) continue; // already lifted
-        await gw.append([
-          signClaims(makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), negationId), seed),
-        ]);
+    const liftPool = gw.channelPools.get(channel)?.gateway;
+    const liftGrounds = liftPool === undefined ? [gw] : [liftPool, gw];
+    for (const g of liftGrounds)
+      for (const binding of [...g.reactor.snapshot()]) {
+        if (!isRegistrationBinding(binding.claims)) continue;
+        const p = binding.claims.pointers.find((pt) => pt.role === "schema");
+        const lens =
+          p?.target.kind === "entity" && p.target.entity.id.startsWith("schema:")
+            ? p.target.entity.id.slice("schema:".length)
+            : undefined;
+        if (lens !== living) continue;
+        for (const negationId of g.reactor.negationsOf(binding.id)) {
+          if (g.reactor.negationsOf(negationId).length > 0) continue; // already lifted
+          await g.append([
+            signClaims(
+              makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), negationId),
+              seed,
+            ),
+          ]);
+        }
       }
-    }
     gw.replayRegistrations();
     // Lifting strikes the curse record itself. The next poll re-blesses through the ordinary path,
     // so nothing here needs to know how binding works.
@@ -820,12 +838,42 @@ export async function curseChannelLawImpl(
     const id = p.target.entity.id;
     return id.startsWith("schema:") ? id.slice("schema:".length) : id;
   };
-  const bindings = [...gw.reactor.snapshot()].filter(
-    (d) =>
-      isRegistrationBinding(d.claims) &&
-      livesAt(d) === living &&
-      gw.reactor.negationsOf(d.id).length === 0,
-  );
+  // THE BINDINGS LIVE IN THE POOL now (§47 slice 3), so the strike lands there — the same ground
+  // the blessing landed in, which is what keeps a curse and a drop composable: both act on the
+  // container that owns the law. The root ground is searched too, for a store carrying bindings
+  // blessed before the move; a curse must reach law wherever an older store put it.
+  const pool = gw.channelPools.get(channel)?.gateway;
+  const grounds: { reactor: Gateway["reactor"]; sign: (id: string) => Promise<void> }[] = [
+    ...(pool === undefined
+      ? []
+      : [
+          {
+            reactor: pool.reactor,
+            sign: async (id: string): Promise<void> => {
+              await pool.append([
+                signClaims(makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), id), seed),
+              ]);
+            },
+          },
+        ]),
+    {
+      reactor: gw.reactor,
+      sign: async (id: string): Promise<void> => {
+        await gw.append([
+          signClaims(makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), id), seed),
+        ]);
+      },
+    },
+  ];
+  const bindings: { id: string; sign: (id: string) => Promise<void> }[] = [];
+  for (const g of grounds) {
+    for (const d of g.reactor.snapshot()) {
+      if (!isRegistrationBinding(d.claims)) continue;
+      if (livesAt(d) !== living) continue;
+      if (g.reactor.negationsOf(d.id).length > 0) continue;
+      bindings.push({ id: d.id, sign: g.sign });
+    }
+  }
   if (bindings.length === 0 && !alreadyCursed) {
     throw new Error(
       `curseChannelLaw refused: "${living}" is not served by this store, so there is nothing to ` +
@@ -851,9 +899,7 @@ export async function curseChannelLawImpl(
     ),
   ]);
   for (const binding of bindings) {
-    await gw.append([
-      signClaims(makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), binding.id), seed),
-    ]);
+    await binding.sign(binding.id);
   }
   gw.replayRegistrations();
 
