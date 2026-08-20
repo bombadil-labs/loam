@@ -138,14 +138,14 @@ describe("§46 — names are the receiver's, and they are explicit", () => {
 });
 
 describe("T198 — two peers with byte-identical law", () => {
-  it("the second channel reports WITNESSED, never bound, because its name is not created", async () => {
+  it("both names bind: identical law under two names is two bindings (was the T198 interim)", async () => {
     // The default case, not an edge: two peers who both ran `loam register --stock note` have
     // byte-identical law. `schemaLawAddress` excludes the LIVING NAME, so that law has ONE address
-    // whatever it is called, and adoptLaw refuses to publish law it already serves under another
-    // name — deliberately, so a module blessed twice does not bind twice.
+    // whatever it is called. The witness now keys on (address, living name) per criterion 2, so
+    // name — the same law under a NEW name publishes; a SAME-name repeat still witnesses.
     //
-    // The defect was reporting that outcome as `bound`. The report said the name serves; the store
-    // threw on it. Until a second name can serve the same law, saying so is the honest answer.
+    // The interim (T198) reported `witnessed` honestly while the name stayed uncreated; this now
+    // asserts the fix, and identical-law-two-peers.test.ts proves both names SERVE real reads.
     const alice = await store("a1".repeat(32));
     const bob = await store("b0".repeat(32));
     const me = await store("cc".repeat(32));
@@ -162,16 +162,16 @@ describe("T198 — two peers with byte-identical law", () => {
       const second = await (
         await me.openChannel({ into: "friends", prefix: "bob", source: feed(bob) })
       ).sync();
-      expect(second.bound).not.toContain("bob:Plant");
-      expect(second.witnessed).toContain("bob:Plant");
+      expect(second.bound).toContain("bob:Plant");
+      expect(second.witnessed).toEqual([]);
 
       // THE REPORT CANNOT OUTRUN THE STORE: every name in `bound` is defined. This is the general
       // form of the defect and is worth asserting for its own sake.
       for (const name of [...first.bound, ...second.bound]) {
         expect(() => me.def(name), `${name} was reported bound`).not.toThrow();
       }
-      // And the witnessed name is exactly the one that does not serve.
-      expect(() => me.def("bob:Plant")).toThrow();
+      // And the second name serves: def resolves it rather than throwing.
+      expect(() => me.def("bob:Plant")).not.toThrow();
     } finally {
       await alice.close();
       await bob.close();
