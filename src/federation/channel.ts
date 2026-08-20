@@ -233,6 +233,11 @@ async function bindArrived(
   const rows = new Map<string, string>(); // alias -> hyperschema entity
   for (const d of members) {
     if (!isRegistrationBinding(d.claims)) continue;
+    // THE PEER'S exports are the PEER-AUTHORED bindings. The receiver's own blessings land in this
+    // same pool (§47 slice 3), and enumerating per lens would otherwise read them back as fresh
+    // exports — blessing "alice:Plant" into "alice:alice:Plant", one layer per poll, forever. The
+    // entity-keyed enumeration hid this by accident; the author filter states it.
+    if (d.claims.author === gw.operatorAuthor) continue;
     const target = d.claims.pointers.find(
       (p) => p.target.kind === "entity" && p.target.entity.context === CTX_REGISTRATION,
     );
@@ -247,9 +252,18 @@ async function bindArrived(
       ? pointed.slice("registration:".length)
       : pointed;
     if (!entity.startsWith("hyperschema:")) continue;
-    // The alias is the peer's own name for the export. It is a LOOKUP KEY here, never a served
-    // name — what gets served is `prefix:alias`, decided below.
-    rows.set(entity.slice("hyperschema:".length), entity);
+    // ONE ROW PER LENS, read from the binding's own `schema:<name>` bytes — never per entity. The
+    // entity-derived alias was T197's collapse: a peer's sibling lenses (§21.7, two readings over
+    // one definition) federated as one, the second not parked, not refused, simply invisible — H6
+    // one layer down, the name a reader asks by derived from the PROGRAM's address instead of the
+    // READING. Two rows may share a targetEntity; that is what a manifest is for. The alias is a
+    // LOOKUP KEY here, never a served name — what gets served is `prefix:alias`, decided below.
+    const living = d.claims.pointers.find((p) => p.role === "schema");
+    const lens =
+      living?.target.kind === "entity" && living.target.entity.id.startsWith("schema:")
+        ? living.target.entity.id.slice("schema:".length)
+        : entity.slice("hyperschema:".length);
+    rows.set(lens, entity);
   }
   if (rows.size === 0) return { bound, parked, witnessed };
 

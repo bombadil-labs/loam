@@ -1,0 +1,1 @@
+{"seq":1,"gate":"rails-green","ts":"2026-08-20T22:19:29.587Z","ticket":"T200","data":{"slice":4,"criteria":"9","tests":2353},"files":{},"anchor":{"segment":"root","seq":291,"lineHash":"b72e73211211a94954df17e4fd315cf0c264cb6d75c4944aef0fce4f268a882b"},"branch":"t200-slice4","prev":null,"sigVersion":2,"sig":"9de6717e3ef6efbb7aadbbbdcb9566fdcf5ca25219e8ce465a372da952833661"}
