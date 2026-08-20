@@ -69,6 +69,8 @@ name begins with that number.
 | §43 | [The listing door — a kind's entities, served through a container](spec/43-listing-door.md) |
 | §44 | [The front door — the constant greeting at `/`](spec/44-front-door.md) |
 | §45 | [Pens — provisioning a renderer's signing key](spec/45-pens.md) |
+| §46 | [Federation is container-to-container](spec/46-federation-channels.md) |
+| §47 | [Law resolves like data](spec/47-law-resolves-like-data.md) |
 
 _**§21**, **§22**, **§25**, and **§26** are **landed** — design accepted and implemented (see each
 Provenance footer; §21.7's coexistence design is accepted with its implementation queued as ticket T2).

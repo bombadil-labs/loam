@@ -74,7 +74,8 @@ them is a separate problem once law resolves like data and binds where it was bl
    struck one — so the shortcut is a cache with a proof rather than an unexamined shortcut — verified
    by `test/gateway/binding-equivalence.test.ts`.
 2. Two bindings naming one address under different names both resolve, and both serve — verified by
-   `test/gateway/binding-two-names.test.ts`.
+   `test/federation/identical-law-two-peers.test.ts` and
+   `test/gateway/adopt-as-never-takes.test.ts`.
 3. Two bindings naming different addresses under one name resolve by the store's DECLARED policy, and
    `pick byTimestamp desc`, `pick byAuthorRank` and `conflicts` each produce their own documented
    outcome — verified by `test/gateway/binding-contested-name.test.ts`.
@@ -85,7 +86,7 @@ them is a separate problem once law resolves like data and binds where it was bl
 6. A binding blessed into a container is live in that container and absent from the store's root
    reading — verified by `test/gateway/binding-container-scoped.test.ts`.
 7. Dropping a container removes the bindings blessed into it, and a named bystander container's
-   bindings still serve — verified by `test/gateway/binding-drop-scoped.test.ts`.
+   bindings still serve — verified by `test/gateway/binding-container-scoped.test.ts`.
 8. Two peers publishing byte-identical law through two channels both bind, each under its own
    receiver-assigned name, and both serve real reads — verified by
    `test/federation/identical-law-two-peers.test.ts`.
@@ -96,10 +97,10 @@ them is a separate problem once law resolves like data and binds where it was bl
 11. The declared policy is DATA: changing it is a delta, the next read obeys it, and no restart is
     involved — verified by `test/gateway/binding-policy-is-data.test.ts`.
 12. A store with no declared policy behaves exactly as today's hardcoded latest-wins, so an existing
-    store upgrades without choosing anything — verified by `test/gateway/binding-default-policy.test.ts`.
+    store upgrades without choosing anything — verified by `test/gateway/binding-policy-is-data.test.ts`.
 13. The declaration accepts an optional CONTAINER qualifier and an unqualified declaration governs the
     root, so per-container policy is a later delta rather than a migration — verified by
-    `test/gateway/binding-policy-qualifier.test.ts`.
+    `test/gateway/binding-policy-is-data.test.ts`.
 
 ## Deliberately out of scope
 

@@ -1636,4 +1636,47 @@ export const CHAPTERS = [
       },
     ],
   },
+  {
+    n: 16,
+    slug: "federation-channels",
+    title: "Law travels, and names are yours",
+    thesis:
+      "A peer's schemas and data arrive through a channel and read on your own surface, under names you assigned — and what resolves a contested name is declared law, not a loop nobody chose.",
+    covers: ["spec/46-federation-channels.md", "spec/47-law-resolves-like-data.md"],
+    body: [
+      {
+        kind: "prose",
+        text: "Pulling moved bytes; a channel moves meaning. You name a container to receive into and assign the peer a prefix, their deltas land in a nested pool, and the law they published binds under your prefix — no schema written by you, no name chosen by them. Two friends who both started from the stock shelf each get their own name on the other's store, and severing a channel takes its law with its data, because the binding was never anywhere but the pool.",
+      },
+      {
+        kind: "claims",
+        claims: [
+          {
+            says: "Two peers holding byte-identical law both bind, each under its own receiver-assigned name, and each name answers its own peer's data through a real read.",
+            spec: "spec/47-law-resolves-like-data.md",
+            proof: "test/federation/identical-law-two-peers.test.ts",
+            door: null,
+          },
+          {
+            says: "A channel's blessing lives in the channel's pool — absent from the root ground — so dropping the channel removes its lenses from the surface while a named bystander channel's still serve.",
+            spec: "spec/47-law-resolves-like-data.md",
+            proof: "test/gateway/binding-container-scoped.test.ts",
+            door: null,
+          },
+          {
+            says: "How a contested name resolves is a declared, strikeable delta — latest-wins, mine-outranks-a-peer's, or serve-neither-and-name-both — and a store that declares nothing keeps its old loud collision unchanged.",
+            spec: "spec/47-law-resolves-like-data.md",
+            proof: "test/gateway/binding-policy-is-data.test.ts",
+            door: null,
+          },
+          {
+            says: "The channel's whole control surface is reachable over MCP behind a container-scoped grant, and the drop tool can only stage a sever with a two-sided preview — a person completes it in the browser, behind a session a connector token cannot obtain.",
+            spec: "spec/46-federation-channels.md",
+            proof: "test/server/federate-mcp.test.ts",
+            door: null,
+          },
+        ],
+      },
+    ],
+  },
 ];
