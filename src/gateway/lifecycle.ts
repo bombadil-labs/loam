@@ -46,7 +46,7 @@ import {
   lensNameFor,
 } from "./registration.js";
 import { loadRenderers, readRenderers } from "./renderers.js";
-import { readBindingPolicy } from "./binding-policy.js";
+import { interpretBindingPolicy, readBindingPolicy } from "./binding-policy.js";
 import { loadResolvers } from "./resolvers.js";
 
 // Every claim template must be VISIBLE to its own schema: substitute sentinels for the arg
@@ -390,10 +390,57 @@ const lastBindFailure = (gw: Gateway, key: string): string | undefined =>
 export function replayRegistrationsImpl(gw: Gateway): void {
   const manual = gw.registered.filter((r) => r.origin === "manual");
   const accepted: Bound[] = [...manual];
-  let pending: Bound[] = readRegistrations(gw.reactor, gw.operatorAuthor).map((r) => ({
+  const rootRows: Bound[] = readRegistrations(gw.reactor, gw.operatorAuthor).map((r) => ({
     ...r,
     origin: "store" as const,
   }));
+
+  // §47 slice 3 — AGGREGATE EACH ATTACHED CHANNEL POOL'S BLESSED BINDINGS. A channel's blessing
+  // now lands in the pool's own ground (bindArrived adopts on the POOL gateway), so the law lives
+  // where the peer's data lives and a drop takes both. The surface still serves the lens: this fold
+  // is what carries it up, each row filtered to the channel's own prefix so a pool cannot smuggle a
+  // binding for a name outside its namespace.
+  const channelRows: Bound[] = [];
+  for (const standing of gw.channelStatus()) {
+    const pool = gw.channelPools.get(standing.name)?.gateway;
+    if (pool === undefined) continue;
+    for (const r of readRegistrations(pool.reactor, pool.operatorAuthor)) {
+      if (!lensOf(r).startsWith(`${standing.prefix}:`)) continue;
+      channelRows.push({ ...r, origin: "store" as const, channel: standing.name });
+    }
+  }
+
+  // CROSS-ORIGIN CONTESTS resolve by the declared policy BEFORE the trial fixpoint. Undeclared
+  // keeps today's shape whole: root rows enter the fixpoint FIRST, so a channel row contesting a
+  // root name meets the gql collision and is remembered as a bind failure — root wins, exactly as
+  // a manual override always has. Under a declared mode the loser is dropped here instead, so the
+  // fixpoint never sees the contest. Rank under byAuthorRank is ORIGIN rank — root over channel —
+  // because every blessing is operator-SIGNED and raw author rank is vacuous (T202's warning; this
+  // fold is the change that makes rank real, and the door rail lands with it).
+  const mode = readBindingPolicy(gw.reactor, gw.operatorAuthor);
+  let pending: Bound[] = [...rootRows, ...channelRows];
+  if (mode !== undefined && channelRows.length > 0) {
+    const resolved = interpretBindingPolicy(
+      pending
+        .filter((r) => r.boundId !== undefined)
+        .map((r) => ({
+          lens: lensOf(r),
+          entity: r.entity ?? "",
+          author: r.channel === undefined ? (gw.operatorAuthor ?? "") : `channel:${r.channel}`,
+          timestamp: r.boundAt ?? 0,
+          deltaId: r.boundId!,
+        })),
+      mode,
+      gw.operatorAuthor,
+    );
+    pending = pending.filter((r) => {
+      if (r.boundId === undefined) return true; // a manual row never entered the contest
+      const winner = resolved.winners.get(lensOf(r));
+      // Under `conflicts` a contested name has NO winner and every contender drops (criterion 4);
+      // otherwise only the policy's winner proceeds to the trial.
+      return winner === r.boundId;
+    });
+  }
   for (;;) {
     const stillPending: Bound[] = [];
     let progressed = false;

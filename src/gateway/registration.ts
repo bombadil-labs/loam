@@ -232,6 +232,11 @@ export interface Registration {
   // The hyperschema entity the definition lives at (`hyperschema:<Name>` by default). Identity is
   // the ENTITY, not the name: republishing here evolves; a different entity is a different schema.
   readonly entity?: string;
+  // The BINDING delta's stamp and id — what a declared policy resolves cross-origin contests on
+  // when this row meets a channel pool's row for one name (§47 slice 3). Optional: a manual
+  // registration has no binding delta.
+  readonly boundAt?: number;
+  readonly boundId?: string;
   // The write discipline, traveling with the read program.
   readonly mutations?: ClaimTemplates;
   // Why `mutations` is absent although the binding's bytes carry a payload: the payload could not
@@ -978,6 +983,8 @@ export function readRegistrations(reactor: Reactor, operator?: string): Registra
         roots: cand.roots,
         entity: cand.schemaEntity,
         lensName: lensNameOf(cand),
+        boundAt: cand.timestamp,
+        boundId: cand.id,
         ...(cand.mutations === undefined ? {} : { mutations: cand.mutations }),
         ...(cand.mutationsDefect === undefined ? {} : { mutationsDefect: cand.mutationsDefect }),
         ...(cand.writable === undefined ? {} : { writable: cand.writable }),
@@ -1035,6 +1042,8 @@ export function readRegistrationVersions(
         roots: cand.roots,
         entity: cand.schemaEntity,
         lensName: lensNameOf(cand),
+        boundAt: cand.timestamp,
+        boundId: cand.id,
         ...(cand.mutations === undefined ? {} : { mutations: cand.mutations }),
         ...(cand.writable === undefined ? {} : { writable: cand.writable }),
         ...(cand.resolvers === undefined ? {} : { resolvers: cand.resolvers }),

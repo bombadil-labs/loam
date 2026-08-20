@@ -74,10 +74,10 @@ describe("§47 — identical law from two peers", () => {
       const first = await ch.sync();
       expect(first.bound).toContain("alice:Plant");
 
-      // LAW deltas only: every sync stamps a channel record, so the raw count always moves. What
+      // LAW deltas in the POOL, where blessings land (S47 slice 3); the raw count always moves. What
       // the witness promises is that no REGISTRATION lands twice.
       const lawCount = (): number =>
-        [...me.reactor.snapshot()].filter((d) =>
+        [...ch.pool.gateway!.reactor.snapshot()].filter((d) =>
           d.claims.pointers.some(
             (p) => p.target.kind === "entity" && p.target.entity.context === "loam.registration",
           ),

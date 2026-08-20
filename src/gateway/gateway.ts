@@ -278,6 +278,11 @@ export const NUL = "\u0000";
 /** @internal - T19 seam (lifecycle.ts) */
 export interface Bound extends Registration {
   readonly origin: "manual" | "store";
+  /** The channel pool this row aggregated from (§47 slice 3) — absent for the root's own rows.
+   * Rank under byAuthorRank reads THIS, not the signer: a blessing is operator-signed wherever it
+   * lands, and "author rank" means whose ACT placed the binding — a direct registration outranks
+   * law that arrived by federation. */
+  readonly channel?: string;
 }
 
 // The two names a registration answers to when something binds to it BY NAME: the reading it is,
@@ -937,6 +942,10 @@ export class Gateway {
         this.federationChannels.set(standing.name, resumeChannelImpl(this, standing, token));
       }
     }
+    // Boot's replay ran before any pool attached, so the aggregation saw none of them. Refold once,
+    // after the loop — without this a rebooted store keeps the data and loses the LAW until the
+    // next sync, which is T196's failure shape one layer up.
+    if (this.channelPools.size > 0) this.replayRegistrations();
   }
 
   /** Keep accepting on every open channel until stopped. Polling today; the transport is

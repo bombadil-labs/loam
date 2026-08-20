@@ -147,11 +147,11 @@ describe("§46 — dropping one channel", () => {
 
       // The bystander's LAW still serves — dropping a channel is not a law-wide retraction.
       expect(me.def("bob:Sprout")).toBeDefined();
-      // And the dropped peer's lens no longer ANSWERS. It stays registered — a drop purges bytes,
-      // not the receiver's own bindings — but reading it must refuse rather than fall back to this
+      // And the dropped peer's lens is GONE from the surface entirely. The binding — a drop purges bytes,
+      // lived in the pool and left with it (S47 slice 3) — so the name resolves as never registered, and cannot fall back to this
       // store's own ground. Measured before the guard: it answered the receiver's private claim.
       const orphaned = await me.query(`{ alice_Plant(entity: "${FERN}") { height } }`);
-      expect(orphaned.errors?.join(" ")).toMatch(/severed/);
+      expect(orphaned.errors?.join(" ")).toMatch(/Cannot query field/);
     } finally {
       await alice.close();
       await bob.close();
