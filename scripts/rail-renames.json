@@ -58,52 +58,58 @@
       "authorized": "PENDING MYK - a branch cannot self-authorize, so merging this entry IS the authorization. Fixture size only; both probes verified red."
     },
     {
-      "from": "\"a bulk of 5k plain arrivals folds",
-      "to": "\"a bulk of plain arrivals folds",
-      "files": ["test/gateway/listing-warm.test.ts"],
-      "authorized": "Myk, 2026-08-19, in chat \u2014 T187: the bulk-fold rail flakes under suite load; authorized shrinking its fixture, explicitly NOT widening its timeout."
+      "from": "the second channel reports WITNESSED, never bound, because its name is not created",
+      "to": "both names bind: identical law under two names is two bindings (was the T198 interim)",
+      "files": ["test/federation/name-parked.test.ts"],
+      "authorized": "Myk, 2026-08-20, in chat \u2014 T200/\u00a747 criterion 2: the (address, living name) witness makes both peers' names bind; the interim witnessed-only rail flips to assert the fixed behavior."
     },
     {
-      "from": "[\"plant:b00500\", \"plant:b02500\", \"plant:b04500\", MOSS]",
-      "to": "[\"plant:b00150\", \"plant:b00750\", \"plant:b01350\", MOSS]",
-      "files": ["test/gateway/listing-warm.test.ts"],
-      "authorized": "Myk, 2026-08-19, in chat \u2014 T187: the bulk-fold rail flakes under suite load; authorized shrinking its fixture, explicitly NOT widening its timeout."
+      "from": "whatever it is called, and adoptLaw refuses to publish law it already serves under another",
+      "to": "whatever it is called. The witness now keys on (address, living name) per criterion 2, so",
+      "files": ["test/federation/name-parked.test.ts"],
+      "authorized": "Myk, 2026-08-20, in chat \u2014 T200/\u00a747 criterion 2: the (address, living name) witness makes both peers' names bind; the interim witnessed-only rail flips to assert the fixed behavior."
     },
     {
-      "from": "{ length: 5000 }",
-      "to": "{ length: 1500 }",
-      "files": ["test/gateway/listing-warm.test.ts"],
-      "authorized": "Myk, 2026-08-19, in chat \u2014 T187: the bulk-fold rail flakes under suite load; authorized shrinking its fixture, explicitly NOT widening its timeout."
+      "from": "deliberately, so a module blessed twice does not bind twice.",
+      "to": "the same law under a NEW name publishes; a SAME-name repeat still witnesses.",
+      "files": ["test/federation/name-parked.test.ts"],
+      "authorized": "Myk, 2026-08-20, in chat \u2014 T200/\u00a747 criterion 2: the (address, living name) witness makes both peers' names bind; the interim witnessed-only rail flips to assert the fixed behavior."
     },
     {
-      "from": "String(5000 - i)",
-      "to": "String(1500 - i)",
-      "files": ["test/gateway/listing-warm.test.ts"],
-      "authorized": "Myk, 2026-08-19, in chat \u2014 T187: the bulk-fold rail flakes under suite load; authorized shrinking its fixture, explicitly NOT widening its timeout."
+      "from": "The defect was reporting that outcome as `bound`. The report said the name serves; the store",
+      "to": "The interim (T198) reported `witnessed` honestly while the name stayed uncreated; this now",
+      "files": ["test/federation/name-parked.test.ts"],
+      "authorized": "Myk, 2026-08-20, in chat \u2014 T200/\u00a747 criterion 2: the (address, living name) witness makes both peers' names bind; the interim witnessed-only rail flips to assert the fixed behavior."
     },
     {
-      "from": "toHaveLength(5001)",
-      "to": "toHaveLength(1501)",
-      "files": ["test/gateway/listing-warm.test.ts"],
-      "authorized": "Myk, 2026-08-19, in chat \u2014 T187: the bulk-fold rail flakes under suite load; authorized shrinking its fixture, explicitly NOT widening its timeout."
+      "from": "threw on it. Until a second name can serve the same law, saying so is the honest answer.",
+      "to": "asserts the fix, and identical-law-two-peers.test.ts proves both names SERVE real reads.",
+      "files": ["test/federation/name-parked.test.ts"],
+      "authorized": "Myk, 2026-08-20, in chat \u2014 T200/\u00a747 criterion 2: the (address, living name) witness makes both peers' names bind; the interim witnessed-only rail flips to assert the fixed behavior."
     },
     {
-      "from": "after: \"plant:b00490\" })).toEqual(cold.slice(490, 515))",
-      "to": "after: \"plant:b00140\" })).toEqual(cold.slice(140, 165))",
-      "files": ["test/gateway/listing-warm.test.ts"],
-      "authorized": "Myk, 2026-08-19, in chat \u2014 T187: the bulk-fold rail flakes under suite load; authorized shrinking its fixture, explicitly NOT widening its timeout."
+      "from": "expect(second.bound).not.toContain(\"bob:Plant\");",
+      "to": "expect(second.bound).toContain(\"bob:Plant\");",
+      "files": ["test/federation/name-parked.test.ts"],
+      "authorized": "Myk, 2026-08-20, in chat \u2014 T200/\u00a747 criterion 2: the (address, living name) witness makes both peers' names bind; the interim witnessed-only rail flips to assert the fixed behavior."
     },
     {
-      "from": "cold[2500]! })).toEqual(cold.slice(2501, 2526))",
-      "to": "cold[750]! })).toEqual(cold.slice(751, 776))",
-      "files": ["test/gateway/listing-warm.test.ts"],
-      "authorized": "Myk, 2026-08-19, in chat \u2014 T187: the bulk-fold rail flakes under suite load; authorized shrinking its fixture, explicitly NOT widening its timeout."
+      "from": "expect(second.witnessed).toContain(\"bob:Plant\");",
+      "to": "expect(second.witnessed).toEqual([]);",
+      "files": ["test/federation/name-parked.test.ts"],
+      "authorized": "Myk, 2026-08-20, in chat \u2014 T200/\u00a747 criterion 2: the (address, living name) witness makes both peers' names bind; the interim witnessed-only rail flips to assert the fixed behavior."
     },
     {
-      "from": "cold[4990]! })).toEqual(cold.slice(4991))",
-      "to": "cold[1490]! })).toEqual(cold.slice(1491))",
-      "files": ["test/gateway/listing-warm.test.ts"],
-      "authorized": "Myk, 2026-08-19, in chat \u2014 T187: the bulk-fold rail flakes under suite load; authorized shrinking its fixture, explicitly NOT widening its timeout."
+      "from": "And the witnessed name is exactly the one that does not serve.",
+      "to": "And the second name serves: def resolves it rather than throwing.",
+      "files": ["test/federation/name-parked.test.ts"],
+      "authorized": "Myk, 2026-08-20, in chat \u2014 T200/\u00a747 criterion 2: the (address, living name) witness makes both peers' names bind; the interim witnessed-only rail flips to assert the fixed behavior."
+    },
+    {
+      "from": "expect(() => me.def(\"bob:Plant\")).toThrow();",
+      "to": "expect(() => me.def(\"bob:Plant\")).not.toThrow();",
+      "files": ["test/federation/name-parked.test.ts"],
+      "authorized": "Myk, 2026-08-20, in chat \u2014 T200/\u00a747 criterion 2: the (address, living name) witness makes both peers' names bind; the interim witnessed-only rail flips to assert the fixed behavior."
     }
   ]
 }
