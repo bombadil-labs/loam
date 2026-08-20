@@ -29,6 +29,10 @@ import {
   type Reactor,
   type Term,
 } from "@bombadil/rhizomatic";
+// A deliberate one-way-at-runtime cycle: binding-policy imports `lawfulDeltasAt` from here, and
+// this reader calls its interpreter. Both uses are call-time, so ESM resolves it; the modules stay
+// split because the interpreter is the SPEC and this file is the fast path it disciplines.
+import { interpretBindingPolicy, readBindingPolicy } from "./binding-policy.js";
 
 export const CTX_REGISTRATION = "loam.registration";
 
@@ -727,6 +731,8 @@ interface Candidate {
   resolvers?: ResolverSpecs;
   timestamp: number;
   id: string;
+  /** The BINDING delta's author — what a declared byAuthorRank policy ranks on (§47). */
+  author: string;
 }
 
 // The entity a registration pointer names, by role — the living `schema` and the frozen
@@ -839,6 +845,7 @@ function survivingCandidates(
       ...(resolvers === undefined ? {} : { resolvers }),
       timestamp: delta.claims.timestamp,
       id: delta.id,
+      author: delta.claims.author,
     };
     if (struck) {
       withdrawn?.push(candidate);
@@ -867,6 +874,43 @@ const lensNameOf = (cand: Candidate): LensName =>
     ? cand.livingEntity.slice("schema:".length)
     : cand.livingEntity) as LensName;
 
+/**
+ * The names a `conflicts` policy is withholding, each with EVERY candidate named (§47 criterion 4).
+ * This is the refusal a person can act on: the name is absent from the surface, and this reader
+ * says why and between whom — never a silent gap a caller mistakes for "no such lens".
+ */
+export function readContestedBindings(
+  reactor: Reactor,
+  operator?: string,
+): Map<string, { entity: string; author: string; deltaId: string }[]> {
+  const mode = readBindingPolicy(reactor, operator);
+  const out = new Map<string, { entity: string; author: string; deltaId: string }[]>();
+  if (mode !== "conflicts") return out;
+  const groups = survivingCandidates(reactor, operator);
+  const latest = new Map<string, Candidate>();
+  for (const [key, group] of groups) {
+    for (const cand of group) latest.set([key, lensNameOf(cand)].join(NUL_SEP), cand);
+  }
+  const resolved = interpretBindingPolicy(
+    [...latest.values()].map((c) => ({
+      lens: lensNameOf(c),
+      entity: c.schemaEntity,
+      author: c.author,
+      timestamp: c.timestamp,
+      deltaId: c.id,
+    })),
+    mode,
+    operator,
+  );
+  for (const [lens, list] of resolved.contested) {
+    out.set(
+      lens,
+      list.map((c) => ({ entity: c.entity, author: c.author, deltaId: c.deltaId })),
+    );
+  }
+  return out;
+}
+
 export function readRegistrations(reactor: Reactor, operator?: string): Registration[] {
   const lawful = lawfulSnapshot(reactor, operator);
   const groups = survivingCandidates(reactor, operator);
@@ -881,10 +925,38 @@ export function readRegistrations(reactor: Reactor, operator?: string): Registra
     }
   }
 
+  // §47 — A DECLARED POLICY RESOLVES CONTESTED NAMES; an undeclared store keeps today's behavior
+  // whole (criterion 12), including its build-time collision when two entities want one lens. The
+  // production loop above stays the fast path; `interpretBindingPolicy` is the spec as code, and
+  // the equivalence rail holds this block to its answers so the two can never drift silently.
+  const mode = readBindingPolicy(reactor, operator);
+  const resolvedAway = new Set<string>();
+  if (mode !== undefined) {
+    const resolved = interpretBindingPolicy(
+      [...latest.values()].map((c) => ({
+        lens: lensNameOf(c),
+        entity: c.schemaEntity,
+        author: c.author,
+        timestamp: c.timestamp,
+        deltaId: c.id,
+      })),
+      mode,
+      operator,
+    );
+    for (const c of latest.values()) {
+      const lens = lensNameOf(c) as string;
+      const winner = resolved.winners.get(lens);
+      // Shadowed by the policy, or withheld under `conflicts`: either way this candidate does not
+      // reach the surface, and under `conflicts` the reader below names every contender.
+      if (winner !== c.id) resolvedAway.add(c.id);
+    }
+  }
+
   // Loosely dependency-ordered by timestamp so refs tend to resolve on replay; the gateway's
   // fixpoint handles what order cannot (ties, forward refs).
   const out: Registration[] = [];
   for (const cand of [...latest.values()].sort((a, b) => a.timestamp - b.timestamp)) {
+    if (resolvedAway.has(cand.id)) continue;
     try {
       const hyperschema = loadHyperSchema(lawful, cand.schemaEntity);
       // NUL is the gateway's own alphabet (internal materialization names): a definition whose
