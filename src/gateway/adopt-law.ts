@@ -552,7 +552,17 @@ function schemaExport(src: Source, row: ManifestRow, definitions: readonly Delta
         `must not re-speak law its author took back`,
     );
   }
-  const binding = [...live]
+  // THE ROW'S ALIAS PICKS AMONG SIBLINGS (§47 criterion 9). Several live bindings can share one
+  // entity — §21.7 coexistence, two readings over one definition — and `.at(-1)` alone collapsed
+  // them: every row classified to the entity's LATEST binding, so a sibling lens federated as a
+  // second copy of its twin. When any live binding's own `schema:<name>` bytes match the alias,
+  // classification narrows to those; a module whose alias is not a lens name (the pre-§47 shape,
+  // entity-derived aliases) keeps the latest-overall fallback whole.
+  const aliased = live.filter((d) => {
+    const p = d.claims.pointers.find((pt) => pt.role === "schema");
+    return p?.target.kind === "entity" && p.target.entity.id === `schema:${row.alias}`;
+  });
+  const binding = [...(aliased.length > 0 ? aliased : live)]
     .sort((a, b) =>
       byAge(
         { timestamp: a.claims.timestamp, deltaId: a.id },
