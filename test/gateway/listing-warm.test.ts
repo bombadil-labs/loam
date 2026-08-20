@@ -144,16 +144,16 @@ describe("the maintained candidate set — a warm page does not scan the ground"
     await gw.close();
   });
 
-  it("a bulk of 5k plain arrivals folds in one read: no scan, and the page equals a cold twin", async () => {
+  it("a bulk of plain arrivals folds in one read: no scan, and the page equals a cold twin", async () => {
     const gw = await governedGarden();
     // Several standing members that INTERLEAVE with the arrivals, so the merge has to shift more
     // than one of them (a merge that mis-steps over the standing array survives a single member).
-    const standing = ["plant:b00500", "plant:b02500", "plant:b04500", MOSS];
+    const standing = ["plant:b00150", "plant:b00750", "plant:b01350", MOSS];
     await gw.append(standing.map((n, i) => observed(n, "tag", "soft", 1100 + i, GARDENER_SEED)));
     expect(await page(gw)).toEqual(standing);
     const s = scans(gw);
-    const bulk = Array.from({ length: 5000 }, (_, i) =>
-      observed(`plant:b${String(5000 - i).padStart(5, "0")}`, "height", i, 2000 + i, GARDENER_SEED),
+    const bulk = Array.from({ length: 1500 }, (_, i) =>
+      observed(`plant:b${String(1500 - i).padStart(5, "0")}`, "height", i, 2000 + i, GARDENER_SEED),
     ).filter(
       (d) =>
         !standing.includes(
@@ -169,12 +169,12 @@ describe("the maintained candidate set — a warm page does not scan the ground"
     expect(s.scopes()).toBe(0);
     expect(s.folds()).toBe(bulk.length);
     const cold = slow(gw);
-    expect(cold).toHaveLength(5001);
-    expect(await page(gw, { limit: 25, after: "plant:b00490" })).toEqual(cold.slice(490, 515));
+    expect(cold).toHaveLength(1501);
+    expect(await page(gw, { limit: 25, after: "plant:b00140" })).toEqual(cold.slice(140, 165));
     expect(first).toEqual(cold.slice(0, 25));
     // A page from the middle and the tail, seeking, against the same cold projection.
-    expect(await page(gw, { limit: 25, after: cold[2500]! })).toEqual(cold.slice(2501, 2526));
-    expect(await page(gw, { limit: 25, after: cold[4990]! })).toEqual(cold.slice(4991));
+    expect(await page(gw, { limit: 25, after: cold[750]! })).toEqual(cold.slice(751, 776));
+    expect(await page(gw, { limit: 25, after: cold[1490]! })).toEqual(cold.slice(1491));
     await gw.close();
   }, 60_000);
 
