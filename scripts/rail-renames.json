@@ -58,58 +58,28 @@
       "authorized": "PENDING MYK - a branch cannot self-authorize, so merging this entry IS the authorization. Fixture size only; both probes verified red."
     },
     {
-      "from": "the second channel reports WITNESSED, never bound, because its name is not created",
-      "to": "both names bind: identical law under two names is two bindings (was the T198 interim)",
-      "files": ["test/federation/name-parked.test.ts"],
-      "authorized": "Myk, 2026-08-20, in chat \u2014 T200/\u00a747 criterion 2: the (address, living name) witness makes both peers' names bind; the interim witnessed-only rail flips to assert the fixed behavior."
+      "from": "// And the dropped peer's lens no longer ANSWERS. It stays registered",
+      "to": "// And the dropped peer's lens is GONE from the surface entirely. The binding",
+      "files": ["test/federation/drop-two-sided.test.ts"],
+      "authorized": "Myk, 2026-08-20, in chat (T200 slice 3, 'keep it rollin'): bindings live in the channel's pool, so a drop takes them and the severed-lens guard case stops existing \u2014 the rail's refusal assertion flips to the name being gone from the surface."
     },
     {
-      "from": "whatever it is called, and adoptLaw refuses to publish law it already serves under another",
-      "to": "whatever it is called. The witness now keys on (address, living name) per criterion 2, so",
-      "files": ["test/federation/name-parked.test.ts"],
-      "authorized": "Myk, 2026-08-20, in chat \u2014 T200/\u00a747 criterion 2: the (address, living name) witness makes both peers' names bind; the interim witnessed-only rail flips to assert the fixed behavior."
+      "from": "// not the receiver's own bindings",
+      "to": "// lived in the pool and left with it (S47 slice 3)",
+      "files": ["test/federation/drop-two-sided.test.ts"],
+      "authorized": "Myk, 2026-08-20, in chat (T200 slice 3, 'keep it rollin'): bindings live in the channel's pool, so a drop takes them and the severed-lens guard case stops existing \u2014 the rail's refusal assertion flips to the name being gone from the surface."
     },
     {
-      "from": "deliberately, so a module blessed twice does not bind twice.",
-      "to": "the same law under a NEW name publishes; a SAME-name repeat still witnesses.",
-      "files": ["test/federation/name-parked.test.ts"],
-      "authorized": "Myk, 2026-08-20, in chat \u2014 T200/\u00a747 criterion 2: the (address, living name) witness makes both peers' names bind; the interim witnessed-only rail flips to assert the fixed behavior."
+      "from": "but reading it must refuse rather than fall back to this",
+      "to": "so the name resolves as never registered, and cannot fall back to this",
+      "files": ["test/federation/drop-two-sided.test.ts"],
+      "authorized": "Myk, 2026-08-20, in chat (T200 slice 3, 'keep it rollin'): bindings live in the channel's pool, so a drop takes them and the severed-lens guard case stops existing \u2014 the rail's refusal assertion flips to the name being gone from the surface."
     },
     {
-      "from": "The defect was reporting that outcome as `bound`. The report said the name serves; the store",
-      "to": "The interim (T198) reported `witnessed` honestly while the name stayed uncreated; this now",
-      "files": ["test/federation/name-parked.test.ts"],
-      "authorized": "Myk, 2026-08-20, in chat \u2014 T200/\u00a747 criterion 2: the (address, living name) witness makes both peers' names bind; the interim witnessed-only rail flips to assert the fixed behavior."
-    },
-    {
-      "from": "threw on it. Until a second name can serve the same law, saying so is the honest answer.",
-      "to": "asserts the fix, and identical-law-two-peers.test.ts proves both names SERVE real reads.",
-      "files": ["test/federation/name-parked.test.ts"],
-      "authorized": "Myk, 2026-08-20, in chat \u2014 T200/\u00a747 criterion 2: the (address, living name) witness makes both peers' names bind; the interim witnessed-only rail flips to assert the fixed behavior."
-    },
-    {
-      "from": "expect(second.bound).not.toContain(\"bob:Plant\");",
-      "to": "expect(second.bound).toContain(\"bob:Plant\");",
-      "files": ["test/federation/name-parked.test.ts"],
-      "authorized": "Myk, 2026-08-20, in chat \u2014 T200/\u00a747 criterion 2: the (address, living name) witness makes both peers' names bind; the interim witnessed-only rail flips to assert the fixed behavior."
-    },
-    {
-      "from": "expect(second.witnessed).toContain(\"bob:Plant\");",
-      "to": "expect(second.witnessed).toEqual([]);",
-      "files": ["test/federation/name-parked.test.ts"],
-      "authorized": "Myk, 2026-08-20, in chat \u2014 T200/\u00a747 criterion 2: the (address, living name) witness makes both peers' names bind; the interim witnessed-only rail flips to assert the fixed behavior."
-    },
-    {
-      "from": "And the witnessed name is exactly the one that does not serve.",
-      "to": "And the second name serves: def resolves it rather than throwing.",
-      "files": ["test/federation/name-parked.test.ts"],
-      "authorized": "Myk, 2026-08-20, in chat \u2014 T200/\u00a747 criterion 2: the (address, living name) witness makes both peers' names bind; the interim witnessed-only rail flips to assert the fixed behavior."
-    },
-    {
-      "from": "expect(() => me.def(\"bob:Plant\")).toThrow();",
-      "to": "expect(() => me.def(\"bob:Plant\")).not.toThrow();",
-      "files": ["test/federation/name-parked.test.ts"],
-      "authorized": "Myk, 2026-08-20, in chat \u2014 T200/\u00a747 criterion 2: the (address, living name) witness makes both peers' names bind; the interim witnessed-only rail flips to assert the fixed behavior."
+      "from": "expect(orphaned.errors?.join(\" \")).toMatch(/severed/);",
+      "to": "expect(orphaned.errors?.join(\" \")).toMatch(/Cannot query field/);",
+      "files": ["test/federation/drop-two-sided.test.ts"],
+      "authorized": "Myk, 2026-08-20, in chat (T200 slice 3, 'keep it rollin'): bindings live in the channel's pool, so a drop takes them and the severed-lens guard case stops existing \u2014 the rail's refusal assertion flips to the name being gone from the surface."
     }
   ]
 }
