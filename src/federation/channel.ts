@@ -20,6 +20,7 @@ import type { Container } from "../gateway/container.js";
 import { containerClaims, readContainerTable } from "../gateway/container.js";
 import type { Gateway } from "../gateway/gateway.js";
 import { legalNameFor } from "../gateway/gql.js";
+import { parseOffer } from "./offer.js";
 import { CTX_MANIFEST, isRegistrationBinding, manifestExportClaims } from "../gateway/adopt-law.js";
 import { CTX_REGISTRATION } from "../gateway/registration.js";
 import { freezeMembers } from "../gateway/container-identity.js";
@@ -35,6 +36,12 @@ export interface OpenChannelOptions {
   /** The namespace the RECEIVER assigns this peer. Never the publisher's choice. */
   readonly prefix: string;
   readonly source: ChannelSource;
+  /**
+   * Where the peer IS — persisted on the channel record so a booted store can rebuild this channel
+   * and resume its standing sync. Ordinary data; the credential it presents is not, and lives in the
+   * home (T196).
+   */
+  readonly from?: string;
   /** Whether law arriving on this channel binds. Reversible; see §46's two toggles. */
   readonly bless?: boolean;
 }
@@ -63,6 +70,8 @@ export interface ChannelStatus {
   /** 0 means NEVER synced — deliberately distinct from "synced a while ago". */
   readonly lastSyncedAt: number;
   readonly consecutiveFailures: number;
+  /** The peer's address, or "" for a channel opened before addresses were recorded. */
+  readonly from: string;
 }
 
 export const CTX_CHANNEL = "loam.channel";
@@ -98,6 +107,12 @@ export function channelRecordClaims(
         role: "consecutiveFailures",
         target: { kind: "primitive", value: status.consecutiveFailures },
       },
+      // The peer's ADDRESS, so a booted store can rebuild this channel. Ordinary data; the
+      // credential it presents lives in the home and never here (T196). Omitted when empty so a
+      // record written before addresses existed reads back unchanged.
+      ...(status.from === ""
+        ? []
+        : [{ role: "from" as const, target: { kind: "primitive" as const, value: status.from } }]),
     ],
   };
 }
@@ -148,6 +163,7 @@ function readChannels(
         blessing: of("blessing") !== false,
         lastSyncedAt: Number(of("lastSyncedAt") ?? 0),
         consecutiveFailures: Number(of("consecutiveFailures") ?? 0),
+        from: String(of("from") ?? ""),
       },
     });
   }
@@ -340,6 +356,76 @@ function standingPrefixes(gw: Gateway): { channel: string; prefix: string }[] {
   return out;
 }
 
+/**
+ * One sync, shared by a freshly opened channel and a resumed one.
+ *
+ * Extracted rather than copied when resume arrived (T196): two sync bodies would drift, and the
+ * drift would land on whichever path had fewer tests — which after a restart is the resumed one,
+ * the path a person actually runs.
+ */
+async function syncChannel(
+  gw: Gateway,
+  ground: Gateway,
+  name: string,
+  opts: { into: string; prefix: string; from?: string; source: ChannelSource; bless?: boolean },
+): Promise<SyncReport> {
+  const before = channelStatusImpl(gw, name)[0];
+  // FROZEN: read the toggle from the ground on every sync, so a freeze takes effect on the next
+  // poll without restarting anything — the same "state is data" discipline as `loam:trust`. A
+  // frozen channel reports honestly rather than silently doing nothing: it did not fail, and it
+  // did not accept anything, and both are true.
+  if (before?.receiving === false) {
+    return { offered: 0, accepted: 0, duplicates: 0, bound: [], parked: [], witnessed: [] };
+  }
+  let offered: readonly Delta[];
+  try {
+    offered = await opts.source.pull();
+  } catch (err) {
+    // A peer that did not answer is NOT a peer with nothing new. Record the failure before
+    // rethrowing, so the count survives even when the caller swallows the error (H9).
+    await stamp(gw, {
+      name,
+      into: opts.into,
+      prefix: opts.prefix,
+      receiving: before?.receiving ?? true,
+      blessing: before?.blessing ?? opts.bless !== false,
+      lastSyncedAt: before?.lastSyncedAt ?? 0,
+      consecutiveFailures: (before?.consecutiveFailures ?? 0) + 1,
+      from: before?.from ?? opts.from ?? "",
+    });
+    throw err;
+  }
+  // `federate`, never `append`. Admission and authorship are different axes (§28.1): a peer's
+  // deltas carry the PEER's signatures and hold no write standing here, so the governed write door
+  // refuses them — correctly. Federation is union by signature verification, and the pool is
+  // exactly the bounded place that union is allowed to happen.
+  const report = await ground.federate([...offered]);
+  // Read from the GROUND on every sync, not from the open-time option. Note this blesses the pool's
+  // CONTENTS rather than this sync's arrivals, so resuming binds what landed while blessing was off.
+  const blessing = before?.blessing ?? opts.bless !== false;
+  const { bound, parked, witnessed } = blessing
+    ? await bindArrived(gw, ground, opts.prefix)
+    : { bound: [] as string[], parked: [] as string[], witnessed: [] as string[] };
+  await stamp(gw, {
+    name,
+    into: opts.into,
+    prefix: opts.prefix,
+    receiving: before?.receiving ?? true,
+    blessing: before?.blessing ?? opts.bless !== false,
+    lastSyncedAt: gw.nextTimestamp(),
+    consecutiveFailures: 0,
+    from: before?.from ?? opts.from ?? "",
+  });
+  return {
+    offered: report.offered,
+    accepted: report.accepted,
+    duplicates: report.offered - report.accepted,
+    bound,
+    parked,
+    witnessed,
+  };
+}
+
 export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Promise<Channel> {
   if (gw.options.seed === undefined) {
     throw new Error(
@@ -432,6 +518,7 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
     blessing: opts.bless !== false,
     lastSyncedAt: 0,
     consecutiveFailures: 0,
+    from: opts.from ?? "",
   });
 
   const channel: Channel = {
@@ -442,65 +529,9 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
     // Union, and idempotent by construction: the pool's append de-duplicates by delta id, so a
     // second sync of an unchanged peer accepts nothing and refuses nothing. Polling is therefore
     // safe at any interval, which is what lets the transport stay behind this contract.
-    sync: async (): Promise<SyncReport> => {
-      const before = channelStatusImpl(gw, name)[0];
-      // FROZEN: read the toggle from the ground on every sync, so a freeze takes effect on the next
-      // poll without restarting anything — the same "state is data" discipline as `loam:trust`.
-      // A frozen channel reports honestly rather than silently doing nothing: it did not fail, and
-      // it did not accept anything, and both are true.
-      if (before?.receiving === false) {
-        return { offered: 0, accepted: 0, duplicates: 0, bound: [], parked: [], witnessed: [] };
-      }
-      let offered: readonly Delta[];
-      try {
-        offered = await opts.source.pull();
-      } catch (err) {
-        // A peer that did not answer is NOT a peer with nothing new. Record the failure before
-        // rethrowing, so the count survives even when the caller swallows the error (H9).
-        await stamp(gw, {
-          name,
-          into: opts.into,
-          prefix: opts.prefix,
-          receiving: before?.receiving ?? true,
-          blessing: before?.blessing ?? opts.bless !== false,
-          lastSyncedAt: before?.lastSyncedAt ?? 0,
-          consecutiveFailures: (before?.consecutiveFailures ?? 0) + 1,
-        });
-        throw err;
-      }
-      // `federate`, never `append`. Admission and authorship are different axes (§28.1): a peer's
-      // deltas carry the PEER's signatures and hold no write standing here, so the governed write
-      // door refuses them — correctly. Federation is union by signature verification, and the
-      // pool is exactly the bounded place that union is allowed to happen.
-      const report = await ground.federate([...offered]);
-      // The blessing toggle is read from the GROUND on every sync, not from the open-time option:
-      // a pause must take effect on the next poll without restarting anything. Note this blesses
-      // the pool's CONTENTS rather than this sync's arrivals, so resuming binds what landed while
-      // blessing was off — which is the behaviour a person expects from "pause", and the reason a
-      // sync that accepted nothing can still bind law.
-      const blessing = before?.blessing ?? opts.bless !== false;
-      const { bound, parked, witnessed } = blessing
-        ? await bindArrived(gw, ground, opts.prefix)
-        : { bound: [] as string[], parked: [] as string[], witnessed: [] as string[] };
-      await stamp(gw, {
-        name,
-        into: opts.into,
-        prefix: opts.prefix,
-        receiving: before?.receiving ?? true,
-        blessing: before?.blessing ?? opts.bless !== false,
-        lastSyncedAt: gw.nextTimestamp(),
-        consecutiveFailures: 0,
-      });
-      return {
-        offered: report.offered,
-        accepted: report.accepted,
-        duplicates: report.offered - report.accepted,
-        bound,
-        parked,
-        witnessed,
-      };
-    },
+    sync: () => syncChannel(gw, ground, name, opts),
   };
+
   gw.federationChannels.set(name, channel);
   gw.channelPools.set(name, pool);
   return channel;
@@ -899,5 +930,47 @@ export function sourceFor(
       }
       return parseOffer(await res.text());
     },
+  };
+}
+
+/**
+ * Rebuild a Channel from its record and the credential the home holds — the other half of what
+ * `openChannel` built in a process that has since exited.
+ *
+ * It reaches the peer through the SHIPPED source builder and the SHARED sync body, so a resumed
+ * channel pulls exactly the way a freshly opened one does.
+ */
+export function resumeChannelImpl(gw: Gateway, standing: ChannelStatus, token: string): Channel {
+  const poolOf = (): Container => {
+    const held = gw.channelPools.get(standing.name);
+    if (held === undefined) {
+      throw new Error(
+        `${standing.name} is not attached in this process, so its bytes are unreadable — the ` +
+          `channel record stands and the pool did not open`,
+      );
+    }
+    return held;
+  };
+  const opts = {
+    into: standing.into,
+    prefix: standing.prefix,
+    from: standing.from,
+    source: sourceFor(
+      standing.from,
+      token,
+      () => {
+        throw new Error("a resumed channel pulls from its recorded address, never a file");
+      },
+      parseOffer,
+    ),
+  };
+  return {
+    name: standing.name,
+    into: standing.into,
+    prefix: standing.prefix,
+    get pool(): Container {
+      return poolOf();
+    },
+    sync: () => syncChannel(gw, poolOf().gateway!, standing.name, opts),
   };
 }

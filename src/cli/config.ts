@@ -18,6 +18,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import { isAbsolute, join } from "node:path";
 import { authorForSeed } from "@bombadil/rhizomatic";
 import { randomBytes } from "node:crypto";
@@ -146,6 +147,37 @@ export function readUserSeed(home: string, name: string): UserSeedRead {
 // IS the provisioning: `loam serve` reads every `pen.<name>.seed` at boot and hands the map to
 // `GatewayOptions.pens`, keyed by the `<name>` a renderer binding cites.
 export const penSeedPath = (home: string, name: string): string => join(home, `pen.${name}.seed`);
+
+// A FEDERATION CHANNEL'S TOKEN (T196), under the same law as a pen seed: 0600, in the home, never
+// in the ground. The split is the design — a channel's ADDRESS is ordinary data and rides its record
+// as a delta, and the credential it presents is a secret and stays here. Federation is the last
+// subsystem that should break the rule that a secret never enters the ground, since it is the one
+// that hands data to other people.
+//
+// The filename carries a digest of the channel name rather than the name itself: a channel is
+// `channel:<into>:<prefix>`, and folding its unsafe characters would be many-to-one — the same
+// collision that would have let one channel's drop purge another's bytes.
+export const channelTokenPath = (home: string, channel: string): string =>
+  join(
+    home,
+    `channel.${channel.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 48)}--` +
+      `${createHash("sha256").update(channel, "utf8").digest("hex").slice(0, 16)}.token`,
+  );
+
+export function writeChannelToken(home: string, channel: string, token: string): void {
+  writeFileSync(channelTokenPath(home, channel), `${token}\n`, { mode: 0o600 });
+}
+
+/** The same three-way read a pen seed has (H9): "no file" and "a file I could not read" must never
+ * collapse — only the first means this channel was never given a credential. */
+export function readChannelToken(home: string, channel: string): UserSeedRead {
+  try {
+    return { kind: "present", seed: readFileSync(channelTokenPath(home, channel), "utf8").trim() };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { kind: "absent" };
+    return { kind: "unreadable", detail: err instanceof Error ? err.message : String(err) };
+  }
+}
 
 export function writePenSeed(home: string, name: string, seed: string): void {
   writeFileSync(penSeedPath(home, name), `${seed}\n`, { mode: 0o600 });
