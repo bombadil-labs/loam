@@ -577,9 +577,10 @@ every other channel whole.
 - **Federating still costs a peer your operator token.** `GET /:mount/federate` demands it, and that
   token also registers root law, mints grants and reads everything. A container-scoped offer token
   is designed and blocked on where a runtime-issued credential should live (T196/T188).
-- **The standing sync does not survive a restart.** A channel's source is not persisted, so a store
-  that reboots keeps the data and stops pulling — while `federate list` still says `receiving`
-  (T196).
+- ~~The standing sync does not survive a restart.~~ **Fixed (T196).** A channel's address rides its
+  record and its token lives in the home at 0600, so `loam serve` rebuilds its channels at boot and
+  says how many it is syncing. A channel it cannot resume — no recorded address, or no token here —
+  is named on stderr rather than left in the list reporting `receiving`.
 - **Two peers publishing identical law give you one name, not two.** If you and a friend both start
   from `loam register --stock note`, the second channel reports its lens as `witnessed` rather than
   bound, and that name does not answer. The peer's data is still there, reachable through the first

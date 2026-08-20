@@ -31,6 +31,7 @@ import { promoteImpl, readAdoptions, type Adoption } from "./adopt.js";
 import {
   channelStatusImpl,
   channelsEverImpl,
+  resumeChannelImpl,
   curseChannelLawImpl,
   dropChannelImpl,
   keepSyncingImpl,
@@ -193,6 +194,13 @@ export interface GatewayOptions {
    * by forgetting — so a durable deployment sets it.
    */
   readonly channelBackend?: (pool: string) => StoreBackend;
+  /**
+   * The credential a channel presents to its peer, by channel name (T196). A SECRET, so it never
+   * rides the channel record — the address does, and this supplies the other half at boot. Absent,
+   * or returning undefined for a channel, means that channel cannot sync and must SAY so rather
+   * than sit in the list reporting `receiving`.
+   */
+  readonly channelToken?: (channel: string) => string | undefined;
   // The OPERATOR's signing identity — the root of the capability chain (SPEC §7). It needs no
   // grant, plants the first tenants and grants, and signs mutations that name no actor. Without
   // a seed the gateway is read-only — unsigned authority does not exist here.
@@ -896,6 +904,16 @@ export class Gateway {
   async resumeChannels(): Promise<void> {
     for (const standing of this.channelStatus()) {
       if (this.federationChannels.has(standing.name)) continue;
+      // REBUILD THE CHANNEL, not only its pool. `keepSyncing` iterates `federationChannels`, so a
+      // booted store with pools and no channels polls nothing — while `federate list` goes on
+      // reporting `receiving`. That is the standing instruction dying with the process that opened
+      // it, and reporting otherwise (T196).
+      //
+      // A channel with no recorded address, or none this store holds a credential for, is left
+      // unrebuilt DELIBERATELY: it cannot sync, and a handle that cannot pull would report health it
+      // does not have. `channelStatus` still lists it, and the CLI reads the missing half from the
+      // same two places this does.
+      const token = this.options.channelToken?.(standing.name);
       try {
         this.channelPools.set(
           standing.name,
@@ -907,7 +925,16 @@ export class Gateway {
           }),
         );
       } catch {
-        // Deliberately left unattached; see above.
+        // Deliberately left unattached; see above. And CRUCIALLY, left un-REGISTERED below: the
+        // channel goes into `federationChannels` only once its pool is open. Registered first, a
+        // channel with an unreadable pool evaded the CLI's cannot-sync report (which filters on
+        // this very map), and every tick then threw BEFORE the stamp-failure path — so
+        // consecutiveFailures stayed 0 while `federate list` said `receiving` about something that
+        // could never pull. The exact H9 shape this ticket closes, reintroduced one layer down.
+        continue;
+      }
+      if (standing.from !== "" && token !== undefined) {
+        this.federationChannels.set(standing.name, resumeChannelImpl(this, standing, token));
       }
     }
   }

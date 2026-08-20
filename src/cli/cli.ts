@@ -77,6 +77,8 @@ import {
   readUserSeed,
   storePath,
   userSeedPath,
+  readChannelToken,
+  writeChannelToken,
   writePenSeed,
   writeUserSeed,
 } from "./config.js";
@@ -706,6 +708,13 @@ async function cmdServe(
     // The serving process must reach a channel's pool that another process opened, or a bound
     // federated lens resolves over an empty ground and answers null (T189).
     channelBackend: channelBackendFor(home, io),
+    // The other half of a persisted channel: the address rides its record, the credential lives
+    // here (T196). A channel whose token is missing is not rebuilt, and says so rather than
+    // sitting in the list reporting `receiving`.
+    channelToken: (c) => {
+      const held = readChannelToken(home, c);
+      return held.kind === "present" ? held.seed : undefined;
+    },
   });
   let server;
   try {
@@ -756,11 +765,39 @@ async function cmdServe(
       (Object.keys(pens).length === 0 ? "" : `\n  pens ${Object.keys(pens).sort().join(", ")}`),
   );
 
+  // THE STANDING INSTRUCTION (§46 story S7, T196). Channels were rebuilt at boot from their records
+  // and the home's credentials; this is what makes them pull. Without it a restarted store keeps its
+  // data, resumes nothing, and goes on reporting `receiving` — the report outliving the behaviour.
+  //
+  // Started only when there is something to poll, so a store with no channels arms no timer, and
+  // named in the boot line so "is my federation live" is answered here rather than by a stale
+  // `lastSyncedAt` an hour later.
+  const standing =
+    gateway.federationChannels.size > 0 ? gateway.keepSyncing({ everyMs: 60_000 }) : undefined;
+  if (standing !== undefined) {
+    io.out(`  syncing ${gateway.federationChannels.size} channel(s) every 60s`);
+  }
+  const unresumed = gateway.channelStatus().filter((c) => !gateway.federationChannels.has(c.name));
+  for (const c of unresumed) {
+    // An honest report of a channel that CANNOT sync, rather than a list that says `receiving`
+    // about something nothing is polling (H9).
+    io.err(
+      `loam: ${c.name} will not sync — ` +
+        (c.from === ""
+          ? "its record carries no peer address (opened before addresses were recorded)"
+          : !gateway.channelPools.has(c.name)
+            ? "its pool did not open (is its file readable?)"
+            : "this home holds no token for it") +
+        ". Re-open it with `loam federate open` to resume.",
+    );
+  }
+
   // Closing the server also releases the gateway (and its backend file) — one shutdown, whole.
   // The serving record goes LAST: while any of this can still fail, a live pid is still true.
   const handle: ServerHandle = {
     ...server,
     async close(): Promise<void> {
+      await standing?.stop();
       await server.close();
       await gateway.close();
       rmSync(servingFile(home), { force: true });
@@ -870,7 +907,13 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
   const gateway = await Gateway.boot(
     openStore(path, io),
     assembleGenesis({ operatorSeed: readSeed(home) }),
-    { channelBackend: channelBackendFor(home, io) },
+    {
+      channelBackend: channelBackendFor(home, io),
+      channelToken: (c) => {
+        const held = readChannelToken(home, c);
+        return held.kind === "present" ? held.seed : undefined;
+      },
+    },
   );
   let outcome: PublishOutcome;
   try {
@@ -938,7 +981,13 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
   const gateway = await Gateway.boot(
     openStore(storePath(home, parsed.flags.get("store")), io),
     assembleGenesis({ operatorSeed: readSeed(home) }),
-    { channelBackend: channelBackendFor(home, io) },
+    {
+      channelBackend: channelBackendFor(home, io),
+      channelToken: (c) => {
+        const held = readChannelToken(home, c);
+        return held.kind === "present" ? held.seed : undefined;
+      },
+    },
   );
   try {
     if (verb === "list") {
@@ -983,9 +1032,13 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
       const channel = await gateway.openChannel({
         into,
         prefix,
+        from,
         bless: parsed.flags.get("bless") !== "false",
         source: sourceFor(from, token, (f) => readFileSync(f, "utf8"), parseOffer),
       });
+      // The credential is written where secrets live, so the next boot can resume this channel.
+      // The address went onto its record; this is the half that must never be a delta (T196).
+      if (token !== undefined) writeChannelToken(home, channel.name, token);
       const report = await channel.sync();
       io.out(
         `loam: channel ${channel.name}\n` +
@@ -1102,7 +1155,13 @@ async function cmdPull(args: readonly string[], io: IO): Promise<number> {
   const gateway = await Gateway.boot(
     openStore(path, io),
     assembleGenesis({ operatorSeed: readSeed(home) }),
-    { channelBackend: channelBackendFor(home, io) },
+    {
+      channelBackend: channelBackendFor(home, io),
+      channelToken: (c) => {
+        const held = readChannelToken(home, c);
+        return held.kind === "present" ? held.seed : undefined;
+      },
+    },
   );
   let report: FederationReport;
   // Pull's own dimension: deltas the peer sent that would not even reconstruct (see PullReport).
