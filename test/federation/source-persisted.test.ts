@@ -115,3 +115,42 @@ describe("T196 — the source is persisted", () => {
     }
   });
 });
+
+describe("T196 — a channel whose pool cannot attach is not reported live", () => {
+  it("a failed pool attach leaves the channel UNRESUMED, not silently registered", async () => {
+    // The failure class the stderr report exists for: the record is whole, the token is present,
+    // and the pool's own store cannot open (a locked or corrupt sqlite). Registering the channel
+    // anyway would make it evade that report, and every sync tick would then throw BEFORE the
+    // stamp-failure path runs — consecutiveFailures stays 0, lastSyncedAt rots, and `federate
+    // list` says `receiving` about something that can never pull. That is the exact H9 shape this
+    // ticket exists to close, reintroduced one layer down.
+    const { SqliteBackend } = await import("../../src/store/sqlite.js");
+    const path = join(home, "store.sqlite");
+    const genesis = assembleGenesis({ operatorSeed: "cc".repeat(32), registrations: [] });
+    const first = await Gateway.boot(new SqliteBackend(path), genesis);
+    await first.openChannel({
+      into: "friends",
+      prefix: "alice",
+      from: "https://peer.example/default",
+      source: { pull: () => Promise.resolve([]) },
+    });
+    await first.close();
+
+    const rebooted = await Gateway.boot(new SqliteBackend(path), genesis, {
+      channelToken: () => "tok",
+      // The pool's store refuses to open — the unreadable-sqlite case, made deterministic.
+      channelBackend: () => {
+        throw new Error("simulated: the pool's sqlite is locked");
+      },
+    });
+    try {
+      // NOT live: nothing can pull it, so nothing may claim it.
+      expect(rebooted.federationChannels.has("channel:friends:alice")).toBe(false);
+      // Two-sided: still LISTED — the record stands, which is what lets the CLI name it on stderr
+      // instead of the channel simply vanishing.
+      expect(rebooted.channelStatus("channel:friends:alice")).toHaveLength(1);
+    } finally {
+      await rebooted.close();
+    }
+  });
+});

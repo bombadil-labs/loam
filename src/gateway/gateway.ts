@@ -914,9 +914,6 @@ export class Gateway {
       // does not have. `channelStatus` still lists it, and the CLI reads the missing half from the
       // same two places this does.
       const token = this.options.channelToken?.(standing.name);
-      if (standing.from !== "" && token !== undefined) {
-        this.federationChannels.set(standing.name, resumeChannelImpl(this, standing, token));
-      }
       try {
         this.channelPools.set(
           standing.name,
@@ -928,7 +925,16 @@ export class Gateway {
           }),
         );
       } catch {
-        // Deliberately left unattached; see above.
+        // Deliberately left unattached; see above. And CRUCIALLY, left un-REGISTERED below: the
+        // channel goes into `federationChannels` only once its pool is open. Registered first, a
+        // channel with an unreadable pool evaded the CLI's cannot-sync report (which filters on
+        // this very map), and every tick then threw BEFORE the stamp-failure path — so
+        // consecutiveFailures stayed 0 while `federate list` said `receiving` about something that
+        // could never pull. The exact H9 shape this ticket closes, reintroduced one layer down.
+        continue;
+      }
+      if (standing.from !== "" && token !== undefined) {
+        this.federationChannels.set(standing.name, resumeChannelImpl(this, standing, token));
       }
     }
   }

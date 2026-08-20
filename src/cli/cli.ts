@@ -785,7 +785,9 @@ async function cmdServe(
       `loam: ${c.name} will not sync — ` +
         (c.from === ""
           ? "its record carries no peer address (opened before addresses were recorded)"
-          : "this home holds no token for it") +
+          : !gateway.channelPools.has(c.name)
+            ? "its pool did not open (is its file readable?)"
+            : "this home holds no token for it") +
         ". Re-open it with `loam federate open` to resume.",
     );
   }
