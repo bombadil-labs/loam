@@ -922,14 +922,26 @@ const routeWinner = (gw: Gateway, route: string): Winner | undefined => {
 };
 
 // Is this exact law already bound at this root, under ANY name? That is what makes a re-blessing a
-// silent WITNESS rather than a second publish — identity is the content address, never the living
-// name (implementing it as the name would hand the root-name guard a bypass).
-function boundElsewhere(gw: Gateway, ex: SchemaExport | RendererExport): Winner | undefined {
+// silent WITNESS rather than a second publish. Law identity is the content address — but the
+// WITNESS keys on (address, requested living name), not the address alone (§47 criterion 2,
+// T198): the same law under the SAME name is a repeat and witnesses (the hourly blessAll case),
+// while the same law under a NEW name is a second binding and publishes — two peers who both ran
+// `loam register --stock note` are the default case, and address-only witnessing left the second
+// channel's name uncreated while the report said bound. A caller with NO requested name (lawFrom's
+// exposure reading asks "bound under any name?") keeps the old address-only semantics.
+//
+// The root-name guard is untouched: it runs AFTER this, per name, so keying the witness narrower
+// hands it nothing — a contested name still meets the same refusal it always did.
+function boundElsewhere(
+  gw: Gateway,
+  ex: SchemaExport | RendererExport,
+  requestedName?: string,
+): Winner | undefined {
   if (ex.kind === "schema") {
     for (const v of gw.registrationVersions()) {
-      if (schemaLawAddress(v.hyperschema, v.schema) === ex.address) {
-        return { address: ex.address, deltaId: v.deltaId };
-      }
+      if (schemaLawAddress(v.hyperschema, v.schema) !== ex.address) continue;
+      if (requestedName !== undefined && lensOf(v) !== requestedName) continue;
+      return { address: ex.address, deltaId: v.deltaId };
     }
     return undefined;
   }
@@ -1073,8 +1085,13 @@ async function adoptOne(
     if (capture !== undefined) throw new Error(`adoption refused: ${capture}`);
   }
 
-  // Already bound, by CONTENT ADDRESS under any name: a silent witness, never a second publish.
-  const already = boundElsewhere(gw, ex);
+  // Already bound as THE NAME THE CALLER ASKED FOR: a silent witness, never a second publish.
+  // The key is `opts.as`, deliberately — an explicit `as` is the receiver's naming act (§46), so
+  // the name is part of the request, and the same law under a NEW requested name is a second
+  // binding that publishes (§47 criterion 2: many names may point at one law). A call with NO `as`
+  // asked for the LAW, not a name, and keeps the address-only witness whole — T140's idempotent
+  // module contract, where re-blessing what the operator already serves appends nothing.
+  const already = boundElsewhere(gw, ex, opts.as);
   if (already !== undefined) {
     const landed = await record(gw, src, row, ex, "witnessed", already.deltaId);
     return { alias: row.alias, kind: "witnessed", landed, notes };
@@ -1108,7 +1125,14 @@ async function adoptOne(
 
   const name = livingNameOf(ex, opts);
   const confirmed = opts.repoints?.[row.alias] === row.target;
-  const mayTake = opts.supersede === true || opts.as !== undefined || confirmed;
+  // `as` NAMES; only `supersede` (or a confirmed re-point) TAKES. The door's own refusal presents
+  // them as exactly that pair — supersede to take the name, `as` to serve side by side — yet `as`
+  // used to confer take-the-name too, so an operator following the door's own guidance onto an
+  // OCCUPIED name struck the incumbent's binding silently, with the outcome reading "adopted-from"
+  // and no note that a naming request had become a retirement (the suppression lens's finding;
+  // §47's witness change made the state reachable, since the same law bound under another name no
+  // longer witnesses before this guard runs).
+  const mayTake = opts.supersede === true || confirmed;
 
   // PHASE 1 — the name-check, inside the critical section. It carries the winner it OBSERVED.
   const observed = await withLivingNames(gw, () => {

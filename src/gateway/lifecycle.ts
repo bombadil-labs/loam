@@ -46,6 +46,7 @@ import {
   lensNameFor,
 } from "./registration.js";
 import { loadRenderers, readRenderers } from "./renderers.js";
+import { readBindingPolicy } from "./binding-policy.js";
 import { loadResolvers } from "./resolvers.js";
 
 // Every claim template must be VISIBLE to its own schema: substitute sentinels for the arg
@@ -646,11 +647,24 @@ export async function publishRegistrationImpl(
     await loadResolvers([resolvers]);
   }
   const lensName = lensNameFor(hyperschema, schema);
+  const schemaEntity = schemaEntityFor(hyperschema, entity);
   const survivors = gw.registered.filter(
     (r) => !(programOf(r) === hyperschema.name && lensOf(r) === lensName),
   );
+  // §47 — UNDER A DECLARED BINDING POLICY, A NAME CONTEST IS NOT A REFUSAL. The trial build's job
+  // is to refuse what replay would trip on; with a policy declared, replay RESOLVES a contested
+  // name instead of tripping (readRegistrations applies the policy), so the trial is run over the
+  // set minus the rival — both registrations land as deltas, and the replay below decides which one
+  // serves. The outcome stays honest either way: `bound: false` with the policy named, never a
+  // thrown refusal for law that lawfully landed. An UNDECLARED store keeps today's loud collision
+  // (criterion 12) — the next line changes nothing for it.
+  const mode = readBindingPolicy(gw.reactor, gw.operatorAuthor);
+  const trialSurvivors =
+    mode === undefined
+      ? survivors
+      : survivors.filter((r) => !(lensOf(r) === lensName && r.entity !== schemaEntity));
   const trialLenses: Bound[] = [
-    ...survivors,
+    ...trialSurvivors,
     { hyperschema, schema, roots, origin: "store", lensName },
   ];
   const trialRegistry = SchemaRegistry.build(
@@ -667,7 +681,7 @@ export async function publishRegistrationImpl(
   );
   buildGqlSchema(
     [
-      ...survivors,
+      ...trialSurvivors,
       {
         hyperschema,
         schema,
@@ -682,7 +696,6 @@ export async function publishRegistrationImpl(
   ); // arg names, field collisions, resolver output types — everything the replay would trip on, NOW
 
   const author = authorForSeed(seed);
-  const schemaEntity = schemaEntityFor(hyperschema, entity);
   // The clock is a seam, not a decision: an ordinary publish stamps NOW, and a T33 blessing threads
   // the SOURCE's timestamps through so its twins re-mint the source's ids (see adopt-law.ts's H4
   // note — the tombstone refusal and idempotence both ride that identity).
@@ -753,7 +766,13 @@ export async function publishRegistrationImpl(
     bound: false,
     reason:
       lastBindFailure(gw, failureKey(schemaEntity, lensName)) ??
-      "it was not among the registrations the store re-derived — check that the operator authored " +
-        "it and that its definition survives",
+      (mode !== undefined && gw.registered.some((r) => lensOf(r) === lensName)
+        ? `the declared ${mode} policy resolves "${lensName}" to another registration — the deltas ` +
+          `are down, and this one serves if the contest later resolves its way`
+        : mode === "conflicts"
+          ? `"${lensName}" is contested and the declared conflicts policy serves no contender — ` +
+            `readContestedBindings names them all`
+          : "it was not among the registrations the store re-derived — check that the operator " +
+            "authored it and that its definition survives"),
   };
 }

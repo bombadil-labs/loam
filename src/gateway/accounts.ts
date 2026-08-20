@@ -27,6 +27,7 @@ import { eraseDefect } from "./erase.js";
 import { publicDefect } from "./public.js";
 import { artifactDefect } from "./artifact.js";
 import { trustDefect } from "./trust.js";
+import { bindingPolicyDefect } from "./binding-policy.js";
 import { budgetDefect } from "./budget.js";
 import { envelopeDefect } from "./envelope.js";
 import { containerDefect } from "./container.js";
@@ -576,6 +577,7 @@ export function authorize(
   const defect =
     constitutionalDefect(delta) ??
     trustDefect(delta.claims) ??
+    bindingPolicyDefect(delta.claims) ??
     publicDefect(delta.claims) ??
     artifactDefect(delta.claims) ??
     budgetDefect(delta.claims) ??
