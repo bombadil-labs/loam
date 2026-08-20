@@ -58,9 +58,14 @@ describe("T196 — the source is persisted", () => {
       expect(held.kind).toBe("present");
       expect(held.kind === "present" && held.seed).toBe("s3cret-peer-token");
 
-      // 0600, like every other secret this home holds.
-      const file = readdirSync(home).find((f) => f.includes("channel"))!;
-      expect(statSync(join(home, file)).mode & 0o777).toBe(0o600);
+      // 0600, like every other secret this home holds — asserted off win32 only, where chmod is
+      // advisory and stat reports 0o666 for any writable file (the same reasoning pen.test.ts
+      // records for the seed files). The never-in-the-ground assertion below is the load-bearing
+      // one and holds on every platform.
+      if (process.platform !== "win32") {
+        const file = readdirSync(home).find((f) => f.includes("channel"))!;
+        expect(statSync(join(home, file)).mode & 0o777).toBe(0o600);
+      }
 
       // THE HOUSE RAIL: the secret appears in no delta. Same assertion the operator and pen seeds
       // carry, because federation is exactly where a leaked credential would matter most.
