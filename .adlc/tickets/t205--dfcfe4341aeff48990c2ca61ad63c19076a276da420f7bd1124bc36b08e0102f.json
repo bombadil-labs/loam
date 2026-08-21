@@ -3,5 +3,8 @@
   "category": "feature",
   "duration": 1,
   "id": "T205",
+  "rails": [
+    "test/cli/grant-ledger.test.ts"
+  ],
   "title": "The grant ledger — every author with standing, on one screen"
 }

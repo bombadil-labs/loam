@@ -18,9 +18,23 @@
 // Every name used as a row selector avoids the hex alphabet, on purpose: an author is
 // `ed25519:<hex>`, so a name spelled only in [0-9a-f] could match another row's key.
 //
-// Deliberately NOT asserted: the exact column widths (cosmetic — pinning them would freeze a layout
-// rather than a promise), and the seed-file-UNREADABLE row (no portable fixture makes a file
-// unreadable on every CI platform; `test/cli/pen.test.ts` names the same gap).
+// Deliberately NOT asserted, and why. Column WIDTHS are free — `expectColumnsAligned` pins where a
+// cell starts, which is the promise; the widths belong to the data. The seed-file-UNREADABLE row has
+// no portable fixture (no file is unreadable on every CI platform; `test/cli/pen.test.ts` names the
+// same gap). Three more are unreachable rather than unwritten, and the rail that would close each is
+// named beside it:
+//
+//   - the UNLISTABLE HOME refusal in `cmdGrantList`. `cmdGrant` runs `homeDefect` first and demands
+//     R/W/X, so a home that passes that check and then fails `readdirSync` is a race, not a state a
+//     fixture can stage. Closing it needs a directory whose permission bits bind — root and win32
+//     both defeat that, which is the shape `test/cli/pen.test.ts` had to solve for its own.
+//   - a grant delta carrying a SUBJECT BUT NO VERB, or a non-string primitive where a subject
+//     belongs. `constitutionalDefect` refuses both for everyone, the operator included, so the
+//     ground cannot hold one and `gateway.append` will not plant one. The rail that would close it
+//     writes such a delta past the door, which would assert behaviour for a state the door prevents.
+//   - the ABBREVIATION BOUND. `shortAuthor` returns the whole string for a key of twelve characters
+//     or fewer; every real author is `ed25519:` plus sixty-four, so no fixture distinguishes that
+//     bound from one character either side of it.
 //
 // Every store here is a fresh temp home. Nothing in this file touches a real ~/.loam.
 
