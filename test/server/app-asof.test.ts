@@ -28,10 +28,12 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
+import { asOfBanner } from "../../src/gateway/asof.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { publicClaims } from "../../src/gateway/public.js";
 import { serve, type ServerHandle } from "../../src/server/http.js";
+import type { ResolvedNode } from "../../src/surface/surface.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
@@ -75,7 +77,7 @@ const BOARD_BUNDLE = readFileSync(
 // is the renderer's offer to serve something else.
 const PIN = 'data-loam-asof-says="pin"';
 const FORGOTTEN = 'data-loam-asof-says="forgotten"';
-const CONTROL = "data-loam-asof-control";
+const CONTROL = 'data-loam-asof-control="1"';
 
 interface World {
   readonly gw: Gateway;
@@ -393,8 +395,9 @@ describe("(d) the board's page carries the time control, and an asOf shows a pri
 
   it("the rendered page carries the time control, and the control re-requests with asOf", async () => {
     const html = await bodyOf(await page());
-    expect(html).toContain(CONTROL); // the control's own marker
-    expect(html).toContain('name="asOf"'); // and it asks for the parameter the door parses
+    expect(html).toContain(CONTROL); // the control's own marker, value included
+    // A real input, naming the parameter the door parses — not merely the word somewhere on the page.
+    expect(html).toMatch(/<input[^>]*name="asOf"/i);
     expect(html).toMatch(/<form[^>]*method="get"/i); // an inert GET — no script, any CSP
   });
 
@@ -419,5 +422,80 @@ describe("(d) the board's page carries the time control, and an asOf shows a pri
     const now = await bodyOf(await page());
     expect(now).not.toContain("data-loam-asof-says");
     expect(section(now, "shipped")).toContain("as-of reaches the rendered route");
+  });
+
+  it("the control re-shows the pin where the door offers it, and starts empty where it does not", async () => {
+    // The full door echoes every non-`read` parameter into `node.state`, so the field carries the
+    // moment you are on. The anonymous door carries no state at all (a `?read=` there would be the
+    // lens-existence oracle §17 closed), so the same URL leaves the field blank — the page is still
+    // pinned, and the CHROME above is what says so on both doors.
+    const viaFull = await bodyOf(
+      await fetch(
+        `${board.base}/${BOARD_MOUNT}/app/${BOARD_ROUTE}/${BOARD_ENTITY}?asOf=${beforeShip}`,
+        { headers: { authorization: "Bearer op" } },
+      ),
+    );
+    expect(viaFull).toContain(`value="${beforeShip}"`);
+
+    const viaPublic = await bodyOf(await page(`?asOf=${beforeShip}`));
+    expect(viaPublic).toContain('value=""');
+    expect(viaPublic).toContain(PIN); // pinned either way, and it says so either way
+  });
+});
+
+// ── the banner's own arithmetic, where a door cannot reach it ─────────────────────────────────
+//
+// A rail driving real erasures can afford one or two of them, so the CAP and the plural forms
+// stay unreached through the door — and both are copy a person reads off the page. Asserted
+// directly on `asOfBanner`, which is the same function the door calls.
+
+describe("the confession counts honestly — plurals, and a capped enumeration", () => {
+  const nodeAt = (asOf: number, forgotten: number[], suppressed?: number): ResolvedNode => ({
+    entity: FERN,
+    view: {},
+    hex: "",
+    hviewHex: "",
+    asOf,
+    forgotten,
+    ...(suppressed === undefined ? {} : { suppressed }),
+  });
+
+  it("one forgetting is a record; two are records — the count matches the enumeration", () => {
+    const one = asOfBanner(nodeAt(50, [101]));
+    expect(one).toContain("1 record,");
+    expect(one).toContain("101");
+    const two = asOfBanner(nodeAt(50, [101, 102]));
+    expect(two).toContain("2 records,");
+    expect(two).toContain("101, 102");
+  });
+
+  it("a long history states the exact COUNT and lists only the first eight", () => {
+    const many = [101, 102, 103, 104, 105, 106, 107, 108, 109, 110];
+    const banner = asOfBanner(nodeAt(50, many));
+    expect(banner).toContain("10 records,"); // the count is never truncated
+    expect(banner).toContain("101, 102, 103, 104, 105, 106, 107, 108");
+    expect(banner).toContain("and 2 more"); // and the page says it truncated
+    expect(banner).not.toContain("109"); // the ninth and tenth are not painted
+    expect(banner).not.toContain("110");
+  });
+
+  it("exactly eight is the boundary — all listed, nothing claimed to be more", () => {
+    const banner = asOfBanner(nodeAt(50, [101, 102, 103, 104, 105, 106, 107, 108]));
+    expect(banner).toContain("108");
+    expect(banner).not.toContain("more");
+  });
+
+  it("a standing slate is confessed in the same register, and stays silent at zero", () => {
+    expect(asOfBanner(nodeAt(50, [], 1))).toContain("1 delta");
+    expect(asOfBanner(nodeAt(50, [], 3))).toContain("3 deltas");
+    expect(asOfBanner(nodeAt(50, [], 0))).not.toContain('data-loam-asof-says="suppressed"');
+    expect(asOfBanner(nodeAt(50, []))).not.toContain('data-loam-asof-says="suppressed"');
+  });
+
+  it("nothing forgotten is no confession at all — the pin still states the moment", () => {
+    const banner = asOfBanner(nodeAt(50, []));
+    expect(banner).toContain(PIN);
+    expect(banner).toContain("as of 50 ");
+    expect(banner).not.toContain(FORGOTTEN);
   });
 });

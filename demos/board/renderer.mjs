@@ -50,8 +50,13 @@ export default (n) => {
   // honest source for "now" — and reading the host's clock would make the page differ between two
   // renders of one unchanged ground. The door states the moment it served in its own chrome; the
   // control only has to name the parameter. `state.asOf` is echoed back by the full door, so the
-  // field re-shows the pin you are on where the door offers it.
-  const pinned = n.state && n.state.asOf ? esc(n.state.asOf) : "";
+  // field re-shows the pin you are on there; the anonymous door carries no state and the field
+  // starts empty.
+  //
+  // THE `n.state` GUARD IS LOAD-BEARING even though the §30 floor says the member is always
+  // present: `scripts/render-board-artifact.mjs` renders this bundle from a node it builds by hand
+  // and does not fill it, so an unguarded read throws and takes the mirror down with it.
+  const pinned = esc(n.state && n.state.asOf);
   const rewind =
     `<form class="tt" method="get" data-loam-asof-control="1">` +
     `<label for="asof">as of</label>` +

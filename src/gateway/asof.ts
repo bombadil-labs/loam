@@ -27,15 +27,16 @@ import type { ResolvedNode } from "../surface/surface.js";
 // (H8's shape, on a page). The COUNT is always exact; the enumeration is capped and says so.
 const MAX_LISTED_MOMENTS = 8;
 
-const escape = (s: string): string =>
-  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
 /**
  * The banner's own markup: what moment the door served, and — when the window since that moment
  * contains one — the erasure confession, plus any read-closing slate's suppression count (§29.3).
- * Every value here is a number the gateway computed; nothing a caller typed reaches the page.
+ *
+ * NOTHING HERE IS ESCAPED, AND THAT IS ONLY SAFE WHILE EVERY VALUE IS A NUMBER the gateway itself
+ * computed: the moment, the forgotten timestamps, the suppression count. A caller's `?asOf=` string
+ * never reaches this — the door parsed it to a number before the render began. A future line that
+ * puts any STRING in this banner must escape it, the way §24.7's frame escapes a container name.
  */
 export function asOfBanner(node: ResolvedNode): string {
   const forgotten = node.forgotten ?? [];
@@ -45,7 +46,7 @@ export function asOfBanner(node: ResolvedNode): string {
     forgotten.length === 0
       ? ""
       : `<span data-loam-asof-says="forgotten">Since that moment this store lawfully forgot ` +
-        `${plural(forgotten.length, "record", "records")}, at ${escape(listed)}` +
+        `${plural(forgotten.length, "record", "records")}, at ${listed}` +
         `${rest > 0 ? ` and ${rest} more` : ""}. An erasure keeps no content and names no ` +
         `entity, so this page cannot tell you whether it took anything you see here.</span> `;
   const slate =
@@ -59,7 +60,7 @@ export function asOfBanner(node: ResolvedNode): string {
     `font:14px/1.45 system-ui,sans-serif">` +
     `<strong>As it stood.</strong> ` +
     `<span data-loam-asof-says="pin">This is a reading of the past. The door resolved this page ` +
-    `against the ground as of ${escape(String(node.asOf))} (milliseconds since 1970), not against ` +
+    `against the ground as of ${node.asOf} (milliseconds since 1970), not against ` +
     `the present.</span> ` +
     confession +
     slate +
