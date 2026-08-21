@@ -1601,6 +1601,30 @@ describe("T209 — the CLI names what arrived and mounts one app", () => {
       expect(await run(["federate", "list", "--home", me], io()), said()).toBe(0);
       expect(said()).toContain(CHANNEL);
 
+      // A FLAG THIS FORM DOES NOT TAKE IS REFUSED, not ignored. `--expect` is an accepted federate
+      // flag, and the resolvers branch returns before anything reads it — so an operator who
+      // reached for the pin would be granted, told nothing, and left believing they had pinned.
+      fresh();
+      expect(
+        await run(
+          [
+            "federate",
+            "bless-app",
+            "--channel",
+            CHANNEL,
+            "--resolvers",
+            "alice:Plant",
+            "--expect",
+            "1e20deadbeefcafe0123456789",
+            "--home",
+            me,
+          ],
+          io(),
+        ),
+      ).toBe(2);
+      expect(said()).toContain("does not take --expect");
+      expect(said()).toContain("Nothing was granted");
+
       // THE BARE `--resolvers` FORM, through the door a person types it at. Nothing on this
       // channel is withheld, so the act refuses — which is the point: the refusal proves the CLI
       // reached the gateway with a name it could resolve, rather than passing a string that could

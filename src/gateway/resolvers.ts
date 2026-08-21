@@ -300,12 +300,20 @@ export function applyResolvers(
   if (resolvers === undefined) return view;
   const out: Record<string, View> = { ...view };
   for (const [field, spec] of Object.entries(resolvers)) {
-    // A WITHHELD RESOLVER TAKES ITS FIELD AWAY, and this is the seam where it has to happen. The
-    // availability rule below — a resolver that throws leaves the Policy value — is right about a
-    // resolver this store RAN and that failed. A withheld one was never run, deliberately, so the
-    // Policy value is a number nobody computed and nothing downstream would say so: REST, watch,
-    // list and a rendered page all read THIS function's output, and only GraphQL can attach a
-    // reason to a field. An absent field is the one answer that stays true at every door.
+    // A WITHHELD RESOLVER TAKES ITS FIELD AWAY. The availability rule below — a resolver that
+    // throws leaves the Policy value — is right about a resolver this store RAN and that failed. A
+    // withheld one was never run, deliberately, so the Policy value is a number nobody computed and
+    // nothing downstream would say so: REST, watch, list and a rendered page all read THIS
+    // function's output, and only GraphQL can attach a reason to a field.
+    //
+    // WHERE IT HOLDS, exactly: every top-level read (each door resolves through `resolvedNode`,
+    // `resolvePinned` or `watchEntity`, and all three name their lens), and an EXPANDED CHILD
+    // decorated through its own reading. WHERE IT DOES NOT, named rather than implied: a child the
+    // decoration pass skips because it does not align positionally under a `conflicts` policy, and
+    // a child re-projected by a parent's OWN resolver, which builds its value from the hyperview
+    // and never passes here. Both serve the Policy value for a withheld field. Closing them wants
+    // the field out of the READING rather than out of this view — its own change, with its own
+    // rails, because it moves a published Schema and therefore a law address.
     if (lens !== undefined && isWithheldResolver(spec.code, lens, field)) {
       delete out[field];
       continue;

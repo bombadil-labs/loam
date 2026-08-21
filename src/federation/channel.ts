@@ -976,6 +976,13 @@ export async function blessChannelAppImpl(
  * and say what is missing. This is the act that supplies it: the operator names one lens, and its
  * registration is re-published with the peer's resolvers in place.
  *
+ * WHAT IT DOES NOT CARRY, and its sibling does: a pin. `bless-app --route` takes `--expect` and the
+ * listing prints an app's identity to paste into it; a withheld LENS is printed by name alone, and
+ * this act grants whatever the pool holds when it runs. A poll landing between the listing and the
+ * act therefore grants newer law than the operator read. The act refuses the flag rather than
+ * ignoring it, so nobody is told they pinned something; closing it wants an identity for a lens's
+ * resolver law, which is its own change.
+ *
  * It keeps `bless-app`'s discipline, for the same reasons. The act is per lens, never per channel.
  * The law comes from the pool's own manifest under the operator's own rows, so a peer cannot choose
  * what it grants. And it supersedes deliberately, because the incumbent is the withheld binding
@@ -1083,8 +1090,8 @@ function resolves(ground: Gateway, lens: string): boolean {
  *
  * A pool is an attached container and therefore a mount in its own right, so the mark has to ride
  * the pool rather than a lookup on the parent — the door that reaches it may never consult the
- * parent at all. Every path that attaches one calls this: opening a channel, and resuming one at
- * boot, which is the path a running server actually serves from.
+ * parent at all. ONE caller: `attachChannelPool`, which is the one place a channel's pool is
+ * attached. A mark written at each attach site instead is a mark that gets missed at the next one.
  */
 function markChannelPool(pool: Container): void {
   if (pool.gateway !== undefined) pool.gateway.channelPool = true;
@@ -1098,6 +1105,12 @@ function markChannelPool(pool: Container): void {
  * three sites that need one — opening a channel, resuming one at boot, and the drop path's
  * re-open — and a mark written at each of them is a mark that will be missed at a fourth. This
  * function exists so there is nothing to remember.
+ *
+ * The mark lands just AFTER the attach publishes the mount, not before it, so there is a window in
+ * which the pool is routable and unmarked. No caller in this tree reaches it — the window closes
+ * inside one await with nothing else on the loop that routes — and closing it properly means the
+ * container primitive learning what a channel pool is, which is §27's business rather than this
+ * function's.
  */
 export async function attachChannelPool(gw: Gateway, name: string): Promise<Container> {
   const pool = await gw.openContainer({

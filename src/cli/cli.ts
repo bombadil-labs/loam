@@ -1238,6 +1238,22 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
       // lens's computed fields run. Neither rides the blessing toggle, and neither rides the other.
       const lens = parsed.flags.get("resolvers");
       if (lens !== undefined) {
+        // FLAGS THIS FORM DOES NOT TAKE ARE REFUSED, not ignored. `--expect` pins an APP's identity
+        // and there is no identity for a lens's resolver law to pin; `--pen` and `--supersede`
+        // belong to a route. Accepting them silently would tell an operator they had asked for
+        // something — which, for a pin, is the difference between a check and the belief in one.
+        const stray = ["expect", "pen", "supersede"].filter(
+          (f) => parsed.flags.has(f) || parsed.booleans.has(f),
+        );
+        if (stray.length > 0) {
+          io.err(
+            `federate bless-app --resolvers does not take ${stray.map((f) => `--${f}`).join(", ")}` +
+              " — those belong to `--route`, which mounts an app. This act grants the resolver " +
+              "code on ONE lens, and it has no identity to pin: `federate list` names the lens " +
+              "and nothing finer. Nothing was granted.",
+          );
+          return 2;
+        }
         // THE NAME THE ACT USED, not the one that was typed. `--resolvers Plant` is a supported
         // form and the reader below answers prefixed names, so comparing the operator's own string
         // would be a check that can never match — a guard that passes because it is empty.
