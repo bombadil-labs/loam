@@ -289,7 +289,13 @@ export function applyResolvers(
   hview: HView,
   root: string,
   memo: ResolverMemo,
-  lens?: string,
+  /**
+   * The READING these resolvers ride, and it is REQUIRED — `undefined` would make an un-threaded
+   * call site disable the withheld-field refusal in silence, which is how the expanded-children
+   * path came to answer a Policy value for a field this store had refused to compute. A caller with
+   * genuinely no reading passes `undefined` deliberately and says why.
+   */
+  lens: string | undefined,
 ): Record<string, View> {
   if (resolvers === undefined) return view;
   const out: Record<string, View> = { ...view };
@@ -434,6 +440,10 @@ const decorateOne = (
     ref.hview,
     ref.root,
     memo,
+    // THE CHILD'S OWN READING (§22.7). A withheld field is withheld wherever it is read, and an
+    // expanded child is read through a DIFFERENT lens than its parent — the one named here. Left
+    // out, a peer's lens embedded as a child answered its Policy value at every door.
+    ref.reading.name,
   );
   return decorateChildren(withOwn, ref.hview, ref.reading, readingResolvers, memo);
 };

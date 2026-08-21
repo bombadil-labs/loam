@@ -1238,20 +1238,23 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
       // lens's computed fields run. Neither rides the blessing toggle, and neither rides the other.
       const lens = parsed.flags.get("resolvers");
       if (lens !== undefined) {
-        await gateway.blessChannelResolvers(name, lens);
+        // THE NAME THE ACT USED, not the one that was typed. `--resolvers Plant` is a supported
+        // form and the reader below answers prefixed names, so comparing the operator's own string
+        // would be a check that can never match — a guard that passes because it is empty.
+        const served = await gateway.blessChannelResolvers(name, lens);
         // READ IT BACK. The grant replaces a binding whose address is identical to the one it
         // replaces, so "it landed" and "it took the name" are different questions — and announcing
         // the first as the second is the shape this file refuses everywhere else (H7).
-        if (gateway.withheldOn(name).includes(lens)) {
+        if (gateway.withheldOn(name).includes(served)) {
           io.err(
-            `federate bless-app: ${name} published the grant for "${lens}", and its fields still ` +
+            `federate bless-app: ${name} published the grant for "${served}", and its fields still ` +
               "refuse\n  the withheld binding is still what answers — nothing here should be read " +
               "as a success",
           );
           return 2;
         }
         io.out(
-          `loam: ${name} now runs the peer's resolver code for "${lens}"\n` +
+          `loam: ${name} now runs the peer's resolver code for "${served}"\n` +
             "  it runs on this channel's pool, in this process, and not in the render worker\n" +
             `  dropping the channel takes it with the peer's data — \`loam federate drop --channel ${name} --yes\``,
         );

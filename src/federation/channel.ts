@@ -988,7 +988,7 @@ export async function blessChannelResolversImpl(
   gw: Gateway,
   channel: string,
   lens: string,
-): Promise<void> {
+): Promise<string> {
   const status = channelStatusImpl(gw, channel)[0];
   const ground = gw.channelPools.get(channel)?.gateway;
   if (status === undefined || ground === undefined) {
@@ -1026,6 +1026,10 @@ export async function blessChannelResolversImpl(
   });
   await ground.preloadResolvers();
   gw.replayRegistrations();
+  // THE NAME THIS ACTED ON, because the caller may have typed the bare one. A caller that compared
+  // its own argument against a reader that answers prefixed names would be asking a question that
+  // cannot match — a check that passes because it is empty, not because the state is good.
+  return served;
 }
 
 /**
@@ -1084,6 +1088,28 @@ function resolves(ground: Gateway, lens: string): boolean {
  */
 function markChannelPool(pool: Container): void {
   if (pool.gateway !== undefined) pool.gateway.channelPool = true;
+}
+
+/**
+ * ATTACH A CHANNEL'S POOL — the one place that does it, and therefore the one place that marks it.
+ *
+ * A pool becomes a MOUNT the moment it attaches, so a pool attached without its mark is an
+ * anonymously-readable copy of this store's ground for as long as the process lives. There are
+ * three sites that need one — opening a channel, resuming one at boot, and the drop path's
+ * re-open — and a mark written at each of them is a mark that will be missed at a fourth. This
+ * function exists so there is nothing to remember.
+ */
+export async function attachChannelPool(gw: Gateway, name: string): Promise<Container> {
+  const pool = await gw.openContainer({
+    name,
+    // Durability is the store's choice, not the channel's: without a backend a separate container
+    // is in-memory, and a channel that forgets its peer on restart is not federation.
+    ...(gw.options.channelBackend === undefined
+      ? {}
+      : { backend: gw.options.channelBackend(name) }),
+  });
+  markChannelPool(pool);
+  return pool;
 }
 
 /** The alias a manifest row names, or undefined for any other delta. */
@@ -1342,23 +1368,13 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
   // it rebuilds its channels, and a channel whose peer credential is missing is attached and
   // unresumed — so a second `federate open` in a fresh invocation found the pool already attached
   // and threw, contradicting the door's own "syncing again is safe". Reuse what is attached.
-  const pool =
-    gw.channelPools.get(name) ??
-    (await gw.openContainer({
-      name,
-      // Durability is the store's choice, not the channel's: without a backend a separate container
-      // is in-memory, and a channel that forgets its peer on restart is not federation.
-      ...(gw.options.channelBackend === undefined
-        ? {}
-        : { backend: gw.options.channelBackend(name) }),
-    }));
+  const pool = gw.channelPools.get(name) ?? (await attachChannelPool(gw, name));
   const ground = pool.gateway;
   if (ground === undefined) {
     throw new Error(
       `openChannel: ${name} resolved without its own ground — a pool must be separate`,
     );
   }
-  markChannelPool(pool);
 
   // The opening record: `lastSyncedAt: 0` says NEVER SYNCED, which is deliberately distinct from a
   // stale timestamp. A channel that has never reached its peer must not read as merely quiet.
@@ -1442,15 +1458,10 @@ export async function dropChannelImpl(gw: Gateway, name: string): Promise<void> 
         `channelBackend. Nothing was removed.`,
     );
   }
-  const pool =
-    channel?.pool ??
-    attached ??
-    (await gw.openContainer({
-      name,
-      ...(gw.options.channelBackend === undefined
-        ? {}
-        : { backend: gw.options.channelBackend(name) }),
-    }));
+  // THE MARK RIDES THIS ONE TOO. A drop that REFUSES leaves the pool attached for the life of the
+  // process — deliberately, so an operator can look at what could not be purged — and an unmarked
+  // pool is one with an open anonymous door.
+  const pool = channel?.pool ?? attached ?? (await attachChannelPool(gw, name));
   if (pool.drop === undefined) {
     throw new Error(
       `dropChannel refused: ${name} has no drop — only a SEPARATE container purges its own bytes, ` +

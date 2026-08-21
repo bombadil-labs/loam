@@ -30,6 +30,7 @@ import { isRepairable } from "../store/quarantine.js";
 import { promoteImpl, readAdoptions, type Adoption } from "./adopt.js";
 import {
   blessChannelAppImpl,
+  attachChannelPool,
   blessChannelResolversImpl,
   withheldLenses,
   channelAppsImpl,
@@ -955,17 +956,9 @@ export class Gateway {
       // same two places this does.
       const token = this.options.channelToken?.(standing.name);
       try {
-        const resumed = await this.openContainer({
-          name: standing.name,
-          ...(this.options.channelBackend === undefined
-            ? {}
-            : { backend: this.options.channelBackend(standing.name) }),
-        });
-        // A RESUMED pool is a channel's too, and this is the path a running server serves from —
-        // marking only the freshly opened one would close the anonymous door for the process that
-        // opened the channel and leave it open for every process after a restart.
-        if (resumed.gateway !== undefined) resumed.gateway.channelPool = true;
-        this.channelPools.set(standing.name, resumed);
+        // Through the one attach, which is also the one place a channel pool is MARKED — a resumed
+        // pool is a channel's too, and this is the path a running server actually serves from.
+        this.channelPools.set(standing.name, await attachChannelPool(this, standing.name));
       } catch {
         // Deliberately left unattached; see above. And CRUCIALLY, left un-REGISTERED below: the
         // channel goes into `federationChannels` only once its pool is open. Registered first, a
@@ -1039,7 +1032,7 @@ export class Gateway {
    * Run a peer's RESOLVER code for one lens (SPEC §24.6). The channel binds names on its own; this
    * is the separate act that lets the code behind a computed field run.
    */
-  async blessChannelResolvers(channel: string, lens: string): Promise<void> {
+  async blessChannelResolvers(channel: string, lens: string): Promise<string> {
     return blessChannelResolversImpl(this, channel, lens);
   }
 

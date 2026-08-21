@@ -1601,6 +1601,19 @@ describe("T209 — the CLI names what arrived and mounts one app", () => {
       expect(await run(["federate", "list", "--home", me], io()), said()).toBe(0);
       expect(said()).toContain(CHANNEL);
 
+      // THE BARE `--resolvers` FORM, through the door a person types it at. Nothing on this
+      // channel is withheld, so the act refuses — which is the point: the refusal proves the CLI
+      // reached the gateway with a name it could resolve, rather than passing a string that could
+      // never match anything and calling the silence success.
+      fresh();
+      expect(
+        await run(
+          ["federate", "bless-app", "--channel", CHANNEL, "--resolvers", "Plant", "--home", me],
+          io(),
+        ),
+      ).toBe(2);
+      expect(said()).toContain("holds no withheld resolvers");
+
       // THE DOCUMENTED WORKFLOW, END TO END: read the listing, paste what it printed, bless. The
       // listing used to print twelve characters and the floor demanded twenty, so pasting the id a
       // person could actually see was refused every time — a remedy the surface offering it could
@@ -2294,6 +2307,30 @@ describe("T209 — a peer's RESOLVER code is a second decision", () => {
       const after = bob.surface("full")!.hooks.resolve("alice:Plant", FERN, undefined);
       expect(after.view.watered).toBe(true);
       expect(after.view.readings).toBe(424242);
+    } finally {
+      await alice.close();
+      await bob.close();
+    }
+  });
+
+  it("the act reports the name it used, so a BARE name cannot fool a read-back", async () => {
+    // `--resolvers Plant` is a supported form — the act prefixes it — while every reader answers
+    // prefixed names. A caller that checked its own argument against those readers would be asking
+    // a question that cannot match: the guard passes because the comparison is empty, not because
+    // the grant took the name. So the act returns what it acted on.
+    const alice = await resolverPeer();
+    const bob = await store(BOB_SEED);
+    try {
+      const channel = await link(bob, alice, "alice");
+      await channel.sync();
+      expect(bob.withheldOn(CHANNEL)).toEqual(["alice:Plant"]);
+
+      const served = await bob.blessChannelResolvers(CHANNEL, "Plant"); // the BARE form
+      expect(served).toBe("alice:Plant");
+      expect(bob.withheldOn(CHANNEL).includes(served)).toBe(false);
+      // …and the grant really took: the peer's value answers at the shared seam.
+      const node = bob.surface("full")!.hooks.resolve("alice:Plant", FERN, undefined);
+      expect(node.view.readings).toBe(424242);
     } finally {
       await alice.close();
       await bob.close();
