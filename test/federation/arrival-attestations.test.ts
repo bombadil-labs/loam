@@ -582,6 +582,8 @@ describe("T207 — a sync that accepts deltas stamps its own custody", () => {
       const pool = channel.pool.gateway!;
       const first = await channel.sync();
       expect(first.accepted).toBeGreaterThan(0);
+      const synced = me.channelStatus(channel.name)[0]!.lastSyncedAt;
+      expect(synced).toBeGreaterThan(0);
       const stamped = stampsIn(pool)
         .map((s) => s.deltaId)
         .sort();
@@ -606,11 +608,17 @@ describe("T207 — a sync that accepts deltas stamps its own custody", () => {
       const after = me.channelStatus(channel.name)[0]!;
       expect(after.consecutiveFailures).toBe(0);
       expect(after.unattested).toEqual([]);
+      // The door DID open, and nothing came through it — which is exactly what this clock records.
+      expect(after.lastSyncedAt).toBeGreaterThan(synced);
 
       // ACCEPTING, through the same faulty door: now the fault is a refusal, and it counts.
       await alice.append([observed(FERN, "height", 71, 2000, ALICE_SEED)]);
       await expect(channel.sync()).rejects.toThrow(/named 0 of them/);
-      expect(me.channelStatus(channel.name)[0]!.consecutiveFailures).toBe(1);
+      const broken = me.channelStatus(channel.name)[0]!;
+      expect(broken.consecutiveFailures).toBe(1);
+      // PRESERVED, never reset: a channel that reached its peer a moment ago and then refused once
+      // must not read as one that has never synced at all (H9).
+      expect(broken.lastSyncedAt).toBe(after.lastSyncedAt);
     } finally {
       await alice.close();
       await me.close();
