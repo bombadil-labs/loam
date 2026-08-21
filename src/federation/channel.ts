@@ -91,10 +91,12 @@ export interface ArrivedApp {
   /** The app this store actually ANSWERS WITH at `serves`. Absent means that name answers nothing. */
   readonly serving?: string;
   /**
-   * Why a mounted app does not answer: something of the RECEIVER'S OWN holds the name. Names the
-   * thing that is in the way, because the remedy is to move it, and no blessing can help.
+   * Why a mounted app does not answer: something else holds the name. Names the thing that is in
+   * the way, because the remedy is to move THAT, and no blessing can help.
    */
   readonly shadowed?: string;
+  /** What would give the name back — a different sentence per obstruction, written where it is known. */
+  readonly remedy?: string;
   /** A mounted app whose LENS is not bound here — cursed, or its registration withdrawn (§23.6). */
   readonly dark?: true;
   /**
@@ -104,10 +106,11 @@ export interface ArrivedApp {
    */
   readonly wantsPen?: string;
   /**
-   * The peer's binding pins a §17 version of the PEER's own store, so this store cannot mount it at
-   * all — the pin names a delta it does not hold. Reported rather than offered a remedy.
+   * Why the blessing door would REFUSE this row, when it would. A listing that offered `bless-app`
+   * here would be printing a command that throws — the failure this whole shape exists to avoid —
+   * so the reason is carried instead of the recipe.
    */
-  readonly pinned?: true;
+  readonly unmountable?: string;
   /**
    * Nothing is mounted here and nothing can be: a route of the RECEIVER'S OWN holds that name, and
    * the blessing door refuses it. Distinct from `shadowed`, which is about a mount that exists.
@@ -701,9 +704,14 @@ function appsOf(
     // only flattening collisions are refused), so `alice` and `alice:sub` can both stand — and then
     // `alice:sub:note` is claimed by both. The DOOR gives it to the longer prefix; a report that
     // did not ask the same question would call this app served while the other one answered.
-    const claimedBy = siblings.find(
-      (p) => p.length > prefix.length && serves.startsWith(`${p}:`) && serves.length > p.length + 1,
-    );
+    // The LONGEST such prefix, because that is the one the door hands the name to — naming any
+    // other channel would be true about the obstruction and wrong about who has it.
+    const claimedBy = siblings
+      .filter(
+        (p) =>
+          p.length > prefix.length && serves.startsWith(`${p}:`) && serves.length > p.length + 1,
+      )
+      .sort((a, b) => b.length - a.length)[0];
     // (b) a twin of the receiver's own route holds the bare name INSIDE the pool. Every attach
     // re-pulses the seeding edge, so this arrives long after a blessing — and it is just as true
     // before one: this is the ONE the blessing door refuses, by that name.
@@ -716,6 +724,15 @@ function appsOf(
         : poolHolds
           ? `your own route "${route}", seeded into this pool`
           : undefined;
+    // ONE REMEDY PER OBSTRUCTION. "Your own law wins its own names" is true of two of these and
+    // flatly wrong about the third: when a sibling CHANNEL holds the name, nothing of the
+    // operator's own is in the way and stopping their own law clears nothing.
+    const remedy =
+      shadow === undefined
+        ? undefined
+        : claimedBy !== undefined
+          ? `drop that channel, or re-open this one under a prefix its namespace does not contain`
+          : "your own law wins its own names; this one answers when yours stops";
     // (c) the lens it reads is not bound here — a curse, or a withdrawn registration (§23.6).
     const dark = own !== undefined && shadow === undefined && !routeServableOn(ground, own, "full");
     // NOTHING MOUNTED, AND NOTHING MOUNTABLE — and only cause (b) is that. The blessing door looks
@@ -729,22 +746,34 @@ function appsOf(
         : undefined;
     const serving =
       own === undefined || shadow !== undefined || dark ? undefined : appIdentity(own);
-    // A VERSION-PINNED arrival can never mount here: the pin names a delta of the PEER's own store,
-    // which this one does not hold, and the blessing door refuses it by name. Reporting such a row
-    // as merely "inert" would print a remedy that always throws.
-    const pinned = offeredBindings.get(route)?.versionId !== undefined;
+    // WHAT THE BLESSING DOOR WOULD REFUSE, asked here so the listing never offers it. Two causes
+    // today, both of them refusals this store makes about the SHAPE of a peer's binding rather than
+    // about anything the operator can change: a §17 pin names a delta of the PEER's own store,
+    // which this one does not hold; and a route the publish door will not accept is one no blessing
+    // can file. Reporting either as merely "inert" prints a remedy that always throws.
+    const offeredHere = offeredBindings.get(route);
+    const unmountable =
+      offeredHere === undefined
+        ? undefined
+        : offeredHere.versionId !== undefined
+          ? "it pins a version of the peer's OWN store, and this store does not hold that delta"
+          : route === "" || route.includes("/") || route.includes("\u0000")
+            ? `this store's publish door will not accept the route "${route}"`
+            : undefined;
     rows.push({
       channel,
       route,
       serves,
-      ...(pinned ? { pinned: true as const } : {}),
+      ...(unmountable === undefined ? {} : { unmountable }),
       ...(offeredBindings.get(route)?.pen === undefined
         ? {}
         : { wantsPen: offeredBindings.get(route)!.pen! }),
       ...(hash === undefined ? {} : { hash }),
       ...(own === undefined ? {} : { mounted: appIdentity(own) }),
       ...(serving === undefined ? {} : { serving }),
-      ...(shadow === undefined || blocked !== undefined ? {} : { shadowed: shadow }),
+      ...(shadow === undefined || blocked !== undefined
+        ? {}
+        : { shadowed: shadow, ...(remedy === undefined ? {} : { remedy }) }),
       ...(blocked === undefined ? {} : { blocked }),
       ...(dark ? { dark: true as const } : {}),
       blessed: hash !== undefined && hash === serving,

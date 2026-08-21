@@ -1085,7 +1085,7 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
           const stuck =
             a.shadowed !== undefined
               ? `\n    ${here}, and "${a.serves}" answers nothing: ${a.shadowed} holds that name\n` +
-                "    your own law wins its own names; this one answers when yours stops"
+                `    ${a.remedy ?? ""}`
               : a.dark === true
                 ? `\n    it is MOUNTED here and answers nothing: the lens it reads is not bound ` +
                   "here\n    lift the curse on that lens, or re-bless it, and this answers again"
@@ -1113,10 +1113,10 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
           }
           // A pin names a delta of the PEER's store, which this one does not hold: the blessing door
           // refuses it by name, so offering the blessing here would be offering a refusal.
-          if (a.pinned === true) {
+          if (a.unmountable !== undefined) {
             return (
-              `${offers}\n    it pins a version of the peer's OWN store, so it cannot mount here\n` +
-              "    ask them to publish it against no pin at all" +
+              `${offers}\n    it cannot mount here: ${a.unmountable}\n` +
+              "    only the peer can change that; nothing on this side will" +
               // A re-point to a pinned binding leaves an EARLIER blessing serving, and saying only
               // "it cannot mount" would leave an operator believing that route answers nothing.
               (a.serving === undefined
@@ -1240,7 +1240,7 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
         // the lens, which is wrong for the commonest case: a name of the operator's own in the way.
         const why =
           app?.shadowed !== undefined
-            ? `${app.shadowed} holds that name — your own law wins its own names, so this answers when yours stops`
+            ? `${app.shadowed} holds that name — ${app.remedy ?? "move it and this answers"}`
             : app?.dark === true
               ? "the lens it reads is not bound here — lift the curse on it, or re-bless it"
               : "check `loam federate list` for what this store says about it";

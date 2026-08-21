@@ -40,6 +40,7 @@ import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { publicClaims } from "../../src/gateway/public.js";
 import { readSeed, storePath } from "../../src/cli/config.js";
+import { rendererBindingClaims } from "../../src/gateway/renderers.js";
 import { serve } from "../../src/server/http.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
@@ -176,7 +177,7 @@ const appIdOf = (
         opts.pen ?? "",
         opts.versionId ?? "",
       ]
-        .map((field) => `${field.length}:${field}`)
+        .map((field) => `${new TextEncoder().encode(field).length}:${field}`)
         .join(""),
     ),
   );
@@ -763,6 +764,10 @@ describe("T209 — the prefix reaches a blessed app and nothing else", () => {
       expect(after.serving).toBeUndefined(); // …and no longer what that name answers
       expect(after.blessed).toBe(false);
       expect(after.shadowed).toContain("alice:sub");
+      // AND THE REMEDY MATCHES THE CAUSE. Nothing of the operator's own law is in the way here, so
+      // "your own law wins its own names" would be a true sentence about a different situation.
+      expect(after.remedy).toContain("drop that channel");
+      expect(after.remedy).not.toContain("your own law");
       expect(bodyOf(await bob.serveRoute("alice:sub:hello", FERN, "full"))).not.toContain(
         "<p id=h>62</p>",
       );
@@ -773,10 +778,17 @@ describe("T209 — the prefix reaches a blessed app and nothing else", () => {
     }
   });
 
-  it("the anonymous door never evaluates a peer's module body", async () => {
+  it("the public door resolves no channel app to prepare", async () => {
     // Preparing a route means IMPORTING the bundle, and the HTTP door prepares BEFORE it decides
-    // anything about the request. Door-blind, that let a tokenless caller make this store run a
-    // stranger's top-level code by asking for a route it would then refuse.
+    // anything about the request — so a door-blind prepare let a tokenless caller make this store
+    // run a stranger's top-level code by asking for a route it would then refuse.
+    //
+    // WHAT THIS RAIL CANNOT OBSERVE, named rather than implied by its title: that no import
+    // happened. The ESM cache is content-addressed and process-wide, and the blessing above already
+    // warmed it, so a reverted fix would delegate, hit the cache, and look identical from here. What
+    // it does pin is the resolution — the public door finds nothing to prepare and nothing to serve,
+    // while the token door finds both. The witness the other half wants is a cold process, which is
+    // the same gap this file's header names for `prepareRoute` generally.
     const alice = await peer(ALICE_SEED, { route: "hello", app: APP, height: 62 });
     const bob = await store(BOB_SEED);
     try {
@@ -1133,18 +1145,59 @@ describe("T209 — what an app IS, for the report and for the blessing", () => {
       await channel.sync();
 
       const row = bob.channelApps(CHANNEL).find((a) => a.route === "hello")!;
-      expect(row.pinned).toBe(true);
+      expect(row.unmountable).toContain("pins a version");
       expect(row.hash).not.toBe(appIdOf(APP)); // the pin is part of what the app IS
       await expect(bob.blessChannelApp(CHANNEL, "hello")).rejects.toThrow(/pins a §17/);
 
       // Two-sided: alice's UNPINNED app on the same channel is unaffected and mounts.
       const other = bob.channelApps(CHANNEL).find((a) => a.route === "other")!;
-      expect(other.pinned).toBeUndefined();
+      expect(other.unmountable).toBeUndefined();
       // THE ROUTE IS PART OF THE IDENTITY, and this is the only rail that asks at a route other than
       // the fixture's default — without it, an identity that hard-coded one route would pass.
       expect(other.hash).toBe(appIdOf(OTHER_APP, { route: "other" }));
       await bob.blessChannelApp(CHANNEL, "other");
       expect((await bob.serveRoute("alice:other", FERN, "full")).status).toBe(200);
+    } finally {
+      await alice.close();
+      await bob.close();
+    }
+  });
+
+  it("a route this store's publish door would refuse is named, not offered a blessing", async () => {
+    // A peer signs their own bindings and never passes this store's publish door, so a route shape
+    // that door rejects can arrive. Offering `bless-app` for it prints a command that throws from
+    // deep in the publish path — the same class as a pinned arrival, one cause further along.
+    const alice = await peer(ALICE_SEED, { route: "fine", app: OTHER_APP, height: 62 });
+    const bob = await store(BOB_SEED);
+    try {
+      // Raw-appended: `publishRenderer` would refuse this route, which is the point.
+      await alice.append([
+        signClaims(
+          rendererBindingClaims(
+            {
+              route: "a/b",
+              schemaName: "Plant" as never,
+              consumes: ["height"],
+              bundle: APP,
+            },
+            undefined,
+            authorForSeed(ALICE_SEED),
+            4_000,
+          ),
+          ALICE_SEED,
+        ),
+      ]);
+      const channel = await link(bob, alice, "alice");
+      await channel.sync();
+
+      const bad = bob.channelApps(CHANNEL).find((a) => a.route === "a/b")!;
+      expect(bad.unmountable).toContain("publish door");
+      await expect(bob.blessChannelApp(CHANNEL, "a/b")).rejects.toThrow();
+      // Two-sided: the well-shaped route on the same channel is offered and mounts.
+      const fine = bob.channelApps(CHANNEL).find((a) => a.route === "fine")!;
+      expect(fine.unmountable).toBeUndefined();
+      await bob.blessChannelApp(CHANNEL, "fine");
+      expect((await bob.serveRoute("alice:fine", FERN, "full")).status).toBe(200);
     } finally {
       await alice.close();
       await bob.close();
