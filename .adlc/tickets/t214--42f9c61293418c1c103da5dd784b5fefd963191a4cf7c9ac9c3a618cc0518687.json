@@ -1,0 +1,12 @@
+{
+  "body": "openChannelImpl declares its pool with no membership and no admit, so openSeparate's reseed\nfederates the receiver's WHOLE root ground into the pool, on every attach including boot\n(openChannelImpl's pool declaration in src/federation/channel.ts (~732-741 on main; anchor by function name, lines drift), src/gateway/container.ts ~1217-1227). Four measured\nconsequences (T203/T204 builds, 2026-08-21):\n1. A channel pool's container page lists the primary's constitutional deltas — users, roles,\n   grants, the OTHER channels' records — as members.\n2. A root binding published under a channel's prefix lands in the pool at attach, and the\n   replay fold re-aggregates the root's own binding as a CHANNEL row with the channel's origin\n   rank.\n3. A struck root policy declaration keeps governing the pool: the pool holds a copy taken at\n   attach time and no strike crosses that edge (H1 at the container seam).\n4. T204's reboot case: the pool's reader names a contest against the root's own binding-copy;\n   the contested reading is honest against it (the serving contender is marked by content\n   address), but the underlying state is wrong.\n\nThe fix changes WHAT BINDS in a pool, so the decision is design-shaped: the candidate is\ndeclaring the pool with an admit/membership that seeds nothing (a channel pool's ground should\nhold the peer's deltas, the receiver's blessings, and the custody stamps — not a root mirror),\nplus a migration story for pools already seeded. Draft the analysis, recommend, and STOP for\nMyk — §46/§47 ground.\n\nAcceptance criteria (for the design phase):\n(a) A working-spec amendment or ticket-body decision from Myk on the pool's seeding contract,\n    with the migration for existing pools named. Verify: Myk's word in chat or PR review;\n    the build criteria are written then.\n\nMerge tier: DESIGN-STAGE — Myk's merge. Do not build past the analysis without his word.",
+  "category": "bug",
+  "duration": 3,
+  "edges": [
+    {
+      "to": "T219"
+    }
+  ],
+  "id": "T214",
+  "title": "A channel pool is seeded with a full copy of the root ground — and no strike crosses the seam"
+}

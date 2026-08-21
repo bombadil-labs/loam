@@ -1,0 +1,15 @@
+{
+  "_adlcArchive": {
+    "archivedAt": "2026-08-21T14:18:30.954Z",
+    "reason": "completed",
+    "sourceRevision": null,
+    "sourceStoreHash": "1ea51765ad3c3b6d85b227dba495ae747e8a8ee398a87f6ad2e47db1dd72aed1",
+    "ticketHash": "4dd770ea4722f3ed10bc1f3c83ffcefd787682334502fa02e950e3d3c44c3f69",
+    "version": 1
+  },
+  "body": "This ticket was authored from a T207 build-lane report claiming CLAUDE.md and\nscripts/rails-guard-ci.mjs reference `npm run preflight`. A coldstart judge checked the\npremise (2026-08-21): ZERO occurrences on the working tree, on origin/main, and in the entire\nhistory of every ref (`git log --all -S \"npm run preflight\"` is empty). The only 'preflight'\never in CLAUDE.md was the ADLC plugin's SessionStart preflight hook, removed in PR #173.\n\nThe lane's report was wrong; the doctrine held (grep-verify any report claim that names a\nfile before passing it upward — the T116 lesson, reproduced). Nothing to build. Archived on\ncreation day with this note so the record shows the claim was checked, not dropped.\n\nAcceptance criteria:\n(a) None — the premise is refuted. Verify: the grep transcript above, re-runnable.\n\nMerge tier: not applicable.",
+  "category": "docs",
+  "duration": 1,
+  "id": "T223",
+  "title": "REFUTED — no `npm run preflight` reference exists (a lane report error, checked and closed)"
+}
