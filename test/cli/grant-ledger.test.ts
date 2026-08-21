@@ -61,6 +61,8 @@ const CONNECTOR_SEED = "70".repeat(32);
 const CONNECTOR = authorForSeed(CONNECTOR_SEED);
 const STRANGER_SEED = "5c".repeat(32);
 const STRANGER = authorForSeed(STRANGER_SEED);
+const IMPOSTOR_SEED = "3a".repeat(32);
+const IMPOSTOR = authorForSeed(IMPOSTOR_SEED);
 
 // How the ledger abbreviates an author: the algorithm tag in full, then twelve characters of the
 // key. Transcribed here rather than imported, so the rail pins the promise instead of agreeing with
@@ -210,6 +212,39 @@ async function plantOperatorGrant(subject: string, verb: "write" | "admin"): Pro
   }
 }
 
+// A delta the operator signs AT the store entity that is not a grant: it is filed under a different
+// context and carries subject and verb roles anyway. Nothing in the store's law forbids it, and it
+// grants nothing.
+async function plantNonGrantAtStore(subject: string): Promise<void> {
+  const seed = readSeed(home);
+  const operator = authorForSeed(seed);
+  const gw = await Gateway.boot(
+    new SqliteBackend(storePath(home)),
+    assembleGenesis({ operatorSeed: seed }),
+  );
+  try {
+    await gw.append([
+      signClaims(
+        {
+          timestamp: Date.now(),
+          author: operator,
+          pointers: [
+            {
+              role: "note",
+              target: { kind: "entity", entity: { id: STORE_ENTITY, context: "loam.notes" } },
+            },
+            { role: "subject", target: { kind: "primitive", value: subject } },
+            { role: "verb", target: { kind: "primitive", value: "admin" } },
+          ],
+        },
+        seed,
+      ),
+    ]);
+  } finally {
+    await gw.close();
+  }
+}
+
 beforeEach(async () => {
   home = mkdtempSync(join(tmpdir(), "loam-ledger-"));
   clear();
@@ -290,6 +325,8 @@ describe("T205 (a) — one screen holds the user, the pen, and the connector", (
     expect(stranger).toContain("write");
     // Two-sided: the attributed pen is NOT swept into the same bucket.
     expect(rowFor(listing, "quill")).not.toContain("unattributed");
+    // Both rows counted, both binding — and the count reads for a two-row store.
+    expect(listing).toContain("the grant ledger — 2 rows, 2 live");
   });
 });
 
@@ -376,6 +413,13 @@ describe("T205 (c) — a provisioned seed file with no grant is listed as holdin
     expect(quill).toContain("write");
     expect(quill).not.toContain("no grant in the ground");
     expect(await heldVerbs(authorOfPen("quill"))).toEqual(["write"]);
+
+    // The count separates the two: three rows on the screen, ONE of them binding. A ledger that
+    // counted a provisioned-but-ungranted key as live would report standing nobody granted.
+    expect(listing).toContain("the grant ledger — 3 rows, 1 live");
+    // This store mixes granted and ungranted rows, so its columns have the widest spread of cell
+    // lengths in the file — the place where a padding fault shows first.
+    expectColumnsAligned(listing);
   });
 });
 
@@ -395,6 +439,26 @@ const namesIn = (listing: string): string[] =>
     .map((l) => ROW_RE.exec(l)?.[2])
     .filter((n): n is string => n !== undefined);
 
+const rowLines = (listing: string): string[] => listing.split("\n").filter((l) => ROW_RE.test(l));
+
+// Every column's cells begin exactly where the header says. This pins ALIGNMENT — the property that
+// makes a table a table — without pinning the WIDTHS, which are the data's to decide and would only
+// freeze a layout. Worth its own assertion because a misaligned column is read as the wrong column.
+const expectColumnsAligned = (listing: string): void => {
+  const header = listing.split("\n").find((l) => l.startsWith("  kind "));
+  expect(header, listing).toBeDefined();
+  const rows = rowLines(listing);
+  expect(rows.length, listing).toBeGreaterThan(1);
+  for (const column of ["name", "author", "verb", "granted", "standing"]) {
+    const at = header!.indexOf(column);
+    expect(at, `the header does not name ${column}: ${header!}`).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row[at - 1], `${column} is misaligned in: ${row}`).toBe(" ");
+      expect(row[at], `${column} is misaligned in: ${row}`).not.toBe(" ");
+    }
+  }
+};
+
 describe("T205 — the screen is grouped, and every column tells the truth", () => {
   it("groups the rows user, pen, connector, unattributed", async () => {
     // "one screen" is a promise about reading, so the grouping is a promise too: an operator
@@ -406,6 +470,10 @@ describe("T205 — the screen is grouped, and every column tells the truth", () 
       await run(["user", "create", "vera", "--operator", "--home", home], io(), password("pw")),
       printed(),
     ).toBe(0);
+    // `quill` is provisioned FIRST and sorts SECOND. Creation order and name order disagree here on
+    // purpose: a listing that had fallen back on arrival time would print these two the other way
+    // round rather than agree with the promise by accident.
+    expect(await run(["pen", "create", "quill", "--home", home], io()), printed()).toBe(0);
     expect(await run(["pen", "create", "nib", "--home", home], io()), printed()).toBe(0);
     seedConnector();
     expect(
@@ -415,7 +483,6 @@ describe("T205 — the screen is grouped, and every column tells the truth", () 
       ),
       printed(),
     ).toBe(0);
-    expect(await run(["pen", "create", "quill", "--home", home], io()), printed()).toBe(0);
     await plantOperatorGrant(STRANGER, "write");
     clear();
 
@@ -436,6 +503,49 @@ describe("T205 — the screen is grouped, and every column tells the truth", () 
     for (const column of ["kind", "name", "author", "verb", "granted", "standing"]) {
       expect(header).toContain(column);
     }
+  });
+
+  it("reads two grants on one key oldest first", async () => {
+    // A key that gained standing twice has a HISTORY, and on the morning it leaked the order of
+    // that history is the question. Both rows name the same pen and the same key, so nothing but
+    // the grant time can separate them.
+    expect(await run(["pen", "create", "quill", "--home", home], io()), printed()).toBe(0);
+    const quill = authorOfPen("quill");
+    await plantOperatorGrant(quill, "admin");
+    clear();
+
+    expect(await run(["grant", "list", "--home", home], io()), printed()).toBe(0);
+    const listing = printed();
+    const rows = rowLines(listing);
+    expect(rows, listing).toHaveLength(2);
+    for (const row of rows) {
+      expect(row).toContain("pen");
+      expect(row).toContain("quill");
+      expect(row).toContain(shown(quill));
+    }
+    // `pen create` planted the write grant; the admin grant came after it.
+    expect(rows[0], listing).toContain("write");
+    expect(rows[1], listing).toContain("admin");
+    expect(await heldVerbs(quill)).toEqual(["admin", "write"]);
+  });
+
+  it("a delta at the store entity that is not a grant is not a row", async () => {
+    // The ledger reads deltas filed under `loam.grants` and nothing else. A delta that merely SITS
+    // at the store entity and happens to carry subject and verb roles confers no standing, and a
+    // ledger that listed it would report an authority nobody holds — the same lie as omitting one,
+    // pointed the other way.
+    expect(await run(["pen", "create", "quill", "--home", home], io()), printed()).toBe(0);
+    await plantNonGrantAtStore(IMPOSTOR);
+    clear();
+
+    expect(await run(["grant", "list", "--home", home], io()), printed()).toBe(0);
+    const listing = printed();
+    expect(rowFor(listing, shown(IMPOSTOR)), listing).toBe("");
+    expect(rowLines(listing), listing).toHaveLength(1);
+    // Two-sided: the real grant beside it is still a row, so this is not a ledger that lists
+    // nothing.
+    expect(rowFor(listing, "quill")).toContain("write");
+    expect(await heldVerbs(IMPOSTOR)).toEqual([]);
   });
 
   it("an empty home says nothing holds standing, and names the operator that needs none", async () => {
