@@ -295,6 +295,24 @@ const appRouteOf = (pathname: string): { route: string; entity: string } | undef
 // suggestion.
 const MAX_GESTURE_READS = 8;
 
+// The time pin as it rides a rendered route (SPEC §26): `?asOf=<T>` renders the route against the
+// ground as it stood at that millisecond. The grammar and the refusal are the REST door's, verbatim
+// — one parameter, one meaning, every door — so a moment that reads as a number on `/rest` reads as
+// the same number here. An absent or EMPTY value is present-tense: `Number("")` is 0, so a door that
+// only tested `Number.isFinite` would pin the epoch and serve an empty page while looking healthy.
+interface AppPin {
+  readonly asOf?: number;
+  readonly error?: string;
+}
+
+const appAsOfOf = (params: URLSearchParams): AppPin => {
+  const raw = params.get("asOf");
+  if (raw === null || raw === "") return {};
+  const t = Number(raw);
+  if (!Number.isFinite(t)) return { error: "asOf must be a numeric timestamp (milliseconds)" };
+  return { asOf: t };
+};
+
 const gestureOf = (
   params: URLSearchParams,
 ): { reads: ReadGesture[]; state: Record<string, string> } => {
@@ -1664,13 +1682,35 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
               refused(res);
               return;
             }
+            // The moment is parsed BEFORE the bundle loads and before any route is looked up: a
+            // malformed one costs no render, and refuses identically whether or not the route
+            // exists — so the refusal is no route-existence oracle. GET only, because `asOf` is a
+            // READ parameter and the REST door already ignores it on a write.
+            const pin: AppPin = req.method === "GET" ? appAsOfOf(url.searchParams) : {};
+            if (pin.error !== undefined) {
+              sendRendered(res, {
+                status: 400,
+                contentType: "text/plain; charset=utf-8",
+                body: pin.error,
+              });
+              return;
+            }
             await gateway.prepareRoute(parsed.route); // load the bundle before the render (worker, §23.9)
             if (!guard.live()) {
               guard.gone();
               return;
             }
             if (req.method === "GET") {
-              sendRendered(res, await gateway.serveRoute(parsed.route, parsed.entity, "public"));
+              sendRendered(
+                res,
+                await gateway.serveRoute(
+                  parsed.route,
+                  parsed.entity,
+                  "public",
+                  undefined,
+                  pin.asOf,
+                ),
+              );
               return;
             }
             // A write-enabled renderer's form POST (SPEC §23.3): the store signs as the renderer's pen,
@@ -1847,6 +1887,18 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             refused(res);
             return;
           }
+          // The same pin, parsed the same way, at the door's OTHER call site — see the anonymous
+          // branch above. Both sites or neither: one of them threading it would leave the other
+          // silently answering the present to a caller who named a moment.
+          const pin: AppPin = req.method === "GET" ? appAsOfOf(url.searchParams) : {};
+          if (pin.error !== undefined) {
+            sendRendered(res, {
+              status: 400,
+              contentType: "text/plain; charset=utf-8",
+              body: pin.error,
+            });
+            return;
+          }
           await gateway.prepareRoute(parsed.route); // load the bundle before the render (worker, §23.9)
           if (!guard.live()) {
             guard.gone();
@@ -1860,6 +1912,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
                 parsed.entity,
                 "full",
                 gestureOf(url.searchParams),
+                pin.asOf,
               ),
             );
             return;

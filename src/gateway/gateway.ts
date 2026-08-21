@@ -708,8 +708,9 @@ export class Gateway {
     entity: string,
     door: "full" | "public",
     gesture?: { readonly reads: readonly ReadGesture[]; readonly state: Record<string, string> },
+    asOf?: number,
   ): Promise<{ status: number; contentType: string; body: string }> {
-    return serveRouteImpl(this, route, entity, door, gesture);
+    return serveRouteImpl(this, route, entity, door, gesture, asOf);
   }
 
   // Write through a rendered route (SPEC §23.3): the body lives in renderers.ts.

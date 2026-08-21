@@ -24,6 +24,7 @@ import type { Gateway, RequestContext } from "./gateway.js";
 import type { ResolvedNode } from "./gql.js";
 import { holdsGrant } from "./accounts.js";
 import { STORE_ENTITY } from "./genesis.js";
+import { frameAsOf } from "./asof.js";
 import { frameProbation } from "./probation.js";
 import { renderInWorker } from "./render-worker.js";
 import { workerLimitsOf } from "./envelope.js";
@@ -493,6 +494,7 @@ export async function serveRouteImpl(
   entity: string,
   door: "full" | "public",
   gesture?: { readonly reads: readonly ReadGesture[]; readonly state: Record<string, string> },
+  asOf?: number,
 ): Promise<{ status: number; contentType: string; body: string }> {
   // One refusal, everywhere — history is not anonymous, and neither is "which routes exist" (§17).
   const gone = { status: 404, contentType: "text/plain; charset=utf-8", body: "no such route" };
@@ -511,7 +513,11 @@ export async function serveRouteImpl(
       ) {
         return gone;
       }
-      node = surface.hooks.resolve(binding.schemaName, entity);
+      // THE TIME PIN RIDES THE SAME HOOK EVERY OTHER DOOR READS THROUGH (SPEC §26): one resolve,
+      // one narrower ground, nothing about the render time-cased. Threaded HERE rather than at each
+      // door, because the app door is two call sites and one of them would otherwise keep quietly
+      // answering the present.
+      node = surface.hooks.resolve(binding.schemaName, entity, asOf);
     } else {
       // A PINNED renderer. The anonymous door serves it IFF the operator publicly declared THAT pin
       // (§23.8 — a declaration is publication, not a probe); every undeclared pin stays a uniform 404,
@@ -525,7 +531,9 @@ export async function serveRouteImpl(
         .registrationVersions()
         .find((v) => v.deltaId === binding.versionId && lensOf(v) === binding.schemaName);
       if (pinned === undefined) return gone;
-      node = gw.resolvePinned(pinned, entity);
+      // Both pins at once (SPEC §26): an OLD lens over an OLD ground. They are orthogonal, so a
+      // pinned route reads the past through the reading it froze rather than through the latest.
+      node = gw.resolvePinned(pinned, entity, asOf);
     }
   } catch (err) {
     // A resolve fault is unusual (the lens is registered); leak the reason only to the full (token)
@@ -542,10 +550,17 @@ export async function serveRouteImpl(
   // a refusal is already text and says nothing about the ground. This is the one place it can live: the
   // bundle is untrusted and would simply not draw it, and the door below serves whatever bytes it is
   // handed. A store that is not a quarantine is untouched, and that is what keeps canonical reads honest.
+  //
+  // THE TIME FRAME (SPEC §26) rides the same seam, for the same reason: the reader is a person and
+  // the code between them is a bundle that predates the pin, so a page served from a MOMENT has to
+  // say so in bytes the bundle never touched. Applied FIRST, so §24.7's banner still lands first in
+  // the body — a probationary store's most urgent statement stays the one at the top.
   const framed = (r: { status: number; contentType: string; body: string }) => {
+    if (r.status !== 200 || !r.contentType.startsWith("text/html")) return r;
+    let body = frameAsOf(r.body, node);
     const p = gw.probation;
-    if (p === undefined || r.status !== 200 || !r.contentType.startsWith("text/html")) return r;
-    return { ...r, body: frameProbation(r.body, p, door) };
+    if (p !== undefined) body = frameProbation(body, p, door);
+    return body === r.body ? r : { ...r, body };
   };
   // The bundle must be loadable (unloaded → unmounted, a 404, not a 500 — prepareRoute pre-loads it on
   // the serve path). The read-discipline + resolve above stayed on THIS thread (authority never leaves
@@ -560,7 +575,7 @@ export async function serveRouteImpl(
   const state: Record<string, string> = door === "public" ? {} : (gesture?.state ?? {});
   if (door === "full") {
     for (const g of gesture?.reads ?? []) {
-      reads[readKey(g.lens, g.entity)] = resolveGesture(gw, g);
+      reads[readKey(g.lens, g.entity)] = resolveGesture(gw, g, asOf);
     }
   }
   // Built LAZILY: a refused render must cost nothing, and `bytesEnvelope` walks the whole view. The
@@ -664,7 +679,12 @@ export async function serveRouteImpl(
 // the lens must be REGISTERED on this door's surface, and `hooks.resolve` carries no identity — a token
 // individuates WRITE standing, and §7's isolation unit for reads is the mount. There is no shadow
 // allow-list: the door adjudicates nothing the store would not.
-function resolveGesture(gw: Gateway, g: ReadGesture): ReadResult {
+//
+// THE MOMENT REACHES HERE TOO (SPEC §26), and it is not optional. A gesture and a pin ride the SAME
+// request — `?asOf=T&read=Lens:entity` is one GET — so a mediated read left at the present would put
+// today's value inside a page the frame stamps "as of T". That is worse than an unpinned read: the
+// door's own chrome vouches for the wrong number.
+function resolveGesture(gw: Gateway, g: ReadGesture, asOf?: number): ReadResult {
   const surface = gw.surface("full");
   const lens = g.lens as LensName;
   if (surface === undefined || !surface.registered.some((r) => lensOf(r) === lens)) {
@@ -673,9 +693,10 @@ function resolveGesture(gw: Gateway, g: ReadGesture): ReadResult {
     };
   }
   try {
-    const node = surface.hooks.resolve(lens, g.entity);
+    const node = surface.hooks.resolve(lens, g.entity, asOf);
     // Absence is an answer, not an error: an entity the store has nothing for resolves to an EMPTY
-    // view, and the renderer draws its own "nothing here". Only a fault is a refusal.
+    // view, and the renderer draws its own "nothing here". Only a fault is a refusal. An entity that
+    // had not been spoken of yet at T is exactly that same absence, reached down the time axis.
     return {
       entity: g.entity,
       view: bytesEnvelope(node.view) as Record<string, unknown>,

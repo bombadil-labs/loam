@@ -3,5 +3,8 @@
   "category": "feature",
   "duration": 2,
   "id": "T208",
+  "rails": [
+    "test/server/app-asof.test.ts"
+  ],
   "title": "As-of reaches the rendered route — and the board gets a time slider"
 }
