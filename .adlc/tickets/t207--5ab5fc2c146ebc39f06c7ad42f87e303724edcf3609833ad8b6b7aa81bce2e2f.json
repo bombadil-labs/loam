@@ -3,5 +3,8 @@
   "category": "feature",
   "duration": 2,
   "id": "T207",
+  "rails": [
+    "test/federation/arrival-attestations.test.ts"
+  ],
   "title": "Arrival attestations — custody as data, one signed stamp per sync"
 }

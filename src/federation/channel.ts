@@ -18,7 +18,7 @@ import type { Claims } from "@bombadil/rhizomatic";
 import { makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
 import type { Container } from "../gateway/container.js";
 import { containerClaims, readContainerTable } from "../gateway/container.js";
-import type { Gateway } from "../gateway/gateway.js";
+import type { FederationReport, Gateway } from "../gateway/gateway.js";
 import { legalNameFor } from "../gateway/gql.js";
 import { parseOffer } from "./offer.js";
 import { CTX_MANIFEST, isRegistrationBinding, manifestExportClaims } from "../gateway/adopt-law.js";
@@ -115,6 +115,118 @@ export function channelRecordClaims(
         : [{ role: "from" as const, target: { kind: "primitive" as const, value: status.from } }]),
     ],
   };
+}
+
+export const CTX_ARRIVAL = "loam.arrival";
+
+/**
+ * How many delta-refs one attestation carries. A sync that accepts more is stamped `ceil(N/256)`
+ * times rather than once with an unbounded pointer list — a delta whose size is a peer's choice is
+ * an H8 shape, and nothing downstream may assume a stamp is the whole sync.
+ */
+export const ARRIVAL_FAN = 256;
+
+/**
+ * One arrival attestation: WHEN a named set of deltas stepped through a named door.
+ *
+ * Three provenance layers already stand — the signature names the author, the pool names the last
+ * hop, the prefix names the receiver's petname for the peer. None of them records custody in time.
+ * The channel record's `lastSyncedAt` says when the door last opened, never what came through it.
+ *
+ * This closes that as ordinary data, which buys two things nothing else had to be built for: it
+ * rides an as-of read of the pool ("what had arrived by Tuesday"), and it purges WITH the pool when
+ * the channel is dropped — correct, because the trail was about the severed peer.
+ *
+ * RECEIVER-SIGNED. Custody is a claim about this store's own act, so a peer can neither make one
+ * nor forge one. It is also what keeps a stamp out of law: `bindArrived` enumerates a peer's
+ * exports from PEER-authored bindings, so the receiver's own authorship excludes these by the same
+ * filter that stops a blessing being re-blessed.
+ */
+export function arrivalClaims(
+  arrival: { channel: string; from: string; arrived: readonly string[] },
+  author: string,
+  timestamp: number,
+): Claims {
+  return {
+    timestamp,
+    author,
+    pointers: [
+      {
+        role: "arrival",
+        target: {
+          kind: "entity",
+          entity: { id: `channel:${arrival.channel}`, context: CTX_ARRIVAL },
+        },
+      },
+      // Omitted when empty, exactly as the channel record omits it: a channel opened before
+      // addresses were recorded has no address, and "" is not one.
+      ...(arrival.from === ""
+        ? []
+        : [{ role: "from" as const, target: { kind: "primitive" as const, value: arrival.from } }]),
+      ...arrival.arrived.map((id) => ({
+        role: "arrived" as const,
+        target: { kind: "delta" as const, deltaRef: { delta: id } },
+      })),
+    ],
+  };
+}
+
+/**
+ * Stamp this sync's custody into the channel's own pool — one attestation per `ARRIVAL_FAN` refs.
+ *
+ * NOTHING ACCEPTED, NOTHING WRITTEN. Liveness is already the channel record's job, and a standing
+ * sync polls forever: a stamp per poll would grow the pool without recording a single arrival.
+ *
+ * ONE TIMESTAMP for the whole sync, so a batch split by the cap still reads as one arrival rather
+ * than as several. It comes from the POOL's clock because the stamps live in the pool, and an as-of
+ * read there is what reads them back.
+ */
+async function attestArrival(
+  gw: Gateway,
+  ground: Gateway,
+  name: string,
+  from: string,
+  report: FederationReport,
+): Promise<void> {
+  // REFUSE RATHER THAN STAMP A CUSTODY THIS CANNOT POINT AT. The door names what it ingested only
+  // when asked (`ids: true`); asked and answered with a shorter list, an attestation would silently
+  // under-claim, and a custody trail with an undeclared gap is worse than none.
+  const arrived = report.acceptedIds;
+  if (arrived === undefined || arrived.length !== report.accepted) {
+    throw new Error(
+      `sync could not record the arrival on "${name}": the pool's door reported ${report.accepted} ` +
+        `accepted delta(s) and named ${arrived?.length ?? 0} of them, so an attestation would ` +
+        `claim a custody it cannot point at. The peer's deltas landed; nothing was attested.`,
+    );
+  }
+  if (arrived.length === 0) return;
+  const at = ground.nextTimestamp();
+  const stamps: Delta[] = [];
+  for (let i = 0; i < arrived.length; i += ARRIVAL_FAN) {
+    stamps.push(
+      signClaims(
+        arrivalClaims(
+          { channel: name, from, arrived: arrived.slice(i, i + ARRIVAL_FAN) },
+          gw.operatorAuthor!,
+          at,
+        ),
+        gw.options.seed!,
+      ),
+    );
+  }
+  // `federate`, like the manifest rows the channel writes beside them: the pool is a separate
+  // ground, and this is the door the receiver's own writes into it already take. That door counts
+  // its refusals rather than naming them, so the count is checked here — a stamp refused (a slate
+  // closing `cite` over a member is the reachable case) would otherwise leave the same undeclared
+  // gap the guard above exists to prevent.
+  const landed = await ground.federate(stamps);
+  if (landed.accepted !== stamps.length) {
+    throw new Error(
+      `sync could not record the arrival on "${name}": the pool took ${landed.accepted} of ` +
+        `${stamps.length} attestation(s), so the custody trail would have a gap nothing declares. ` +
+        `The peer's deltas landed; the stamp did not.`,
+    );
+  }
 }
 
 /**
@@ -392,6 +504,9 @@ async function syncChannel(
   opts: { into: string; prefix: string; from?: string; source: ChannelSource; bless?: boolean },
 ): Promise<SyncReport> {
   const before = channelStatusImpl(gw, name)[0];
+  // The peer's address as the RECORD holds it, resolved once: the failure stamp, the success stamp
+  // and the arrival attestation must all name the same door.
+  const from = before?.from ?? opts.from ?? "";
   // FROZEN: read the toggle from the ground on every sync, so a freeze takes effect on the next
   // poll without restarting anything — the same "state is data" discipline as `loam:trust`. A
   // frozen channel reports honestly rather than silently doing nothing: it did not fail, and it
@@ -413,7 +528,7 @@ async function syncChannel(
       blessing: before?.blessing ?? opts.bless !== false,
       lastSyncedAt: before?.lastSyncedAt ?? 0,
       consecutiveFailures: (before?.consecutiveFailures ?? 0) + 1,
-      from: before?.from ?? opts.from ?? "",
+      from,
     });
     throw err;
   }
@@ -421,13 +536,19 @@ async function syncChannel(
   // deltas carry the PEER's signatures and hold no write standing here, so the governed write door
   // refuses them — correctly. Federation is union by signature verification, and the pool is
   // exactly the bounded place that union is allowed to happen.
-  const report = await ground.federate([...offered]);
+  // `ids: true` is what lets custody POINT at the arrivals instead of counting them. The door
+  // already knows which deltas it newly ingested; recovering that afterwards would mean diffing
+  // reactor snapshots around the call, a pass over the whole store on every poll (H8).
+  const report = await ground.federate([...offered], { ids: true });
   // Read from the GROUND on every sync, not from the open-time option. Note this blesses the pool's
   // CONTENTS rather than this sync's arrivals, so resuming binds what landed while blessing was off.
   const blessing = before?.blessing ?? opts.bless !== false;
   const { bound, parked, witnessed } = blessing
     ? await bindArrived(gw, ground, opts.prefix)
     : { bound: [] as string[], parked: [] as string[], witnessed: [] as string[] };
+  // AFTER the blessing, never before: `bindArrived` freezes the pool's members to address a module
+  // version, so a stamp landing first would move that address on every poll for no reason.
+  await attestArrival(gw, ground, name, from, report);
   await stamp(gw, {
     name,
     into: opts.into,
@@ -436,7 +557,7 @@ async function syncChannel(
     blessing: before?.blessing ?? opts.bless !== false,
     lastSyncedAt: gw.nextTimestamp(),
     consecutiveFailures: 0,
-    from: before?.from ?? opts.from ?? "",
+    from,
   });
   return {
     offered: report.offered,
