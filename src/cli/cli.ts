@@ -240,10 +240,12 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "--supersede is what moves the route onto it. Pass --expect <bundle-id from list> to refuse",
       "if the peer changed the app between the listing and the blessing.",
       "",
-      "WHAT MOUNTING DOES NOT BOUND: the app runs in a worker with a time and memory limit, and",
-      "that is not object-capability confinement. A peer's bundle can still reach the filesystem",
-      "and the network of the machine you run this on. The pool bounds what it can WRITE to your",
-      "store, not what it can reach outside it (SPEC §24.5, an open flag).",
+      "WHAT MOUNTING DOES NOT BOUND. The pool bounds what a peer's app may WRITE to your store. It",
+      "does not bound what that code may REACH: a bundle can open a socket or read the filesystem of",
+      "the machine you run this on. And only the app's RENDER runs in a worker with a time and memory",
+      "limit — its module body is evaluated on the serving thread, when you bless it and again when a",
+      "process first serves it, with no such limit. Mount a peer's app the way you would run their",
+      "program (SPEC §24.5, an open flag).",
     ],
   },
   migrate: {
@@ -1067,24 +1069,38 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
             a.hash === undefined
               ? `\n  app "${a.route}" — the peer WITHDREW it`
               : `\n  app "${a.route}" — the peer offers ${short(a.hash)}`;
-          // Something of the operator's OWN holds the name. No blessing can move it, so the report
-          // names the thing in the way rather than a command that would refuse.
-          if (a.shadowed !== undefined) {
+          // WHY IT ANSWERS NOTHING, when it does not. Each cause has a different remedy and none of
+          // them is "bless it", so each says the thing that is actually in the way.
+          const stuck =
+            a.shadowed !== undefined
+              ? `\n    it is MOUNTED here and answers nothing: ${a.shadowed} holds that name\n` +
+                "    rename your own route to give this one back its name"
+              : a.dark === true
+                ? `\n    it is MOUNTED here and answers nothing: the lens it reads is not bound ` +
+                  "here\n    lift the curse on that lens, or re-bless it, and this answers again"
+                : undefined;
+          // WITHDRAWN FIRST. There is nothing to bless and nothing newer to move onto, so every
+          // remedy below would refuse — the only act left is dropping the channel.
+          if (a.hash === undefined) {
             return (
-              `${offers}\n    it is MOUNTED here and answers nothing: ${a.shadowed} holds that name\n` +
-              "    rename your own route to give this one back its name"
+              offers +
+              (stuck ??
+                `\n    this store still runs the app it blessed (${short(a.serving ?? a.mounted ?? "")}) ` +
+                  `at "${a.serves}"`) +
+              `\n    dropping the channel is what removes it: \`loam federate drop --channel ${r.name} --yes\``
             );
           }
-          if (a.dark === true) {
+          if (stuck !== undefined) return offers + stuck;
+          // A pin names a delta of the PEER's store, which this one does not hold: the blessing door
+          // refuses it by name, so offering the blessing here would be offering a refusal.
+          if (a.pinned === true) {
             return (
-              `${offers}\n    it is MOUNTED here and answers nothing: the lens it reads is not ` +
-              "bound here\n    lift the curse on that lens, or re-bless it, and this answers again"
+              `${offers}\n    it pins a version of the peer's OWN store, so it cannot mount here\n` +
+              "    ask them to publish it unpinned, against a version you hold"
             );
           }
           if (a.serving === undefined) {
-            return a.hash === undefined
-              ? `${offers}\n    and nothing of it is mounted here — the row is about to go quiet`
-              : `${offers}\n    ARRIVED, INERT — nothing of it runs until ${bless}\``;
+            return `${offers}\n    ARRIVED, INERT — nothing of it runs until ${bless}\``;
           }
           if (a.blessed) return `${offers}\n    it SERVES at "${a.serves}"`;
           return (
@@ -1188,11 +1204,15 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
       // does not serve — its lens withdrawn, say — must not be announced as a mount (H7).
       const app = gateway.channelApps(name).find((a) => a.route === route);
       if (app?.blessed !== true) {
-        io.out(
-          `loam: ${name} blessed the app "${route}", and it does not serve\n` +
-            "  the binding landed; something else it needs did not — check that the lens it reads is\n" +
-            `  still bound here: \`loam federate list\``,
-        );
+        // NAME THE CAUSE, or name that it is unknown. The first version of this line always blamed
+        // the lens, which is wrong for the commonest case: a name of the operator's own in the way.
+        const why =
+          app?.shadowed !== undefined
+            ? `${app.shadowed} holds that name — rename your own route to give this one its name`
+            : app?.dark === true
+              ? "the lens it reads is not bound here — lift the curse on it, or re-bless it"
+              : "check `loam federate list` for what this store says about it";
+        io.out(`loam: ${name} blessed the app "${route}", and it does not serve\n  ${why}`);
         return 0;
       }
       io.out(

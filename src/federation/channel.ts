@@ -97,6 +97,11 @@ export interface ArrivedApp {
   readonly shadowed?: string;
   /** A mounted app whose LENS is not bound here — cursed, or its registration withdrawn (§23.6). */
   readonly dark?: true;
+  /**
+   * The peer's binding pins a §17 version of the PEER's own store, so this store cannot mount it at
+   * all — the pin names a delta it does not hold. Reported rather than offered a remedy.
+   */
+  readonly pinned?: true;
   /** Is the code the peer offers the code that answers? Every absence above is why this is not one field. */
   readonly blessed: boolean;
 }
@@ -602,6 +607,10 @@ const appIdentity = (r: RendererBinding): string =>
         r.bundle,
         JSON.stringify([...(r.writable ?? [])]),
         r.pen ?? "",
+        // The §17 VERSION a binding pins decides which frozen reading it renders against, and
+        // whether the route goes dark at all (§23.6). A re-point between pins with one bundle is a
+        // different app by every question an operator would ask about it.
+        r.versionId ?? "",
       ]
         .map((field) => `${field.length}:${field}`)
         .join(""),
@@ -652,7 +661,8 @@ function appsOf(gw: Gateway, ground: Gateway, channel: string, prefix: string): 
   // receiver's whole ground, so every renderer this store owns has an operator-signed twin in here,
   // and counting a twin would tell an operator their peer's route runs code it does not.
   const mounted = new Map(readPoolRenderers(ground, gw).map((r) => [r.route, r]));
-  const offered = new Map(arrivedBindings(gw, ground).map((r) => [r.route, appIdentity(r)]));
+  const offeredBindings = new Map(arrivedBindings(gw, ground).map((r) => [r.route, r]));
+  const offered = new Map([...offeredBindings].map(([route, r]) => [route, appIdentity(r)]));
   const rows: ArrivedApp[] = [];
   for (const route of new Set([...offered.keys(), ...mounted.keys()])) {
     const hash = offered.get(route);
@@ -674,10 +684,15 @@ function appsOf(gw: Gateway, ground: Gateway, channel: string, prefix: string): 
     const dark = own !== undefined && shadow === undefined && !routeServableOn(ground, own, "full");
     const serving =
       own === undefined || shadow !== undefined || dark ? undefined : appIdentity(own);
+    // A VERSION-PINNED arrival can never mount here: the pin names a delta of the PEER's own store,
+    // which this one does not hold, and the blessing door refuses it by name. Reporting such a row
+    // as merely "inert" would print a remedy that always throws.
+    const pinned = offeredBindings.get(route)?.versionId !== undefined;
     rows.push({
       channel,
       route,
       serves: `${prefix}:${route}`,
+      ...(pinned ? { pinned: true as const } : {}),
       ...(hash === undefined ? {} : { hash }),
       ...(own === undefined ? {} : { mounted: appIdentity(own) }),
       ...(serving === undefined ? {} : { serving }),
@@ -714,9 +729,12 @@ export function channelAppsImpl(gw: Gateway, channel?: string): ArrivedApp[] {
  * gateway, so it runs on the pool's ground, wears §24.7's probation frame, writes only into the
  * pool, and goes with the pool when the channel is dropped. What none of that reaches is AMBIENT
  * AUTHORITY — §24.5's open flag, stated here because this is the door that first lets bytes a
- * stranger signed execute on the host. The §23.9 worker bounds hang, crash and memory; it is not an
- * ocap sandbox, and a bundle can still reach `node:fs` or a socket. The pool bounds what an app may
- * write into the operator's store, not what it may touch outside it.
+ * stranger signed execute on this host. Two halves, and the second is easy to miss: the §23.9
+ * worker bounds hang, crash and memory for the RENDER, and it is not an ocap sandbox, so a bundle
+ * can still reach `node:fs` or a socket. The module BODY is not even in the worker — `publishRenderer`
+ * loads the bundle to check it is loadable, and `prepareRoute` loads it again in whatever process
+ * first serves the route, both on the calling thread with no clock. Blessing a peer's app is
+ * running their program.
  * `dependencies: "refuse"` keeps the act to the one export asked for — a
  * renderer whose lens is not blessed is refused, never quietly blessed along with it — and
  * `expect: "renderer"` means a manifest alias can never turn this into a schema blessing.
@@ -764,11 +782,15 @@ export async function blessChannelAppImpl(
   if (opts.expect !== undefined) {
     // A PIN SHORT ENOUGH TO MATCH ANYTHING IS NOT A PIN, and the empty string matches everything —
     // so a caller who believes they pinned would be told they had. Refused rather than honoured.
-    if (opts.expect.length < 8) {
+    // EVERY identity begins `1e20` — the multihash tag and length — so the first four characters
+    // discriminate nothing at all. A "pin" of eight characters is four real ones, sixteen bits, a
+    // number of bundle variants a peer grinds through in milliseconds. The floor counts the
+    // constant, and the refusal explains why rather than just naming a number.
+    if (opts.expect.length < 20) {
       throw new Error(
-        `bless-app refused: --expect "${opts.expect}" is too short to identify an app. Paste at ` +
-          "least the first 8 characters of the id `loam federate list` printed. A pin that matches " +
-          "anything reads as a pin and is not one.",
+        `bless-app refused: --expect "${opts.expect}" is too short to identify an app. Every id ` +
+          "starts `1e20`, so a short pin is mostly that constant — paste at least 20 characters of " +
+          "what `loam federate list` printed. A pin a peer can grind past reads as a pin and is not one.",
       );
     }
     if (!appIdentity(app).startsWith(opts.expect)) {

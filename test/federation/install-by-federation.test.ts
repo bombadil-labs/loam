@@ -155,7 +155,13 @@ const anyPoolFileHolds = (home: string, needle: string): boolean => {
 // of them may contain would let two different bindings mint one identity.
 const appIdOf = (
   bundle: string,
-  opts: { route?: string; consumes?: string[]; writable?: string[]; pen?: string } = {},
+  opts: {
+    route?: string;
+    consumes?: string[];
+    writable?: string[];
+    pen?: string;
+    versionId?: string;
+  } = {},
 ): string =>
   contentAddress(
     new TextEncoder().encode(
@@ -166,6 +172,7 @@ const appIdOf = (
         bundle,
         JSON.stringify(opts.writable ?? []),
         opts.pen ?? "",
+        opts.versionId ?? "",
       ]
         .map((field) => `${field.length}:${field}`)
         .join(""),
@@ -1004,6 +1011,39 @@ describe("T209 — what an app IS, for the report and for the blessing", () => {
     }
   });
 
+  it("an app that pins a version of the PEER's store is named as unmountable, not offered a blessing", async () => {
+    // The pin names a delta of ALICE's store, which bob does not hold, so the blessing door refuses
+    // it by name. Listing it as "inert, bless it" would print a remedy that always throws — and the
+    // identity has to move with the pin, or re-pointing between pins would read as no change.
+    const alice = await peer(ALICE_SEED, { route: "other", app: OTHER_APP, height: 62 });
+    await alice.publishRenderer({
+      route: "hello",
+      schema: "Plant",
+      consumes: ["height"],
+      bundle: APP,
+      version: 1, // pinned to alice's own registration version
+    });
+    const bob = await store(BOB_SEED);
+    try {
+      const channel = await link(bob, alice, "alice");
+      await channel.sync();
+
+      const row = bob.channelApps(CHANNEL).find((a) => a.route === "hello")!;
+      expect(row.pinned).toBe(true);
+      expect(row.hash).not.toBe(appIdOf(APP)); // the pin is part of what the app IS
+      await expect(bob.blessChannelApp(CHANNEL, "hello")).rejects.toThrow(/pins a §17/);
+
+      // Two-sided: alice's UNPINNED app on the same channel is unaffected and mounts.
+      const other = bob.channelApps(CHANNEL).find((a) => a.route === "other")!;
+      expect(other.pinned).toBeUndefined();
+      await bob.blessChannelApp(CHANNEL, "other");
+      expect((await bob.serveRoute("alice:other", FERN, "full")).status).toBe(200);
+    } finally {
+      await alice.close();
+      await bob.close();
+    }
+  });
+
   it("a pin too short to identify anything is refused, not honoured", async () => {
     // `startsWith("")` is true of every identity, so an empty pin reads as a pin and is not one.
     const alice = await peer(ALICE_SEED, { route: "hello", app: APP, height: 62 });
@@ -1014,13 +1054,14 @@ describe("T209 — what an app IS, for the report and for the blessing", () => {
       await expect(bob.blessChannelApp(CHANNEL, "hello", { expect: "" })).rejects.toThrow(
         /too short to identify/,
       );
-      await expect(bob.blessChannelApp(CHANNEL, "hello", { expect: "1e20" })).rejects.toThrow(
-        /too short to identify/,
-      );
+      // Twelve characters LOOK like a pin and are eight real ones, because every id starts `1e20`.
+      await expect(
+        bob.blessChannelApp(CHANNEL, "hello", { expect: "1e20abcdefgh" }),
+      ).rejects.toThrow(/too short to identify/);
       expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(404);
       // Two-sided: a pin long enough to mean something is honoured.
       await bob.blessChannelApp(CHANNEL, "hello", {
-        expect: bob.channelApps(CHANNEL)[0]!.hash!.slice(0, 12),
+        expect: bob.channelApps(CHANNEL)[0]!.hash!.slice(0, 24),
       });
       expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(200);
     } finally {
@@ -1339,14 +1380,14 @@ describe("T209 — the CLI names what arrived and mounts one app", () => {
             "--route",
             "hello",
             "--expect",
-            "1e20deadbeefcafe",
+            "1e20deadbeefcafe0123456789",
             "--home",
             me,
           ],
           io(),
         ),
       ).toBe(2);
-      expect(said()).toContain("you asked for 1e20deadbeefcafe");
+      expect(said()).toContain("you asked for 1e20deadbeefcafe0123456789");
 
       fresh();
       expect(
@@ -1420,6 +1461,57 @@ describe("T209 — the CLI names what arrived and mounts one app", () => {
       expect(await run(["federate", "list", "--home", me], io()), said()).toBe(0);
       expect(said()).toContain('it SERVES at "alice:hello"');
       expect(said()).not.toContain("runs DIFFERENT code");
+
+      // ALICE WITHDRAWS IT. There is nothing left to bless and nothing newer to move onto, so every
+      // remedy but one would refuse — and the listing must not offer them. The row landing in the
+      // "runs DIFFERENT code … --supersede" branch was the shape this whole block exists to stop.
+      // EVERY binding at that route — she has published twice by now, and striking only the first
+      // would leave the second standing as what she still offers.
+      const atHello = [...alice.reactor.snapshot()]
+        .filter((d) =>
+          d.claims.pointers.some(
+            (p) =>
+              p.role === "route" && p.target.kind === "primitive" && p.target.value === "hello",
+          ),
+        )
+        .map((d) => d.id);
+      expect(atHello.length).toBeGreaterThan(1);
+      await alice.append(
+        atHello.map((id, i) =>
+          signClaims(
+            makeNegationClaims(authorForSeed(ALICE_SEED), 7_000 + i, id, "withdrawn"),
+            ALICE_SEED,
+          ),
+        ),
+      );
+      writeFileSync(offer, exportOffer(alice));
+      fresh();
+      expect(
+        await run(
+          [
+            "federate",
+            "open",
+            "--from",
+            offer,
+            "--into",
+            "friends",
+            "--prefix",
+            "alice",
+            "--home",
+            me,
+          ],
+          io(),
+        ),
+        said(),
+      ).toBe(0);
+      fresh();
+      expect(await run(["federate", "list", "--home", me], io()), said()).toBe(0);
+      expect(said()).toContain("the peer WITHDREW it");
+      expect(said()).toContain("still runs the app it blessed");
+      expect(said()).toContain("federate drop --channel channel:friends:alice --yes");
+      expect(said()).not.toContain("runs DIFFERENT code");
+      expect(said()).not.toContain("--supersede");
+      expect(said()).not.toContain("ARRIVED, INERT");
 
       // THE BYTES, on a real file. Every other drop rail here runs on an in-memory pool, where
       // "gone" and "closed" are the same observation. The bundle carries a needle no other store
