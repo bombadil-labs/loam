@@ -399,6 +399,10 @@ describe("(d) the board's page carries the time control, and an asOf shows a pri
     // A real input, naming the parameter the door parses — not merely the word somewhere on the page.
     expect(html).toMatch(/<input[^>]*name="asOf"/i);
     expect(html).toMatch(/<form[^>]*method="get"/i); // an inert GET — no script, any CSP
+    // And a step the browser will accept. A NUMERIC step over `min="0"` makes the browser demand a
+    // multiple of it, and a millisecond timestamp is a multiple of nothing — the submit is blocked
+    // in the browser, where no server-side rail can see it.
+    expect(html).toMatch(/<input[^>]*name="asOf"[^>]*step="any"/i);
   });
 
   it("an asOf shows the PRIOR board state — the card is back in waiting, not shipped", async () => {

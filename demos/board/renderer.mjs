@@ -60,7 +60,11 @@ export default (n) => {
   const rewind =
     `<form class="tt" method="get" data-loam-asof-control="1">` +
     `<label for="asof">as of</label>` +
-    `<input id="asof" name="asOf" type="number" step="60000" min="0" ` +
+    // `step="any"` OR THE FORM WILL NOT SUBMIT. With `min="0"` present the step base is 0, so a
+    // numeric step makes the browser demand a multiple of it — and a real millisecond timestamp is
+    // a multiple of nothing. Chrome then blocks the submit with "the two nearest valid values are",
+    // and the control looks broken while every server-side rail stays green.
+    `<input id="asof" name="asOf" type="number" step="any" min="0" ` +
     `placeholder="milliseconds since 1970" value="${pinned}">` +
     `<button type="submit">rewind</button> <a href="?">now</a>` +
     `</form>`;
