@@ -3,5 +3,8 @@
   "category": "feature",
   "duration": 1,
   "id": "T203",
+  "rails": [
+    "test/server/admin-channel-health.test.ts"
+  ],
   "title": "Channel health on /admin — the sever-confirm page can see what it severs"
 }

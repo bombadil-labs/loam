@@ -15,6 +15,7 @@ import { readUserSeed } from "../cli/config.js";
 import { authorForSeed, type Delta } from "@bombadil/rhizomatic";
 import { lensOf, readRegistrations } from "../gateway/registration.js";
 import type { Container, ContainerTable, ResolvedContainer } from "../gateway/container.js";
+import type { ChannelStatus } from "../federation/channel.js";
 import type { Gateway } from "../gateway/gateway.js";
 
 export const ADMIN_PATH = "/admin";
@@ -181,6 +182,57 @@ ${listing}
 </form>`;
   };
 
+  // One channel's health, from the record deltas §46.4 already writes. `lastSyncedAt === 0` is
+  // NEVER SYNCED and renders as words: a zero drawn as a time reads as "synced a while ago", and
+  // telling a quiet peer from an unreachable one is the whole reason both fields are stored (H9).
+  // Same convention as the `loam_federate_status` tool.
+  const channelRowHtml = (c: ChannelStatus): string => {
+    const fails =
+      `${c.consecutiveFailures} consecutive failure` + (c.consecutiveFailures === 1 ? "" : "s");
+    const when =
+      c.lastSyncedAt === 0
+        ? "never synced"
+        : `last synced ${new Date(c.lastSyncedAt).toISOString()}`;
+    return (
+      `<li><a href="${escapeHtml(detailHref(c.name))}"><code>${escapeHtml(c.name)}</code></a> — ` +
+      `the peer you call <code>${escapeHtml(c.prefix)}</code>, into ` +
+      `<a href="${escapeHtml(detailHref(c.into))}"><code>${escapeHtml(c.into)}</code></a>. ` +
+      `${c.receiving ? "receiving" : "not receiving"} · ` +
+      `${c.blessing ? "blessing" : "not blessing"} · ${when} · ` +
+      // The marker is structural rather than a colour, so it survives a stylesheet-less read.
+      (c.consecutiveFailures === 0 ? fails : `<strong>${fails}</strong>`) +
+      `</li>`
+    );
+  };
+
+  // The channels panel, in one shape wherever it appears: the dashboard, a container's own page,
+  // and the drop-confirm page. `keep` is the caller's SCOPE — every caller has already proven its
+  // containers are in the session user's subtree, and this panel widens nothing. A page about one
+  // container renders nothing when no channel touches it; the dashboard passes `empty` because
+  // there "no channels" is an answer a person asked for.
+  const channelsPanelHtml = (
+    gw: Gateway,
+    keep: (c: ChannelStatus) => boolean,
+    empty?: string,
+  ): string => {
+    const rows = gw
+      .channelStatus()
+      .filter(keep)
+      .sort((a, b) => (a.name < b.name ? -1 : 1));
+    if (rows.length === 0 && empty === undefined) return "";
+    const listing =
+      rows.length === 0 ? `<p>${empty}</p>` : `<ul>\n${rows.map(channelRowHtml).join("\n")}\n</ul>`;
+    return `<h2>Channels.</h2>
+<p>A channel is a peer this store reads from. Its deltas land in a pool of its own, and the law it
+carries binds under the name you gave the peer. Read the last two together: a peer with no failures
+and an old reading is quiet, and a peer with failures is one this store could not reach.</p>
+${listing}`;
+  };
+
+  /** The channels a page about `name` is answerable for: its own, and the ones receiving into it. */
+  const channelsTouching = (gw: Gateway, name: string): string =>
+    channelsPanelHtml(gw, (c) => c.name === name || c.into === name);
+
   const dashboardPage = (
     gw: Gateway,
     user: string,
@@ -195,6 +247,7 @@ ${listing}
 name, and everything declared inside it. Each name opens its own page.</p>
 ${treeHtml(table, reach, user)}
 ${opts.connectionsPanel(gw, table, reach, formToken)}
+${channelsPanelHtml(gw, (c) => reach.has(c.name), "No channel receives into your subtree.")}
 ${declareFormHtml(user, reach, formToken)}
 ${schemaPanelHtml(gw, formToken)}
 ${signOutFormHtml(formToken)}`,
@@ -317,7 +370,9 @@ writes, or drop it to forget it whole.</p>`
       (rec.parent === undefined && rec.inboxOf === undefined
         ? " — your root."
         : ` — inside <code>${escapeHtml(rec.inboxOf ?? rec.parent!)}</code>.`) +
-      "</p>";
+      // Above every branch's lifecycle forms, drop included: this page is where a channel is
+      // severed, so it is where a person must be able to see what they are severing.
+      `</p>\n${channelsTouching(gw, name)}`;
     const back = `<p><a href="${ADMIN_PATH}">Back to your containers.</a></p>`;
     const forms = lifecycleForms(table, name, rec, formToken);
 
@@ -388,6 +443,7 @@ ${members.map((m) => memberHtml(gw, name, m, formToken)).join("\n")}
   };
 
   const confirmPage = (
+    gw: Gateway,
     name: string,
     rec: ResolvedContainer,
     count: number | undefined,
@@ -411,6 +467,7 @@ pool remains.</p>`;
       `<h1>Drop <code>${escapeHtml(name)}</code>?</h1>
 <p>${held}</p>
 ${consequence}
+${channelsTouching(gw, name)}
 <p>This cannot be undone.</p>
 <form method="post" action="${ADMIN_DROP_CONFIRM_PATH}">
 ${hiddenPair(formToken, name)}
