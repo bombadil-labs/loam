@@ -73,6 +73,7 @@ import {
   type ClaimTemplates,
   type LensName,
   type ResolverSpecs,
+  type ResolverSpec,
 } from "./registration.js";
 import { CTX_RENDERER, publishRendererImpl } from "./renderers.js";
 
@@ -884,6 +885,46 @@ export interface AdoptLawOptions {
   readonly pen?: boolean;
   /** alias → the new target address the operator confirms for a RE-POINTED alias. */
   readonly repoints?: Readonly<Record<string, string>>;
+  /**
+   * Refuse a row that classifies as anything other than this kind. Blessing a NAME and mounting
+   * CODE THAT RUNS are different grants (§24.6), and a caller that means one must never perform the
+   * other because a manifest alias resolved to a row it did not expect — an alias is a lookup key a
+   * peer's own law can collide with.
+   */
+  readonly expect?: "schema" | "renderer";
+  /**
+   * Refuse rather than blessing a renderer's schema dependency alongside it. The default pulls the
+   * dependency in, which is right for an operator blessing a module they chose; a caller blessing
+   * ONE export of a stranger's pool must bind nothing the operator did not ask for.
+   */
+  readonly dependencies?: "refuse";
+  /**
+   * Resolve the alias only among manifest rows THIS store's operator authored.
+   *
+   * A module's manifest is ordinarily the SHIPPER's word — that is the whole point of §27.8, and the
+   * default must stay unscoped. A federation pool is the other case: the peer never sends rows, the
+   * receiver mints every one of them, and the peer CAN author deltas in the pool. `readManifest` is
+   * latest-per-alias across all authors, so an unscoped read there lets a peer plant a row that wins
+   * an alias and redirects the blessing to a target the operator never saw. Scoped, an alias means
+   * what the operator said it means.
+   */
+  readonly manifest?: "operator";
+  /**
+   * Bind the law and WITHHOLD its §22 resolvers — the fields they back refuse, by name, instead of
+   * running a stranger's code.
+   *
+   * A registration may carry resolver ESM, and publishing one loads that ESM on THIS gateway
+   * (`preloadResolvers` → `importEsm`) — no pool, no worker, no frame. So a pass that binds NAMES
+   * without a person deciding cannot pass resolvers through: "a name bound" and "code ran" are the
+   * two grants §24.6 keeps apart, and this is the second one arriving through the first.
+   *
+   * `"grant"` is the act that reverses it, and it also SKIPS THE WITNESS. Law identity deliberately
+   * excludes the resolvers (`schemaLawAddress` covers the gather body and the resolution program,
+   * nothing else), so withheld law and granted law share one address — and a re-blessing would
+   * witness, append nothing, and report success while every field went on refusing. A grant changes
+   * something the address cannot see, so the address may not be what decides whether it happens.
+   */
+  readonly resolvers?: "withhold" | "grant";
 }
 
 export interface AdoptionOutcome {
@@ -1043,7 +1084,7 @@ export async function adoptLawImpl(
   opts: AdoptLawOptions = {},
 ): Promise<AdoptionOutcome> {
   const src = sourceOf(gw, version);
-  const rows = readManifest(src.members);
+  const rows = manifestRowsFor(gw, src, opts);
   const row = rows.find((r) => r.alias === alias);
   if (row === undefined) {
     throw new Error(
@@ -1059,6 +1100,13 @@ export async function adoptLawImpl(
         `by promote-outputs (§24.3).`,
     );
   }
+  if (opts.expect !== undefined && ex.kind !== opts.expect) {
+    throw new Error(
+      `adoption refused: "${alias}" names ${ex.kind} law, and this caller asked for ` +
+        `${opts.expect} law. Blessing a NAME and mounting CODE THAT RUNS are different grants ` +
+        `(§24.6) — an alias a peer chose may not turn one act into the other.`,
+    );
+  }
   return adoptOne(gw, src, row, ex, opts);
 }
 
@@ -1066,7 +1114,7 @@ async function adoptOne(
   gw: Gateway,
   src: Source,
   row: ManifestRow,
-  ex: SchemaExport | RendererExport,
+  given: SchemaExport | RendererExport,
   opts: AdoptLawOptions,
 ): Promise<AdoptionOutcome> {
   if (gw.options.seed === undefined || gw.operatorAuthor === undefined) {
@@ -1075,6 +1123,15 @@ async function adoptOne(
     );
   }
   const notes: string[] = [...skewNotes(gw, src, row)];
+  // THE LENS THE BINDING WILL NAME HERE, resolved before anything else reads its address.
+  const verdict: LensVerdict =
+    given.kind === "renderer"
+      ? resolveRendererLens(gw, src, row, given, opts, notes)
+      : { kind: "unknown" };
+  const ex = verdict.kind === "resolved" ? verdict.ex : given;
+  // The module DEFINES the lens and this store binds that law nowhere: the dependency is a real
+  // debt, whatever some other law happens to be called. Carried past the witness to the guard below.
+  const unblessed = verdict.kind === "unblessed" ? verdict.dependency : undefined;
 
   // A pen never rides the sugar OR the primitive: §23.3's write standing is a second key, and
   // classification read it from the BYTES, so a manifest calling this row a schema changes nothing.
@@ -1101,17 +1158,39 @@ async function adoptOne(
   // binding that publishes (§47 criterion 2: many names may point at one law). A call with NO `as`
   // asked for the LAW, not a name, and keeps the address-only witness whole — T140's idempotent
   // module contract, where re-blessing what the operator already serves appends nothing.
-  const already = boundElsewhere(gw, ex, opts.as);
+  // A GRANT IS NOT A REPEAT, whatever the address says — see `AdoptLawOptions.resolvers`.
+  const already = opts.resolvers === "grant" ? undefined : boundElsewhere(gw, ex, opts.as);
   if (already !== undefined) {
     const landed = await record(gw, src, row, ex, "witnessed", already.deltaId);
     return { alias: row.alias, kind: "witnessed", landed, notes };
   }
 
+  // A CALLER THAT REFUSES DEPENDENCIES REFUSES THE BARE-NAME FALLBACK WITH THEM.
+  //
+  // `unknown` means the module carries no definition of the lens this renderer reads, so the only
+  // thing left to match on is the peer's own spelling — and the fallback below matches it against
+  // `gw.registered`, which in a channel pool is the one-way seeded copy of the RECEIVER's own
+  // registrations. That is the lens capture the address matching exists to prevent, arriving by the
+  // one door that skips it: a peer's app reading `Plant` would mount bound to the operator's Plant,
+  // rendering the operator's own reading under the peer's name. A caller that blesses one export of
+  // a stranger's pool cannot accept "some law of that name is served here" as an answer.
+  if (ex.kind === "renderer" && verdict.kind === "unknown" && opts.dependencies === "refuse") {
+    throw new Error(
+      `adoption refused: the renderer "${row.alias}" reads the lens "${ex.schemaName}", and this ` +
+        `module carries no definition of it — so nothing here can say WHOSE reading that name ` +
+        `means. A law of that name may well be served; matching on the name would mount this app ` +
+        `over it. Bless the schema it reads first, from the same source.`,
+    );
+  }
+
   // A renderer reads a LENS this store must serve (§23.4 refuses one that does not). When the
   // module exports that lens too, the blessing takes it first — the renderer is not law that
   // stands alone, and the dependency is REPORTED rather than assumed.
-  if (ex.kind === "renderer" && !gw.registered.some((r) => lensOf(r) === ex.schemaName)) {
-    const dependency = dependencyRow(gw, src, ex.schemaName);
+  if (
+    ex.kind === "renderer" &&
+    (unblessed !== undefined || !gw.registered.some((r) => lensOf(r) === ex.schemaName))
+  ) {
+    const dependency = unblessed;
     if (dependency === undefined) {
       throw new Error(
         `adoption refused: the renderer "${row.alias}" reads the lens "${ex.schemaName}", which ` +
@@ -1119,10 +1198,17 @@ async function adoptOne(
           `first, or register your own`,
       );
     }
+    if (opts.dependencies === "refuse") {
+      throw new Error(
+        `adoption refused: the renderer "${row.alias}" reads the lens "${ex.schemaName}", which ` +
+          `this store does not serve — bless the schema it reads first. This caller blesses one ` +
+          `export at a time, so nothing binds a name the operator did not ask for.`,
+      );
+    }
     // The dependency is blessed under its OWN name: `as` renames the row the operator asked for,
-    // never the lens its renderer reads.
+    // never the lens its renderer reads. `supersede` does NOT ride down either — it is consent to
+    // take ONE name the caller looked at, and the dependency's name is one they never mentioned.
     const inherited: AdoptLawOptions = {
-      ...(opts.supersede === undefined ? {} : { supersede: opts.supersede }),
       ...(opts.pen === undefined ? {} : { pen: opts.pen }),
       ...(opts.repoints === undefined ? {} : { repoints: opts.repoints }),
     };
@@ -1177,7 +1263,13 @@ async function adoptOne(
     // `supersede` outranks by RETIRING the incumbent from the blessing itself, because the
     // blessing's timestamp is the source's and cannot win on recency. Strike the blessing and the
     // incumbent resurfaces — the negation stops counting with its carrier.
-    const negates = held !== undefined && held.address !== ex.address ? [held.deltaId] : [];
+    // A GRANT MUST RETIRE ITS INCUMBENT, and recency cannot do it. The withheld binding and the
+    // granted one are the SAME LAW by address — that is why the witness had to be skipped — and a
+    // blessing inherits its source timestamps, so the two tie and the id tie-break decides which
+    // one a reader sees. A coin flip is not a decision an operator took.
+    const takesName =
+      held !== undefined && (held.address !== ex.address || opts.resolvers === "grant");
+    const negates = takesName ? [held.deltaId] : [];
     return publish(gw, ex, opts, negates);
   });
 
@@ -1185,13 +1277,148 @@ async function adoptOne(
   return { alias: row.alias, kind: "adopted-from", landed: [...landed, ...provenance], notes };
 }
 
+/**
+ * THE RECEIVER'S REFUSING STUB, byte for byte — the whole source of a withheld resolver.
+ *
+ * It is DERIVED from the lens and the field rather than recognised by a marker, and that is the
+ * guard, not a detail. A substring test over source a PEER authors is a test the peer can pass:
+ * prefix your module with the marker, and every reader here calls your code withheld while
+ * `publishRegistration` imports and evaluates it — the guarantee inverted, with every
+ * operator-facing signal agreeing that nothing ran. Equality cannot be gamed that way: source
+ * identical to this IS this, and what runs is the refusal. Nothing about a stub is read from what
+ * arrived.
+ */
+export function withheldResolverCode(lens: string, field: string): string {
+  const why =
+    `"${field}" on "${lens}" is computed by RESOLVER CODE the peer wrote, and this store has ` +
+    "not been told to run it. Law that arrives on a channel binds a NAME; running code is a " +
+    "second decision. Bless it with `loam federate bless-app --channel <name> --resolvers " +
+    `"${lens}"\`, or read the fields this lens resolves without a resolver.`;
+  return `export default () => { throw new Error(${JSON.stringify(why)}); };`;
+}
+
+/** Is this EXACTLY the stub this store would write for that field — not merely something like it? */
+export const isWithheldResolver = (code: string, lens: string, field: string): boolean =>
+  code === withheldResolverCode(lens, field);
+
+/**
+ * The peer's resolvers, replaced one for one by a stub of OUR OWN that refuses.
+ *
+ * Dropping them instead would be quieter and worse: the field would fall back to its Policy value
+ * and answer a NUMBER an operator had no reason to trust, with nothing anywhere saying that a
+ * reading they were shown is not the reading the peer wrote. A refusal is the honest shape — the
+ * field says what is missing and what act supplies it.
+ *
+ * The stub is this store's code, not the peer's, which is the whole point: it is what runs where
+ * the peer's ESM would have. `type` and `rung` are preserved so the surface keeps its shape and the
+ * refusal arrives at the field rather than at the publish.
+ */
+function withheldResolvers(
+  specs: ResolverSpecs | undefined,
+  lens: string,
+): ResolverSpecs | undefined {
+  if (specs === undefined) return undefined;
+  const out: Record<string, ResolverSpec> = {};
+  for (const [field, spec] of Object.entries(specs)) {
+    // EVERY field, unconditionally. An earlier shape skipped a spec that already LOOKED withheld,
+    // so a re-bless would not stack stubs — and "looked withheld" was a substring of source the
+    // peer writes, so the skip was the bypass. The stub is idempotent by construction: written
+    // from the lens and the field, it is the same bytes every time, and re-blessing simply writes
+    // it again. Nothing here trusts what arrived.
+    out[field] = { rung: spec.rung, type: spec.type, code: withheldResolverCode(lens, field) };
+  }
+  return out;
+}
+
+/**
+ * The manifest, as the caller is entitled to read it (see `AdoptLawOptions.manifest`).
+ *
+ * THE SCOPE IS APPLIED TO THE MEMBERS, NEVER TO THE ROWS. `readManifest` is latest-per-alias, so
+ * filtering afterwards lets a foreign row WIN an alias and then be discarded — leaving the alias
+ * empty and the operator's own row invisible. Filtering first asks the right question: what does
+ * this manifest say, among the rows this caller trusts?
+ */
+function manifestRowsFor(gw: Gateway, src: Source, opts: AdoptLawOptions): ManifestRow[] {
+  if (opts.manifest !== "operator") return readManifest(src.members);
+  return readManifest(src.members.filter((d) => d.claims.author === gw.operatorAuthor));
+}
+
+/** What lens a renderer will read HERE, and whether that is a settled question yet. */
+type LensVerdict =
+  | { readonly kind: "resolved"; readonly ex: RendererExport }
+  /** The module exports the lens, and this store serves that LAW under no name at all. */
+  | { readonly kind: "unblessed"; readonly dependency: { row: ManifestRow; ex: SchemaExport } }
+  /** The module does not carry the lens; only the peer's spelling is left to match on. */
+  | { readonly kind: "unknown" };
+
+/**
+ * The renderer as it will actually be PUBLISHED here, with the lens it reads named the way THIS
+ * store names it.
+ *
+ * Law identity deliberately excludes the living name (§46.2), so the lens a stranger's renderer
+ * names bare — `Plant` — can be the very law this store already serves under a name of its own
+ * choosing: a channel's `alice:Plant`, assigned by the receiver because the receiver names what it
+ * receives. Publishing the peer's spelling would file a binding over a lens nothing here answers,
+ * and the renderer door would refuse it — so the mapping is not a convenience, it is what makes an
+ * arriving app mountable at all.
+ *
+ * IT MATCHES ON THE LAW'S ADDRESS, NEVER ON THE BARE NAME (H6) — and that closes the common case,
+ * not every case. The address it compares comes from the module's own schema export, and a manifest
+ * row names that export by hyperschema ENTITY; two stores that both publish a hyperschema named
+ * `Plant` file at the same default entity, so `classify` resolves it to whichever definition is
+ * latest across authors in the pool. When the receiver's own seeded law wins that, the address IS
+ * the receiver's and the match agrees with itself. Timestamps on the peer's side are the peer's, so
+ * which side wins is not the receiver's choice. Closing it wants entity-namespacing at the
+ * federation edge, which is its own ticket; the rail names the gap where it can be seen. A
+ * channel pool holds a one-way seeded copy of the RECEIVER's own registrations, so the set of lenses
+ * "already served" there includes the receiver's own — and a peer whose app reads a common name
+ * (`Note`, `Plant`, any stock shape) would otherwise mount bound to the RECEIVER's lens, resolving a
+ * stranger's app through a Schema the operator never associated with that channel, and inheriting
+ * whatever the operator had declared public about their own law. A name is not an identity; the
+ * gather program plus its resolution program is.
+ *
+ * Re-addressed here, BEFORE the witness and the name guard read `address`, because the address must
+ * be the address of what actually lands: computed from the peer's spelling, a second blessing of the
+ * same app would fail to witness and would then meet the route's own "already answered by
+ * DIFFERENT-content law" refusal, against law it published itself.
+ */
+function resolveRendererLens(
+  gw: Gateway,
+  src: Source,
+  row: ManifestRow,
+  ex: RendererExport,
+  opts: AdoptLawOptions,
+  notes: string[],
+): LensVerdict {
+  const dependency = dependencyRow(gw, src, ex.schemaName, opts);
+  // Nothing in the module defines the lens. The operator was told "or register your own", so the
+  // peer's spelling is all there is to match on — the caller's own name check rules below.
+  if (dependency === undefined) return { kind: "unknown" };
+  // THE SERVED SET, not every version ever published. A retired reading still has versions on the
+  // ground — a cursed channel lens is exactly that — and re-pointing a binding at a name this store
+  // no longer answers would swap a legible refusal for a renderer over a dark lens.
+  const served = gw.registered.find(
+    (r) => schemaLawAddress(r.hyperschema, r.schema) === dependency.ex.address,
+  );
+  if (served === undefined) return { kind: "unblessed", dependency };
+  const under = lensOf(served);
+  if (under === ex.schemaName) return { kind: "resolved", ex };
+  notes.push(
+    `the renderer "${row.alias}" reads the peer's lens "${ex.schemaName}", which this store serves ` +
+      `as "${under}" — the binding names the reading THIS store answers`,
+  );
+  const core = { ...ex, schemaName: under };
+  return { kind: "resolved", ex: { ...core, address: rendererLawAddress(core) } };
+}
+
 // The manifest row whose SCHEMA law provides a lens name — the dependency lookup a renderer needs.
 function dependencyRow(
   gw: Gateway,
   src: Source,
   lens: string,
+  opts: AdoptLawOptions,
 ): { row: ManifestRow; ex: SchemaExport } | undefined {
-  for (const candidate of readManifest(src.members)) {
+  for (const candidate of manifestRowsFor(gw, src, opts)) {
     let ex: Export;
     try {
       ex = classify(src, candidate);
@@ -1213,6 +1440,8 @@ async function publish(
 ): Promise<string[]> {
   if (ex.kind === "schema") {
     const lens = opts.as ?? ex.lensName;
+    const resolvers =
+      opts.resolvers === "withhold" ? withheldResolvers(ex.resolvers, lens) : ex.resolvers;
     let tick = 0;
     const clock = (): number => ex.timestamps[Math.min(tick++, ex.timestamps.length - 1)]!;
     const outcome = await publishRegistrationImpl(
@@ -1224,7 +1453,7 @@ async function publish(
       ex.schemaEntity,
       ex.mutations,
       ex.writable,
-      ex.resolvers,
+      resolvers,
       { clock, negates },
     );
     if (!outcome.bound) {

@@ -29,6 +29,11 @@ import type { StoreBackend } from "../store/backend.js";
 import { isRepairable } from "../store/quarantine.js";
 import { promoteImpl, readAdoptions, type Adoption } from "./adopt.js";
 import {
+  blessChannelAppImpl,
+  attachChannelPool,
+  blessChannelResolversImpl,
+  withheldLenses,
+  channelAppsImpl,
   channelStatusImpl,
   channelsEverImpl,
   resumeChannelImpl,
@@ -37,6 +42,7 @@ import {
   keepSyncingImpl,
   openChannelImpl,
   setChannelImpl,
+  type ArrivedApp,
   type Channel,
   type ChannelStatus,
   type OpenChannelOptions,
@@ -316,6 +322,9 @@ const bindableNames = (r: Bound): string[] => [lensOf(r), programOf(r)];
 // no export). The seam is deliberately explicit: what a concern module touches is greppable as
 // `gw.<member>` in its module, and a module needing a member NOT yet marked is a real finding about
 // coupling — widen the seam loudly, here, or question the boundary.
+/** No name at all — what a channel pool has declared open to a tokenless caller (see `openNames`). */
+const EMPTY_PUBLIC: ReadonlySet<string> = new Set<string>();
+
 export class Gateway {
   /** @internal — T19 seam (renderers.ts) */
   registered: Bound[] = [];
@@ -549,8 +558,8 @@ export class Gateway {
     door: "full" | "public" = "full",
   ): { registered: readonly Registered[]; hooks: GqlHooks } | undefined {
     if (door === "public") {
-      this.publicOpen ??= readPublicSchemas(this.reactor, this.operatorAuthor);
-      const defs = this.registered.filter((r) => this.publicOpen!.has(lensOf(r)));
+      const declared = this.openNames();
+      const defs = this.registered.filter((r) => declared.has(lensOf(r)));
       if (defs.length === 0) return undefined;
       return { registered: defs, hooks: this.gqlHooks("public") };
     }
@@ -562,12 +571,10 @@ export class Gateway {
   // anonymously — because the operator declared it." A declaration is publication, not a probe, so the
   // anonymous door may reveal exactly what the operator chose to name, and nothing else stays 404.
   isPublicLatest(name: string): boolean {
-    this.publicOpen ??= readPublicSchemas(this.reactor, this.operatorAuthor);
-    return this.publicOpen.has(name);
+    return this.openNames().has(name);
   }
   isPublicPin(name: string, deltaId: string): boolean {
-    this.publicOpen ??= readPublicSchemas(this.reactor, this.operatorAuthor);
-    return this.publicOpen.has(`${name}@${deltaId}`);
+    return this.openNames().has(`${name}@${deltaId}`);
   }
 
   // Every answerable version of every registration (SPEC §17): the append-only publication
@@ -720,8 +727,8 @@ export class Gateway {
   }
 
   // Ensure a route's bundle is loaded (SPEC §23): the body lives in renderers.ts.
-  async prepareRoute(route: string): Promise<void> {
-    return prepareRouteImpl(this, route);
+  async prepareRoute(route: string, door: "full" | "public" = "full"): Promise<void> {
+    return prepareRouteImpl(this, route, door);
   }
 
   // Serve a route (SPEC §23): the body — and the door-discipline doctrine — lives in renderers.ts.
@@ -901,6 +908,12 @@ export class Gateway {
    */
   readonly channelPools = new Map<string, Container>();
 
+  /**
+   * Set on a POOL's own gateway when it is a federation channel's pool (§46.1). It is what tells a
+   * peer-fed staging store from an operator-opened quarantine, and it closes the anonymous surface.
+   */
+  channelPool?: true;
+
   // The §24.5 envelope rows for every enveloped pool attached here: which pool, its resolved
   // ceilings, and what it has spent. The refusal a caller meets stays leak-free; this is the
   // operator-facing half of "exhaustion is loud". Body in envelope.ts.
@@ -943,15 +956,9 @@ export class Gateway {
       // same two places this does.
       const token = this.options.channelToken?.(standing.name);
       try {
-        this.channelPools.set(
-          standing.name,
-          await this.openContainer({
-            name: standing.name,
-            ...(this.options.channelBackend === undefined
-              ? {}
-              : { backend: this.options.channelBackend(standing.name) }),
-          }),
-        );
+        // Through the one attach, which is also the one place a channel pool is MARKED — a resumed
+        // pool is a channel's too, and this is the path a running server actually serves from.
+        this.channelPools.set(standing.name, await attachChannelPool(this, standing.name));
       } catch {
         // Deliberately left unattached; see above. And CRUCIALLY, left un-REGISTERED below: the
         // channel goes into `federationChannels` only once its pool is open. Registered first, a
@@ -1002,6 +1009,39 @@ export class Gateway {
 
   channelStatus(name?: string): ChannelStatus[] {
     return channelStatusImpl(this, name);
+  }
+
+  /** The peer apps sitting in this store's channel pools — arrived, and inert until blessed. */
+  channelApps(channel?: string): ArrivedApp[] {
+    return channelAppsImpl(this, channel);
+  }
+
+  /**
+   * Mount ONE arrived app (SPEC §24.6). Neither channel toggle reaches this: blessing a name and
+   * running a stranger's code are different grants, so the wider one takes its own deliberate act.
+   */
+  async blessChannelApp(
+    channel: string,
+    route: string,
+    opts: { pen?: boolean; supersede?: boolean; expect?: string } = {},
+  ): Promise<void> {
+    return blessChannelAppImpl(this, channel, route, opts);
+  }
+
+  /**
+   * Run a peer's RESOLVER code for one lens (SPEC §24.6). The channel binds names on its own; this
+   * is the separate act that lets the code behind a computed field run.
+   */
+  async blessChannelResolvers(channel: string, lens: string): Promise<string> {
+    return blessChannelResolversImpl(this, channel, lens);
+  }
+
+  /** The lenses on a channel whose peer-written resolvers are WITHHELD — decisions waiting on you. */
+  withheldOn(channel: string): string[] {
+    const status = channelStatusImpl(this, channel)[0];
+    const ground = this.channelPools.get(channel)?.gateway;
+    if (status === undefined || ground === undefined) return [];
+    return withheldLenses(this, ground, status.prefix);
   }
 
   /** Sever a federation channel and purge its pool. Irreversible; freezing is the reversible act. */
@@ -1470,9 +1510,27 @@ export class Gateway {
   // also keeps a nothing-public mount's refusal as cheap as an absent mount's (no timing
   // oracle where the status codes are uniform).
   private publicOpen: ReadonlySet<string> | undefined;
-  private publicSurface(): GraphQLSchema | undefined {
+
+  /**
+   * THE NAMES THIS STORE HAS DECLARED OPEN TO A TOKENLESS CALLER — and the one place that decides
+   * it, because there are five readers and a guard on one of them closes one door.
+   *
+   * A CHANNEL POOL DECLARES NOTHING. It is an attached container and therefore a mount in its own
+   * right, so `/channel:friends:alice/...` is a real URL against a store whose ground is a frozen
+   * COPY of this one's — `loam:public` rides that copy, and a declaration the operator has since
+   * struck still stands in there. Answering an empty set here closes the GraphQL surface, the SSE
+   * subscribe, the pinned-version REST door and the renderer door together, because all four ask
+   * this. A quarantine pool the operator opened themselves keeps its anonymous door: §24.7 builds a
+   * deliberate public probation surface on one, and this is narrower on purpose — it is about a
+   * pool whose contents a PEER chooses.
+   */
+  private openNames(): ReadonlySet<string> {
+    if (this.channelPool === true) return EMPTY_PUBLIC;
     this.publicOpen ??= readPublicSchemas(this.reactor, this.operatorAuthor);
-    const open = this.publicOpen;
+    return this.publicOpen;
+  }
+  private publicSurface(): GraphQLSchema | undefined {
+    const open = this.openNames();
     if (open.size === 0) return undefined;
     const defs = this.registered.filter((r) => open.has(lensOf(r)));
     if (defs.length === 0) return undefined; // declared but not (yet) registered: nothing binds
@@ -1495,8 +1553,7 @@ export class Gateway {
     if (this.publicSurface() !== undefined) return true;
     // §23.8: a pinned-public declaration opens the anonymous door for its route (and its byte-door) even
     // when no BARE-name lens is public — publicSurface builds only the bare-latest GraphQL/REST surface.
-    this.publicOpen ??= readPublicSchemas(this.reactor, this.operatorAuthor);
-    for (const entry of this.publicOpen) if (entry.includes("@")) return true;
+    for (const entry of this.openNames()) if (entry.includes("@")) return true;
     return false;
   }
 

@@ -17,7 +17,7 @@
 // slice, not invented here.
 
 import { authorForSeed, signClaims, type Primitive } from "@bombadil/rhizomatic";
-import type { Claims, Reactor } from "@bombadil/rhizomatic";
+import type { Claims, Delta, Reactor } from "@bombadil/rhizomatic";
 import { bytesEnvelope, findBytesByRef } from "./bytes.js";
 import { importEsm, loadedEsm } from "./esm.js";
 import type { Gateway, RequestContext } from "./gateway.js";
@@ -280,71 +280,134 @@ const isRoute = (id: string): boolean => id.startsWith("renderer:");
 // merges as data and mounts nothing (§8/§12 inert-by-default). A binding missing route/schema/bundle
 // binds nothing — unmounted, never a crash.
 export function readRenderers(reactor: Reactor, operator?: string): RendererBinding[] {
-  const lawful = lawfulSnapshot(reactor, operator);
   const negated = lawfulNegated(reactor, operator);
+  return latestPerRoute(lawfulSnapshot(reactor, operator), (d) => !negated(d.id));
+}
+
+/**
+ * ONE renderer binding, parsed from its delta — or undefined when the delta is not one, or is
+ * malformed (a binding missing route/schema/bundle binds nothing: unmounted, never a crash).
+ *
+ * Extracted so every reader of renderer law parses it the same way. Two parsers would drift, and the
+ * drift would land on which bundle a caller believes is bound.
+ */
+export function rendererBindingOf(delta: Delta): RendererBinding | undefined {
+  const key = delta.claims.pointers.find(
+    (p) => p.target.kind === "entity" && p.target.entity.context === CTX_RENDERER,
+  );
+  if (key?.target.kind !== "entity" || !isRoute(key.target.entity.id)) return undefined;
+  const route = primitive(delta.claims, "route");
+  const schemaName = primitive(delta.claims, "schema");
+  const bundle = primitive(delta.claims, "bundle");
+  if (typeof route !== "string" || typeof schemaName !== "string" || typeof bundle !== "string") {
+    return undefined;
+  }
+  const versionIdRaw = primitive(delta.claims, "versionId");
+  const versionId = typeof versionIdRaw === "string" ? versionIdRaw : undefined;
+  const jsonList = (role: string): string[] | undefined => {
+    const raw = primitive(delta.claims, role);
+    if (typeof raw !== "string") return undefined;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.every((f) => typeof f === "string")) return parsed;
+    } catch {
+      return undefined;
+    }
+    return undefined;
+  };
+  // Write-enabling (SPEC §23.3): read the form allow-list and the pen name. A binding with one but not
+  // the other is malformed and stays READ-ONLY (both dropped) — the parse gate keeps them paired, and a
+  // reader never trusts a half-written binding to sign.
+  const writable = jsonList("writable");
+  const penRaw = primitive(delta.claims, "pen");
+  const pen = typeof penRaw === "string" && penRaw !== "" ? penRaw : undefined;
+  const writeReady = writable !== undefined && writable.length > 0 && pen !== undefined;
+  return {
+    route,
+    // Parse boundary: reconstructed from a lawful delta, validated string above (see the guard).
+    schemaName: schemaName as LensName,
+    ...(versionId === undefined ? {} : { versionId }),
+    consumes: jsonList("consumes") ?? [],
+    bundle,
+    ...(writeReady ? { writable, pen } : {}),
+    deltaId: delta.id,
+    timestamp: delta.claims.timestamp,
+  };
+}
+
+/** Latest per route, over whatever deltas the caller hands in, keeping only those that survive. */
+function latestPerRoute(
+  deltas: Iterable<Delta>,
+  survives: (d: Delta) => boolean,
+): RendererBinding[] {
   const latest = new Map<string, RendererBinding>();
-  for (const delta of lawful) {
-    const key = delta.claims.pointers.find(
-      (p) => p.target.kind === "entity" && p.target.entity.context === CTX_RENDERER,
-    );
-    if (key?.target.kind !== "entity" || !isRoute(key.target.entity.id)) continue;
-    if (negated(delta.id)) continue;
-    const route = primitive(delta.claims, "route");
-    const schemaName = primitive(delta.claims, "schema");
-    const bundle = primitive(delta.claims, "bundle");
-    if (typeof route !== "string" || typeof schemaName !== "string" || typeof bundle !== "string") {
-      continue; // a malformed renderer binds nothing
-    }
-    const versionIdRaw = primitive(delta.claims, "versionId");
-    const versionId = typeof versionIdRaw === "string" ? versionIdRaw : undefined;
-    let consumes: string[] = [];
-    const consumesRaw = primitive(delta.claims, "consumes");
-    if (typeof consumesRaw === "string") {
-      try {
-        const parsed: unknown = JSON.parse(consumesRaw);
-        if (Array.isArray(parsed) && parsed.every((f) => typeof f === "string")) consumes = parsed;
-      } catch {
-        consumes = [];
-      }
-    }
-    // Write-enabling (SPEC §23.3): read the form allow-list and the pen name. A binding with one but not
-    // the other is malformed and stays READ-ONLY (both dropped) — the parse gate keeps them paired, and a
-    // reader never trusts a half-written binding to sign.
-    const penRaw = primitive(delta.claims, "pen");
-    let writable: string[] | undefined;
-    const writableRaw = primitive(delta.claims, "writable");
-    if (typeof writableRaw === "string") {
-      try {
-        const parsed: unknown = JSON.parse(writableRaw);
-        if (Array.isArray(parsed) && parsed.every((f) => typeof f === "string")) writable = parsed;
-      } catch {
-        writable = undefined;
-      }
-    }
-    const pen = typeof penRaw === "string" && penRaw !== "" ? penRaw : undefined;
-    const writeReady = writable !== undefined && writable.length > 0 && pen !== undefined;
-    const binding: RendererBinding = {
-      route,
-      // Parse boundary: reconstructed from a lawful delta, validated string above (see the guard).
-      schemaName: schemaName as LensName,
-      ...(versionId === undefined ? {} : { versionId }),
-      consumes,
-      bundle,
-      ...(writeReady ? { writable: writable as readonly string[], pen } : {}),
-      deltaId: delta.id,
-      timestamp: delta.claims.timestamp,
-    };
+  for (const delta of deltas) {
+    if (!survives(delta)) continue;
+    const binding = rendererBindingOf(delta);
+    if (binding === undefined) continue;
     // Latest per route: (timestamp, id) ascending, the same tie-break every latest-wins reader uses.
-    const held = latest.get(key.target.entity.id);
+    const held = latest.get(binding.route);
     if (
       held === undefined ||
       binding.timestamp > held.timestamp ||
       (binding.timestamp === held.timestamp && binding.deltaId > held.deltaId)
     ) {
-      latest.set(key.target.entity.id, binding);
+      latest.set(binding.route, binding);
     }
   }
   return [...latest.values()];
+}
+
+/**
+ * The renderer bindings a POOL holds OF ITS OWN — operator-authored, and absent from the host's
+ * ground (SPEC §24.6).
+ *
+ * A pool is one-way seeded with the host's whole ground and the edge re-pulses on every attach, so
+ * every renderer the host owns has an operator-signed twin in here, minted fresh each reseed.
+ * Custody is what tells them apart: a blessing is published on the pool's gateway and never travels
+ * back, so its binding is absent from the host's ground while a twin is present by construction.
+ *
+ * LATEST-PER-ROUTE IS TAKEN AMONG THE POOL'S OWN, deliberately. Filtering `readRenderers`
+ * afterwards would ask a different question — "is the pool's WINNER at this route ours?" — and
+ * answer "no app here" for a route where a re-seeded twin merely out-timestamped a standing
+ * blessing. That difference is exactly a mounted-but-shadowed app, and a caller that cannot see it
+ * cannot say so.
+ */
+export function readPoolRenderers(pool: Gateway, host: Gateway): RendererBinding[] {
+  // No operator is no answer, not every answer: unscoped, `lawfulSnapshot` returns the whole pool
+  // and a peer's own binding would count as something this store had mounted.
+  if (pool.operatorAuthor === undefined) return [];
+  const negated = lawfulNegated(pool.reactor, pool.operatorAuthor);
+  return latestPerRoute(
+    lawfulSnapshot(pool.reactor, pool.operatorAuthor),
+    (d) => !negated(d.id) && host.reactor.get(d.id) === undefined,
+  );
+}
+
+/**
+ * Every surviving renderer binding NOT authored by `operator`, latest per route — the arrivals a
+ * channel pool holds (SPEC §24.6).
+ *
+ * ONE PASS, and that is the point (H8). Asking `readRenderers` once per author would re-materialize
+ * the whole pool per author, and the author set is PEER-CONTROLLED: a renderer binding under a fresh
+ * keypair costs a peer nothing, and this runs on every sync and every listing. `lawfulNegated` reads
+ * the substrate's own negation index rather than the ground, so per-author survival stays cheap.
+ *
+ * Survival is scoped to each binding's OWN author — a shipper takes back their own word and nobody
+ * takes it back for them, the same algebra the blessing door keeps over a module's members.
+ */
+export function readForeignRenderers(reactor: Reactor, operator: string): RendererBinding[] {
+  const negated = new Map<string, (id: string) => boolean>();
+  const survives = (d: Delta): boolean => {
+    if (d.claims.author === operator) return false;
+    let owned = negated.get(d.claims.author);
+    if (owned === undefined) {
+      owned = lawfulNegated(reactor, d.claims.author);
+      negated.set(d.claims.author, owned);
+    }
+    return !owned(d.id);
+  };
+  return latestPerRoute(reactor.snapshot(), survives);
 }
 
 // Load a renderer bundle to a callable, via the shared content-addressed ESM loader (§22.3). `export
@@ -472,13 +535,103 @@ export async function publishRendererImpl(
   await gw.append([signClaims(filed, seed)]);
 }
 
+/**
+ * A CHANNEL'S APP SERVES UNDER THE CHANNEL'S PREFIX (SPEC §46.2), and it serves FROM THE POOL.
+ *
+ * The receiver names a peer's app exactly as it names a peer's lens — `alice:hello`, because the
+ * receiver called the channel `alice`. What it must NOT do is fold the peer's binding into this
+ * store's own renderer table: the render has to run on the POOL's ground, behind the pool's
+ * probation frame (§24.7), with its writes sequestered there. A copied binding would run a
+ * stranger's code against the receiver's own ground, which is the one thing a blessing may not buy.
+ * So the prefix is a DELEGATION, resolved per request, and nothing about a channel is cached here.
+ *
+ * TWO GATES, AND NEITHER IS OPTIONAL.
+ *
+ * FULL DOOR ONLY. A pool decides its own anonymous surface from its own `loam:public` deltas, and a
+ * pool's copy of the receiver's ground is FROZEN at seeding — so a public declaration the operator
+ * has since STRUCK still stands in there (`container.ts` states that staleness; `writeRouteImpl`
+ * re-reads the root's live word precisely because of it). Delegating the anonymous door would put a
+ * second, stale, tokenless view of this store on its own front door. Exposing a channel app to
+ * strangers is a decision this seam does not make; the pool's own container mount is unchanged.
+ *
+ * AND THE BINDING MUST BE THE POOL'S OWN. A pool is one-way seeded with the receiver's whole ground,
+ * so every renderer this store owns has an operator-signed twin inside every channel pool — and
+ * without this check `alice:<any route of mine>` would serve MY app over the PEER's claims, with no
+ * blessing anywhere in the story. Custody is the discriminator: a blessing is published on the
+ * pool's gateway and never travels back, so its binding is absent from this store's own ground,
+ * while a seeded twin is present by construction. One indexed lookup, and it fails closed.
+ *
+ * The receiver's OWN law wins its own name: every caller reaches this only after finding nothing at
+ * `route` in its own table. And the cheap gates come first — a store with no channels, or a route
+ * with no prefix, never pays for the channel reading (H8: `channelStatus` walks the ground).
+ *
+ * Reads `channelPools` rather than `federationChannels` deliberately: a booted store whose peer
+ * credential is missing has the pool attached and the channel unresumable, and a blessed app must
+ * go on serving whether or not this store can currently reach the peer it came from.
+ */
+function channelApp(
+  gw: Gateway,
+  route: string,
+  door: "full" | "public",
+): { pool: Gateway; route: string } | undefined {
+  if (door !== "full" || gw.channelPools.size === 0) return undefined;
+  if (!route.includes(":")) return undefined;
+  // MATCH THE DECLARED PREFIX, never "everything before the first colon". A prefix may CONTAIN a
+  // colon — nothing refuses one at `federate open` — and splitting instead of matching would look
+  // for a channel called `a` when the operator named one `a:b`, so a blessed app would answer 404
+  // while every other surface said it was mounted. The LONGEST match wins, because `a` and `a:b`
+  // can both stand and only the longer one is the specific answer.
+  // WHOSE NAMESPACE IS THIS, decided BEFORE anything is looked up in it. The longest declared
+  // prefix owns the name outright: falling back to a shorter one when the longer channel happens to
+  // hold nothing would make "who answers `alice:sub:note`" depend on what someone had mounted, so
+  // opening a channel would silently move names in and out of another's namespace. One owner, and
+  // if it has nothing there the name answers nothing.
+  let owner: { name: string; prefix: string } | undefined;
+  for (const c of gw.channelStatus()) {
+    if (c.prefix === "" || !route.startsWith(`${c.prefix}:`)) continue;
+    if (route.length <= c.prefix.length + 1) continue; // the bare name would be empty
+    if (owner === undefined || c.prefix.length > owner.prefix.length) {
+      owner = { name: c.name, prefix: c.prefix };
+    }
+  }
+  if (owner === undefined) return undefined;
+  const bare = route.slice(owner.prefix.length + 1);
+  const pool = gw.channelPools.get(owner.name)?.gateway;
+  // No operator is no answer: `lawfulSnapshot` would otherwise hand back every delta in the pool,
+  // and a peer's own binding would read as something this store had mounted.
+  if (pool?.operatorAuthor === undefined) return undefined;
+  const binding = pool.renderers().find((r) => r.route === bare);
+  // Absent, or a seeded twin of law this store already owns: not this channel's app.
+  if (binding === undefined || gw.reactor.get(binding.deltaId) !== undefined) return undefined;
+  return { pool, route: bare };
+}
+
 // Ensure a route's bundle is loaded (the body of `Gateway.prepareRoute`, SPEC §23) — async, so a renderer
 // binding that arrived by any path (a raw `/append`, a fresh reactor in another process) is runnable
 // before the synchronous serveRoute. Idempotent (the ESM cache dedups by content address). A no-op for an
-// unknown route.
-export async function prepareRouteImpl(gw: Gateway, route: string): Promise<void> {
+// unknown route. A channel's app is prepared in ITS pool — the door calls this before every render, and
+// it is what makes a blessed app runnable in a process that booted after the blessing.
+export async function prepareRouteImpl(
+  gw: Gateway,
+  route: string,
+  door: "full" | "public" = "full",
+): Promise<void> {
   const binding = gw.renderers().find((r) => r.route === route);
-  if (binding !== undefined) await loadRenderers([binding.bundle]);
+  if (binding !== undefined) {
+    // THE DOOR DECIDES HERE TOO, on every gateway and not only where a channel is involved.
+    // Preparing is EVALUATING a module body, and this branch runs on a pool's own mount as readily
+    // as on the root — so a route this door could never serve must not be a route this door can
+    // make it run. Loading only what could be served is the same rule the serve path keeps.
+    if (routeServableOn(gw, binding, door)) await loadRenderers([binding.bundle]);
+    return;
+  }
+  // THE DOOR REACHES THIS SIDE TOO, and leaving it out was the whole hazard. Preparing means
+  // EVALUATING a peer's module body (`importEsm`), and the door calls prepare BEFORE it decides
+  // anything about the request — so a hard-coded "full" here let a tokenless caller make this store
+  // run a stranger's top-level code by asking for a route it would then refuse. Delegation serves
+  // the token door only; preparing for it must be the token door's business only.
+  const app = channelApp(gw, route, door);
+  if (app !== undefined) await app.pool.prepareRoute(app.route, door);
 }
 
 // Serve a route (the body of `Gateway.serveRoute`, SPEC §23): resolve the renderer's node under the
@@ -499,7 +652,10 @@ export async function serveRouteImpl(
   // One refusal, everywhere — history is not anonymous, and neither is "which routes exist" (§17).
   const gone = { status: 404, contentType: "text/plain; charset=utf-8", body: "no such route" };
   const binding = gw.renderers().find((r) => r.route === route);
-  if (binding === undefined) return gone;
+  if (binding === undefined) {
+    const app = channelApp(gw, route, door);
+    return app === undefined ? gone : app.pool.serveRoute(app.route, entity, door, gesture, asOf);
+  }
   let node: ResolvedNode;
   try {
     if (binding.versionId === undefined) {
@@ -713,7 +869,11 @@ function resolveGesture(gw: Gateway, g: ReadGesture, asOf?: number): ReadResult 
 // applies — a latest renderer's lens must be in the door's surface (public = a bare-name declaration); a
 // pinned renderer's version must be publicly declared (public) or simply survive (full). writeRoute
 // reuses it so a stranger can only POST to a route they could GET, and an undeclared route stays 404.
-function routeServableOn(gw: Gateway, binding: RendererBinding, door: "full" | "public"): boolean {
+export function routeServableOn(
+  gw: Gateway,
+  binding: RendererBinding,
+  door: "full" | "public",
+): boolean {
   if (binding.versionId === undefined) {
     const surface = gw.surface(door);
     return (
@@ -770,7 +930,10 @@ export async function writeRouteImpl(
   const text = "text/plain; charset=utf-8";
   const gone = { status: 404, contentType: text, body: "no such route" };
   const binding = gw.renderers().find((r) => r.route === route);
-  if (binding === undefined) return gone;
+  if (binding === undefined) {
+    const app = channelApp(gw, route, door);
+    return app === undefined ? gone : app.pool.writeRoute(app.route, entity, fields, door);
+  }
   // Visible on this door (the same discipline as a GET), so a stranger can only write where they could
   // read, and an undeclared route stays a uniform 404 rather than revealing itself.
   if (!routeServableOn(gw, binding, door)) return gone;

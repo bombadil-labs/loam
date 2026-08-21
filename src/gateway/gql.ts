@@ -31,6 +31,7 @@ import {
   type GraphQLOutputType,
 } from "graphql";
 import type { Primitive, Policy } from "@bombadil/rhizomatic";
+import { isWithheldResolver } from "./adopt-law.js";
 import { bytesEnvelope } from "./bytes.js";
 import { lensOf, edgeRoles, type ClaimTemplates, type ResolverOutputType } from "./registration.js";
 import type {
@@ -224,13 +225,31 @@ function resolverTypeOf(type: ResolverOutputType): GraphQLOutputType {
   }
 }
 
+/** What a withheld field says when it is asked — the state, and the act that clears it. */
+const withheldReason = (def: Registered, prop: string): string =>
+  `"${prop}" on "${lensOf(def)}" is computed by RESOLVER CODE this store has not been told to ` +
+  "run. Law that arrives on a federation channel binds a NAME; running the code behind a computed " +
+  "field is a second decision (§24.6). Until it is taken, this field has no honest value to give: " +
+  `\`loam federate bless-app --channel <name> --resolvers "${lensOf(def)}"\` is the act that ` +
+  "supplies one.";
+
 function propFields<N extends ResolvedNode>(def: Registered): GraphQLFieldConfigMap<N, unknown> {
   const fields: GraphQLFieldConfigMap<N, unknown> = {};
   for (const [prop, pp] of def.schema.props) {
     const resolver = def.resolvers?.[prop];
+    // A WITHHELD RESOLVER REFUSES ITS FIELD, and it must not fall back the way a broken one does.
+    // §22's availability rule — a resolver that throws leaves the Policy value — is right about a
+    // resolver this store RAN and that failed. This field is not that: the code behind it was never
+    // run, deliberately, so the Policy value here is a number nobody computed and nothing would say
+    // so. The read answers with a reason instead, at the blast radius of the one field.
+    const withheld = resolver !== undefined && isWithheldResolver(resolver.code, lensOf(def), prop);
     fields[legal(prop)] = {
       type: resolver === undefined ? fieldTypeOf(pp) : resolverTypeOf(resolver.type),
-      resolve: (node) => node.view[prop] ?? null,
+      resolve: withheld
+        ? (): never => {
+            throw new Error(withheldReason(def, prop));
+          }
+        : (node) => node.view[prop] ?? null,
     };
   }
   return fields;
