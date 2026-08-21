@@ -450,8 +450,22 @@ function crossOriginBindings(gw: Gateway, rows: readonly Bound[]): ResolvedBindi
 
 /** One contender for a withheld name, plus WHERE its binding lives. */
 export interface ContestedName extends ContestedBinding {
-  /** `"root"`, or the channel pool's own name — the same origin the cross-origin fold ranks by. */
+  /** `"root"`, or the channel pool's own name — the same origin the cross-origin fold ranks by. A
+   * binding a pool holds a COPY of names the ROOT: that is the nearer ground, and the one whose
+   * registration a person can actually withdraw. */
   readonly origin: string;
+  /** This contender is the one the surface currently serves. At most one row per name carries it. */
+  readonly served: boolean;
+}
+
+/** What a declared `conflicts` policy is withholding under ONE name. */
+export interface ContestedNameReport {
+  /** Every contender, in ground order. At most one is `served`. */
+  readonly contenders: readonly ContestedName[];
+  /** Present when the name IS served by a binding that is NOT one of the contenders — a third
+   * definition, or a manual registration carrying no binding delta. The contest is still real and
+   * every contender below it is still withheld; the name is simply answered from elsewhere. */
+  readonly servedByOther?: { readonly origin: string; readonly entity: string };
 }
 
 /**
@@ -463,16 +477,33 @@ export interface ContestedName extends ContestedBinding {
  * A contender appears once, under the first origin that names it, so a row that is both a pool's
  * own loser and a cross-origin loser is not counted twice.
  *
- * COST: one registration read per ground — the same pass `replayRegistrations` makes, taken live so
- * the answer can never be a stale echo of the last fold. Call it per page, not per request.
+ * NOTHING IS EVER DROPPED FROM THIS REPORT. A name the surface serves is still a name two
+ * registrations wanted, and the contenders it withholds are still withheld — so what serves is
+ * MARKED rather than used to delete the entry. Deleting was worse than the silence it cured:
+ * publishing one more rival of your own resolves the other contenders away, leaves a single
+ * candidate to win, and would erase the refusal of every contender at once.
+ *
+ * COST: a replay plus one registration read per ground. Call it per page, not per request.
  */
-export function contestedNamesImpl(gw: Gateway): Map<string, ContestedName[]> {
-  const out = new Map<string, ContestedName[]>();
-  const add = (lens: string, row: ContestedName): void => {
-    const list = out.get(lens) ?? [];
+export function contestedNamesImpl(gw: Gateway): Map<string, ContestedNameReport> {
+  // ONE MOMENT for the fold and the reading. `append` never replays, and declaring a policy IS an
+  // append — so without this the first read after a declaration describes a surface that predates
+  // it, and a struck declaration keeps a name withheld here after the doors revived it. Replay is a
+  // set-compare no-op when nothing moved, which is what makes this affordable rather than clever.
+  gw.replayRegistrations();
+
+  const drafts = new Map<string, (ContestedBinding & { origin: string })[]>();
+  const rows = storeBindings(gw);
+  // A pool is seeded with a COPY of the root ground, so one content address can sit in two grounds.
+  // The row names the ROOT then: it is the nearer ground, and the only one whose registration a
+  // person can withdraw.
+  const originOf = (deltaId: string, ground: string): string =>
+    gw.reactor.get(deltaId) === undefined ? ground : "root";
+  const add = (lens: string, row: ContestedBinding & { origin: string }): void => {
+    const list = drafts.get(lens) ?? [];
     if (list.some((held) => held.deltaId === row.deltaId)) return;
     list.push(row);
-    out.set(lens, list);
+    drafts.set(lens, list);
   };
   for (const [lens, list] of readContestedBindings(gw.reactor, gw.operatorAuthor)) {
     for (const c of list) add(lens, { ...c, origin: "root" });
@@ -484,7 +515,7 @@ export function contestedNamesImpl(gw: Gateway): Map<string, ContestedName[]> {
     if (pool === undefined) continue;
     for (const [lens, list] of readContestedBindings(pool.reactor, pool.operatorAuthor)) {
       if (!lens.startsWith(`${standing.prefix}:`)) continue;
-      for (const c of list) add(lens, { ...c, origin: standing.name });
+      for (const c of list) add(lens, { ...c, origin: originOf(c.deltaId, standing.name) });
     }
   }
   // THE CROSS-ORIGIN CONTEST — a root row against a pool's, which no single ground can see. This is
@@ -493,10 +524,12 @@ export function contestedNamesImpl(gw: Gateway): Map<string, ContestedName[]> {
   //
   // The candidates carry the ORIGIN rank as their author (`channel:<pool>`), which is a rank and not
   // a signer. The row reports the key that actually signed the binding, and the origin separately.
-  const rows = storeBindings(gw);
-  const byBinding = new Map(
-    rows.filter((r) => r.boundId !== undefined).map((r) => [r.boundId!, r]),
-  );
+  const byBinding = new Map<string, Bound>();
+  for (const r of rows) {
+    // First wins, and root rows come first: a delta both grounds hold is read off the root's row.
+    if (r.boundId === undefined || byBinding.has(r.boundId)) continue;
+    byBinding.set(r.boundId, r);
+  }
   for (const [lens, list] of crossOriginBindings(gw, rows)?.contested ?? []) {
     for (const c of list) {
       // Total by construction: the candidates the contest ranked were built from these very rows.
@@ -508,27 +541,41 @@ export function contestedNamesImpl(gw: Gateway): Map<string, ContestedName[]> {
         author: row.boundBy!,
         timestamp: c.timestamp,
         deltaId: c.deltaId,
-        origin: row.channel ?? "root",
+        origin: originOf(c.deltaId, row.channel ?? "root"),
       });
     }
   }
-  // A NAME THE SURFACE SERVES IS NOT WITHHELD, whatever a ground's own contest says — and the two
-  // can disagree. The reading is live and `gw.registered` is the fold it describes, so anything that
-  // moves a ground without a replay leaves them out of step; worse, a channel pool is seeded with a
-  // COPY of the root ground, so after a re-attach the pool's own reader sees the root's binding as a
-  // second contender for a name the root is meanwhile serving. Announcing a refusal the doors are
-  // not honouring is the failure that matters here, so the served surface decides. (curseChannelLaw
-  // verifies the same way, and for the same reason.)
-  const served = new Set<string>(gw.registered.map((r) => lensOf(r) as string));
-  for (const lens of [...out.keys()]) {
-    if (served.has(lens)) out.delete(lens);
-  }
-  // Ground order within a name, so a reader sees the incumbent before the challenger.
-  for (const list of out.values()) {
+
+  // WHAT SERVES EACH NAME, decided by CONTENT ADDRESS. The fold above was just replayed, so
+  // `gw.registered` is this same moment's answer. Two shapes, and they say different things:
+  //   - the serving binding IS one of the contenders (the pool's copy of a root binding is the
+  //     same delta): mark that row, and the others stay withheld;
+  //   - the name is served by something else entirely — a third definition, or a manual
+  //     registration with no binding delta: every contender is still withheld, and the report
+  //     names what answers instead. Dropping the entry here would suppress a refusal the doors
+  //     ARE honouring.
+  const out = new Map<string, ContestedNameReport>();
+  for (const [lens, list] of drafts) {
+    // Ground order within a name, so a reader sees the incumbent before the challenger.
     list.sort(
       (a, b) =>
         a.timestamp - b.timestamp || (a.deltaId < b.deltaId ? -1 : a.deltaId > b.deltaId ? 1 : 0),
     );
+    const serving = gw.registered.find((r) => (lensOf(r) as string) === lens);
+    const servedRow =
+      serving?.boundId === undefined ? undefined : list.find((d) => d.deltaId === serving.boundId);
+    out.set(lens, {
+      contenders: list.map((d) => ({ ...d, served: d === servedRow })),
+      ...(serving === undefined || servedRow !== undefined
+        ? {}
+        : {
+            servedByOther: {
+              origin: serving.channel ?? "root",
+              // A manual registration files under no entity; its program name is what it answers as.
+              entity: serving.entity ?? programOf(serving),
+            },
+          }),
+    });
   }
   return out;
 }

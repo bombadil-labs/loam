@@ -71,7 +71,7 @@ import { freezeMembers, type ModuleVersion } from "./container-identity.js";
 import {
   boundKey,
   contestedNamesImpl,
-  type ContestedName,
+  type ContestedNameReport,
   lazyMatNameImpl,
   loadHyperSchemaImpl,
   matForImpl,
@@ -566,7 +566,7 @@ export class Gateway {
   // The names a declared `conflicts` policy is WITHHOLDING (§47.1), across every ground this store
   // serves law from — its own, and each attached channel pool's. The refusal a person can act on:
   // the lens is absent from the surface, and this says which name, between whom, and from where.
-  contestedNames(): Map<string, ContestedName[]> {
+  contestedNames(): Map<string, ContestedNameReport> {
     return contestedNamesImpl(this);
   }
 

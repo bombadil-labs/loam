@@ -266,8 +266,10 @@ describe("T204 — contested names on /admin", () => {
     expect(() => gateway.def("burdock")).toThrow();
     const reading = gateway.contestedNames();
     expect([...reading.keys()].sort()).toEqual(["alice:Plant", "burdock", "camellia"]);
-    const rows = reading.get("alice:Plant")!;
+    const rows = reading.get("alice:Plant")!.contenders;
     expect(rows.map((r) => r.origin).sort()).toEqual([POOL, "root"]);
+    // Nothing serves any of these names, so no row carries the serving marker.
+    expect(rows.some((r) => r.served)).toBe(false);
 
     const html = await textOf(base, await signIn(base, "ada", PASSWORD));
     const panel = panelOf(html);
@@ -306,8 +308,12 @@ describe("T204 — contested names on /admin", () => {
     // one subtree's business. Every contender, its signer, and its binding are all still named.
     expect(panel).toContain("<strong>alice:Plant</strong>");
     expect(panel).toContain("hyperschema:Rival");
-    for (const row of gateway.contestedNames().get("alice:Plant")!) {
-      expect(rowFor(html, row.deltaId)).toContain(row.author);
+    for (const row of gateway.contestedNames().get("alice:Plant")!.contenders) {
+      const rendered = rowFor(html, row.deltaId);
+      expect(rendered).toContain(row.author);
+      // The DEFINITION survives the substitution too: a renderer that blanked a row whose origin
+      // it would not name would satisfy every assertion above this one.
+      expect(rendered).toContain(row.entity);
     }
     // The pool's NAME does not — it names ada's child container and her alias for the peer.
     expect(panel).not.toContain(POOL);
@@ -343,10 +349,10 @@ describe("T204 — contested names on /admin", () => {
     expect(reading.size).toBe(3);
 
     let contenders = 0;
-    for (const [lens, rows] of reading) {
+    for (const [lens, report] of reading) {
       expect(panel).toContain(`<strong>${lens}</strong>`);
-      expect(rows.length).toBeGreaterThan(1);
-      for (const row of rows) {
+      expect(report.contenders.length).toBeGreaterThan(1);
+      for (const row of report.contenders) {
         contenders += 1;
         const rendered = rowFor(html, row.deltaId);
         expect(rendered).toContain(row.entity);

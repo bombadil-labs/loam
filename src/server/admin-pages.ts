@@ -16,6 +16,7 @@ import { authorForSeed, type Delta } from "@bombadil/rhizomatic";
 import { lensOf, readRegistrations } from "../gateway/registration.js";
 import type { Container, ContainerTable, ResolvedContainer } from "../gateway/container.js";
 import type { ChannelStatus } from "../federation/channel.js";
+import type { ContestedNameReport } from "../gateway/lifecycle.js";
 import type { Gateway } from "../gateway/gateway.js";
 
 export const ADMIN_PATH = "/admin";
@@ -200,12 +201,15 @@ ${listing}
   //
   // A ROW'S ORIGIN IS A CONTAINER NAME, and container names on this page are reader-scoped: the
   // channels panel above renders only what `reach` holds, deliberately. So a pool outside the
-  // reader's subtree is named by its kind rather than by its name. The refusal itself loses
-  // nothing — the lens, every contender, its signer and its binding are all still there.
+  // reader's subtree is named by its kind rather than by its name — and the prose says what that
+  // costs, because a row with no ground named cannot carry the panel's own closing instruction.
+  // The refusal itself loses nothing: the lens, every contender, its signer and its binding stay.
   //
   // The prose never says the declaration is the ROOT's: a pool reads its own binding policy, so a
-  // contest can be governed a ground down from anything the operator declared here. Each row names
-  // the ground to act in.
+  // contest can be governed a ground down from anything the operator declared here.
+  //
+  // A SERVED NAME IS STILL LISTED. Its serving row is marked, or the heading names what answers
+  // from outside the contest; either way every withheld contender stays visible.
   //
   // Delta ids are TEXT. No delta-addressed view exists to link to, and the members list already
   // renders ids this way; a link to nothing would be worse than a name a person can paste.
@@ -216,19 +220,35 @@ ${listing}
         : "a channel pool your subtree does not reach";
     const names = [...gw.contestedNames()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
     if (names.length === 0) return "";
+    const headOf = (lens: string, report: ContestedNameReport): string => {
+      const rows = report.contenders;
+      const served = rows.find((r) => r.served);
+      const answer =
+        served !== undefined
+          ? `, and ${originHtml(served.origin)} serves it — the marked row below`
+          : report.servedByOther !== undefined
+            ? `, and ${originHtml(report.servedByOther.origin)} serves it from ` +
+              `<code>${escapeHtml(report.servedByOther.entity)}</code>, which is not among them`
+            : `, and none of them serves`;
+      return (
+        `<strong>${escapeHtml(lens)}</strong> — ${rows.length} registration` +
+        `${rows.length === 1 ? "" : "s"} want this name${answer}.`
+      );
+    };
     const listing = names
       .map(
-        ([lens, rows]) =>
-          `<li><strong>${escapeHtml(lens)}</strong> — ${rows.length} registration` +
-          `${rows.length === 1 ? "" : "s"} want this name, and none of them serves.\n` +
-          `<ul>\n${rows
+        ([lens, report]) =>
+          `<li>${headOf(lens, report)}\n` +
+          `<ul>\n${report.contenders
             .map(
               (r) =>
                 `<li><code>${escapeHtml(r.entity)}</code>, from ` +
                 `${originHtml(r.origin)}, signed by ` +
                 `<code>${escapeHtml(r.author)}</code> at ` +
                 `${escapeHtml(momentOf(r.timestamp))} — binding ` +
-                `<code>${escapeHtml(r.deltaId)}</code></li>`,
+                `<code>${escapeHtml(r.deltaId)}</code>; ` +
+                (r.served ? `<strong>this one serves the name</strong>` : `withheld`) +
+                `</li>`,
             )
             .join("\n")}\n</ul></li>`,
       )
@@ -236,10 +256,11 @@ ${listing}
     return `<section class="contested">
 <h2>Contested names.</h2>
 <p>A <code>conflicts</code> binding policy is in force over each name below, so two or more
-registrations want it and this store serves none of them — it refuses to choose for you. Each
-contender names its definition, the ground it was bound in (<code>root</code>, or a channel's pool),
-the key that signed the binding, and the moment. A pool declares its own policy, so act in the
-ground the row names: withdraw one of its bindings, or declare there a policy that picks.</p>
+registrations want it and the policy withholds every contender it can. Each contender names its
+definition, the ground it was bound in (<code>root</code>, or a channel's pool), the key that signed
+the binding, and the moment. A pool declares its own policy, so act in the ground the row names:
+withdraw one of its bindings, or declare there a policy that picks. A row that names no ground sits
+in a channel pool your subtree does not reach, and two such pools read alike here.</p>
 <ul>
 ${listing}
 </ul>
