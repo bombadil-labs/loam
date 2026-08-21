@@ -1413,7 +1413,20 @@ export async function revokeConnector(
           clients: file.clients.map((c) =>
             c.clientId === clientId ? { ...c, generation: c.generation + 1 } : c,
           ),
+          // The grant goes, and with it the SEED — revocation destroys the key. What survives is the
+          // public author, in a list nothing that mints authority reads (`OAuthRevocation`). Without
+          // it the store forgets who acted the moment it stops letting them act, and the ledger then
+          // reports a connector of months' standing as having "no acting identity yet" while the
+          // grant it held sits attributed to nobody.
           grants: file.grants.filter((g) => g.clientId !== clientId),
+          ...(struckGrant === undefined
+            ? {}
+            : {
+                revoked: [
+                  ...(file.revoked ?? []).filter((r) => r.clientId !== clientId),
+                  { clientId, actor: struckGrant.actor, revokedAt: Date.now() },
+                ],
+              }),
         },
         result: { kind: "revoked", clientId, generation: client.generation + 1 },
       };

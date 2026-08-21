@@ -27,7 +27,13 @@ import { sourceFor } from "../federation/channel.js";
 import { tombstonesIn } from "../gateway/erase.js";
 import { assembleGenesis } from "../gateway/genesis.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
-import { CTX_GRANTS, grantClaims, grantsHeldBy } from "../gateway/accounts.js";
+import {
+  constitutionalDefect,
+  CTX_GRANTS,
+  grantClaims,
+  grantsHeldBy,
+  honoredStrikeOn,
+} from "../gateway/accounts.js";
 import {
   parseRegistrationInput,
   schemaEntityFor,
@@ -37,7 +43,13 @@ import { STOCK_SCHEMAS, stockNames, stockSchema } from "../stock/index.js";
 import { CTX_PEN, penEntity, penRecordClaims } from "../gateway/renderers.js";
 import { serve, type ServerHandle } from "../server/http.js";
 import { revokeConnector } from "../server/oauth.js";
-import { grantFor, readOAuthFile, type OAuthFile, type OAuthGrant } from "../server/oauth-file.js";
+import {
+  grantFor,
+  readOAuthFile,
+  revocationFor,
+  type OAuthFile,
+  type OAuthGrant,
+} from "../server/oauth-file.js";
 import {
   credentialsPath,
   entryFor,
@@ -2411,18 +2423,25 @@ function homeIdentities(home: string): HomeIdentity[] {
 function connectorIdentities(file: OAuthFile): HomeIdentity[] {
   return file.clients.map((client) => {
     const grant = grantFor(file, client.clientId);
+    // A REVOKED connector still has a name for the key it used to sign with. Without this the ledger
+    // read a connector of months' standing as never having had an identity, and stranded the struck
+    // grant it left behind under `unattributed` — two false answers from one dropped record.
+    const revoked = grant === undefined ? revocationFor(file, client.clientId) : undefined;
+    const author = grant?.actor ?? revoked?.actor;
     const tokens = file.tokens.filter((t) => t.clientId === client.clientId).length;
     const facts = `generation ${client.generation} · ${tokens} live token${tokens === 1 ? "" : "s"}`;
     return {
       kind: "connector" as const,
       name: `${client.clientId} (${client.clientName})`,
-      ...(grant === undefined ? {} : { author: grant.actor }),
+      ...(author === undefined ? {} : { author }),
       note:
-        grant === undefined
-          ? `no acting identity yet · ${facts}`
-          : grant.standing
+        grant !== undefined
+          ? grant.standing
             ? facts
-            : `grant pending · ${facts}`,
+            : `grant pending · ${facts}`
+          : revoked !== undefined
+            ? `revoked ${new Date(revoked.revokedAt).toISOString()} · ${facts}`
+            : `no acting identity yet · ${facts}`,
     };
   });
 }
@@ -2431,9 +2450,15 @@ interface GroundGrant {
   readonly id: string;
   readonly subject: string;
   readonly verb: string;
+  readonly granter: string; // who signed it — the operator, or an admin acting under one
   readonly at: number;
   readonly prefix?: string;
+  /** When an HONORED strike retired it. Absent when nothing with standing struck it. */
   readonly struckAt?: number;
+  /** A negation names it and binds nothing — struck by an author with no standing, or itself struck. */
+  readonly inertStrike: boolean;
+  /** Why this grant is not law at all, when it is not. Malformed law binds nothing for anyone. */
+  readonly defect?: string;
 }
 
 /**
@@ -2446,7 +2471,7 @@ interface GroundGrant {
  * matches on both), so there is no author for it to put on the screen. Constitutional law refuses
  * such a delta at the door; only a store predating that check can hold one.
  */
-function groundGrants(reactor: Reactor): GroundGrant[] {
+function groundGrants(reactor: Reactor, operator: string): GroundGrant[] {
   const out: GroundGrant[] = [];
   for (const id of reactor.byTarget(STORE_ENTITY)) {
     const delta = reactor.get(id);
@@ -2468,22 +2493,45 @@ function groundGrants(reactor: Reactor): GroundGrant[] {
       if (p.role === "prefix") prefix = p.target.value;
     }
     if (subject === undefined || verb === undefined) continue;
-    // The EARLIEST strike is the one reported: it is the moment the standing stopped being
-    // uncontested, and a later strike on the same grant changes nothing about that.
-    const strikes = reactor
-      .negationsOf(id)
-      .map((negId) => reactor.get(negId)?.claims.timestamp)
-      .filter((t): t is number => t !== undefined);
+    // WHICH strike, not merely whether one exists. `honoredStrikeOn` runs the constitution's own
+    // walk, so an inert negation — one struck itself, or signed by an author with no standing to
+    // strike — never supplies the caption. Reading `negationsOf` raw would let a writer's inert
+    // strike at t1 mask the operator's lawful one at t2 and under-report the exposure window, which
+    // is the one number this ledger exists to get right.
+    const honored = honoredStrikeOn(reactor, id, operator);
+    const defect = constitutionalDefect(delta);
     out.push({
       id,
       subject,
       verb,
+      granter: delta.claims.author,
       at: delta.claims.timestamp,
       ...(prefix === undefined ? {} : { prefix }),
-      ...(strikes.length === 0 ? {} : { struckAt: Math.min(...strikes) }),
+      ...(honored === undefined ? {} : { struckAt: honored.timestamp }),
+      inertStrike: honored === undefined && reactor.negationsOf(id).length > 0,
+      ...(defect === undefined ? {} : { defect }),
     });
   }
   return out;
+}
+
+/**
+ * Why a grant that nothing struck still binds nothing. The reasons are genuinely different and an
+ * operator acts differently on each, so one catch-all sentence would be false for two of the three:
+ *
+ *  - MALFORMED LAW binds nothing for anyone, the operator included, and no re-granting fixes it.
+ *  - REGISTER is not delegable. An admin may mint `write` and `admin` all day; `register` from any
+ *    author but the operator is refused by `grantsHeldBy` no matter how sound its chain, because the
+ *    store signs registrations with the OPERATOR'S key. Saying "no chain reaches the operator" here
+ *    would send an operator to repair a chain that is already intact.
+ *  - Otherwise the chain really is the answer: whoever signed it holds no effective admin standing.
+ */
+function whyNotBinding(g: GroundGrant, operator: string): string {
+  if (g.defect !== undefined) return `malformed law — ${g.defect}`;
+  if (g.verb === "register" && g.granter !== operator) {
+    return "register standing is the operator's alone to mint, whatever the chain says";
+  }
+  return "no chain of admin standing reaches the operator";
 }
 
 // An author, short enough for a column and long enough to identify: the algorithm tag in full, then
@@ -2557,7 +2605,7 @@ async function cmdGrantList(home: string, parsed: Parsed, io: IO): Promise<numbe
   const operator = authorForSeed(seed);
   const rows: LedgerRow[] = [];
   try {
-    const grants = groundGrants(gateway.reactor);
+    const grants = groundGrants(gateway.reactor, operator);
     // One pass per distinct subject, reusing the door's own derivation rather than re-deriving
     // effectiveness here: two answers to "does this bind" is one too many.
     const binding = new Set<string>();
@@ -2569,13 +2617,15 @@ async function cmdGrantList(home: string, parsed: Parsed, io: IO): Promise<numbe
 
     for (const g of grants) {
       const live = binding.has(g.id);
+      // "struck" is the word an operator scans this column for, so it appears in exactly ONE answer
+      // here: the one where a strike WITH STANDING actually retired the grant. Every other phrasing
+      // says "strike", never "struck", or a reader grepping the ledger lands on a row that is not.
+      const inert = g.inertStrike ? " · a strike names it and binds nothing" : "";
       const standing = live
-        ? g.struckAt === undefined
-          ? "live"
-          : "live — a strike names it and does not bind"
-        : g.struckAt === undefined
-          ? "does not bind — nothing struck it, and no chain reaches the operator"
-          : `struck ${new Date(g.struckAt).toISOString()}`;
+        ? `live${inert}`
+        : g.struckAt !== undefined
+          ? `struck ${new Date(g.struckAt).toISOString()}`
+          : `does not bind — ${whyNotBinding(g, operator)}${inert}`;
       const common = {
         author: shortAuthor(g.subject),
         verb: g.prefix === undefined ? g.verb : `${g.verb}("${g.prefix}")`,

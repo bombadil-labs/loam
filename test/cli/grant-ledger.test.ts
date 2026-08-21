@@ -36,20 +36,40 @@
 //     or fewer; every real author is `ed25519:` plus sixty-four, so no fixture distinguishes that
 //     bound from one character either side of it.
 //
+// THE OPERATOR'S OWN KEY IS NOT A KIND. `operator.seed` is outside the `user|pen` file convention
+// this file's identities come from, so a grant naming the operator's key renders `unattributed`
+// rather than as the operator. It is a strange thing to mint — the operator needs no grant and the
+// summary line says so — but it is mintable, and the row would be honest about the KEY while wrong
+// about who holds it. Closing it means widening the kind enum, which is a decision this ticket did
+// not take.
+//
+// SEVEN OF THESE TESTS WERE NEVER INDIVIDUALLY RED. The five criterion rails were written first and
+// failed first. The rails that close mutation survivors, and those the review batch asked for, were
+// written against behaviour that already existed in the branch; each fails against the connector-only
+// listing that preceded the ledger, which is a weaker proof than a criterion rail's, and this note
+// exists so nobody reads the file as twelve equal reds.
+//
 // Every store here is a fresh temp home. Nothing in this file touches a real ~/.loam.
 
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
+import { authorForSeed, makeNegationClaims, signClaims, type Claims } from "@bombadil/rhizomatic";
 import { run } from "../../src/cli/cli.js";
 import { penSeedPath, readSeed, storePath, userSeedPath } from "../../src/cli/config.js";
-import { CTX_GRANTS, grantClaims, grantsHeldBy } from "../../src/gateway/accounts.js";
+import { CTX_GRANTS, grantClaims, grantsHeldBy, type Verb } from "../../src/gateway/accounts.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
-import { EMPTY_OAUTH, writeOAuthFile, type OAuthFile } from "../../src/server/oauth-file.js";
+import {
+  EMPTY_OAUTH,
+  grantFor,
+  readOAuthFile,
+  revocationFor,
+  writeOAuthFile,
+  type OAuthFile,
+} from "../../src/server/oauth-file.js";
 import type { ScryptParams } from "../../src/server/credentials.js";
 
 vi.setConfig({ testTimeout: 60_000 });
@@ -93,8 +113,8 @@ const rowFor = (listing: string, needle: string): string =>
 
 const authorOfUser = (name: string): string =>
   authorForSeed(readFileSync(userSeedPath(home, name), "utf8").trim());
-const authorOfPen = (name: string): string =>
-  authorForSeed(readFileSync(penSeedPath(home, name), "utf8").trim());
+const authorOfPen = (name: string): string => authorForSeed(penSeedOf(name));
+const penSeedOf = (name: string): string => readFileSync(penSeedPath(home, name), "utf8").trim();
 
 // A connector that has completed a token exchange: the state `loam grant` operates on.
 const seedConnector = (): void => {
@@ -210,21 +230,80 @@ const heldVerbs = (author: string): Promise<string[]> =>
       .sort(),
   );
 
-// An operator-signed grant planted straight into the ground, for a key this home holds no file for.
-async function plantOperatorGrant(subject: string, verb: "write" | "admin"): Promise<void> {
-  const seed = readSeed(home);
+// Append deltas signed by whatever key the caller names — the primitive the standing rails need,
+// because an INERT strike is defined by WHO signed it, not by its shape.
+async function appendSignedBy(seed: string, claims: readonly Claims[]): Promise<void> {
   const gw = await Gateway.boot(
     new SqliteBackend(storePath(home)),
-    assembleGenesis({ operatorSeed: seed }),
+    assembleGenesis({ operatorSeed: readSeed(home) }),
   );
   try {
-    await gw.append([
-      signClaims(grantClaims(STORE_ENTITY, subject, verb, authorForSeed(seed), Date.now()), seed),
-    ]);
+    await gw.append(claims.map((c) => signClaims(c, seed)));
   } finally {
     await gw.close();
   }
 }
+
+// An operator-signed grant planted straight into the ground, for a key this home holds no file for.
+const plantOperatorGrant = (
+  subject: string,
+  verb: "write" | "admin",
+  at = Date.now(),
+): Promise<void> => {
+  const seed = readSeed(home);
+  return appendSignedBy(seed, [grantClaims(STORE_ENTITY, subject, verb, authorForSeed(seed), at)]);
+};
+
+// A grant signed by somebody OTHER than the operator. `authorize` admits it — its author holds write
+// standing — and the constitution still refuses to let it bind unless its author holds admin. That
+// gap is the whole subject of the "does not bind" rails.
+const plantGrantSignedBy = (
+  seed: string,
+  subject: string,
+  verb: Verb,
+  at = Date.now(),
+  prefix?: string,
+): Promise<void> =>
+  appendSignedBy(seed, [grantClaims(STORE_ENTITY, subject, verb, authorForSeed(seed), at, prefix)]);
+
+// A bare negation of `targetId`, signed by `seed`. Whether it BINDS is the constitution's decision:
+// only the operator and an effective store admin may retire law, so a write-grantee's strike lands
+// in the ground and retires nothing.
+const plantStrike = (seed: string, targetId: string, at: number): Promise<void> =>
+  appendSignedBy(seed, [makeNegationClaims(authorForSeed(seed), at, targetId)]);
+
+// Who struck `targetId`, and when — read straight off the ground, so a rail can say what the store
+// HOLDS before asking what the ledger SAYS about it.
+const strikesOn = (targetId: string): Promise<{ author: string; timestamp: number }[]> =>
+  ground((gw) =>
+    gw.reactor.negationsOf(targetId).map((id) => {
+      const d = gw.reactor.get(id);
+      return { author: d?.claims.author ?? "(gone)", timestamp: d?.claims.timestamp ?? -1 };
+    }),
+  );
+
+const soleGrantId = async (subject: string): Promise<string> => {
+  const { surviving, struck } = await grantIds(subject);
+  const all = [...surviving, ...struck];
+  expect(all, `expected exactly one grant naming ${subject}`).toHaveLength(1);
+  return all[0]!;
+};
+
+// Every author the DOOR honours, derived from the ground WITHOUT the ledger's own parse of a grant
+// delta. The drift canary below compares the two: `groundGrants` reads pointers by hand, and the day
+// that hand-rolled read diverges from `grantsHeldBy`, a binding author silently leaves the screen.
+const bindingSubjects = (): Promise<string[]> =>
+  ground((gw, operator) => {
+    const subjects = new Set<string>();
+    for (const delta of gw.reactor.snapshot()) {
+      for (const p of delta.claims.pointers) {
+        if (p.role === "subject" && p.target.kind === "primitive") {
+          if (typeof p.target.value === "string") subjects.add(p.target.value);
+        }
+      }
+    }
+    return [...subjects].filter((s) => grantsHeldBy(gw.reactor, s, operator).length > 0).sort();
+  });
 
 // A delta the operator signs AT the store entity that is not a grant: it is filed under a different
 // context and carries subject and verb roles anyway. Nothing in the store's law forbids it, and it
@@ -337,8 +416,12 @@ describe("T205 (a) — one screen holds the user, the pen, and the connector", (
     expect(stranger, listing).not.toBe("");
     expect(stranger).toContain("unattributed");
     expect(stranger).toContain("write");
-    // Two-sided: the attributed pen is NOT swept into the same bucket.
-    expect(rowFor(listing, "quill")).not.toContain("unattributed");
+    // Two-sided: the attributed pen is NOT swept into the same bucket. The row is asserted PRESENT
+    // first — `rowFor` returns "" when the join drops it, and "" contains nothing at all, so the
+    // negative below would pass most loudly in exactly the case it is meant to catch.
+    const quill = rowFor(listing, "quill");
+    expect(quill, listing).not.toBe("");
+    expect(quill).not.toContain("unattributed");
     // Both rows counted, both binding — and the count reads for a two-row store.
     expect(listing).toContain("the grant ledger — 2 rows, 2 live");
   });
@@ -394,6 +477,112 @@ describe("T205 (b) — a struck grant is shown struck, never omitted", () => {
     // A grant nothing has struck reads exactly `live` — not "live" with a caveat about a strike,
     // which is a different fact and belongs to a different row.
     expect(kitRow.trimEnd().endsWith(" live"), kitRow).toBe(true);
+  });
+});
+
+// A strike is a fact about STANDING, not about shape. These rails exist because reading `negationsOf`
+// raw cannot tell the two apart, and every wrong answer it produces is a wrong answer about the one
+// number the key-leak morning turns on: when did this key stop being able to write.
+describe("T205 (b2) — only a strike with standing is reported as one", () => {
+  it("an inert strike leaves a live grant live, and never says struck", async () => {
+    // `quill` holds WRITE. `standsFor` admits the operator and effective store admins, so quill's
+    // negation lands in the ground and retires nothing.
+    expect(await run(["pen", "create", "quill", "--home", home], io()), printed()).toBe(0);
+    expect(await run(["pen", "create", "nib", "--home", home], io()), printed()).toBe(0);
+    const nib = authorOfPen("nib");
+    const grant = await soleGrantId(nib);
+    await plantStrike(penSeedOf("quill"), grant, 1_700_000_000_000);
+    clear();
+
+    // DELTA: the strike really is in the ground, signed by the pen, naming nib's grant.
+    expect(await strikesOn(grant)).toEqual([
+      { author: authorOfPen("quill"), timestamp: 1_700_000_000_000 },
+    ]);
+    expect((await grantIds(nib)).surviving, "the grant still stands").toHaveLength(1);
+    // OBJECT, at the door: nib still holds write, so nothing was retired.
+    expect(await heldVerbs(nib)).toEqual(["write"]);
+
+    expect(await run(["grant", "list", "--home", home], io()), printed()).toBe(0);
+    const listing = printed();
+    const row = rowFor(listing, "nib");
+    expect(row, listing).not.toBe("");
+    expect(row).not.toMatch(/struck/);
+    expect(row).toContain("live");
+    // The strike is not hidden either — it is reported as what it is.
+    expect(row).toContain("binds nothing");
+  });
+
+  it("reports the LAWFUL strike's time, not an earlier inert one", async () => {
+    // The whole hazard in one fixture: an inert strike at t1, the operator's lawful strike at t2.
+    // A ledger taking the minimum over every negation reports t1 and UNDER-REPORTS the window in
+    // which the key could still write — by exactly the distance between them.
+    expect(await run(["pen", "create", "quill", "--home", home], io()), printed()).toBe(0);
+    expect(await run(["pen", "create", "nib", "--home", home], io()), printed()).toBe(0);
+    const nib = authorOfPen("nib");
+    const grant = await soleGrantId(nib);
+    const t1 = 1_700_000_000_000;
+    const t2 = 1_700_000_600_000; // ten minutes later
+    await plantStrike(penSeedOf("quill"), grant, t1);
+    await plantStrike(readSeed(home), grant, t2);
+    clear();
+
+    expect(await heldVerbs(nib), "the operator's strike binds").toEqual([]);
+    expect(await run(["grant", "list", "--home", home], io()), printed()).toBe(0);
+    const row = rowFor(printed(), "nib");
+    expect(row, printed()).not.toBe("");
+    expect(row).toContain(`struck ${new Date(t2).toISOString()}`);
+    expect(row, "the inert strike's time must not be the caption").not.toContain(
+      new Date(t1).toISOString(),
+    );
+    // Two-sided: the pen that struck nothing is untouched.
+    expect(rowFor(printed(), "quill")).not.toMatch(/struck/);
+  });
+
+  it("a grant that fails on its chain is not reported as revoked", async () => {
+    // `quill` holds write and NOT admin, so a grant it signs never binds. It also strikes that grant
+    // inertly. Reporting "struck" here would name a revocation nobody with standing performed — and
+    // it would silently become a lie in the other direction the day quill is granted admin, because
+    // the grant would then bind while the ledger still called it revoked.
+    expect(await run(["pen", "create", "quill", "--home", home], io()), printed()).toBe(0);
+    const quillSeed = penSeedOf("quill");
+    await plantGrantSignedBy(quillSeed, STRANGER, "write", 1_700_000_000_000);
+    await plantStrike(quillSeed, await soleGrantId(STRANGER), 1_700_000_300_000);
+    clear();
+
+    expect(await heldVerbs(STRANGER), "it never bound").toEqual([]);
+    expect(await run(["grant", "list", "--home", home], io()), printed()).toBe(0);
+    const row = rowFor(printed(), shown(STRANGER));
+    expect(row, printed()).not.toBe("");
+    expect(row).not.toMatch(/struck/);
+    expect(row).toContain("does not bind");
+    expect(row).toContain("no chain of admin standing reaches the operator");
+  });
+
+  it("names non-delegability, not a broken chain, when an admin mints register", async () => {
+    // The chain here is perfect: `vera` holds admin from the operator. `register` is refused anyway,
+    // because the store signs registrations with the OPERATOR'S key. An operator told "no chain
+    // reaches the operator" would go and repair a chain that was never broken.
+    expect(
+      await run(["user", "create", "vera", "--operator", "--home", home], io(), password("pw")),
+      printed(),
+    ).toBe(0);
+    const veraSeed = readFileSync(userSeedPath(home, "vera"), "utf8").trim();
+    await plantGrantSignedBy(veraSeed, STRANGER, "register", 1_700_000_000_000, "thread:");
+    // Two-sided on the SAME granter: the write grant vera mints DOES bind, so the refusal above is
+    // about the verb and not about vera.
+    await plantGrantSignedBy(veraSeed, IMPOSTOR, "write", 1_700_000_100_000);
+    clear();
+
+    expect(await heldVerbs(STRANGER)).toEqual([]);
+    expect(await heldVerbs(IMPOSTOR), "an admin may delegate write").toEqual(["write"]);
+
+    expect(await run(["grant", "list", "--home", home], io()), printed()).toBe(0);
+    const listing = printed();
+    const refused = rowFor(listing, shown(STRANGER));
+    expect(refused, listing).not.toBe("");
+    expect(refused).toContain("register standing is the operator's alone to mint");
+    expect(refused).not.toContain("no chain");
+    expect(rowFor(listing, shown(IMPOSTOR))).toContain("live");
   });
 });
 
@@ -517,6 +706,15 @@ describe("T205 — the screen is grouped, and every column tells the truth", () 
     for (const column of ["kind", "name", "author", "verb", "granted", "standing"]) {
       expect(header).toContain(column);
     }
+
+    // THE DRIFT CANARY. The ledger parses a grant delta by hand; the door answers through
+    // `grantsHeldBy`. The two agree today and nothing makes them agree tomorrow, so this asserts the
+    // property that matters: every author the DOOR honours is on the screen. A hand-rolled read that
+    // starts skipping a pointer shape drops a live author here, loudly, instead of quietly.
+    const honoured = await bindingSubjects();
+    expect(honoured.length, "the fixture must exercise the canary").toBeGreaterThan(3);
+    for (const subject of honoured)
+      expect(listing, `${subject} is honoured but absent`).toContain(shown(subject));
   });
 
   it("reads two grants on one key oldest first", async () => {
@@ -619,6 +817,49 @@ describe("T205 — the screen is grouped, and every column tells the truth", () 
     expect(quill).not.toContain("64-hex");
   });
 
+  it("keeps a revoked connector attributed, and names the revocation", async () => {
+    // Revocation destroys the KEY, not the history. Before this the grant record went entirely, so
+    // the ledger reported a connector that had acted for months as holding "no acting identity yet"
+    // while the struck grant it left behind sat under `unattributed` — two false answers about the
+    // same connector, from one dropped record, on the exact morning both matter.
+    seedTwoConnectors();
+    await plantOperatorGrant(CONNECTOR, "write");
+    expect((await grantIds(CONNECTOR)).surviving).toHaveLength(1);
+
+    expect(await run(["grant", "revoke", "cli-groove", "--home", home], io()), printed()).toBe(0);
+    clear();
+
+    // DELTA: the ground grant really is struck, by the operator.
+    expect((await grantIds(CONNECTOR)).struck).toHaveLength(1);
+    expect(await heldVerbs(CONNECTOR)).toEqual([]);
+    // And the SEED is gone from the home — revocation still destroys the key.
+    const file = readOAuthFile(home);
+    expect(grantFor(file, "cli-groove"), "the seed-bearing record is gone").toBeUndefined();
+    const record = revocationFor(file, "cli-groove");
+    expect(record, "the connector's public identity is kept").toBeDefined();
+    expect(record?.actor).toBe(CONNECTOR);
+    // The key itself is destroyed — the whole point of keeping only the public half.
+    expect(JSON.stringify(file.revoked ?? [])).not.toContain(CONNECTOR_SEED);
+
+    expect(await run(["grant", "list", "--home", home], io()), printed()).toBe(0);
+    const listing = printed();
+    const groove = rowFor(listing, "cli-groove");
+    expect(groove, listing).not.toBe("");
+    // The struck grant is ATTRIBUTED — the connector's name, not `unattributed`.
+    expect(groove).toContain("connector");
+    expect(groove).toContain(shown(CONNECTOR));
+    expect(groove).toMatch(/struck \d{4}-\d{2}-\d{2}T/);
+    expect(groove).toContain("revoked ");
+    expect(listing).not.toContain("unattributed");
+    expect(groove).not.toContain("no acting identity yet");
+
+    // Two-sided: the connector that was never granted is untouched by any of it.
+    const mute = rowFor(listing, "cli-mute");
+    expect(mute, listing).not.toBe("");
+    expect(mute).not.toContain("revoked ");
+    expect(mute).toContain("no acting identity yet");
+  });
+
   it("carries each connector's own generation, token count, and acting identity", async () => {
     seedTwoConnectors();
     expect(
@@ -675,7 +916,9 @@ describe("T205 (d) — the ledger is a read", () => {
 
     expect(await deltaCount()).toBe(before);
 
-    // Twice, because an append that is idempotent by content address hides behind a single run.
+    // Run twice. This adds no discriminating power over the first run — a content-addressed append
+    // of the SAME delta would already have been counted once above — and it is kept only because a
+    // second call is the cheapest way to notice a listing that appends something new each time.
     clear();
     expect(await run(["grant", "list", "--home", home], io()), printed()).toBe(0);
     expect(await deltaCount()).toBe(before);
