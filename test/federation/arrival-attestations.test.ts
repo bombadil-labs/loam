@@ -21,7 +21,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { verifyDelta } from "@bombadil/rhizomatic";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
-import { Gateway } from "../../src/gateway/gateway.js";
+import { Gateway, type FederationReport } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
@@ -106,6 +106,19 @@ function stampsIn(pool: Gateway, asOf?: number): Stamp[] {
 
 /** The union of every ref the given stamps carry. */
 const refsOf = (stamps: readonly Stamp[]): string[] => stamps.flatMap((s) => s.arrived);
+
+/**
+ * Bend what the pool's union door REPORTS, leaving what it does with the deltas alone.
+ *
+ * The two refusals below cannot be reached by any offer a peer can compose: the door names every id
+ * it counted, so the disagreement the sync path refuses on is a source fault rather than an input.
+ * Injecting it here is what makes that refusal a behavior instead of an unprovable belief — the
+ * alternative is code no rail can reach.
+ */
+function bendReport(pool: Gateway, bend: (r: FederationReport) => FederationReport): void {
+  const real = pool.federate.bind(pool);
+  pool.federate = async (deltas, opts) => bend(await real(deltas, opts));
+}
 
 /** The surviving registration bindings in a pool, by delta id — what "bound as law" means here. */
 function bindingIdsIn(pool: Gateway): string[] {
@@ -382,6 +395,71 @@ describe("T207 — a sync that accepts deltas stamps its own custody", () => {
       // The present read does name it — the past is narrower because time is, not because the read
       // is broken.
       expect(new Set(refsOf(now)).has(late.id)).toBe(true);
+    } finally {
+      await alice.close();
+      await me.close();
+    }
+  });
+
+  it("refuses to stamp a custody it cannot point at when the door names fewer ids than it counted", async () => {
+    // A stamp naming a SUBSET of the arrivals is the silent failure this guards: the trail would
+    // read complete and be short, and nothing anywhere would say so. Judge a custody claim by
+    // whether it can be false, never by whether it was written.
+    const alice = await store(ALICE_SEED);
+    const me = await store(ME_SEED);
+    try {
+      const planted = observed(FERN, "height", 62, 1000, ALICE_SEED);
+      await alice.append([planted]);
+      const channel = await me.openChannel({
+        into: "friends",
+        prefix: "alice",
+        from: "https://alice.example/loam",
+        source: feed(alice),
+      });
+      const pool = channel.pool.gateway!;
+      bendReport(pool, (r) =>
+        r.acceptedIds !== undefined && r.acceptedIds.length > 0
+          ? { ...r, acceptedIds: r.acceptedIds.slice(1) }
+          : r,
+      );
+
+      await expect(channel.sync()).rejects.toThrow(/could not record the arrival/);
+      // TWO-SIDED, and it is the refusal's own sentence being checked: the deltas landed, and no
+      // stamp did. A refusal that mis-stated either half would be the same overclaim in a new place.
+      expect(pool.reactor.get(planted.id)).toBeDefined();
+      expect(stampsIn(pool)).toEqual([]);
+    } finally {
+      await alice.close();
+      await me.close();
+    }
+  });
+
+  it("refuses, and says none were named, when the door names no ids at all", async () => {
+    const alice = await store(ALICE_SEED);
+    const me = await store(ME_SEED);
+    try {
+      const planted = observed(FERN, "height", 62, 1000, ALICE_SEED);
+      await alice.append([planted]);
+      const channel = await me.openChannel({
+        into: "friends",
+        prefix: "alice",
+        from: "https://alice.example/loam",
+        source: feed(alice),
+      });
+      const pool = channel.pool.gateway!;
+      // The counts alone — the key is DROPPED, not set to undefined, which is what a door that
+      // never learned to name its arrivals would return.
+      bendReport(pool, (r) => ({
+        offered: r.offered,
+        accepted: r.accepted,
+        rejected: r.rejected,
+        held: r.held,
+      }));
+
+      // The COUNT is in the sentence, so a reader learns how far apart the two answers were.
+      await expect(channel.sync()).rejects.toThrow(/named 0 of them/);
+      expect(pool.reactor.get(planted.id)).toBeDefined();
+      expect(stampsIn(pool)).toEqual([]);
     } finally {
       await alice.close();
       await me.close();
