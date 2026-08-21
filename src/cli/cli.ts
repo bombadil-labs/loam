@@ -222,6 +222,15 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "PREFIX you assign the peer — the prefix is yours, never theirs, so no peer can take a name",
       "you serve. Law that arrives binds under that prefix; your own names are untouched.",
       "",
+      "Each verb takes only its own flags and refuses the rest rather than dropping them:",
+      "  open      --from --into --prefix --token --bless",
+      "  list      (nothing beyond --home/--store)",
+      "  set       --channel --receiving --bless",
+      "  bless-app --channel --route --resolvers --expect --pen --supersede",
+      "  drop      --channel --yes",
+      "`--bless` and `--receiving` take exactly `true` or `false`. Any other spelling is refused,",
+      "never read as `true`.",
+      "",
       "  loam federate open --from https://peer.example/default --into friends --prefix alice",
       "  loam federate list",
       "  loam federate set --channel channel:friends:alice --bless false",
@@ -1056,7 +1065,8 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
           .join(
             ", ",
           )}. Nothing was done: a flag this verb never reads is a request that would go ` +
-        "unanswered in silence, and one of them decides whether a peer's law binds at all.",
+        "unanswered in silence, and these verbs do not share a vocabulary — one of them owns " +
+        "`--bless`, which decides whether a peer's law binds at all.",
     );
     return 2;
   }

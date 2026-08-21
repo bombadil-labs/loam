@@ -1740,6 +1740,44 @@ describe("T209 — the CLI names what arrived and mounts one app", () => {
         said(),
       ).toBe(2);
       expect(said()).toContain("does not take --route");
+
+      // AND `--expect`, whose refusal carries a reason of its own: there is no identity for a
+      // lens's resolver law to pin, so accepting it would tell an operator they had pinned.
+      fresh();
+      expect(
+        await run(
+          [
+            "federate",
+            "bless-app",
+            "--channel",
+            CHANNEL,
+            "--resolvers",
+            "alice:Plant",
+            "--expect",
+            "1e20deadbeefcafe0123456789",
+            "--home",
+            me,
+          ],
+          io(),
+        ),
+        said(),
+      ).toBe(2);
+      expect(said()).toContain("does not take --expect");
+      expect(said()).toContain("Nothing was granted");
+
+      // THE `--resolvers` BRANCH REACHING THE GATEWAY, which every assertion above stops short of:
+      // each refuses at a flag guard, so none of them proves the act is wired to the door a person
+      // types it at. Nothing on this channel is withheld, so the act refuses — and that refusal
+      // comes from the gateway, past the guards, which is what makes it a wiring proof.
+      fresh();
+      expect(
+        await run(
+          ["federate", "bless-app", "--channel", CHANNEL, "--resolvers", "Plant", "--home", me],
+          io(),
+        ),
+        said(),
+      ).toBe(2);
+      expect(said()).toContain("holds no withheld resolvers");
     } finally {
       await alice.close();
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -1767,9 +1805,50 @@ describe("T209 — the CLI names what arrived and mounts one app", () => {
         ).toBe(2);
         expect(said()).toContain('exactly "true" or "false"');
       }
+
+      // AND ON `open`, which its own refusal calls the worse door: that one never prints the
+      // blessing state it settled on, so a wrong guess there is silent at the moment it is made.
+      fresh();
+      expect(
+        await run(
+          [
+            "federate",
+            "open",
+            "--from",
+            join(root, "peer.offer"),
+            "--into",
+            "friends",
+            "--prefix",
+            "zoe",
+            "--bless",
+            "FALSE",
+            "--home",
+            me,
+          ],
+          io(),
+        ),
+        said(),
+      ).toBe(2);
+      expect(said()).toContain('exactly "true" or "false"');
+
       fresh();
       expect(await run(["federate", "list", "--home", me], io()), said()).toBe(0);
       expect(said()).not.toContain("NOT blessing"); // none of them changed anything
+      expect(said()).not.toContain("zoe"); // and nothing was opened
+
+      // `--receiving` is the same door, and it is the remedy the drop refusal points at — a wrong
+      // entry in this verb's own flag table would turn a printed remedy into a refusal.
+      fresh();
+      expect(
+        await run(
+          ["federate", "set", "--channel", CHANNEL, "--receiving", "false", "--home", me],
+          io(),
+        ),
+        said(),
+      ).toBe(0);
+      fresh();
+      expect(await run(["federate", "list", "--home", me], io()), said()).toBe(0);
+      expect(said()).toContain("FROZEN");
 
       // Two-sided: the spelling it DOES understand works, and the listing says so.
       fresh();
