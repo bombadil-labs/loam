@@ -279,7 +279,9 @@ describe("T204 — contested names on /admin", () => {
     for (const row of rows) {
       const rendered = rowFor(html, row.deltaId);
       expect(rendered, `no row for ${row.origin}`).not.toBe("");
-      expect(rendered).toContain(row.origin);
+      // Code-formatted, like every other identifier this page renders: a bare string in prose is
+      // not a name a person can copy, and the wrapper is what the reader keys on.
+      expect(rendered).toContain(`<code>${row.origin}</code>`);
       expect(rendered).toContain(row.author);
       expect(rendered).toContain(new Date(row.timestamp).toISOString());
     }
@@ -348,7 +350,7 @@ describe("T204 — contested names on /admin", () => {
         contenders += 1;
         const rendered = rowFor(html, row.deltaId);
         expect(rendered).toContain(row.entity);
-        expect(rendered).toContain(row.origin);
+        expect(rendered).toContain(`<code>${row.origin}</code>`);
         expect(rendered).toContain(row.author);
         expect(rendered).toContain(new Date(row.timestamp).toISOString());
         expect(rendered).toContain(row.deltaId);
