@@ -11,14 +11,31 @@
 // on the wrong shape cannot pass together. That also makes the on-ground vocabulary — not a helper
 // signature — the thing these rails freeze.
 //
-// WHAT THIS FILE DELIBERATELY DOES NOT PROVE: the target half of the erasure rail at the BYTES
-// AFTER the cut. `drop()` closes the store it purged, so the same handle answers "this store is
-// closed" rather than the question; the byte-level proof for a severed pool lives in
-// test/federation/drop-cli.test.ts, which scans the pool's sqlite file. What this file proves is
-// the premise at the bytes before the cut, the absence from the receiver's gather after it, and the
-// BYSTANDER at the bytes — the half that sees over-purging, which is the failure that matters most.
+// WHAT THIS FILE DELIBERATELY DOES NOT PROVE — four gaps, named so a reader does not read them as
+// covered:
+//
+// 1. The target half of the erasure rail at the BYTES AFTER the cut. `drop()` closes the store it
+//    purged, so the same handle answers "this store is closed" rather than the question; the
+//    byte-level proof for a severed pool lives in test/federation/drop-cli.test.ts, which scans the
+//    pool's sqlite file. What (c) proves is the premise at the bytes before the cut, the absence
+//    from the receiver's gather after it, and the BYSTANDER at the bytes — the half that sees
+//    over-purging, which is the failure that matters most.
+// 2. The as-of read in (e) goes through the helper below, which reimplements §26's one rule. No
+//    shipped door reads a pool's ground as of a time, so there is nothing else to drive: the rail
+//    pins the DELTA TIMESTAMPS custody rides on, and it cannot pin a reader that does not exist.
+//    A door that later serves this must earn its own rail.
+// 3. THE CRASH WINDOW. Federating the peer's deltas and stamping their custody are two writes with
+//    no transaction between them. A restart in that window leaves the arrivals in the pool with no
+//    stamp and nothing on the channel record saying so — the healing field below cannot know about
+//    a debt no code lived to record. Finding it again needs a scan of the pool against its stamps.
+//    Not closed here, and not closeable without either an atomic write or that scan.
+// 4. WHEN a healed arrival is stamped. A ref carried on the channel record is stamped by the sync
+//    that finally records it, so its attestation names THAT moment, not the moment it arrived. An
+//    as-of read therefore sees a healed arrival late. Late is what this can offer; the gap it
+//    replaces was permanent.
 
 import { beforeEach, describe, expect, it } from "vitest";
+import type { Delta } from "@bombadil/rhizomatic";
 import { verifyDelta } from "@bombadil/rhizomatic";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway, type FederationReport } from "../../src/gateway/gateway.js";
@@ -120,6 +137,33 @@ function bendReport(pool: Gateway, bend: (r: FederationReport) => FederationRepo
   pool.federate = async (deltas, opts) => bend(await real(deltas, opts));
 }
 
+/**
+ * Make the pool's door SWALLOW the last stamp of an attestation batch — a partial landing that is
+ * physically real rather than merely misreported.
+ *
+ * The batch is picked by its CONTENTS, never by call order: a sync federates the peer's deltas
+ * first and may write manifest rows in between, so "the second call" is a premise this fixture
+ * does not control. Every delta of an attestation batch carries the arrival context, and nothing
+ * else the channel writes does.
+ */
+function swallowLastStamp(pool: Gateway): { hits: number } {
+  const real = pool.federate.bind(pool);
+  const seen = { hits: 0 };
+  const isStamp = (d: Delta): boolean =>
+    d.claims.pointers.some(
+      (p) => p.target.kind === "entity" && p.target.entity.context === CTX_ARRIVAL,
+    );
+  pool.federate = async (deltas, opts) => {
+    const all = [...deltas];
+    if (all.length < 2 || !all.every(isStamp)) return real(all, opts);
+    seen.hits += 1;
+    // Taken and reported honestly — the door simply never sees the last one, which is what a
+    // partial landing IS. A door that lied about the count would prove a different thing.
+    return real(all.slice(0, -1), opts);
+  };
+  return seen;
+}
+
 /** The surviving registration bindings in a pool, by delta id — what "bound as law" means here. */
 function bindingIdsIn(pool: Gateway): string[] {
   const out: string[] = [];
@@ -157,6 +201,10 @@ describe("T207 — a sync that accepts deltas stamps its own custody", () => {
 
       // ONE STAMP PER SYNC, fanned by the cap and not by anything else.
       expect(stamps.length).toBe(Math.ceil(report.accepted / FAN));
+      // ONE ARRIVAL, ONE MOMENT: a batch split by the cap is still one sync, so every stamp of it
+      // carries the same timestamp. Without this the split would read as several arrivals, and an
+      // as-of read would answer a question nobody asked.
+      expect(new Set(stamps.map((s) => s.at)).size).toBe(1);
       for (const s of stamps) {
         expect(s.arrived.length).toBeGreaterThan(0);
         expect(s.arrived.length).toBeLessThanOrEqual(FAN);
@@ -333,11 +381,17 @@ describe("T207 — a sync that accepts deltas stamps its own custody", () => {
       }
       // And no manifest row names a stamp: the receiver recognised nothing of its own authorship.
       const stampIds = new Set(stamps.map((s) => s.deltaId));
+      let aliasRows = 0;
       for (const d of pool.reactor.snapshot()) {
         const alias = d.claims.pointers.find((p) => p.role === "alias");
         if (alias?.target.kind !== "primitive") continue;
+        aliasRows += 1;
         expect(stampIds.has(String(alias.target.value))).toBe(false);
       }
+      // THE FLOOR under that sweep: the fixture bound "alice:Plant", so a manifest row exists. A
+      // loop over nothing passes every assertion inside it, and would keep passing if rows stopped
+      // being written at all.
+      expect(aliasRows).toBeGreaterThan(0);
       // The mechanism the exclusion rests on, stated so a change to it goes red here too.
       for (const s of stamps) expect(s.author).toBe(me.operator);
     } finally {
@@ -428,6 +482,135 @@ describe("T207 — a sync that accepts deltas stamps its own custody", () => {
       // stamp did. A refusal that mis-stated either half would be the same overclaim in a new place.
       expect(pool.reactor.get(planted.id)).toBeDefined();
       expect(stampsIn(pool)).toEqual([]);
+    } finally {
+      await alice.close();
+      await me.close();
+    }
+  });
+
+  it("records what a partial landing left unstamped, and heals it on the next sync", async () => {
+    // THE GAP THAT MUST NOT BE PERMANENT. A refusal that wrote nothing to the channel would leave
+    // these arrivals unstampable forever: the standing sync swallows the throw, the next poll holds
+    // the same deltas so accepts none, and a stamp is only ever written for what a sync accepts.
+    // The debt therefore rides the channel record until a sync names it.
+    const alice = await store(ALICE_SEED);
+    const me = await store(ME_SEED);
+    try {
+      // Past the cap, so the landing can be PARTIAL: two stamps, one of which never lands.
+      const planted = Array.from({ length: 300 }, (_, i) =>
+        observed(FERN, "height", i, 1000 + i, ALICE_SEED),
+      );
+      await alice.append(planted);
+      const channel = await me.openChannel({
+        into: "friends",
+        prefix: "alice",
+        from: "https://alice.example/loam",
+        source: feed(alice),
+      });
+      const pool = channel.pool.gateway!;
+      const swallowed = swallowLastStamp(pool);
+
+      await expect(channel.sync()).rejects.toThrow(/took 1 of 2 attestation\(s\)/);
+      expect(swallowed.hits).toBe(1); // the premise: one attestation batch, one stamp swallowed
+
+      // ONE stamp stands, and the refusal claims exactly that — not that nothing was recorded.
+      const standing = stampsIn(pool);
+      expect(standing.length).toBe(1);
+      expect(standing[0]!.arrived.length).toBe(FAN);
+      const named = new Set(refsOf(standing));
+
+      // THE DEBT, on the record a person reads. A failed sync is not a sync: the counter rises and
+      // the clock does not move.
+      const failed = me.channelStatus(channel.name)[0]!;
+      expect(failed.consecutiveFailures).toBe(1);
+      expect(failed.lastSyncedAt).toBe(0);
+      expect(failed.unattested.length).toBeGreaterThan(0);
+      expect(failed.unattested.length).toBeLessThanOrEqual(FAN);
+      // It names the arrivals no stamp names, and only those — over-claiming here would re-stamp
+      // what already stands, under-claiming is the gap itself.
+      for (const id of failed.unattested) expect(named.has(id)).toBe(false);
+      // NOTHING IS LOST: every planted delta is either stamped or written down as owed.
+      for (const d of planted) {
+        expect(named.has(d.id) || failed.unattested.includes(d.id)).toBe(true);
+      }
+
+      // THE HEALING. The peer says nothing new, so the debt alone is what this sync has to stamp —
+      // which is the condition the old shape could never meet.
+      const second = await channel.sync();
+      expect(second.accepted).toBe(0);
+      const after = stampsIn(pool);
+      expect(after.length).toBe(2);
+      const healed = after.filter((s) => s.deltaId !== standing[0]!.deltaId);
+      expect(healed.length).toBe(1);
+      expect(healed[0]!.arrived.slice().sort()).toEqual([...failed.unattested].sort());
+      expect(healed[0]!.channel).toBe(channel.name);
+      expect(healed[0]!.from).toBe("https://alice.example/loam");
+      expect(healed[0]!.author).toBe(me.operator);
+      expect(verifyDelta(pool.reactor.get(healed[0]!.deltaId)!)).toBe("verified");
+
+      // THE TRAIL IS WHOLE: every arrival named exactly once, no ref stamped twice.
+      const refs = refsOf(after);
+      expect(new Set(refs).size).toBe(refs.length);
+      const all = new Set(refs);
+      for (const d of planted) expect(all.has(d.id)).toBe(true);
+
+      // And the record is clean again — the debt clears with the sync that paid it.
+      const healthy = me.channelStatus(channel.name)[0]!;
+      expect(healthy.unattested).toEqual([]);
+      expect(healthy.consecutiveFailures).toBe(0);
+      expect(healthy.lastSyncedAt).toBeGreaterThan(0);
+    } finally {
+      await alice.close();
+      await me.close();
+    }
+  });
+
+  it("a quiet poll against a door that will not name its arrivals does not refuse", async () => {
+    // The refusal below says "the peer's deltas landed". On a poll that accepted nothing that
+    // sentence is false, and a false refusal on every quiet poll of a faulty channel would bury the
+    // one that is true. The fault is not forgiven — it is caught on the first poll that accepts.
+    const alice = await store(ALICE_SEED);
+    const me = await store(ME_SEED);
+    try {
+      await alice.append([observed(FERN, "height", 62, 1000, ALICE_SEED)]);
+      const channel = await me.openChannel({
+        into: "friends",
+        prefix: "alice",
+        from: "https://alice.example/loam",
+        source: feed(alice),
+      });
+      const pool = channel.pool.gateway!;
+      const first = await channel.sync();
+      expect(first.accepted).toBeGreaterThan(0);
+      const stamped = stampsIn(pool)
+        .map((s) => s.deltaId)
+        .sort();
+      expect(stamped.length).toBeGreaterThan(0);
+
+      // From here the door counts but will not name — the same fault the refusals above catch.
+      bendReport(pool, (r) => ({
+        offered: r.offered,
+        accepted: r.accepted,
+        rejected: r.rejected,
+        held: r.held,
+      }));
+
+      // QUIET: nothing arrived and nothing is owed, so there is nothing to refuse about.
+      const quiet = await channel.sync();
+      expect(quiet.accepted).toBe(0);
+      expect(
+        stampsIn(pool)
+          .map((s) => s.deltaId)
+          .sort(),
+      ).toEqual(stamped);
+      const after = me.channelStatus(channel.name)[0]!;
+      expect(after.consecutiveFailures).toBe(0);
+      expect(after.unattested).toEqual([]);
+
+      // ACCEPTING, through the same faulty door: now the fault is a refusal, and it counts.
+      await alice.append([observed(FERN, "height", 71, 2000, ALICE_SEED)]);
+      await expect(channel.sync()).rejects.toThrow(/named 0 of them/);
+      expect(me.channelStatus(channel.name)[0]!.consecutiveFailures).toBe(1);
     } finally {
       await alice.close();
       await me.close();
