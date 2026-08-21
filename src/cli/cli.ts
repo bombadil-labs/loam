@@ -226,7 +226,8 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "  open      --from --into --prefix --token --bless",
       "  list      (nothing beyond --home/--store)",
       "  set       --channel --receiving --bless",
-      "  bless-app --channel --route --resolvers --expect --pen --supersede",
+      "  bless-app --channel, then EITHER --route (with --expect/--pen/--supersede)",
+      "            OR --resolvers, which takes neither of those",
       "  drop      --channel --yes",
       "`--bless` and `--receiving` take exactly `true` or `false`. Any other spelling is refused,",
       "never read as `true`.",
@@ -1065,8 +1066,8 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
           .join(
             ", ",
           )}. Nothing was done: a flag this verb never reads is a request that would go ` +
-        "unanswered in silence, and these verbs do not share a vocabulary — one of them owns " +
-        "`--bless`, which decides whether a peer's law binds at all.",
+        "unanswered in silence. These verbs do not share a vocabulary: `--bless` belongs to `open` " +
+        "and `set`, and it decides whether a peer's law binds at all.",
     );
     return 2;
   }

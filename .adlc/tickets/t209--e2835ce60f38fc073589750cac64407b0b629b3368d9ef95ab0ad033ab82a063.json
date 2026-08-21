@@ -4,7 +4,9 @@
   "duration": 3,
   "id": "T209",
   "rails": [
-    "test/federation/install-by-federation.test.ts"
+    "test/federation/install-by-federation.test.ts",
+    "test/federation/install-by-federation-cli.test.ts",
+    "test/federation/install-by-federation-resolvers.test.ts"
   ],
   "title": "Install by federation — an arriving renderer is inert until blessed"
 }
