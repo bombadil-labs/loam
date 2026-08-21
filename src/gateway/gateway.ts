@@ -30,6 +30,8 @@ import { isRepairable } from "../store/quarantine.js";
 import { promoteImpl, readAdoptions, type Adoption } from "./adopt.js";
 import {
   blessChannelAppImpl,
+  blessChannelResolversImpl,
+  withheldLenses,
   channelAppsImpl,
   channelStatusImpl,
   channelsEverImpl,
@@ -552,6 +554,16 @@ export class Gateway {
     door: "full" | "public" = "full",
   ): { registered: readonly Registered[]; hooks: GqlHooks } | undefined {
     if (door === "public") {
+      // A CHANNEL POOL HAS NO ANONYMOUS SURFACE, at any door it can be reached through — and it can
+      // be reached through more than one: a pool is an attached container, so it is a mount in its
+      // own right, and `/channel:friends:alice/...` is a real URL. Its ground is a one-way seeded
+      // COPY of this store's, `loam:public` rides that copy, and the copy is frozen — so a
+      // declaration the operator has since struck still opens a door in there. A staging area for a
+      // stranger's law is not a place to serve strangers from, whatever its copy of the ground says.
+      // (A QUARANTINE pool the operator opened themselves keeps its anonymous door; §24.7 builds a
+      // deliberate public probation surface on it. This is narrower on purpose: it is about a pool
+      // whose contents a PEER chooses.)
+      if (this.channelPool === true) return undefined;
       this.publicOpen ??= readPublicSchemas(this.reactor, this.operatorAuthor);
       const defs = this.registered.filter((r) => this.publicOpen!.has(lensOf(r)));
       if (defs.length === 0) return undefined;
@@ -904,6 +916,12 @@ export class Gateway {
    */
   readonly channelPools = new Map<string, Container>();
 
+  /**
+   * Set on a POOL's own gateway when it is a federation channel's pool (§46.1). It is what tells a
+   * peer-fed staging store from an operator-opened quarantine, and it closes the anonymous surface.
+   */
+  channelPool?: true;
+
   // The §24.5 envelope rows for every enveloped pool attached here: which pool, its resolved
   // ceilings, and what it has spent. The refusal a caller meets stays leak-free; this is the
   // operator-facing half of "exhaustion is loud". Body in envelope.ts.
@@ -946,15 +964,17 @@ export class Gateway {
       // same two places this does.
       const token = this.options.channelToken?.(standing.name);
       try {
-        this.channelPools.set(
-          standing.name,
-          await this.openContainer({
-            name: standing.name,
-            ...(this.options.channelBackend === undefined
-              ? {}
-              : { backend: this.options.channelBackend(standing.name) }),
-          }),
-        );
+        const resumed = await this.openContainer({
+          name: standing.name,
+          ...(this.options.channelBackend === undefined
+            ? {}
+            : { backend: this.options.channelBackend(standing.name) }),
+        });
+        // A RESUMED pool is a channel's too, and this is the path a running server serves from —
+        // marking only the freshly opened one would close the anonymous door for the process that
+        // opened the channel and leave it open for every process after a restart.
+        if (resumed.gateway !== undefined) resumed.gateway.channelPool = true;
+        this.channelPools.set(standing.name, resumed);
       } catch {
         // Deliberately left unattached; see above. And CRUCIALLY, left un-REGISTERED below: the
         // channel goes into `federationChannels` only once its pool is open. Registered first, a
@@ -1022,6 +1042,22 @@ export class Gateway {
     opts: { pen?: boolean; supersede?: boolean; expect?: string } = {},
   ): Promise<void> {
     return blessChannelAppImpl(this, channel, route, opts);
+  }
+
+  /**
+   * Run a peer's RESOLVER code for one lens (SPEC §24.6). The channel binds names on its own; this
+   * is the separate act that lets the code behind a computed field run.
+   */
+  async blessChannelResolvers(channel: string, lens: string): Promise<void> {
+    return blessChannelResolversImpl(this, channel, lens);
+  }
+
+  /** The lenses on a channel whose peer-written resolvers are WITHHELD — decisions waiting on you. */
+  withheldOn(channel: string): string[] {
+    const status = channelStatusImpl(this, channel)[0];
+    const ground = this.channelPools.get(channel)?.gateway;
+    if (status === undefined || ground === undefined) return [];
+    return withheldLenses(this, ground, status.prefix);
   }
 
   /** Sever a federation channel and purge its pool. Irreversible; freezing is the reversible act. */

@@ -206,6 +206,7 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "receiving",
       "channel",
       "route",
+      "resolvers",
       "expect",
       "pen",
       "supersede",
@@ -225,11 +226,16 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "  loam federate list",
       "  loam federate set --channel channel:friends:alice --bless false",
       "  loam federate bless-app --channel channel:friends:alice --route hello",
+      "  loam federate bless-app --channel channel:friends:alice --resolvers alice:Plant",
       "  loam federate drop --channel channel:friends:alice --yes",
       "",
       "`set` is reversible: --receiving false freezes the channel and keeps what arrived,",
       "--bless false stops new law binding and leaves bound law serving. `drop` is NOT reversible:",
       "it purges that peer's pool at the bytes and needs --yes.",
+      "",
+      "A peer's RESOLVER code never runs on its own either. A registration whose fields are computed",
+      "binds with those resolvers WITHHELD: the fields refuse and say so, and `bless-app --resolvers",
+      "<lens>` is what lets that code run. Binding a name and running code are two decisions.",
       "",
       "An APP a peer sends never runs on its own. It arrives inert, `list` names it, and",
       "`bless-app` mounts that one route — the toggles above govern NAMES, never code that runs.",
@@ -1218,11 +1224,25 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
     }
 
     if (verb === "bless-app") {
+      // TWO ACTS, ONE VERB, because they are the same decision about the same channel: let a
+      // peer's code run here. `--route` mounts an app; `--resolvers` lets the code behind one
+      // lens's computed fields run. Neither rides the blessing toggle, and neither rides the other.
+      const lens = parsed.flags.get("resolvers");
+      if (lens !== undefined) {
+        await gateway.blessChannelResolvers(name, lens);
+        io.out(
+          `loam: ${name} now runs the peer's resolver code for "${lens}"\n` +
+            "  it runs on this channel's pool, in this process, and not in the render worker\n" +
+            `  dropping the channel takes it with the peer's data — \`loam federate drop --channel ${name} --yes\``,
+        );
+        return 0;
+      }
       const route = parsed.flags.get("route");
       if (route === undefined) {
         io.err(
-          "federate bless-app wants --route <route> — `loam federate list` names every app a peer " +
-            "has sent, and mounting one is the only way its code ever runs here",
+          "federate bless-app wants --route <route>, or --resolvers <lens> — `loam federate list` " +
+            "names every app a peer has sent and every lens whose resolver code is withheld, and " +
+            "these are the only two ways a peer's code ever runs here",
         );
         return 2;
       }

@@ -618,7 +618,11 @@ export async function prepareRouteImpl(
 ): Promise<void> {
   const binding = gw.renderers().find((r) => r.route === route);
   if (binding !== undefined) {
-    await loadRenderers([binding.bundle]);
+    // THE DOOR DECIDES HERE TOO, on every gateway and not only where a channel is involved.
+    // Preparing is EVALUATING a module body, and this branch runs on a pool's own mount as readily
+    // as on the root — so a route this door could never serve must not be a route this door can
+    // make it run. Loading only what could be served is the same rule the serve path keeps.
+    if (routeServableOn(gw, binding, door)) await loadRenderers([binding.bundle]);
     return;
   }
   // THE DOOR REACHES THIS SIDE TOO, and leaving it out was the whole hazard. Preparing means

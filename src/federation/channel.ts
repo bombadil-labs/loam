@@ -24,6 +24,7 @@ import { parseOffer } from "./offer.js";
 import {
   CTX_MANIFEST,
   isRegistrationBinding,
+  isWithheldResolver,
   manifestExportClaims,
   readManifest,
 } from "../gateway/adopt-law.js";
@@ -559,6 +560,12 @@ async function bindArrived(
         as: name,
         expect: "schema",
         manifest: "operator",
+        // AUTO-BLESS BINDS THE NAME AND WITHHOLDS THE CODE. A registration may carry §22 resolver
+        // ESM, and publishing one LOADS that ESM on the gateway it is published to — no pool, no
+        // worker, no frame. This pass runs unattended on a poll, so passing resolvers through would
+        // make "the blessing toggle is on" mean "a stranger's code runs here", which is the one
+        // sentence §24.6 exists to refuse. The fields refuse by name until a person says otherwise.
+        resolvers: "withhold",
       });
       // "witnessed" IS NOT "bound", and reporting it as bound was a false report of the plainest
       // kind: `bound` said the name serves, and the store threw on it.
@@ -733,8 +740,17 @@ function appsOf(
         : claimedBy !== undefined
           ? `drop that channel, or re-open this one under a prefix its namespace does not contain`
           : "your own law wins its own names; this one answers when yours stops";
-    // (c) the lens it reads is not bound here — a curse, or a withdrawn registration (§23.6).
-    const dark = own !== undefined && shadow === undefined && !routeServableOn(ground, own, "full");
+    // (c) the route answers nothing — a cursed or withdrawn lens (§23.6), or a reading this store
+    // cannot assemble at all. ASKED OF THE DOOR, not of the registry: `routeServableOn` reports
+    // whether a lens is REGISTERED, and a registered lens whose scope cannot be built throws at the
+    // resolve — so a report that stopped at presence said SERVES about a route answering 400. The
+    // probe is the same call `serveRouteImpl` makes before it renders, run against an entity no
+    // store holds: what it exercises is whether the reading can be assembled, which is the half a
+    // registration cannot promise.
+    const dark =
+      own !== undefined &&
+      shadow === undefined &&
+      (!routeServableOn(ground, own, "full") || !resolves(ground, own.schemaName));
     // NOTHING MOUNTED, AND NOTHING MOUNTABLE — and only cause (b) is that. The blessing door looks
     // for a twin at the BARE route, so a host route named `<prefix>:<route>` is invisible to it and
     // a blessing there SUCCEEDS; what it will never do is answer, because the receiver's own law
@@ -950,6 +966,114 @@ export async function blessChannelAppImpl(
     ...(opts.pen === true ? { pen: true } : {}),
     ...(opts.supersede === true ? { supersede: true } : {}),
   });
+}
+
+/**
+ * RUN A PEER'S RESOLVER CODE for one lens — the second explicit act, and a sibling of `bless-app`.
+ *
+ * A channel blesses NAMES on its own; it never runs code on its own. An arriving registration whose
+ * fields are computed by the peer's ESM binds with those resolvers withheld, so the fields refuse
+ * and say what is missing. This is the act that supplies it: the operator names one lens, and its
+ * registration is re-published with the peer's resolvers in place.
+ *
+ * It keeps `bless-app`'s discipline, for the same reasons. The act is per lens, never per channel.
+ * The law comes from the pool's own manifest under the operator's own rows, so a peer cannot choose
+ * what it grants. And it supersedes deliberately, because the incumbent is the withheld binding
+ * this store published — taking that name back is the entire point of the call.
+ *
+ * WHAT IT DOES NOT BOUND is what `bless-app` does not bound: this code runs on the POOL's gateway,
+ * in-process, with no clock. A resolver is not a render and never reaches §23.9's worker at all.
+ */
+export async function blessChannelResolversImpl(
+  gw: Gateway,
+  channel: string,
+  lens: string,
+): Promise<void> {
+  const status = channelStatusImpl(gw, channel)[0];
+  const ground = gw.channelPools.get(channel)?.gateway;
+  if (status === undefined || ground === undefined) {
+    throw new Error(
+      `bless-app refused: this store holds no open channel named "${channel}" — ` +
+        "`loam federate list` names the ones it has",
+    );
+  }
+  const seed = gw.options.seed;
+  const operator = gw.operatorAuthor;
+  if (seed === undefined || operator === undefined) {
+    throw new Error("only an operated store may bless law (a blessing is the operator's claim)");
+  }
+  // The operator names the lens the way this store serves it; the manifest knows it by the peer's
+  // own bare name, which is what the prefix was put in front of.
+  const served = lens.startsWith(`${status.prefix}:`) ? lens : `${status.prefix}:${lens}`;
+  const alias = served.slice(status.prefix.length + 1);
+  const withheld = withheldLenses(gw, ground, status.prefix);
+  if (!withheld.includes(served)) {
+    throw new Error(
+      `bless-app refused: "${served}" on "${channel}" holds no withheld resolvers — ` +
+        (withheld.length === 0
+          ? "nothing on this channel is waiting on that act"
+          : `these are: ${withheld.map((l) => `"${l}"`).join(", ")}`),
+    );
+  }
+  const version = freezeMembers([...ground.reactor.snapshot()]);
+  await ground.adoptLaw(version, alias, {
+    as: served,
+    expect: "schema",
+    manifest: "operator",
+    resolvers: "grant",
+    // The incumbent is this store's own withheld binding, and replacing it IS the request.
+    supersede: true,
+  });
+  await ground.preloadResolvers();
+  gw.replayRegistrations();
+}
+
+/**
+ * The lenses this channel serves whose resolvers are WITHHELD — the decisions waiting on a person.
+ *
+ * Read from the code that would run, not from a record beside it: a stub carries its own mark, so
+ * the report cannot drift from what the store holds.
+ */
+export function withheldLenses(gw: Gateway, ground: Gateway, prefix: string): string[] {
+  const out: string[] = [];
+  for (const r of ground.registered) {
+    const specs = r.resolvers;
+    if (specs === undefined) continue;
+    const name = r.schema.name ?? r.hyperschema.name;
+    if (!name.startsWith(`${prefix}:`)) continue;
+    if (Object.values(specs).some((spec) => isWithheldResolver(spec.code))) out.push(name);
+  }
+  return out.sort();
+}
+
+/**
+ * Can this store ASSEMBLE the reading behind a lens?
+ *
+ * A registration is a promise that a name is filed, not that a view can be built from it: a gather
+ * that scopes a container reaches for that container's bytes, and a store that cannot reach them
+ * refuses at the resolve rather than at the registry (H9 — a scope must never resolve as if it were
+ * empty). The entity is deliberately one no store holds; nothing about it is read, and building the
+ * scope is the whole question.
+ */
+function resolves(ground: Gateway, lens: string): boolean {
+  try {
+    ground.surface("full")?.hooks.resolve(lens, "loam:probe-no-such-entity", undefined);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Mark a pool as a CHANNEL's, on its own gateway.
+ *
+ * A pool is an attached container and therefore a mount in its own right, so the mark has to ride
+ * the pool rather than a lookup on the parent — the door that reaches it may never consult the
+ * parent at all. Every path that attaches one calls this: opening a channel, and resuming one at
+ * boot, which is the path a running server actually serves from.
+ */
+function markChannelPool(pool: Container): void {
+  if (pool.gateway !== undefined) pool.gateway.channelPool = true;
 }
 
 /** The alias a manifest row names, or undefined for any other delta. */
@@ -1224,6 +1348,7 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
       `openChannel: ${name} resolved without its own ground — a pool must be separate`,
     );
   }
+  markChannelPool(pool);
 
   // The opening record: `lastSyncedAt: 0` says NEVER SYNCED, which is deliberately distinct from a
   // stale timestamp. A channel that has never reached its peer must not read as merely quiet.

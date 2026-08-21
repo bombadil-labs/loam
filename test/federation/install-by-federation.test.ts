@@ -113,6 +113,28 @@ async function peer(
   return gw;
 }
 
+/** A peer whose lens has a COMPUTED field — the §22 resolver whose ESM must not run uninvited. */
+async function resolverPeer(): Promise<Gateway> {
+  const gw = await Gateway.boot(
+    new MemoryBackend(),
+    assembleGenesis({
+      operatorSeed: ALICE_SEED,
+      registrations: [
+        {
+          hyperschema: PLANT,
+          schema: PLANT_POLICY,
+          roots: [FERN],
+          resolvers: {
+            readings: { rung: "a", type: "number", code: "export default () => 424242;" },
+          },
+        },
+      ],
+    }),
+  );
+  await gw.append([observed(FERN, "height", 62, 1_000, ALICE_SEED)]);
+  return gw;
+}
+
 const link = (bob: Gateway, from: Gateway, prefix: string, bless = true) =>
   bob.openChannel({
     into: "friends",
@@ -1880,6 +1902,189 @@ describe("T209 — the CLI says what it found, and never announces a mount it di
     } finally {
       await alice.close();
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+});
+
+describe("T209 — a blessing outlives the process that made it", () => {
+  it("a blessed app still serves after a restart, and the report never outruns the store", async () => {
+    // THE PROMISE IS NOT "it served once". A pool re-attaches at boot, which re-pulses its seeding
+    // edge and rebuilds its surface from scratch — and only then is the scope that a blessed lens
+    // reads through actually assembled. A blessing that survived only in the process that made it
+    // would be a mount an operator could never rely on, and every report said SERVES either way.
+    const root = mkdtempSync(join(tmpdir(), "loam-t209-restart-"));
+    const alice = await peer(ALICE_SEED, { route: "hello", app: APP, height: 62 });
+    try {
+      const boot = async (): Promise<Gateway> =>
+        Gateway.boot(
+          new SqliteBackend(join(root, "bob.sqlite")),
+          assembleGenesis({ operatorSeed: BOB_SEED }),
+          {
+            channelBackend: (n: string) =>
+              new SqliteBackend(join(root, `${n.replace(/[^a-z0-9]/gi, "_")}.sqlite`)),
+          },
+        );
+      const bob = await boot();
+      const channel = await bob.openChannel({
+        into: "friends",
+        prefix: "alice",
+        source: { pull: () => Promise.resolve(alice.reactor.arrivalLog()) },
+      });
+      await channel.sync();
+      await bob.blessChannelApp(CHANNEL, "hello");
+      expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(200);
+      await bob.close();
+
+      // A DIFFERENT PROCESS'S STORE, in every sense that matters: nothing from the blessing is in
+      // memory, and the pool is re-attached from its file.
+      const again = await boot();
+      try {
+        await again.prepareRoute("alice:hello", "full");
+        const served = await again.serveRoute("alice:hello", FERN, "full");
+        expect(served.status).toBe(200);
+        // The PEER's markup and the PEER's value, so this cannot pass on a page that merely renders.
+        expect(bodyOf(served)).toContain("<p id=h>62</p>");
+        expect(bodyOf(served)).toContain("data-loam-probation");
+        // And the report agrees with the door — which it did not when the door answered 400.
+        const row = again.channelApps(CHANNEL)[0]!;
+        expect(row.blessed).toBe(true);
+        expect(row.dark).toBeUndefined();
+      } finally {
+        await again.close();
+      }
+    } finally {
+      await alice.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
+  // THE PROBE THIS FILE CANNOT REDDEN, named rather than left as a rail that proves nothing.
+  // `appsOf` asks whether a mounted lens can be RESOLVED, not merely whether it is registered,
+  // because a registered lens whose scope cannot be assembled throws at the resolve and the door
+  // answers 400 — which is exactly what the restart above did before the scope was fixed. With that
+  // fixed, no state reachable from these surfaces makes a mounted lens fail to assemble: the probe
+  // is defence in depth against the next reader that goes stale, and its failing side is unreachable
+  // from here. A rail for it wants a store built by hand into a state the doors cannot produce.
+});
+
+describe("T209 — a channel pool is not a door for strangers", () => {
+  it("the pool's own mount refuses a tokenless caller, and the token door still serves", async () => {
+    // A pool is an attached container, so it is a MOUNT in its own right and
+    // `/channel:friends:alice/app/<route>/<entity>` is a real URL. Its ground is a seeded COPY of
+    // this store's, `loam:public` rides that copy, and the copy is frozen — so a declaration the
+    // operator has since struck still opens a door in there. A staging area for a peer's law is not
+    // a place to serve strangers from.
+    const alice = await peer(ALICE_SEED, { route: "hello", app: APP, height: 62 });
+    const bob = await store(BOB_SEED);
+    try {
+      // Bob's OWN law, his own route, and his own public declaration — all BEFORE the channel
+      // opens, so the pool inherits a twin renderer and a copy of the declaration.
+      await bob.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+      await bob.append([observed(FERN, "height", 7, 2_000, BOB_SEED)]);
+      await bob.publishRenderer({
+        route: "own",
+        schema: "Plant",
+        consumes: ["height"],
+        bundle: OTHER_APP,
+      });
+      await bob.append([signClaims(publicClaims(["Plant"], BOB, 9_400), BOB_SEED)]);
+      const channel = await link(bob, alice, "alice");
+      await channel.sync();
+      await bob.blessChannelApp(CHANNEL, "hello");
+      // The premise, asserted: the pool really did inherit the open declaration.
+      expect(channel.pool.gateway!.isPublicLatest("Plant")).toBe(true);
+
+      const door = await serve({
+        mounts: { default: bob },
+        tokens: { "tok-op": { operator: true } },
+        port: 0,
+      });
+      try {
+        const at = (path: string): string => `${door.url}${path}`;
+        const poolUrl = at(`/${encodeURIComponent(CHANNEL)}/app/own/${encodeURIComponent(FERN)}`);
+        const tokenless = await fetch(poolUrl);
+        expect(tokenless.status).not.toBe(200);
+        expect(await tokenless.text()).not.toContain("data-loam-probation");
+
+        // TWO-SIDED, and it must be a SUCCESS: the operator's own token door still serves the
+        // channel's app at the receiver's prefixed route. A rail that only proved the refusal would
+        // pass with delegation deleted from every door.
+        const served = await fetch(at(`/default/app/alice:hello/${encodeURIComponent(FERN)}`), {
+          headers: { authorization: "Bearer tok-op" },
+        });
+        expect(served.status).toBe(200);
+        // The PEER's app really rendered — reading over the POOL's ground, where this store's own
+        // later observation of the same field wins the Policy. The markup is alice's either way,
+        // and that is what says her code ran.
+        expect(await served.text()).toContain("<p id=h>7</p>");
+      } finally {
+        await door.close();
+      }
+    } finally {
+      await alice.close();
+      await bob.close();
+    }
+  });
+});
+
+describe("T209 — a peer's RESOLVER code is a second decision", () => {
+  it("auto-bless binds the name and withholds the code; the field refuses by name", async () => {
+    // The blessing toggle is ON and doing its job — the lens binds and its ordinary fields answer.
+    // What it does NOT do is run the peer's ESM: publishing a registration LOADS its resolvers on
+    // the gateway it is published to, with no pool, no worker and no frame. So the computed field
+    // refuses, and says which act supplies it.
+    const alice = await resolverPeer();
+    const bob = await store(BOB_SEED);
+    try {
+      const channel = await link(bob, alice, "alice");
+      const report = await channel.sync();
+      expect(report.bound).toContain("alice:Plant"); // the toggle worked…
+
+      const q = '{ alice_Plant(entity: "' + FERN + '") { height readings } }';
+      const refused = await bob.query(q);
+      // The ORDINARY field answers, so this cannot pass with the whole lens broken.
+      expect((refused.data as { alice_Plant: { height: unknown } }).alice_Plant.height).toBe(62);
+      // The COMPUTED one refuses, by name, with the act that clears it.
+      expect(
+        (refused.data as { alice_Plant: { readings: unknown } }).alice_Plant.readings,
+      ).toBeNull();
+      expect(JSON.stringify(refused.errors)).toContain("has not been told to run");
+      expect(JSON.stringify(refused.errors)).toContain("--resolvers");
+      // The listing names the decision waiting on a person.
+      expect(bob.withheldOn(CHANNEL)).toEqual(["alice:Plant"]);
+
+      // THE EXPLICIT ACT, and only then does the peer's code compute anything here.
+      await bob.blessChannelResolvers(CHANNEL, "alice:Plant");
+      const granted = await bob.query(q);
+      expect(granted.errors).toBeUndefined();
+      expect((granted.data as { alice_Plant: { readings: unknown } }).alice_Plant.readings).toBe(
+        424242,
+      );
+      expect(bob.withheldOn(CHANNEL)).toEqual([]);
+    } finally {
+      await alice.close();
+      await bob.close();
+    }
+  });
+
+  it("the act names one lens, and refuses a lens with nothing withheld", async () => {
+    const alice = await resolverPeer();
+    const bob = await store(BOB_SEED);
+    try {
+      const channel = await link(bob, alice, "alice");
+      await channel.sync();
+      await expect(bob.blessChannelResolvers(CHANNEL, "alice:Nope")).rejects.toThrow(
+        /holds no withheld resolvers/,
+      );
+      // Two-sided: the lens that IS waiting is accepted.
+      await bob.blessChannelResolvers(CHANNEL, "alice:Plant");
+      // …and a second call refuses, because nothing is withheld any more.
+      await expect(bob.blessChannelResolvers(CHANNEL, "alice:Plant")).rejects.toThrow(
+        /holds no withheld resolvers/,
+      );
+    } finally {
+      await alice.close();
+      await bob.close();
     }
   });
 });

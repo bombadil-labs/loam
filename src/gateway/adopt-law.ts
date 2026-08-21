@@ -73,6 +73,7 @@ import {
   type ClaimTemplates,
   type LensName,
   type ResolverSpecs,
+  type ResolverSpec,
 } from "./registration.js";
 import { CTX_RENDERER, publishRendererImpl } from "./renderers.js";
 
@@ -908,6 +909,22 @@ export interface AdoptLawOptions {
    * what the operator said it means.
    */
   readonly manifest?: "operator";
+  /**
+   * Bind the law and WITHHOLD its §22 resolvers — the fields they back refuse, by name, instead of
+   * running a stranger's code.
+   *
+   * A registration may carry resolver ESM, and publishing one loads that ESM on THIS gateway
+   * (`preloadResolvers` → `importEsm`) — no pool, no worker, no frame. So a pass that binds NAMES
+   * without a person deciding cannot pass resolvers through: "a name bound" and "code ran" are the
+   * two grants §24.6 keeps apart, and this is the second one arriving through the first.
+   *
+   * `"grant"` is the act that reverses it, and it also SKIPS THE WITNESS. Law identity deliberately
+   * excludes the resolvers (`schemaLawAddress` covers the gather body and the resolution program,
+   * nothing else), so withheld law and granted law share one address — and a re-blessing would
+   * witness, append nothing, and report success while every field went on refusing. A grant changes
+   * something the address cannot see, so the address may not be what decides whether it happens.
+   */
+  readonly resolvers?: "withhold" | "grant";
 }
 
 export interface AdoptionOutcome {
@@ -1141,7 +1158,8 @@ async function adoptOne(
   // binding that publishes (§47 criterion 2: many names may point at one law). A call with NO `as`
   // asked for the LAW, not a name, and keeps the address-only witness whole — T140's idempotent
   // module contract, where re-blessing what the operator already serves appends nothing.
-  const already = boundElsewhere(gw, ex, opts.as);
+  // A GRANT IS NOT A REPEAT, whatever the address says — see `AdoptLawOptions.resolvers`.
+  const already = opts.resolvers === "grant" ? undefined : boundElsewhere(gw, ex, opts.as);
   if (already !== undefined) {
     const landed = await record(gw, src, row, ex, "witnessed", already.deltaId);
     return { alias: row.alias, kind: "witnessed", landed, notes };
@@ -1245,12 +1263,64 @@ async function adoptOne(
     // `supersede` outranks by RETIRING the incumbent from the blessing itself, because the
     // blessing's timestamp is the source's and cannot win on recency. Strike the blessing and the
     // incumbent resurfaces — the negation stops counting with its carrier.
-    const negates = held !== undefined && held.address !== ex.address ? [held.deltaId] : [];
+    // A GRANT MUST RETIRE ITS INCUMBENT, and recency cannot do it. The withheld binding and the
+    // granted one are the SAME LAW by address — that is why the witness had to be skipped — and a
+    // blessing inherits its source timestamps, so the two tie and the id tie-break decides which
+    // one a reader sees. A coin flip is not a decision an operator took.
+    const takesName =
+      held !== undefined && (held.address !== ex.address || opts.resolvers === "grant");
+    const negates = takesName ? [held.deltaId] : [];
     return publish(gw, ex, opts, negates);
   });
 
   const provenance = await record(gw, src, row, ex, "adopted-from", landed[0] ?? ex.sourceDelta);
   return { alias: row.alias, kind: "adopted-from", landed: [...landed, ...provenance], notes };
+}
+
+/**
+ * The mark a withheld resolver carries in its own source, so a reader can name the state without a
+ * second record to keep in step with it.
+ */
+export const RESOLVER_WITHHELD = "loam:resolver-withheld";
+
+/** Is this the receiver's refusing stub rather than law that computes anything? */
+export const isWithheldResolver = (code: string): boolean => code.includes(RESOLVER_WITHHELD);
+
+/**
+ * The peer's resolvers, replaced one for one by a stub of OUR OWN that refuses.
+ *
+ * Dropping them instead would be quieter and worse: the field would fall back to its Policy value
+ * and answer a NUMBER an operator had no reason to trust, with nothing anywhere saying that a
+ * reading they were shown is not the reading the peer wrote. A refusal is the honest shape — the
+ * field says what is missing and what act supplies it.
+ *
+ * The stub is this store's code, not the peer's, which is the whole point: it is what runs where
+ * the peer's ESM would have. `type` and `rung` are preserved so the surface keeps its shape and the
+ * refusal arrives at the field rather than at the publish.
+ */
+function withheldResolvers(
+  specs: ResolverSpecs | undefined,
+  lens: string,
+): ResolverSpecs | undefined {
+  if (specs === undefined) return undefined;
+  const out: Record<string, ResolverSpec> = {};
+  for (const [field, spec] of Object.entries(specs)) {
+    if (isWithheldResolver(spec.code)) {
+      out[field] = spec; // already withheld: re-blessing must not stack stubs
+      continue;
+    }
+    const why =
+      `"${field}" on "${lens}" is computed by RESOLVER CODE the peer wrote, and this store has ` +
+      `not been told to run it. Law that arrives on a channel binds a NAME; running code is a ` +
+      `second decision. Bless it with \`loam federate bless-app --channel <name> --resolvers ` +
+      `"${lens}"\`, or read the fields this lens resolves without a resolver.`;
+    out[field] = {
+      rung: spec.rung,
+      type: spec.type,
+      code: `// ${RESOLVER_WITHHELD}\nexport default () => { throw new Error(${JSON.stringify(why)}); };`,
+    };
+  }
+  return out;
 }
 
 /**
@@ -1363,6 +1433,8 @@ async function publish(
 ): Promise<string[]> {
   if (ex.kind === "schema") {
     const lens = opts.as ?? ex.lensName;
+    const resolvers =
+      opts.resolvers === "withhold" ? withheldResolvers(ex.resolvers, lens) : ex.resolvers;
     let tick = 0;
     const clock = (): number => ex.timestamps[Math.min(tick++, ex.timestamps.length - 1)]!;
     const outcome = await publishRegistrationImpl(
@@ -1374,7 +1446,7 @@ async function publish(
       ex.schemaEntity,
       ex.mutations,
       ex.writable,
-      ex.resolvers,
+      resolvers,
       { clock, negates },
     );
     if (!outcome.bound) {
