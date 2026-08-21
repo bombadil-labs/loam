@@ -102,6 +102,11 @@ export interface ArrivedApp {
    * all — the pin names a delta it does not hold. Reported rather than offered a remedy.
    */
   readonly pinned?: true;
+  /**
+   * Nothing is mounted here and nothing can be: a route of the RECEIVER'S OWN holds that name, and
+   * the blessing door refuses it. Distinct from `shadowed`, which is about a mount that exists.
+   */
+  readonly blocked?: string;
   /** Is the code the peer offers the code that answers? Every absence above is why this is not one field. */
   readonly blessed: boolean;
 }
@@ -661,6 +666,11 @@ function appsOf(gw: Gateway, ground: Gateway, channel: string, prefix: string): 
   // receiver's whole ground, so every renderer this store owns has an operator-signed twin in here,
   // and counting a twin would tell an operator their peer's route runs code it does not.
   const mounted = new Map(readPoolRenderers(ground, gw).map((r) => [r.route, r]));
+  // READ ONCE, not once per route. Both of these walk a whole ground, and the ROUTE COUNT is
+  // peer-controlled — a route costs a peer one delta, and this runs on every sync poll, every
+  // listing and every connector read (H8).
+  const hostRoutes = new Set(gw.renderers().map((r) => r.route));
+  const poolWinner = new Map(ground.renderers().map((r) => [r.route, r]));
   const offeredBindings = new Map(arrivedBindings(gw, ground).map((r) => [r.route, r]));
   const offered = new Map([...offeredBindings].map(([route, r]) => [route, appIdentity(r)]));
   const rows: ArrivedApp[] = [];
@@ -672,16 +682,20 @@ function appsOf(gw: Gateway, ground: Gateway, channel: string, prefix: string): 
     const shadow =
       // (a) the receiver's own law answers the name this app would serve under. Their own name is
       // theirs (§46.2) and the delegation is the fallback, so the channel's app never gets the call.
-      gw.renderers().some((r) => r.route === `${prefix}:${route}`)
+      hostRoutes.has(`${prefix}:${route}`)
         ? `your own route "${prefix}:${route}"`
-        : // (b) a twin of the receiver's own route re-seeded into the pool and took the bare name
-          // there. Every attach re-pulses the seeding edge, so this can arrive long after a blessing.
-          own !== undefined &&
-            ground.renderers().find((r) => r.route === route)?.deltaId !== own.deltaId
+        : // (b) a twin of the receiver's own route holds the bare name INSIDE the pool. Every attach
+          // re-pulses the seeding edge, so this arrives long after a blessing — and it is just as
+          // true before one: nothing of the peer's can mount at a name their own law answers there.
+          poolWinner.get(route) !== undefined && poolWinner.get(route)!.deltaId !== own?.deltaId
           ? `your own route "${route}", seeded into this pool`
           : undefined;
     // (c) the lens it reads is not bound here — a curse, or a withdrawn registration (§23.6).
     const dark = own !== undefined && shadow === undefined && !routeServableOn(ground, own, "full");
+    // NOTHING MOUNTED, AND NOTHING MOUNTABLE. The same obstruction as `shadowed`, met before a
+    // blessing rather than after one — so it needs its own name: a listing that called this state
+    // "inert, bless it" would print the one command the blessing door refuses by name.
+    const blocked = own === undefined && shadow !== undefined ? shadow : undefined;
     const serving =
       own === undefined || shadow !== undefined || dark ? undefined : appIdentity(own);
     // A VERSION-PINNED arrival can never mount here: the pin names a delta of the PEER's own store,
@@ -696,7 +710,8 @@ function appsOf(gw: Gateway, ground: Gateway, channel: string, prefix: string): 
       ...(hash === undefined ? {} : { hash }),
       ...(own === undefined ? {} : { mounted: appIdentity(own) }),
       ...(serving === undefined ? {} : { serving }),
-      ...(shadow === undefined ? {} : { shadowed: shadow }),
+      ...(shadow === undefined || blocked !== undefined ? {} : { shadowed: shadow }),
+      ...(blocked === undefined ? {} : { blocked }),
       ...(dark ? { dark: true as const } : {}),
       blessed: hash !== undefined && hash === serving,
     });
@@ -789,8 +804,8 @@ export async function blessChannelAppImpl(
     if (opts.expect.length < 20) {
       throw new Error(
         `bless-app refused: --expect "${opts.expect}" is too short to identify an app. Every id ` +
-          "starts `1e20`, so a short pin is mostly that constant — paste at least 20 characters of " +
-          "what `loam federate list` printed. A pin a peer can grind past reads as a pin and is not one.",
+          "starts `1e20`, so a short pin is mostly that constant — paste the whole id `loam " +
+          "federate list` prints. A pin a peer can grind past reads as a pin and is not one.",
       );
     }
     if (!appIdentity(app).startsWith(opts.expect)) {

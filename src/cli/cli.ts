@@ -237,7 +237,7 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "there, and it answers the token door only. Dropping the channel takes it away. Add --pen for",
       "an app that writes: its pen must also be provisioned and granted, which is a separate act",
       "(SPEC §6, §24.7). When a peer ships new code at a route you mounted, `list` says so and",
-      "--supersede is what moves the route onto it. Pass --expect <bundle-id from list> to refuse",
+      "--supersede is what moves the route onto it. Pass --expect <the id `list` prints> to refuse",
       "if the peer changed the app between the listing and the blessing.",
       "",
       "WHAT MOUNTING DOES NOT BOUND. The pool bounds what a peer's app may WRITE to your store. It",
@@ -1057,7 +1057,10 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
         // FOUR STATES, NOT TWO. A single "blessed" flag said "nothing runs" while blessed code ran
         // (a peer had shipped new code at the route) and printed a remedy that throws. What an
         // operator needs to see is the pair: what the peer OFFERS, and what this store RUNS.
-        const short = (h: string): string => `${h.slice(0, 12)}…`;
+        // LONG ENOUGH TO PASTE INTO `--expect`. Twelve characters looked tidy and were four real
+        // ones, since every id starts `1e20` — so the documented workflow (read the list, paste the
+        // id) refused every time. A listing that cannot supply its own remedy is not a listing.
+        const short = (h: string): string => h.slice(0, 28);
         // TWO SENTENCES PER APP: what the peer OFFERS, and what this store DOES about it — then the
         // remedy for that exact state. Every earlier shape of this printed one line that had to
         // cover several states, and each time the line was wrong for one of them and its remedy
@@ -1074,7 +1077,7 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
           const stuck =
             a.shadowed !== undefined
               ? `\n    it is MOUNTED here and answers nothing: ${a.shadowed} holds that name\n` +
-                "    rename your own route to give this one back its name"
+                "    your own law wins its own names; this one answers again when yours stops"
               : a.dark === true
                 ? `\n    it is MOUNTED here and answers nothing: the lens it reads is not bound ` +
                   "here\n    lift the curse on that lens, or re-bless it, and this answers again"
@@ -1091,12 +1094,26 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
             );
           }
           if (stuck !== undefined) return offers + stuck;
+          // NOTHING IS MOUNTED and nothing can be: a route of the operator's own holds that name
+          // inside the pool, and the blessing door refuses it by name. `stuck` cannot speak for this
+          // one — it says "it is MOUNTED here", and nothing is.
+          if (a.blocked !== undefined) {
+            return (
+              `${offers}\n    it cannot mount: ${a.blocked} holds that name\n` +
+              "    a peer's app cannot take a name your own law answers"
+            );
+          }
           // A pin names a delta of the PEER's store, which this one does not hold: the blessing door
           // refuses it by name, so offering the blessing here would be offering a refusal.
           if (a.pinned === true) {
             return (
               `${offers}\n    it pins a version of the peer's OWN store, so it cannot mount here\n` +
-              "    ask them to publish it unpinned, against a version you hold"
+              "    ask them to publish it against no pin at all" +
+              // A re-point to a pinned binding leaves an EARLIER blessing serving, and saying only
+              // "it cannot mount" would leave an operator believing that route answers nothing.
+              (a.serving === undefined
+                ? ""
+                : `\n    this store still runs the app it blessed (${short(a.serving)}) at "${a.serves}"`)
             );
           }
           if (a.serving === undefined) {
@@ -1208,12 +1225,18 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
         // the lens, which is wrong for the commonest case: a name of the operator's own in the way.
         const why =
           app?.shadowed !== undefined
-            ? `${app.shadowed} holds that name — rename your own route to give this one its name`
+            ? `${app.shadowed} holds that name — your own law wins its own names`
             : app?.dark === true
               ? "the lens it reads is not bound here — lift the curse on it, or re-bless it"
               : "check `loam federate list` for what this store says about it";
-        io.out(`loam: ${name} blessed the app "${route}", and it does not serve\n  ${why}`);
-        return 0;
+        // EXIT 2, because a script that reads 0 here reads a mount. The blessing DID land and is
+        // not lost — it answers the moment what is in the way moves — and the message says so, so
+        // nobody re-runs this looking for a different result.
+        io.err(
+          `federate bless-app: ${name} blessed the app "${route}", and "${app?.serves ?? route}" ` +
+            `answers nothing\n  ${why}\n  the blessing is on the ground; it serves when that clears`,
+        );
+        return 2;
       }
       io.out(
         `loam: ${name} now serves the app "${route}" at "${app.serves}"\n` +

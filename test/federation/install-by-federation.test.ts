@@ -878,6 +878,12 @@ describe("T209 — a peer may not choose what the operator blesses", () => {
       expect(row.hash).toBe(appIdOf(APP));
       expect(row.serving).toBeUndefined(); // nothing of THIS channel runs there
       expect(row.blessed).toBe(false);
+      // AND IT SAYS WHY. Nothing is mounted, and nothing CAN be: the blessing door refuses this
+      // exact state by name, so a row that read as merely "inert" would send an operator to the one
+      // command that always refuses. `blocked`, not `shadowed` — nothing is mounted to shadow.
+      expect(row.blocked).toContain("hello");
+      expect(row.shadowed).toBeUndefined();
+      await expect(bob.blessChannelApp(CHANNEL, "hello")).rejects.toThrow(/YOUR OWN route/);
       expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(404);
       // Two-sided: bob's own route still serves bob's own app.
       expect(bodyOf(await bob.serveRoute("hello", FERN, "full"))).toContain("<section id=other>");
@@ -1365,6 +1371,35 @@ describe("T209 — the CLI names what arrived and mounts one app", () => {
       fresh();
       expect(await run(["federate", "list", "--home", me], io()), said()).toBe(0);
       expect(said()).toContain(CHANNEL);
+
+      // THE DOCUMENTED WORKFLOW, END TO END: read the listing, paste what it printed, bless. The
+      // listing used to print twelve characters and the floor demanded twenty, so pasting the id a
+      // person could actually see was refused every time — a remedy the surface offering it could
+      // not satisfy. The pin here is READ OUT OF THE LISTING's own bytes, never hand-typed.
+      fresh();
+      expect(await run(["federate", "list", "--home", me], io()), said()).toBe(0);
+      const printed = /1e20[0-9a-f]+/.exec(said())?.[0];
+      expect(printed, said()).toBeDefined();
+      fresh();
+      expect(
+        await run(
+          [
+            "federate",
+            "bless-app",
+            "--channel",
+            CHANNEL,
+            "--route",
+            "hello",
+            "--expect",
+            printed!,
+            "--home",
+            me,
+          ],
+          io(),
+        ),
+        said(),
+      ).toBe(0);
+      expect(said()).toContain('serves the app "hello"');
 
       // --expect REACHES THE GATEWAY FROM THE COMMAND LINE. The flag whose whole purpose is to stop
       // a peer moving between `list` and `bless-app` is only worth having at the door a person types
