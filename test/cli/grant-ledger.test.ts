@@ -35,6 +35,13 @@
 //   - the ABBREVIATION BOUND. `shortAuthor` returns the whole string for a key of twelve characters
 //     or fewer; every real author is `ed25519:` plus sixty-four, so no fixture distinguishes that
 //     bound from one character either side of it.
+//   - the ID TIE-BREAK inside `honoredStrikeOn`. Two strikes with the SAME timestamp are separated
+//     by delta id so one store always reads one way, and the ledger prints only the timestamp — so
+//     when the tie fires the screen is identical whichever id wins. When timestamps DIFFER the
+//     tie-break is dead code the mutation gate can still reach, and whether a wrong one is visible
+//     turns on whether id order happens to contradict timestamp order. A delta id is a content
+//     address: choosing a pair that contradicts means hard-coding magic timestamps whose hashes
+//     happen to sort backwards, which is fixture-fitting rather than a rail. Left open, deliberately.
 //
 // THE OPERATOR'S OWN KEY IS NOT A KIND. `operator.seed` is outside the `user|pen` file convention
 // this file's identities come from, so a grant naming the operator's key renders `unattributed`
@@ -945,6 +952,32 @@ describe("T205 — the screen is grouped, and every column tells the truth", () 
       expect(row).toMatch(/struck \d{4}-\d{2}-\d{2}T/);
     }
     expect(listing).not.toContain("unattributed");
+  });
+
+  it("breaks a same-instant revocation tie by key, so one file reads one way", () => {
+    // Two keys revoked in the same millisecond is rare and not impossible, and "oldest first" still
+    // has to mean something when it happens. This lives here rather than beside `oauth-file`'s own
+    // tests because those are frozen; it is a unit assertion on the helper the ledger reads.
+    const [low, high] = [authorForSeed("11".repeat(32)), authorForSeed("22".repeat(32))].sort();
+    writeOAuthFile(home, {
+      ...EMPTY_OAUTH,
+      clients: [
+        {
+          clientId: "cli-tie",
+          clientName: "Tie",
+          redirectUris: ["https://x/cb"],
+          registeredAt: 1,
+          generation: 3,
+        },
+      ],
+      // Inserted in the WRONG order on purpose: a sort that had stopped breaking the tie would hand
+      // these back exactly as they went in, and no timestamp could tell the difference.
+      revoked: [
+        { clientId: "cli-tie", actor: high!, revokedAt: 5_000 },
+        { clientId: "cli-tie", actor: low!, revokedAt: 5_000 },
+      ],
+    });
+    expect(revocationsFor(readOAuthFile(home), "cli-tie").map((r) => r.actor)).toEqual([low, high]);
   });
 
   it("carries each connector's own generation, token count, and acting identity", async () => {
