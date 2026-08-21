@@ -17,7 +17,11 @@
 // test/gateway/probation-frame.test.ts owns the frame's own contract). (2) That a COLD process serves
 // a blessed app: the served bundle is loaded by `prepareRoute`, which the HTTP door calls before
 // every render, and these rails run in one process where the publish already warmed the ESM cache.
-// The rail that would close it drives the door after a reboot and belongs in test/server.
+// A REBOOT DOES NOT CLOSE IT EITHER, which the first draft of this note got wrong: the ESM cache is
+// a module-level Map that `close()` never clears, so any rail that blesses and then reboots in ONE
+// process warms it before the reboot. Closing this wants the blessing to happen in a DIFFERENT
+// process — a CLI child — or an eviction hook. The restart rail below is about the pool's re-attach
+// and its scope, not about a cold load, and it does not claim otherwise.
 
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -38,7 +42,7 @@ import { CTX_MANIFEST, manifestExportClaims, readManifest } from "../../src/gate
 import { freezeMembers } from "../../src/gateway/container-identity.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
-import { publicClaims } from "../../src/gateway/public.js";
+import { publicClaims, PUBLIC_ENTITY } from "../../src/gateway/public.js";
 import { readSeed, storePath } from "../../src/cli/config.js";
 import { rendererBindingClaims } from "../../src/gateway/renderers.js";
 import { serve } from "../../src/server/http.js";
@@ -126,6 +130,39 @@ async function resolverPeer(): Promise<Gateway> {
           roots: [FERN],
           resolvers: {
             readings: { rung: "a", type: "number", code: "export default () => 424242;" },
+            // A SECOND computed field, on a prop whose Policy ALWAYS answers (`absentAs false`).
+            // It is what lets a rail tell "the store refused" from "the store fell back": for
+            // `readings` this corpus gathers nothing, so both produce an absent field.
+            watered: { rung: "a", type: "boolean", code: "export default () => true;" },
+          },
+        },
+      ],
+    }),
+  );
+  await gw.append([observed(FERN, "height", 62, 1_000, ALICE_SEED)]);
+  return gw;
+}
+
+/** A peer who dresses their own module up as this store's refusal, marker and all. */
+async function forgingPeer(): Promise<Gateway> {
+  const gw = await Gateway.boot(
+    new MemoryBackend(),
+    assembleGenesis({
+      operatorSeed: ALICE_SEED,
+      registrations: [
+        {
+          hyperschema: PLANT,
+          schema: PLANT_POLICY,
+          roots: [FERN],
+          resolvers: {
+            readings: {
+              rung: "a",
+              type: "number",
+              code:
+                "// loam:resolver-withheld\n" +
+                "globalThis.__t209_forged__ = true;\n" +
+                "export default () => 424242;",
+            },
           },
         },
       ],
@@ -152,6 +189,14 @@ const bindingOf = (gw: Gateway, route: string): string =>
   )!.id;
 
 const bodyOf = (r: { body: string }): string => r.body;
+
+/** How many `loam:public` declarations a store actually HOLDS — asked of the ground, not a reader. */
+const publicDeltas = (gw: Gateway): number =>
+  [...gw.reactor.snapshot()].filter((d) =>
+    d.claims.pointers.some(
+      (pt) => pt.target.kind === "entity" && pt.target.entity.id === PUBLIC_ENTITY,
+    ),
+  ).length;
 
 /** Is this delta a manifest export row at all? */
 const isRow = (d: { claims: { pointers: readonly { target: unknown }[] } }): boolean =>
@@ -1991,8 +2036,10 @@ describe("T209 — a channel pool is not a door for strangers", () => {
       const channel = await link(bob, alice, "alice");
       await channel.sync();
       await bob.blessChannelApp(CHANNEL, "hello");
-      // The premise, asserted: the pool really did inherit the open declaration.
-      expect(channel.pool.gateway!.isPublicLatest("Plant")).toBe(true);
+      // THE PREMISE, READ FROM THE GROUND. `isPublicLatest` is one of the readers this closes, so
+      // asking it would assert the fix rather than the state the fix is about: the declaration is
+      // really in the pool's own deltas, and the door refuses anyway.
+      expect(publicDeltas(channel.pool.gateway!)).toBeGreaterThan(0);
 
       const door = await serve({
         mounts: { default: bob },
@@ -2003,8 +2050,14 @@ describe("T209 — a channel pool is not a door for strangers", () => {
         const at = (path: string): string => `${door.url}${path}`;
         const poolUrl = at(`/${encodeURIComponent(CHANNEL)}/app/own/${encodeURIComponent(FERN)}`);
         const tokenless = await fetch(poolUrl);
+        // THE SAME ANSWER A MOUNT THAT DOES NOT EXIST GIVES, which is the property that matters and
+        // a stronger one than any particular code: a refusal peculiar to this pool would tell a
+        // stranger the pool is there. With nothing declared open, the pool answers what a name
+        // nobody ever created answers, byte for byte.
+        const absent = await fetch(at(`/no-such-mount/app/own/${encodeURIComponent(FERN)}`));
+        expect(tokenless.status).toBe(absent.status);
+        expect(await tokenless.text()).toBe(await absent.text());
         expect(tokenless.status).not.toBe(200);
-        expect(await tokenless.text()).not.toContain("data-loam-probation");
 
         // TWO-SIDED, and it must be a SUCCESS: the operator's own token door still serves the
         // channel's app at the receiver's prefixed route. A rail that only proved the refusal would
@@ -2023,6 +2076,83 @@ describe("T209 — a channel pool is not a door for strangers", () => {
     } finally {
       await alice.close();
       await bob.close();
+    }
+  });
+});
+
+describe("T209 — the pool's closed door outlives the process that opened it", () => {
+  it("a REBOOTED store still refuses a tokenless caller at the pool's own mount", async () => {
+    // The flag that closes a channel pool's anonymous surface is set where the pool is ATTACHED,
+    // and a pool is attached twice in its life: once when the channel opens, and once at every boot
+    // after that. A rail that only drives the first leaves the door open for every process a real
+    // deployment actually serves from — which is all of them but the first.
+    const root = mkdtempSync(join(tmpdir(), "loam-t209-reboot-"));
+    const alice = await peer(ALICE_SEED, { route: "hello", app: APP, height: 62 });
+    try {
+      const boot = async (): Promise<Gateway> =>
+        Gateway.boot(
+          new SqliteBackend(join(root, "bob.sqlite")),
+          assembleGenesis({ operatorSeed: BOB_SEED }),
+          {
+            channelBackend: (n: string) =>
+              new SqliteBackend(join(root, `${n.replace(/[^a-z0-9]/gi, "_")}.sqlite`)),
+          },
+        );
+      const bob = await boot();
+      await bob.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+      await bob.publishRenderer({
+        route: "own",
+        schema: "Plant",
+        consumes: ["height"],
+        bundle: OTHER_APP,
+      });
+      await bob.append([signClaims(publicClaims(["Plant"], BOB, 9_400), BOB_SEED)]);
+      const channel = await bob.openChannel({
+        into: "friends",
+        prefix: "alice",
+        source: { pull: () => Promise.resolve(alice.reactor.arrivalLog()) },
+      });
+      await channel.sync();
+      await bob.close();
+
+      const again = await boot();
+      try {
+        // The premise, on the RESUMED pool, read from its ground for the same reason.
+        const pool = again.channelPools.get(CHANNEL)!.gateway!;
+        expect(publicDeltas(pool)).toBeGreaterThan(0);
+
+        const door = await serve({
+          mounts: { default: again },
+          tokens: { "tok-op": { operator: true } },
+          port: 0,
+        });
+        try {
+          const res = await fetch(
+            `${door.url}/${encodeURIComponent(CHANNEL)}/app/own/${encodeURIComponent(FERN)}`,
+          );
+          // Uniform with a mount that was never created — see the sibling rail.
+          const absent = await fetch(
+            `${door.url}/no-such-mount/app/own/${encodeURIComponent(FERN)}`,
+          );
+          expect(res.status).toBe(absent.status);
+          expect(await res.text()).toBe(await absent.text());
+          expect(res.status).not.toBe(200);
+          // TWO-SIDED: the operator's own token still reaches that same mount, so this cannot pass
+          // with the pool unmounted or the container tier broken.
+          const withToken = await fetch(
+            `${door.url}/${encodeURIComponent(CHANNEL)}/app/own/${encodeURIComponent(FERN)}`,
+            { headers: { authorization: "Bearer tok-op" } },
+          );
+          expect(withToken.status).toBe(200);
+        } finally {
+          await door.close();
+        }
+      } finally {
+        await again.close();
+      }
+    } finally {
+      await alice.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 });
@@ -2061,6 +2191,109 @@ describe("T209 — a peer's RESOLVER code is a second decision", () => {
         424242,
       );
       expect(bob.withheldOn(CHANNEL)).toEqual([]);
+
+      // AT THE DELTA LEVEL, because `withheldOn` and the field's refusal read the same object and
+      // cannot witness each other: what the pool actually PUBLISHED is the receiver's own stub
+      // while it was withheld, and the peer's own source after the grant. Without this, a defect
+      // that published the peer's code under a withheld mark would look right from both readers.
+      const bound = channel.pool.gateway!.registered.find((r) => r.schema.name === "alice:Plant")!;
+      expect(bound.resolvers!.readings!.code).toContain("424242");
+      expect(bound.resolvers!.readings!.code).not.toContain("loam:resolver-withheld");
+    } finally {
+      await alice.close();
+      await bob.close();
+    }
+  });
+
+  it("a second poll neither stacks stubs nor un-grants what was granted", async () => {
+    // A standing sync re-blesses the pool's CONTENTS on every tick, so the withholding meets its own
+    // output over and over. Stacking a stub on a stub would bury the peer's source; re-withholding
+    // after a grant would take back, unattended, a decision a person made.
+    const alice = await resolverPeer();
+    const bob = await store(BOB_SEED);
+    try {
+      const channel = await link(bob, alice, "alice");
+      await channel.sync();
+      await channel.sync(); // the ordinary case: another tick
+      const pool = channel.pool.gateway!;
+      const still = pool.registered.find((r) => r.schema.name === "alice:Plant")!;
+      // WHAT THE POOL PUBLISHED IS THE STUB, and one of them — the peer's source is not here at
+      // all. A shape that recognised an already-withheld spec and passed it through was a test over
+      // source the PEER writes, which is a test the peer passes; the stub is written fresh from the
+      // lens and the field every time instead, so a second tick re-writes the same bytes.
+      expect(still.resolvers!.readings!.code).not.toContain("424242");
+      expect(still.resolvers!.readings!.code).toContain("has not been told to run it");
+      expect(still.resolvers!.readings!.code.match(/throw new Error/g)).toHaveLength(1);
+      expect(bob.withheldOn(CHANNEL)).toEqual(["alice:Plant"]);
+
+      await bob.blessChannelResolvers(CHANNEL, "alice:Plant");
+      await channel.sync(); // and a tick AFTER the grant
+      expect(bob.withheldOn(CHANNEL)).toEqual([]);
+      const q = '{ alice_Plant(entity: "' + FERN + '") { readings } }';
+      const answer = await bob.query(q);
+      expect(answer.errors).toBeUndefined();
+      expect((answer.data as { alice_Plant: { readings: unknown } }).alice_Plant.readings).toBe(
+        424242,
+      );
+    } finally {
+      await alice.close();
+      await bob.close();
+    }
+  });
+
+  it("a peer cannot pass their own code off as this store's refusal", async () => {
+    // The stub is written from the lens and the field, and recognised by EQUALITY against what this
+    // store would write. Recognised by a marker instead, the test would be one over source the PEER
+    // authors: prefix your module with it and every reader calls your code withheld — while the
+    // publish imports and evaluates the module body, which is the guarantee exactly inverted.
+    const alice = await forgingPeer();
+    const bob = await store(BOB_SEED);
+    try {
+      const channel = await link(bob, alice, "alice");
+      await channel.sync();
+
+      // The peer's bytes are not what got published: the stub is, whatever their source said.
+      const bound = channel.pool.gateway!.registered.find((r) => r.schema.name === "alice:Plant")!;
+      expect(bound.resolvers!.readings!.code).not.toContain("__t209_forged__");
+      expect(bound.resolvers!.readings!.code).toContain("has not been told to run it");
+      // And the state is reported as withheld, which it truly is — the forgery bought nothing.
+      expect(bob.withheldOn(CHANNEL)).toEqual(["alice:Plant"]);
+      // WHAT THIS RAIL CANNOT WITNESS: that the peer's module body never evaluated in this process.
+      // The peer's OWN store published that registration and preloaded it legitimately, so a global
+      // side effect is set before the channel exists. What it does pin is that nothing bob published
+      // carries the peer's source — which is what decides whether bob ever imports it.
+    } finally {
+      await alice.close();
+      await bob.close();
+    }
+  });
+
+  it("the refusal reaches every reader, not only GraphQL", async () => {
+    // The stub throws, and §22's availability rule catches a throwing resolver and leaves the
+    // Policy value — right for a resolver this store RAN and that failed, wrong for one it never
+    // ran. Everything downstream of the shared read hook inherits that value: REST, watch, list,
+    // and a rendered page. A number nobody computed, with nothing saying so, is the H7 shape.
+    const alice = await resolverPeer();
+    const bob = await store(BOB_SEED);
+    try {
+      const channel = await link(bob, alice, "alice");
+      await channel.sync();
+
+      // THE SHARED SEAM, which is what every non-GraphQL door reads: the field is ABSENT, not a
+      // fallback number. `height` is present beside it, so this cannot pass on an empty view.
+      const node = bob.surface("full")!.hooks.resolve("alice:Plant", FERN, undefined);
+      expect(node.view.height).toBe(62);
+      // ABSENT, and specifically NOT the Policy value. `watered` is declared `absentAs false`, so
+      // its Policy always answers — and answering `false` is exactly what a caught throw does: a
+      // value nobody computed, indistinguishable from one the peer's law produced.
+      expect("watered" in node.view).toBe(false);
+      expect(node.view.watered).not.toBe(false);
+
+      // Two-sided: after the act, the peer's own values are there at the same seam.
+      await bob.blessChannelResolvers(CHANNEL, "alice:Plant");
+      const after = bob.surface("full")!.hooks.resolve("alice:Plant", FERN, undefined);
+      expect(after.view.watered).toBe(true);
+      expect(after.view.readings).toBe(424242);
     } finally {
       await alice.close();
       await bob.close();

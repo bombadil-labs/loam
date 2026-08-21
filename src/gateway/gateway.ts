@@ -321,6 +321,9 @@ const bindableNames = (r: Bound): string[] => [lensOf(r), programOf(r)];
 // no export). The seam is deliberately explicit: what a concern module touches is greppable as
 // `gw.<member>` in its module, and a module needing a member NOT yet marked is a real finding about
 // coupling — widen the seam loudly, here, or question the boundary.
+/** No name at all — what a channel pool has declared open to a tokenless caller (see `openNames`). */
+const EMPTY_PUBLIC: ReadonlySet<string> = new Set<string>();
+
 export class Gateway {
   /** @internal — T19 seam (renderers.ts) */
   registered: Bound[] = [];
@@ -554,18 +557,8 @@ export class Gateway {
     door: "full" | "public" = "full",
   ): { registered: readonly Registered[]; hooks: GqlHooks } | undefined {
     if (door === "public") {
-      // A CHANNEL POOL HAS NO ANONYMOUS SURFACE, at any door it can be reached through — and it can
-      // be reached through more than one: a pool is an attached container, so it is a mount in its
-      // own right, and `/channel:friends:alice/...` is a real URL. Its ground is a one-way seeded
-      // COPY of this store's, `loam:public` rides that copy, and the copy is frozen — so a
-      // declaration the operator has since struck still opens a door in there. A staging area for a
-      // stranger's law is not a place to serve strangers from, whatever its copy of the ground says.
-      // (A QUARANTINE pool the operator opened themselves keeps its anonymous door; §24.7 builds a
-      // deliberate public probation surface on it. This is narrower on purpose: it is about a pool
-      // whose contents a PEER chooses.)
-      if (this.channelPool === true) return undefined;
-      this.publicOpen ??= readPublicSchemas(this.reactor, this.operatorAuthor);
-      const defs = this.registered.filter((r) => this.publicOpen!.has(lensOf(r)));
+      const declared = this.openNames();
+      const defs = this.registered.filter((r) => declared.has(lensOf(r)));
       if (defs.length === 0) return undefined;
       return { registered: defs, hooks: this.gqlHooks("public") };
     }
@@ -577,12 +570,10 @@ export class Gateway {
   // anonymously — because the operator declared it." A declaration is publication, not a probe, so the
   // anonymous door may reveal exactly what the operator chose to name, and nothing else stays 404.
   isPublicLatest(name: string): boolean {
-    this.publicOpen ??= readPublicSchemas(this.reactor, this.operatorAuthor);
-    return this.publicOpen.has(name);
+    return this.openNames().has(name);
   }
   isPublicPin(name: string, deltaId: string): boolean {
-    this.publicOpen ??= readPublicSchemas(this.reactor, this.operatorAuthor);
-    return this.publicOpen.has(`${name}@${deltaId}`);
+    return this.openNames().has(`${name}@${deltaId}`);
   }
 
   // Every answerable version of every registration (SPEC §17): the append-only publication
@@ -1526,9 +1517,27 @@ export class Gateway {
   // also keeps a nothing-public mount's refusal as cheap as an absent mount's (no timing
   // oracle where the status codes are uniform).
   private publicOpen: ReadonlySet<string> | undefined;
-  private publicSurface(): GraphQLSchema | undefined {
+
+  /**
+   * THE NAMES THIS STORE HAS DECLARED OPEN TO A TOKENLESS CALLER — and the one place that decides
+   * it, because there are five readers and a guard on one of them closes one door.
+   *
+   * A CHANNEL POOL DECLARES NOTHING. It is an attached container and therefore a mount in its own
+   * right, so `/channel:friends:alice/...` is a real URL against a store whose ground is a frozen
+   * COPY of this one's — `loam:public` rides that copy, and a declaration the operator has since
+   * struck still stands in there. Answering an empty set here closes the GraphQL surface, the SSE
+   * subscribe, the pinned-version REST door and the renderer door together, because all four ask
+   * this. A quarantine pool the operator opened themselves keeps its anonymous door: §24.7 builds a
+   * deliberate public probation surface on one, and this is narrower on purpose — it is about a
+   * pool whose contents a PEER chooses.
+   */
+  private openNames(): ReadonlySet<string> {
+    if (this.channelPool === true) return EMPTY_PUBLIC;
     this.publicOpen ??= readPublicSchemas(this.reactor, this.operatorAuthor);
-    const open = this.publicOpen;
+    return this.publicOpen;
+  }
+  private publicSurface(): GraphQLSchema | undefined {
+    const open = this.openNames();
     if (open.size === 0) return undefined;
     const defs = this.registered.filter((r) => open.has(lensOf(r)));
     if (defs.length === 0) return undefined; // declared but not (yet) registered: nothing binds
@@ -1551,8 +1560,7 @@ export class Gateway {
     if (this.publicSurface() !== undefined) return true;
     // §23.8: a pinned-public declaration opens the anonymous door for its route (and its byte-door) even
     // when no BARE-name lens is public — publicSurface builds only the bare-latest GraphQL/REST surface.
-    this.publicOpen ??= readPublicSchemas(this.reactor, this.operatorAuthor);
-    for (const entry of this.publicOpen) if (entry.includes("@")) return true;
+    for (const entry of this.openNames()) if (entry.includes("@")) return true;
     return false;
   }
 

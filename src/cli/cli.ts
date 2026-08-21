@@ -1146,10 +1146,19 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
             `    to move it onto what the peer offers now: ${bless} --supersede\``
           );
         });
+        // A LENS WHOSE RESOLVER CODE IS WITHHELD is a decision waiting on a person, exactly as an
+        // inert app is — and the help points here for it, so here is where it has to appear.
+        const withheld = gateway
+          .withheldOn(r.name)
+          .map(
+            (lens) =>
+              `\n  lens "${lens}" — its computed fields REFUSE: the peer's resolver code is not run here\n` +
+              `    to run it: \`loam federate bless-app --channel ${r.name} --resolvers "${lens}"\``,
+          );
         io.out(
           `${r.name}\n  into ${r.into}, serving the peer's law under "${r.prefix}:"\n` +
             `  ${r.receiving ? "receiving" : "FROZEN"}, ${r.blessing ? "blessing" : "NOT blessing"}\n` +
-            `  ${when}${trouble}${apps.join("")}`,
+            `  ${when}${trouble}${withheld.join("")}${apps.join("")}`,
         );
       }
       return 0;
@@ -1230,6 +1239,17 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
       const lens = parsed.flags.get("resolvers");
       if (lens !== undefined) {
         await gateway.blessChannelResolvers(name, lens);
+        // READ IT BACK. The grant replaces a binding whose address is identical to the one it
+        // replaces, so "it landed" and "it took the name" are different questions — and announcing
+        // the first as the second is the shape this file refuses everywhere else (H7).
+        if (gateway.withheldOn(name).includes(lens)) {
+          io.err(
+            `federate bless-app: ${name} published the grant for "${lens}", and its fields still ` +
+              "refuse\n  the withheld binding is still what answers — nothing here should be read " +
+              "as a success",
+          );
+          return 2;
+        }
         io.out(
           `loam: ${name} now runs the peer's resolver code for "${lens}"\n` +
             "  it runs on this channel's pool, in this process, and not in the render worker\n" +

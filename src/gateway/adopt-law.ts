@@ -1278,13 +1278,28 @@ async function adoptOne(
 }
 
 /**
- * The mark a withheld resolver carries in its own source, so a reader can name the state without a
- * second record to keep in step with it.
+ * THE RECEIVER'S REFUSING STUB, byte for byte — the whole source of a withheld resolver.
+ *
+ * It is DERIVED from the lens and the field rather than recognised by a marker, and that is the
+ * guard, not a detail. A substring test over source a PEER authors is a test the peer can pass:
+ * prefix your module with the marker, and every reader here calls your code withheld while
+ * `publishRegistration` imports and evaluates it — the guarantee inverted, with every
+ * operator-facing signal agreeing that nothing ran. Equality cannot be gamed that way: source
+ * identical to this IS this, and what runs is the refusal. Nothing about a stub is read from what
+ * arrived.
  */
-export const RESOLVER_WITHHELD = "loam:resolver-withheld";
+export function withheldResolverCode(lens: string, field: string): string {
+  const why =
+    `"${field}" on "${lens}" is computed by RESOLVER CODE the peer wrote, and this store has ` +
+    "not been told to run it. Law that arrives on a channel binds a NAME; running code is a " +
+    "second decision. Bless it with `loam federate bless-app --channel <name> --resolvers " +
+    `"${lens}"\`, or read the fields this lens resolves without a resolver.`;
+  return `export default () => { throw new Error(${JSON.stringify(why)}); };`;
+}
 
-/** Is this the receiver's refusing stub rather than law that computes anything? */
-export const isWithheldResolver = (code: string): boolean => code.includes(RESOLVER_WITHHELD);
+/** Is this EXACTLY the stub this store would write for that field — not merely something like it? */
+export const isWithheldResolver = (code: string, lens: string, field: string): boolean =>
+  code === withheldResolverCode(lens, field);
 
 /**
  * The peer's resolvers, replaced one for one by a stub of OUR OWN that refuses.
@@ -1305,20 +1320,12 @@ function withheldResolvers(
   if (specs === undefined) return undefined;
   const out: Record<string, ResolverSpec> = {};
   for (const [field, spec] of Object.entries(specs)) {
-    if (isWithheldResolver(spec.code)) {
-      out[field] = spec; // already withheld: re-blessing must not stack stubs
-      continue;
-    }
-    const why =
-      `"${field}" on "${lens}" is computed by RESOLVER CODE the peer wrote, and this store has ` +
-      `not been told to run it. Law that arrives on a channel binds a NAME; running code is a ` +
-      `second decision. Bless it with \`loam federate bless-app --channel <name> --resolvers ` +
-      `"${lens}"\`, or read the fields this lens resolves without a resolver.`;
-    out[field] = {
-      rung: spec.rung,
-      type: spec.type,
-      code: `// ${RESOLVER_WITHHELD}\nexport default () => { throw new Error(${JSON.stringify(why)}); };`,
-    };
+    // EVERY field, unconditionally. An earlier shape skipped a spec that already LOOKED withheld,
+    // so a re-bless would not stack stubs — and "looked withheld" was a substring of source the
+    // peer writes, so the skip was the bypass. The stub is idempotent by construction: written
+    // from the lens and the field, it is the same bytes every time, and re-blessing simply writes
+    // it again. Nothing here trusts what arrived.
+    out[field] = { rung: spec.rung, type: spec.type, code: withheldResolverCode(lens, field) };
   }
   return out;
 }

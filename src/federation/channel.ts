@@ -28,7 +28,7 @@ import {
   manifestExportClaims,
   readManifest,
 } from "../gateway/adopt-law.js";
-import { CTX_REGISTRATION, lawfulNegated } from "../gateway/registration.js";
+import { CTX_REGISTRATION, lawfulNegated, lensOf } from "../gateway/registration.js";
 import { freezeMembers } from "../gateway/container-identity.js";
 import type { RendererBinding } from "../gateway/renderers.js";
 import { readForeignRenderers, readPoolRenderers, routeServableOn } from "../gateway/renderers.js";
@@ -1039,9 +1039,14 @@ export function withheldLenses(gw: Gateway, ground: Gateway, prefix: string): st
   for (const r of ground.registered) {
     const specs = r.resolvers;
     if (specs === undefined) continue;
-    const name = r.schema.name ?? r.hyperschema.name;
+    // `lensOf`, not the schema's own name (H6): the READING is what a person names to this act, and
+    // what `blessChannelResolvers` then binds under. Two derivations that agree today would let a
+    // sibling reading be gated by one name and granted under another.
+    const name = lensOf(r);
     if (!name.startsWith(`${prefix}:`)) continue;
-    if (Object.values(specs).some((spec) => isWithheldResolver(spec.code))) out.push(name);
+    if (Object.entries(specs).some(([field, spec]) => isWithheldResolver(spec.code, name, field))) {
+      out.push(name);
+    }
   }
   return out.sort();
 }
@@ -1054,6 +1059,11 @@ export function withheldLenses(gw: Gateway, ground: Gateway, prefix: string): st
  * refuses at the resolve rather than at the registry (H9 — a scope must never resolve as if it were
  * empty). The entity is deliberately one no store holds; nothing about it is read, and building the
  * scope is the whole question.
+ *
+ * Its failing side is not reachable from the surfaces the rails drive — a channel lens is scoped by
+ * the channel's OWN container name, which a pool always answers for itself. It is defence in depth
+ * against the next reader of this row going stale, and it is named as unrailed rather than dressed
+ * up with a fixture built by hand into a state the doors cannot produce.
  */
 function resolves(ground: Gateway, lens: string): boolean {
   try {

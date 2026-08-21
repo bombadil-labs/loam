@@ -33,6 +33,7 @@ import {
   type Schema,
   type View,
 } from "@bombadil/rhizomatic";
+import { isWithheldResolver } from "./adopt-law.js";
 import { importEsm } from "./esm.js";
 import type { ResolverOutputType, ResolverSpecs } from "./registration.js";
 
@@ -288,10 +289,21 @@ export function applyResolvers(
   hview: HView,
   root: string,
   memo: ResolverMemo,
+  lens?: string,
 ): Record<string, View> {
   if (resolvers === undefined) return view;
   const out: Record<string, View> = { ...view };
   for (const [field, spec] of Object.entries(resolvers)) {
+    // A WITHHELD RESOLVER TAKES ITS FIELD AWAY, and this is the seam where it has to happen. The
+    // availability rule below — a resolver that throws leaves the Policy value — is right about a
+    // resolver this store RAN and that failed. A withheld one was never run, deliberately, so the
+    // Policy value is a number nobody computed and nothing downstream would say so: REST, watch,
+    // list and a rendered page all read THIS function's output, and only GraphQL can attach a
+    // reason to a field. An absent field is the one answer that stays true at every door.
+    if (lens !== undefined && isWithheldResolver(spec.code, lens, field)) {
+      delete out[field];
+      continue;
+    }
     const fn = loaded.get(resolverAddress(spec.code));
     if (fn === undefined) continue; // not loaded → fall back to the Policy value
     const { entries, deltaIds } = bucketOf(hview, field, root);
