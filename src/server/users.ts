@@ -125,7 +125,12 @@ export function roleClaims(
  * caller with no operator gets no user and no role — the door stays shut rather than opening on a
  * fact nobody is answerable for.
  */
-function userHyperSchema(operator: string): HyperSchema {
+/**
+ * EXPORTED because this reading is not in the registration table. It is assembled here and run
+ * directly by `resolveUserView`, so anything enumerating "the masks this store reads under" finds
+ * every registered Schema and misses THIS one — the login door, live on every served home.
+ */
+export function userHyperSchema(operator: string): HyperSchema {
   return {
     name: "LoamUser",
     alg: 1,
