@@ -182,22 +182,49 @@ ${listing}
 </form>`;
   };
 
-  // One channel's health, from the record deltas §46.4 already writes. `lastSyncedAt === 0` is
-  // NEVER SYNCED and renders as words: a zero drawn as a time reads as "synced a while ago", and
-  // telling a quiet peer from an unreachable one is the whole reason both fields are stored (H9).
-  // Same convention as the `loam_federate_status` tool.
-  const channelRowHtml = (c: ChannelStatus): string => {
-    const fails =
-      `${c.consecutiveFailures} consecutive failure` + (c.consecutiveFailures === 1 ? "" : "s");
+  // The row's opening half: which peer, under which local name, feeding which container.
+  const channelHeadHtml = (c: ChannelStatus): string =>
+    `<a href="${escapeHtml(detailHref(c.name))}"><code>${escapeHtml(c.name)}</code></a> — ` +
+    `the peer you call <code>${escapeHtml(c.prefix)}</code>, into ` +
+    `<a href="${escapeHtml(detailHref(c.into))}"><code>${escapeHtml(c.into)}</code></a>. `;
+
+  // One channel's health, from the record deltas §46.4 already writes — and ONLY where this store
+  // can still stand behind the reading. Three shapes, because three different things are true:
+  //
+  //   - UNREADABLE: the record's numbers are not numbers. `readChannels` coerces with `Number(...)`
+  //     and filters by no author, so NaN reaches here from any writer; rendering it would put
+  //     `Invalid Date` in front of a person, and `toISOString` throws on it — one bad record used
+  //     to take the whole page down with it.
+  //   - NOT RESUMED: the record stands but this store rebuilt no channel for it at boot (no
+  //     address, or no credential — gateway.ts's resumeChannels). Nothing polls it, so its failure
+  //     count CANNOT move: reporting "0 failures" would be a health claim about a peer this store
+  //     stopped calling, which is exactly the H9 shape these fields exist to defeat.
+  //   - LIVE: the toggles, the last sync, and the count, all of them currently meaningful.
+  //
+  // `lastSyncedAt === 0` is NEVER SYNCED in every shape that shows it, and renders as words: a zero
+  // drawn as a time reads as "synced a while ago". Same convention as `loam_federate_status`.
+  const channelRowHtml = (c: ChannelStatus, resumed: boolean): string => {
+    const head = channelHeadHtml(c);
+    if (!Number.isFinite(c.lastSyncedAt) || !Number.isFinite(c.consecutiveFailures)) {
+      return (
+        `<li>${head}<strong>unreadable — this channel's record does not carry its health as ` +
+        `numbers, so this page will not guess at it</strong></li>`
+      );
+    }
     const when =
       c.lastSyncedAt === 0
         ? "never synced"
         : `last synced ${new Date(c.lastSyncedAt).toISOString()}`;
+    if (!resumed) {
+      return (
+        `<li>${head}<strong>not resumed — this store is not polling this peer</strong> · ` +
+        `${when}</li>`
+      );
+    }
+    const fails =
+      `${c.consecutiveFailures} consecutive failure` + (c.consecutiveFailures === 1 ? "" : "s");
     return (
-      `<li><a href="${escapeHtml(detailHref(c.name))}"><code>${escapeHtml(c.name)}</code></a> — ` +
-      `the peer you call <code>${escapeHtml(c.prefix)}</code>, into ` +
-      `<a href="${escapeHtml(detailHref(c.into))}"><code>${escapeHtml(c.into)}</code></a>. ` +
-      `${c.receiving ? "receiving" : "not receiving"} · ` +
+      `<li>${head}${c.receiving ? "receiving" : "not receiving"} · ` +
       `${c.blessing ? "blessing" : "not blessing"} · ${when} · ` +
       // The marker is structural rather than a colour, so it survives a stylesheet-less read.
       (c.consecutiveFailures === 0 ? fails : `<strong>${fails}</strong>`) +
@@ -209,23 +236,30 @@ ${listing}
   // and the drop-confirm page. `keep` is the caller's SCOPE — every caller has already proven its
   // containers are in the session user's subtree, and this panel widens nothing. A page about one
   // container renders nothing when no channel touches it; the dashboard passes `empty` because
-  // there "no channels" is an answer a person asked for.
+  // there "no channels" is an answer a person asked for. `note` is what the PAGE knows and the
+  // panel does not — on a confirm page, what the act about to happen will and will not do.
   const channelsPanelHtml = (
     gw: Gateway,
     keep: (c: ChannelStatus) => boolean,
-    empty?: string,
+    opts: { empty?: string; note?: string } = {},
   ): string => {
     const rows = gw
       .channelStatus()
       .filter(keep)
       .sort((a, b) => (a.name < b.name ? -1 : 1));
-    if (rows.length === 0 && empty === undefined) return "";
+    if (rows.length === 0 && opts.empty === undefined) return "";
     const listing =
-      rows.length === 0 ? `<p>${empty}</p>` : `<ul>\n${rows.map(channelRowHtml).join("\n")}\n</ul>`;
+      rows.length === 0
+        ? `<p>${opts.empty}</p>`
+        : `<ul>\n${rows
+            .map((c) => channelRowHtml(c, gw.federationChannels.has(c.name)))
+            .join("\n")}\n</ul>` + (opts.note === undefined ? "" : `\n<p>${opts.note}</p>`);
     return `<h2>Channels.</h2>
 <p>A channel is a peer this store reads from. Its deltas land in a pool of its own, and the law it
 carries binds under the name you gave the peer. Read the last two together: a peer with no failures
-and an old reading is quiet, and a peer with failures is one this store could not reach.</p>
+and an old reading is quiet, and a peer with failures is one this store could not reach. A channel
+marked <strong>not resumed</strong> is neither: this store rebuilt no channel for it at its last
+restart, so nothing polls that peer and its failure count can never move.</p>
 ${listing}`;
   };
 
@@ -247,7 +281,11 @@ ${listing}`;
 name, and everything declared inside it. Each name opens its own page.</p>
 ${treeHtml(table, reach, user)}
 ${opts.connectionsPanel(gw, table, reach, formToken)}
-${channelsPanelHtml(gw, (c) => reach.has(c.name), "No channel receives into your subtree.")}
+${channelsPanelHtml(gw, (c) => reach.has(c.name), {
+  // Scoped, not absolute: this store may be receiving on a dozen channels, and the true statement
+  // is only that none of them lands anywhere THIS reader can see.
+  empty: "No channel receives into a container your subtree reaches.",
+})}
 ${declareFormHtml(user, reach, formToken)}
 ${schemaPanelHtml(gw, formToken)}
 ${signOutFormHtml(formToken)}`,
@@ -467,7 +505,19 @@ pool remains.</p>`;
       `<h1>Drop <code>${escapeHtml(name)}</code>?</h1>
 <p>${held}</p>
 ${consequence}
-${channelsTouching(gw, name)}
+${channelsPanelHtml(
+  gw,
+  // The channels receiving INTO this container — which is to say, the ones this drop does NOT
+  // touch. A pool is its own separate store and its sync is its own standing instruction; striking
+  // the declaration above them ends neither. A health list over a confirm button, with no such
+  // sentence, reads as the list of things about to be severed.
+  (c) => c.into === name,
+  {
+    note:
+      "This drop does not sever these channels. Each keeps its own pool, and each goes on " +
+      "receiving — sever one from its own page.",
+  },
+)}
 <p>This cannot be undone.</p>
 <form method="post" action="${ADMIN_DROP_CONFIRM_PATH}">
 ${hiddenPair(formToken, name)}
