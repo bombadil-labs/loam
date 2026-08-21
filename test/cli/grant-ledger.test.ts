@@ -24,7 +24,7 @@
 //
 // Every store here is a fresh temp home. Nothing in this file touches a real ~/.loam.
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -326,16 +326,23 @@ describe("T205 (b) — a struck grant is shown struck, never omitted", () => {
     expect(await run(["grant", "list", "--home", home], io()), printed()).toBe(0);
     const listing = printed();
 
+    // The marker is the word AND a time. `toContain("struck")` alone would be satisfied by a row
+    // reading "nothing struck it" — the negative sentence carrying the positive word — so the rail
+    // demands the timestamp that only a real strike can produce.
     const ivyRow = rowFor(listing, "ivy");
     expect(ivyRow, listing).not.toBe("");
-    expect(ivyRow).toContain("struck");
+    expect(ivyRow).toMatch(/struck \d{4}-\d{2}-\d{2}T/);
     expect(ivyRow).toContain("admin"); // the verb it held stays legible
     expect(ivyRow).toContain(shown(ivy));
 
     const kitRow = rowFor(listing, "kit");
     expect(kitRow, listing).not.toBe("");
-    expect(kitRow).not.toContain("struck");
+    expect(kitRow).not.toMatch(/struck/);
+    expect(kitRow).toContain("admin");
     expect(kitRow).toContain(shown(kit));
+    // A grant nothing has struck reads exactly `live` — not "live" with a caveat about a strike,
+    // which is a different fact and belongs to a different row.
+    expect(kitRow.trimEnd().endsWith(" live"), kitRow).toBe(true);
   });
 });
 
@@ -374,11 +381,19 @@ describe("T205 (c) — a provisioned seed file with no grant is listed as holdin
 
 // The kind column, in the order the rows print. The header line and the operator line carry no kind
 // and do not appear; anything else that did would show up here rather than pass unnoticed.
+const ROW_RE = /^ {2}(user|pen|connector|unattributed) +(\S+(?: \(.+?\))?) /;
 const kindsIn = (listing: string): string[] =>
   listing
     .split("\n")
-    .map((l) => /^ {2}(user|pen|connector|unattributed) /.exec(l)?.[1])
+    .map((l) => ROW_RE.exec(l)?.[1])
     .filter((k): k is string => k !== undefined);
+
+// The name column, in the order the rows print — the intra-kind half of the same promise.
+const namesIn = (listing: string): string[] =>
+  listing
+    .split("\n")
+    .map((l) => ROW_RE.exec(l)?.[2])
+    .filter((n): n is string => n !== undefined);
 
 describe("T205 — the screen is grouped, and every column tells the truth", () => {
   it("groups the rows user, pen, connector, unattributed", async () => {
@@ -400,11 +415,53 @@ describe("T205 — the screen is grouped, and every column tells the truth", () 
       ),
       printed(),
     ).toBe(0);
+    expect(await run(["pen", "create", "quill", "--home", home], io()), printed()).toBe(0);
     await plantOperatorGrant(STRANGER, "write");
     clear();
 
     expect(await run(["grant", "list", "--home", home], io()), printed()).toBe(0);
-    expect(kindsIn(printed()), printed()).toEqual(["user", "pen", "connector", "unattributed"]);
+    const listing = printed();
+
+    // Grouped by kind first, then by name inside a kind — `nib` before `quill`, both before the
+    // connector, and the key nothing can name last.
+    expect(kindsIn(listing), listing).toEqual(["user", "pen", "pen", "connector", "unattributed"]);
+    expect(namesIn(listing), listing).toEqual(["vera", "nib", "quill", "cli-groove (Groove)", "—"]);
+
+    // The count line is part of the answer: five rows, and every one of them binding. An operator
+    // reads this before the table and must not be told a struck or ungranted row is live.
+    expect(listing).toContain("the grant ledger — 5 rows, 5 live");
+    // Every column is named, so no fact arrives in an unlabelled column.
+    const header = listing.split("\n").find((l) => l.trimStart().startsWith("kind "));
+    expect(header, listing).toBeDefined();
+    for (const column of ["kind", "name", "author", "verb", "granted", "standing"]) {
+      expect(header).toContain(column);
+    }
+  });
+
+  it("an empty home says nothing holds standing, and names the operator that needs none", async () => {
+    // The state a store is in the moment it is created. A ledger that printed a bare header here
+    // would read as "the answer is missing" rather than "the answer is none".
+    expect(await run(["grant", "list", "--home", home], io()), printed()).toBe(0);
+    const listing = printed();
+    expect(listing).toContain("nothing holds standing here");
+    expect(listing).toContain(shown(authorForSeed(readSeed(home))));
+    expect(kindsIn(listing), listing).toEqual([]);
+  });
+
+  it("refuses operationally when the connector records cannot be read", async () => {
+    // H9: a read that could not happen must not answer NO. Exit 1 (this store could not tell) is a
+    // different verdict from exit 0 with an empty ledger, and the second would report that nobody
+    // holds standing on the strength of a file it never opened.
+    //
+    // ALONE IN THIS FILE, this rail also passes against the connector-only listing that preceded
+    // the ledger: it guards a refusal the ledger INHERITED rather than one it introduced. It is
+    // here because the ledger grew a second early-exit beside it — the empty-home answer above —
+    // and the two must never be reachable from the same fault.
+    rmSync(join(home, "oauth.json"), { force: true });
+    mkdirSync(join(home, "oauth.json"));
+    expect(await run(["grant", "list", "--home", home], io())).toBe(1);
+    expect(printed()).toContain("unreadable");
+    expect(printed()).not.toContain("nothing holds standing");
   });
 
   it("a seed file that is not a key is named, with its own path, and claims no author", async () => {
