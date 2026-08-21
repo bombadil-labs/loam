@@ -26,11 +26,12 @@ import {
   isRegistrationBinding,
   isRendererBinding,
   manifestExportClaims,
+  readManifest,
 } from "../gateway/adopt-law.js";
 import { CTX_REGISTRATION } from "../gateway/registration.js";
 import { freezeMembers } from "../gateway/container-identity.js";
 import type { RendererBinding } from "../gateway/renderers.js";
-import { readRenderers } from "../gateway/renderers.js";
+import { readRenderers, routeServableOn } from "../gateway/renderers.js";
 
 /** Where a channel's deltas come from. A live peer, a frozen offer, or a fixture. */
 export interface ChannelSource {
@@ -74,20 +75,21 @@ export interface SyncReport {
   readonly apps: readonly ArrivedApp[];
 }
 
-/** One of a peer's apps, as it sits in the channel's pool. */
+/** One app of a channel: what the peer OFFERS, and what this store RUNS. */
 export interface ArrivedApp {
   readonly channel: string;
   /** The peer's own route — the handle `loam federate bless-app --route` takes. */
   readonly route: string;
-  /** What this store would serve it as: the receiver's prefix over the peer's route (§46.2). */
+  /** What this store serves it as: the receiver's prefix over the peer's route (§46.2). */
   readonly serves: string;
-  /** The content address of the BUNDLE — the code that would run, named the way a person can check. */
-  readonly hash: string;
   /**
-   * Is this exact code what serves at that route right now? False is the arrival state AND the state
-   * after a peer ships new code at a route you blessed: the old binding still serves, so calling the
-   * new one blessed would report a mount that never happened (H7).
+   * The content address of the bundle the PEER OFFERS today. Absent once the peer withdrew the app —
+   * and the row survives that, because this store may still be running what it blessed.
    */
+  readonly hash?: string;
+  /** The bundle this store RUNS at that route, if any. Absent means the route answers nothing. */
+  readonly serving?: string;
+  /** Is the code the peer offers the code that runs? The two absences above are why this is not one field. */
   readonly blessed: boolean;
 }
 
@@ -487,8 +489,11 @@ async function bindArrived(
 
   // The manifest rows land in the POOL, so a channel's recognition of a peer is recorded exactly
   // where that peer's bytes live — and is purged with them when the channel is dropped.
+  // The OPERATOR's rows only. A peer who pre-plants a row under a lens-shaped alias would otherwise
+  // suppress the receiver's own mint and choose what `<prefix>:<lens>` resolves to.
   const pending = [...rows].filter(
-    ([alias]) => !members.some((d) => manifestAliasOf(d.claims) === alias),
+    ([alias]) =>
+      !members.some((d) => d.claims.author === operator && manifestAliasOf(d.claims) === alias),
   );
   if (pending.length > 0) {
     await ground.federate(
@@ -523,7 +528,11 @@ async function bindArrived(
       // naming a RENDERER under a lens's name would let the name-binding toggle publish code that
       // runs. Auto-bless never auto-executes (§24.6), and this is where that is enforced rather
       // than assumed.
-      const outcome = await ground.adoptLaw(version, alias, { as: name, expect: "schema" });
+      const outcome = await ground.adoptLaw(version, alias, {
+        as: name,
+        expect: "schema",
+        manifest: "operator",
+      });
       // "witnessed" IS NOT "bound", and reporting it as bound was a false report of the plainest
       // kind: `bound` said the name serves, and the store threw on it.
       //
@@ -589,21 +598,60 @@ function arrivedBindings(gw: Gateway, ground: Gateway): RendererBinding[] {
   return [...latest.values()];
 }
 
-/** The arrived apps of ONE channel, with what the pool actually serves folded in. */
+/**
+ * The apps of ONE channel: what the peer OFFERS and what this store RUNS, as two separate facts.
+ *
+ * Collapsing them into one boolean made the report lie in both directions, which is H7 pointed at
+ * the surface an operator reads before deciding. A peer who ships new code at a blessed route makes
+ * `hash` move while the old binding goes on serving — reporting that as "inert, nothing runs" is
+ * false and its remedy would throw. A peer who WITHDRAWS an app drops out of the arrivals entirely
+ * while this store keeps running the bundle it blessed — reporting nothing at all is worse. So the
+ * rows are the UNION of both sides, and each names which half it has.
+ *
+ * `serving` is asked of the door's own predicate rather than of the binding's existence: a binding
+ * whose lens was later withdrawn is still in the table and answers 404 (§23.6). What it still does
+ * not ask is whether the BUNDLE loads, which is `prepareRoute`'s business and cannot be known from
+ * the ground — the residual is named here rather than papered over.
+ */
 function appsOf(gw: Gateway, ground: Gateway, channel: string, prefix: string): ArrivedApp[] {
-  const serving = new Map(ground.renderers().map((r) => [r.route, bundleHash(r.bundle)]));
-  return arrivedBindings(gw, ground)
-    .map((r) => {
-      const hash = bundleHash(r.bundle);
-      return {
-        channel,
-        route: r.route,
-        serves: `${prefix}:${r.route}`,
-        hash,
-        blessed: serving.get(r.route) === hash,
-      };
-    })
-    .sort((a, b) => (a.route < b.route ? -1 : a.route > b.route ? 1 : 0));
+  const running = new Map(
+    ground
+      .renderers()
+      .filter((r) => routeServableOn(ground, r, "full"))
+      .map((r) => [r.route, bundleHash(r.bundle)]),
+  );
+  const offered = new Map(arrivedBindings(gw, ground).map((r) => [r.route, bundleHash(r.bundle)]));
+  const rows: ArrivedApp[] = [];
+  for (const route of new Set([...offered.keys(), ...running.keys()])) {
+    const hash = offered.get(route);
+    const serving = running.get(route);
+    // A route this store runs that the peer never sent is the receiver's OWN law, seeded into the
+    // pool by the one-way edge — not an app of this channel, and not this listing's business.
+    if (hash === undefined && !isChannelApp(gw, ground, route)) continue;
+    rows.push({
+      channel,
+      route,
+      serves: `${prefix}:${route}`,
+      ...(hash === undefined ? {} : { hash }),
+      ...(serving === undefined ? {} : { serving }),
+      blessed: hash !== undefined && hash === serving,
+    });
+  }
+  return rows.sort((a, b) => (a.route < b.route ? -1 : a.route > b.route ? 1 : 0));
+}
+
+/**
+ * Is the renderer this pool serves at `route` an app the operator put IN THE POOL, rather than a
+ * seeded twin of the receiver's own law?
+ *
+ * A pool is one-way seeded with the receiver's whole ground (§24.1), so every renderer the receiver
+ * owns has a copy inside every channel pool, operator-signed and indistinguishable by author. The
+ * discriminator is custody: a blessing is published on the POOL's gateway and never travels back, so
+ * its binding exists here and NOT in the receiver's own ground. One indexed lookup, no scan.
+ */
+function isChannelApp(gw: Gateway, ground: Gateway, route: string): boolean {
+  const binding = ground.renderers().find((r) => r.route === route);
+  return binding !== undefined && gw.reactor.get(binding.deltaId) === undefined;
 }
 
 /** Every arrived app across this store's live channels, or one channel's (SPEC §24.6). */
@@ -632,12 +680,20 @@ export function channelAppsImpl(gw: Gateway, channel?: string): ArrivedApp[] {
  * channel is dropped. `dependencies: "refuse"` keeps the act to the one export asked for — a
  * renderer whose lens is not blessed is refused, never quietly blessed along with it — and
  * `expect: "renderer"` means a manifest alias can never turn this into a schema blessing.
+ *
+ * AND IT MOUNTS THE BUNDLE THE OPERATOR WAS SHOWN. The pool is a store the PEER writes into, the
+ * manifest vocabulary is not reserved, and `readManifest` is latest-per-alias across all authors —
+ * so a peer can author a row that wins `app:<route>` and points somewhere else. `manifest:
+ * "operator"` makes the alias mean what this store's operator said it means, and the post-freeze
+ * check below refuses rather than blessing a target the listing did not name. Two guards, because
+ * this is the one call where the difference between them is the difference between the code an
+ * operator read the hash of and code they never saw.
  */
 export async function blessChannelAppImpl(
   gw: Gateway,
   channel: string,
   route: string,
-  opts: { pen?: boolean } = {},
+  opts: { pen?: boolean; supersede?: boolean } = {},
 ): Promise<void> {
   const status = channelStatusImpl(gw, channel)[0];
   const ground = gw.channelPools.get(channel)?.gateway;
@@ -668,7 +724,11 @@ export async function blessChannelAppImpl(
   // keeps a blessing pointed at the code that arrived rather than the code that used to be there.
   const alias = `app:${route}`;
   const members = [...ground.reactor.snapshot()];
-  if (!members.some((d) => namesExport(d.claims, alias, app.deltaId))) {
+  // The dedupe asks about the OPERATOR's rows only. Unscoped, a peer who plants a decoy row naming
+  // the right target would suppress the receiver's own mint, and the alias would then be theirs.
+  if (
+    !members.some((d) => d.claims.author === operator && namesExport(d.claims, alias, app.deltaId))
+  ) {
     await ground.federate([
       signClaims(
         manifestExportClaims(
@@ -680,11 +740,28 @@ export async function blessChannelAppImpl(
       ),
     ]);
   }
-  const version = freezeMembers([...ground.reactor.snapshot()]);
+  const frozen = [...ground.reactor.snapshot()];
+  const version = freezeMembers(frozen);
+  // THE BLESSING MOUNTS WHAT THE LISTING NAMED, or it refuses. Read the alias back out of the very
+  // members the version froze, exactly as `adoptLaw` will read it, and confirm it still resolves to
+  // the binding the operator asked about. `manifest: "operator"` should already make this true; a
+  // guard that only holds when another guard holds is not a guard, and the cost is one lookup.
+  const resolved = readManifest(frozen.filter((d) => d.claims.author === operator)).find(
+    (r) => r.alias === alias,
+  );
+  if (resolved?.target !== app.deltaId) {
+    throw new Error(
+      `bless-app refused: this pool's manifest no longer names "${route}" as the binding the ` +
+        `listing showed (${app.deltaId.slice(0, 12)}…) — nothing was blessed. Re-read ` +
+        "`loam federate list` and bless the hash you meant.",
+    );
+  }
   await ground.adoptLaw(version, alias, {
     expect: "renderer",
     dependencies: "refuse",
+    manifest: "operator",
     ...(opts.pen === true ? { pen: true } : {}),
+    ...(opts.supersede === true ? { supersede: true } : {}),
   });
 }
 

@@ -897,6 +897,17 @@ export interface AdoptLawOptions {
    * ONE export of a stranger's pool must bind nothing the operator did not ask for.
    */
   readonly dependencies?: "refuse";
+  /**
+   * Resolve the alias only among manifest rows THIS store's operator authored.
+   *
+   * A module's manifest is ordinarily the SHIPPER's word — that is the whole point of §27.8, and the
+   * default must stay unscoped. A federation pool is the other case: the peer never sends rows, the
+   * receiver mints every one of them, and the peer CAN author deltas in the pool. `readManifest` is
+   * latest-per-alias across all authors, so an unscoped read there lets a peer plant a row that wins
+   * an alias and redirects the blessing to a target the operator never saw. Scoped, an alias means
+   * what the operator said it means.
+   */
+  readonly manifest?: "operator";
 }
 
 export interface AdoptionOutcome {
@@ -1056,7 +1067,7 @@ export async function adoptLawImpl(
   opts: AdoptLawOptions = {},
 ): Promise<AdoptionOutcome> {
   const src = sourceOf(gw, version);
-  const rows = readManifest(src.members);
+  const rows = manifestRowsFor(gw, src, opts);
   const row = rows.find((r) => r.alias === alias);
   if (row === undefined) {
     throw new Error(
@@ -1096,7 +1107,14 @@ async function adoptOne(
   }
   const notes: string[] = [...skewNotes(gw, src, row)];
   // THE LENS THE BINDING WILL NAME HERE, resolved before anything else reads its address.
-  const ex = given.kind === "renderer" ? underServedLens(gw, src, row, given, notes) : given;
+  const verdict: LensVerdict =
+    given.kind === "renderer"
+      ? resolveRendererLens(gw, src, row, given, opts, notes)
+      : { kind: "unknown" };
+  const ex = verdict.kind === "resolved" ? verdict.ex : given;
+  // The module DEFINES the lens and this store binds that law nowhere: the dependency is a real
+  // debt, whatever some other law happens to be called. Carried past the witness to the guard below.
+  const unblessed = verdict.kind === "unblessed" ? verdict.dependency : undefined;
 
   // A pen never rides the sugar OR the primitive: §23.3's write standing is a second key, and
   // classification read it from the BYTES, so a manifest calling this row a schema changes nothing.
@@ -1132,8 +1150,11 @@ async function adoptOne(
   // A renderer reads a LENS this store must serve (§23.4 refuses one that does not). When the
   // module exports that lens too, the blessing takes it first — the renderer is not law that
   // stands alone, and the dependency is REPORTED rather than assumed.
-  if (ex.kind === "renderer" && !gw.registered.some((r) => lensOf(r) === ex.schemaName)) {
-    const dependency = dependencyRow(gw, src, ex.schemaName);
+  if (
+    ex.kind === "renderer" &&
+    (unblessed !== undefined || !gw.registered.some((r) => lensOf(r) === ex.schemaName))
+  ) {
+    const dependency = unblessed;
     if (dependency === undefined) {
       throw new Error(
         `adoption refused: the renderer "${row.alias}" reads the lens "${ex.schemaName}", which ` +
@@ -1215,6 +1236,27 @@ async function adoptOne(
 }
 
 /**
+ * The manifest, as the caller is entitled to read it (see `AdoptLawOptions.manifest`).
+ *
+ * THE SCOPE IS APPLIED TO THE MEMBERS, NEVER TO THE ROWS. `readManifest` is latest-per-alias, so
+ * filtering afterwards lets a foreign row WIN an alias and then be discarded — leaving the alias
+ * empty and the operator's own row invisible. Filtering first asks the right question: what does
+ * this manifest say, among the rows this caller trusts?
+ */
+function manifestRowsFor(gw: Gateway, src: Source, opts: AdoptLawOptions): ManifestRow[] {
+  if (opts.manifest !== "operator") return readManifest(src.members);
+  return readManifest(src.members.filter((d) => d.claims.author === gw.operatorAuthor));
+}
+
+/** What lens a renderer will read HERE, and whether that is a settled question yet. */
+type LensVerdict =
+  | { readonly kind: "resolved"; readonly ex: RendererExport }
+  /** The module exports the lens, and this store serves that LAW under no name at all. */
+  | { readonly kind: "unblessed"; readonly dependency: { row: ManifestRow; ex: SchemaExport } }
+  /** The module does not carry the lens; only the peer's spelling is left to match on. */
+  | { readonly kind: "unknown" };
+
+/**
  * The renderer as it will actually be PUBLISHED here, with the lens it reads named the way THIS
  * store names it.
  *
@@ -1225,37 +1267,44 @@ async function adoptOne(
  * and the renderer door would refuse it — so the mapping is not a convenience, it is what makes an
  * arriving app mountable at all.
  *
+ * IT MATCHES ON THE LAW'S ADDRESS, NEVER ON THE BARE NAME, and that is the whole guard (H6). A
+ * channel pool holds a one-way seeded copy of the RECEIVER's own registrations, so the set of lenses
+ * "already served" there includes the receiver's own — and a peer whose app reads a common name
+ * (`Note`, `Plant`, any stock shape) would otherwise mount bound to the RECEIVER's lens, resolving a
+ * stranger's app through a Schema the operator never associated with that channel, and inheriting
+ * whatever the operator had declared public about their own law. A name is not an identity; the
+ * gather program plus its resolution program is.
+ *
  * Re-addressed here, BEFORE the witness and the name guard read `address`, because the address must
  * be the address of what actually lands: computed from the peer's spelling, a second blessing of the
  * same app would fail to witness and would then meet the route's own "already answered by
  * DIFFERENT-content law" refusal, against law it published itself.
- *
- * Nothing widens. This only ever re-points a binding at law this store ALREADY serves; a lens
- * nothing here answers is left exactly as it was, for the dependency guard below to rule on.
  */
-function underServedLens(
+function resolveRendererLens(
   gw: Gateway,
   src: Source,
   row: ManifestRow,
   ex: RendererExport,
+  opts: AdoptLawOptions,
   notes: string[],
-): RendererExport {
-  if (gw.registered.some((r) => lensOf(r) === ex.schemaName)) return ex;
-  const dependency = dependencyRow(gw, src, ex.schemaName);
-  if (dependency === undefined) return ex;
+): LensVerdict {
+  const dependency = dependencyRow(gw, src, ex.schemaName, opts);
+  // Nothing in the module defines the lens. The operator was told "or register your own", so the
+  // peer's spelling is all there is to match on — the caller's own name check rules below.
+  if (dependency === undefined) return { kind: "unknown" };
   const served = gw
     .registrationVersions()
     .filter((v) => schemaLawAddress(v.hyperschema, v.schema) === dependency.ex.address)
-    .at(-1); // registrationVersions is (timestamp, deltaId) ascending
-  if (served === undefined) return ex;
+    .at(-1); // registrationVersions is (timestamp, deltaId) ascending — the latest name for this law
+  if (served === undefined) return { kind: "unblessed", dependency };
   const under = lensOf(served);
-  if (under === ex.schemaName) return ex;
+  if (under === ex.schemaName) return { kind: "resolved", ex };
   notes.push(
     `the renderer "${row.alias}" reads the peer's lens "${ex.schemaName}", which this store serves ` +
       `as "${under}" — the binding names the reading THIS store answers`,
   );
   const core = { ...ex, schemaName: under };
-  return { ...core, address: rendererLawAddress(core) };
+  return { kind: "resolved", ex: { ...core, address: rendererLawAddress(core) } };
 }
 
 // The manifest row whose SCHEMA law provides a lens name — the dependency lookup a renderer needs.
@@ -1263,8 +1312,9 @@ function dependencyRow(
   gw: Gateway,
   src: Source,
   lens: string,
+  opts: AdoptLawOptions,
 ): { row: ManifestRow; ex: SchemaExport } | undefined {
-  for (const candidate of readManifest(src.members)) {
+  for (const candidate of manifestRowsFor(gw, src, opts)) {
     let ex: Export;
     try {
       ex = classify(src, candidate);

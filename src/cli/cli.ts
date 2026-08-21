@@ -207,12 +207,14 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "channel",
       "route",
       "pen",
+      "supersede",
       "yes",
     ]),
     // `--yes` is a bare confirmation, not a value. Without this the parser demanded a value and
     // `federate drop --channel X --yes` could not be typed correctly by anyone.
-    // `--pen` is the same shape: §6's second key for an app that can WRITE, asked as a word.
-    booleans: new Set(["yes", "pen"]),
+    // `--pen` is the same shape: §6's second key for an app that can WRITE, asked as a word. So is
+    // `--supersede`: moving a mounted route to the peer's newer code is a decision, not a default.
+    booleans: new Set(["yes", "pen", "supersede"]),
     notes: [
       "Federation is container-to-container. `open` names the container you receive INTO and the",
       "PREFIX you assign the peer — the prefix is yours, never theirs, so no peer can take a name",
@@ -231,8 +233,10 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "An APP a peer sends never runs on its own. It arrives inert, `list` names it, and",
       "`bless-app` mounts that one route — the toggles above govern NAMES, never code that runs.",
       "A mounted app runs on the channel's own pool behind the probation frame, its writes stay",
-      "there, and dropping the channel takes it away. Add --pen for an app that writes: its pen",
-      "must also be provisioned and granted, which is a separate act (SPEC §6, §24.7).",
+      "there, and it answers the token door only. Dropping the channel takes it away. Add --pen for",
+      "an app that writes: its pen must also be provisioned and granted, which is a separate act",
+      "(SPEC §6, §24.7). When a peer ships new code at a route you mounted, `list` says so and",
+      "--supersede is what moves the route onto it.",
     ],
   },
   migrate: {
@@ -1016,6 +1020,12 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
   try {
     if (verb === "list") {
       const rows = gateway.channelStatus();
+      // Read ONCE for the whole listing. `channelApps` walks the ground to find the channels, so
+      // asking it per row would make a listing quadratic in the store (H8).
+      const appsByChannel = new Map<string, ReturnType<typeof gateway.channelApps>>();
+      for (const a of gateway.channelApps()) {
+        appsByChannel.set(a.channel, [...(appsByChannel.get(a.channel) ?? []), a]);
+      }
       if (rows.length === 0) {
         io.out(
           "loam: no federation channels — `loam federate open --from <url> --into <container> --prefix <name>`",
@@ -1032,17 +1042,36 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
         const trouble =
           r.consecutiveFailures > 0 ? `, ${r.consecutiveFailures} failed attempt(s) since` : "";
         // An APP a peer sent is code, and no toggle above mounts it (§24.6). An operator who cannot
-        // see what arrived cannot decide about it, so every arrival is named here whether or not it
-        // was ever blessed — and the bundle's address is printed so two stores can compare notes.
-        const apps = gateway
-          .channelApps(r.name)
-          .map((a) =>
-            a.blessed
-              ? `\n  app "${a.route}" serves at "${a.serves}", bundle ${a.hash.slice(0, 12)}…`
-              : `\n  app "${a.route}" ARRIVED, INERT — bundle ${a.hash.slice(0, 12)}…\n` +
-                `    nothing of it runs until \`loam federate bless-app --channel ${r.name} ` +
-                `--route ${a.route}\``,
+        // see what arrived cannot decide about it, so every arrival is named here — and the bundle's
+        // address is printed so two stores can compare notes.
+        //
+        // FOUR STATES, NOT TWO. A single "blessed" flag said "nothing runs" while blessed code ran
+        // (a peer had shipped new code at the route) and printed a remedy that throws. What an
+        // operator needs to see is the pair: what the peer OFFERS, and what this store RUNS.
+        const short = (h: string): string => `${h.slice(0, 12)}…`;
+        const apps = (appsByChannel.get(r.name) ?? []).map((a) => {
+          const head = `\n  app "${a.route}"`;
+          if (a.blessed) return `${head} serves at "${a.serves}", bundle ${short(a.hash!)}`;
+          if (a.hash === undefined) {
+            return (
+              `${head} was WITHDRAWN by the peer, and this store still runs the bundle it ` +
+              `blessed (${short(a.serving!)}) at "${a.serves}"\n` +
+              `    dropping the channel is what removes it: \`loam federate drop --channel ${r.name} --yes\``
+            );
+          }
+          if (a.serving === undefined) {
+            return (
+              `${head} ARRIVED, INERT — bundle ${short(a.hash)}\n` +
+              `    nothing of it runs until \`loam federate bless-app --channel ${r.name} ` +
+              `--route ${a.route}\``
+            );
+          }
+          return (
+            `${head} ARRIVED, and this store runs DIFFERENT code at "${a.serves}"\n` +
+            `    the peer now offers ${short(a.hash)}; this store runs ${short(a.serving)}\n` +
+            `    to move it: \`loam federate bless-app --channel ${r.name} --route ${a.route} --supersede\``
           );
+        });
         io.out(
           `${r.name}\n  into ${r.into}, serving the peer's law under "${r.prefix}:"\n` +
             `  ${r.receiving ? "receiving" : "FROZEN"}, ${r.blessing ? "blessing" : "NOT blessing"}\n` +
@@ -1129,10 +1158,23 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
         );
         return 2;
       }
-      await gateway.blessChannelApp(name, route, { pen: parsed.booleans.has("pen") });
+      await gateway.blessChannelApp(name, route, {
+        pen: parsed.booleans.has("pen"),
+        supersede: parsed.booleans.has("supersede"),
+      });
+      // Report what the store ANSWERS WITH, not what the call returned. A blessing that landed and
+      // does not serve — its lens withdrawn, say — must not be announced as a mount (H7).
       const app = gateway.channelApps(name).find((a) => a.route === route);
+      if (app?.blessed !== true) {
+        io.out(
+          `loam: ${name} blessed the app "${route}", and it does not serve\n` +
+            "  the binding landed; something else it needs did not — check that the lens it reads is\n" +
+            `  still bound here: \`loam federate list\``,
+        );
+        return 0;
+      }
       io.out(
-        `loam: ${name} now serves the app "${route}" at "${app?.serves ?? route}"\n` +
+        `loam: ${name} now serves the app "${route}" at "${app.serves}"\n` +
           "  it runs on this channel's pool, behind the probation frame, and its writes stay there\n" +
           `  dropping the channel takes it with the peer's data — \`loam federate drop --channel ${name} --yes\``,
       );

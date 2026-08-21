@@ -482,16 +482,36 @@ export async function publishRendererImpl(
  * stranger's code against the receiver's own ground, which is the one thing a blessing may not buy.
  * So the prefix is a DELEGATION, resolved per request, and nothing about a channel is cached here.
  *
+ * TWO GATES, AND NEITHER IS OPTIONAL.
+ *
+ * FULL DOOR ONLY. A pool decides its own anonymous surface from its own `loam:public` deltas, and a
+ * pool's copy of the receiver's ground is FROZEN at seeding — so a public declaration the operator
+ * has since STRUCK still stands in there (`container.ts` states that staleness; `writeRouteImpl`
+ * re-reads the root's live word precisely because of it). Delegating the anonymous door would put a
+ * second, stale, tokenless view of this store on its own front door. Exposing a channel app to
+ * strangers is a decision this seam does not make; the pool's own container mount is unchanged.
+ *
+ * AND THE BINDING MUST BE THE POOL'S OWN. A pool is one-way seeded with the receiver's whole ground,
+ * so every renderer this store owns has an operator-signed twin inside every channel pool — and
+ * without this check `alice:<any route of mine>` would serve MY app over the PEER's claims, with no
+ * blessing anywhere in the story. Custody is the discriminator: a blessing is published on the
+ * pool's gateway and never travels back, so its binding is absent from this store's own ground,
+ * while a seeded twin is present by construction. One indexed lookup, and it fails closed.
+ *
  * The receiver's OWN law wins its own name: every caller reaches this only after finding nothing at
- * `route` in its own table. And the two cheap gates come first — a store with no channels, or a
- * route with no prefix, never pays for the channel reading (H8: `channelStatus` walks the ground).
+ * `route` in its own table. And the cheap gates come first — a store with no channels, or a route
+ * with no prefix, never pays for the channel reading (H8: `channelStatus` walks the ground).
  *
  * Reads `channelPools` rather than `federationChannels` deliberately: a booted store whose peer
  * credential is missing has the pool attached and the channel unresumable, and a blessed app must
  * go on serving whether or not this store can currently reach the peer it came from.
  */
-function channelApp(gw: Gateway, route: string): { pool: Gateway; route: string } | undefined {
-  if (gw.channelPools.size === 0) return undefined;
+function channelApp(
+  gw: Gateway,
+  route: string,
+  door: "full" | "public",
+): { pool: Gateway; route: string } | undefined {
+  if (door !== "full" || gw.channelPools.size === 0) return undefined;
   const cut = route.indexOf(":");
   if (cut <= 0 || cut === route.length - 1) return undefined;
   const prefix = route.slice(0, cut);
@@ -499,7 +519,11 @@ function channelApp(gw: Gateway, route: string): { pool: Gateway; route: string 
   for (const c of gw.channelStatus()) {
     if (c.prefix !== prefix) continue;
     const pool = gw.channelPools.get(c.name)?.gateway;
-    return pool === undefined ? undefined : { pool, route: bare };
+    if (pool === undefined) return undefined;
+    const binding = pool.renderers().find((r) => r.route === bare);
+    // Absent, or a seeded twin of law this store already owns: not this channel's app.
+    if (binding === undefined || gw.reactor.get(binding.deltaId) !== undefined) return undefined;
+    return { pool, route: bare };
   }
   return undefined;
 }
@@ -515,7 +539,8 @@ export async function prepareRouteImpl(gw: Gateway, route: string): Promise<void
     await loadRenderers([binding.bundle]);
     return;
   }
-  const app = channelApp(gw, route);
+  // Prepared on the FULL door's terms, because that is the only door delegation serves.
+  const app = channelApp(gw, route, "full");
   if (app !== undefined) await app.pool.prepareRoute(app.route);
 }
 
@@ -538,7 +563,7 @@ export async function serveRouteImpl(
   const gone = { status: 404, contentType: "text/plain; charset=utf-8", body: "no such route" };
   const binding = gw.renderers().find((r) => r.route === route);
   if (binding === undefined) {
-    const app = channelApp(gw, route);
+    const app = channelApp(gw, route, door);
     return app === undefined ? gone : app.pool.serveRoute(app.route, entity, door, gesture, asOf);
   }
   let node: ResolvedNode;
@@ -754,7 +779,11 @@ function resolveGesture(gw: Gateway, g: ReadGesture, asOf?: number): ReadResult 
 // applies — a latest renderer's lens must be in the door's surface (public = a bare-name declaration); a
 // pinned renderer's version must be publicly declared (public) or simply survive (full). writeRoute
 // reuses it so a stranger can only POST to a route they could GET, and an undeclared route stays 404.
-function routeServableOn(gw: Gateway, binding: RendererBinding, door: "full" | "public"): boolean {
+export function routeServableOn(
+  gw: Gateway,
+  binding: RendererBinding,
+  door: "full" | "public",
+): boolean {
   if (binding.versionId === undefined) {
     const surface = gw.surface(door);
     return (
@@ -812,7 +841,7 @@ export async function writeRouteImpl(
   const gone = { status: 404, contentType: text, body: "no such route" };
   const binding = gw.renderers().find((r) => r.route === route);
   if (binding === undefined) {
-    const app = channelApp(gw, route);
+    const app = channelApp(gw, route, door);
     return app === undefined ? gone : app.pool.writeRoute(app.route, entity, fields, door);
   }
   // Visible on this door (the same discipline as a GET), so a stranger can only write where they could
