@@ -1074,10 +1074,13 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
               : `\n  app "${a.route}" — the peer offers ${short(a.hash)}`;
           // WHY IT ANSWERS NOTHING, when it does not. Each cause has a different remedy and none of
           // them is "bless it", so each says the thing that is actually in the way.
+          // "MOUNTED" only when something is. A shadowed row can have no blessing at all — the
+          // name is simply the operator's — and blessing it would land and still answer nothing.
+          const here = a.mounted === undefined ? "nothing of it is mounted" : "it is MOUNTED here";
           const stuck =
             a.shadowed !== undefined
-              ? `\n    it is MOUNTED here and answers nothing: ${a.shadowed} holds that name\n` +
-                "    your own law wins its own names; this one answers again when yours stops"
+              ? `\n    ${here}, and "${a.serves}" answers nothing: ${a.shadowed} holds that name\n` +
+                "    your own law wins its own names; this one answers when yours stops"
               : a.dark === true
                 ? `\n    it is MOUNTED here and answers nothing: the lens it reads is not bound ` +
                   "here\n    lift the curse on that lens, or re-bless it, and this answers again"
@@ -1225,7 +1228,7 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
         // the lens, which is wrong for the commonest case: a name of the operator's own in the way.
         const why =
           app?.shadowed !== undefined
-            ? `${app.shadowed} holds that name — your own law wins its own names`
+            ? `${app.shadowed} holds that name — your own law wins its own names, so this answers when yours stops`
             : app?.dark === true
               ? "the lens it reads is not bound here — lift the curse on it, or re-bless it"
               : "check `loam federate list` for what this store says about it";

@@ -39,8 +39,10 @@ import { freezeMembers } from "../../src/gateway/container-identity.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { publicClaims } from "../../src/gateway/public.js";
+import { readSeed, storePath } from "../../src/cli/config.js";
 import { serve } from "../../src/server/http.js";
 import { MemoryBackend } from "../../src/store/memory.js";
+import { SqliteBackend } from "../../src/store/sqlite.js";
 import { FERN, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, pickLatest } from "../gateway/fixtures.js";
 
@@ -583,9 +585,14 @@ describe("T209 — the blessing toggle does not extend to renderers", () => {
 
       await bob.curseChannelLaw(CHANNEL, "alice:Plant");
       expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(404);
-      // …and the listing stops calling it served, in the same process.
-      expect(bob.channelApps(CHANNEL)[0]!.serving).toBeUndefined();
-      expect(bob.channelApps(CHANNEL)[0]!.blessed).toBe(false);
+      // …and the listing stops calling it served, in the same process — and says WHY, because the
+      // remedy for a dark mount is to bring its lens back, and no other state's remedy is that.
+      const row = bob.channelApps(CHANNEL)[0]!;
+      expect(row.serving).toBeUndefined();
+      expect(row.blessed).toBe(false);
+      expect(row.mounted).toBe(appIdOf(APP)); // it IS still mounted
+      expect(row.dark).toBe(true);
+      expect(row.shadowed).toBeUndefined(); // nothing of the operator's is in the way
     } finally {
       await alice.close();
       await bob.close();
@@ -694,6 +701,30 @@ describe("T209 — the prefix reaches a blessed app and nothing else", () => {
       expect((await bob.writeRoute("alice:hello", FERN, { height: 5 }, "public")).status).toBe(404);
       // Two-sided, and it must be a SUCCESS: the token door serves the same route.
       expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(200);
+    } finally {
+      await alice.close();
+      await bob.close();
+    }
+  });
+
+  it("a prefix that itself contains a colon still reaches its own app", async () => {
+    // The delegation matches a DECLARED prefix rather than splitting at the first colon. Nothing
+    // refuses a colon in a prefix at `federate open`, so splitting would look for a channel called
+    // "a" when the operator named one "a:b" — and every other surface would say the app is mounted
+    // while the door answered 404.
+    const alice = await peer(ALICE_SEED, { route: "hello", app: APP, height: 62 });
+    const bob = await store(BOB_SEED);
+    try {
+      const channel = await link(bob, alice, "a:b");
+      await channel.sync();
+      await bob.blessChannelApp("channel:friends:a:b", "hello");
+
+      expect(bob.channelApps()[0]!.serves).toBe("a:b:hello");
+      const served = await bob.serveRoute("a:b:hello", FERN, "full");
+      expect(served.status).toBe(200);
+      expect(bodyOf(served)).toContain("<p id=h>62</p>");
+      // And the shorter reading of the same name is not a channel: no store answers it.
+      expect((await bob.serveRoute("a:hello", FERN, "full")).status).toBe(404);
     } finally {
       await alice.close();
       await bob.close();
@@ -1042,6 +1073,9 @@ describe("T209 — what an app IS, for the report and for the blessing", () => {
       // Two-sided: alice's UNPINNED app on the same channel is unaffected and mounts.
       const other = bob.channelApps(CHANNEL).find((a) => a.route === "other")!;
       expect(other.pinned).toBeUndefined();
+      // THE ROUTE IS PART OF THE IDENTITY, and this is the only rail that asks at a route other than
+      // the fixture's default — without it, an identity that hard-coded one route would pass.
+      expect(other.hash).toBe(appIdOf(OTHER_APP, { route: "other" }));
       await bob.blessChannelApp(CHANNEL, "other");
       expect((await bob.serveRoute("alice:other", FERN, "full")).status).toBe(200);
     } finally {
@@ -1076,7 +1110,11 @@ describe("T209 — what an app IS, for the report and for the blessing", () => {
     }
   });
 
-  it("a peer cannot mint two different apps with one identity", () => {
+  it("the identity's encoding cannot be forged across a field boundary", () => {
+    // A FORMAT rail: both sides are the test's own restatement, so what it pins is the ENCODING, not
+    // the reader. The reader is held to this restatement by every sibling rail that compares
+    // `appIdOf(...)` against a real `channelApps()` hash — including one, above, with a pen and a
+    // writable list, and one at a route other than the default.
     // The fields are length-prefixed, not separated. A peer SIGNS these bytes and never passes this
     // store's publish door, so any separator they can put inside a field would let them move bytes
     // across a boundary — and pin one identity to two different bundles.
@@ -1234,6 +1272,10 @@ describe("T209 — what an app IS, for the report and for the blessing", () => {
       expect(row.serving).toBeUndefined();
       expect(row.blessed).toBe(false);
       expect(row.shadowed).toContain("alice:hello");
+      // NOT `blocked`: the blessing door looks for a twin at the BARE route, so it never refuses
+      // this — a blessing here lands and still answers nothing, and calling it unmountable would be
+      // the same lie as calling it inert, pointed the other way.
+      expect(row.blocked).toBeUndefined();
       // And the door confirms it: bob's own app answers that name, on bob's own ground.
       expect(bodyOf(await bob.serveRoute("alice:hello", FERN, "full"))).toContain(
         "<section id=other>7</section>",
@@ -1635,6 +1677,86 @@ describe("T209 — the CLI names what arrived and mounts one app", () => {
         said(),
       ).toBe(0);
       expect(said()).toContain('serves the app "hello"');
+    } finally {
+      await alice.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+});
+
+describe("T209 — the CLI says what it found, and never announces a mount it did not make", () => {
+  it("a blocked route prints why, and a blessing that lands without serving exits 2", async () => {
+    // The two CLI states an operator is most likely to hit and least able to diagnose, driven
+    // through the shipped command. Both are about the same collision — a name of the operator's own
+    // — met once BEFORE a blessing and once AFTER one, and each has to say a different true thing.
+    const root = mkdtempSync(join(tmpdir(), "loam-t209-cli2-"));
+    const out: string[] = [];
+    const err: string[] = [];
+    const io = () => ({ out: (s: string) => out.push(s), err: (s: string) => err.push(s) });
+    const said = (): string => [...out, ...err].join("\n");
+    const fresh = (): void => {
+      out.length = 0;
+      err.length = 0;
+    };
+    const me = join(root, "me");
+    const offer = join(root, "alice.offer");
+    const alice = await peer(ALICE_SEED, { route: "hello", app: APP, height: 62 });
+    try {
+      writeFileSync(offer, exportOffer(alice));
+      expect(await run(["init", "--home", me], io())).toBe(0);
+
+      // Bob's OWN route of the same bare name, published straight into the home the CLI reads.
+      const home = await Gateway.boot(
+        new SqliteBackend(storePath(me)),
+        assembleGenesis({ operatorSeed: readSeed(me) }),
+      );
+      await home.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+      await home.publishRenderer({
+        route: "hello",
+        schema: "Plant",
+        consumes: ["height"],
+        bundle: OTHER_APP,
+      });
+      await home.close();
+
+      fresh();
+      expect(
+        await run(
+          [
+            "federate",
+            "open",
+            "--from",
+            offer,
+            "--into",
+            "friends",
+            "--prefix",
+            "alice",
+            "--home",
+            me,
+          ],
+          io(),
+        ),
+        said(),
+      ).toBe(0);
+
+      // BEFORE a blessing: nothing is mounted and nothing can be. The listing must not send the
+      // operator to `bless-app`, which refuses this exact state by name.
+      fresh();
+      expect(await run(["federate", "list", "--home", me], io()), said()).toBe(0);
+      expect(said()).toContain("it cannot mount");
+      expect(said()).toContain("holds that name");
+      expect(said()).not.toContain("ARRIVED, INERT");
+      expect(said()).not.toContain("bless-app --channel");
+
+      // And the door agrees: the act it withheld really is refused.
+      fresh();
+      expect(
+        await run(
+          ["federate", "bless-app", "--channel", CHANNEL, "--route", "hello", "--home", me],
+          io(),
+        ),
+      ).toBe(2);
+      expect(said()).toContain("YOUR OWN route");
     } finally {
       await alice.close();
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

@@ -374,6 +374,9 @@ function latestPerRoute(
  * cannot say so.
  */
 export function readPoolRenderers(pool: Gateway, host: Gateway): RendererBinding[] {
+  // No operator is no answer, not every answer: unscoped, `lawfulSnapshot` returns the whole pool
+  // and a peer's own binding would count as something this store had mounted.
+  if (pool.operatorAuthor === undefined) return [];
   const negated = lawfulNegated(pool.reactor, pool.operatorAuthor);
   return latestPerRoute(
     lawfulSnapshot(pool.reactor, pool.operatorAuthor),
@@ -572,20 +575,30 @@ function channelApp(
   door: "full" | "public",
 ): { pool: Gateway; route: string } | undefined {
   if (door !== "full" || gw.channelPools.size === 0) return undefined;
-  const cut = route.indexOf(":");
-  if (cut <= 0 || cut === route.length - 1) return undefined;
-  const prefix = route.slice(0, cut);
-  const bare = route.slice(cut + 1);
+  if (!route.includes(":")) return undefined;
+  // MATCH THE DECLARED PREFIX, never "everything before the first colon". A prefix may CONTAIN a
+  // colon — nothing refuses one at `federate open` — and splitting instead of matching would look
+  // for a channel called `a` when the operator named one `a:b`, so a blessed app would answer 404
+  // while every other surface said it was mounted. The LONGEST match wins, because `a` and `a:b`
+  // can both stand and only the longer one is the specific answer.
+  let best: { pool: Gateway; route: string } | undefined;
+  let longest = 0;
   for (const c of gw.channelStatus()) {
-    if (c.prefix !== prefix) continue;
+    if (c.prefix === "" || !route.startsWith(`${c.prefix}:`)) continue;
+    if (c.prefix.length <= longest) continue;
+    const bare = route.slice(c.prefix.length + 1);
+    if (bare === "") continue;
     const pool = gw.channelPools.get(c.name)?.gateway;
-    if (pool === undefined) return undefined;
+    // No operator is no answer: `lawfulSnapshot` would otherwise hand back every delta in the pool,
+    // and a peer's own binding would read as something this store had mounted.
+    if (pool?.operatorAuthor === undefined) continue;
     const binding = pool.renderers().find((r) => r.route === bare);
     // Absent, or a seeded twin of law this store already owns: not this channel's app.
-    if (binding === undefined || gw.reactor.get(binding.deltaId) !== undefined) return undefined;
-    return { pool, route: bare };
+    if (binding === undefined || gw.reactor.get(binding.deltaId) !== undefined) continue;
+    best = { pool, route: bare };
+    longest = c.prefix.length;
   }
-  return undefined;
+  return best;
 }
 
 // Ensure a route's bundle is loaded (the body of `Gateway.prepareRoute`, SPEC §23) — async, so a renderer

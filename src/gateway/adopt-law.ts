@@ -1285,7 +1285,14 @@ type LensVerdict =
  * and the renderer door would refuse it — so the mapping is not a convenience, it is what makes an
  * arriving app mountable at all.
  *
- * IT MATCHES ON THE LAW'S ADDRESS, NEVER ON THE BARE NAME, and that is the whole guard (H6). A
+ * IT MATCHES ON THE LAW'S ADDRESS, NEVER ON THE BARE NAME (H6) — and that closes the common case,
+ * not every case. The address it compares comes from the module's own schema export, and a manifest
+ * row names that export by hyperschema ENTITY; two stores that both publish a hyperschema named
+ * `Plant` file at the same default entity, so `classify` resolves it to whichever definition is
+ * latest across authors in the pool. When the receiver's own seeded law wins that, the address IS
+ * the receiver's and the match agrees with itself. Timestamps on the peer's side are the peer's, so
+ * which side wins is not the receiver's choice. Closing it wants entity-namespacing at the
+ * federation edge, which is its own ticket; the rail names the gap where it can be seen. A
  * channel pool holds a one-way seeded copy of the RECEIVER's own registrations, so the set of lenses
  * "already served" there includes the receiver's own — and a peer whose app reads a common name
  * (`Note`, `Plant`, any stock shape) would otherwise mount bound to the RECEIVER's lens, resolving a

@@ -617,7 +617,9 @@ const appIdentity = (r: RendererBinding): string =>
         // different app by every question an operator would ask about it.
         r.versionId ?? "",
       ]
-        .map((field) => `${field.length}:${field}`)
+        // The count is of the BYTES this encoder emits, not of UTF-16 units — a prefix that counts
+        // one thing while the hash covers another is a question nobody should have to answer.
+        .map((field) => `${new TextEncoder().encode(field).length}:${field}`)
         .join(""),
     ),
   );
@@ -679,23 +681,30 @@ function appsOf(gw: Gateway, ground: Gateway, channel: string, prefix: string): 
     const own = mounted.get(route);
     // MOUNTED IS NOT SERVING, and the difference is the whole reason this report exists. Three ways
     // a standing blessing answers nothing, each with a different remedy and none of them "bless it":
-    const shadow =
-      // (a) the receiver's own law answers the name this app would serve under. Their own name is
-      // theirs (§46.2) and the delegation is the fallback, so the channel's app never gets the call.
-      hostRoutes.has(`${prefix}:${route}`)
-        ? `your own route "${prefix}:${route}"`
-        : // (b) a twin of the receiver's own route holds the bare name INSIDE the pool. Every attach
-          // re-pulses the seeding edge, so this arrives long after a blessing — and it is just as
-          // true before one: nothing of the peer's can mount at a name their own law answers there.
-          poolWinner.get(route) !== undefined && poolWinner.get(route)!.deltaId !== own?.deltaId
-          ? `your own route "${route}", seeded into this pool`
-          : undefined;
+    // (a) the receiver's own law answers the name this app would serve under. Their own name is
+    // theirs (§46.2) and the delegation is the fallback, so the channel's app never gets the call.
+    const hostHolds = hostRoutes.has(`${prefix}:${route}`);
+    // (b) a twin of the receiver's own route holds the bare name INSIDE the pool. Every attach
+    // re-pulses the seeding edge, so this arrives long after a blessing — and it is just as true
+    // before one: this is the ONE the blessing door refuses, by that name.
+    const poolHolds =
+      poolWinner.get(route) !== undefined && poolWinner.get(route)!.deltaId !== own?.deltaId;
+    const shadow = hostHolds
+      ? `your own route "${prefix}:${route}"`
+      : poolHolds
+        ? `your own route "${route}", seeded into this pool`
+        : undefined;
     // (c) the lens it reads is not bound here — a curse, or a withdrawn registration (§23.6).
     const dark = own !== undefined && shadow === undefined && !routeServableOn(ground, own, "full");
-    // NOTHING MOUNTED, AND NOTHING MOUNTABLE. The same obstruction as `shadowed`, met before a
-    // blessing rather than after one — so it needs its own name: a listing that called this state
-    // "inert, bless it" would print the one command the blessing door refuses by name.
-    const blocked = own === undefined && shadow !== undefined ? shadow : undefined;
+    // NOTHING MOUNTED, AND NOTHING MOUNTABLE — and only cause (b) is that. The blessing door looks
+    // for a twin at the BARE route, so a host route named `<prefix>:<route>` is invisible to it and
+    // a blessing there SUCCEEDS; what it will never do is answer, because the receiver's own law
+    // wins its own name. Calling that "cannot mount" would be as false as calling it inert, in the
+    // other direction — so it stays `shadowed`, and the report says the blessing would not help.
+    const blocked =
+      own === undefined && poolHolds && !hostHolds
+        ? `your own route "${route}", seeded into this pool`
+        : undefined;
     const serving =
       own === undefined || shadow !== undefined || dark ? undefined : appIdentity(own);
     // A VERSION-PINNED arrival can never mount here: the pin names a delta of the PEER's own store,
@@ -810,7 +819,7 @@ export async function blessChannelAppImpl(
     }
     if (!appIdentity(app).startsWith(opts.expect)) {
       throw new Error(
-        `bless-app refused: "${route}" on "${channel}" is ${appIdentity(app).slice(0, 12)}… now, ` +
+        `bless-app refused: "${route}" on "${channel}" is ${appIdentity(app).slice(0, 28)} now, ` +
           `and you asked for ${opts.expect}. The peer changed it between the listing and this ` +
           "call. Nothing was blessed; re-read `loam federate list`.",
       );
@@ -873,8 +882,8 @@ export async function blessChannelAppImpl(
   if (resolved?.target !== app.deltaId) {
     throw new Error(
       `bless-app refused: this pool's manifest no longer names "${route}" as the binding the ` +
-        `listing showed (${app.deltaId.slice(0, 12)}…) — nothing was blessed. Re-read ` +
-        "`loam federate list` and bless the hash you meant.",
+        `listing showed (delta ${app.deltaId.slice(0, 12)}…) — nothing was blessed. Re-read ` +
+        "`loam federate list` and bless the app it names.",
     );
   }
   await ground.adoptLaw(version, alias, {
