@@ -216,9 +216,14 @@ async function attestArrival(
   }
   // `federate`, like the manifest rows the channel writes beside them: the pool is a separate
   // ground, and this is the door the receiver's own writes into it already take. That door counts
-  // its refusals rather than naming them, so the count is checked here — a stamp refused (a slate
-  // closing `cite` over a member is the reachable case) would otherwise leave the same undeclared
-  // gap the guard above exists to prevent.
+  // its refusals rather than naming them, so the count is checked here: a refused stamp would leave
+  // the same undeclared gap the guard above exists to prevent, and nothing would say so.
+  //
+  // A stamp IS a citation of its arrivals, so a slate closing `cite` is the mechanism that could
+  // refuse one. No offer reaches it today — a slate's members are frozen from the ground the pool
+  // already holds, and a delta the pool already holds is `held` rather than newly accepted, so this
+  // sync's refs and that slate's members are disjoint sets. The check is what keeps that an
+  // observation about today rather than a load-bearing assumption.
   const landed = await ground.federate(stamps);
   if (landed.accepted !== stamps.length) {
     throw new Error(
