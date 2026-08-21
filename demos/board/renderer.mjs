@@ -41,6 +41,33 @@ export default (n) => {
     `<span class="st">${esc(x.kind)} · ${esc(x.status)}${x.est ? ` · ≈${esc(x.est)} min` : ""}</span>` +
     brief(x) +
     `</div>`;
+  // THE TIME CONTROL (SPEC §26). The door reads `?asOf=<T>` on this route and resolves the board
+  // against the ground as it stood at that millisecond; this is only the ask. A plain GET form, no
+  // script — the page stays inert under any CSP, and a browser with JavaScript off still rewinds.
+  //
+  // WHY A NUMBER RATHER THAN A DRAGGABLE RANGE: a range wants a min and a max, and a `RenderFn` is
+  // a pure function of its node. The node carries the view, not a clock, so this bundle has no
+  // honest source for "now" — and reading the host's clock would make the page differ between two
+  // renders of one unchanged ground. The door states the moment it served in its own chrome; the
+  // control only has to name the parameter. `state.asOf` is echoed back by the full door, so the
+  // field re-shows the pin you are on there; the anonymous door carries no state and the field
+  // starts empty.
+  //
+  // THE `n.state` GUARD IS LOAD-BEARING even though the §30 floor says the member is always
+  // present: `scripts/render-board-artifact.mjs` renders this bundle from a node it builds by hand
+  // and does not fill it, so an unguarded read throws and takes the mirror down with it.
+  const pinned = esc(n.state && n.state.asOf);
+  const rewind =
+    `<form class="tt" method="get" data-loam-asof-control="1">` +
+    `<label for="asof">as of</label>` +
+    // `step="any"` OR THE FORM WILL NOT SUBMIT. With `min="0"` present the step base is 0, so a
+    // numeric step makes the browser demand a multiple of it — and a real millisecond timestamp is
+    // a multiple of nothing. Chrome then blocks the submit with "the two nearest valid values are",
+    // and the control looks broken while every server-side rail stays green.
+    `<input id="asof" name="asOf" type="number" step="any" min="0" ` +
+    `placeholder="milliseconds since 1970" value="${pinned}">` +
+    `<button type="submit">rewind</button> <a href="?">now</a>` +
+    `</form>`;
   // The catch-all holds whatever no section does. Absence must be visible: the door still
   // answers a mis-statused item, so a page that drops it disagrees with its own store.
   const placed = new Set(SECTIONS.flatMap((s) => s.holds));
@@ -66,10 +93,17 @@ export default (n) => {
   .br{margin:.45rem 0 .15rem}.br summary{cursor:pointer;font:600 .64rem ui-monospace,monospace;
     color:#82aedc;text-transform:uppercase;letter-spacing:.1em}
   .br p{margin:.5rem 0 0;color:#cfc4ae;font-size:.85rem;max-width:38rem}
-  a{color:#82aedc;text-decoration:none} footer{margin-top:1.4rem;font:.7rem ui-monospace,monospace;color:#57503f}</style>
+  a{color:#82aedc;text-decoration:none} footer{margin-top:1.4rem;font:.7rem ui-monospace,monospace;color:#57503f}
+  .tt{display:flex;gap:.5rem;align-items:center;margin:.7rem 0 0;font:600 .64rem ui-monospace,monospace;
+    color:#9c8f7a;text-transform:uppercase;letter-spacing:.1em}
+  .tt input{flex:1 1 12rem;min-width:0;background:#1d1710;border:1px solid #2f2819;border-radius:6px;
+    padding:.3rem .5rem;color:#ece3d1;font:inherit;text-transform:none;letter-spacing:0}
+  .tt button{background:#2f2819;border:1px solid #57503f;border-radius:6px;padding:.3rem .7rem;
+    color:#ece3d1;font:inherit;cursor:pointer}</style>
   </head><body><main>
   <div class="k">bombadil labs · rendered live from the ground</div>
   <h1>${esc(n.view.banner ?? "Loam — the board")}</h1>
+  ${rewind}
   ${[...SECTIONS, { key: "unplaced", label: "status?", hue: "#c2566a", holds: null }].map(sec).join("")}
   <footer>every line above is a signed delta · entity ${esc(n.entity)} · digest ${esc(n.hex).slice(0, 20)}…</footer>
   </main></body></html>`;
