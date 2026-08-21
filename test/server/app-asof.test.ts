@@ -19,19 +19,25 @@
 //
 // BOTH LEVELS, as P3 requires. The object level is what the DOOR SERVES — the rendered bytes a
 // browser receives, which is the only level a person ever meets. The delta level is asserted where
-// it can disagree: (c) reads the sqlite file itself for the purged plaintext, and reads the
-// surviving tombstone's timestamp to pin the annotation's window.
+// it can disagree: (c) reads the sqlite file AND its `-wal` sidecar for the purged plaintext, and
+// reads the surviving tombstone's timestamp to pin the annotation's window.
+//
+// (a) IS THE WIDEST CRITERION HERE, because a render has more than one read in it. The route's own
+// node, the floor's mediated `?read=` gestures (§30), and a version-pinned route's frozen lens are
+// three separate resolve paths, and every one of them must reach the same moment or the page
+// disagrees with the banner the door stamps on it.
 
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
-import { asOfBanner } from "../../src/gateway/asof.js";
+import { asOfBanner, frameAsOf } from "../../src/gateway/asof.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { publicClaims } from "../../src/gateway/public.js";
+import { readKey } from "../../src/gateway/renderers.js";
 import { serve, type ServerHandle } from "../../src/server/http.js";
 import type { ResolvedNode } from "../../src/surface/surface.js";
 import { MemoryBackend } from "../../src/store/memory.js";
@@ -56,6 +62,7 @@ const OP_SEED = "0e".repeat(32);
 const OP = authorForSeed(OP_SEED);
 const MOUNT = "garden";
 const ROUTE = "plant";
+const MOSS = "plant:moss"; // the gesture's entity — a second root, moving on its own clock
 
 // A bundle that DRAWS the two fields under test, so a page resolved against the wrong moment
 // differs in its own bytes rather than agreeing by accident. It returns a FRAGMENT (no <body>),
@@ -64,6 +71,16 @@ const BUNDLE = `export default function (node) {
   var h = node.view.height === undefined || node.view.height === null ? "none" : node.view.height;
   var t = node.view.tag === undefined || node.view.tag === null ? [] : node.view.tag;
   return "<main><p>height=" + h + "</p><p>tag=" + JSON.stringify(t) + "</p></main>";
+}`;
+
+// A bundle that draws the floor's MEDIATED READS (§30) as well as its own root, so a gesture
+// resolved against the wrong moment shows up in the page rather than only in the payload.
+const GESTURE_BUNDLE = `export default function (node) {
+  var lines = Object.keys(node.reads).sort().map(function (k) {
+    var r = node.reads[k];
+    return r.error ? k + "!" + r.error.code : k + "=" + r.view.height;
+  });
+  return "<main><p>root=" + node.view.height + "</p><p>reads=" + lines.join(",") + "</p></main>";
 }`;
 
 const BOARD_BUNDLE = readFileSync(
@@ -86,17 +103,24 @@ interface World {
 }
 
 // A governed Plant store serving one rendered route, declared public so BOTH doors answer it.
-// `seed` plants whatever facts the caller needs before the server opens.
+// `seed` plants whatever facts the caller needs before the server opens; `opts` widens the roots
+// (a gesture reads a SECOND entity) or swaps the bundle for one that draws what a rail needs.
 async function bootWorldWith(
   backend: MemoryBackend | SqliteBackend,
   seed: readonly Delta[],
+  opts: { roots?: readonly string[]; bundle?: string } = {},
 ): Promise<World> {
   const gw = await Gateway.boot(
     backend,
     assembleGenesis({
       operatorSeed: OP_SEED,
       registrations: [
-        { hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN], writable: [...PLANT_WRITABLE] },
+        {
+          hyperschema: PLANT,
+          schema: PLANT_POLICY,
+          roots: [...(opts.roots ?? [FERN])],
+          writable: [...PLANT_WRITABLE],
+        },
       ],
       grants: [grantClaims(STORE_ENTITY, GARDENER, "write", OP, 2)],
     }),
@@ -107,7 +131,7 @@ async function bootWorldWith(
     route: ROUTE,
     schema: "Plant",
     consumes: ["height", "tag"],
-    bundle: BUNDLE,
+    bundle: opts.bundle ?? BUNDLE,
   });
   // Without this the anonymous door serves a uniform 404 and the public half of (a) would be
   // asserting a refusal rather than a moment.
@@ -203,6 +227,125 @@ describe("(a) a rendered route resolves against the ground as of T — on BOTH d
   });
 });
 
+// ── (a, continued) the pin reaches EVERY read the render is built from ───────────────────────
+//
+// A render has two read paths, and the pin has to reach both or the page contradicts its own
+// chrome. The floor's mediated reads (§30) ride the same request as the moment — `?asOf=T&read=…`
+// is one GET — so a gesture answering the present inside a page banner-stamped "as of T" would
+// attribute today's value to last Tuesday, with the door's own words vouching for it.
+
+describe("(a) a ?read= gesture resolves at the pinned moment, not at the present", () => {
+  let world: World;
+  const key = readKey("Plant", MOSS);
+
+  beforeAll(async () => {
+    world = await bootWorldWith(
+      new MemoryBackend(),
+      [
+        observed(FERN, "height", 10, 1000, GARDENER_SEED),
+        observed(FERN, "height", 20, 2000, GARDENER_SEED),
+        // The gesture's entity moves across the same window, and to a DIFFERENT value than the
+        // root's — a page that mixed the two moments could not be mistaken for a correct one.
+        observed(MOSS, "height", 7, 1000, GARDENER_SEED),
+        observed(MOSS, "height", 99, 2000, GARDENER_SEED),
+      ],
+      { roots: [FERN, MOSS], bundle: GESTURE_BUNDLE },
+    );
+  });
+  afterAll(async () => {
+    await world.handle.close();
+    await world.gw.close();
+  });
+
+  it("without a pin the gesture answers the present — the other side of the assertion", async () => {
+    const body = await bodyOf(await app(world, "full", `?read=Plant:${encodeURIComponent(MOSS)}`));
+    expect(body).toContain("root=20");
+    expect(body).toContain(`${key}=99`);
+    expect(body).not.toContain("data-loam-asof"); // no moment named, no chrome
+  });
+
+  it("with a pin the gesture answers the MOMENT, and the page agrees with its own banner", async () => {
+    const body = await bodyOf(
+      await app(world, "full", `?asOf=1500&read=Plant:${encodeURIComponent(MOSS)}`),
+    );
+    expect(body).toContain("root=10"); // the root was already pinned
+    expect(body).toContain(`${key}=7`); // and so is the mediated read
+    expect(body).not.toContain(`${key}=99`); // never the present value under a past banner
+    expect(body).toContain(PIN); // the banner that would otherwise be vouching for a lie
+  });
+
+  it("a moment before the gesture's entity was spoken of resolves it empty, not to the present", async () => {
+    const body = await bodyOf(
+      await app(world, "full", `?asOf=500&read=Plant:${encodeURIComponent(MOSS)}`),
+    );
+    expect(body).toContain(`${key}=undefined`); // an empty view, drawn — absence is an answer
+    expect(body).not.toContain(`${key}=7`);
+    expect(body).not.toContain(`${key}=99`);
+  });
+});
+
+// ── (a, continued) both pins at once: an OLD lens over an OLD ground ──────────────────────────
+//
+// `serveRouteImpl` has TWO resolve branches, and only one of them is reached by a route bound to
+// the latest reading. A renderer published against a VERSION (§23.6) takes the other, and it must
+// honour the moment too — §26 calls the two pins orthogonal. Without this block the pinned
+// branch's `asOf` is feature-deletable: dropping the argument compiles and the suite stays green.
+
+describe("(a) a VERSION-PINNED route honours the moment — both pins, on both doors", () => {
+  let world: World;
+  const PINNED_ROUTE = "plant-frozen";
+
+  const pinnedPage = (door: "full" | "public", query = ""): Promise<Response> =>
+    fetch(`${world.base}/${MOUNT}/app/${PINNED_ROUTE}/${encodeURIComponent(FERN)}${query}`, {
+      headers: door === "full" ? { authorization: "Bearer op-token" } : {},
+    });
+
+  beforeAll(async () => {
+    world = await bootWorldWith(new MemoryBackend(), [
+      observed(FERN, "height", 10, 1000, GARDENER_SEED),
+      observed(FERN, "height", 20, 2000, GARDENER_SEED),
+    ]);
+    // A renderer frozen to v1's CONTENT ADDRESS — the branch a latest-bound route never reaches.
+    await world.gw.publishRenderer({
+      route: PINNED_ROUTE,
+      schema: "Plant",
+      version: 1,
+      consumes: ["height", "tag"],
+      bundle: BUNDLE,
+    });
+    // The anonymous door serves a pinned route only against a declared PIN (§23.8); the bare
+    // `Plant` declaration the world already carries is not one.
+    await world.gw.declarePublic(["Plant@v1"]);
+  });
+  afterAll(async () => {
+    await world.handle.close();
+    await world.gw.close();
+  });
+
+  it("the pinned route is genuinely the pinned branch — it serves, and v1 is a declared pin", () => {
+    const v1 = world.gw.registrationVersions().find((v) => v.hyperschema.name === "Plant");
+    expect(v1).toBeDefined();
+    expect(world.gw.isPublicPin("Plant", v1!.deltaId)).toBe(true);
+  });
+
+  for (const door of ["full", "public"] as const) {
+    it(`${door} door: the frozen lens reads the past, and still reads the present without a pin`, async () => {
+      const past = await pinnedPage(door, "?asOf=1500");
+      expect(past.status).toBe(200);
+      const pastBody = await bodyOf(past);
+      expect(pastBody).toContain("height=10");
+      expect(pastBody).not.toContain("height=20");
+      expect(pastBody).toContain(PIN);
+
+      const now = await pinnedPage(door);
+      expect(now.status).toBe(200);
+      const nowBody = await bodyOf(now);
+      expect(nowBody).toContain("height=20");
+      expect(nowBody).not.toContain("data-loam-asof");
+    });
+  }
+});
+
 // ── (b) a malformed moment refuses, and renders nothing ──────────────────────────────────────
 
 describe("(b) an invalid asOf refuses with the parameter named, and renders nothing", () => {
@@ -244,8 +387,9 @@ describe("(b) an invalid asOf refuses with the parameter named, and renders noth
 
   it("a POST ignores asOf entirely, exactly as the REST door does — a write is present-tense", async () => {
     // Not a refusal: `asOf` is a READ parameter, and the REST door already ignores it on a write.
-    // The route has no writable form, so the POST refuses for its OWN reason (never a 400 about
-    // the moment) — which is what proves the parse did not run.
+    // The route declares no writable field, so the POST refuses for its OWN reason — and that
+    // refusal is asserted POSITIVELY. A negative-only assertion passes on any failure at all,
+    // including a 500, which is the one outcome that would hide a parse running where it should not.
     const res = await fetch(
       `${world.base}/${MOUNT}/app/${ROUTE}/${encodeURIComponent(FERN)}?asOf=nonsense`,
       {
@@ -257,7 +401,10 @@ describe("(b) an invalid asOf refuses with the parameter named, and renders noth
         body: "height=99",
       },
     );
-    expect(await res.text()).not.toContain("asOf must be");
+    expect(res.status).toBe(405); // the route's own answer, not the moment's
+    const body = await res.text();
+    expect(body).toContain("this route is read-only");
+    expect(body).not.toContain("asOf must be");
   });
 });
 
@@ -301,10 +448,15 @@ describe("(c) an as-of window spanning an erasure confesses it, in the served by
   });
 
   it("the purge reached the BYTES — the condemned text is not in the store file, the bystander is", () => {
-    // The delta level, read where T40 proved an API can lie downward: the file itself.
-    const bytes = readFileSync(dbPath, "latin1");
-    expect(bytes).not.toContain("condemned-leaf");
-    expect(bytes).toContain("bystander-leaf");
+    // The delta level, read where T40 proved an API can lie downward: the files themselves. The
+    // `-wal` SIDECAR is read too when it exists, and it is not a formality — the backend's own
+    // comments name it as the place a pre-delete page image survives a checkpoint that could not
+    // truncate. Reading only the main file would call a leak clean.
+    const files = [dbPath, `${dbPath}-wal`].filter((f) => existsSync(f));
+    expect(files).toContain(dbPath);
+    for (const f of files) expect(readFileSync(f, "latin1")).not.toContain("condemned-leaf");
+    // Two-sided at the bytes as well: the live bystander is still legible somewhere in the store.
+    expect(files.map((f) => readFileSync(f, "latin1")).join("")).toContain("bystander-leaf");
   });
 
   for (const door of ["full", "public"] as const) {
@@ -452,6 +604,13 @@ describe("(d) the board's page carries the time control, and an asOf shows a pri
 // A rail driving real erasures can afford one or two of them, so the CAP and the plural forms
 // stay unreached through the door — and both are copy a person reads off the page. Asserted
 // directly on `asOfBanner`, which is the same function the door calls.
+//
+// WHAT THIS BLOCK DELIBERATELY DOES NOT PROVE: the SUPPRESSED span is asserted here only, never
+// driven through a rendered route. Standing up a read-closing slate (§29.3) and rendering under it
+// is a heavier fixture than this file carries, so the door-level proof that a slate's count reaches
+// a reader lives with §29.3's own data-door rails (`test/gateway/slate-doors.test.ts`); what is
+// closed here is that the banner states the count it is handed. A rail that drove a slate through
+// `/app` would close the remaining gap.
 
 describe("the confession counts honestly — plurals, and a capped enumeration", () => {
   const nodeAt = (asOf: number, forgotten: number[], suppressed?: number): ResolvedNode => ({
@@ -501,5 +660,19 @@ describe("the confession counts honestly — plurals, and a capped enumeration",
     expect(banner).toContain(PIN);
     expect(banner).toContain("as of 50 ");
     expect(banner).not.toContain(FORGOTTEN);
+  });
+
+  it("a PRESENT node passes through byte-identical — the frame is a no-op without a moment", () => {
+    // The load-bearing half of "no asOf is byte-identical to today", asserted on the wrapper rather
+    // than inferred from a page that merely lacked a marker. `frameAsOf` is called on EVERY 200
+    // text/html render, pinned or not, so a wrapper that touched a present-tense body would change
+    // every page this store has ever served.
+    const html = `<!doctype html><html><body><main>untouched</main></body></html>`;
+    const present: ResolvedNode = { entity: FERN, view: {}, hex: "", hviewHex: "" };
+    expect(frameAsOf(html, present)).toBe(html);
+    // A fragment takes the other placement branch, and must be equally untouched.
+    expect(frameAsOf("<p>bare</p>", present)).toBe("<p>bare</p>");
+    // And the same node WITH a moment does change it — or the assertion above proves nothing.
+    expect(frameAsOf(html, { ...present, asOf: 50, forgotten: [] })).not.toBe(html);
   });
 });

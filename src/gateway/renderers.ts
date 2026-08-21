@@ -575,7 +575,7 @@ export async function serveRouteImpl(
   const state: Record<string, string> = door === "public" ? {} : (gesture?.state ?? {});
   if (door === "full") {
     for (const g of gesture?.reads ?? []) {
-      reads[readKey(g.lens, g.entity)] = resolveGesture(gw, g);
+      reads[readKey(g.lens, g.entity)] = resolveGesture(gw, g, asOf);
     }
   }
   // Built LAZILY: a refused render must cost nothing, and `bytesEnvelope` walks the whole view. The
@@ -679,7 +679,12 @@ export async function serveRouteImpl(
 // the lens must be REGISTERED on this door's surface, and `hooks.resolve` carries no identity — a token
 // individuates WRITE standing, and §7's isolation unit for reads is the mount. There is no shadow
 // allow-list: the door adjudicates nothing the store would not.
-function resolveGesture(gw: Gateway, g: ReadGesture): ReadResult {
+//
+// THE MOMENT REACHES HERE TOO (SPEC §26), and it is not optional. A gesture and a pin ride the SAME
+// request — `?asOf=T&read=Lens:entity` is one GET — so a mediated read left at the present would put
+// today's value inside a page the frame stamps "as of T". That is worse than an unpinned read: the
+// door's own chrome vouches for the wrong number.
+function resolveGesture(gw: Gateway, g: ReadGesture, asOf?: number): ReadResult {
   const surface = gw.surface("full");
   const lens = g.lens as LensName;
   if (surface === undefined || !surface.registered.some((r) => lensOf(r) === lens)) {
@@ -688,9 +693,10 @@ function resolveGesture(gw: Gateway, g: ReadGesture): ReadResult {
     };
   }
   try {
-    const node = surface.hooks.resolve(lens, g.entity);
+    const node = surface.hooks.resolve(lens, g.entity, asOf);
     // Absence is an answer, not an error: an entity the store has nothing for resolves to an EMPTY
-    // view, and the renderer draws its own "nothing here". Only a fault is a refusal.
+    // view, and the renderer draws its own "nothing here". Only a fault is a refusal. An entity that
+    // had not been spoken of yet at T is exactly that same absence, reached down the time axis.
     return {
       entity: g.entity,
       view: bytesEnvelope(node.view) as Record<string, unknown>,
