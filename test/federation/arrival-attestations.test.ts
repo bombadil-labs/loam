@@ -127,10 +127,10 @@ const refsOf = (stamps: readonly Stamp[]): string[] => stamps.flatMap((s) => s.a
 /**
  * Bend what the pool's union door REPORTS, leaving what it does with the deltas alone.
  *
- * The two refusals below cannot be reached by any offer a peer can compose: the door names every id
- * it counted, so the disagreement the sync path refuses on is a source fault rather than an input.
- * Injecting it here is what makes that refusal a behavior instead of an unprovable belief — the
- * alternative is code no rail can reach.
+ * No offer a peer can compose reaches the refusals this drives: the door names every id it counted,
+ * so the disagreement the sync path refuses on is a source fault rather than an input. Injecting it
+ * here is what makes that refusal a behavior instead of an unprovable belief — the alternative is
+ * code no rail can reach. A door that stops naming its arrivals is the fault it stands for.
  */
 function bendReport(pool: Gateway, bend: (r: FederationReport) => FederationReport): void {
   const real = pool.federate.bind(pool);
