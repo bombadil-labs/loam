@@ -194,18 +194,26 @@ ${listing}
   // gateway's, over every ground it serves law from; this panel renders it and derives nothing of
   // its own.
   //
-  // STORE-WIDE, like the schema panel above and for the same reason: a lens is how this store
-  // reads, for every reader, so a withheld name is not one subtree's business. The block is absent
-  // when nothing is contested — a panel that is always there says nothing.
+  // The REFUSAL is store-wide, like the schema panel above and for the same reason: a lens is how
+  // this store reads, for every reader, so a withheld name is not one subtree's business. The block
+  // is absent when nothing is contested — a panel that is always there says nothing.
   //
-  // The prose speaks of the CONTENDERS it lists, never of the name as a whole. A name contested
-  // inside one ground can still be answered from another — a root pair withheld between themselves
-  // while a channel's pool binds the same name — and "the store serves neither" would be false
-  // there. What is always true is that no LISTED contender serves.
+  // A ROW'S ORIGIN IS A CONTAINER NAME, and container names on this page are reader-scoped: the
+  // channels panel above renders only what `reach` holds, deliberately. So a pool outside the
+  // reader's subtree is named by its kind rather than by its name. The refusal itself loses
+  // nothing — the lens, every contender, its signer and its binding are all still there.
+  //
+  // The prose never says the declaration is the ROOT's: a pool reads its own binding policy, so a
+  // contest can be governed a ground down from anything the operator declared here. Each row names
+  // the ground to act in.
   //
   // Delta ids are TEXT. No delta-addressed view exists to link to, and the members list already
   // renders ids this way; a link to nothing would be worse than a name a person can paste.
-  const contestedPanelHtml = (gw: Gateway): string => {
+  const contestedPanelHtml = (gw: Gateway, reach: ReadonlySet<string>): string => {
+    const originHtml = (origin: string): string =>
+      origin === "root" || reach.has(origin)
+        ? `<code>${escapeHtml(origin)}</code>`
+        : "a channel pool your subtree does not reach";
     const names = [...gw.contestedNames()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
     if (names.length === 0) return "";
     const listing = names
@@ -217,7 +225,7 @@ ${listing}
             .map(
               (r) =>
                 `<li><code>${escapeHtml(r.entity)}</code>, from ` +
-                `<code>${escapeHtml(r.origin)}</code>, signed by ` +
+                `${originHtml(r.origin)}, signed by ` +
                 `<code>${escapeHtml(r.author)}</code> at ` +
                 `${escapeHtml(momentOf(r.timestamp))} — binding ` +
                 `<code>${escapeHtml(r.deltaId)}</code></li>`,
@@ -227,11 +235,11 @@ ${listing}
       .join("\n");
     return `<section class="contested">
 <h2>Contested names.</h2>
-<p>This store declares a <code>conflicts</code> binding policy. Two or more registrations want each
-name below, and the policy serves none of the contenders it lists — the store refuses to choose for
-you. Each contender names its definition, the ground it was bound in (<code>root</code>, or a
-channel's pool), the key that signed the binding, and the moment. Withdraw one binding, or declare a
-policy that picks, and the name serves again.</p>
+<p>A <code>conflicts</code> binding policy is in force over each name below, so two or more
+registrations want it and this store serves none of them — it refuses to choose for you. Each
+contender names its definition, the ground it was bound in (<code>root</code>, or a channel's pool),
+the key that signed the binding, and the moment. A pool declares its own policy, so act in the
+ground the row names: withdraw one of its bindings, or declare there a policy that picks.</p>
 <ul>
 ${listing}
 </ul>
@@ -343,7 +351,7 @@ ${channelsPanelHtml(gw, (c) => reach.has(c.name), {
   empty: "No channel receives into a container your subtree reaches.",
 })}
 ${declareFormHtml(user, reach, formToken)}
-${contestedPanelHtml(gw)}
+${contestedPanelHtml(gw, reach)}
 ${schemaPanelHtml(gw, formToken)}
 ${signOutFormHtml(formToken)}`,
     );

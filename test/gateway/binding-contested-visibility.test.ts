@@ -26,12 +26,23 @@
 //
 // Erasure standing rule: every store here is this file's own in-memory fixture.
 
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { signClaims, type Delta, type HyperSchema, type Schema } from "@bombadil/rhizomatic";
+import {
+  makeNegationClaims,
+  signClaims,
+  type Delta,
+  type HyperSchema,
+  type Schema,
+} from "@bombadil/rhizomatic";
 import { bindingPolicyClaims } from "../../src/gateway/binding-policy.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
+import { readContestedBindings, readRegistrations } from "../../src/gateway/registration.js";
 import { MemoryBackend } from "../../src/store/memory.js";
+import { SqliteBackend } from "../../src/store/sqlite.js";
 import { FERN } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY } from "./fixtures.js";
 
@@ -226,6 +237,9 @@ describe("T204 — a contested name is named, with its origin", () => {
         expect(bindingIn(pool, row.deltaId)).toBeDefined();
         expect(bindingIn(me, row.deltaId)).toBeUndefined();
       }
+      // OBJECT LEVEL: the withholding reaches the SURFACE. The pool's own reader drops both
+      // contenders, so without this the reading could be right while a door served one of them.
+      expect(() => me.def("alice:Shared")).toThrow();
       // Two-sided: the peer's own uncontested lens still serves through the same pool.
       expect(me.def("alice:Plant")).toBeDefined();
       expect(me.contestedNames().has("alice:Plant")).toBe(false);
@@ -235,26 +249,199 @@ describe("T204 — a contested name is named, with its origin", () => {
     }
   });
 
-  it("an undeclared store reports nothing contested — the reading is the policy's, not a scanner", async () => {
-    const gw = await store(OP_SEED);
+  it("a pool cannot name a contest outside its own prefix", async () => {
+    const alice = await store(ALICE_SEED);
+    const me = await store(OP_SEED);
     try {
-      await gw.publishRegistration(PLANT, named("Shared"), [FERN], undefined, "hyperschema:One");
-      // No policy is declared, so a second registration for one name meets today's LOUD build-time
-      // collision (§47 criterion 12) — it never lands, and nothing is withheld by law. A reading
-      // that answered from the registrations alone would report a contest this store does not have.
-      await expect(
-        gw.publishRegistration(
-          bodyNamed("Two"),
-          named("Shared"),
+      await alice.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+      const ch = await me.openChannel({ into: "friends", prefix: "alice", source: feed(alice) });
+      await ch.sync();
+      const pool = ch.pool.gateway!;
+      await declareConflicts(pool, OP_SEED);
+      // A BARE name — outside the channel's namespace. The pool holds a real contest over it.
+      for (const n of ["One", "Two"]) {
+        await pool.publishRegistration(
+          bodyNamed(`Sneaky${n}`),
+          named("Sneaky"),
           [FERN],
           undefined,
-          "hyperschema:Two",
+          `hyperschema:Sneaky${n}`,
+        );
+      }
+      me.replayRegistrations();
+
+      // Two-sided, and this is the whole point: the POOL names the contest...
+      expect(readContestedBindings(pool.reactor, pool.operatorAuthor).has("Sneaky")).toBe(true);
+      // ...and the receiver's reading does not, because the name is outside the prefix the fold
+      // aggregates by. A pool that could name any lens could put a contest a person did not cause
+      // in front of them, over a name this store binds itself.
+      expect(me.contestedNames().has("Sneaky")).toBe(false);
+      // And the pool's IN-prefix contests still come through, so the filter is not just "nothing".
+      await pool.publishRegistration(
+        bodyNamed("InOne"),
+        named("alice:Both"),
+        [FERN],
+        undefined,
+        "hyperschema:InOne",
+      );
+      await pool.publishRegistration(
+        bodyNamed("InTwo"),
+        named("alice:Both"),
+        [FERN],
+        undefined,
+        "hyperschema:InTwo",
+      );
+      me.replayRegistrations();
+      expect(me.contestedNames().has("alice:Both")).toBe(true);
+    } finally {
+      await alice.close();
+      await me.close();
+    }
+  });
+
+  it("an undeclared store reports nothing contested, with both rivals live in the ground", async () => {
+    const gw = await store(OP_SEED);
+    try {
+      // Declared FIRST, so both rivals actually land — an undeclared store refuses the second
+      // publish loudly (§47 criterion 12), and a store holding one binding proves nothing about a
+      // reading that only ever reports contests between two.
+      const declaration = signClaims(
+        bindingPolicyClaims("conflicts", gw.operatorAuthor!, gw.nextTimestamp()),
+        OP_SEED,
+      );
+      await gw.append([declaration]);
+      await gw.publishRegistration(PLANT, named("Shared"), [FERN], undefined, "hyperschema:One");
+      await gw.publishRegistration(
+        bodyNamed("Two"),
+        named("Shared"),
+        [FERN],
+        undefined,
+        "hyperschema:Two",
+      );
+      const contended = gw.contestedNames().get("Shared") ?? [];
+      expect(contended).toHaveLength(2);
+
+      // Now STRIKE the declaration. The policy read is latest-SURVIVING, so no mode is in force —
+      // and the reading must fall silent even though both rival bindings are still legible.
+      await gw.append([
+        signClaims(
+          makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), declaration.id),
+          OP_SEED,
         ),
-      ).rejects.toThrow(/collides/);
-      expect(gw.contestedNames().size).toBe(0);
+      ]);
+      gw.replayRegistrations();
+
+      // DELTA LEVEL: nothing was withdrawn but the law — both bindings are still in the ground.
+      for (const row of contended) expect(bindingIn(gw, row.deltaId)).toBeDefined();
+      // OBJECT LEVEL: no policy withholds anything, so the name serves again...
       expect(gw.def("Shared")).toBeDefined();
+      // ...and the reading says nothing. A reading that answered from the registrations alone
+      // would report a contest this store's law no longer has.
+      expect(gw.contestedNames().size).toBe(0);
+      // Asserted on the single-ground reader too, which has no served-surface reconciliation to
+      // fall back on — so this pins the POLICY check rather than the surface check.
+      expect(readContestedBindings(gw.reactor, gw.operatorAuthor).size).toBe(0);
     } finally {
       await gw.close();
+    }
+  });
+
+  it("an undeclared store keeps its cross-origin shape: the root's binding wins, and nothing is withheld", async () => {
+    const alice = await store(ALICE_SEED);
+    const me = await store(OP_SEED);
+    try {
+      // ORDER IS THE WHOLE RAIL, and the channel is opened FIRST for a reason: a pool is seeded
+      // with a copy of the root ground at open, so a root binding published under the channel's
+      // prefix BEFORE the open lands in the pool and there is no cross-origin contest to have.
+      const ch = await me.openChannel({ into: "friends", prefix: "alice", source: feed(alice) });
+      await ch.sync();
+      await me.publishRegistration(
+        bodyNamed("Rival"),
+        named("alice:Plant"),
+        [FERN],
+        undefined,
+        "hyperschema:Rival",
+      );
+      const rootAt = me.def("alice:Plant").boundAt!;
+      // alice publishes AFTER the root claimed the name, so the blessing is the LATER binding. Any
+      // recency rule would hand the name over; §47 criterion 12 says an undeclared store keeps
+      // today's shape, where root rows enter the fixpoint first and win.
+      await alice.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+      await ch.sync();
+      const pool = ch.pool.gateway!;
+      const channelRow = readRegistrations(pool.reactor, pool.operatorAuthor).find(
+        (r) => r.lensName === "alice:Plant",
+      );
+      // The fixture's own premise, asserted: the pool holds the PEER's binding, and it is later.
+      expect(channelRow?.entity).toBe("hyperschema:Plant");
+      expect(channelRow?.boundAt ?? 0).toBeGreaterThan(rootAt);
+
+      // OBJECT LEVEL: the ROOT's definition is what the surface serves under that name — the later
+      // binding did NOT take it, because no policy is in force to hand it over.
+      expect(me.def("alice:Plant").entity).toBe("hyperschema:Rival");
+      // DELTA LEVEL: the peer's binding is in the pool all the same — it lost the fold, it was not
+      // refused at the door.
+      expect(bindingIn(pool, channelRow!.boundId!)).toBeDefined();
+      // And no law withholds anything, so the reading is silent.
+      expect(me.contestedNames().size).toBe(0);
+    } finally {
+      await alice.close();
+      await me.close();
+    }
+  });
+
+  it("a name the surface SERVES is never reported as withheld, whatever a ground says", async () => {
+    // A channel pool is seeded with a COPY of the receiver's root ground, so a re-attach can put
+    // the ROOT's own binding into the pool as a second contender for a name the root is meanwhile
+    // serving. The pool then reads a contest that the surface does not have. The reading must
+    // follow the surface: announcing a refusal the doors are not honouring is the failure that
+    // matters. (The copying itself is §46/§47 ground, not this reading's to change.)
+    const home = mkdtempSync(join(tmpdir(), "loam-t204-"));
+    const alice = await store(ALICE_SEED);
+    try {
+      await alice.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+      const genesis = assembleGenesis({ operatorSeed: OP_SEED, registrations: [] });
+      const backendFor = (pool: string): SqliteBackend =>
+        new SqliteBackend(join(home, `${pool.replace(/[^A-Za-z0-9._-]/g, "_")}.sqlite`));
+
+      const first = await Gateway.boot(new SqliteBackend(join(home, "store.sqlite")), genesis, {
+        channelBackend: backendFor,
+      });
+      await declareConflicts(first, OP_SEED);
+      const ch = await first.openChannel({
+        into: "friends",
+        prefix: "alice",
+        from: "https://peer.example/default",
+        source: feed(alice),
+      });
+      await ch.sync();
+      await first.publishRegistration(
+        bodyNamed("Rival"),
+        named("alice:Plant"),
+        [FERN],
+        undefined,
+        "hyperschema:Rival",
+      );
+      // Before the reboot this IS a live cross-origin contest, and the surface refuses the name.
+      expect(first.contestedNames().has("alice:Plant")).toBe(true);
+      expect(() => first.def("alice:Plant")).toThrow();
+      await first.close();
+
+      const rebooted = await Gateway.boot(new SqliteBackend(join(home, "store.sqlite")), genesis, {
+        channelBackend: backendFor,
+        channelToken: () => "tok",
+      });
+      try {
+        // The re-attach changed which binding the fold sees, and the name now SERVES...
+        expect(rebooted.def("alice:Plant")).toBeDefined();
+        // ...so the reading must not call it withheld — that sentence would be false on the page.
+        expect(rebooted.contestedNames().has("alice:Plant")).toBe(false);
+      } finally {
+        await rebooted.close();
+      }
+    } finally {
+      await alice.close();
+      rmSync(home, { recursive: true, force: true });
     }
   });
 });

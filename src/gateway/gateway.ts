@@ -70,9 +70,9 @@ import {
 import { freezeMembers, type ModuleVersion } from "./container-identity.js";
 import {
   boundKey,
-  lazyMatNameImpl,
   contestedNamesImpl,
   type ContestedName,
+  lazyMatNameImpl,
   loadHyperSchemaImpl,
   matForImpl,
   matNameImpl,

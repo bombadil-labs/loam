@@ -512,6 +512,17 @@ export function contestedNamesImpl(gw: Gateway): Map<string, ContestedName[]> {
       });
     }
   }
+  // A NAME THE SURFACE SERVES IS NOT WITHHELD, whatever a ground's own contest says — and the two
+  // can disagree. The reading is live and `gw.registered` is the fold it describes, so anything that
+  // moves a ground without a replay leaves them out of step; worse, a channel pool is seeded with a
+  // COPY of the root ground, so after a re-attach the pool's own reader sees the root's binding as a
+  // second contender for a name the root is meanwhile serving. Announcing a refusal the doors are
+  // not honouring is the failure that matters here, so the served surface decides. (curseChannelLaw
+  // verifies the same way, and for the same reason.)
+  const served = new Set<string>(gw.registered.map((r) => lensOf(r) as string));
+  for (const lens of [...out.keys()]) {
+    if (served.has(lens)) out.delete(lens);
+  }
   // Ground order within a name, so a reader sees the incumbent before the challenger.
   for (const list of out.values()) {
     list.sort(

@@ -3,5 +3,9 @@
   "category": "feature",
   "duration": 1,
   "id": "T204",
+  "rails": [
+    "test/gateway/binding-contested-visibility.test.ts",
+    "test/server/admin-contested-names.test.ts"
+  ],
   "title": "Contested names made visible — retain the contest in the fold, then render it"
 }

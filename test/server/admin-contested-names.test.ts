@@ -3,16 +3,26 @@
 // rail the statement was made only to code: the reading existed, and no surface read it, so a
 // person met a lens that simply was not there.
 //
-// What this file asserts, at both levels:
-//   - object level, the page a PERSON reads: the block names the withheld lens, and each contender
-//     carries its origin, its signing author, its timestamp, and its binding delta id;
+// THIS FILE IS THE OBJECT LEVEL ONLY, deliberately. It asserts what a person reads and what the
+// resolver answers; the DELTA level — that every row's binding is a real delta in the ground its
+// origin names — is carried by test/gateway/binding-contested-visibility.test.ts, and is not
+// repeated here. What it asserts:
+//   - the block names the withheld lens, and each contender carries its origin, its signing author,
+//     its timestamp, and its binding delta id;
 //   - the same page with nothing contested renders NO block at all (two-sided — a block that is
 //     always present says nothing, and an empty one invites a reader to think the store is broken);
+//   - a reader whose subtree does not reach a channel pool gets the refusal whole but not the
+//     pool's NAME, which is a container name and scoped on this page like every other;
 //   - the block matches `gateway.contestedNames()` row for row, field for field, and adds no row
 //     the reading does not hold. The surface never disagrees with the resolver, and it never
 //     re-derives the contest for itself (H10).
 //
-// The fixture's contest is CROSS-ORIGIN — a root registration against a channel pool's blessed
+// The per-field expectations in (c) and (d) are READ OUT of `contestedNames()` rather than written
+// by hand, so a wrongly-derived author rendered consistently would pass them. That is deliberate —
+// they rail the SURFACE against the resolver — and it is the gateway file that pins the resolver's
+// author against the policy's origin rank. Neither file is self-standing; together they close it.
+//
+// The fixture's first contest is CROSS-ORIGIN — a root registration against a channel pool's blessed
 // one — on purpose. A root-vs-root contest gives every row the same origin, so a renderer that
 // printed the word "root" on every line would satisfy any assertion drawn from it.
 //
@@ -54,6 +64,8 @@ const CHEAP: ScryptParams = { N: 1024, r: 8, p: 1, keylen: 32 };
 const PASSWORD = "correct horse";
 const ADA_SEED = "aa".repeat(32);
 const ADA = authorForSeed(ADA_SEED);
+const BEA_SEED = "bb".repeat(32);
+const BEA = authorForSeed(BEA_SEED);
 
 /** The pool `openChannel({ into: "ada:feed", prefix: "alice" })` derives. */
 const POOL = "channel:ada:feed:alice";
@@ -73,20 +85,25 @@ const authoredBy = (key: string): unknown => ({
   in: "input",
 });
 
-/** ada, and the container her channel receives into. */
-async function seedAda(gateway: Gateway): Promise<void> {
+/** ada and bea, and the container ada's channel receives into. */
+async function seedUsers(gateway: Gateway): Promise<void> {
   let ts = 9001;
   const op = (claims: Claims): Promise<unknown> =>
     gateway.append([signClaims(claims, OPERATOR_SEED)]);
-  await op(userClaims("ada", OPERATOR, ts++));
-  await op(roleClaims("ada", "actor", OPERATOR, ts++));
-  await op(
-    containerClaims(
-      { container: "ada", trust: "curated", posture: "shared", membership: authoredBy(ADA) },
-      OPERATOR,
-      ts++,
-    ),
-  );
+  for (const [name, key] of [
+    ["ada", ADA],
+    ["bea", BEA],
+  ] as const) {
+    await op(userClaims(name, OPERATOR, ts++));
+    await op(roleClaims(name, "actor", OPERATOR, ts++));
+    await op(
+      containerClaims(
+        { container: name, trust: "curated", posture: "shared", membership: authoredBy(key) },
+        OPERATOR,
+        ts++,
+      ),
+    );
+  }
   // `openChannel` declares a missing `into` with no parent edge, which would put the pool outside
   // every user's subtree; declaring it as ada's child first keeps the fixture's store well formed.
   await op(
@@ -109,8 +126,9 @@ async function doorOver(gateway: Gateway): Promise<string> {
   const home = mkdtempSync(join(tmpdir(), "loam-t204-"));
   homes.push(home);
   const hash = await hashPassword(PASSWORD, CHEAP);
-  writeCredentials(home, { version: 1, users: { ada: hash } });
+  writeCredentials(home, { version: 1, users: { ada: hash, bea: hash } });
   writeUserSeed(home, "ada", ADA_SEED);
+  writeUserSeed(home, "bea", BEA_SEED);
   const handle = await serve({
     mounts: { default: gateway },
     tokens: { "op-token": { operator: true } },
@@ -122,14 +140,22 @@ async function doorOver(gateway: Gateway): Promise<string> {
   return handle.url;
 }
 
-const rival: HyperSchema = { name: "Rival", alg: 1, body: PLANT.body };
+const defined = (name: string): HyperSchema => ({ name, alg: 1, body: PLANT.body });
 
 /**
- * A store whose `alice:Plant` is contested across origins.
+ * A store withholding THREE names, covering each shape the panel must render.
  *
- * alice publishes `Plant`; the channel blesses it into the pool as `alice:Plant`; this store then
- * registers a definition of its OWN under that same living name. With `conflicts` declared, the
- * fold serves neither — which is precisely the hole the block fills.
+ *   | name          | contest        | origins rendered           |
+ *   |---------------|----------------|----------------------------|
+ *   | `alice:Plant` | root vs pool   | `root` and the pool's name |
+ *   | `burdock`     | root vs root   | `root` twice               |
+ *   | `camellia`    | root vs root   | `root` twice               |
+ *
+ * The cross-origin one is what stops a renderer from printing "root" on every line. The other two
+ * exist for ORDER, and THREE of them rather than two: the reading composes root contests before
+ * cross-origin ones, so the sorted order is none of the insertion order, its reverse, or any order
+ * a two-name fixture could distinguish — a comparator that answers the same thing for every pair
+ * still passes at two names.
  */
 async function contestedServer(): Promise<{ base: string; gateway: Gateway }> {
   const alice = await Gateway.open(new MemoryBackend(), { seed: ALICE_SEED });
@@ -137,7 +163,7 @@ async function contestedServer(): Promise<{ base: string; gateway: Gateway }> {
   await alice.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
 
   const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
-  await seedAda(gateway);
+  await seedUsers(gateway);
   await gateway.append([
     signClaims(bindingPolicyClaims("conflicts", OPERATOR, gateway.nextTimestamp()), OPERATOR_SEED),
   ]);
@@ -148,12 +174,23 @@ async function contestedServer(): Promise<{ base: string; gateway: Gateway }> {
   });
   await channel.sync();
   await gateway.publishRegistration(
-    rival,
+    defined("Rival"),
     { ...PLANT_POLICY, name: "alice:Plant" },
     [FERN],
     undefined,
     "hyperschema:Rival",
   );
+  for (const lens of ["burdock", "camellia"]) {
+    for (const n of ["One", "Two"]) {
+      await gateway.publishRegistration(
+        defined(`${lens}${n}`),
+        { ...PLANT_POLICY, name: lens },
+        [FERN],
+        undefined,
+        `hyperschema:${lens}${n}`,
+      );
+    }
+  }
   return { base: await doorOver(gateway), gateway };
 }
 
@@ -164,7 +201,7 @@ async function calmServer(): Promise<{ base: string; gateway: Gateway }> {
   await alice.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
 
   const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
-  await seedAda(gateway);
+  await seedUsers(gateway);
   await gateway.append([
     signClaims(bindingPolicyClaims("conflicts", OPERATOR, gateway.nextTimestamp()), OPERATOR_SEED),
   ]);
@@ -224,10 +261,11 @@ describe("T204 — contested names on /admin", () => {
     const { base, gateway } = await contestedServer();
     grounds.push(gateway);
 
-    // The store really is withholding the name — the page below must agree with exactly this.
+    // The store really is withholding both names — the page below must agree with exactly this.
     expect(() => gateway.def("alice:Plant")).toThrow();
+    expect(() => gateway.def("burdock")).toThrow();
     const reading = gateway.contestedNames();
-    expect([...reading.keys()]).toEqual(["alice:Plant"]);
+    expect([...reading.keys()].sort()).toEqual(["alice:Plant", "burdock", "camellia"]);
     const rows = reading.get("alice:Plant")!;
     expect(rows.map((r) => r.origin).sort()).toEqual([POOL, "root"]);
 
@@ -245,6 +283,35 @@ describe("T204 — contested names on /admin", () => {
       expect(rendered).toContain(row.author);
       expect(rendered).toContain(new Date(row.timestamp).toISOString());
     }
+
+    // ONE ORDER, and it is the name's. The reading composes the root contests first, so a panel
+    // that rendered in reading order would put them above `alice:Plant`.
+    const at = (name: string): number => panel.indexOf(`<strong>${name}</strong>`);
+    expect(at("alice:Plant")).toBeGreaterThan(-1);
+    expect(at("alice:Plant")).toBeLessThan(at("burdock"));
+    expect(at("burdock")).toBeLessThan(at("camellia"));
+  });
+
+  it("(c) a reader is not shown the name of a channel pool their subtree does not reach", async () => {
+    const { base, gateway } = await contestedServer();
+    grounds.push(gateway);
+
+    // bea holds a container of her own, and the channel receives into ADA's subtree — the channels
+    // panel on this same page scopes container names for exactly this reason.
+    const html = await textOf(base, await signIn(base, "bea", PASSWORD));
+    const panel = panelOf(html);
+    // The REFUSAL still reaches her whole: registration is store law, and a withheld name is not
+    // one subtree's business. Every contender, its signer, and its binding are all still named.
+    expect(panel).toContain("<strong>alice:Plant</strong>");
+    expect(panel).toContain("hyperschema:Rival");
+    for (const row of gateway.contestedNames().get("alice:Plant")!) {
+      expect(rowFor(html, row.deltaId)).toContain(row.author);
+    }
+    // The pool's NAME does not — it names ada's child container and her alias for the peer.
+    expect(panel).not.toContain(POOL);
+    expect(panel).toContain("a channel pool your subtree does not reach");
+    // Two-sided: ada, who does reach it, still sees the real name.
+    expect(panelOf(await textOf(base, await signIn(base, "ada", PASSWORD)))).toContain(POOL);
   });
 
   it("(c) a store withholding nothing renders no block at all", async () => {
@@ -271,7 +338,7 @@ describe("T204 — contested names on /admin", () => {
     const panel = panelOf(html);
     const reading = gateway.contestedNames();
     // Non-vacuous: an empty reading would satisfy every loop below.
-    expect(reading.size).toBe(1);
+    expect(reading.size).toBe(3);
 
     let contenders = 0;
     for (const [lens, rows] of reading) {
