@@ -106,6 +106,34 @@ const seedConnector = (): void => {
   writeOAuthFile(home, file);
 };
 
+// Two connectors that differ in every column the connector half of a row carries: one has an acting
+// identity and a live token, the other has neither. Each fact is asserted on BOTH rows, so a
+// listing that read the wrong client's records would swap them and be caught.
+const seedTwoConnectors = (): void => {
+  const client = (clientId: string, clientName: string, generation: number) => ({
+    clientId,
+    clientName,
+    redirectUris: ["https://x/cb"],
+    registeredAt: 1,
+    generation,
+  });
+  const file: OAuthFile = {
+    ...EMPTY_OAUTH,
+    clients: [client("cli-groove", "Groove", 2), client("cli-mute", "Mute", 1)],
+    grants: [
+      {
+        clientId: "cli-groove",
+        actorSeed: CONNECTOR_SEED,
+        actor: CONNECTOR,
+        grantedAt: 1,
+        standing: true,
+      },
+    ],
+    tokens: [{ digest: "aa".repeat(32), clientId: "cli-groove", issuedAt: 1, generation: 2 }],
+  };
+  writeOAuthFile(home, file);
+};
+
 // Read the store file directly — never through a Gateway, which boots its genesis and would count
 // its own writes as the command's.
 async function deltaCount(): Promise<number> {
@@ -341,6 +369,105 @@ describe("T205 (c) — a provisioned seed file with no grant is listed as holdin
     expect(quill).toContain("write");
     expect(quill).not.toContain("no grant in the ground");
     expect(await heldVerbs(authorOfPen("quill"))).toEqual(["write"]);
+  });
+});
+
+// The kind column, in the order the rows print. The header line and the operator line carry no kind
+// and do not appear; anything else that did would show up here rather than pass unnoticed.
+const kindsIn = (listing: string): string[] =>
+  listing
+    .split("\n")
+    .map((l) => /^ {2}(user|pen|connector|unattributed) /.exec(l)?.[1])
+    .filter((k): k is string => k !== undefined);
+
+describe("T205 — the screen is grouped, and every column tells the truth", () => {
+  it("groups the rows user, pen, connector, unattributed", async () => {
+    // "one screen" is a promise about reading, so the grouping is a promise too: an operator
+    // scanning the ledger never has to wonder whether a pen row might sit below a connector row.
+    // The names here sort AGAINST the kind order on purpose — `nib` before `vera` alphabetically,
+    // `cli-groove` before `nib` — so a listing that had lost its kind ranking and fallen back on
+    // names would print a visibly different order rather than the same one by luck.
+    expect(
+      await run(["user", "create", "vera", "--operator", "--home", home], io(), password("pw")),
+      printed(),
+    ).toBe(0);
+    expect(await run(["pen", "create", "nib", "--home", home], io()), printed()).toBe(0);
+    seedConnector();
+    expect(
+      await run(
+        ["grant", "cli-groove", "--verb=register", "--prefix=groove:", "--home", home],
+        io(),
+      ),
+      printed(),
+    ).toBe(0);
+    await plantOperatorGrant(STRANGER, "write");
+    clear();
+
+    expect(await run(["grant", "list", "--home", home], io()), printed()).toBe(0);
+    expect(kindsIn(printed()), printed()).toEqual(["user", "pen", "connector", "unattributed"]);
+  });
+
+  it("a seed file that is not a key is named, with its own path, and claims no author", async () => {
+    // Custody that cannot be read is not custody by nobody (H9). The row still prints, it names the
+    // file, and its author column stays empty rather than inventing a key.
+    expect(await run(["pen", "create", "quill", "--home", home], io()), printed()).toBe(0);
+    writeFileSync(userSeedPath(home, "vex"), "not-a-key\n", { mode: 0o600 });
+    writeFileSync(penSeedPath(home, "wisp"), "also-not-a-key\n", { mode: 0o600 });
+    clear();
+
+    expect(await run(["grant", "list", "--home", home], io()), printed()).toBe(0);
+    const listing = printed();
+
+    // Each row names ITS OWN file — a user row must never quote a pen path, or the operator goes
+    // looking in the wrong place for the key they were told to replace.
+    const vex = rowFor(listing, "vex");
+    expect(vex, listing).not.toBe("");
+    expect(vex).toContain(userSeedPath(home, "vex"));
+    expect(vex).toContain("does not hold a 64-hex seed");
+    expect(vex).not.toContain("ed25519:");
+
+    const wisp = rowFor(listing, "wisp");
+    expect(wisp, listing).not.toBe("");
+    expect(wisp).toContain(penSeedPath(home, "wisp"));
+    expect(wisp).toContain("does not hold a 64-hex seed");
+    expect(wisp).not.toContain("ed25519:");
+
+    // Two-sided: the pen whose file IS a key still shows one, and says nothing about hex.
+    const quill = rowFor(listing, "quill");
+    expect(quill).toContain(shown(authorOfPen("quill")));
+    expect(quill).not.toContain("64-hex");
+  });
+
+  it("carries each connector's own generation, token count, and acting identity", async () => {
+    seedTwoConnectors();
+    expect(
+      await run(
+        ["grant", "cli-groove", "--verb=register", "--prefix=groove:", "--home", home],
+        io(),
+      ),
+      printed(),
+    ).toBe(0);
+    clear();
+
+    expect(await run(["grant", "list", "--home", home], io()), printed()).toBe(0);
+    const listing = printed();
+
+    const groove = rowFor(listing, "cli-groove");
+    expect(groove, listing).not.toBe("");
+    expect(groove).toContain("generation 2");
+    expect(groove).toContain("1 live token");
+    expect(groove).not.toContain("1 live tokens"); // one token is not plural
+    expect(groove).toContain(shown(CONNECTOR));
+    expect(groove).not.toContain("no acting identity yet");
+
+    // Two-sided on all three facts: the connector that has completed no token exchange holds none
+    // of them, and its row says so instead of borrowing its neighbour's.
+    const mute = rowFor(listing, "cli-mute");
+    expect(mute, listing).not.toBe("");
+    expect(mute).toContain("generation 1");
+    expect(mute).toContain("0 live tokens");
+    expect(mute).toContain("no acting identity yet");
+    expect(mute).not.toContain("ed25519:");
   });
 });
 
