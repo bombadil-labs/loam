@@ -17,7 +17,7 @@
 // slice, not invented here.
 
 import { authorForSeed, signClaims, type Primitive } from "@bombadil/rhizomatic";
-import type { Claims, Reactor } from "@bombadil/rhizomatic";
+import type { Claims, Delta, Reactor } from "@bombadil/rhizomatic";
 import { bytesEnvelope, findBytesByRef } from "./bytes.js";
 import { importEsm, loadedEsm } from "./esm.js";
 import type { Gateway, RequestContext } from "./gateway.js";
@@ -280,71 +280,108 @@ const isRoute = (id: string): boolean => id.startsWith("renderer:");
 // merges as data and mounts nothing (§8/§12 inert-by-default). A binding missing route/schema/bundle
 // binds nothing — unmounted, never a crash.
 export function readRenderers(reactor: Reactor, operator?: string): RendererBinding[] {
-  const lawful = lawfulSnapshot(reactor, operator);
   const negated = lawfulNegated(reactor, operator);
+  return latestPerRoute(lawfulSnapshot(reactor, operator), (d) => !negated(d.id));
+}
+
+/**
+ * ONE renderer binding, parsed from its delta — or undefined when the delta is not one, or is
+ * malformed (a binding missing route/schema/bundle binds nothing: unmounted, never a crash).
+ *
+ * Extracted so every reader of renderer law parses it the same way. Two parsers would drift, and the
+ * drift would land on which bundle a caller believes is bound.
+ */
+export function rendererBindingOf(delta: Delta): RendererBinding | undefined {
+  const key = delta.claims.pointers.find(
+    (p) => p.target.kind === "entity" && p.target.entity.context === CTX_RENDERER,
+  );
+  if (key?.target.kind !== "entity" || !isRoute(key.target.entity.id)) return undefined;
+  const route = primitive(delta.claims, "route");
+  const schemaName = primitive(delta.claims, "schema");
+  const bundle = primitive(delta.claims, "bundle");
+  if (typeof route !== "string" || typeof schemaName !== "string" || typeof bundle !== "string") {
+    return undefined;
+  }
+  const versionIdRaw = primitive(delta.claims, "versionId");
+  const versionId = typeof versionIdRaw === "string" ? versionIdRaw : undefined;
+  const jsonList = (role: string): string[] | undefined => {
+    const raw = primitive(delta.claims, role);
+    if (typeof raw !== "string") return undefined;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.every((f) => typeof f === "string")) return parsed;
+    } catch {
+      return undefined;
+    }
+    return undefined;
+  };
+  // Write-enabling (SPEC §23.3): read the form allow-list and the pen name. A binding with one but not
+  // the other is malformed and stays READ-ONLY (both dropped) — the parse gate keeps them paired, and a
+  // reader never trusts a half-written binding to sign.
+  const writable = jsonList("writable");
+  const penRaw = primitive(delta.claims, "pen");
+  const pen = typeof penRaw === "string" && penRaw !== "" ? penRaw : undefined;
+  const writeReady = writable !== undefined && writable.length > 0 && pen !== undefined;
+  return {
+    route,
+    // Parse boundary: reconstructed from a lawful delta, validated string above (see the guard).
+    schemaName: schemaName as LensName,
+    ...(versionId === undefined ? {} : { versionId }),
+    consumes: jsonList("consumes") ?? [],
+    bundle,
+    ...(writeReady ? { writable, pen } : {}),
+    deltaId: delta.id,
+    timestamp: delta.claims.timestamp,
+  };
+}
+
+/** Latest per route, over whatever deltas the caller hands in, keeping only those that survive. */
+function latestPerRoute(
+  deltas: Iterable<Delta>,
+  survives: (d: Delta) => boolean,
+): RendererBinding[] {
   const latest = new Map<string, RendererBinding>();
-  for (const delta of lawful) {
-    const key = delta.claims.pointers.find(
-      (p) => p.target.kind === "entity" && p.target.entity.context === CTX_RENDERER,
-    );
-    if (key?.target.kind !== "entity" || !isRoute(key.target.entity.id)) continue;
-    if (negated(delta.id)) continue;
-    const route = primitive(delta.claims, "route");
-    const schemaName = primitive(delta.claims, "schema");
-    const bundle = primitive(delta.claims, "bundle");
-    if (typeof route !== "string" || typeof schemaName !== "string" || typeof bundle !== "string") {
-      continue; // a malformed renderer binds nothing
-    }
-    const versionIdRaw = primitive(delta.claims, "versionId");
-    const versionId = typeof versionIdRaw === "string" ? versionIdRaw : undefined;
-    let consumes: string[] = [];
-    const consumesRaw = primitive(delta.claims, "consumes");
-    if (typeof consumesRaw === "string") {
-      try {
-        const parsed: unknown = JSON.parse(consumesRaw);
-        if (Array.isArray(parsed) && parsed.every((f) => typeof f === "string")) consumes = parsed;
-      } catch {
-        consumes = [];
-      }
-    }
-    // Write-enabling (SPEC §23.3): read the form allow-list and the pen name. A binding with one but not
-    // the other is malformed and stays READ-ONLY (both dropped) — the parse gate keeps them paired, and a
-    // reader never trusts a half-written binding to sign.
-    const penRaw = primitive(delta.claims, "pen");
-    let writable: string[] | undefined;
-    const writableRaw = primitive(delta.claims, "writable");
-    if (typeof writableRaw === "string") {
-      try {
-        const parsed: unknown = JSON.parse(writableRaw);
-        if (Array.isArray(parsed) && parsed.every((f) => typeof f === "string")) writable = parsed;
-      } catch {
-        writable = undefined;
-      }
-    }
-    const pen = typeof penRaw === "string" && penRaw !== "" ? penRaw : undefined;
-    const writeReady = writable !== undefined && writable.length > 0 && pen !== undefined;
-    const binding: RendererBinding = {
-      route,
-      // Parse boundary: reconstructed from a lawful delta, validated string above (see the guard).
-      schemaName: schemaName as LensName,
-      ...(versionId === undefined ? {} : { versionId }),
-      consumes,
-      bundle,
-      ...(writeReady ? { writable: writable as readonly string[], pen } : {}),
-      deltaId: delta.id,
-      timestamp: delta.claims.timestamp,
-    };
+  for (const delta of deltas) {
+    if (!survives(delta)) continue;
+    const binding = rendererBindingOf(delta);
+    if (binding === undefined) continue;
     // Latest per route: (timestamp, id) ascending, the same tie-break every latest-wins reader uses.
-    const held = latest.get(key.target.entity.id);
+    const held = latest.get(binding.route);
     if (
       held === undefined ||
       binding.timestamp > held.timestamp ||
       (binding.timestamp === held.timestamp && binding.deltaId > held.deltaId)
     ) {
-      latest.set(key.target.entity.id, binding);
+      latest.set(binding.route, binding);
     }
   }
   return [...latest.values()];
+}
+
+/**
+ * Every surviving renderer binding NOT authored by `operator`, latest per route — the arrivals a
+ * channel pool holds (SPEC §24.6).
+ *
+ * ONE PASS, and that is the point (H8). Asking `readRenderers` once per author would re-materialize
+ * the whole pool per author, and the author set is PEER-CONTROLLED: a renderer binding under a fresh
+ * keypair costs a peer nothing, and this runs on every sync and every listing. `lawfulNegated` reads
+ * the substrate's own negation index rather than the ground, so per-author survival stays cheap.
+ *
+ * Survival is scoped to each binding's OWN author — a shipper takes back their own word and nobody
+ * takes it back for them, the same algebra the blessing door keeps over a module's members.
+ */
+export function readForeignRenderers(reactor: Reactor, operator: string): RendererBinding[] {
+  const negated = new Map<string, (id: string) => boolean>();
+  const survives = (d: Delta): boolean => {
+    if (d.claims.author === operator) return false;
+    let owned = negated.get(d.claims.author);
+    if (owned === undefined) {
+      owned = lawfulNegated(reactor, d.claims.author);
+      negated.set(d.claims.author, owned);
+    }
+    return !owned(d.id);
+  };
+  return latestPerRoute(reactor.snapshot(), survives);
 }
 
 // Load a renderer bundle to a callable, via the shared content-addressed ESM loader (§22.3). `export

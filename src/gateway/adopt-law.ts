@@ -385,7 +385,7 @@ const carriesBytes = (members: readonly Delta[], ref: string): boolean =>
     d.claims.pointers.some((p) => p.target.kind === "bytes" && bytesRefOf(p.target.value) === ref),
   );
 
-export const isRendererBinding = (claims: Claims): boolean =>
+const isRendererBinding = (claims: Claims): boolean =>
   claims.pointers.some(
     (p) =>
       p.target.kind === "entity" &&
@@ -1147,6 +1147,24 @@ async function adoptOne(
     return { alias: row.alias, kind: "witnessed", landed, notes };
   }
 
+  // A CALLER THAT REFUSES DEPENDENCIES REFUSES THE BARE-NAME FALLBACK WITH THEM.
+  //
+  // `unknown` means the module carries no definition of the lens this renderer reads, so the only
+  // thing left to match on is the peer's own spelling — and the fallback below matches it against
+  // `gw.registered`, which in a channel pool is the one-way seeded copy of the RECEIVER's own
+  // registrations. That is the lens capture the address matching exists to prevent, arriving by the
+  // one door that skips it: a peer's app reading `Plant` would mount bound to the operator's Plant,
+  // rendering the operator's own reading under the peer's name. A caller that blesses one export of
+  // a stranger's pool cannot accept "some law of that name is served here" as an answer.
+  if (ex.kind === "renderer" && verdict.kind === "unknown" && opts.dependencies === "refuse") {
+    throw new Error(
+      `adoption refused: the renderer "${row.alias}" reads the lens "${ex.schemaName}", and this ` +
+        `module carries no definition of it — so nothing here can say WHOSE reading that name ` +
+        `means. A law of that name may well be served; matching on the name would mount this app ` +
+        `over it. Bless the schema it reads first, from the same source.`,
+    );
+  }
+
   // A renderer reads a LENS this store must serve (§23.4 refuses one that does not). When the
   // module exports that lens too, the blessing takes it first — the renderer is not law that
   // stands alone, and the dependency is REPORTED rather than assumed.
@@ -1170,9 +1188,9 @@ async function adoptOne(
       );
     }
     // The dependency is blessed under its OWN name: `as` renames the row the operator asked for,
-    // never the lens its renderer reads.
+    // never the lens its renderer reads. `supersede` does NOT ride down either — it is consent to
+    // take ONE name the caller looked at, and the dependency's name is one they never mentioned.
     const inherited: AdoptLawOptions = {
-      ...(opts.supersede === undefined ? {} : { supersede: opts.supersede }),
       ...(opts.pen === undefined ? {} : { pen: opts.pen }),
       ...(opts.repoints === undefined ? {} : { repoints: opts.repoints }),
     };
@@ -1292,10 +1310,12 @@ function resolveRendererLens(
   // Nothing in the module defines the lens. The operator was told "or register your own", so the
   // peer's spelling is all there is to match on — the caller's own name check rules below.
   if (dependency === undefined) return { kind: "unknown" };
-  const served = gw
-    .registrationVersions()
-    .filter((v) => schemaLawAddress(v.hyperschema, v.schema) === dependency.ex.address)
-    .at(-1); // registrationVersions is (timestamp, deltaId) ascending — the latest name for this law
+  // THE SERVED SET, not every version ever published. A retired reading still has versions on the
+  // ground — a cursed channel lens is exactly that — and re-pointing a binding at a name this store
+  // no longer answers would swap a legible refusal for a renderer over a dark lens.
+  const served = gw.registered.find(
+    (r) => schemaLawAddress(r.hyperschema, r.schema) === dependency.ex.address,
+  );
   if (served === undefined) return { kind: "unblessed", dependency };
   const under = lensOf(served);
   if (under === ex.schemaName) return { kind: "resolved", ex };

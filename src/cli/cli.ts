@@ -1051,13 +1051,18 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
         const short = (h: string): string => `${h.slice(0, 12)}…`;
         const apps = (appsByChannel.get(r.name) ?? []).map((a) => {
           const head = `\n  app "${a.route}"`;
-          if (a.blessed) return `${head} serves at "${a.serves}", bundle ${short(a.hash!)}`;
+          if (a.hash !== undefined && a.hash === a.serving) {
+            return `${head} serves at "${a.serves}", bundle ${short(a.hash)}`;
+          }
           if (a.hash === undefined) {
-            return (
-              `${head} was WITHDRAWN by the peer, and this store still runs the bundle it ` +
-              `blessed (${short(a.serving!)}) at "${a.serves}"\n` +
-              `    dropping the channel is what removes it: \`loam federate drop --channel ${r.name} --yes\``
-            );
+            // Withdrawn upstream. `serving` may be gone too — the blessing landed and something it
+            // needs no longer holds — and a branch that assumed otherwise would crash the listing.
+            return a.serving === undefined
+              ? `${head} was WITHDRAWN by the peer, and nothing runs at "${a.serves}" either\n` +
+                  "    the blessing is still in the pool; dropping the channel is what clears it"
+              : `${head} was WITHDRAWN by the peer, and this store still runs the bundle it ` +
+                  `blessed (${short(a.serving)}) at "${a.serves}"\n` +
+                  `    dropping the channel is what removes it: \`loam federate drop --channel ${r.name} --yes\``;
           }
           if (a.serving === undefined) {
             return (

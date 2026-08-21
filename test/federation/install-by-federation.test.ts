@@ -34,7 +34,7 @@ import {
 import { run } from "../../src/cli/cli.js";
 import { exportOffer } from "../../src/federation/offer.js";
 import { grantClaims } from "../../src/gateway/accounts.js";
-import { manifestExportClaims } from "../../src/gateway/adopt-law.js";
+import { CTX_MANIFEST, manifestExportClaims, readManifest } from "../../src/gateway/adopt-law.js";
 import { freezeMembers } from "../../src/gateway/container-identity.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -126,6 +126,14 @@ const bindingOf = (gw: Gateway, route: string): string =>
   )!.id;
 
 const bodyOf = (r: { body: string }): string => r.body;
+
+/** Is this delta a manifest export row at all? */
+const isRow = (d: { claims: { pointers: readonly { target: unknown }[] } }): boolean =>
+  d.claims.pointers.some(
+    (p) =>
+      (p.target as { kind?: string; entity?: { context?: string } }).kind === "entity" &&
+      (p.target as { entity?: { context?: string } }).entity?.context === CTX_MANIFEST,
+  );
 
 // Does ANY pool file under this home still hold these bytes? EVERY file, not just the .sqlite:
 // sqlite runs in WAL mode, so a recent write lives in the -wal sidecar until a checkpoint, and a
@@ -303,7 +311,11 @@ describe("T209 — the report and the listing name what arrived", () => {
       await bob.setChannel(CHANNEL, { receiving: false });
 
       const frozen = await channel.sync();
-      expect(frozen.accepted).toBe(0); // the freeze is real
+      // `accepted: 0` alone cannot tell a freeze from a quiet poll — re-pulling the same log accepts
+      // nothing either way. `offered: 0` is what only the frozen branch produces: it returns before
+      // the peer is ever asked.
+      expect(frozen.offered).toBe(0);
+      expect(frozen.accepted).toBe(0);
       expect(frozen.apps).toHaveLength(1);
       expect(frozen.apps[0]!.hash).toBe(hashOf(APP));
       expect(frozen.apps[0]!.blessed).toBe(false);
@@ -457,22 +469,90 @@ describe("T209 — the blessing toggle does not extend to renderers", () => {
   it("an app whose lens is not blessed refuses, and mounts nothing", async () => {
     // Ordering: a renderer is not law that stands alone. With blessing off the peer's lens binds
     // nowhere, so the app has no reading to render and the adoption door says which act comes first.
+    //
+    // AND THE REFUSAL IS ABOUT IDENTITY, NOT SCARCITY. The store here DOES serve a lens named
+    // "Plant" — its own, seeded into the pool by the one-way edge. A door that asked "is some law of
+    // that name served?" would mount the peer's app over the operator's own reading and call it
+    // success, which is the capture the address matching exists to prevent, arriving by the one path
+    // that skips it. So the fixture registers that rival deliberately.
     const alice = await peer(ALICE_SEED, { route: "hello", app: APP, height: 62 });
     const bob = await store(BOB_SEED);
     try {
+      await bob.publishRegistration(
+        PLANT,
+        { ...RIVAL_PLANT, name: "Plant" },
+        [FERN],
+        undefined,
+        "hyperschema:BobPlant",
+      );
       const channel = await link(bob, alice, "alice", false);
       await channel.sync();
+      expect(channel.pool.gateway!.registered.some((r) => r.schema.name === "Plant")).toBe(true);
+
       await expect(bob.blessChannelApp(CHANNEL, "hello")).rejects.toThrow(
-        /bless the schema it reads first/,
+        /carries no definition of it/,
       );
       expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(404);
       expect(channel.pool.gateway!.renderers().some((r) => r.route === "hello")).toBe(false);
 
-      // Two-sided: turn blessing on, sync, and the same call now mounts it.
+      // Two-sided: turn blessing on, sync, and the same call now mounts it — reading ALICE's lens.
       await bob.setChannel(CHANNEL, { blessing: true });
       await channel.sync();
       await bob.blessChannelApp(CHANNEL, "hello");
       expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(200);
+      expect(channel.pool.gateway!.renderers().find((r) => r.route === "hello")!.schemaName).toBe(
+        "alice:Plant",
+      );
+    } finally {
+      await alice.close();
+      await bob.close();
+    }
+  });
+
+  it("an app whose lens was CURSED refuses, and says this caller blesses one export", async () => {
+    // The other refusal, and the branch that only a channel caller can reach: the module DOES carry
+    // the lens, and this store binds that law under no name — because the operator retired it. A
+    // door that pulled the dependency in would re-bless what the operator just retired, on the
+    // strength of a request about something else.
+    const alice = await peer(ALICE_SEED, { route: "hello", app: APP, height: 62 });
+    const bob = await store(BOB_SEED);
+    try {
+      const channel = await link(bob, alice, "alice");
+      await channel.sync();
+      await bob.curseChannelLaw(CHANNEL, "alice:Plant");
+
+      await expect(bob.blessChannelApp(CHANNEL, "hello")).rejects.toThrow(
+        /blesses one export at a time/,
+      );
+      expect(channel.pool.gateway!.renderers().some((r) => r.route === "hello")).toBe(false);
+      // Two-sided: lift the curse, sync, and the same call mounts it.
+      await bob.curseChannelLaw(CHANNEL, "alice:Plant", { lift: true });
+      await channel.sync();
+      await bob.blessChannelApp(CHANNEL, "hello");
+      expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(200);
+    } finally {
+      await alice.close();
+      await bob.close();
+    }
+  });
+
+  it("cursing the lens under a MOUNTED app darkens it in the same breath", async () => {
+    // A curse strikes a binding that lives in the POOL, and a mounted app resolves through the
+    // POOL's surface. Retiring the reading for the root's readers while the stranger's code goes on
+    // rendering it is the retirement reporting a success it did not achieve.
+    const alice = await peer(ALICE_SEED, { route: "hello", app: APP, height: 62 });
+    const bob = await store(BOB_SEED);
+    try {
+      const channel = await link(bob, alice, "alice");
+      await channel.sync();
+      await bob.blessChannelApp(CHANNEL, "hello");
+      expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(200);
+
+      await bob.curseChannelLaw(CHANNEL, "alice:Plant");
+      expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(404);
+      // …and the listing stops calling it served, in the same process.
+      expect(bob.channelApps(CHANNEL)[0]!.serving).toBeUndefined();
+      expect(bob.channelApps(CHANNEL)[0]!.blessed).toBe(false);
     } finally {
       await alice.close();
       await bob.close();
@@ -640,6 +720,18 @@ describe("T209 — a peer may not choose what the operator blesses", () => {
       ]);
       const channel = await link(bob, alice, "alice");
       await channel.sync();
+      const pool = channel.pool.gateway!;
+
+      // THE PLANT IS LIVE, asserted rather than assumed. Without this the rail would keep passing in
+      // a world where the row never reached the pool at all — an empty-set pass, and the guard would
+      // be measuring nothing (H10 one step removed).
+      const members = [...pool.reactor.snapshot()];
+      expect(members.some((d) => d.claims.author === authorForSeed(ALICE_SEED) && isRow(d))).toBe(
+        true,
+      );
+      // …and it really does WIN the alias when the manifest is read unscoped, which is the whole
+      // premise: the operator-scoped read is what makes the blessing ignore it.
+      expect(readManifest(members).find((r) => r.alias === "app:hello")?.target).toBe(decoy);
 
       const listed = bob.channelApps(CHANNEL);
       expect(listed).toHaveLength(1);
@@ -677,12 +769,85 @@ describe("T209 — a peer may not choose what the operator blesses", () => {
       ]);
       const channel = await link(bob, alice, "alice");
       const report = await channel.sync();
+      const members = [...channel.pool.gateway!.reactor.snapshot()];
 
+      // The plant is live and it WINS the alias unscoped — the premise, asserted.
+      expect(readManifest(members).find((r) => r.alias === "Plant")?.target).toBe(
+        bindingOf(alice, "hello"),
+      );
       // The lens still binds under the receiver's own name — the pass did its job…
       expect(report.bound).toContain("alice:Plant");
       // …and mounted nothing.
       expect(channel.pool.gateway!.renderers().some((r) => r.route === "hello")).toBe(false);
       expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(404);
+    } finally {
+      await alice.close();
+      await bob.close();
+    }
+  });
+
+  it("a decoy row naming the RIGHT target cannot deny the operator their own alias", async () => {
+    // The other half of the same guard, and it fails the other way: unscoped, a peer's row naming
+    // the very binding the operator means suppresses the operator's own mint — and the scoped read
+    // then finds no row at all, so `bless-app` refuses forever for that route. A peer must not be
+    // able to make an act impossible any more than they can redirect it.
+    const alice = await peer(ALICE_SEED, { route: "hello", app: APP, height: 62 });
+    const bob = await store(BOB_SEED);
+    try {
+      await alice.append([
+        signClaims(
+          manifestExportClaims(
+            { alias: "app:hello", targetAddress: bindingOf(alice, "hello"), kind: "renderer" },
+            authorForSeed(ALICE_SEED),
+            9_999_999_999_999,
+          ),
+          ALICE_SEED,
+        ),
+      ]);
+      const channel = await link(bob, alice, "alice");
+      await channel.sync();
+      const members = [...channel.pool.gateway!.reactor.snapshot()];
+      expect(readManifest(members).find((r) => r.alias === "app:hello")?.author).toBe(
+        authorForSeed(ALICE_SEED),
+      );
+
+      await bob.blessChannelApp(CHANNEL, "hello");
+      expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(200);
+    } finally {
+      await alice.close();
+      await bob.close();
+    }
+  });
+
+  it("the receiver's OWN route of the same name is never reported as what a channel runs", async () => {
+    // `serving` is what this store RUNS at that route, and a pool holds a twin of every renderer the
+    // receiver owns. Counting a twin tells an operator their peer's route runs code it does not, and
+    // offers `--supersede` for a conflict that does not exist — whose remedy would strike the
+    // operator's own binding.
+    const alice = await peer(ALICE_SEED, { route: "hello", app: APP, height: 62 });
+    const bob = await store(BOB_SEED);
+    try {
+      await bob.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+      await bob.append([observed(FERN, "height", 7, 2_000, BOB_SEED)]);
+      // Bob's OWN app, at the same bare route name the peer uses.
+      await bob.publishRenderer({
+        route: "hello",
+        schema: "Plant",
+        consumes: ["height"],
+        bundle: OTHER_APP,
+      });
+      const channel = await link(bob, alice, "alice");
+      await channel.sync();
+
+      // The twin is really in the pool and really servable there — this is about a reachable thing.
+      expect(channel.pool.gateway!.renderers().some((r) => r.route === "hello")).toBe(true);
+      const row = bob.channelApps(CHANNEL)[0]!;
+      expect(row.hash).toBe(hashOf(APP));
+      expect(row.serving).toBeUndefined(); // nothing of THIS channel runs there
+      expect(row.blessed).toBe(false);
+      expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(404);
+      // Two-sided: bob's own route still serves bob's own app.
+      expect(bodyOf(await bob.serveRoute("hello", FERN, "full"))).toContain("<section id=other>");
     } finally {
       await alice.close();
       await bob.close();
@@ -823,6 +988,64 @@ describe("T209 — the CLI names what arrived and mounts one app", () => {
       expect(await run(["federate", "list", "--home", me], io()), said()).toBe(0);
       expect(said()).toContain('app "hello" serves at "alice:hello"');
       expect(said()).not.toContain("ARRIVED, INERT");
+
+      // ALICE SHIPS NEW CODE at the mounted route. The listing must say what runs, and the remedy it
+      // prints must be one that works — a recipe that throws is worse than none.
+      await alice.publishRenderer({
+        route: "hello",
+        schema: "Plant",
+        consumes: ["height"],
+        bundle: OTHER_APP,
+      });
+      writeFileSync(offer, exportOffer(alice));
+      fresh();
+      expect(
+        await run(
+          [
+            "federate",
+            "open",
+            "--from",
+            offer,
+            "--into",
+            "friends",
+            "--prefix",
+            "alice",
+            "--home",
+            me,
+          ],
+          io(),
+        ),
+        said(),
+      ).toBe(0);
+
+      fresh();
+      expect(await run(["federate", "list", "--home", me], io()), said()).toBe(0);
+      expect(said()).toContain("runs DIFFERENT code");
+      expect(said()).toContain("--supersede");
+      expect(said()).not.toContain("ARRIVED, INERT"); // it is NOT inert; code is running
+
+      fresh();
+      expect(
+        await run(
+          [
+            "federate",
+            "bless-app",
+            "--channel",
+            CHANNEL,
+            "--route",
+            "hello",
+            "--supersede",
+            "--home",
+            me,
+          ],
+          io(),
+        ),
+        said(),
+      ).toBe(0);
+      fresh();
+      expect(await run(["federate", "list", "--home", me], io()), said()).toBe(0);
+      expect(said()).toContain('app "hello" serves at "alice:hello"');
+      expect(said()).not.toContain("runs DIFFERENT code");
 
       // THE BYTES, on a real file. Every other drop rail here runs on an in-memory pool, where
       // "gone" and "closed" are the same observation. The bundle carries a needle no other store

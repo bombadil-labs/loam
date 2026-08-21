@@ -24,14 +24,13 @@ import { parseOffer } from "./offer.js";
 import {
   CTX_MANIFEST,
   isRegistrationBinding,
-  isRendererBinding,
   manifestExportClaims,
   readManifest,
 } from "../gateway/adopt-law.js";
 import { CTX_REGISTRATION } from "../gateway/registration.js";
 import { freezeMembers } from "../gateway/container-identity.js";
 import type { RendererBinding } from "../gateway/renderers.js";
-import { readRenderers, routeServableOn } from "../gateway/renderers.js";
+import { readForeignRenderers, routeServableOn } from "../gateway/renderers.js";
 
 /** Where a channel's deltas come from. A live peer, a frozen offer, or a fixture. */
 export interface ChannelSource {
@@ -574,28 +573,11 @@ const bundleHash = (bundle: string): string => contentAddress(new TextEncoder().
  * reading it back would report the receiver's act as a fresh arrival, forever.
  */
 function arrivedBindings(gw: Gateway, ground: Gateway): RendererBinding[] {
-  const authors = new Set<string>();
-  for (const d of ground.reactor.snapshot()) {
-    if (d.claims.author !== gw.operatorAuthor && isRendererBinding(d.claims)) {
-      authors.add(d.claims.author);
-    }
-  }
-  const latest = new Map<string, RendererBinding>();
-  for (const author of authors) {
-    for (const r of readRenderers(ground.reactor, author)) {
-      // One route, two peers relaying into one pool: the same (timestamp, id) tie-break every
-      // latest-wins reader here uses, so the listing is an answer rather than an iteration order.
-      const held = latest.get(r.route);
-      if (
-        held === undefined ||
-        r.timestamp > held.timestamp ||
-        (r.timestamp === held.timestamp && r.deltaId > held.deltaId)
-      ) {
-        latest.set(r.route, r);
-      }
-    }
-  }
-  return [...latest.values()];
+  const operator = gw.operatorAuthor;
+  // No operator is no answer, not an empty one: without one, "not the operator's" is every delta in
+  // the pool, and the listing would report a peer's law and the receiver's own alike.
+  if (operator === undefined) return [];
+  return readForeignRenderers(ground.reactor, operator);
 }
 
 /**
@@ -614,10 +596,17 @@ function arrivedBindings(gw: Gateway, ground: Gateway): RendererBinding[] {
  * the ground — the residual is named here rather than papered over.
  */
 function appsOf(gw: Gateway, ground: Gateway, channel: string, prefix: string): ArrivedApp[] {
+  // WHAT THIS STORE RUNS AT THAT ROUTE — asked exactly as the serving path asks it, or the report
+  // and the door disagree. Both halves matter. `routeServableOn` is the door's own predicate, so a
+  // binding whose lens was withdrawn is not counted as running (§23.6). And the CUSTODY check is
+  // the same one delegation makes: a pool is one-way seeded with the receiver's whole ground, so
+  // every renderer this store owns has an operator-signed twin in here — counting a twin would tell
+  // an operator their peer's route runs code it does not, and offer `--supersede` for a conflict
+  // that does not exist.
   const running = new Map(
     ground
       .renderers()
-      .filter((r) => routeServableOn(ground, r, "full"))
+      .filter((r) => routeServableOn(ground, r, "full") && gw.reactor.get(r.deltaId) === undefined)
       .map((r) => [r.route, bundleHash(r.bundle)]),
   );
   const offered = new Map(arrivedBindings(gw, ground).map((r) => [r.route, bundleHash(r.bundle)]));
@@ -625,9 +614,6 @@ function appsOf(gw: Gateway, ground: Gateway, channel: string, prefix: string): 
   for (const route of new Set([...offered.keys(), ...running.keys()])) {
     const hash = offered.get(route);
     const serving = running.get(route);
-    // A route this store runs that the peer never sent is the receiver's OWN law, seeded into the
-    // pool by the one-way edge — not an app of this channel, and not this listing's business.
-    if (hash === undefined && !isChannelApp(gw, ground, route)) continue;
     rows.push({
       channel,
       route,
@@ -638,20 +624,6 @@ function appsOf(gw: Gateway, ground: Gateway, channel: string, prefix: string): 
     });
   }
   return rows.sort((a, b) => (a.route < b.route ? -1 : a.route > b.route ? 1 : 0));
-}
-
-/**
- * Is the renderer this pool serves at `route` an app the operator put IN THE POOL, rather than a
- * seeded twin of the receiver's own law?
- *
- * A pool is one-way seeded with the receiver's whole ground (§24.1), so every renderer the receiver
- * owns has a copy inside every channel pool, operator-signed and indistinguishable by author. The
- * discriminator is custody: a blessing is published on the POOL's gateway and never travels back, so
- * its binding exists here and NOT in the receiver's own ground. One indexed lookup, no scan.
- */
-function isChannelApp(gw: Gateway, ground: Gateway, route: string): boolean {
-  const binding = ground.renderers().find((r) => r.route === route);
-  return binding !== undefined && gw.reactor.get(binding.deltaId) === undefined;
 }
 
 /** Every arrived app across this store's live channels, or one channel's (SPEC §24.6). */
@@ -1014,14 +986,20 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
     ),
   ]);
 
-  const pool = await gw.openContainer({
-    name,
-    // Durability is the store's choice, not the channel's: without a backend a separate container
-    // is in-memory, and a channel that forgets its peer on restart is not federation.
-    ...(gw.options.channelBackend === undefined
-      ? {}
-      : { backend: gw.options.channelBackend(name) }),
-  });
+  // IDEMPOTENT ACROSS PROCESSES, not only within one. A booted store re-attaches its pools before
+  // it rebuilds its channels, and a channel whose peer credential is missing is attached and
+  // unresumed — so a second `federate open` in a fresh invocation found the pool already attached
+  // and threw, contradicting the door's own "syncing again is safe". Reuse what is attached.
+  const pool =
+    gw.channelPools.get(name) ??
+    (await gw.openContainer({
+      name,
+      // Durability is the store's choice, not the channel's: without a backend a separate container
+      // is in-memory, and a channel that forgets its peer on restart is not federation.
+      ...(gw.options.channelBackend === undefined
+        ? {}
+        : { backend: gw.options.channelBackend(name) }),
+    }));
   const ground = pool.gateway;
   if (ground === undefined) {
     throw new Error(
@@ -1309,7 +1287,7 @@ export async function curseChannelLawImpl(
           ]);
         }
       }
-    gw.replayRegistrations();
+    replayEverywhere(gw);
     // Lifting strikes the curse record itself. The next poll re-blesses through the ordinary path,
     // so nothing here needs to know how binding works.
     for (const d of cursesOf(gw, channel)) {
@@ -1419,7 +1397,7 @@ export async function curseChannelLawImpl(
   for (const binding of bindings) {
     await binding.sign(binding.id);
   }
-  gw.replayRegistrations();
+  replayEverywhere(gw);
 
   // THE VERDICT IS THE SURFACE, NOT THE COUNT. A purge's count is evidence, never the verdict (T70),
   // and the same holds for a retirement: this refuses rather than reporting a lens left the surface
@@ -1437,6 +1415,20 @@ export async function curseChannelLawImpl(
         `sync will not re-bless it, but this store is still answering the name now.`,
     );
   }
+}
+
+/**
+ * Re-derive the root's surface AND every attached pool's.
+ *
+ * A curse strikes a binding that lives in the POOL (§47.4), and a mounted app resolves through the
+ * POOL's own surface — so replaying only the root retires the lens for the root's readers while a
+ * stranger's code goes on rendering the retired reading. The lift is the same shape pointed the
+ * other way: it revives the binding on the ground and the pool would go on serving nothing. Both
+ * halves of a reversible act have to arrive in the same breath, or the reversal is not one.
+ */
+function replayEverywhere(gw: Gateway): void {
+  for (const pool of gw.channelPools.values()) pool.gateway?.replayRegistrations();
+  gw.replayRegistrations();
 }
 
 /** The living names cursed on a channel, with the delta that said so. */
