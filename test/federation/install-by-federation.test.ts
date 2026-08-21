@@ -974,6 +974,18 @@ describe("T209 — the CLI names what arrived and mounts one app", () => {
       );
       expect(said()).toContain("wants --route");
 
+      // AN UNKNOWN VERB IS REFUSED BY NAME, and this matters more than it looks: `drop` is the
+      // fall-through at the bottom of the group, so an allowlist that let a stranger past would
+      // hand a typo an irreversible purge. Two-sided — the channel is still here afterwards.
+      fresh();
+      expect(
+        await run(["federate", "frobnicate", "--channel", CHANNEL, "--yes", "--home", me], io()),
+      ).toBe(2);
+      expect(said()).toContain("federate takes a verb");
+      fresh();
+      expect(await run(["federate", "list", "--home", me], io()), said()).toBe(0);
+      expect(said()).toContain(CHANNEL);
+
       fresh();
       expect(
         await run(
