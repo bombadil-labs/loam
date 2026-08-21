@@ -7,7 +7,7 @@
 // `serve` blocks until the process is signalled.
 
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
 import {
@@ -37,7 +37,7 @@ import { STOCK_SCHEMAS, stockNames, stockSchema } from "../stock/index.js";
 import { CTX_PEN, penEntity, penRecordClaims } from "../gateway/renderers.js";
 import { serve, type ServerHandle } from "../server/http.js";
 import { revokeConnector } from "../server/oauth.js";
-import { grantFor, readOAuthFile, type OAuthGrant } from "../server/oauth-file.js";
+import { grantFor, readOAuthFile, type OAuthFile, type OAuthGrant } from "../server/oauth-file.js";
 import {
   credentialsPath,
   entryFor,
@@ -309,12 +309,13 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
     ],
   },
   grant: {
-    summary: "list or revoke the OAuth connectors this store has granted (SPEC §37)",
+    summary: "read the ledger of every author with standing; grant and revoke (SPEC §37)",
     usage: "loam grant list|revoke <client_id> | <client_id> --verb=<verb> [options]",
     flags: new Set(["home", "store", "verb", "prefix"]),
     notes: [
       "subcommands:",
-      "  list                  the connectors this store holds — id, name, generation, standing",
+      "  list                  every author with standing — users, pens, connectors, and any key",
+      "                        this home cannot name; struck grants shown struck, never omitted",
       "  revoke <client_id>    bump the connector's generation and strike its write grant",
       "  <client_id> --verb=register --prefix=<p>",
       "                        let the connector register schemas whose name starts with <p>",
@@ -2332,6 +2333,190 @@ async function cmdGrantMint(
   return 0;
 }
 
+// --- the grant ledger (T205) ---------------------------------------------------------------------
+//
+// Every author with standing at the store entity, on one screen. Two halves joined on the author
+// key: the GROUND's grant deltas, and what the HOME knows about who holds each key — its
+// `user.<name>.seed` and `pen.<name>.seed` files, and its connector records.
+//
+// The join is loose in BOTH directions, and that is the whole design. A grant whose subject matches
+// no file and no connector record is still a row (`unattributed`): a key with standing that nothing
+// here can name is the most important line on the screen, never the one to drop. And a seed file
+// with no grant is still a row: custody without authorization is the question `loam pen create`
+// left open — is this pen provisioned, or merely present — and an omitted row answers neither.
+//
+// A struck grant is SHOWN struck rather than filtered. The ledger is opened on the morning a key
+// leaked, and on that morning an omission and a revocation look identical.
+
+type LedgerKind = "user" | "pen" | "connector" | "unattributed";
+const KIND_ORDER: Readonly<Record<LedgerKind, number>> = {
+  user: 0,
+  pen: 1,
+  connector: 2,
+  unattributed: 3,
+};
+
+// The cell an absent fact prints: a name nothing claims, a verb nobody granted, a key this home
+// cannot derive. Never blank — a blank cell reads as an oversight rather than as an answer.
+const LEDGER_NONE = "—";
+
+/**
+ * One identity the home can name, and the key it holds. `author` is ABSENT when the file or record
+ * exists and this command could not derive a key from it — unknown, never "nobody" (H9) — and the
+ * row still prints, carrying `note` to say why.
+ */
+interface HomeIdentity {
+  readonly kind: "user" | "pen" | "connector";
+  readonly name: string;
+  readonly author?: string;
+  /** Facts that ride the standing column: a connector's generation and tokens, or a fault. */
+  readonly note?: string;
+}
+
+/**
+ * Every identity the HOME provisions, read through the same primitives `loam serve` provisions with
+ * (`readUserSeed` / `readPenSeed` / `isSeedHex`), so the ledger cannot report a pen as provisioned
+ * that a boot would refuse.
+ *
+ * THROWS if the home cannot be listed. That is deliberate: an unlistable home makes every seed file
+ * invisible, and every grant in the ground would then render `unattributed` — a ledger inventing the
+ * exact alarm it exists to raise.
+ */
+function homeIdentities(home: string): HomeIdentity[] {
+  const out: HomeIdentity[] = [];
+  for (const entry of readdirSync(home).sort()) {
+    const match = /^(user|pen)\.(.+)\.seed$/.exec(entry);
+    if (match === null) continue;
+    const kind = match[1] as "user" | "pen";
+    const name = match[2] as string;
+    const path = kind === "user" ? userSeedPath(home, name) : penSeedPath(home, name);
+    const read = kind === "user" ? readUserSeed(home, name) : readPenSeed(home, name);
+    if (read.kind === "absent") continue; // raced away between the listing and the read
+    if (read.kind === "unreadable") {
+      out.push({ kind, name, note: `${path} is unreadable, so its key cannot be named here` });
+      continue;
+    }
+    if (!isSeedHex(read.seed)) {
+      out.push({ kind, name, note: `${path} does not hold a 64-hex seed` });
+      continue;
+    }
+    out.push({ kind, name, author: authorForSeed(read.seed) });
+  }
+  return out;
+}
+
+// The connector half of the same question. A client with no grant has registered and never
+// completed a token exchange, so it has no acting identity for a grant to name yet; `standing:
+// false` means its seed exists and the ground append has not landed.
+function connectorIdentities(file: OAuthFile): HomeIdentity[] {
+  return file.clients.map((client) => {
+    const grant = grantFor(file, client.clientId);
+    const tokens = file.tokens.filter((t) => t.clientId === client.clientId).length;
+    const facts = `generation ${client.generation} · ${tokens} live token${tokens === 1 ? "" : "s"}`;
+    return {
+      kind: "connector" as const,
+      name: `${client.clientId} (${client.clientName})`,
+      ...(grant === undefined ? {} : { author: grant.actor }),
+      note:
+        grant === undefined
+          ? `no acting identity yet · ${facts}`
+          : grant.standing
+            ? facts
+            : `grant pending · ${facts}`,
+    };
+  });
+}
+
+interface GroundGrant {
+  readonly id: string;
+  readonly subject: string;
+  readonly verb: string;
+  readonly at: number;
+  readonly prefix?: string;
+  readonly struckAt?: number;
+}
+
+/**
+ * Every grant-shaped delta filed at the store entity, whoever signed it. Whether one BINDS is
+ * `grantsHeldBy`'s question and is asked separately, because the two answers are different facts: a
+ * grant nobody honours is still a row, and a row that quietly vanished is the omission this ledger
+ * exists to make impossible.
+ *
+ * A grant-shaped delta carrying no subject or no verb names nobody and confers nothing (`grantHeld`
+ * matches on both), so there is no author for it to put on the screen. Constitutional law refuses
+ * such a delta at the door; only a store predating that check can hold one.
+ */
+function groundGrants(reactor: Reactor): GroundGrant[] {
+  const out: GroundGrant[] = [];
+  for (const id of reactor.byTarget(STORE_ENTITY)) {
+    const delta = reactor.get(id);
+    if (delta === undefined) continue;
+    const filedHere = delta.claims.pointers.some(
+      (p) =>
+        p.target.kind === "entity" &&
+        p.target.entity.id === STORE_ENTITY &&
+        p.target.entity.context === CTX_GRANTS,
+    );
+    if (!filedHere) continue;
+    let subject: string | undefined;
+    let verb: string | undefined;
+    let prefix: string | undefined;
+    for (const p of delta.claims.pointers) {
+      if (p.target.kind !== "primitive" || typeof p.target.value !== "string") continue;
+      if (p.role === "subject") subject = p.target.value;
+      if (p.role === "verb") verb = p.target.value;
+      if (p.role === "prefix") prefix = p.target.value;
+    }
+    if (subject === undefined || verb === undefined) continue;
+    // The EARLIEST strike is the one reported: it is the moment the standing stopped being
+    // uncontested, and a later strike on the same grant changes nothing about that.
+    const strikes = reactor
+      .negationsOf(id)
+      .map((negId) => reactor.get(negId)?.claims.timestamp)
+      .filter((t): t is number => t !== undefined);
+    out.push({
+      id,
+      subject,
+      verb,
+      at: delta.claims.timestamp,
+      ...(prefix === undefined ? {} : { prefix }),
+      ...(strikes.length === 0 ? {} : { struckAt: Math.min(...strikes) }),
+    });
+  }
+  return out;
+}
+
+// An author, short enough for a column and long enough to identify: the algorithm tag in full, then
+// twelve characters of the key. The abbreviation never elides the middle — an operator matching a
+// key against a log matches a PREFIX.
+function shortAuthor(author: string): string {
+  const keyAt = author.indexOf(":") + 1;
+  return author.length - keyAt <= 12 ? author : `${author.slice(0, keyAt + 12)}…`;
+}
+
+// A column-aligned table. Every column but the last is padded to its widest cell; the last carries
+// free text and stays ragged, and its line is trimmed so an empty cell leaves no trail.
+function ledgerTable(header: readonly string[], rows: readonly (readonly string[])[]): string[] {
+  const all = [header, ...rows];
+  const last = header.length - 1;
+  const widths = header.map((_, i) => Math.max(...all.map((r) => (r[i] ?? "").length)));
+  return all.map((r) =>
+    `  ${r.map((cell, i) => (i === last ? cell : cell.padEnd(widths[i]!))).join("  ")}`.trimEnd(),
+  );
+}
+
+interface LedgerRow {
+  readonly kind: LedgerKind;
+  readonly name: string;
+  readonly author: string;
+  readonly verb: string;
+  readonly granted: string;
+  readonly standing: string;
+  readonly live: boolean;
+  readonly at: number;
+  readonly tiebreak: string;
+}
+
 async function cmdGrantList(home: string, parsed: Parsed, io: IO): Promise<number> {
   let file;
   try {
@@ -2343,11 +2528,18 @@ async function cmdGrantList(home: string, parsed: Parsed, io: IO): Promise<numbe
     );
     return 1;
   }
-  if (file.clients.length === 0) {
-    io.out("loam: this store has granted no connectors");
-    return 0;
+  let identities: HomeIdentity[];
+  try {
+    identities = [...homeIdentities(home), ...connectorIdentities(file)];
+  } catch (err) {
+    io.err(
+      `grant list: ${home} could not be listed, so every seed file in it is invisible here — and ` +
+        `a ledger that answered "nobody holds this key" would be worse than none: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    );
+    return 1;
   }
-  // The verbs come from the GROUND, through the same derivation the registration door reads — so
+  // The standing comes from the GROUND, through the same derivation the registration door reads — so
   // this listing cannot show an operator a standing the door would not honour, or hide one it would.
   let seed: string;
   try {
@@ -2362,36 +2554,93 @@ async function cmdGrantList(home: string, parsed: Parsed, io: IO): Promise<numbe
   }
   const path = storePath(home, parsed.flags.get("store"));
   const gateway = await Gateway.boot(openStore(path, io), assembleGenesis({ operatorSeed: seed }));
+  const operator = authorForSeed(seed);
+  const rows: LedgerRow[] = [];
   try {
-    const operator = authorForSeed(seed);
-    const held = (actor: string): string => {
-      const grants = grantsHeldBy(gateway.reactor, actor, operator);
-      if (grants.length === 0) return "no verb in the ground";
-      return grants
-        .map((g) => (g.prefix === undefined ? g.verb : `${g.verb}("${g.prefix}")`))
-        .sort()
-        .join(", ");
-    };
-    io.out(`loam: ${file.clients.length} connector${file.clients.length === 1 ? "" : "s"}`);
-    for (const client of file.clients) {
-      const grant = grantFor(file, client.clientId);
-      const tokens = file.tokens.filter((t) => t.clientId === client.clientId).length;
-      // The standing line is the honest one: a client with no grant has registered but never
-      // completed a token exchange, so it can act nowhere yet.
-      const standing =
-        grant === undefined
-          ? "no grant yet"
-          : grant.standing
-            ? `acts as ${grant.actor}`
-            : "grant pending";
-      io.out(
-        `  ${client.clientId}  ${client.clientName}\n` +
-          `    generation ${client.generation} · ${standing} · ${tokens} live token${tokens === 1 ? "" : "s"}` +
-          (grant === undefined ? "" : `\n    holds ${held(grant.actor)}`),
-      );
+    const grants = groundGrants(gateway.reactor);
+    // One pass per distinct subject, reusing the door's own derivation rather than re-deriving
+    // effectiveness here: two answers to "does this bind" is one too many.
+    const binding = new Set<string>();
+    for (const subject of new Set(grants.map((g) => g.subject))) {
+      for (const held of grantsHeldBy(gateway.reactor, subject, operator)) binding.add(held.id);
+    }
+    const withNote = (text: string, note?: string): string =>
+      note === undefined ? text : `${text} · ${note}`;
+
+    for (const g of grants) {
+      const live = binding.has(g.id);
+      const standing = live
+        ? g.struckAt === undefined
+          ? "live"
+          : "live — a strike names it and does not bind"
+        : g.struckAt === undefined
+          ? "does not bind — nothing struck it, and no chain reaches the operator"
+          : `struck ${new Date(g.struckAt).toISOString()}`;
+      const common = {
+        author: shortAuthor(g.subject),
+        verb: g.prefix === undefined ? g.verb : `${g.verb}("${g.prefix}")`,
+        granted: new Date(g.at).toISOString(),
+        live,
+        at: g.at,
+        tiebreak: g.id,
+      };
+      // Every identity holding this key gets the row — a key copied into two files holds standing
+      // under both names, and naming only the first would hide the second.
+      const holders = identities.filter((i) => i.author === g.subject);
+      if (holders.length === 0) {
+        rows.push({ kind: "unattributed", name: LEDGER_NONE, standing, ...common });
+      }
+      for (const h of holders) {
+        rows.push({ kind: h.kind, name: h.name, standing: withNote(standing, h.note), ...common });
+      }
+    }
+
+    const granted = new Set(grants.map((g) => g.subject));
+    for (const i of identities) {
+      if (i.author !== undefined && granted.has(i.author)) continue;
+      rows.push({
+        kind: i.kind,
+        name: i.name,
+        author: i.author === undefined ? LEDGER_NONE : shortAuthor(i.author),
+        verb: LEDGER_NONE,
+        granted: LEDGER_NONE,
+        standing:
+          i.author === undefined
+            ? (i.note ?? "this home cannot name its key")
+            : withNote("no grant in the ground", i.note),
+        live: false,
+        at: 0,
+        tiebreak: i.name,
+      });
     }
   } finally {
     await gateway.close();
+  }
+
+  if (rows.length === 0) {
+    io.out(
+      `loam: nothing holds standing here — no seed file, no connector record, no grant in the ` +
+        `ground.\n  the operator ${shortAuthor(operator)} needs none`,
+    );
+    return 0;
+  }
+  rows.sort(
+    (a, b) =>
+      KIND_ORDER[a.kind] - KIND_ORDER[b.kind] ||
+      a.name.localeCompare(b.name) ||
+      a.at - b.at ||
+      a.tiebreak.localeCompare(b.tiebreak),
+  );
+  const live = rows.filter((r) => r.live).length;
+  io.out(
+    `loam: the grant ledger — ${rows.length} row${rows.length === 1 ? "" : "s"}, ${live} live\n` +
+      `  the operator ${shortAuthor(operator)} needs no grant and holds every standing`,
+  );
+  for (const line of ledgerTable(
+    ["kind", "name", "author", "verb", "granted", "standing"],
+    rows.map((r) => [r.kind, r.name, r.author, r.verb, r.granted, r.standing]),
+  )) {
+    io.out(line);
   }
   return 0;
 }
