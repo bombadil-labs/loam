@@ -459,6 +459,9 @@ describe("T209 — bless-app mounts behind the probation frame, writes sequester
     try {
       const channel = await link(bob, alice, "alice");
       await channel.sync();
+      // THE LISTING SAYS SO FIRST. A recipe without --pen is a printed command that throws, and an
+      // operator who is not told the app asks to WRITE has not been told the thing that matters.
+      expect(bob.channelApps(CHANNEL)[0]!.wantsPen).toBe("alice-pen");
       await expect(bob.blessChannelApp(CHANNEL, "hello")).rejects.toThrow(/holds a PEN/);
       expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(404);
 
@@ -708,10 +711,10 @@ describe("T209 — the prefix reaches a blessed app and nothing else", () => {
   });
 
   it("a prefix that itself contains a colon still reaches its own app", async () => {
-    // The delegation matches a DECLARED prefix rather than splitting at the first colon. Nothing
-    // refuses a colon in a prefix at `federate open`, so splitting would look for a channel called
-    // "a" when the operator named one "a:b" — and every other surface would say the app is mounted
-    // while the door answered 404.
+    // A colon in a prefix is legal (§46.2 admits `al:ice`; only flattening collisions are refused),
+    // so the delegation matches a DECLARED prefix rather than splitting at the first colon —
+    // splitting would look for a channel called "a" when the operator named one "a:b", and every
+    // surface would say the app is mounted while the door answered 404.
     const alice = await peer(ALICE_SEED, { route: "hello", app: APP, height: 62 });
     const bob = await store(BOB_SEED);
     try {
@@ -731,6 +734,69 @@ describe("T209 — the prefix reaches a blessed app and nothing else", () => {
     }
   });
 
+  it("a name another channel's namespace swallows is never reported as served", async () => {
+    // `alice` and `alice:sub` both stand — they flatten to different GraphQL fields, so §46.2's
+    // injectivity check admits the pair — and `alice:sub:hello` then falls inside both namespaces.
+    // The DOOR resolves it by the longest declared prefix. A report that did not ask the same
+    // question would go on telling the shorter channel's operator that their app serves that name.
+    const alice = await peer(ALICE_SEED, { route: "sub:hello", app: APP, height: 62 });
+    const sub = await peer(CAROL_SEED, { route: "hello", app: OTHER_APP, height: 33 });
+    const bob = await store(BOB_SEED);
+    try {
+      const outer = await link(bob, alice, "alice");
+      await outer.sync();
+      await bob.blessChannelApp("channel:friends:alice", "sub:hello");
+
+      // BEFORE the second channel exists, the name is unambiguously the outer channel's.
+      const before = bob.channelApps("channel:friends:alice")[0]!;
+      expect(before.serves).toBe("alice:sub:hello");
+      expect(before.blessed).toBe(true);
+      expect(bodyOf(await bob.serveRoute("alice:sub:hello", FERN, "full"))).toContain(
+        "<p id=h>62</p>",
+      );
+
+      // Opening a channel prefixed `alice:sub` moves that name into ITS namespace.
+      await link(bob, sub, "alice:sub");
+
+      const after = bob.channelApps("channel:friends:alice")[0]!;
+      expect(after.mounted).toBe(appIdOf(APP, { route: "sub:hello" })); // still mounted…
+      expect(after.serving).toBeUndefined(); // …and no longer what that name answers
+      expect(after.blessed).toBe(false);
+      expect(after.shadowed).toContain("alice:sub");
+      expect(bodyOf(await bob.serveRoute("alice:sub:hello", FERN, "full"))).not.toContain(
+        "<p id=h>62</p>",
+      );
+    } finally {
+      await alice.close();
+      await sub.close();
+      await bob.close();
+    }
+  });
+
+  it("the anonymous door never evaluates a peer's module body", async () => {
+    // Preparing a route means IMPORTING the bundle, and the HTTP door prepares BEFORE it decides
+    // anything about the request. Door-blind, that let a tokenless caller make this store run a
+    // stranger's top-level code by asking for a route it would then refuse.
+    const alice = await peer(ALICE_SEED, { route: "hello", app: APP, height: 62 });
+    const bob = await store(BOB_SEED);
+    try {
+      const channel = await link(bob, alice, "alice");
+      await channel.sync();
+      await bob.blessChannelApp(CHANNEL, "hello");
+
+      // The public door resolves NOTHING to prepare, so nothing of the peer's is imported for it…
+      await bob.prepareRoute("alice:hello", "public");
+      expect((await bob.serveRoute("alice:hello", FERN, "public")).status).toBe(404);
+      // …while the token door does prepare it, and serves. Two-sided, and it has to be: a rail that
+      // only asserted the 404 would pass with the delegation deleted from both doors.
+      await bob.prepareRoute("alice:hello", "full");
+      expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(200);
+    } finally {
+      await alice.close();
+      await bob.close();
+    }
+  });
+
   it("the shapes that are not a channel app all answer the one uniform refusal", async () => {
     const alice = await peer(ALICE_SEED, { route: "a:b", app: APP, height: 62 });
     const bob = await store(BOB_SEED);
@@ -739,7 +805,8 @@ describe("T209 — the prefix reaches a blessed app and nothing else", () => {
       await channel.sync();
       await bob.blessChannelApp(CHANNEL, "a:b");
 
-      // The split is on the FIRST colon, so a peer's own colon-bearing route still resolves.
+      // The DECLARED prefix is matched, not the first colon — so a peer's own colon-bearing route
+      // resolves under a prefix that has none.
       expect((await bob.serveRoute("alice:a:b", FERN, "full")).status).toBe(200);
       // And every near-miss is the same 404 an unknown route gives — no existence oracle.
       const misses = ["alice:", ":a:b", "a:b", "zoe:a:b", "alice:nope", "alic:a:b", ""];

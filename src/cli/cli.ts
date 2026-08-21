@@ -243,9 +243,9 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "WHAT MOUNTING DOES NOT BOUND. The pool bounds what a peer's app may WRITE to your store. It",
       "does not bound what that code may REACH: a bundle can open a socket or read the filesystem of",
       "the machine you run this on. And only the app's RENDER runs in a worker with a time and memory",
-      "limit — its module body is evaluated on the serving thread, when you bless it and again when a",
-      "process first serves it, with no such limit. Mount a peer's app the way you would run their",
-      "program (SPEC §24.5, an open flag).",
+      "limit — its module body is evaluated on the serving thread, when you bless it and again the",
+      "first time a process is asked for it, with no such limit. Mount a peer's app the way you would",
+      "run their program (SPEC §24.5, an open flag).",
     ],
   },
   migrate: {
@@ -1067,7 +1067,12 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
         // refused. A remedy is part of a report's truth: printing a command that throws is a false
         // statement about the store, made on the surface a person reads before deciding.
         const apps = (appsByChannel.get(r.name) ?? []).map((a) => {
-          const bless = `\`loam federate bless-app --channel ${r.name} --route ${a.route}`;
+          // THE RECIPE CARRIES EVERY FLAG THE DOOR WILL DEMAND. An app that holds a pen is refused
+          // without `--pen` (§6's two keys), so a recipe that omitted it was a printed command that
+          // throws — and worse, it left the operator unaware that this app asks to WRITE.
+          const bless =
+            `\`loam federate bless-app --channel ${r.name} --route ${a.route}` +
+            (a.wantsPen === undefined ? "" : " --pen");
           const offers =
             a.hash === undefined
               ? `\n  app "${a.route}" — the peer WITHDREW it`
@@ -1119,12 +1124,19 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
                 : `\n    this store still runs the app it blessed (${short(a.serving)}) at "${a.serves}"`)
             );
           }
+          // What an app ASKS FOR, said once and near the top: a pen is the one property of an
+          // arrival that changes what blessing it means, rather than only what it draws.
+          const asks =
+            a.wantsPen === undefined
+              ? ""
+              : `\n    it asks to WRITE, under the pen "${a.wantsPen}" — blessing it needs --pen, ` +
+                "and the pen itself needs provisioning and a grant";
           if (a.serving === undefined) {
-            return `${offers}\n    ARRIVED, INERT — nothing of it runs until ${bless}\``;
+            return `${offers}${asks}\n    ARRIVED, INERT — nothing of it runs until ${bless}\``;
           }
           if (a.blessed) return `${offers}\n    it SERVES at "${a.serves}"`;
           return (
-            `${offers}\n    this store runs DIFFERENT code at "${a.serves}": ${short(a.serving)}\n` +
+            `${offers}${asks}\n    this store runs DIFFERENT code at "${a.serves}": ${short(a.serving)}\n` +
             `    to move it onto what the peer offers now: ${bless} --supersede\``
           );
         });

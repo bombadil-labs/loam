@@ -723,8 +723,8 @@ export class Gateway {
   }
 
   // Ensure a route's bundle is loaded (SPEC §23): the body lives in renderers.ts.
-  async prepareRoute(route: string): Promise<void> {
-    return prepareRouteImpl(this, route);
+  async prepareRoute(route: string, door: "full" | "public" = "full"): Promise<void> {
+    return prepareRouteImpl(this, route, door);
   }
 
   // Serve a route (SPEC §23): the body — and the door-discipline doctrine — lives in renderers.ts.

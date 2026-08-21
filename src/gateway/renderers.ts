@@ -581,24 +581,29 @@ function channelApp(
   // for a channel called `a` when the operator named one `a:b`, so a blessed app would answer 404
   // while every other surface said it was mounted. The LONGEST match wins, because `a` and `a:b`
   // can both stand and only the longer one is the specific answer.
-  let best: { pool: Gateway; route: string } | undefined;
-  let longest = 0;
+  // WHOSE NAMESPACE IS THIS, decided BEFORE anything is looked up in it. The longest declared
+  // prefix owns the name outright: falling back to a shorter one when the longer channel happens to
+  // hold nothing would make "who answers `alice:sub:note`" depend on what someone had mounted, so
+  // opening a channel would silently move names in and out of another's namespace. One owner, and
+  // if it has nothing there the name answers nothing.
+  let owner: { name: string; prefix: string } | undefined;
   for (const c of gw.channelStatus()) {
     if (c.prefix === "" || !route.startsWith(`${c.prefix}:`)) continue;
-    if (c.prefix.length <= longest) continue;
-    const bare = route.slice(c.prefix.length + 1);
-    if (bare === "") continue;
-    const pool = gw.channelPools.get(c.name)?.gateway;
-    // No operator is no answer: `lawfulSnapshot` would otherwise hand back every delta in the pool,
-    // and a peer's own binding would read as something this store had mounted.
-    if (pool?.operatorAuthor === undefined) continue;
-    const binding = pool.renderers().find((r) => r.route === bare);
-    // Absent, or a seeded twin of law this store already owns: not this channel's app.
-    if (binding === undefined || gw.reactor.get(binding.deltaId) !== undefined) continue;
-    best = { pool, route: bare };
-    longest = c.prefix.length;
+    if (route.length <= c.prefix.length + 1) continue; // the bare name would be empty
+    if (owner === undefined || c.prefix.length > owner.prefix.length) {
+      owner = { name: c.name, prefix: c.prefix };
+    }
   }
-  return best;
+  if (owner === undefined) return undefined;
+  const bare = route.slice(owner.prefix.length + 1);
+  const pool = gw.channelPools.get(owner.name)?.gateway;
+  // No operator is no answer: `lawfulSnapshot` would otherwise hand back every delta in the pool,
+  // and a peer's own binding would read as something this store had mounted.
+  if (pool?.operatorAuthor === undefined) return undefined;
+  const binding = pool.renderers().find((r) => r.route === bare);
+  // Absent, or a seeded twin of law this store already owns: not this channel's app.
+  if (binding === undefined || gw.reactor.get(binding.deltaId) !== undefined) return undefined;
+  return { pool, route: bare };
 }
 
 // Ensure a route's bundle is loaded (the body of `Gateway.prepareRoute`, SPEC §23) — async, so a renderer
@@ -606,15 +611,23 @@ function channelApp(
 // before the synchronous serveRoute. Idempotent (the ESM cache dedups by content address). A no-op for an
 // unknown route. A channel's app is prepared in ITS pool — the door calls this before every render, and
 // it is what makes a blessed app runnable in a process that booted after the blessing.
-export async function prepareRouteImpl(gw: Gateway, route: string): Promise<void> {
+export async function prepareRouteImpl(
+  gw: Gateway,
+  route: string,
+  door: "full" | "public" = "full",
+): Promise<void> {
   const binding = gw.renderers().find((r) => r.route === route);
   if (binding !== undefined) {
     await loadRenderers([binding.bundle]);
     return;
   }
-  // Prepared on the FULL door's terms, because that is the only door delegation serves.
-  const app = channelApp(gw, route, "full");
-  if (app !== undefined) await app.pool.prepareRoute(app.route);
+  // THE DOOR REACHES THIS SIDE TOO, and leaving it out was the whole hazard. Preparing means
+  // EVALUATING a peer's module body (`importEsm`), and the door calls prepare BEFORE it decides
+  // anything about the request — so a hard-coded "full" here let a tokenless caller make this store
+  // run a stranger's top-level code by asking for a route it would then refuse. Delegation serves
+  // the token door only; preparing for it must be the token door's business only.
+  const app = channelApp(gw, route, door);
+  if (app !== undefined) await app.pool.prepareRoute(app.route, door);
 }
 
 // Serve a route (the body of `Gateway.serveRoute`, SPEC §23): resolve the renderer's node under the

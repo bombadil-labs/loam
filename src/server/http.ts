@@ -1705,7 +1705,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
               });
               return;
             }
-            await gateway.prepareRoute(parsed.route); // load the bundle before the render (worker, §23.9)
+            await gateway.prepareRoute(parsed.route, "public"); // load the bundle before the render (worker, §23.9)
             if (!guard.live()) {
               guard.gone();
               return;

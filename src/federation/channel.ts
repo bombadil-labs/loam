@@ -98,6 +98,12 @@ export interface ArrivedApp {
   /** A mounted app whose LENS is not bound here — cursed, or its registration withdrawn (§23.6). */
   readonly dark?: true;
   /**
+   * The peer's app carries a PEN: it asks to WRITE, under a granted author, and blessing it takes
+   * its own flag (§6's two keys). On the row because it is the decision the identity exists to
+   * surface — an operator told only "different code" has not been told the difference that matters.
+   */
+  readonly wantsPen?: string;
+  /**
    * The peer's binding pins a §17 version of the PEER's own store, so this store cannot mount it at
    * all — the pin names a delta it does not hold. Reported rather than offered a remedy.
    */
@@ -662,7 +668,13 @@ function arrivedBindings(gw: Gateway, ground: Gateway): RendererBinding[] {
  * not ask is whether the BUNDLE loads, which is `prepareRoute`'s business and cannot be known from
  * the ground — the residual is named here rather than papered over.
  */
-function appsOf(gw: Gateway, ground: Gateway, channel: string, prefix: string): ArrivedApp[] {
+function appsOf(
+  gw: Gateway,
+  ground: Gateway,
+  channel: string,
+  prefix: string,
+  siblings: readonly string[],
+): ArrivedApp[] {
   // WHAT THIS CHANNEL HAS MOUNTED at each route: the operator-authored bindings that live only in
   // the POOL. The custody test is the same one delegation makes — a pool is one-way seeded with the
   // receiver's whole ground, so every renderer this store owns has an operator-signed twin in here,
@@ -681,19 +693,29 @@ function appsOf(gw: Gateway, ground: Gateway, channel: string, prefix: string): 
     const own = mounted.get(route);
     // MOUNTED IS NOT SERVING, and the difference is the whole reason this report exists. Three ways
     // a standing blessing answers nothing, each with a different remedy and none of them "bless it":
+    const serves = `${prefix}:${route}`;
     // (a) the receiver's own law answers the name this app would serve under. Their own name is
     // theirs (§46.2) and the delegation is the fallback, so the channel's app never gets the call.
-    const hostHolds = hostRoutes.has(`${prefix}:${route}`);
+    const hostHolds = hostRoutes.has(serves);
+    // (a2) ANOTHER CHANNEL owns that name. A prefix may contain a colon (§46.2 admits `al:ice`, and
+    // only flattening collisions are refused), so `alice` and `alice:sub` can both stand — and then
+    // `alice:sub:note` is claimed by both. The DOOR gives it to the longer prefix; a report that
+    // did not ask the same question would call this app served while the other one answered.
+    const claimedBy = siblings.find(
+      (p) => p.length > prefix.length && serves.startsWith(`${p}:`) && serves.length > p.length + 1,
+    );
     // (b) a twin of the receiver's own route holds the bare name INSIDE the pool. Every attach
     // re-pulses the seeding edge, so this arrives long after a blessing — and it is just as true
     // before one: this is the ONE the blessing door refuses, by that name.
     const poolHolds =
       poolWinner.get(route) !== undefined && poolWinner.get(route)!.deltaId !== own?.deltaId;
     const shadow = hostHolds
-      ? `your own route "${prefix}:${route}"`
-      : poolHolds
-        ? `your own route "${route}", seeded into this pool`
-        : undefined;
+      ? `your own route "${serves}"`
+      : claimedBy !== undefined
+        ? `the channel prefixed "${claimedBy}:", whose namespace that name falls inside`
+        : poolHolds
+          ? `your own route "${route}", seeded into this pool`
+          : undefined;
     // (c) the lens it reads is not bound here — a curse, or a withdrawn registration (§23.6).
     const dark = own !== undefined && shadow === undefined && !routeServableOn(ground, own, "full");
     // NOTHING MOUNTED, AND NOTHING MOUNTABLE — and only cause (b) is that. The blessing door looks
@@ -702,7 +724,7 @@ function appsOf(gw: Gateway, ground: Gateway, channel: string, prefix: string): 
     // wins its own name. Calling that "cannot mount" would be as false as calling it inert, in the
     // other direction — so it stays `shadowed`, and the report says the blessing would not help.
     const blocked =
-      own === undefined && poolHolds && !hostHolds
+      own === undefined && poolHolds && !hostHolds && claimedBy === undefined
         ? `your own route "${route}", seeded into this pool`
         : undefined;
     const serving =
@@ -714,8 +736,11 @@ function appsOf(gw: Gateway, ground: Gateway, channel: string, prefix: string): 
     rows.push({
       channel,
       route,
-      serves: `${prefix}:${route}`,
+      serves,
       ...(pinned ? { pinned: true as const } : {}),
+      ...(offeredBindings.get(route)?.pen === undefined
+        ? {}
+        : { wantsPen: offeredBindings.get(route)!.pen! }),
       ...(hash === undefined ? {} : { hash }),
       ...(own === undefined ? {} : { mounted: appIdentity(own) }),
       ...(serving === undefined ? {} : { serving }),
@@ -731,12 +756,15 @@ function appsOf(gw: Gateway, ground: Gateway, channel: string, prefix: string): 
 /** Every arrived app across this store's live channels, or one channel's (SPEC §24.6). */
 export function channelAppsImpl(gw: Gateway, channel?: string): ArrivedApp[] {
   const out: ArrivedApp[] = [];
+  // EVERY channel's prefix, even when the caller asked about one: a name's owner is decided across
+  // the whole set, so a per-channel answer computed without the others is a guess.
+  const prefixes = channelStatusImpl(gw).map((c) => c.prefix);
   for (const status of channelStatusImpl(gw, channel)) {
     const ground = gw.channelPools.get(status.name)?.gateway;
     // A channel whose pool this process has not attached is reported as carrying no apps rather
     // than guessed at — the pool is where the answer lives, and there is no second copy of it.
     if (ground === undefined) continue;
-    out.push(...appsOf(gw, ground, status.name, status.prefix));
+    out.push(...appsOf(gw, ground, status.name, status.prefix, prefixes));
   }
   return out;
 }
@@ -981,7 +1009,13 @@ async function syncChannel(
       bound: [],
       parked: [],
       witnessed: [],
-      apps: appsOf(gw, ground, name, opts.prefix),
+      apps: appsOf(
+        gw,
+        ground,
+        name,
+        opts.prefix,
+        channelStatusImpl(gw).map((c) => c.prefix),
+      ),
     };
   }
   let offered: readonly Delta[];
@@ -1064,7 +1098,13 @@ async function syncChannel(
     witnessed,
     // Read AFTER the blessing, so an app whose lens just bound is reported against the pool as it
     // now stands rather than as it was when the pull landed.
-    apps: appsOf(gw, ground, name, opts.prefix),
+    apps: appsOf(
+      gw,
+      ground,
+      name,
+      opts.prefix,
+      channelStatusImpl(gw).map((c) => c.prefix),
+    ),
   };
 }
 
