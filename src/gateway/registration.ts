@@ -237,6 +237,10 @@ export interface Registration {
   // registration has no binding delta.
   readonly boundAt?: number;
   readonly boundId?: string;
+  // Who SIGNED the binding delta. Deliberately NOT the origin a policy ranks by: a channel's
+  // blessing is the receiving operator's own act wherever it lands, so the signing key cannot tell
+  // a root row from a pool row (T202's warning). A contested-name report names both, separately.
+  readonly boundBy?: string;
   // The write discipline, traveling with the read program.
   readonly mutations?: ClaimTemplates;
   // Why `mutations` is absent although the binding's bytes carry a payload: the payload could not
@@ -880,16 +884,33 @@ const lensNameOf = (cand: Candidate): LensName =>
     : cand.livingEntity) as LensName;
 
 /**
+ * One contender for a withheld name, as its own binding delta records it: which definition, who
+ * signed the binding, when, and the binding's id. The stamp is what lets a reader tell an old
+ * registration from a fresh challenger — the contest names both, and says nothing about which
+ * deserves the name.
+ */
+export interface ContestedBinding {
+  readonly entity: string;
+  readonly author: string;
+  readonly timestamp: number;
+  readonly deltaId: string;
+}
+
+/**
  * The names a `conflicts` policy is withholding, each with EVERY candidate named (§47 criterion 4).
  * This is the refusal a person can act on: the name is absent from the surface, and this reader
  * says why and between whom — never a silent gap a caller mistakes for "no such lens".
+ *
+ * ONE reactor, deliberately: this module must not import gateway.ts, so a store that also serves
+ * blessed law from channel pools reads its cross-origin contests through the gateway's own
+ * `contestedNames` (lifecycle.ts), which composes this reader over every ground replay folds.
  */
 export function readContestedBindings(
   reactor: Reactor,
   operator?: string,
-): Map<string, { entity: string; author: string; deltaId: string }[]> {
+): Map<string, ContestedBinding[]> {
   const mode = readBindingPolicy(reactor, operator);
-  const out = new Map<string, { entity: string; author: string; deltaId: string }[]>();
+  const out = new Map<string, ContestedBinding[]>();
   if (mode !== "conflicts") return out;
   const groups = survivingCandidates(reactor, operator);
   const latest = new Map<string, Candidate>();
@@ -910,7 +931,12 @@ export function readContestedBindings(
   for (const [lens, list] of resolved.contested) {
     out.set(
       lens,
-      list.map((c) => ({ entity: c.entity, author: c.author, deltaId: c.deltaId })),
+      list.map((c) => ({
+        entity: c.entity,
+        author: c.author,
+        timestamp: c.timestamp,
+        deltaId: c.deltaId,
+      })),
     );
   }
   return out;
@@ -985,6 +1011,7 @@ export function readRegistrations(reactor: Reactor, operator?: string): Registra
         lensName: lensNameOf(cand),
         boundAt: cand.timestamp,
         boundId: cand.id,
+        boundBy: cand.author,
         ...(cand.mutations === undefined ? {} : { mutations: cand.mutations }),
         ...(cand.mutationsDefect === undefined ? {} : { mutationsDefect: cand.mutationsDefect }),
         ...(cand.writable === undefined ? {} : { writable: cand.writable }),
@@ -1044,6 +1071,7 @@ export function readRegistrationVersions(
         lensName: lensNameOf(cand),
         boundAt: cand.timestamp,
         boundId: cand.id,
+        boundBy: cand.author,
         ...(cand.mutations === undefined ? {} : { mutations: cand.mutations }),
         ...(cand.writable === undefined ? {} : { writable: cand.writable }),
         ...(cand.resolvers === undefined ? {} : { resolvers: cand.resolvers }),

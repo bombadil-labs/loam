@@ -16,6 +16,7 @@ import { authorForSeed, type Delta } from "@bombadil/rhizomatic";
 import { lensOf, readRegistrations } from "../gateway/registration.js";
 import type { Container, ContainerTable, ResolvedContainer } from "../gateway/container.js";
 import type { ChannelStatus } from "../federation/channel.js";
+import type { ContestedNameReport } from "../gateway/lifecycle.js";
 import type { Gateway } from "../gateway/gateway.js";
 
 export const ADMIN_PATH = "/admin";
@@ -182,6 +183,90 @@ ${listing}
 </form>`;
   };
 
+  // A moment, in words a person can read — and NEVER `Invalid Date`. A binding delta carries its
+  // stamp as a number, so this guard is unreachable through the publish path; `toISOString` throws
+  // on a non-finite value, and one such row would take the whole dashboard down with it.
+  const momentOf = (ms: number): string =>
+    Number.isFinite(ms) ? new Date(ms).toISOString() : "an unreadable time";
+
+  // The registrations this store is WITHHOLDING (§47.1). Under a declared `conflicts` policy a
+  // contested name is refused rather than decided, and without this block a person meets a lens
+  // that is simply not there — the 404-shaped hole §47.1 promises not to dig. The reading is the
+  // gateway's, over every ground it serves law from; this panel renders it and derives nothing of
+  // its own.
+  //
+  // The REFUSAL is store-wide, like the schema panel above and for the same reason: a lens is how
+  // this store reads, for every reader, so a withheld name is not one subtree's business. The block
+  // is absent when nothing is contested — a panel that is always there says nothing.
+  //
+  // A ROW'S ORIGIN IS A CONTAINER NAME, and container names on this page are reader-scoped: the
+  // channels panel above renders only what `reach` holds, deliberately. So a pool outside the
+  // reader's subtree is named by its kind rather than by its name — and the prose says what that
+  // costs, because a row with no ground named cannot carry the panel's own closing instruction.
+  // The refusal itself loses nothing: the lens, every contender, its signer and its binding stay.
+  //
+  // The prose never says the declaration is the ROOT's: a pool reads its own binding policy, so a
+  // contest can be governed a ground down from anything the operator declared here.
+  //
+  // A SERVED NAME IS STILL LISTED. Its serving row is marked, or the heading names what answers
+  // from outside the contest; either way every withheld contender stays visible.
+  //
+  // Delta ids are TEXT. No delta-addressed view exists to link to, and the members list already
+  // renders ids this way; a link to nothing would be worse than a name a person can paste.
+  const contestedPanelHtml = (gw: Gateway, reach: ReadonlySet<string>): string => {
+    const originHtml = (origin: string): string =>
+      origin === "root" || reach.has(origin)
+        ? `<code>${escapeHtml(origin)}</code>`
+        : "a channel pool your subtree does not reach";
+    const names = [...gw.contestedNames()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
+    if (names.length === 0) return "";
+    const headOf = (lens: string, report: ContestedNameReport): string => {
+      const rows = report.contenders;
+      const served = rows.find((r) => r.served);
+      const answer =
+        served !== undefined
+          ? `, and ${originHtml(served.origin)} serves it — the marked row below`
+          : report.servedByOther !== undefined
+            ? `, and ${originHtml(report.servedByOther.origin)} serves it from ` +
+              `<code>${escapeHtml(report.servedByOther.entity)}</code>, which is not among them`
+            : `, and none of them serves`;
+      return (
+        `<strong>${escapeHtml(lens)}</strong> — ${rows.length} registration` +
+        `${rows.length === 1 ? "" : "s"} want this name${answer}.`
+      );
+    };
+    const listing = names
+      .map(
+        ([lens, report]) =>
+          `<li>${headOf(lens, report)}\n` +
+          `<ul>\n${report.contenders
+            .map(
+              (r) =>
+                `<li><code>${escapeHtml(r.entity)}</code>, from ` +
+                `${originHtml(r.origin)}, signed by ` +
+                `<code>${escapeHtml(r.author)}</code> at ` +
+                `${escapeHtml(momentOf(r.timestamp))} — binding ` +
+                `<code>${escapeHtml(r.deltaId)}</code>; ` +
+                (r.served ? `<strong>this one serves the name</strong>` : `withheld`) +
+                `</li>`,
+            )
+            .join("\n")}\n</ul></li>`,
+      )
+      .join("\n");
+    return `<section class="contested">
+<h2>Contested names.</h2>
+<p>A <code>conflicts</code> binding policy is in force over each name below, so two or more
+registrations want it and the policy withholds every contender it can. Each contender names its
+definition, the ground it was bound in (<code>root</code>, or a channel's pool), the key that signed
+the binding, and the moment. A pool declares its own policy, so act in the ground the row names:
+withdraw one of its bindings, or declare there a policy that picks. A row that names no ground sits
+in a channel pool your subtree does not reach, and two such pools read alike here.</p>
+<ul>
+${listing}
+</ul>
+</section>`;
+  };
+
   // The row's opening half: which peer, under which local name, feeding which container.
   const channelHeadHtml = (c: ChannelStatus): string =>
     `<a href="${escapeHtml(detailHref(c.name))}"><code>${escapeHtml(c.name)}</code></a> — ` +
@@ -287,6 +372,7 @@ ${channelsPanelHtml(gw, (c) => reach.has(c.name), {
   empty: "No channel receives into a container your subtree reaches.",
 })}
 ${declareFormHtml(user, reach, formToken)}
+${contestedPanelHtml(gw, reach)}
 ${schemaPanelHtml(gw, formToken)}
 ${signOutFormHtml(formToken)}`,
     );
