@@ -308,12 +308,21 @@ export function applyResolvers(
     //
     // WHERE IT HOLDS, exactly: every top-level read (each door resolves through `resolvedNode`,
     // `resolvePinned` or `watchEntity`, and all three name their lens), and an EXPANDED CHILD
-    // decorated through its own reading. WHERE IT DOES NOT, named rather than implied: a child the
-    // decoration pass skips because it does not align positionally under a `conflicts` policy, and
-    // a child re-projected by a parent's OWN resolver, which builds its value from the hyperview
-    // and never passes here. Both serve the Policy value for a withheld field. Closing them wants
-    // the field out of the READING rather than out of this view — its own change, with its own
-    // rails, because it moves a published Schema and therefore a law address.
+    // decorated through its own reading.
+    //
+    // WHERE IT DOES NOT is EVERY PLACE THE DECORATION PASS DOES NOT REACH, and that is a class
+    // rather than a list — do not read the examples as exhaustive. A child re-projected by a
+    // parent's OWN resolver builds its value from the hyperview and never passes here at all; and
+    // decoration skips a child whenever it cannot place it, which includes a positional mismatch
+    // under `conflicts`, an ambiguous (root, role) naming two readings, a stripped-id list whose
+    // length disagrees, and a reading this store does not hold. Each serves the Policy value for a
+    // field this store refused to compute.
+    //
+    // The EXECUTION guarantee is unaffected in all of them — what `loaded` holds for a withheld
+    // spec is this store's own stub, so a peer's ESM does not run on any of these paths. It is the
+    // DISPLAY guarantee that is partial. Closing it wants the field out of the READING rather than
+    // out of this view, which moves a published Schema and therefore a law address: its own change,
+    // with its own rails.
     if (lens !== undefined && isWithheldResolver(spec.code, lens, field)) {
       delete out[field];
       continue;

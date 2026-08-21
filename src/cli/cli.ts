@@ -1240,17 +1240,22 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
       if (lens !== undefined) {
         // FLAGS THIS FORM DOES NOT TAKE ARE REFUSED, not ignored. `--expect` pins an APP's identity
         // and there is no identity for a lens's resolver law to pin; `--pen` and `--supersede`
-        // belong to a route. Accepting them silently would tell an operator they had asked for
-        // something — which, for a pin, is the difference between a check and the belief in one.
-        const stray = ["expect", "pen", "supersede"].filter(
+        // belong to a route; and `--route` names the OTHER act entirely — asked for both, an
+        // operator would have got one and heard about one. Accepting any of them silently tells
+        // someone they asked for something, which for a pin is the difference between a check and
+        // the belief in one. BOTH maps are read: the parser puts a declared boolean in `booleans`
+        // and never in `flags`, so testing one is a test that half the names always pass.
+        const stray = ["route", "expect", "pen", "supersede"].filter(
           (f) => parsed.flags.has(f) || parsed.booleans.has(f),
         );
         if (stray.length > 0) {
+          const named = stray.map((f) => `--${f}`).join(", ");
           io.err(
-            `federate bless-app --resolvers does not take ${stray.map((f) => `--${f}`).join(", ")}` +
-              " — those belong to `--route`, which mounts an app. This act grants the resolver " +
-              "code on ONE lens, and it has no identity to pin: `federate list` names the lens " +
-              "and nothing finer. Nothing was granted.",
+            `federate bless-app --resolvers does not take ${named} — ${
+              stray.length === 1 ? "that belongs" : "those belong"
+            } to \`--route\`, which mounts an app. This act grants the resolver code on ONE lens, ` +
+              "and it has no identity to pin: `federate list` names the lens and nothing finer. " +
+              "Nothing was granted; run the two acts separately.",
           );
           return 2;
         }

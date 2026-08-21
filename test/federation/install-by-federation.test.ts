@@ -1625,6 +1625,54 @@ describe("T209 — the CLI names what arrived and mounts one app", () => {
       expect(said()).toContain("does not take --expect");
       expect(said()).toContain("Nothing was granted");
 
+      // BOTH HALVES OF THE PARSER. A declared boolean lands in `booleans` and never in `flags`, so
+      // a guard that read one map would let two of the four names through while looking complete —
+      // the same shape this CLI's own arg parser already records having been bitten by.
+      for (const stray of ["--pen", "--supersede"]) {
+        fresh();
+        expect(
+          await run(
+            [
+              "federate",
+              "bless-app",
+              "--channel",
+              CHANNEL,
+              "--resolvers",
+              "alice:Plant",
+              stray,
+              "--home",
+              me,
+            ],
+            io(),
+          ),
+          said(),
+        ).toBe(2);
+        expect(said()).toContain(`does not take ${stray}`);
+      }
+
+      // AND `--route`, which names the OTHER act: asked for both, an operator would have been
+      // granted one and told about one.
+      fresh();
+      expect(
+        await run(
+          [
+            "federate",
+            "bless-app",
+            "--channel",
+            CHANNEL,
+            "--resolvers",
+            "alice:Plant",
+            "--route",
+            "hello",
+            "--home",
+            me,
+          ],
+          io(),
+        ),
+      ).toBe(2);
+      expect(said()).toContain("does not take --route");
+      expect(said()).toContain("run the two acts separately");
+
       // THE BARE `--resolvers` FORM, through the door a person types it at. Nothing on this
       // channel is withheld, so the act refuses — which is the point: the refusal proves the CLI
       // reached the gateway with a name it could resolve, rather than passing a string that could

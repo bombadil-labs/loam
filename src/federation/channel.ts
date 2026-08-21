@@ -1107,10 +1107,13 @@ function markChannelPool(pool: Container): void {
  * function exists so there is nothing to remember.
  *
  * The mark lands just AFTER the attach publishes the mount, not before it, so there is a window in
- * which the pool is routable and unmarked. No caller in this tree reaches it — the window closes
- * inside one await with nothing else on the loop that routes — and closing it properly means the
- * container primitive learning what a channel pool is, which is §27's business rather than this
- * function's.
+ * which the pool is routable and unmarked — and a channel IS opened against a live router today,
+ * by the connect tool. What keeps the window shut is narrower than it looks, and worth naming
+ * because a future door could open it: the re-attach path awaits a real append only when a DETACH
+ * record has to be struck, and nothing in this tree detaches a channel pool, so the span from
+ * mount-published to marked crosses microtasks and never a turn that serves a request. Closing it
+ * properly means the container primitive learning what a channel pool is — §27's business, not
+ * this function's.
  */
 export async function attachChannelPool(gw: Gateway, name: string): Promise<Container> {
   const pool = await gw.openContainer({
