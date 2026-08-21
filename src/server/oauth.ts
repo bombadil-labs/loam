@@ -1407,6 +1407,7 @@ export async function revokeConnector(
       const client = clientFor(file, clientId);
       if (client === undefined) return { result: { kind: "no-such-client" } };
       struckGrant = grantFor(file, clientId);
+      const going = struckGrant; // a const the closures below can narrow; `struckGrant` outlives this scope
       return {
         next: {
           ...file,
@@ -1419,12 +1420,14 @@ export async function revokeConnector(
           // reports a connector of months' standing as having "no acting identity yet" while the
           // grant it held sits attributed to nobody.
           grants: file.grants.filter((g) => g.clientId !== clientId),
-          ...(struckGrant === undefined
+          // Keyed by ACTOR: a re-keyed connector keeps a record for every key it ever signed with,
+          // and revoking the same key twice replaces rather than duplicates.
+          ...(going === undefined
             ? {}
             : {
                 revoked: [
-                  ...(file.revoked ?? []).filter((r) => r.clientId !== clientId),
-                  { clientId, actor: struckGrant.actor, revokedAt: Date.now() },
+                  ...(file.revoked ?? []).filter((r) => r.actor !== going.actor),
+                  { clientId, actor: going.actor, revokedAt: Date.now() },
                 ],
               }),
         },

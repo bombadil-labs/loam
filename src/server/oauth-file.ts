@@ -105,6 +105,10 @@ export interface OAuthRevocation {
   readonly actor: string; // the public author, and never a seed
   readonly revokedAt: number;
 }
+// Unique by ACTOR, not by client. A connector that is revoked and then completes a fresh token
+// exchange signs with a NEW key, and it holds standing under each key it ever had until each one is
+// struck. One record per client would forget every key but the last, which is the same hole this
+// list exists to close, one re-key further along.
 
 /** An issued access token, by DIGEST. The token itself is handed to the client and never stored. */
 export interface OAuthToken {
@@ -514,9 +518,9 @@ function checkFileShape(parsed: unknown, where: string): OAuthFile {
   }
   if (revoked !== undefined) {
     checkUnique(
-      revoked.map((r) => r.clientId),
+      revoked.map((r) => r.actor),
       where,
-      "revocation with clientId",
+      "revocation with actor",
     );
   }
   return {
@@ -827,11 +831,13 @@ export const grantFor = (file: OAuthFile, clientId: string): OAuthGrant | undefi
   file.grants.find((g) => g.clientId === clientId);
 
 /**
- * The revocation record for this client, or undefined. READ-ONLY HISTORY: it names who acted, and it
+ * Every key this client has had revoked, oldest first. READ-ONLY HISTORY: it names who acted, and it
  * is deliberately not consulted by anything that grants authority — see `OAuthRevocation`.
  */
-export const revocationFor = (file: OAuthFile, clientId: string): OAuthRevocation | undefined =>
-  file.revoked?.find((r) => r.clientId === clientId);
+export const revocationsFor = (file: OAuthFile, clientId: string): OAuthRevocation[] =>
+  (file.revoked ?? [])
+    .filter((r) => r.clientId === clientId)
+    .sort((a, b) => a.revokedAt - b.revokedAt || a.actor.localeCompare(b.actor));
 
 /** The issued token with this digest, or undefined. One digest names one client (checkUnique). */
 export const tokenFor = (file: OAuthFile, digest: string): OAuthToken | undefined =>

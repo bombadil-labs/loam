@@ -46,7 +46,7 @@ import { revokeConnector } from "../server/oauth.js";
 import {
   grantFor,
   readOAuthFile,
-  revocationFor,
+  revocationsFor,
   type OAuthFile,
   type OAuthGrant,
 } from "../server/oauth-file.js";
@@ -2421,29 +2421,38 @@ function homeIdentities(home: string): HomeIdentity[] {
 // completed a token exchange, so it has no acting identity for a grant to name yet; `standing:
 // false` means its seed exists and the ground append has not landed.
 function connectorIdentities(file: OAuthFile): HomeIdentity[] {
-  return file.clients.map((client) => {
-    const grant = grantFor(file, client.clientId);
-    // A REVOKED connector still has a name for the key it used to sign with. Without this the ledger
-    // read a connector of months' standing as never having had an identity, and stranded the struck
-    // grant it left behind under `unattributed` — two false answers from one dropped record.
-    const revoked = grant === undefined ? revocationFor(file, client.clientId) : undefined;
-    const author = grant?.actor ?? revoked?.actor;
+  const out: HomeIdentity[] = [];
+  for (const client of file.clients) {
+    const name = `${client.clientId} (${client.clientName})`;
     const tokens = file.tokens.filter((t) => t.clientId === client.clientId).length;
     const facts = `generation ${client.generation} · ${tokens} live token${tokens === 1 ? "" : "s"}`;
-    return {
-      kind: "connector" as const,
-      name: `${client.clientId} (${client.clientName})`,
-      ...(author === undefined ? {} : { author }),
-      note:
-        grant !== undefined
-          ? grant.standing
-            ? facts
-            : `grant pending · ${facts}`
-          : revoked !== undefined
-            ? `revoked ${new Date(revoked.revokedAt).toISOString()} · ${facts}`
-            : `no acting identity yet · ${facts}`,
-    };
-  });
+    const grant = grantFor(file, client.clientId);
+    // EVERY key this connector ever signed with, not merely its current one. Revocation destroys the
+    // key and keeps the name, so a re-keyed connector is several authors under one client id, and
+    // each holds standing until its own grant is struck. Naming only the latest would strand the
+    // others under `unattributed` — the same hole one re-key further along.
+    const revocations = revocationsFor(file, client.clientId);
+    for (const r of revocations) {
+      out.push({
+        kind: "connector",
+        name,
+        author: r.actor,
+        note: `revoked ${new Date(r.revokedAt).toISOString()} · ${facts}`,
+      });
+    }
+    if (grant !== undefined) {
+      out.push({
+        kind: "connector",
+        name,
+        author: grant.actor,
+        note: grant.standing ? facts : `grant pending · ${facts}`,
+      });
+    } else if (revocations.length === 0) {
+      // Registered and never through a token exchange: there is no key to attribute anything to.
+      out.push({ kind: "connector", name, note: `no acting identity yet · ${facts}` });
+    }
+  }
+  return out;
 }
 
 interface GroundGrant {

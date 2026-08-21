@@ -43,11 +43,18 @@
 // about who holds it. Closing it means widening the kind enum, which is a decision this ticket did
 // not take.
 //
-// SEVEN OF THESE TESTS WERE NEVER INDIVIDUALLY RED. The five criterion rails were written first and
-// failed first. The rails that close mutation survivors, and those the review batch asked for, were
-// written against behaviour that already existed in the branch; each fails against the connector-only
-// listing that preceded the ledger, which is a weaker proof than a criterion rail's, and this note
-// exists so nobody reads the file as twelve equal reds.
+// THE NINETEEN REDS ARE NOT EQUAL, and the difference is worth knowing before trusting one:
+//
+//   - FIVE were written before the code and failed first. The ticket's own criteria (a)-(d).
+//   - SEVEN were each proven red against a targeted revert of the exact behaviour they pin — the
+//     strike-standing rails against a raw `negationsOf` read, the non-delegability rail against a
+//     single collapsed reason, the two connector rails against a revoke that dropped its record and
+//     against one keyed by client rather than by key. A rail proven this way discriminates the
+//     behaviour, not merely the feature's existence.
+//   - SIX fail only against the connector-only listing that preceded the ledger. They close mutation
+//     survivors, and "the whole feature is absent" is a weaker proof than either kind above.
+//   - ONE — the unreadable-records refusal — passes without this ticket entirely, and says so at
+//     its own site.
 //
 // Every store here is a fresh temp home. Nothing in this file touches a real ~/.loam.
 
@@ -66,7 +73,7 @@ import {
   EMPTY_OAUTH,
   grantFor,
   readOAuthFile,
-  revocationFor,
+  revocationsFor,
   writeOAuthFile,
   type OAuthFile,
 } from "../../src/server/oauth-file.js";
@@ -538,6 +545,35 @@ describe("T205 (b2) — only a strike with standing is reported as one", () => {
     expect(rowFor(printed(), "quill")).not.toMatch(/struck/);
   });
 
+  it("reports the FIRST binding strike when two of them bind", async () => {
+    // Standing ended at the first lawful strike. A second one changes nothing about when, so a
+    // ledger reporting the LATEST would over-report how long the key could write — the same number
+    // as the inert case above, wrong in the opposite direction. Both strikes here bind, so nothing
+    // but the earliest-wins rule separates them.
+    expect(await run(["pen", "create", "nib", "--home", home], io()), printed()).toBe(0);
+    const nib = authorOfPen("nib");
+    const grant = await soleGrantId(nib);
+    const first = 1_700_000_000_000;
+    const second = 1_700_000_900_000; // a quarter of an hour later
+    await plantStrike(readSeed(home), grant, first);
+    await plantStrike(readSeed(home), grant, second);
+    clear();
+
+    // DELTA: two strikes, both the operator's, both in the ground.
+    const both = await strikesOn(grant);
+    expect(both).toHaveLength(2);
+    expect(both.every((s) => s.author === authorForSeed(readSeed(home)))).toBe(true);
+    expect(await heldVerbs(nib)).toEqual([]);
+
+    expect(await run(["grant", "list", "--home", home], io()), printed()).toBe(0);
+    const row = rowFor(printed(), "nib");
+    expect(row, printed()).not.toBe("");
+    expect(row).toContain(`struck ${new Date(first).toISOString()}`);
+    expect(row, "the later strike did not move when standing ended").not.toContain(
+      new Date(second).toISOString(),
+    );
+  });
+
   it("a grant that fails on its chain is not reported as revoked", async () => {
     // `quill` holds write and NOT admin, so a grant it signs never binds. It also strikes that grant
     // inertly. Reporting "struck" here would name a revocation nobody with standing performed — and
@@ -835,9 +871,9 @@ describe("T205 — the screen is grouped, and every column tells the truth", () 
     // And the SEED is gone from the home — revocation still destroys the key.
     const file = readOAuthFile(home);
     expect(grantFor(file, "cli-groove"), "the seed-bearing record is gone").toBeUndefined();
-    const record = revocationFor(file, "cli-groove");
-    expect(record, "the connector's public identity is kept").toBeDefined();
-    expect(record?.actor).toBe(CONNECTOR);
+    const records = revocationsFor(file, "cli-groove");
+    expect(records, "the connector's public identity is kept").toHaveLength(1);
+    expect(records[0]?.actor).toBe(CONNECTOR);
     // The key itself is destroyed — the whole point of keeping only the public half.
     expect(JSON.stringify(file.revoked ?? [])).not.toContain(CONNECTOR_SEED);
 
@@ -858,6 +894,57 @@ describe("T205 — the screen is grouped, and every column tells the truth", () 
     expect(mute, listing).not.toBe("");
     expect(mute).not.toContain("revoked ");
     expect(mute).toContain("no acting identity yet");
+  });
+
+  it("keeps every key a re-keyed connector ever used", async () => {
+    // A revoked connector can come back: a fresh token exchange mints a NEW key under the same
+    // client id. Both keys held standing, at different times, and both left a struck grant behind.
+    // Keeping one record per CLIENT would forget the older key and strand its grant under
+    // `unattributed` — the same hole the revocation record exists to close, one re-key later.
+    const SECOND_SEED = "9d".repeat(32);
+    const SECOND = authorForSeed(SECOND_SEED);
+    seedTwoConnectors();
+    await plantOperatorGrant(CONNECTOR, "write");
+    expect(await run(["grant", "revoke", "cli-groove", "--home", home], io()), printed()).toBe(0);
+
+    // The exchange runs again and hands the connector a different identity.
+    const held = readOAuthFile(home);
+    writeOAuthFile(home, {
+      ...held,
+      grants: [
+        ...held.grants,
+        {
+          clientId: "cli-groove",
+          actorSeed: SECOND_SEED,
+          actor: SECOND,
+          grantedAt: 2,
+          standing: true,
+        },
+      ],
+    });
+    await plantOperatorGrant(SECOND, "write");
+    expect(await run(["grant", "revoke", "cli-groove", "--home", home], io()), printed()).toBe(0);
+    clear();
+
+    const file = readOAuthFile(home);
+    const records = revocationsFor(file, "cli-groove");
+    expect(
+      records.map((r) => r.actor),
+      "both keys are remembered, oldest first",
+    ).toEqual([CONNECTOR, SECOND]);
+    expect(JSON.stringify(file.revoked)).not.toContain(SECOND_SEED);
+
+    expect(await run(["grant", "list", "--home", home], io()), printed()).toBe(0);
+    const listing = printed();
+    // BOTH struck grants are attributed to the connector, and neither is stranded.
+    for (const key of [CONNECTOR, SECOND]) {
+      const row = rowFor(listing, shown(key));
+      expect(row, `${key} is missing from ${listing}`).not.toBe("");
+      expect(row).toContain("connector");
+      expect(row).toContain("cli-groove");
+      expect(row).toMatch(/struck \d{4}-\d{2}-\d{2}T/);
+    }
+    expect(listing).not.toContain("unattributed");
   });
 
   it("carries each connector's own generation, token count, and acting identity", async () => {
