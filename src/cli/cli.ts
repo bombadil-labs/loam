@@ -194,7 +194,7 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
   },
   federate: {
     summary: "open, list, adjust, and sever federation channels (SPEC §46)",
-    usage: "loam federate <open|list|set|drop> [options]",
+    usage: "loam federate <open|list|set|bless-app|drop> [options]",
     flags: new Set([
       "home",
       "store",
@@ -205,11 +205,14 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "bless",
       "receiving",
       "channel",
+      "route",
+      "pen",
       "yes",
     ]),
     // `--yes` is a bare confirmation, not a value. Without this the parser demanded a value and
     // `federate drop --channel X --yes` could not be typed correctly by anyone.
-    booleans: new Set(["yes"]),
+    // `--pen` is the same shape: §6's second key for an app that can WRITE, asked as a word.
+    booleans: new Set(["yes", "pen"]),
     notes: [
       "Federation is container-to-container. `open` names the container you receive INTO and the",
       "PREFIX you assign the peer — the prefix is yours, never theirs, so no peer can take a name",
@@ -218,11 +221,18 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "  loam federate open --from https://peer.example/default --into friends --prefix alice",
       "  loam federate list",
       "  loam federate set --channel channel:friends:alice --bless false",
+      "  loam federate bless-app --channel channel:friends:alice --route hello",
       "  loam federate drop --channel channel:friends:alice --yes",
       "",
       "`set` is reversible: --receiving false freezes the channel and keeps what arrived,",
       "--bless false stops new law binding and leaves bound law serving. `drop` is NOT reversible:",
       "it purges that peer's pool at the bytes and needs --yes.",
+      "",
+      "An APP a peer sends never runs on its own. It arrives inert, `list` names it, and",
+      "`bless-app` mounts that one route — the toggles above govern NAMES, never code that runs.",
+      "A mounted app runs on the channel's own pool behind the probation frame, its writes stay",
+      "there, and dropping the channel takes it away. Add --pen for an app that writes: its pen",
+      "must also be provisioned and granted, which is a separate act (SPEC §6, §24.7).",
     ],
   },
   migrate: {
@@ -980,11 +990,12 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
 async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
   const verb = args[0];
   const parsed = parseFor("federate", args.slice(1));
-  if (verb === undefined || !["open", "list", "set", "drop"].includes(verb)) {
+  if (verb === undefined || !["open", "list", "set", "drop", "bless-app"].includes(verb)) {
     io.err(
       "federate takes a verb: open (start receiving from a peer), list (what is standing and how " +
-        "it is doing), set (freeze or unbless, both reversible), drop (sever and purge, not " +
-        "reversible) — `loam federate --help`",
+        "it is doing), set (freeze or unbless, both reversible), bless-app (mount one app a peer " +
+        "sent, the only act that lets their code run), drop (sever and purge, not reversible) — " +
+        "`loam federate --help`",
     );
     return 2;
   }
@@ -1020,10 +1031,22 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
             : `last synced ${new Date(r.lastSyncedAt).toISOString()}`;
         const trouble =
           r.consecutiveFailures > 0 ? `, ${r.consecutiveFailures} failed attempt(s) since` : "";
+        // An APP a peer sent is code, and no toggle above mounts it (§24.6). An operator who cannot
+        // see what arrived cannot decide about it, so every arrival is named here whether or not it
+        // was ever blessed — and the bundle's address is printed so two stores can compare notes.
+        const apps = gateway
+          .channelApps(r.name)
+          .map((a) =>
+            a.blessed
+              ? `\n  app "${a.route}" serves at "${a.serves}", bundle ${a.hash.slice(0, 12)}…`
+              : `\n  app "${a.route}" ARRIVED, INERT — bundle ${a.hash.slice(0, 12)}…\n` +
+                `    nothing of it runs until \`loam federate bless-app --channel ${r.name} ` +
+                `--route ${a.route}\``,
+          );
         io.out(
           `${r.name}\n  into ${r.into}, serving the peer's law under "${r.prefix}:"\n` +
             `  ${r.receiving ? "receiving" : "FROZEN"}, ${r.blessing ? "blessing" : "NOT blessing"}\n` +
-            `  ${when}${trouble}`,
+            `  ${when}${trouble}${apps.join("")}`,
         );
       }
       return 0;
@@ -1093,6 +1116,25 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
           `${now.blessing ? "blessing" : "NOT blessing"}\n` +
           (now.blessing ? "" : "  law already bound stays bound — this stops NEW law binding\n") +
           (now.receiving ? "" : "  what already arrived still reads — this stops NEW deltas\n"),
+      );
+      return 0;
+    }
+
+    if (verb === "bless-app") {
+      const route = parsed.flags.get("route");
+      if (route === undefined) {
+        io.err(
+          "federate bless-app wants --route <route> — `loam federate list` names every app a peer " +
+            "has sent, and mounting one is the only way its code ever runs here",
+        );
+        return 2;
+      }
+      await gateway.blessChannelApp(name, route, { pen: parsed.booleans.has("pen") });
+      const app = gateway.channelApps(name).find((a) => a.route === route);
+      io.out(
+        `loam: ${name} now serves the app "${route}" at "${app?.serves ?? route}"\n` +
+          "  it runs on this channel's pool, behind the probation frame, and its writes stay there\n" +
+          `  dropping the channel takes it with the peer's data — \`loam federate drop --channel ${name} --yes\``,
       );
       return 0;
     }

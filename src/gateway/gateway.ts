@@ -29,6 +29,8 @@ import type { StoreBackend } from "../store/backend.js";
 import { isRepairable } from "../store/quarantine.js";
 import { promoteImpl, readAdoptions, type Adoption } from "./adopt.js";
 import {
+  blessChannelAppImpl,
+  channelAppsImpl,
   channelStatusImpl,
   channelsEverImpl,
   resumeChannelImpl,
@@ -37,6 +39,7 @@ import {
   keepSyncingImpl,
   openChannelImpl,
   setChannelImpl,
+  type ArrivedApp,
   type Channel,
   type ChannelStatus,
   type OpenChannelOptions,
@@ -1002,6 +1005,23 @@ export class Gateway {
 
   channelStatus(name?: string): ChannelStatus[] {
     return channelStatusImpl(this, name);
+  }
+
+  /** The peer apps sitting in this store's channel pools — arrived, and inert until blessed. */
+  channelApps(channel?: string): ArrivedApp[] {
+    return channelAppsImpl(this, channel);
+  }
+
+  /**
+   * Mount ONE arrived app (SPEC §24.6). Neither channel toggle reaches this: blessing a name and
+   * running a stranger's code are different grants, so the wider one takes its own deliberate act.
+   */
+  async blessChannelApp(
+    channel: string,
+    route: string,
+    opts: { pen?: boolean } = {},
+  ): Promise<void> {
+    return blessChannelAppImpl(this, channel, route, opts);
   }
 
   /** Sever a federation channel and purge its pool. Irreversible; freezing is the reversible act. */

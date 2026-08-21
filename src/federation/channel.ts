@@ -15,15 +15,22 @@
 
 import type { Delta } from "@bombadil/rhizomatic";
 import type { Claims } from "@bombadil/rhizomatic";
-import { makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
+import { contentAddress, makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
 import type { Container } from "../gateway/container.js";
 import { containerClaims, readContainerTable } from "../gateway/container.js";
 import type { FederationReport, Gateway } from "../gateway/gateway.js";
 import { legalNameFor } from "../gateway/gql.js";
 import { parseOffer } from "./offer.js";
-import { CTX_MANIFEST, isRegistrationBinding, manifestExportClaims } from "../gateway/adopt-law.js";
+import {
+  CTX_MANIFEST,
+  isRegistrationBinding,
+  isRendererBinding,
+  manifestExportClaims,
+} from "../gateway/adopt-law.js";
 import { CTX_REGISTRATION } from "../gateway/registration.js";
 import { freezeMembers } from "../gateway/container-identity.js";
+import type { RendererBinding } from "../gateway/renderers.js";
+import { readRenderers } from "../gateway/renderers.js";
 
 /** Where a channel's deltas come from. A live peer, a frozen offer, or a fixture. */
 export interface ChannelSource {
@@ -59,6 +66,29 @@ export interface SyncReport {
    * Distinct from `bound` on purpose — see the note in `bindArrived`.
    */
   readonly witnessed: string[];
+  /**
+   * The peer's APPS sitting in this channel's pool. A renderer is code, and the blessing toggle does
+   * not reach it (§24.6) — so these are reported, never bound. `blessed` says whether THIS code is
+   * what serves today, which is why a report can name an app on every poll without ever mounting it.
+   */
+  readonly apps: readonly ArrivedApp[];
+}
+
+/** One of a peer's apps, as it sits in the channel's pool. */
+export interface ArrivedApp {
+  readonly channel: string;
+  /** The peer's own route — the handle `loam federate bless-app --route` takes. */
+  readonly route: string;
+  /** What this store would serve it as: the receiver's prefix over the peer's route (§46.2). */
+  readonly serves: string;
+  /** The content address of the BUNDLE — the code that would run, named the way a person can check. */
+  readonly hash: string;
+  /**
+   * Is this exact code what serves at that route right now? False is the arrival state AND the state
+   * after a peer ships new code at a route you blessed: the old binding still serves, so calling the
+   * new one blessed would report a mount that never happened (H7).
+   */
+  readonly blessed: boolean;
 }
 
 export interface ChannelStatus {
@@ -488,7 +518,12 @@ async function bindArrived(
       // root ground never holds a channel's law. The pool gateway carries the operator's seed
       // (openSeparate hands it down), so this is the same operator's act in a narrower ground. The
       // receiver's surface serves the lens by AGGREGATION at replay, folded below.
-      const outcome = await ground.adoptLaw(version, alias, { as: name });
+      // `expect: "schema"` states what this pass is FOR. It looks its rows up by alias, and an alias
+      // is a lookup key a peer's own law can collide with — so without the assertion, a manifest row
+      // naming a RENDERER under a lens's name would let the name-binding toggle publish code that
+      // runs. Auto-bless never auto-executes (§24.6), and this is where that is enforced rather
+      // than assumed.
+      const outcome = await ground.adoptLaw(version, alias, { as: name, expect: "schema" });
       // "witnessed" IS NOT "bound", and reporting it as bound was a false report of the plainest
       // kind: `bound` said the name serves, and the store threw on it.
       //
@@ -512,6 +547,154 @@ async function bindArrived(
   // replayRegistrations is what makes it serve.
   if (bound.length > 0) gw.replayRegistrations();
   return { bound, parked, witnessed };
+}
+
+/** The content address of a bundle — the same address the ESM cache keys the running code by. */
+const bundleHash = (bundle: string): string => contentAddress(new TextEncoder().encode(bundle));
+
+/**
+ * The peer's renderer bindings in a channel's pool, latest per route.
+ *
+ * Read PER AUTHOR through `readRenderers`, the same reader that decides what a store serves — so a
+ * peer's own retraction retires their own app, and nobody else's strike does (the author-scoped
+ * negation algebra `adopt-law` keeps for a module's members, and the reason a hostile co-tenant in
+ * one pool cannot make a peer's app vanish from the listing). Sharing the reader is deliberate: a
+ * second parser would drift, and the drift would land on which app an operator thinks they blessed.
+ *
+ * The operator's own slice is excluded, because a blessing lands in this same pool (§47.4) and
+ * reading it back would report the receiver's act as a fresh arrival, forever.
+ */
+function arrivedBindings(gw: Gateway, ground: Gateway): RendererBinding[] {
+  const authors = new Set<string>();
+  for (const d of ground.reactor.snapshot()) {
+    if (d.claims.author !== gw.operatorAuthor && isRendererBinding(d.claims)) {
+      authors.add(d.claims.author);
+    }
+  }
+  const latest = new Map<string, RendererBinding>();
+  for (const author of authors) {
+    for (const r of readRenderers(ground.reactor, author)) {
+      // One route, two peers relaying into one pool: the same (timestamp, id) tie-break every
+      // latest-wins reader here uses, so the listing is an answer rather than an iteration order.
+      const held = latest.get(r.route);
+      if (
+        held === undefined ||
+        r.timestamp > held.timestamp ||
+        (r.timestamp === held.timestamp && r.deltaId > held.deltaId)
+      ) {
+        latest.set(r.route, r);
+      }
+    }
+  }
+  return [...latest.values()];
+}
+
+/** The arrived apps of ONE channel, with what the pool actually serves folded in. */
+function appsOf(gw: Gateway, ground: Gateway, channel: string, prefix: string): ArrivedApp[] {
+  const serving = new Map(ground.renderers().map((r) => [r.route, bundleHash(r.bundle)]));
+  return arrivedBindings(gw, ground)
+    .map((r) => {
+      const hash = bundleHash(r.bundle);
+      return {
+        channel,
+        route: r.route,
+        serves: `${prefix}:${r.route}`,
+        hash,
+        blessed: serving.get(r.route) === hash,
+      };
+    })
+    .sort((a, b) => (a.route < b.route ? -1 : a.route > b.route ? 1 : 0));
+}
+
+/** Every arrived app across this store's live channels, or one channel's (SPEC §24.6). */
+export function channelAppsImpl(gw: Gateway, channel?: string): ArrivedApp[] {
+  const out: ArrivedApp[] = [];
+  for (const status of channelStatusImpl(gw, channel)) {
+    const ground = gw.channelPools.get(status.name)?.gateway;
+    // A channel whose pool this process has not attached is reported as carrying no apps rather
+    // than guessed at — the pool is where the answer lives, and there is no second copy of it.
+    if (ground === undefined) continue;
+    out.push(...appsOf(gw, ground, status.name, status.prefix));
+  }
+  return out;
+}
+
+/**
+ * MOUNT ONE ARRIVED APP — the explicit act, and the whole point of §24.6's "quarantine-first".
+ *
+ * Everything else on a channel is reversible bookkeeping: `receiving` decides whether bytes arrive,
+ * `blessing` decides whether a NAME binds. This decides whether a stranger's CODE RUNS, which is a
+ * strictly wider grant than either, so it is neither toggle's business and it is never automatic.
+ * One route, named by a person, every time.
+ *
+ * What it does NOT widen: the app is published on the POOL's gateway, so it runs on the pool's
+ * ground, wears §24.7's probation frame, writes only into the pool, and goes with the pool when the
+ * channel is dropped. `dependencies: "refuse"` keeps the act to the one export asked for — a
+ * renderer whose lens is not blessed is refused, never quietly blessed along with it — and
+ * `expect: "renderer"` means a manifest alias can never turn this into a schema blessing.
+ */
+export async function blessChannelAppImpl(
+  gw: Gateway,
+  channel: string,
+  route: string,
+  opts: { pen?: boolean } = {},
+): Promise<void> {
+  const status = channelStatusImpl(gw, channel)[0];
+  const ground = gw.channelPools.get(channel)?.gateway;
+  if (status === undefined || ground === undefined) {
+    throw new Error(
+      `bless-app refused: this store holds no open channel named "${channel}" — ` +
+        "`loam federate list` names the ones it has, and a severed channel is gone for good",
+    );
+  }
+  const arrived = arrivedBindings(gw, ground);
+  const app = arrived.find((r) => r.route === route);
+  if (app === undefined) {
+    throw new Error(
+      `bless-app refused: "${channel}" has received no app at the route "${route}" — it offers ` +
+        (arrived.length === 0
+          ? "none yet, so there is nothing to mount"
+          : arrived.map((r) => `"${r.route}"`).join(", ")),
+    );
+  }
+  const seed = gw.options.seed;
+  const operator = gw.operatorAuthor;
+  if (seed === undefined || operator === undefined) {
+    throw new Error("only an operated store may bless an app (a blessing is the operator's claim)");
+  }
+  // The manifest row a peer never sent, minted in the POOL — the same shape `bindArrived` mints for
+  // a lens, and purged with the pool on a drop. It names the binding by CONTENT ADDRESS because that
+  // is how §27.8 names a renderer, and re-minting it whenever the peer re-points the route is what
+  // keeps a blessing pointed at the code that arrived rather than the code that used to be there.
+  const alias = `app:${route}`;
+  const members = [...ground.reactor.snapshot()];
+  if (!members.some((d) => namesExport(d.claims, alias, app.deltaId))) {
+    await ground.federate([
+      signClaims(
+        manifestExportClaims(
+          { alias, targetAddress: app.deltaId, kind: "renderer" },
+          operator,
+          ground.nextTimestamp(),
+        ),
+        seed,
+      ),
+    ]);
+  }
+  const version = freezeMembers([...ground.reactor.snapshot()]);
+  await ground.adoptLaw(version, alias, {
+    expect: "renderer",
+    dependencies: "refuse",
+    ...(opts.pen === true ? { pen: true } : {}),
+  });
+}
+
+/** Does this delta declare exactly this manifest export — the alias AND the address it names? */
+function namesExport(claims: Claims, alias: string, address: string): boolean {
+  const named = (role: string, value: string): boolean =>
+    claims.pointers.some(
+      (p) => p.role === role && p.target.kind === "primitive" && p.target.value === value,
+    );
+  return manifestAliasOf(claims) === alias && named("target-address", address);
 }
 
 /** The alias a manifest row names, or undefined for any other delta. */
@@ -591,7 +774,17 @@ async function syncChannel(
   // frozen channel reports honestly rather than silently doing nothing: it did not fail, and it
   // did not accept anything, and both are true.
   if (before?.receiving === false) {
-    return { offered: 0, accepted: 0, duplicates: 0, bound: [], parked: [], witnessed: [] };
+    // Still names the apps: a frozen channel accepted nothing, and what is already sitting inert in
+    // its pool did not stop existing because the channel stopped listening.
+    return {
+      offered: 0,
+      accepted: 0,
+      duplicates: 0,
+      bound: [],
+      parked: [],
+      witnessed: [],
+      apps: appsOf(gw, ground, name, opts.prefix),
+    };
   }
   let offered: readonly Delta[];
   try {
@@ -671,6 +864,9 @@ async function syncChannel(
     bound,
     parked,
     witnessed,
+    // Read AFTER the blessing, so an app whose lens just bound is reported against the pool as it
+    // now stands rather than as it was when the pull landed.
+    apps: appsOf(gw, ground, name, opts.prefix),
   };
 }
 

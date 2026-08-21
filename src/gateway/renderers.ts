@@ -472,13 +472,51 @@ export async function publishRendererImpl(
   await gw.append([signClaims(filed, seed)]);
 }
 
+/**
+ * A CHANNEL'S APP SERVES UNDER THE CHANNEL'S PREFIX (SPEC §46.2), and it serves FROM THE POOL.
+ *
+ * The receiver names a peer's app exactly as it names a peer's lens — `alice:hello`, because the
+ * receiver called the channel `alice`. What it must NOT do is fold the peer's binding into this
+ * store's own renderer table: the render has to run on the POOL's ground, behind the pool's
+ * probation frame (§24.7), with its writes sequestered there. A copied binding would run a
+ * stranger's code against the receiver's own ground, which is the one thing a blessing may not buy.
+ * So the prefix is a DELEGATION, resolved per request, and nothing about a channel is cached here.
+ *
+ * The receiver's OWN law wins its own name: every caller reaches this only after finding nothing at
+ * `route` in its own table. And the two cheap gates come first — a store with no channels, or a
+ * route with no prefix, never pays for the channel reading (H8: `channelStatus` walks the ground).
+ *
+ * Reads `channelPools` rather than `federationChannels` deliberately: a booted store whose peer
+ * credential is missing has the pool attached and the channel unresumable, and a blessed app must
+ * go on serving whether or not this store can currently reach the peer it came from.
+ */
+function channelApp(gw: Gateway, route: string): { pool: Gateway; route: string } | undefined {
+  if (gw.channelPools.size === 0) return undefined;
+  const cut = route.indexOf(":");
+  if (cut <= 0 || cut === route.length - 1) return undefined;
+  const prefix = route.slice(0, cut);
+  const bare = route.slice(cut + 1);
+  for (const c of gw.channelStatus()) {
+    if (c.prefix !== prefix) continue;
+    const pool = gw.channelPools.get(c.name)?.gateway;
+    return pool === undefined ? undefined : { pool, route: bare };
+  }
+  return undefined;
+}
+
 // Ensure a route's bundle is loaded (the body of `Gateway.prepareRoute`, SPEC §23) — async, so a renderer
 // binding that arrived by any path (a raw `/append`, a fresh reactor in another process) is runnable
 // before the synchronous serveRoute. Idempotent (the ESM cache dedups by content address). A no-op for an
-// unknown route.
+// unknown route. A channel's app is prepared in ITS pool — the door calls this before every render, and
+// it is what makes a blessed app runnable in a process that booted after the blessing.
 export async function prepareRouteImpl(gw: Gateway, route: string): Promise<void> {
   const binding = gw.renderers().find((r) => r.route === route);
-  if (binding !== undefined) await loadRenderers([binding.bundle]);
+  if (binding !== undefined) {
+    await loadRenderers([binding.bundle]);
+    return;
+  }
+  const app = channelApp(gw, route);
+  if (app !== undefined) await app.pool.prepareRoute(app.route);
 }
 
 // Serve a route (the body of `Gateway.serveRoute`, SPEC §23): resolve the renderer's node under the
@@ -499,7 +537,10 @@ export async function serveRouteImpl(
   // One refusal, everywhere — history is not anonymous, and neither is "which routes exist" (§17).
   const gone = { status: 404, contentType: "text/plain; charset=utf-8", body: "no such route" };
   const binding = gw.renderers().find((r) => r.route === route);
-  if (binding === undefined) return gone;
+  if (binding === undefined) {
+    const app = channelApp(gw, route);
+    return app === undefined ? gone : app.pool.serveRoute(app.route, entity, door, gesture, asOf);
+  }
   let node: ResolvedNode;
   try {
     if (binding.versionId === undefined) {
@@ -770,7 +811,10 @@ export async function writeRouteImpl(
   const text = "text/plain; charset=utf-8";
   const gone = { status: 404, contentType: text, body: "no such route" };
   const binding = gw.renderers().find((r) => r.route === route);
-  if (binding === undefined) return gone;
+  if (binding === undefined) {
+    const app = channelApp(gw, route);
+    return app === undefined ? gone : app.pool.writeRoute(app.route, entity, fields, door);
+  }
   // Visible on this door (the same discipline as a GET), so a stranger can only write where they could
   // read, and an undeclared route stays a uniform 404 rather than revealing itself.
   if (!routeServableOn(gw, binding, door)) return gone;

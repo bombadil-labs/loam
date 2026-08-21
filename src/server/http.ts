@@ -1406,6 +1406,10 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
                       // Spelled out rather than left as a zero: a channel that has NEVER reached
                       // its peer must not read like one that is merely quiet (H9, §46 criterion 8).
                       lastSyncedAt: c.lastSyncedAt === 0 ? "never synced" : c.lastSyncedAt,
+                      // What a peer SENT that can run, and whether any of it does (§24.6). Read-only
+                      // like the rest of this tool: naming an app is not mounting it, and no
+                      // connector tool mounts one — that act is the CLI's, in a person's hands.
+                      apps: gateway.channelApps(c.name),
                     })),
                     null,
                     1,

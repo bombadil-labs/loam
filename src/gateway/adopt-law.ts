@@ -385,7 +385,7 @@ const carriesBytes = (members: readonly Delta[], ref: string): boolean =>
     d.claims.pointers.some((p) => p.target.kind === "bytes" && bytesRefOf(p.target.value) === ref),
   );
 
-const isRendererBinding = (claims: Claims): boolean =>
+export const isRendererBinding = (claims: Claims): boolean =>
   claims.pointers.some(
     (p) =>
       p.target.kind === "entity" &&
@@ -884,6 +884,19 @@ export interface AdoptLawOptions {
   readonly pen?: boolean;
   /** alias → the new target address the operator confirms for a RE-POINTED alias. */
   readonly repoints?: Readonly<Record<string, string>>;
+  /**
+   * Refuse a row that classifies as anything other than this kind. Blessing a NAME and mounting
+   * CODE THAT RUNS are different grants (§24.6), and a caller that means one must never perform the
+   * other because a manifest alias resolved to a row it did not expect — an alias is a lookup key a
+   * peer's own law can collide with.
+   */
+  readonly expect?: "schema" | "renderer";
+  /**
+   * Refuse rather than blessing a renderer's schema dependency alongside it. The default pulls the
+   * dependency in, which is right for an operator blessing a module they chose; a caller blessing
+   * ONE export of a stranger's pool must bind nothing the operator did not ask for.
+   */
+  readonly dependencies?: "refuse";
 }
 
 export interface AdoptionOutcome {
@@ -1059,6 +1072,13 @@ export async function adoptLawImpl(
         `by promote-outputs (§24.3).`,
     );
   }
+  if (opts.expect !== undefined && ex.kind !== opts.expect) {
+    throw new Error(
+      `adoption refused: "${alias}" names ${ex.kind} law, and this caller asked for ` +
+        `${opts.expect} law. Blessing a NAME and mounting CODE THAT RUNS are different grants ` +
+        `(§24.6) — an alias a peer chose may not turn one act into the other.`,
+    );
+  }
   return adoptOne(gw, src, row, ex, opts);
 }
 
@@ -1066,7 +1086,7 @@ async function adoptOne(
   gw: Gateway,
   src: Source,
   row: ManifestRow,
-  ex: SchemaExport | RendererExport,
+  given: SchemaExport | RendererExport,
   opts: AdoptLawOptions,
 ): Promise<AdoptionOutcome> {
   if (gw.options.seed === undefined || gw.operatorAuthor === undefined) {
@@ -1075,6 +1095,8 @@ async function adoptOne(
     );
   }
   const notes: string[] = [...skewNotes(gw, src, row)];
+  // THE LENS THE BINDING WILL NAME HERE, resolved before anything else reads its address.
+  const ex = given.kind === "renderer" ? underServedLens(gw, src, row, given, notes) : given;
 
   // A pen never rides the sugar OR the primitive: §23.3's write standing is a second key, and
   // classification read it from the BYTES, so a manifest calling this row a schema changes nothing.
@@ -1117,6 +1139,13 @@ async function adoptOne(
         `adoption refused: the renderer "${row.alias}" reads the lens "${ex.schemaName}", which ` +
           `this store does not serve and this module does not export — bless the schema it reads ` +
           `first, or register your own`,
+      );
+    }
+    if (opts.dependencies === "refuse") {
+      throw new Error(
+        `adoption refused: the renderer "${row.alias}" reads the lens "${ex.schemaName}", which ` +
+          `this store does not serve — bless the schema it reads first. This caller blesses one ` +
+          `export at a time, so nothing binds a name the operator did not ask for.`,
       );
     }
     // The dependency is blessed under its OWN name: `as` renames the row the operator asked for,
@@ -1183,6 +1212,50 @@ async function adoptOne(
 
   const provenance = await record(gw, src, row, ex, "adopted-from", landed[0] ?? ex.sourceDelta);
   return { alias: row.alias, kind: "adopted-from", landed: [...landed, ...provenance], notes };
+}
+
+/**
+ * The renderer as it will actually be PUBLISHED here, with the lens it reads named the way THIS
+ * store names it.
+ *
+ * Law identity deliberately excludes the living name (§46.2), so the lens a stranger's renderer
+ * names bare — `Plant` — can be the very law this store already serves under a name of its own
+ * choosing: a channel's `alice:Plant`, assigned by the receiver because the receiver names what it
+ * receives. Publishing the peer's spelling would file a binding over a lens nothing here answers,
+ * and the renderer door would refuse it — so the mapping is not a convenience, it is what makes an
+ * arriving app mountable at all.
+ *
+ * Re-addressed here, BEFORE the witness and the name guard read `address`, because the address must
+ * be the address of what actually lands: computed from the peer's spelling, a second blessing of the
+ * same app would fail to witness and would then meet the route's own "already answered by
+ * DIFFERENT-content law" refusal, against law it published itself.
+ *
+ * Nothing widens. This only ever re-points a binding at law this store ALREADY serves; a lens
+ * nothing here answers is left exactly as it was, for the dependency guard below to rule on.
+ */
+function underServedLens(
+  gw: Gateway,
+  src: Source,
+  row: ManifestRow,
+  ex: RendererExport,
+  notes: string[],
+): RendererExport {
+  if (gw.registered.some((r) => lensOf(r) === ex.schemaName)) return ex;
+  const dependency = dependencyRow(gw, src, ex.schemaName);
+  if (dependency === undefined) return ex;
+  const served = gw
+    .registrationVersions()
+    .filter((v) => schemaLawAddress(v.hyperschema, v.schema) === dependency.ex.address)
+    .at(-1); // registrationVersions is (timestamp, deltaId) ascending
+  if (served === undefined) return ex;
+  const under = lensOf(served);
+  if (under === ex.schemaName) return ex;
+  notes.push(
+    `the renderer "${row.alias}" reads the peer's lens "${ex.schemaName}", which this store serves ` +
+      `as "${under}" — the binding names the reading THIS store answers`,
+  );
+  const core = { ...ex, schemaName: under };
+  return { ...core, address: rendererLawAddress(core) };
 }
 
 // The manifest row whose SCHEMA law provides a lens name — the dependency lookup a renderer needs.
