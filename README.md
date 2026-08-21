@@ -572,23 +572,30 @@ channel and keeps everything already received; `--bless false` stops new law bin
 already bound serving. Severing is `drop`, which purges that peer's pool at the bytes and leaves
 every other channel whole.
 
+**What a channel gets right, now.** Each of these was once on the not-yet list and is landed
+with rails (spec §46, §47):
+
+- **The standing sync survives a restart.** A channel's address rides its record and its token
+  lives in the home at 0600, so `loam serve` rebuilds its channels at boot and says how many it
+  is syncing. A channel it cannot resume is named on stderr rather than left in the list
+  reporting `receiving`.
+- **Two peers publishing byte-identical law both bind.** You and a friend can both start from
+  `loam register --stock note`; `alice:Note` and `bob:Note` each answer with their own peer's
+  data, under names you assigned.
+- **A peer's sibling lenses arrive as siblings** — two readings over one definition each serve
+  their own resolution under their own name.
+- **A binding lives in the pool it was blessed into**, so severing takes the peer's law with the
+  peer's data — nothing to retire, and a bystander channel's names keep serving.
+
 **What channels do NOT do yet.** Each of these is real today, and each has a ticket:
 
 - **Federating still costs a peer your operator token.** `GET /:mount/federate` demands it, and that
   token also registers root law, mints grants and reads everything. A container-scoped offer token
-  is designed and blocked on where a runtime-issued credential should live (T196/T188).
-- ~~The standing sync does not survive a restart.~~ **Fixed (T196).** A channel's address rides its
-  record and its token lives in the home at 0600, so `loam serve` rebuilds its channels at boot and
-  says how many it is syncing. A channel it cannot resume — no recorded address, or no token here —
-  is named on stderr rather than left in the list reporting `receiving`.
-- **Two peers publishing identical law give you one name, not two.** If you and a friend both start
-  from `loam register --stock note`, the second channel reports its lens as `witnessed` rather than
-  bound, and that name does not answer. The peer's data is still there, reachable through the first
-  channel's name (T198).
-- **A peer's sibling lenses at one hyperschema entity arrive as one** (T197).
-- **Severing does not retire the lenses it blessed.** Reading one afterwards refuses by name rather
-  than answering — it must never fall back to your own deltas — but the binding stays registered
-  (T199).
+  is designed and blocked on where a runtime-issued credential should live (T196/T188 — T196's
+  restart half landed; its shard stays open for this decision).
+- **An arriving renderer is inert and invisible.** A peer's app rides the channel like any other
+  delta, but nothing notices it, offers a bless, or mounts it. Install-by-federation is ticketed
+  (T209), and inert-until-blessed is the designed posture: auto-bless will never auto-execute.
 
 **Over MCP**, an agent gets `loam_federate_status`, `_connect`, `_set` and `_drop`, each scoped by a
 `federate` grant naming one container. `_drop` **stages only**: it returns a link and a preview of
