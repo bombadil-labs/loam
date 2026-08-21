@@ -52,7 +52,7 @@ import {
   survivingDeclarationIds,
   unreachableStoreReport,
 } from "./container.js";
-import { ESM_RESIDENCY_DISCLOSURE } from "./erase.js";
+import { ESM_RESIDENCY_DISCLOSURE, ERASURE_NON_CLAIMS } from "./erase.js";
 import {
   UNSWEPT_AUTH_SURFACES,
   eraseImpl,
@@ -1353,7 +1353,9 @@ export async function cutImpl(
         members.push({
           member: id,
           tombstone: result.tombstone,
-          spokenBy: result.spokenBy,
+          // The reused-tombstone path can carry none; the sibling branch below already reads it the
+          // same way, so a cut report cannot disagree with itself about the same receipt.
+          spokenBy: result.spokenBy ?? "",
           tiers: await tierVerdicts(gw, id, notReached),
           citations: result.citations,
         });
@@ -1791,18 +1793,10 @@ export async function deriveReceiptImpl(
       // honesty half (T105 a). Same constant health() reads, so the two surfaces cannot drift.
       ...ESM_RESIDENCY_DISCLOSURE,
 
-      "PEERS ARE NOT REACHED: erasure does not reach federation peers — they are not the " +
-        "operator's replicas, and a peer refuses a foreign operator's removal-order at its own door.",
-      "ALREADY-SERVED READS ARE NOT RECALLED: egress closure stopped further spread from this " +
-        "store during the window; nothing recalls what a door already served.",
-      "A COPY RE-SPOKEN UNDER ANOTHER ID STILL STANDS: erasure is by ID, and a content-addressed " +
-        "store cannot chase content. That covers a copy made BEFORE identification and also one a " +
-        "standing pass (a rendering, a promotion) minted DURING the window under a slate that did " +
-        "not close `cite` — the frozen set names ids, so a fresh id was never in it. Such a copy " +
-        "must be slated by its own id; the slate report's `duplicates` lists the links this store " +
-        "can follow, and it finds LINKS, never content.",
-      "POINTERS ARE NOT CONTENT: the surviving deltas listed per member cite an erased id and " +
-        "dangle at the hole — that is §11's citations manifest, not retained content.",
+      // The limits that hold for ANY erasure, single-delta or cut, from the SAME constant the
+      // terminal's `loam erase` prints — so a compliance officer reading a receipt and one reading
+      // a run cannot be told different things about where the promise stops.
+      ...ERASURE_NON_CLAIMS,
       ...walls.kept.map(
         (wall) =>
           `A KEPT WALL WAS NOT SWEPT: "${wall}" is covered by a detach record, its per-member ` +

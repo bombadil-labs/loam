@@ -20,13 +20,16 @@
 
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
-import { Reactor, signClaims } from "@bombadil/rhizomatic";
+import { DeltaSet, Reactor, signClaims } from "@bombadil/rhizomatic";
 import type { Claims, Delta } from "@bombadil/rhizomatic";
-import { lawfulNegated } from "./registration.js";
+import { evalTerm, parseTerm } from "@bombadil/rhizomatic";
+import { lawfulNegated, readRegistrations } from "./registration.js";
+import { programMaskJson } from "./listing.js";
 import { unreachableStoreReport } from "./container.js";
 import {
   CTX_SLATE,
   forgivenHealth,
+  readClosedIds,
   readSlates,
   slateHealth,
   slatePointer,
@@ -210,6 +213,395 @@ export function survivingTombstones(reactor: Reactor, operator: string | undefin
   return out;
 }
 
+/**
+ * The instrument behind the revival warning: a reading to be taken TWICE, once before a removal and
+ * once after, because that is the only way to learn what a removal brought back without deriving it.
+ *
+ * Deriving it is what fails. Walking the removed delta's own `negates` pointers answers ONE hop, and
+ * the readers are transitive: a strike on a strike is two, a strike on that is three, and erasing
+ * the last link in a chain frees a claim the walk never names. It is wrong in the other direction
+ * too — a claim carrying TWO strikes stays withdrawn when one of them goes, so the walk announces a
+ * revival that never happened and sends an operator to destroy a record that was never exposed. A
+ * before/after diff observes the answer at the same reader every door uses, at any depth, and cannot
+ * claim a revival the ground did not perform.
+ *
+ * Replicas are included because §11 reaches them: `eraseImpl` fans the purge into every attached
+ * pool, so a strike inside one is removed by the same order and frees the same way.
+ */
+/** One mask a reader of this store actually runs under, and who runs under it. */
+export interface MaskReading {
+  /** The mask itself, kept beside the key now that the key also carries the ground. */
+  readonly policy: unknown;
+  /** Which ground this mask is evaluated over — see `ExtraReading.ground`. */
+  readonly ground: "closed" | "raw";
+  /**
+   * The readings that mask this way. ONE array of pairs, never two parallel arrays: an identity and
+   * the label a person reads are different strings with different collision rules — two entities
+   * can bind one lens name — so deduping them separately let `identities` grow while `readings`
+   * did not, and every index after the first collision named a different door than it addressed.
+   */
+  readonly readings: { readonly identity: string; readonly label: string }[];
+  /** Canonical form of the mask policy, so two readings that mask alike share one live set. */
+  readonly key: string;
+  /** Of the ids present, the ones a reader under this mask resolves. */
+  readonly live: Set<string>;
+}
+
+/** One GROUND's reading. Kept per-store on purpose — see `revivedAcross`. */
+export interface GroundReading {
+  readonly ground: Gateway;
+  /** Every id this store holds, whatever its suppression state. */
+  readonly present: Set<string>;
+  /** One entry per DISTINCT mask any reader of this store can hold. */
+  readonly masks: MaskReading[];
+  /**
+   * Reading name → the mask key it read under. The diff asks about readings BY NAME and never by
+   * mask novelty: `drop` is `entityGatherBody`'s DEFAULT, so an ordinary registration that names
+   * no mask shares the floor's key, and a key-novelty test cannot see it arrive or leave. It also
+   * mistakes a reading whose MASK CHANGED for one that came back.
+   */
+  readonly byReading: Map<string, string>;
+  /**
+   * Readings whose mask could not be assembled, so they were NOT consulted. Carried out to the
+   * screen rather than dropped here: a reader this check never asked about is a hole in the check,
+   * and the sibling login-door path already says as much when its own mask fails to assemble.
+   */
+  readonly unreadable: { readonly identity: string; readonly label: string }[];
+}
+
+/** A reading named on a boundary line, and the ground whose door it is. */
+export interface ReadingAt {
+  readonly reading: string;
+  readonly ground: Gateway;
+}
+
+/** One claim that came back, in one ground, and the readings that can see it there. */
+export interface Revival {
+  readonly id: string;
+  readonly ground: Gateway;
+  /** Names a person can act on: lens names, and/or the floor's own label. */
+  readonly readings: string[];
+}
+
+/** The label the `drop` floor carries — every negation binds, whoever signed it. */
+export const UNGOVERNED_READING = "a reading with no trust mask (the stock shelf's `drop`)";
+
+/**
+ * THE MASKS THIS STORE'S READERS ACTUALLY HOLD, enumerated from its own registered readings.
+ *
+ * Hardcoding the mask was this bug twice. First `lawfulNegated`, the constitutional predicate, which
+ * counts only the operator's strike and so cannot see a grantee's retraction at all. Then TWO
+ * hardcoded masks — trust and `drop` — which is closer and still not what a store has: a Schema
+ * declares its OWN mask, and the shipped ones already disagree with both. `LoamUser` masks
+ * `{author eq operator}` and is live at every served login door; `tenantSchemaFor` masks
+ * admins-only and is the recommended audit reading; `loam register <file>` admits any `{trust: P}`
+ * an operator writes. A revival visible only at one of those is invisible to a two-mask reading —
+ * and a revoked role binding coming back at the login door is exactly the event this warning exists
+ * for. `listing.ts` records the same lesson in its own header: a hardcoded `drop` was this bug at
+ * the listing door.
+ *
+ * `drop` is kept as a FLOOR rather than as one of the two: it is the widest suppression any reader
+ * can perform, so a claim it frees is free at the most permissive door a store can have, and an
+ * unregistered or ungoverned store reads exactly that way.
+ *
+ * A body that masks two ways has no single reading and `programMaskJson` refuses it; such a
+ * hyperschema is skipped here and named in `unreadable`, because guessing which of its masks to
+ * apply would be inventing a reader.
+ */
+export interface ExtraReading {
+  readonly reading: string;
+  readonly policy: unknown;
+  /**
+   * WHICH GROUND this door evaluates over, because a reading is a mask AND a ground.
+   *
+   * "closed" is the ordinary answer: `resolvedNode`, the public door and every registered Schema
+   * read `readGround`, so §29 read closure hides a condemned member from them. §36's login door
+   * does NOT — `resolveUserView` runs its hyperschema over `reactor.snapshot()` directly. Modelled
+   * as closed, a role binding inside a standing slate's condemned set is filtered out of BOTH
+   * readings, no row is emitted, and the strike that hid it can be destroyed with the screen
+   * silent while the user holds the role again at the door this reading was added for.
+   */
+  readonly ground?: "closed" | "raw";
+}
+
+export function maskReadings(
+  gw: Gateway,
+  extra: readonly ExtraReading[] = [],
+): {
+  masks: Map<string, MaskReading>;
+  unreadable: { identity: string; label: string }[];
+} {
+  const masks = new Map<string, MaskReading>();
+  // IDENTITY AND LABEL, like every other reading here. Carrying the bare name let two doors that
+  // share a lens name collapse into one row — under-counting the readings this check never asked,
+  // which is the one number a boundary line exists to get right.
+  const unreadable: { identity: string; label: string }[] = [];
+  // `reading` is the IDENTITY a diff keys on, and a lens NAME is not one: `readRegistrations`
+  // resolves latest-wins per (entity, lens name), so two entities can both bind `Film` when no
+  // §47 binding policy is declared. Keyed on the name alone, one of them silently overwrote the
+  // other in `byReading` — and whether a reopened door was then reported at all turned on which
+  // registration happened to carry the later timestamp. The label a person reads stays the name.
+  // THE KEY IS THE MASK AND THE GROUND TOGETHER. Two doors that suppress by the same rule but read
+  // different grounds are different readings, and merging them under one key would give both the
+  // live set of whichever was computed.
+  const remember = (
+    policy: unknown,
+    identity: string,
+    label = identity,
+    ground: "closed" | "raw" = "closed",
+  ): void => {
+    const key = `${ground}\u0000${JSON.stringify(policy ?? null)}`;
+    const seen = masks.get(key);
+    const pair = { identity, label };
+    if (seen === undefined)
+      masks.set(key, { readings: [pair], key, policy, ground, live: new Set() });
+    else if (!seen.readings.some((r) => r.identity === identity)) seen.readings.push(pair);
+  };
+  remember("drop", UNGOVERNED_READING);
+  for (const reg of readRegistrations(gw.reactor, gw.operatorAuthor)) {
+    const name = reg.lensName ?? reg.hyperschema.name;
+    const identity = `${reg.entity ?? `hyperschema:${reg.hyperschema.name}`}\u0000${name}`;
+    try {
+      remember(programMaskJson(reg.hyperschema.body), identity, name);
+    } catch {
+      unreadable.push({ identity, label: name }); // masks two ways: no single reading to speak for
+    }
+  }
+  // Readings the CALLER knows about that the registration table does not hold. The login door's is
+  // the shipped example: `resolveUserView` runs its hyperschema directly, so no enumeration of
+  // registered Schemas can find it, and it is live on every served home.
+  //
+  // A PINNED VERSION IS NOT IN THIS SET EITHER. `readRegistrations` answers latest-per-(entity,
+  // lens name), while §17's doors admit every surviving version and §23.8's public pin resolves
+  // through `reg.hyperschema.body` — its OWN mask, which can differ from the live one. A claim
+  // freed only under a pinned version's mask is served at that door and named by no row here.
+  //
+  // AND A DOOR THE CALLER DOES NOT NAME IS NOT REPORTED ON. The set above is read from the
+  // REGISTRATION DELTAS rather than from `gw.registered`, deliberately: the in-process set is the
+  // last bind, and the after-reading has to see the law as it stands once the erasure lands. The
+  // cost is that a Schema an embedder mounted in process, with no registration delta naming it, is
+  // invisible here — the revival report neither compares it nor counts it among the readings it
+  // could not consult. Embedders pass such a door as `extra`; the CLI's only one is §36's.
+  for (const one of extra) remember(one.policy, one.reading, one.reading, one.ground ?? "closed");
+  return { masks, unreadable };
+}
+
+/**
+ * The reading of this store and of every replica in reach, ONE ENTRY PER GROUND, and within each
+ * ground one live set per distinct mask.
+ *
+ * Asked TWICE — before a removal and after — because that is the only way to learn what a removal
+ * brought back without deriving it. Deriving it is what fails: walking the removed delta's own
+ * `negates` pointers answers ONE hop, while the readers are transitive, so a strike three deep frees
+ * a claim the walk never names; and it is wrong the other way too, since a claim carrying two
+ * strikes stays withdrawn when one goes, so the walk announces a revival that never happened.
+ *
+ * Replicas are included because §11 reaches them: `eraseImpl` fans the purge into every attached
+ * pool, so a strike inside one is removed by the same order and frees the same way. Each pool
+ * enumerates its OWN readings — a pool is a separate container with its own ground and its own
+ * registrations, and borrowing the host's would describe a reader that store does not have.
+ */
+export function readGrounds(
+  gw: Gateway,
+  extra: readonly ExtraReading[] = [],
+  now: number = Date.now(),
+  seen = new Set<Gateway>(),
+): GroundReading[] {
+  if (seen.has(gw)) return [];
+  seen.add(gw);
+  const { masks, unreadable } = maskReadings(gw, extra);
+  const snapshot = gw.reactor.snapshot();
+  const present = new Set<string>();
+  for (const delta of snapshot) present.add(delta.id);
+  // THE GROUND A DOOR READS, not the raw one. §29's READ CLOSURE is a second suppression, and it
+  // is not a mask: `readGround` is what every gather answering a read door evaluates over, and a
+  // condemned set inside a standing slate is withheld there while sitting untouched in the
+  // reactor. Diffing the raw snapshot models the mask alone, so it is wrong in both directions —
+  // erasing a slate's RECORD lifts the closure over its whole condemned set at every door and
+  // shows here as nothing at all, and a claim freed under a mask while still read-closed shows
+  // here as live again when no door will serve it.
+  //
+  // ONE MOMENT FOR BOTH READINGS. A deadline that passes between the before and the after would
+  // otherwise read as a change this erasure caused; `now` is taken once by the caller.
+  // NARROWED FROM THE SNAPSHOT ALREADY IN HAND. `readGround` takes its own, and this function
+  // takes two readings per erase across every ground — so the hashing that costs the most on a
+  // large store was being paid twice for one answer (H8).
+  const closed = readClosedIds(gw, now);
+  const doorGround =
+    closed.size === 0 ? snapshot : DeltaSet.from([...snapshot].filter((d) => !closed.has(d.id)));
+  const servable = new Set<string>();
+  for (const delta of doorGround) servable.add(delta.id);
+  for (const mask of masks.values()) {
+    const over = mask.ground === "raw" ? snapshot : doorGround;
+    const live = mask.ground === "raw" ? present : servable;
+    // A body that masks NOTHING suppresses nothing: every id its own door would serve is live to it.
+    if (mask.policy === null) {
+      for (const id of live) mask.live.add(id);
+      continue;
+    }
+    const masked = evalTerm(parseTerm({ op: "mask", policy: mask.policy, in: "input" }), over);
+    if (masked.sort !== "dset") throw new Error("a mask always evaluates to a delta set");
+    for (const delta of masked.set) mask.live.add(delta.id);
+  }
+  const byReading = new Map<string, string>();
+  for (const mask of masks.values())
+    for (const reading of mask.readings) byReading.set(reading.identity, mask.key);
+  const out: GroundReading[] = [
+    { ground: gw, present, masks: [...masks.values()], byReading, unreadable },
+  ];
+  // NOT `extra` — a pool enumerates its OWN readings. The caller's extras describe doors onto the
+  // ground the CALLER named, and `loam serve` always mounts the host, so labelling a pool's rows
+  // with them would name a reader that does not look there. NOT a general truth about pools: an
+  // embedder can `serve({ users: { mount: "<container>" } })` and put §36's login door on a pool's
+  // ground, and this reading would then miss a revival at it. The CLI cannot reach that shape.
+  for (const pool of gw.quarantinePools) out.push(...readGrounds(pool, [], now, seen));
+  return out;
+}
+
+/**
+ * What a removal brought BACK, asked PER GROUND AND PER MASK, and never merged across either.
+ *
+ * A pool is a separate container with its own reactor, and `resolvedNode` and the public door read
+ * THIS store's — so "live somewhere in reach" is not the question. Merging grounds also loses the
+ * one fact an operator acts on: WHERE the claim is readable again. A row is emitted per ground, so a
+ * claim that came back at the store AND in a pool says so twice rather than being attributed to
+ * whichever ground the loop happened to visit last.
+ *
+ * Masks are kept apart for the same reason one layer down. OR-ing "visible under mask A" from one
+ * ground with "visible under mask B" from another produces a label describing no reader of any
+ * store — a sentence assembled from two places, true nowhere.
+ *
+ * All three conditions on a revival carry weight. "Now live" alone would report the erasure's own
+ * TOMBSTONE, a delta this order added, live the moment it lands and back from nowhere. Requiring it
+ * to have been PRESENT in that same ground before is what separates a claim returning from the
+ * ordinary arrival of new law.
+ */
+export interface RevivalReport {
+  readonly revived: Revival[];
+  /**
+   * Readings that were there before this removal and are not there now — a door it CLOSED.
+   *
+   * Nothing resurfaces at a door that no longer exists, so this is not a revival. It is the
+   * boundary block's own denominator: `readRegistrations` drops a registration whose definition no
+   * longer loads, so erasing a hyperschema body silently removes a whole reading, and every "and
+   * nothing came back" sentence below then speaks for one reader fewer without saying so.
+   */
+  readonly withdrawn: ReadingAt[];
+  /**
+   * Readings whose MASK moved between the two readings — the door was never withdrawn, its
+   * suppression rule changed under it. Erasing a term delta can do this, and the claims it now
+   * resolves differently were compared against a rule that no longer applies, so they are not
+   * diffed. A different fact from `reopened`, and a louder one: a door that quietly stopped
+   * honouring a stranger's strikes un-suppresses wholesale.
+   */
+  readonly remasked: ReadingAt[];
+  /**
+   * Readings that exist only in the AFTER reading — this removal brought the reading itself back.
+   * Erasing the negation that withdrew a REGISTRATION reopens its door, and what that door now
+   * serves has no before to compare against. Named rather than diffed: the honest answer is that
+   * this check did not look, and a silent skip would read as "nothing came back there".
+   */
+  readonly reopened: ReadingAt[];
+  /** Readings that could not be consulted at all, in either reading, in any ground. */
+  readonly unconsulted: ReadingAt[];
+}
+
+export function revivedAcross(
+  before: readonly GroundReading[],
+  after: readonly GroundReading[],
+): RevivalReport {
+  const out: Revival[] = [];
+  const reopened: ReadingAt[] = [];
+  const remasked: ReadingAt[] = [];
+  const unconsulted: ReadingAt[] = [];
+  // KEYED ON THE GROUND ITSELF. A derived string was not an identity: a channel pool attaches
+  // nothing of its own, so every pool's component was the empty string and two pools that reopened
+  // the same reading name collapsed into one row — under-counting the doors this run could not
+  // speak for, which is the exact opposite of what a boundary line is for.
+  const withdrawn: ReadingAt[] = [];
+  const seenAt = new Map<Gateway, Set<string>>();
+  const once = (into: ReadingAt[], reading: string, ground: Gateway, tag: string): void => {
+    const here = seenAt.get(ground) ?? new Set<string>();
+    seenAt.set(ground, here);
+    // The TAG carries the identity where the caller has one, so two doors that share a label are
+    // two rows. `reading` is only what gets printed.
+    const key = tag.includes("\u0000") ? tag : `${tag}\u0000${reading}`;
+    if (here.has(key)) return;
+    here.add(key);
+    into.push({ reading, ground });
+  };
+  const now = new Map(after.map((reading) => [reading.ground, reading]));
+  for (const was of before) {
+    const then = now.get(was.ground);
+    if (then === undefined) continue; // a ground that left the reading answers for nothing
+    const byId = new Map<string, string[]>();
+    // BY NAME FIRST. A reading absent before and present now is one this removal brought back; a
+    // reading present in both whose MASK moved has a before that no longer describes it. Neither
+    // can be diffed, and the two are different sentences.
+    const undiffable = new Set<string>();
+    // Identity in, the name a person reads out. Read off the PAIR, so no index has to line up.
+    const labels = new Map<string, string>();
+    for (const mask of then.masks) {
+      for (const reading of mask.readings) labels.set(reading.identity, reading.label);
+    }
+    const label = (identity: string): string => labels.get(identity) ?? identity;
+    for (const [identity, key] of then.byReading) {
+      const had = was.byReading.get(identity);
+      if (had === undefined) {
+        once(reopened, label(identity), was.ground, `reopened\u0000${identity}`);
+        undiffable.add(identity);
+      } else if (had !== key) {
+        once(remasked, label(identity), was.ground, `remasked\u0000${identity}`);
+        undiffable.add(identity);
+      }
+    }
+    // AND THE OTHER DIRECTION. The loop above reads the AFTER set, so a reading that LEFT appears
+    // in none of its branches — no row, no boundary, and its ids gone from `then.masks` as well.
+    // The labels come from the BEFORE reading, which is the only one that still has them.
+    const wasLabels = new Map<string, string>();
+    for (const mask of was.masks)
+      for (const reading of mask.readings) wasLabels.set(reading.identity, reading.label);
+    for (const identity of was.byReading.keys()) {
+      if (then.byReading.has(identity)) continue;
+      once(
+        withdrawn,
+        wasLabels.get(identity) ?? identity,
+        was.ground,
+        `withdrawn\u0000${identity}`,
+      );
+    }
+    for (const mask of then.masks) {
+      const wasMask = was.masks.find((m) => m.key === mask.key);
+      // Every reading under this mask is undiffable, so the mask itself has nothing to compare.
+      if (wasMask === undefined || mask.readings.every((r) => undiffable.has(r.identity))) {
+        continue;
+      }
+      for (const id of mask.live) {
+        if (!was.present.has(id) || wasMask.live.has(id)) continue;
+        const readings = byId.get(id) ?? [];
+        for (const reading of mask.readings) {
+          if (undiffable.has(reading.identity)) continue;
+          if (!readings.includes(reading.label)) readings.push(reading.label);
+        }
+        if (readings.length > 0) byId.set(id, readings);
+      }
+    }
+    for (const [id, readings] of byId)
+      out.push({ id, ground: was.ground, readings: readings.sort() });
+    for (const reading of [...was.unreadable, ...then.unreadable]) {
+      once(unconsulted, reading.label, was.ground, `unconsulted\u0000${reading.identity}`);
+    }
+  }
+  const byName = (a: ReadingAt, b: ReadingAt): number => (a.reading < b.reading ? -1 : 1);
+  return {
+    revived: out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
+    remasked: remasked.sort(byName),
+    reopened: reopened.sort(byName),
+    withdrawn: withdrawn.sort(byName),
+    unconsulted: unconsulted.sort(byName),
+  };
+}
+
 /** One receipt, as a reader sees it: THAT an id was forgotten, by whose order, when, and why. */
 export interface TombstoneReceipt {
   /** The receipt's own content address — what an erase prints and what a reader can look up. */
@@ -342,7 +734,9 @@ export async function eraseImpl(
   citations: string[];
   kept: string[];
   tombstone: string;
-  spokenBy: string;
+  minted: boolean;
+  reasons: string[];
+  spokenBy?: string;
 }> {
   // Erasure is the operator's alone (SPEC §11): destructive, so the only signer is the store's
   // own operator. A data subject's request is honored BY the operator, never by the subject
@@ -491,12 +885,20 @@ export async function eraseImpl(
   // deliberately holds outside this sweep, reported rather than silent. The tombstone's id and the
   // target's author ride out too: a cut collects them per member (§29.5) rather than re-deriving them
   // from a ground the purge just moved.
+  // WHAT THE RECEIPT ACTUALLY SAYS, never what the caller asked for. On a retry the tombstone is
+  // REUSED (`already`), and `opts.reason` is dropped on the floor — a second run with a corrected
+  // sentence records nothing, so a caller that echoed its own argument would print one reason while
+  // `tombstones show` printed another. `minted` says which of the two runs this was, because
+  // "safe to re-run" and "your new reason was kept" are different promises.
+  const parts = tombstoneParts(tombstone.claims);
   return {
     erased: id,
     citations,
     kept: stores.kept,
     tombstone: tombstone.id,
-    spokenBy: tombstoneParts(tombstone.claims).spokenBy!,
+    minted: already === undefined,
+    reasons: parts.reasons,
+    ...(parts.spokenBy === undefined ? {} : { spokenBy: parts.spokenBy }),
   };
 }
 
@@ -779,6 +1181,26 @@ export const UNSWEPT_AUTH_SURFACES: readonly string[] = [
     "delta shuts their login door, but the seed file itself stays — and its signature keeps resolving " +
     "for a governed reader until its grant is struck. Removing the seed file, and striking its " +
     "signing grant (`loam user remove-role`), is a separate operation, out of erasure's scope.",
+];
+
+// What an erasure NEVER claims, whatever else it proves — the limits that hold for a single-delta
+// erase and for a whole cut alike. ONE source, read by the §29.7 compliance receipt and by the
+// terminal verb that performs a single erasure, so the two cannot drift on where the promise stops.
+// (The receipt carries further non-claims that are specific to a CUT — the walls it kept, the walls
+// it could not reach — and those stay where the cut computes them.)
+export const ERASURE_NON_CLAIMS: readonly string[] = [
+  "PEERS ARE NOT REACHED: erasure does not reach federation peers — they are not the " +
+    "operator's replicas, and a peer refuses a foreign operator's removal-order at its own door.",
+  "ALREADY-SERVED READS ARE NOT RECALLED: egress closure stopped further spread from this " +
+    "store during the window; nothing recalls what a door already served.",
+  "A COPY RE-SPOKEN UNDER ANOTHER ID STILL STANDS: erasure is by ID, and a content-addressed " +
+    "store cannot chase content. That covers a copy made BEFORE identification and also one a " +
+    "standing pass (a rendering, a promotion) minted DURING the window under a slate that did " +
+    "not close `cite` — the frozen set names ids, so a fresh id was never in it. Such a copy " +
+    "must be slated by its own id; the slate report's `duplicates` lists the links this store " +
+    "can follow, and it finds LINKS, never content.",
+  "POINTERS ARE NOT CONTENT: the surviving deltas listed per member cite an erased id and " +
+    "dangle at the hole — that is §11's citations manifest, not retained content.",
 ];
 
 // The ONE standing R1 violation (T105, §32's seam census): a renderer/resolver compiled from a

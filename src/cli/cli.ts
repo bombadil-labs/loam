@@ -7,7 +7,16 @@
 // `serve` blocks until the process is signalled.
 
 import { randomBytes } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+  mkdirSync,
+  type Dirent,
+} from "node:fs";
 import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
 import {
@@ -25,14 +34,28 @@ import { migrate } from "../migrate/migrate.js";
 import { pullFrom } from "../federation/pull.js";
 import { sourceFor } from "../federation/channel.js";
 import {
+  ERASURE_NON_CLAIMS,
+  erasureStanding,
   erasureStandings,
-  receiptLedger,
-  tombstonesIn,
   type ErasureStanding,
   type StandingReport,
+  ESM_RESIDENCY_DISCLOSURE,
+  readGrounds,
+  revivedAcross,
+  type ExtraReading,
+  type Revival,
+  type ReadingAt,
+  type RevivalReport,
+  receiptLedger,
+  survivingTombstones,
+  tombstonesIn,
+  tombstoneTarget,
+  UNSWEPT_AUTH_SURFACES,
   type TombstoneReceipt,
 } from "../gateway/erase.js";
 import type { SlateReport } from "../gateway/slate.js";
+import { programMaskJson } from "../gateway/listing.js";
+import { unreachableStoreReport } from "../gateway/container.js";
 import { assembleGenesis } from "../gateway/genesis.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
 import {
@@ -74,6 +97,7 @@ import {
   userClaims,
   userEntity,
   userNameDefect,
+  userHyperSchema,
   userRoleDefect,
   type UserRole,
 } from "../server/users.js";
@@ -82,7 +106,6 @@ import type { StoreBackend } from "../store/backend.js";
 import { ArchiveBackend } from "../store/archive.js";
 import { MirrorBackend } from "../store/mirror.js";
 import { SqliteBackend } from "../store/sqlite.js";
-import { unreachableStoreReport } from "../gateway/container.js";
 import { legibilityWarnings, reAdmit } from "../gateway/repair.js";
 import { isRepairable, strandedStrikeWarnings } from "../store/quarantine.js";
 import { parseArgs, rejectUnknown, UsageError, type Parsed } from "./args.js";
@@ -134,6 +157,7 @@ type CommandName =
   | "pen"
   | "grant"
   | "slate"
+  | "erase"
   | "tombstones";
 
 interface CommandSpec {
@@ -375,6 +399,36 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "enforces nothing. That is printed rather than implied.",
     ],
   },
+  erase: {
+    summary: "forget one delta at the bytes, on every tier, and leave a receipt (SPEC §11)",
+    usage: 'loam erase <deltaId> --reason "<why>"',
+    flags: new Set(["home", "store", "archive", "reason"]),
+    notes: [
+      "ERASURE IS THE INSTANCE OPERATOR'S ALONE, and running this in a home that holds",
+      "operator.seed IS that authority. A data subject asks; the operator, as the controller,",
+      "executes. There is no remote path — no session, however privileged, can reach this verb.",
+      "",
+      "--reason IS REQUIRED and has no default. The receipt is the only thing that survives the",
+      "record it forgets, and a receipt that cannot say why is a receipt made less honest.",
+      "",
+      "WHAT IT DOES. It lands the operator-signed tombstone, purges the delta from this store, from",
+      "the archive when one is named, and from every attached channel pool — then asks the BYTES,",
+      "tier by tier, whether they are gone. A tier that cannot be asked has proven nothing, so the",
+      "command FAILS rather than reporting a completeness it never verified. Re-running after a",
+      "fault is safe and mints no second receipt.",
+      "",
+      "WHAT IT DOES NOT DO. It forgets ONE delta; destroying a whole identified set is a slate and",
+      "its cut (§29). It purges DELTAS, so the home's own files stay — and it says which, every run.",
+      "It is instance-level: it clears your ground and bars the id at your door, and it does not",
+      "reach a peer who already pulled the delta.",
+      "",
+      "AN ARCHIVE NAMED ONLY ON `loam serve --archive` IS NOT IN THIS HOME'S CONFIG. Name it here",
+      "too, or the vault keeps the bytes this command reports gone. --archive MAY BE GIVEN MORE",
+      "THAN ONCE, and every value is swept alongside the one config.json names — a home can hold",
+      "more than one cold tier, and naming one is not naming the others. (`loam serve` takes a",
+      "single --archive and opens one mirror; this sweeps every tier it can be told about.)",
+    ],
+  },
   tombstones: {
     summary: "read the receipts: which ids this store forgot, for whom, and why (SPEC §11)",
     usage: "loam tombstones list | show <id> [options]",
@@ -448,6 +502,11 @@ const FLAG_HELP: Readonly<
   "acknowledge-writable": {
     arg: "",
     note: "yes, I know only the schema\u2019s writable list binds on that host",
+  },
+  reason: {
+    arg: "<text>",
+    note: "why this record is being forgotten — the sentence the receipt keeps",
+    required: true,
   },
   role: { arg: "<role>", note: "operator | actor" },
   operator: { arg: "", note: "give the new user the operator role (default: a plain actor)" },
@@ -2843,7 +2902,13 @@ function operatorSeed(home: string, label: string, io: IO): string | { code: num
   }
 }
 
-/** A gateway over the home's store with every standing channel's own pool file attached. */
+/**
+ * A gateway over the home's store with every standing channel's own pool file attached.
+ *
+ * `vault` is passed ONLY by `erase`, which removes bytes. A read answers from the primary —
+ * `deltasSince` does — so opening the cold tier for a listing would buy nothing and would write this
+ * command's genesis into the vault.
+ */
 async function openTiers(
   home: string,
   seed: string,
@@ -3107,6 +3172,733 @@ async function cmdSlate(args: readonly string[], io: IO): Promise<number> {
   return 0;
 }
 
+/**
+ * Cold archives inside this home that the command was NOT told about.
+ *
+ * `loam serve --archive <dir>` does not write that name into `config.json`, so a home can own a cold
+ * tier its own configuration never mentions — and every other tier a sweep reaches is discovered
+ * from the GROUND and fails closed, while this one is discovered from a flag and would fail open.
+ * That asymmetry is the whole reason this exists: the archive is the tier whose retention has no
+ * recovery, and a report that omitted it would be false in the one direction §11 cannot undo.
+ *
+ * Detected by SHAPE, from the layout `ArchiveBackend` writes and nothing else does: a fan directory
+ * of two hex characters holding a file named for a content address. Three deliberate widenings, each
+ * because the SWEEPER is that wide and a detector narrower than its sweeper fails OPEN:
+ *
+ *  - the file need not sit in its matching fan (`purge` hunts a MISFILED copy, and it is still bytes);
+ *  - the `.json.<pid>.tmp` straggler an interrupted append leaves counts (`purge` hunts that too);
+ *  - a fan reached through a SYMLINK counts — a `Dirent` for one answers `isDirectory()` false while
+ *    the path behind it is a perfectly good vault;
+ *  - a fan may be named ANYTHING. `ArchiveBackend` puts no name filter on its own root entries, so a
+ *    hex-only rule here would be narrower than the sweeper on a fourth axis.
+ *
+ * It descends a few levels, because `--archive backup/vault` resolves inside the home and a
+ * single-level probe would miss it, and it tests the home ITSELF for `--archive .`.
+ *
+ * NAMED GAP, and it is the honest limit: `--archive` also takes an ABSOLUTE path, so a vault parked
+ * outside the home is beyond any walk this command can afford. The help text and the README say so.
+ */
+const ARCHIVED_FILE = /^[0-9a-f]{30,}\.json(\..*)?$/;
+const VAULT_SEARCH_DEPTH = 3;
+
+/** What the scan found, and what it could not look at. An unreadable directory is neither. */
+interface VaultScan {
+  readonly vaults: string[];
+  /** Directories the scan could not read. A guard that called these empty would fail OPEN (H9). */
+  readonly unreadable: string[];
+}
+
+// ENOENT and ENOTDIR are ANSWERS: nothing is there. Every other error means the directory exists and
+// this process could not look inside it — a mode bit, a foreign uid, a mount that refuses readdir.
+// `ArchiveBackend` draws exactly this line for the same directories and RETHROWS the rest, so a
+// probe that swallowed them would be narrower than the sweeper it exists to guard.
+function listOrFault(dir: string): { entries: Dirent[] } | { unreadable: true } {
+  try {
+    return { entries: readdirSync(dir, { withFileTypes: true }) };
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    return code === "ENOENT" || code === "ENOTDIR" ? { entries: [] } : { unreadable: true };
+  }
+}
+
+/** A path's real form when it exists, and itself when it does not — one spelling per directory. */
+function realOrSelf(dir: string): string {
+  try {
+    return realpathSync(dir);
+  } catch {
+    return resolve(dir);
+  }
+}
+
+function scanForVaults(home: string, named: readonly string[]): VaultScan {
+  const vaults: string[] = [];
+  const unreadable: string[] = [];
+  // REAL paths, so an alias and its target are one directory. Two spellings of one vault would
+  // otherwise make the named one still count as unnamed under its other name, and naming that one
+  // would flip the refusal onto the first — no invocation could ever satisfy the guard.
+  const real = realOrSelf;
+  const namedReal = new Set(named.map(real));
+  const seen = new Set<string>();
+  const walk = (dir: string, depth: number, known?: ReturnType<typeof listOrFault>): void => {
+    const here = real(dir);
+    if (seen.has(here)) return; // a symlink cycle is a cycle however it is spelled
+    seen.add(here);
+    const isNamedHere = namedReal.has(here);
+    // THE LISTING THE CALLER ALREADY PAID FOR. Every fan was read once to classify it and again to
+    // recurse into it, which doubles the syscalls on a home full of directories (H8).
+    const listed = known ?? listOrFault(dir);
+    if ("unreadable" in listed) {
+      // NAMED OR NOT. Skipping a named one let the run proceed past this pre-work guard and fail
+      // LATER, after the tombstone had landed, when `ArchiveBackend` rejected the same root — the
+      // one state worse than refusing. It also made this guard's own sentence false: the refusal
+      // tells the operator that naming the path does not clear it, and naming it did.
+      unreadable.push(dir);
+      return;
+    }
+    // The named vault is SKIPPED AS A RESULT and still walked THROUGH. Returning here would leave a
+    // second vault parked INSIDE the named one invisible to this guard — and to the sweeper, which
+    // reads each fan one level and never recurses. It would also make `--archive .` (the home
+    // itself) switch the whole probe off.
+    // THE FANS ARE PROBED WHETHER OR NOT THIS DIRECTORY WAS NAMED. Only the CONCLUSION — "this is
+    // an unnamed vault" — belongs to the unnamed case. Skipping the loop for a named vault also
+    // skipped its unreadable fans, and at exactly `VAULT_SEARCH_DEPTH` the recursion below stops
+    // too, so an unreadable fan under a named vault at the bound was seen by nobody: the run
+    // cleared this pre-work guard and failed later, after the tombstone had landed.
+    let archival = false;
+    const fans = new Map<string, ReturnType<typeof listOrFault>>();
+    for (const entry of listed.entries) {
+      // NO NAME FILTER on the fan, because `ArchiveBackend` has none: it reads every non-file
+      // entry of its root and sweeps what looks like a delta inside. A hex-only rule here would be
+      // narrower than the sweeper on a fourth axis, which is the failure this whole probe exists
+      // to avoid — a restored backup under `vault/restored/` is bytes the purge would reach.
+      if (entry.isFile()) continue;
+      const fan = listOrFault(join(dir, entry.name));
+      fans.set(join(dir, entry.name), fan);
+      if ("unreadable" in fan) {
+        unreadable.push(join(dir, entry.name));
+        continue;
+      }
+      if (fan.entries.some((f) => ARCHIVED_FILE.test(f.name))) archival = true;
+    }
+    if (archival && !isNamedHere) {
+      vaults.push(dir);
+      return; // a vault's own fans hold files, not vaults
+    }
+    if (depth === 0) return;
+    for (const entry of listed.entries) {
+      if (entry.isFile()) continue;
+      const child = join(dir, entry.name);
+      const fan = fans.get(child);
+      // An unreadable fan is already recorded above; walking it would record it twice.
+      if (fan !== undefined && "unreadable" in fan) continue;
+      walk(child, depth - 1, fan);
+    }
+  };
+  walk(home, VAULT_SEARCH_DEPTH);
+  return { vaults: vaults.sort(), unreadable: unreadable.sort() };
+}
+
+/**
+ * The masks a served door reads under that no registration names. One today: §36's login reading,
+ * whose hyperschema `resolveUserView` assembles and runs itself. A mask that cannot be assembled is
+ * DROPPED rather than guessed at — the reading then reports one reader fewer, which is a narrower
+ * claim and not a false one, and it says so.
+ */
+function loginDoorReadings(seed: string, unconsulted: string[]): ExtraReading[] {
+  try {
+    return [
+      {
+        reading: "LoamUser (§36's login door)",
+        policy: programMaskJson(userHyperSchema(authorForSeed(seed)).body),
+        // RAW, because `resolveUserView` runs this hyperschema over the reactor's own snapshot and
+        // §29 read closure never reaches it. Modelled as closed, a role binding inside a standing
+        // slate's condemned set is invisible in both readings and its revival goes unsaid.
+        ground: "raw" as const,
+      },
+    ];
+  } catch (err) {
+    // NOT to stderr. This says the revival check speaks for one reader fewer, which is the same
+    // fact `RevivalReport.unconsulted` carries to stdout — and one screen cannot report the same
+    // limitation on two streams depending on which code path noticed it.
+    unconsulted.push(
+      `LoamUser (§36's login door) — its reading could not be assembled: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return [];
+  }
+}
+
+/**
+ * WHERE the bytes for an id still are, asked of every store this command opened — the host AND each
+ * attached pool, which is the set §11's own sweep fans into.
+ *
+ * `gateway.backend.holds` answers for the host alone. A refusal that probed only there would print
+ * nothing while a peer's delta sat legible in `channels/*.sqlite`, and its silence would read as
+ * "no tier holds it" — T40's shape, arriving through a new door. A store that cannot be ASKED is
+ * named separately: unprovable is not clean (H9).
+ */
+async function heldWhere(
+  gw: Gateway,
+  id: string,
+): Promise<{ held: string[]; unprovable: string[] }> {
+  const held: string[] = [];
+  const unprovable: string[] = [];
+  const named = new Map<Gateway, string>();
+  for (const [entity, pool] of gw.attachedContainers) named.set(pool, entity);
+  for (const store of [gw, ...gw.quarantinePools]) {
+    const label = store === gw ? "this store" : (named.get(store) ?? "an attached pool");
+    try {
+      if (await store.backend.holds(id)) held.push(label);
+    } catch (err) {
+      unprovable.push(`${label} (${err instanceof Error ? err.message : String(err)})`);
+    }
+  }
+  return { held, unprovable };
+}
+
+/**
+ * What a removal brought back to life, said the same way on both exits.
+ *
+ * `when` is the whole reason this is one function. On the success path the revival is news the
+ * operator can still act on; on the FAULT path the purge has already happened, and the fault's own
+ * advice is "resolve and re-run" — so the sentence must not let a reader think a re-run undoes it.
+ * Nothing does. The re-run boots on the post-purge ground, where the strike is already gone and
+ * nothing appears to have come back at all, which is why this is the only run that can say it.
+ */
+function reportRevived(
+  io: IO,
+  report: RevivalReport,
+  host: Gateway,
+  when: "now" | "already",
+  // WHETHER THE THING REMOVED WAS A WITHDRAWAL. The as-of disclosure below is about a claim a
+  // strike still hides in the present ground; where no strike was destroyed there is nothing for
+  // that door to serve differently, and an unconditional hedge is one nobody reads.
+  removedNegation = false,
+  /** How many channel lenses this store serves — see the boundary line below. */
+  channels = 0,
+): void {
+  // The success path files a document; the fault path reports a failure. Same sentences, and the
+  // stream follows which of the two this is.
+  const say = (line: string): void => (when === "now" ? io.out(line) : io.err(line));
+  const revived = report.revived;
+  // EACH BOUNDARY NAMES ITS GROUND. Two stores can register the same lens name, so a bare list can
+  // print one name as both consulted and unconsulted on one screen and leave the operator unable to
+  // tell which door to go read.
+  const at = (rows: readonly ReadingAt[]): string =>
+    capped(
+      rows.map((row) => `${row.reading}${row.ground === host ? "" : " (in an attached pool)"}`),
+      4,
+    );
+  // THE BOUNDARIES FIRST, because they qualify the list below them — and because they are the ways
+  // this check can be silent for a reason other than "nothing came back".
+  if (report.reopened.length > 0) {
+    say(
+      `loam: THAT ERASURE REOPENED ${report.reopened.length} READING(S): ${at(report.reopened)}. ` +
+        `Removing what withdrew a reading brings the reading itself back, and what it now serves ` +
+        `had no BEFORE to be compared against — so this run did not look. Read those doors ` +
+        `directly; the list below cannot speak for them.`,
+    );
+  }
+  if (report.remasked.length > 0) {
+    say(
+      `loam: ${report.remasked.length} READING(S) NOW MASK DIFFERENTLY: ${at(report.remasked)}. ` +
+        `The door was not withdrawn — its rule for whose strikes bind moved, which can un-suppress ` +
+        `claims wholesale. Their before no longer describes them, so this run did not compare them.`,
+    );
+  }
+  if (report.withdrawn.length > 0) {
+    say(
+      `loam: THAT ERASURE CLOSED ${report.withdrawn.length} READING(S): ${at(report.withdrawn)}. ` +
+        `A registration whose definition no longer loads is dropped, so removing a hyperschema body ` +
+        `removes the door with it. Nothing resurfaces where there is no longer a door — but every ` +
+        `"nothing came back" below now speaks for that many readers fewer.`,
+    );
+  }
+  // TWO READERS THIS CHECK CANNOT MODEL, said where the other boundaries are said. Both are
+  // properties of the READER rather than of this store's masks, so no enumeration of registered
+  // Schemas reaches either.
+  if (channels > 0) {
+    say(
+      `loam: ${channels} channel read door(s) were not modelled. A channel lens serves the POOL's ` +
+        `deltas filtered by THIS store's surviving strikes, and the check above diffs each ground ` +
+        `on its own — so a claim that lives in a pool and was withdrawn from here can come back ` +
+        `at that door with nothing said. Read \`loam federate list\` and check those lenses.`,
+    );
+  }
+  if (report.unconsulted.length > 0) {
+    say(
+      `loam: ${report.unconsulted.length} reading(s) could not be consulted at all — ` +
+        `${at(report.unconsulted)}. A hyperschema that masks two ways has no single reading, so ` +
+        `the check below speaks for that many readers fewer.`,
+    );
+  }
+  // BEFORE THE EARLY RETURN. The sentence below is about a claim that is identical in both
+  // readings and live only at the as-of door — which is exactly the case where this list is EMPTY.
+  // Printed after the return, the disclosure was suppressed in the only state it was written for,
+  // and silence on this screen reads as "nothing came back".
+  if (removedNegation) {
+    say(
+      `loam: and §26's AS-OF door was not read. It reconstructs the ground at a timestamp, so a ` +
+        `claim still withdrawn today can read live there once the strike is destroyed — the two ` +
+        `readings this run took are of the PRESENT ground and cannot see it.`,
+    );
+  }
+  if (revived.length === 0) return;
+  // WHICH READER, per claim, because a store does not have one. Naming the mask is the difference
+  // between a fact and a guess, and the two shipped masks genuinely disagree about the same delta.
+  // NAMES THE READINGS, never a category. A store's readers are its registered Schemas plus the
+  // `drop` floor, and which of them can see a returned claim is the fact an operator acts on — an
+  // adjective like "governed" describes a class this store may not contain.
+  // UNDER THE MASK THAT GOVERNS THOSE READINGS, not "to" them. The live set is the whole ground a
+  // mask admits; a lens ALSO has its own gather, which selects an entity and a set of pointer
+  // contexts. So this names every door whose suppression rule stopped hiding the claim, and a lens
+  // whose gather does not select the delta will not show it. Saying "live again to Note" about a
+  // grant delta that no Note reading can ever return is a false sentence on a compliance screen.
+  const where = (r: Revival): string =>
+    `${r.id} — live again under the mask that governs ${capped(r.readings, 4)}${
+      r.ground === host ? "" : ", in an attached pool rather than at this store's own door"
+    }`;
+  say(
+    // NOT "that was a strike": the removed delta is whatever it was, and a grant can shrink the
+    // trusted-striker set and free claims without having withdrawn any of them itself.
+    // DISTINCT CLAIMS in the headline, one ROW per place each came back. A claim readable again in
+    // this store and in a pool is one claim in two doors, and counting the rows would inflate the
+    // number an operator reads first.
+    `loam: THAT ERASURE ${when === "now" ? "BROUGHT" : "HAS ALREADY BROUGHT"} ` +
+      `${new Set(revived.map((r) => r.id)).size} CLAIM(S) BACK. Removing it un-suppressed them:\n` +
+      revived
+        .slice(0, 8)
+        .map((r) => `    ${where(r)}`)
+        .join("\n") +
+      (revived.length > 8 ? `\n    and ${revived.length - 8} more` : "") +
+      "\n" +
+      (when === "already"
+        ? `  This is DONE and re-running the erase does not undo it: what was removed is gone, and ` +
+          `the next run will see nothing come back.\n`
+        : "") +
+      `  Read them. If any should stay withdrawn, strike it again — a fresh negation is free, and ` +
+      `reversible in a way an erasure is not.`,
+  );
+}
+
+// --- `loam erase <deltaId> --reason "<why>"` -----------------------------------------------------
+//
+// One delta, one order, one receipt. This WRAPS §11's existing single-delta erase and adds no
+// erasure semantics: the same single authority, the same completeness guard, the same byte verdict
+// tier by tier. Nothing becomes deletable here that an embedding script could not already delete.
+//
+// The archive IS opened for this verb, because this is where bytes are REMOVED. A purge that swept
+// only the primary would leave a cold copy at rest and report the erasure complete — the report
+// false in the one direction §11 cannot recover from.
+
+async function cmdErase(args: readonly string[], io: IO): Promise<number> {
+  const parsed = parseFor("erase", args);
+  const id = parsed.positionals[0];
+  if (id === undefined) {
+    io.err(
+      'erase wants the id of one delta: `loam erase <deltaId> --reason "<why>"` — ' +
+        "`loam tombstones list` reads the receipts it leaves",
+    );
+    return 2;
+  }
+  if (parsed.positionals.length > 1) {
+    io.err(
+      "erase takes exactly one delta id. §11 forgets one record per order; destroying a whole " +
+        "identified set is a slate and its cut (§29), not a longer command line.",
+    );
+    return 2;
+  }
+  const reason = parsed.flags.get("reason");
+  if (reason === undefined || reason.trim().length === 0) {
+    io.err(
+      "erase refused without --reason: a receipt that cannot say why is a receipt made less " +
+        "honest, and the receipt is all that outlives the record.\n" +
+        `  \`loam erase ${id} --reason "<why this record is being forgotten>"\`\n` +
+        "  Nothing was erased.",
+    );
+    return 2;
+  }
+  const home = parsed.flags.get("home") ?? defaultHome();
+  const unusable = homeDefect(home, { allowMissing: false });
+  if (unusable !== undefined) {
+    io.err(`erase: ${unusable}`);
+    return 1;
+  }
+  const seed = operatorSeed(home, "erase", io);
+  if (typeof seed !== "string") return seed.code;
+  // REPEATABLE, and UNIONED with the home's own config. One home can hold more than one cold
+  // tier, and a last-wins flag left such a home permanently refused: name either vault and the
+  // other is still unnamed, so no invocation satisfied the guard. Two things this is NOT:
+  //
+  //  - not a delimited list. No delimiter is safe inside a path, and a comma in one would silently
+  //    become two wrong paths — `ArchiveBackend` MKDIRS its root, so both would be created empty,
+  //    both would answer "no bytes here", and the screen would report a vault as swept that this
+  //    command had just invented beside it.
+  //  - not a REPLACEMENT for config.json's archive. Every other tier is discovered from the ground
+  //    and fails closed; dropping a configured vault because a flag was also given would be the one
+  //    tier a flag can silently switch off.
+  const seenVault = new Set<string>();
+  const vaults = [
+    archivePath(home),
+    ...(parsed.repeated.get("archive") ?? []).map((one) => archivePath(home, one)),
+  ]
+    .filter((one): one is string => one !== undefined)
+    .filter((one) => {
+      const key = realOrSelf(one);
+      if (seenVault.has(key)) return false; // two spellings of one vault are one vault
+      seenVault.add(key);
+      return true;
+    });
+  // BEFORE ANY WORK, the same discipline §27.7's completeness guard applies to a container store:
+  // a tier this command was not told about would be a silent gap in the sweep, so it refuses rather
+  // than purging the primary and calling the erasure complete.
+  const scan = scanForVaults(home, vaults);
+  if (scan.unreadable.length > 0) {
+    io.err(
+      `erase ${id} refused before any work began: ${capped(scan.unreadable)} could not be read, so ` +
+        `this command cannot say whether ${home} holds a cold archive it was not told about. A ` +
+        `directory that cannot be examined has proven nothing, and the tier it might be is the one ` +
+        `whose retention has no recovery.\n` +
+        `  This is a PERMISSIONS problem and only permissions clear it: naming that path with ` +
+        `--archive does not, because a directory the sweep cannot read is not a tier this command ` +
+        `can sweep either. Make it readable, or move it out of ${home}. Nothing was erased.`,
+    );
+    return 1;
+  }
+  // ABSOLUTE, because that is the only spelling `--archive` accepts back. A relative value is
+  // re-resolved INSIDE the home, so a home-prefixed path pasted from this refusal becomes
+  // `<home>/<home>/…`, matches nothing, and fires the same refusal again — a loop an operator
+  // cannot leave by following the instruction. Absolute for an absolute `--home` too, where it
+  // already worked: one spelling, not one that depends on how the home was written.
+  const unnamed = scan.vaults.map((v) => resolve(v));
+  if (unnamed.length > 0) {
+    io.err(
+      `erase ${id} refused before any work began: ${home} holds a cold archive this command was ` +
+        `not told about — ${capped(unnamed)}. \`loam serve --archive <dir>\` does not write that ` +
+        `name into config.json, so a sweep here would purge the primary and report a completeness ` +
+        `it never verified, on the one tier whose retention has no recovery.\n` +
+        `  Name it and re-run: \`loam erase ${id} --reason "…" --archive <dir>\`, REPEATING ` +
+        `--archive once per vault — the value is a path and is never split, so a comma inside one ` +
+        `names a directory that does not exist and this command would create it. Or move the vault ` +
+        `out of ${home}. Nothing was erased.`,
+    );
+    return 1;
+  }
+  // WHICH OF THESE ALREADY EXISTED. `scanForVaults` is meticulous about an UNNAMED vault and
+  // tests a named one not at all — and `ArchiveBackend` MKDIRS its root, so a mistyped `--archive`
+  // becomes an empty tier that answers "no bytes here" and is then listed as swept. Recorded before
+  // anything opens it, and disclosed beside the sweep.
+  const invented = vaults.filter((one) => !existsSync(one));
+  const { gateway, path, lagged } = await openTiers(home, seed, parsed, io, vaults);
+  let done: Awaited<ReturnType<Gateway["erase"]>>;
+  let pools: number;
+  let revived: RevivalReport;
+  let pen: PenReading;
+  // Hoisted because the success screen below the try/catch reads them too.
+  let wasNegation = false;
+  let channelCount = 0;
+  try {
+    pools = gateway.quarantinePools.size;
+    pen = await setAsideWarning(gateway);
+    // WHAT COMES BACK, OBSERVED RATHER THAN DERIVED. The live set is read here and again after the
+    // order, and the difference is the answer — see `liveEverywhere` for why no walk of the removed
+    // delta's own pointers can be trusted to find it.
+    // THE LOGIN DOOR'S READING IS NOT A REGISTERED ONE. `resolveUserView` runs its hyperschema
+    // directly, so the store's registration table does not hold it — and a revoked role binding
+    // coming back at that door is precisely the event this warning exists for.
+    const doorFaults: string[] = [];
+    const doors = loginDoorReadings(seed, doorFaults);
+    for (const fault of doorFaults) {
+      io.out(`loam: ${fault}. The revival check below speaks for one reader fewer.`);
+    }
+    // ONE MOMENT FOR BOTH READINGS. §29 read closure lapses on a deadline, so two clocks would
+    // report a slate's own expiry as claims this erasure brought back.
+    // WAS THE THING REMOVED A WITHDRAWAL? Asked while it is still here; afterwards there is
+    // nothing left to ask. It decides only whether §26's as-of door is worth naming below.
+    wasNegation =
+      gateway.reactor.get(id)?.claims.pointers.some((p) => p.role === "negates") === true;
+    // Counted while the store is open, for the boundary line about channel lenses.
+    channelCount = gateway.channelStatus().length;
+    const moment = Date.now();
+    const before = readGrounds(gateway, doors, moment);
+    // SAID BEFORE THE PURGE, not after. On a large store the two readings are the slow part of
+    // this verb, and a screen that prints nothing until the end invites the one response that
+    // cannot be undone: an interrupt in the middle of a sweep.
+    io.out(
+      `loam: reading ${before.reduce((n, g) => n + g.present.size, 0)} delta(s) across ` +
+        `${before.length} ground(s) to see what this removal brings back. On a large store this ` +
+        `is the slow part — let it finish; an interrupt mid-sweep is worse than the wait.`,
+    );
+    const cameBack = (): RevivalReport =>
+      revivedAcross(before, readGrounds(gateway, doors, moment));
+    try {
+      done = await gateway.erase(id, { reason });
+    } catch (err) {
+      // 1, never 2. Every refusal the gateway raises here — nothing to erase, a container this
+      // sweep cannot reach, a tier that could not be proven clean — is a state of the STORE, and 2
+      // stays what a malformed invocation means. The distinction is what lets a script retry one
+      // and fix the other.
+      io.err(`erase ${id}: ${err instanceof Error ? err.message : String(err)}`);
+      // A FAILED ERASURE STILL PURGED THE LOCAL TIERS. §11 lands the tombstone, purges, re-seats,
+      // and only then reports a replica that refused — so a strike can already be gone while the
+      // order reads as failed, and the claim it withdrew is already live. Said HERE because no
+      // later run can say it: the re-run boots on the post-purge ground, where nothing came back.
+      // A failed RE-SEAT leaves the old reactor in place, so this reading can be taken over ground
+      // the purge already changed underneath it. Silence would then read as "nothing came back"
+      // when the honest answer is "this could not be measured" (H9). The cheap tell is the erased
+      // delta itself: if it is still in the reactor, the removal did not land here.
+      // EVERY GROUND THE SWEEP TOUCHED, not the host alone. A pool re-seats in its own turn and
+      // a failure there is folded into the fault list, leaving no mark on the host — so asking the
+      // host only reports "measured" about a reading taken over a pool the purge changed underneath.
+      if ([gateway, ...gateway.quarantinePools].some((g) => g.reactor.get(id) !== undefined)) {
+        io.err(
+          `loam: the removal did not complete in this store's own ground, so the revival reading ` +
+            `below was taken over a ground that may not reflect the purge. Treat an empty answer ` +
+            `as UNMEASURED rather than as nothing having come back.`,
+        );
+      }
+      reportRevived(io, cameBack(), gateway, "already", wasNegation, channelCount);
+      const already = survivingTombstones(gateway.reactor, gateway.operatorAuthor).find(
+        (t) => tombstoneTarget(t.claims) === id,
+      );
+      if (already !== undefined) {
+        // A receipt exists — but a receipt is a promise, and this run just failed to keep one. The
+        // two states read very differently to a compliance officer, so the sweep is ASKED rather
+        // than assumed: an id erased cleanly long ago, versus one whose tombstone stands over bytes
+        // that are still here.
+        // THE PROBE CANNOT ASK AN UNATTACHED CONTAINER, and the completeness guard fires
+        // precisely because one is declared and not attached. `erasureOutstanding` walks the host,
+        // its tombstones and the ATTACHED pools — so over exactly the state that made this run
+        // refuse, its silence means "not asked" rather than "clean". Read as clean, this screen
+        // tells a compliance officer the store forgot a record, naming the settled date, about the
+        // one tier it could not look in.
+        const stores = unreachableStoreReport(gateway);
+        const unreachable = stores.faultEntities;
+        // A KEPT CONTAINER IS NOT ASKED EITHER. `unreachableStoreReport` routes a container covered
+        // by a surviving detach record to `kept` rather than to `faults`, and `erasureOutstanding`
+        // walks only what is ATTACHED — so a store whose first run honestly printed KEPT OUTSIDE
+        // would have its second run print a settled date with no mention of it.
+        const keptNote =
+          stores.kept.length === 0
+            ? ""
+            : ` ${stores.kept.length} container(s) were KEPT OUTSIDE this sweep at your own ` +
+              `say-so, and were not asked: this speaks for the tiers this run entered.`;
+        // THE SAME THREE STATES THE RECEIPT READER PRINTS. `erasureOutstanding` folds "a tier
+        // refused the question" into "outstanding", so this screen asserted the sweep was NOT
+        // finished over a store where nothing had been established either way — while
+        // `tombstones show` called that same state UNPROVEN. One store, two answers.
+        const standing = await erasureStanding(gateway, id).catch((): ErasureStanding => "unasked");
+        const outstanding = standing === "held" || standing === "owed";
+        const recorded = new Date(already.claims.timestamp).toISOString();
+        const reader = `\`loam tombstones show ${already.id}\``;
+        // THREE STATES, because two of them are not the same fact. The sweep is measurably
+        // unfinished; or it is unfinished-or-not and this run cannot tell; or it settled. Only the
+        // last may name a date and call the record forgotten.
+        io.err(
+          outstanding
+            ? `loam: a receipt already names ${id}, recorded ${recorded} — and the sweep it ` +
+                `promised is NOT finished. The record is not forgotten until it settles; re-run ` +
+                `once the fault above is resolved. ${reader}`
+            : standing === "unasked"
+              ? `loam: a receipt already names ${id}, recorded ${recorded} — and this run CANNOT ` +
+                `SHOW that the sweep it promised finished: a tier refused the question, so ` +
+                `nothing here was measured in either direction. ${reader}`
+              : unreachable.length > 0
+                ? `loam: a receipt already names ${id}, recorded ${recorded} — and this run ` +
+                  `CANNOT SHOW that the sweep it promised finished. ${capped(unreachable, 4)} ` +
+                  `could not be reached, and an unattached container is the one tier this probe ` +
+                  `cannot ask, so its silence is not an answer. Attach it and re-run before ` +
+                  `calling this settled. ${reader}`
+                : `loam: a receipt already names ${id}, ORDERED at ${recorded}, and this run ` +
+                  `asked every tier it opened: none of them still holds it.${keptNote} ${reader}`,
+        );
+      }
+      // "NOT HELD HERE" IS A CLAIM ABOUT THE GROUND, NOT ABOUT THE BYTES. Asked rather than
+      // assumed — and the causes are LISTED, never diagnosed: this probe reaches every tier the
+      // command opened, so a true answer could be a set-aside row, a cold copy no read replants, or
+      // a purge that refused. Naming one of the three as the cause would be a second guess wearing
+      // the authority of a measurement.
+      const where = await heldWhere(gateway, id);
+      if (where.held.length > 0) {
+        io.err(
+          `loam: and yet bytes filed under ${id} are still HELD by ${capped(where.held, 4)}. The ` +
+            `refusal above speaks for the GROUND — what the reactor admitted — and this speaks for ` +
+            `the disk. Three things look like this, and nothing here can tell them apart: a row set ` +
+            `aside by §25 and never admitted${
+              pen.state === "empty"
+                ? " — though the pen is EMPTY, so not that one here"
+                : pen.state === "rows"
+                  ? ` — and the pen is NOT empty: ${pen.text}`
+                  : ` — and the pen COULD NOT BE READ, so it is not ruled out either: ${pen.text}`
+            }, a cold ` +
+            `copy in an archive that no read replants (\`loam serve\` heals at boot, and an erase ` +
+            `can reach it after), or a purge that refused.`,
+        );
+      }
+      if (where.unprovable.length > 0) {
+        io.err(
+          `loam: and ${capped(where.unprovable, 3)} could not be asked whether ${id} is still ` +
+            `there. A tier that cannot answer has proven nothing.`,
+        );
+      }
+      // THE GUARD'S OWN ADVICE NAMES LIBRARY CALLS. `openContainer` and `detach()` are embedding
+      // API, and an operator reading this in a terminal has neither — so the refusal, left alone,
+      // sets up a retry loop they cannot break. Say what CAN be done from here.
+      if (unreachableStoreReport(gateway).faultEntities.length > 0) {
+        io.err(
+          `loam: \`openContainer\` and \`detach()\` above are EMBEDDING API and no CLI verb reaches ` +
+            `them. From a terminal: a federation channel's pool re-attaches on its own the next time ` +
+            `any command boots this home, so if the named container is a channel, re-run this — and ` +
+            `if it is not, the container was opened by an embedder, and only that embedder can ` +
+            `attach or detach it. \`loam federate list\` names the channels this home holds.`,
+        );
+      }
+      return 1;
+    }
+    // THE RECEIPT OUTLIVES A FAILED READING. `cameBack` walks slates, masks and every pool, and
+    // any of that can throw — over a ground this erase has just changed. Thrown here, the run
+    // would purge the bytes, land the tombstone, and print a stack trace instead of the receipt id
+    // the operator needs to read it back. The reading is a QUALIFICATION of the claim; losing it
+    // must not lose the claim.
+    try {
+      revived = cameBack();
+    } catch (err) {
+      revived = { revived: [], remasked: [], reopened: [], withdrawn: [], unconsulted: [] };
+      io.out(
+        `loam: the revival reading could not be taken — ` +
+          `${err instanceof Error ? err.message : String(err)}. The erasure below is DONE; what ` +
+          `it may have brought back was not measured, so treat the silence as UNMEASURED rather ` +
+          `than as nothing having come back.`,
+      );
+    }
+  } finally {
+    await gateway.close();
+  }
+  const swept = [
+    path,
+    ...vaults.map(
+      (one) => `the archive at ${one}${invented.includes(one) ? " (CREATED BY THIS RUN)" : ""}`,
+    ),
+    ...(pools === 0 ? [] : [`${pools} attached channel pool${pools === 1 ? "" : "s"}`]),
+  ];
+  io.out(
+    `loam: erased ${done.erased}\n` +
+      `  receipt      ${done.tombstone}${done.minted ? "" : "  (REUSED, not minted by this run)"}\n` +
+      `  spoken by    ${done.spokenBy ?? `${LEDGER_NONE} this receipt does not record whose record it forgot`}\n` +
+      // THE RECEIPT'S OWN SENTENCE, never the flag's. A retry after a fault REUSES the standing
+      // tombstone and drops `--reason` on the floor, so echoing the argument would print one reason
+      // here and a different one from `tombstones show` on the very next line.
+      `  reason       ${done.reasons.length === 0 ? `${LEDGER_NONE} this receipt records none` : done.reasons.join(" · ")}\n` +
+      (done.minted || done.reasons.includes(reason)
+        ? ""
+        : `  YOUR --reason IS NOT ON THE RECEIPT: this run reused the one an earlier run minted, and\n` +
+          `  a receipt is immutable. To say something else, strike it (forgiveness, §11) and erase again.\n`) +
+      `  the bytes are gone, asked tier by tier: ${swept.join(", ")}\n` +
+      `  \`loam tombstones show ${done.tombstone}\` reads the receipt back` +
+      (done.citations.length === 0
+        ? ""
+        : `\n  ${done.citations.length} surviving delta(s) still point at the hole: ` +
+          capped(done.citations)) +
+      (done.kept.length === 0
+        ? ""
+        : `\n  KEPT OUTSIDE this sweep, at your own say-so — a detach record covers ` +
+          `${capped(done.kept)}`),
+  );
+  reportRevived(io, revived, gateway, "now", wasNegation, channelCount);
+  // A RETRY ANSWERS FOR ITSELF ONLY. When the receipt was reused, an earlier run already purged
+  // whatever it purged — this run booted on that ground, so an empty revival reading here is a
+  // statement about this run and not about the erasure. The fault path carries the same caveat for
+  // the same reason; silence would let a second operator read a clean screen and conclude nothing
+  // ever came back.
+  if (!done.minted) {
+    io.out(
+      `loam: this run REUSED a standing receipt, so the revival reading above answers for THIS run ` +
+        `only. Whatever an earlier run freed was already free when this one started, and no run ` +
+        `after the first can see it.`,
+    );
+  }
+  // A store the sweep deliberately did not enter cannot be read for revivals either. The KEPT line
+  // above names those containers; this says what the silence over them is worth.
+  const looked =
+    revived.reopened.length === 0 &&
+    revived.remasked.length === 0 &&
+    revived.unconsulted.length === 0;
+  if (done.kept.length > 0) {
+    io.out(
+      `loam: the kept container(s) above were not entered for revivals either${
+        revived.revived.length === 0
+          ? `, and nothing came back in the stores this run did read`
+          : ` — the claims listed above are the ones it FOUND, in the stores it read`
+      }${looked ? "" : ", and the boundaries above name readings it could not compare"}. A strike ` +
+        `removed from a kept store would revive there unseen.`,
+    );
+  }
+  // WHAT THE SWEEP DOES NOT REACH, on every run. The home surfaces and the ESM tier come from the
+  // same two constants `health()` reads; the erasure-wide limits come from the constant the §29.7
+  // compliance receipt reads. An operator who forgets a user's record delta and reads a bare
+  // "erased" would believe the home's own credential file went with it. It did not, and a copy
+  // re-spoken under another id did not either — said here before anyone has to ask.
+  // THE BYTE VERDICT CANNOT SEE A SET-ASIDE ROW. `holds` asks the table for the erased ID, and a
+  // §25 row is precisely one whose stored claims no longer match the id it is filed under — so an
+  // erased record's plaintext can be legible inside a row filed under a different id, and every
+  // tier still answers "gone". The two read-only verbs already disclose the pen; the verb that
+  // makes the byte claim is the one that most needs to.
+  if (pen.text !== undefined) {
+    io.out(
+      `loam: ${pen.text}\n  AND THE VERDICT ABOVE COULD NOT SEE THEM: a byte probe asks by id, while a ` +
+        `set-aside row holds another delta's claims under its own — so an erased record can still ` +
+        `be legible inside one.`,
+    );
+  }
+  // AN ARCHIVE OUTSIDE THE HOME IS THE ONE TIER THIS RUN CANNOT LOOK FOR. `--archive` takes an
+  // absolute path, so `serve --archive /var/backups/vault` leaves a cold tier that config.json
+  // never names and no walk of the home can find. The help text and the README both say so; the
+  // screen that makes the BYTE CLAIM said nothing, which is the one place it matters.
+  for (const lag of lagged) io.out(`loam: ${lag}`);
+  if (invented.length > 0) {
+    io.out(
+      `loam: ${capped(invented, 4)} did not exist before this run and was created empty by it. An ` +
+        `empty tier answers "no bytes here", so its line above proves nothing — if you meant a ` +
+        `vault this store is actually served with, that vault still holds this record and this run ` +
+        `did not touch it.`,
+    );
+  }
+  // TRUE ON BOTH BRANCHES, and it used to print on only one. An archive at an ABSOLUTE path
+  // outside the home is invisible to the probe whether or not another vault was named — so the
+  // operator who names an in-home vault reads "asked tier by tier" as the whole answer while
+  // /var/backups still holds the record. The search bound is disclosed with it: the walk reaches a
+  // few levels inside the home and a vault parked deeper is equally out of sight.
+  io.out(
+    vaults.length === 0
+      ? `loam: NO cold archive was consulted — this home's config.json names none and none was ` +
+          `passed. The probe that cleared this run only looked inside ${home}, and only ` +
+          `${VAULT_SEARCH_DEPTH} levels deep. If this store is served with \`--archive <path>\`, ` +
+          `that vault still holds this record: re-run naming it.`
+      : `loam: the archive(s) named above were swept. A vault at an ABSOLUTE path outside ${home} ` +
+          `is invisible to the probe that cleared this run, as is one deeper than ` +
+          `${VAULT_SEARCH_DEPTH} levels inside it — neither was looked for, and neither is covered ` +
+          `by the verdict above. Name every cold tier this store is served with.`,
+  );
+  io.out("loam: what an erasure does NOT reach, and never claims to:");
+  for (const surface of [
+    ...UNSWEPT_AUTH_SURFACES,
+    ...ESM_RESIDENCY_DISCLOSURE,
+    ...ERASURE_NON_CLAIMS,
+  ]) {
+    io.out(`  ${surface}`);
+  }
+  const staleness = servingWarning(home, path);
+  if (staleness !== undefined) {
+    io.out(`loam: ${staleness}`);
+    io.out(
+      "loam: for an erasure that is worse than a stale read — a running server can still SERVE " +
+        "the bytes this command removed, out of the memory it booted with. Restart it.",
+    );
+  }
+  return 0;
+}
+
 // --- `loam tombstones list | show <id>` ----------------------------------------------------------
 
 // WHAT A STANDING RECEIPT IS WORTH, in one cell. A tombstone is a PROMISE: §11 lands it, then
@@ -3283,7 +4075,6 @@ async function cmdTombstones(args: readonly string[], io: IO): Promise<number> {
       );
       return 2;
     }
-
     if (found.length === 0) {
       // "NOT AN ID THIS STORE FORGOT" WOULD CONTRADICT THE GROUND for a forgiven id. Striking a
       // tombstone withdraws the erasure, and the receipt leaves the surviving set — so an id this
@@ -3432,6 +4223,8 @@ export async function run(
         return await cmdGrant(rest, io);
       case "slate":
         return await cmdSlate(rest, io);
+      case "erase":
+        return await cmdErase(rest, io);
       case "tombstones":
         return await cmdTombstones(rest, io);
       default:

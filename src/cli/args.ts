@@ -4,6 +4,13 @@
 
 export interface Parsed {
   readonly flags: Map<string, string>;
+  /**
+   * EVERY value a flag was given, in order. `flags` keeps the last, which is what a single-valued
+   * flag means and what every existing caller reads; a command that genuinely takes a SET reads
+   * this instead. Splitting one value on a delimiter was the alternative and it is worse: no
+   * delimiter is safe in a path, and a comma inside one silently becomes two wrong paths.
+   */
+  readonly repeated: Map<string, string[]>;
   readonly booleans: Set<string>;
   readonly positionals: string[];
 }
@@ -14,8 +21,13 @@ export class UsageError extends Error {}
 
 export function parseArgs(args: readonly string[], booleanFlags: ReadonlySet<string>): Parsed {
   const flags = new Map<string, string>();
+  const repeated = new Map<string, string[]>();
   const booleans = new Set<string>();
   const positionals: string[] = [];
+  const keep = (name: string, value: string): void => {
+    flags.set(name, value);
+    repeated.set(name, [...(repeated.get(name) ?? []), value]);
+  };
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i]!;
     if (arg.startsWith("--")) {
@@ -32,7 +44,7 @@ export function parseArgs(args: readonly string[], booleanFlags: ReadonlySet<str
           );
         }
         // `--name=value`, the near-universal form, kept whole.
-        flags.set(name, body.slice(eq + 1));
+        keep(name, body.slice(eq + 1));
       } else if (booleanFlags.has(body)) {
         booleans.add(body);
       } else {
@@ -40,14 +52,14 @@ export function parseArgs(args: readonly string[], booleanFlags: ReadonlySet<str
         if (value === undefined || value.startsWith("--")) {
           throw new UsageError(`flag --${body} needs a value`);
         }
-        flags.set(body, value);
+        keep(body, value);
         i += 1;
       }
     } else {
       positionals.push(arg);
     }
   }
-  return { flags, booleans, positionals };
+  return { flags, repeated, booleans, positionals };
 }
 
 export function rejectUnknown(parsed: Parsed, allowed: ReadonlySet<string>, command: string): void {

@@ -776,7 +776,12 @@ export class Gateway {
     citations: string[];
     kept: string[];
     tombstone: string;
-    spokenBy: string;
+    /** False when a standing tombstone was REUSED — a retry after a fault records no new reason. */
+    minted: boolean;
+    /** The reasons on the receipt itself, which on a retry are the FIRST run’s, not this call’s. */
+    reasons: string[];
+    /** Absent when the reused tombstone carries no `spoken-by` — the door requires one, replay does not. */
+    spokenBy?: string;
   }> {
     return eraseImpl(this, id, opts);
   }
