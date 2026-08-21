@@ -144,10 +144,27 @@ const anyPoolFileHolds = (home: string, needle: string): boolean => {
   return readdirSync(dir).some((f) => readFileSync(join(dir, f)).includes(needle));
 };
 
-// The expected hash, computed the substrate's way rather than read back from the reader under test
-// (H10). What it pins is that the report names THIS bundle: the sibling rails change the bundle and
-// watch the number move.
-const hashOf = (bundle: string): string => contentAddress(new TextEncoder().encode(bundle));
+// THE APP IDENTITY THE REPORT SHOULD PRINT, spelled out here as a literal rather than imported from
+// the reader under test (H10): a shared helper cannot witness its own bug, and this is the number an
+// operator compares two stores by. It covers everything the binding serves with EXCEPT the lens
+// name, which the receiver renames on the way in — the sibling rails move the bundle, the pen and
+// the writable list in turn and watch it change.
+const appIdOf = (
+  bundle: string,
+  opts: { route?: string; consumes?: string[]; writable?: string[]; pen?: string } = {},
+): string =>
+  contentAddress(
+    new TextEncoder().encode(
+      [
+        "loam.channel.app",
+        opts.route ?? "hello",
+        JSON.stringify(opts.consumes ?? ["height"]),
+        bundle,
+        JSON.stringify(opts.writable ?? []),
+        opts.pen ?? "",
+      ].join("\u0000"),
+    ),
+  );
 
 describe("T209 — an arriving renderer is present at the bytes and 404 at the door", () => {
   it("lands in the pool, serves nowhere, and serves everywhere once blessed", async () => {
@@ -224,7 +241,7 @@ describe("T209 — the report and the listing name what arrived", () => {
         channel: CHANNEL,
         route: "hello",
         serves: "alice:hello",
-        hash: hashOf(APP),
+        hash: appIdOf(APP),
         blessed: false,
       });
 
@@ -239,8 +256,8 @@ describe("T209 — the report and the listing name what arrived", () => {
         channel: CHANNEL,
         route: "hello",
         serves: "alice:hello",
-        hash: hashOf(APP),
-        serving: hashOf(APP),
+        hash: appIdOf(APP),
+        serving: appIdOf(APP),
         blessed: true,
       });
       expect((await channel.sync()).apps[0]!.blessed).toBe(true);
@@ -276,12 +293,12 @@ describe("T209 — the report and the listing name what arrived", () => {
       });
       const after = await channel.sync();
       expect(after.apps).toHaveLength(1);
-      expect(after.apps[0]!.hash).toBe(hashOf(OTHER_APP));
+      expect(after.apps[0]!.hash).toBe(appIdOf(OTHER_APP));
       expect(after.apps[0]!.blessed).toBe(false);
       // AND IT SAYS WHAT IS RUNNING. `blessed: false` alone would read as "nothing runs", which is
       // the H7 shape: the old code IS running, and an operator told otherwise would look for the
       // wrong problem. The two facts are separate fields precisely so neither can imply the other.
-      expect(after.apps[0]!.serving).toBe(hashOf(APP));
+      expect(after.apps[0]!.serving).toBe(appIdOf(APP));
       expect(bodyOf(await bob.serveRoute("alice:hello", FERN, "full"))).toContain("<p id=h>62</p>");
 
       // And the remedy the listing offers actually works: superseding moves the route onto the
@@ -317,7 +334,7 @@ describe("T209 — the report and the listing name what arrived", () => {
       expect(frozen.offered).toBe(0);
       expect(frozen.accepted).toBe(0);
       expect(frozen.apps).toHaveLength(1);
-      expect(frozen.apps[0]!.hash).toBe(hashOf(APP));
+      expect(frozen.apps[0]!.hash).toBe(appIdOf(APP));
       expect(frozen.apps[0]!.blessed).toBe(false);
     } finally {
       await alice.close();
@@ -347,7 +364,7 @@ describe("T209 — the report and the listing name what arrived", () => {
 
       expect(after.apps).toHaveLength(1);
       expect(after.apps[0]!.hash).toBeUndefined(); // the peer offers it no longer
-      expect(after.apps[0]!.serving).toBe(hashOf(APP)); // and this store still runs what it blessed
+      expect(after.apps[0]!.serving).toBe(appIdOf(APP)); // and this store still runs what it blessed
       expect(after.apps[0]!.blessed).toBe(false);
       expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(200);
     } finally {
@@ -735,13 +752,13 @@ describe("T209 — a peer may not choose what the operator blesses", () => {
 
       const listed = bob.channelApps(CHANNEL);
       expect(listed).toHaveLength(1);
-      expect(listed[0]!.hash).toBe(hashOf(APP)); // what the operator is shown
+      expect(listed[0]!.hash).toBe(appIdOf(APP)); // what the operator is shown
 
       await bob.blessChannelApp(CHANNEL, "hello");
 
       // What MOUNTED is what was shown, at both levels: the pool binds that bundle, and the page a
       // person receives is that bundle's output — never the decoy's.
-      expect(bob.channelApps(CHANNEL)[0]!.serving).toBe(hashOf(APP));
+      expect(bob.channelApps(CHANNEL)[0]!.serving).toBe(appIdOf(APP));
       const html = bodyOf(await bob.serveRoute("alice:hello", FERN, "full"));
       expect(html).toContain("<p id=h>62</p>");
       expect(html).not.toContain("<section id=other>");
@@ -842,7 +859,7 @@ describe("T209 — a peer may not choose what the operator blesses", () => {
       // The twin is really in the pool and really servable there — this is about a reachable thing.
       expect(channel.pool.gateway!.renderers().some((r) => r.route === "hello")).toBe(true);
       const row = bob.channelApps(CHANNEL)[0]!;
-      expect(row.hash).toBe(hashOf(APP));
+      expect(row.hash).toBe(appIdOf(APP));
       expect(row.serving).toBeUndefined(); // nothing of THIS channel runs there
       expect(row.blessed).toBe(false);
       expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(404);
@@ -905,6 +922,178 @@ describe("T209 — a peer may not choose what the operator blesses", () => {
       await bob.append([observed(FERN, "height", 7, 2_000, BOB_SEED)]);
       const answer = await bob.query('{ plant(entity: "' + FERN + '") { height } }');
       expect((answer.data as { plant: { height: unknown } }).plant.height).toBe(7);
+    } finally {
+      await alice.close();
+      await bob.close();
+    }
+  });
+});
+
+describe("T209 — what an app IS, for the report and for the blessing", () => {
+  it("a pen appearing on the same bundle is a CHANGE, not a match", async () => {
+    // The bundle alone is not the app. A peer who re-points a route to the SAME code carrying a PEN
+    // and a writable list has changed what it may DO — §6's two keys are a decision about a specific
+    // binding — and a report that called that no change would hide the one re-point that matters.
+    const alice = await peer(ALICE_SEED, { route: "hello", app: APP, height: 62 });
+    const bob = await store(BOB_SEED, { pens: { "alice-pen": PEN_SEED } });
+    try {
+      const channel = await link(bob, alice, "alice");
+      await channel.sync();
+      await bob.blessChannelApp(CHANNEL, "hello");
+      expect(bob.channelApps(CHANNEL)[0]!.blessed).toBe(true);
+      const before = bob.channelApps(CHANNEL)[0]!.hash;
+
+      // Same bundle, now write-enabled.
+      await alice.publishRenderer({
+        route: "hello",
+        schema: "Plant",
+        consumes: ["height"],
+        bundle: APP,
+        writable: ["height"],
+        pen: "alice-pen",
+      });
+      const after = (await channel.sync()).apps[0]!;
+      expect(after.hash).not.toBe(before);
+      expect(after.blessed).toBe(false);
+      // And the pen still cannot ride the re-blessing implicitly.
+      await expect(bob.blessChannelApp(CHANNEL, "hello", { supersede: true })).rejects.toThrow(
+        /holds a PEN/,
+      );
+    } finally {
+      await alice.close();
+      await bob.close();
+    }
+  });
+
+  it("--expect refuses when the peer changed the app between the listing and the blessing", async () => {
+    // `list` and `bless-app` are separate acts with a standing sync between them. Without a pin the
+    // door is last-writer-wins; with one, the operator blesses the identity they read.
+    const alice = await peer(ALICE_SEED, { route: "hello", app: APP, height: 62 });
+    const bob = await store(BOB_SEED);
+    try {
+      const channel = await link(bob, alice, "alice");
+      await channel.sync();
+      const shown = bob.channelApps(CHANNEL)[0]!.hash!;
+
+      // The peer moves underneath the operator.
+      await alice.publishRenderer({
+        route: "hello",
+        schema: "Plant",
+        consumes: ["height"],
+        bundle: OTHER_APP,
+      });
+      await channel.sync();
+
+      await expect(bob.blessChannelApp(CHANNEL, "hello", { expect: shown })).rejects.toThrow(
+        /you asked for/,
+      );
+      expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(404);
+      // Two-sided: the identity that IS current is accepted, and mounts.
+      const now = bob.channelApps(CHANNEL)[0]!.hash!;
+      await bob.blessChannelApp(CHANNEL, "hello", { expect: now });
+      expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(200);
+    } finally {
+      await alice.close();
+      await bob.close();
+    }
+  });
+
+  it("a withdrawal that resurfaces the peer's earlier app does not deadlock the route", async () => {
+    // The dedupe asks which row WINS the alias, not whether one exists. Presence is not victory: an
+    // older row naming the resurfaced binding is still there, and a presence test would skip the
+    // mint, leave the newer row winning, and refuse that route forever — while the listing went on
+    // recommending the command that refuses.
+    const alice = await peer(ALICE_SEED, { route: "hello", app: APP, height: 62 });
+    const bob = await store(BOB_SEED);
+    try {
+      const first = bindingOf(alice, "hello");
+      const channel = await link(bob, alice, "alice");
+      await channel.sync();
+      await bob.blessChannelApp(CHANNEL, "hello");
+
+      // A second app at the same route, blessed over the first.
+      await alice.publishRenderer({
+        route: "hello",
+        schema: "Plant",
+        consumes: ["height"],
+        bundle: OTHER_APP,
+      });
+      await channel.sync();
+      await bob.blessChannelApp(CHANNEL, "hello", { supersede: true });
+      expect(bodyOf(await bob.serveRoute("alice:hello", FERN, "full"))).toContain("<section");
+
+      // …and now alice withdraws it, so her FIRST app resurfaces as what she offers.
+      const second = [...alice.reactor.snapshot()].find(
+        (d) =>
+          d.id !== first &&
+          d.claims.pointers.some(
+            (p) =>
+              p.role === "route" && p.target.kind === "primitive" && p.target.value === "hello",
+          ),
+      )!.id;
+      await alice.append([
+        signClaims(
+          makeNegationClaims(authorForSeed(ALICE_SEED), 6_000, second, "withdrawn"),
+          ALICE_SEED,
+        ),
+      ]);
+      const after = await channel.sync();
+      expect(after.apps[0]!.hash).toBe(appIdOf(APP)); // the first app again
+
+      // The remedy the listing prints must WORK. This is the call that used to refuse forever.
+      await bob.blessChannelApp(CHANNEL, "hello", { supersede: true });
+      expect(bob.channelApps(CHANNEL)[0]!.blessed).toBe(true);
+      expect(bodyOf(await bob.serveRoute("alice:hello", FERN, "full"))).toContain("<p id=h>62</p>");
+    } finally {
+      await alice.close();
+      await bob.close();
+    }
+  });
+
+  it("a route the receiver's OWN law answers inside the pool is refused in those words", async () => {
+    // The listing hides the seeded twin (it is not this channel's app), but the blessing door's own
+    // name guard sees it — and refused with a delta id no listing shows, offering a remedy that
+    // would strike the copy of the operator's own binding.
+    const alice = await peer(ALICE_SEED, { route: "hello", app: APP, height: 62 });
+    const bob = await store(BOB_SEED);
+    try {
+      await bob.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+      await bob.publishRenderer({
+        route: "hello",
+        schema: "Plant",
+        consumes: ["height"],
+        bundle: OTHER_APP,
+      });
+      const channel = await link(bob, alice, "alice");
+      await channel.sync();
+
+      await expect(bob.blessChannelApp(CHANNEL, "hello")).rejects.toThrow(/YOUR OWN route/);
+      expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(404);
+      // Two-sided: bob's own route is untouched and still serves.
+      expect(bodyOf(await bob.serveRoute("hello", FERN, "full"))).toContain("<section id=other>");
+    } finally {
+      await alice.close();
+      await bob.close();
+    }
+  });
+
+  it("a second curse after a lift still retires the lens", async () => {
+    // A lift revives a binding by negating the curse's negation; the negation stays on the ground.
+    // Asked as presence, a second curse then finds nothing to strike and reports "nothing to
+    // retire" while the lens is served and a mounted app is rendering it.
+    const alice = await peer(ALICE_SEED, { route: "hello", app: APP, height: 62 });
+    const bob = await store(BOB_SEED);
+    try {
+      const channel = await link(bob, alice, "alice");
+      await channel.sync();
+      await bob.blessChannelApp(CHANNEL, "hello");
+
+      await bob.curseChannelLaw(CHANNEL, "alice:Plant");
+      await bob.curseChannelLaw(CHANNEL, "alice:Plant", { lift: true });
+      expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(200); // back
+
+      await bob.curseChannelLaw(CHANNEL, "alice:Plant"); // the call that used to refuse
+      expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(404);
     } finally {
       await alice.close();
       await bob.close();

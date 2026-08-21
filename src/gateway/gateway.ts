@@ -1019,7 +1019,7 @@ export class Gateway {
   async blessChannelApp(
     channel: string,
     route: string,
-    opts: { pen?: boolean; supersede?: boolean } = {},
+    opts: { pen?: boolean; supersede?: boolean; expect?: string } = {},
   ): Promise<void> {
     return blessChannelAppImpl(this, channel, route, opts);
   }

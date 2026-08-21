@@ -206,6 +206,7 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "receiving",
       "channel",
       "route",
+      "expect",
       "pen",
       "supersede",
       "yes",
@@ -236,7 +237,13 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "there, and it answers the token door only. Dropping the channel takes it away. Add --pen for",
       "an app that writes: its pen must also be provisioned and granted, which is a separate act",
       "(SPEC §6, §24.7). When a peer ships new code at a route you mounted, `list` says so and",
-      "--supersede is what moves the route onto it.",
+      "--supersede is what moves the route onto it. Pass --expect <bundle-id from list> to refuse",
+      "if the peer changed the app between the listing and the blessing.",
+      "",
+      "WHAT MOUNTING DOES NOT BOUND: the app runs in a worker with a time and memory limit, and",
+      "that is not object-capability confinement. A peer's bundle can still reach the filesystem",
+      "and the network of the machine you run this on. The pool bounds what it can WRITE to your",
+      "store, not what it can reach outside it (SPEC §24.5, an open flag).",
     ],
   },
   migrate: {
@@ -1163,9 +1170,11 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
         );
         return 2;
       }
+      const expected = parsed.flags.get("expect");
       await gateway.blessChannelApp(name, route, {
         pen: parsed.booleans.has("pen"),
         supersede: parsed.booleans.has("supersede"),
+        ...(expected === undefined ? {} : { expect: expected }),
       });
       // Report what the store ANSWERS WITH, not what the call returned. A blessing that landed and
       // does not serve — its lens withdrawn, say — must not be announced as a mount (H7).

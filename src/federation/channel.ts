@@ -27,7 +27,7 @@ import {
   manifestExportClaims,
   readManifest,
 } from "../gateway/adopt-law.js";
-import { CTX_REGISTRATION } from "../gateway/registration.js";
+import { CTX_REGISTRATION, lawfulNegated } from "../gateway/registration.js";
 import { freezeMembers } from "../gateway/container-identity.js";
 import type { RendererBinding } from "../gateway/renderers.js";
 import { readForeignRenderers, routeServableOn } from "../gateway/renderers.js";
@@ -557,17 +557,52 @@ async function bindArrived(
   return { bound, parked, witnessed };
 }
 
-/** The content address of a bundle — the same address the ESM cache keys the running code by. */
-const bundleHash = (bundle: string): string => contentAddress(new TextEncoder().encode(bundle));
+/**
+ * WHAT AN APP IS, for the purpose of "is this the same app?" — everything the binding serves with
+ * EXCEPT the lens name.
+ *
+ * The bundle alone is not enough, and getting that wrong is the H7 shape this report exists to
+ * avoid: a peer who re-points a route to the SAME bundle carrying a PEN and a `writable` list has
+ * changed what the app may do, and a hash over the bundle would call that no change at all. §6's two
+ * keys are a decision an operator makes about a specific binding, so the thing they compare has to
+ * move when the pen does. `adopt-law`'s own `rendererLawAddress` says the same thing in the same
+ * words — "a pen swap is a different renderer".
+ *
+ * THE LENS NAME IS EXCLUDED, and it is the one field that must be. The receiver RENAMES the lens on
+ * the way in (§46.2: `Plant` becomes `alice:Plant`), so the arrived binding and the blessed one
+ * never agree about it, and a hash that included it could never match — every app would read as
+ * changed, forever. The residual is real and named rather than hidden: a peer who changes ONLY the
+ * lens their app reads moves nothing here. What RUNS is unaffected — the blessed binding goes on
+ * reading the lens the blessing resolved — so the flag stays true about the code; it is silent about
+ * a re-point that would only take effect at the next blessing.
+ */
+const appIdentity = (r: RendererBinding): string =>
+  contentAddress(
+    new TextEncoder().encode(
+      [
+        "loam.channel.app",
+        r.route,
+        JSON.stringify([...r.consumes]),
+        r.bundle,
+        JSON.stringify([...(r.writable ?? [])]),
+        r.pen ?? "",
+        // NUL-separated, the same separator every content address in this store uses: a field
+        // value can contain a space, and a separator a value can contain is not one.
+      ].join("\u0000"),
+    ),
+  );
 
 /**
  * The peer's renderer bindings in a channel's pool, latest per route.
  *
- * Read PER AUTHOR through `readRenderers`, the same reader that decides what a store serves — so a
- * peer's own retraction retires their own app, and nobody else's strike does (the author-scoped
- * negation algebra `adopt-law` keeps for a module's members, and the reason a hostile co-tenant in
- * one pool cannot make a peer's app vanish from the listing). Sharing the reader is deliberate: a
- * second parser would drift, and the drift would land on which app an operator thinks they blessed.
+ * Survival is scoped per author by `readForeignRenderers` — a peer's own retraction retires their
+ * own app, and nobody else's strike does, the same algebra `adopt-law` keeps over a module's
+ * members. WHAT IT DOES NOT SCOPE is the WINNER: a route is one name, the pool binds one thing at
+ * it, and the latest binding across every non-operator author takes it by `(timestamp, deltaId)`.
+ * So a pool carrying more than one author's renderer bindings — a peer relaying a third party's
+ * deltas — is a contest, and a later timestamp wins it. That is the same latest-wins every name in
+ * the store resolves by, and it is worth stating because the operator's decision surface shows one
+ * row per route without naming who authored it.
  *
  * The operator's own slice is excluded, because a blessing lands in this same pool (§47.4) and
  * reading it back would report the receiver's act as a fresh arrival, forever.
@@ -607,9 +642,9 @@ function appsOf(gw: Gateway, ground: Gateway, channel: string, prefix: string): 
     ground
       .renderers()
       .filter((r) => routeServableOn(ground, r, "full") && gw.reactor.get(r.deltaId) === undefined)
-      .map((r) => [r.route, bundleHash(r.bundle)]),
+      .map((r) => [r.route, appIdentity(r)]),
   );
-  const offered = new Map(arrivedBindings(gw, ground).map((r) => [r.route, bundleHash(r.bundle)]));
+  const offered = new Map(arrivedBindings(gw, ground).map((r) => [r.route, appIdentity(r)]));
   const rows: ArrivedApp[] = [];
   for (const route of new Set([...offered.keys(), ...running.keys()])) {
     const hash = offered.get(route);
@@ -647,25 +682,35 @@ export function channelAppsImpl(gw: Gateway, channel?: string): ArrivedApp[] {
  * strictly wider grant than either, so it is neither toggle's business and it is never automatic.
  * One route, named by a person, every time.
  *
- * What it does NOT widen: the app is published on the POOL's gateway, so it runs on the pool's
- * ground, wears §24.7's probation frame, writes only into the pool, and goes with the pool when the
- * channel is dropped. `dependencies: "refuse"` keeps the act to the one export asked for — a
+ * What it does NOT widen, and the one thing it does not bound: the app is published on the POOL's
+ * gateway, so it runs on the pool's ground, wears §24.7's probation frame, writes only into the
+ * pool, and goes with the pool when the channel is dropped. What none of that reaches is AMBIENT
+ * AUTHORITY — §24.5's open flag, stated here because this is the door that first lets bytes a
+ * stranger signed execute on the host. The §23.9 worker bounds hang, crash and memory; it is not an
+ * ocap sandbox, and a bundle can still reach `node:fs` or a socket. The pool bounds what an app may
+ * write into the operator's store, not what it may touch outside it.
+ * `dependencies: "refuse"` keeps the act to the one export asked for — a
  * renderer whose lens is not blessed is refused, never quietly blessed along with it — and
  * `expect: "renderer"` means a manifest alias can never turn this into a schema blessing.
  *
- * AND IT MOUNTS THE BUNDLE THE OPERATOR WAS SHOWN. The pool is a store the PEER writes into, the
- * manifest vocabulary is not reserved, and `readManifest` is latest-per-alias across all authors —
- * so a peer can author a row that wins `app:<route>` and points somewhere else. `manifest:
- * "operator"` makes the alias mean what this store's operator said it means, and the post-freeze
- * check below refuses rather than blessing a target the listing did not name. Two guards, because
- * this is the one call where the difference between them is the difference between the code an
- * operator read the hash of and code they never saw.
+ * A PEER CANNOT CHOOSE WHAT THIS BLESSES. The pool is a store the PEER writes into, the manifest
+ * vocabulary is not reserved, and `readManifest` is latest-per-alias across all authors — so a peer
+ * can author a row that wins `app:<route>` and points somewhere else. `manifest: "operator"` makes
+ * the alias mean what this store's operator said it means, and the post-freeze check below refuses
+ * rather than blessing a target the operator's own rows do not name.
+ *
+ * WHAT THOSE GUARDS DO NOT GIVE YOU, stated because the difference matters: they bind the alias to
+ * the binding THIS CALL resolved, not to the one a person read in a listing a moment earlier. The
+ * two are separate invocations and a standing sync polls between them, so a peer who lands newer
+ * code at the route in that window is what mounts. `expect` closes that when it matters: pass the
+ * identity the listing showed and the call refuses anything else. Without it the door is
+ * last-writer-wins, which is honest for an unattended script and not enough for a decision.
  */
 export async function blessChannelAppImpl(
   gw: Gateway,
   channel: string,
   route: string,
-  opts: { pen?: boolean; supersede?: boolean } = {},
+  opts: { pen?: boolean; supersede?: boolean; expect?: string } = {},
 ): Promise<void> {
   const status = channelStatusImpl(gw, channel)[0];
   const ground = gw.channelPools.get(channel)?.gateway;
@@ -685,6 +730,30 @@ export async function blessChannelAppImpl(
           : arrived.map((r) => `"${r.route}"`).join(", ")),
     );
   }
+  // THE IDENTITY THE OPERATOR MEANT, when they named one. `federate list` and this call are separate
+  // invocations with a standing sync between them, so "the app at route hello" can mean different
+  // code by the time this runs. A prefix of the identity the listing printed is enough to say which.
+  if (opts.expect !== undefined && !appIdentity(app).startsWith(opts.expect)) {
+    throw new Error(
+      `bless-app refused: "${route}" on "${channel}" is ${appIdentity(app).slice(0, 12)}… now, ` +
+        `and you asked for ${opts.expect}. The peer changed it between the listing and this call. ` +
+        "Nothing was blessed; re-read `loam federate list`.",
+    );
+  }
+  // A ROUTE THE RECEIVER'S OWN LAW ALREADY ANSWERS INSIDE THE POOL. A pool is one-way seeded with
+  // this store's whole ground, so a route name the receiver uses has an operator-signed twin in
+  // here. The listing hides those (they are not this channel's apps), but the blessing door's own
+  // name guard sees one and refuses with a delta id no listing ever showed — and its stated remedy
+  // would strike the copy of the operator's own binding. Refused here instead, in words about the
+  // thing that is actually in the way.
+  const twin = ground.renderers().find((r) => r.route === route);
+  if (twin !== undefined && gw.reactor.get(twin.deltaId) !== undefined) {
+    throw new Error(
+      `bless-app refused: this pool holds a copy of YOUR OWN route "${route}", seeded from this ` +
+        "store's ground — so the name is already answered in there by law of yours. A peer's app " +
+        "cannot take it. Rename your own route, or ask the peer to publish theirs elsewhere.",
+    );
+  }
   const seed = gw.options.seed;
   const operator = gw.operatorAuthor;
   if (seed === undefined || operator === undefined) {
@@ -696,11 +765,15 @@ export async function blessChannelAppImpl(
   // keeps a blessing pointed at the code that arrived rather than the code that used to be there.
   const alias = `app:${route}`;
   const members = [...ground.reactor.snapshot()];
-  // The dedupe asks about the OPERATOR's rows only. Unscoped, a peer who plants a decoy row naming
-  // the right target would suppress the receiver's own mint, and the alias would then be theirs.
-  if (
-    !members.some((d) => d.claims.author === operator && namesExport(d.claims, alias, app.deltaId))
-  ) {
+  // THE DEDUPE ASKS THE QUESTION THE GUARD BELOW ASKS — which row WINS this alias — and not the
+  // easier one, does a row saying this exist. They differ the moment a peer withdraws a binding and
+  // an earlier one resurfaces: an old row naming it is still present and unstruck, so a presence
+  // test skips the mint, the newer row goes on winning, and the guard then refuses that route
+  // forever while the listing keeps recommending the command that refuses. Presence is not
+  // survival, and it is not victory either. (Operator-scoped for the other half: unscoped, a peer
+  // who plants a decoy row naming the right target would suppress the receiver's own mint.)
+  const mine = readManifest(members.filter((d) => d.claims.author === operator));
+  if (mine.find((r) => r.alias === alias)?.target !== app.deltaId) {
     await ground.federate([
       signClaims(
         manifestExportClaims(
@@ -735,15 +808,6 @@ export async function blessChannelAppImpl(
     ...(opts.pen === true ? { pen: true } : {}),
     ...(opts.supersede === true ? { supersede: true } : {}),
   });
-}
-
-/** Does this delta declare exactly this manifest export — the alias AND the address it names? */
-function namesExport(claims: Claims, alias: string, address: string): boolean {
-  const named = (role: string, value: string): boolean =>
-    claims.pointers.some(
-      (p) => p.role === role && p.target.kind === "primitive" && p.target.value === value,
-    );
-  return manifestAliasOf(claims) === alias && named("target-address", address);
 }
 
 /** The alias a manifest row names, or undefined for any other delta. */
@@ -1363,10 +1427,16 @@ export async function curseChannelLawImpl(
   ];
   const bindings: { id: string; sign: (id: string) => Promise<void> }[] = [];
   for (const g of grounds) {
+    // SURVIVAL, NOT PRESENCE. A lift revives a binding by negating the curse's negation; it does not
+    // remove that negation, so `negationsOf(...).length > 0` stays true of a binding that is fully
+    // live again. Asked that way, a SECOND curse finds nothing to strike and refuses with "not
+    // served by this store" while the lens is on the surface and a mounted app is rendering it —
+    // H9's shape, and the licence it hands out is "you have nothing to retire".
+    const struckHere = lawfulNegated(g.reactor, gw.operatorAuthor);
     for (const d of g.reactor.snapshot()) {
       if (!isRegistrationBinding(d.claims)) continue;
       if (livesAt(d) !== living) continue;
-      if (g.reactor.negationsOf(d.id).length > 0) continue;
+      if (struckHere(d.id)) continue;
       bindings.push({ id: d.id, sign: g.sign });
     }
   }
