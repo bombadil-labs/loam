@@ -1,4 +1,12 @@
 {
+  "_adlcArchive": {
+    "archivedAt": "2026-08-20T22:40:02.646Z",
+    "reason": "completed",
+    "sourceRevision": null,
+    "sourceStoreHash": "14f3297dd35ad4b465f50ea9339b1c21dcdbe6b054e1f2d3394ec28be8fbae02",
+    "ticketHash": "7a4884e632d5a2246b78fa9ce19ecde601cda9702d099255c2afe7b146793ff8",
+    "version": 1
+  },
   "body": "FROM THE P5 SUPPRESSION LENS, 2026-08-19. Three silent failures in one function; T191 covers the\nlift half separately.\n\n1. `.find` PICKS ONE BINDING AND SNAPSHOT ORDER DECIDES WHICH. Several bindings survive at one entity\n   by design — readRegistrations takes the latest per (registration entity, lens name) and\n   readRegistrationVersions returns every survivor. If a lens has a v1 and a v2, striking v1 leaves\n   v2 latest and THE LENS KEEPS SERVING while the curse reports done.\n\n2. THE MATCH IS ON THE HYPERSCHEMA ENTITY, NOT THE LENS — H6's shape, in the bytes. Under §21.7\n   coexistence two readings share one entity, so cursing one lens can strike a SIBLING reading's\n   binding while the cursed lens keeps serving. Exactly the wrong lens retired.\n\n3. `binding === undefined` RETURNS SUCCESS HAVING STRUCK NOTHING. Registration.entity is optional, so\n   a manually-registered lens has none and both comparisons are false. The docstring one line above\n   promises \"the lens leaves the surface\". H7.\n\nWHY THE RAIL CANNOT SEE ANY OF IT: curse-durable.test.ts uses two distinct programs (Plant, Sprout),\neach with one entity and one version — the corpus in which the entity-match and the lens-match\nCOINCIDE. That is H10 (\"two derivations coincide\"), and it is why a green rail proves nothing here.\n\nFIX SHAPE: collect ALL live bindings whose lens name is the living name, strike each, then ASSERT the\nlens no longer serves and REFUSE if it does. A curse that cannot prove the lens left must not report\nthat it did.",
   "edges": [],
   "id": "T194",

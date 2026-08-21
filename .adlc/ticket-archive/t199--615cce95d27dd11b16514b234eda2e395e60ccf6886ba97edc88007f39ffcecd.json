@@ -1,4 +1,12 @@
 {
+  "_adlcArchive": {
+    "archivedAt": "2026-08-20T22:40:03.336Z",
+    "reason": "completed",
+    "sourceRevision": null,
+    "sourceStoreHash": "2f0db922b2b5087f64799daaae4da272c01f1c31c24b171812529063e364a55c",
+    "ticketHash": "3716d239e52a15d48a011e29ed07dd9c7abb5a123918f87fdfdec5028c49d7de",
+    "version": 1
+  },
   "body": "FOUND BY FIXING A TEST, 2026-08-19. rails-guard refused a skipped rail; replacing the skip with a\ntrue assertion exposed a live disclosure.\n\nMEASURED, on the ordinary query door, after a deliberate administrative act:\n\n    BEFORE DROP: {\"alice_Plant\":{\"height\":11}}    <- the peer's claim, correctly scoped\n    AFTER  DROP: {\"alice_Plant\":{\"height\":999}}   <- the RECEIVER's own private claim\n\nSevering a channel purges its pool and negates its channel record, but leaves the LAW it blessed\nregistered in the receiver's ground. `channelGroundFor` looks a channel up by prefix among LIVE\nchannels, finds none, and returns undefined — so the read falls through to the primary ground. A name\nthat answered a peer now answers you, with no error and nothing in the report.\n\nIt is the same shape as T193's subscription leak and arguably worse: it is the ordinary read path,\nit follows an act the operator chose, and it looks like it worked.\n\nFIXED BY FAILING CLOSED. `channelsEver` reads severed channels too, so the read path can tell a name\nthat was NEVER a channel (an ordinary lens) from one whose channel is GONE (a lens with no ground).\nThe second refuses and says why. A refusal is always available; a wrong answer that looks right is\nnot recoverable.\n\nWHAT IS NOT DECIDED, and is Myk's: SHOULD A DROP RETIRE THE LENSES IT BLESSED? Failing closed leaves\nthe binding registered and unreadable, which is honest but odd — `federate list` no longer shows the\nchannel while the lens is still in the store's registry. Retiring them on drop would be tidier and is\na WIDENING of what drop removes: today it purges a pool's bytes, and that would add the receiver's\nown bindings. Under the erasure rule that is Myk's merge with its one-line statement of what can now\nbe deleted that could not before.\n\nRAILS: the drop rail now asserts the refusal by name, and the two-sided case (a bystander channel's\nlens still serves) sits beside it.",
   "edges": [],
   "id": "T199",
