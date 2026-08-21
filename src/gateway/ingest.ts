@@ -454,7 +454,7 @@ export function watchImpl(gw: Gateway, term: unknown): AsyncGenerator<Delta[], v
 export async function federateImpl(
   gw: Gateway,
   deltas: Iterable<Delta>,
-  opts: { admit?: (d: Delta) => boolean } = {},
+  opts: { admit?: (d: Delta) => boolean; ids?: boolean } = {},
 ): Promise<FederationReport> {
   if (gw.writeFailure !== undefined) {
     throw new Error(`this gateway can no longer persist: ${gw.writeFailure.message}`);
@@ -511,18 +511,22 @@ export async function federateImpl(
   // that offers the same delta twice would otherwise be reported as one refusal that never happened.
   const crossed = new Set(admitted.map((d) => d.id));
   const rejected = all.reduce((n, d) => (crossed.has(d.id) ? n : n + 1), 0);
-  let accepted = 0;
+  // The ids are collected in THIS loop, from the same verdict that increments the count — so
+  // `acceptedIds` and `accepted` cannot disagree about which deltas newly landed. Anything that
+  // recovered the set afterwards would be answering a different question a moment later.
+  const acceptedIds: string[] = [];
   if (admitted.length > 0) {
     await gw.backend.append(admitted);
     for (const d of admitted) gw.justPersisted.add(d.id);
     try {
       for (const d of admitted) {
-        if (gw.ingestVia(d).status === "accepted") accepted += 1;
+        if (gw.ingestVia(d).status === "accepted") acceptedIds.push(d.id);
       }
     } finally {
       for (const d of admitted) gw.justPersisted.delete(d.id);
     }
   }
+  const accepted = acceptedIds.length;
   // "accepted" counts deltas NEWLY ingested — a duplicate verified but merged into what was
   // already there, so a re-pull accepts nothing (union is idempotent). "held" is the unique-id
   // remainder: offered ids neither newly ingested nor refused. Occurrences and unique ids are
@@ -530,5 +534,8 @@ export async function federateImpl(
   // `held`'s complement), so the two are never subtracted from each other.
   const refusedIds = new Set(all.filter((d) => !crossed.has(d.id)).map((d) => d.id));
   const held = new Set(all.map((d) => d.id)).size - accepted - refusedIds.size;
-  return { offered: all.length, accepted, rejected, held };
+  const counts = { offered: all.length, accepted, rejected, held };
+  // The ids ride only when asked (see FederationReport): the counts are what every other caller
+  // reads, and the report keeps exactly the shape they compare.
+  return opts.ids === true ? { ...counts, acceptedIds } : counts;
 }

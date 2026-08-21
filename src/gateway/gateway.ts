@@ -248,6 +248,19 @@ export interface FederationReport {
   readonly accepted: number; // UNIQUE deltas newly ingested (union is idempotent)
   readonly rejected: number; // occurrences refused at the door — a duplicated refusal counts twice
   readonly held: number; // UNIQUE offered ids the store already held — neither new nor refused
+  /**
+   * WHICH deltas were newly ingested, in offer order — present only when the caller asked with
+   * `{ ids: true }`, and then `acceptedIds.length === accepted` always.
+   *
+   * A count says how much crossed; only this says WHAT. A caller that must point at the arrivals —
+   * the channel's arrival attestation does — would otherwise diff reactor snapshots around the
+   * call, which costs a pass over the whole store per sync (H8) to recover something the door
+   * already knew.
+   *
+   * ASKED FOR RATHER THAN ALWAYS PRESENT: the report is a small count-vector that callers compare
+   * and serialize whole, so it stays exactly what it was for everyone who wants the counts.
+   */
+  readonly acceptedIds?: readonly string[];
 }
 
 export interface RequestContext {
@@ -1236,7 +1249,7 @@ export class Gateway {
   // Admit a batch of peer deltas (SPEC §8): the body lives in ingest.ts.
   async federate(
     deltas: Iterable<Delta>,
-    opts: { admit?: (d: Delta) => boolean } = {},
+    opts: { admit?: (d: Delta) => boolean; ids?: boolean } = {},
   ): Promise<FederationReport> {
     return federateImpl(this, deltas, opts);
   }
