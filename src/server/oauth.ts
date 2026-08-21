@@ -1407,13 +1407,29 @@ export async function revokeConnector(
       const client = clientFor(file, clientId);
       if (client === undefined) return { result: { kind: "no-such-client" } };
       struckGrant = grantFor(file, clientId);
+      const going = struckGrant; // a const the closures below can narrow; `struckGrant` outlives this scope
       return {
         next: {
           ...file,
           clients: file.clients.map((c) =>
             c.clientId === clientId ? { ...c, generation: c.generation + 1 } : c,
           ),
+          // The grant goes, and with it the SEED — revocation destroys the key. What survives is the
+          // public author, in a list nothing that mints authority reads (`OAuthRevocation`). Without
+          // it the store forgets who acted the moment it stops letting them act, and the ledger then
+          // reports a connector of months' standing as having "no acting identity yet" while the
+          // grant it held sits attributed to nobody.
           grants: file.grants.filter((g) => g.clientId !== clientId),
+          // Keyed by ACTOR: a re-keyed connector keeps a record for every key it ever signed with,
+          // and revoking the same key twice replaces rather than duplicates.
+          ...(going === undefined
+            ? {}
+            : {
+                revoked: [
+                  ...(file.revoked ?? []).filter((r) => r.actor !== going.actor),
+                  { clientId, actor: going.actor, revokedAt: Date.now() },
+                ],
+              }),
         },
         result: { kind: "revoked", clientId, generation: client.generation + 1 },
       };

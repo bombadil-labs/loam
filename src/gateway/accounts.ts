@@ -242,6 +242,45 @@ export function dataStruck(reactor: Reactor, operator?: string): (id: string) =>
   return (id) => !surviving.has(id) && reactor.get(id) !== undefined;
 }
 
+// WHICH strike actually retired `id`, if any — the constitutional question, answered by the same
+// `struck`/`standsFor` walk resolution runs, so a report of WHEN standing ended cannot drift from
+// the store's own verdict on WHETHER it ended. Built on the private recursion for exactly the reason
+// `dataStruck` is built on `lawfulStrikersJson`: two derivations of one fact disagree eventually.
+//
+// A negation that is itself struck, or whose author had no standing to strike, is INERT and is not
+// returned — it never retired anything, and reporting its timestamp would name a revocation nobody
+// lawful performed. The EARLIEST honored strike wins: that is the moment the standing ended, and a
+// later strike on the same grant does not move it. Ties break on the negation id so one store always
+// reads one way.
+//
+// `undefined` means no honored strike, which is NOT the same as "this grant binds" — a grant can
+// fail for chain reasons with no strike anywhere near it. Callers that need both facts ask this and
+// `grantsHeldBy` separately.
+export function honoredStrikeOn(
+  reactor: Reactor,
+  id: string,
+  operator?: string,
+): { readonly id: string; readonly timestamp: number } | undefined {
+  const ctx: Ctx = { reactor, operator };
+  let earliest: { id: string; timestamp: number } | undefined;
+  for (const negId of reactor.negationsOf(id)) {
+    const branch = new Set<string>([negId]);
+    if (struck(ctx, negId, branch)) continue; // the strike is itself struck: inert
+    const neg = reactor.get(negId);
+    if (neg === undefined) continue;
+    if (operator !== undefined && !standsFor(ctx, neg, branch)) continue; // no standing: inert
+    const candidate = { id: negId, timestamp: neg.claims.timestamp };
+    if (
+      earliest === undefined ||
+      candidate.timestamp < earliest.timestamp ||
+      (candidate.timestamp === earliest.timestamp && candidate.id < earliest.id)
+    ) {
+      earliest = candidate;
+    }
+  }
+  return earliest;
+}
+
 // The governed audit schema: like TENANT, but negations bind only from the operator and the
 // operator's ADMIN grantees — the same standing `standsFor` demands — so what the audit shows
 // agrees with what enforcement honors (to the chain's first link).

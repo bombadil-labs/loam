@@ -88,6 +88,28 @@ export interface OAuthGrant {
   readonly grantDeltaId?: string;
 }
 
+/**
+ * A connector's identity AFTER its grant was revoked (T205). The seed is GONE — revocation destroys
+ * the key — and this record exists so a LEDGER can still say who acted, never so anything can act
+ * again. The asymmetry is the whole point: the public author is a fact the store's own deltas carry
+ * forever, and dropping it only made `loam grant list` report that a connector which had acted for
+ * months held "no acting identity yet", while the grant it once held sat in the ledger attributed to
+ * nobody.
+ *
+ * It is a SEPARATE collection rather than a flag on `OAuthGrant`, and that is a safety property, not
+ * a stylistic one: `grantFor` is what the token exchange and `loam grant <id> --verb=` read, so a
+ * revoked identity must not be reachable from it. Nothing that mints authority reads this list.
+ */
+export interface OAuthRevocation {
+  readonly clientId: string;
+  readonly actor: string; // the public author, and never a seed
+  readonly revokedAt: number;
+}
+// Unique by ACTOR, not by client. A connector that is revoked and then completes a fresh token
+// exchange signs with a NEW key, and it holds standing under each key it ever had until each one is
+// struck. One record per client would forget every key but the last, which is the same hole this
+// list exists to close, one re-key further along.
+
 /** An issued access token, by DIGEST. The token itself is handed to the client and never stored. */
 export interface OAuthToken {
   readonly digest: string; // sha256 hex of the bearer secret
@@ -140,6 +162,8 @@ export interface OAuthFile {
   readonly tokens: readonly OAuthToken[];
   /** Authorization codes in flight (phase 14). Absent in a file written before phase 14. */
   readonly codes?: readonly OAuthCode[];
+  /** Identities whose grant was revoked (T205). Absent in a file written before it. */
+  readonly revoked?: readonly OAuthRevocation[];
 }
 
 /** The caller could not decide what is registered. Never a licence to mint. */
@@ -360,6 +384,32 @@ function checkCode(raw: unknown, where: string): OAuthCode {
 }
 
 /**
+ * A revocation record, checked. It carries a public author and NO secret, and the refusal below says
+ * so out loud: a file holding `actorSeed` beside a revocation is either hand-edited or written by
+ * code that misunderstood what revocation destroys, and both are refused rather than loaded.
+ */
+function checkRevocation(raw: unknown, where: string): OAuthRevocation {
+  object(raw, where);
+  if ((raw as Record<string, unknown>)["actorSeed"] !== undefined) {
+    throw new OAuthFileUnreadable(
+      `${where} carries an actorSeed — revoking a connector destroys its key, and this file never ` +
+        `keeps one for an identity that may no longer act`,
+    );
+  }
+  const actor = str(raw, where, "actor");
+  // The same control-byte rule the redirect uri and the PKCE challenge pass: a hand-edited file must
+  // not smuggle a forged `loam grant list` row through the revocation table either.
+  if (CONTROL(actor)) {
+    throw new OAuthFileUnreadable(`${where} has an actor carrying a control character`);
+  }
+  return {
+    clientId: str(raw, where, "clientId"),
+    actor,
+    revokedAt: num(raw, where, "revokedAt"),
+  };
+}
+
+/**
  * The whole file, checked. An ABSENT file is an empty one — a home with no connectors is not
  * damaged. Anything present but unparseable throws `OAuthFileUnreadable`.
  */
@@ -435,6 +485,15 @@ function checkFileShape(parsed: unknown, where: string): OAuthFile {
       : Array.from(array(codesRaw, `${where}: codes`), (c, i) =>
           checkCode(c, `${where}: code ${i}`),
         );
+  // OPTIONAL, on the same terms as `codes`: absent reads as no revocations, and the returned object
+  // OMITS the key so a file written before T205 round-trips byte-identical.
+  const revokedRaw = file["revoked"];
+  const revoked =
+    revokedRaw === undefined
+      ? undefined
+      : Array.from(array(revokedRaw, `${where}: revoked`), (r, i) =>
+          checkRevocation(r, `${where}: revocation ${i}`),
+        );
   checkUnique(
     clients.map((c) => c.clientId),
     where,
@@ -457,7 +516,21 @@ function checkFileShape(parsed: unknown, where: string): OAuthFile {
       "code with digest",
     );
   }
-  return { version: 1, clients, grants, tokens, ...(codes === undefined ? {} : { codes }) };
+  if (revoked !== undefined) {
+    checkUnique(
+      revoked.map((r) => r.actor),
+      where,
+      "revocation with actor",
+    );
+  }
+  return {
+    version: 1,
+    clients,
+    grants,
+    tokens,
+    ...(codes === undefined ? {} : { codes }),
+    ...(revoked === undefined ? {} : { revoked }),
+  };
 }
 
 /**
@@ -485,6 +558,10 @@ function checkFileShape(parsed: unknown, where: string): OAuthFile {
 function performAtomicWrite(home: string, sound: OAuthFile, verifyOwnership: () => void): void {
   const target = oauthPath(home);
   const temp = `${target}.${process.pid}-${randomBytes(6).toString("hex")}.tmp`;
+  // THIS LIST IS EXPLICIT, AND A NEW FIELD MUST BE ADDED HERE TOO. `sound` is spread nowhere: a
+  // field that exists on `OAuthFile` and passes `checkFileShape` is still DROPPED at this line
+  // unless it is named below. Typecheck cannot see it, the validator has already approved it, and
+  // the only symptom is a value that read back missing — so a new field earns a round-trip rail.
   const body = `${JSON.stringify(
     {
       version: 1,
@@ -494,6 +571,7 @@ function performAtomicWrite(home: string, sound: OAuthFile, verifyOwnership: () 
       // Only when non-empty: an empty code list writes no key, so a phase-13 store stays byte-for-byte
       // what it was.
       ...(sound.codes === undefined ? {} : { codes: sound.codes }),
+      ...(sound.revoked === undefined ? {} : { revoked: sound.revoked }),
     },
     null,
     2,
@@ -751,6 +829,15 @@ export const clientFor = (file: OAuthFile, clientId: string): OAuthClient | unde
 
 export const grantFor = (file: OAuthFile, clientId: string): OAuthGrant | undefined =>
   file.grants.find((g) => g.clientId === clientId);
+
+/**
+ * Every key this client has had revoked, oldest first. READ-ONLY HISTORY: it names who acted, and it
+ * is deliberately not consulted by anything that grants authority — see `OAuthRevocation`.
+ */
+export const revocationsFor = (file: OAuthFile, clientId: string): OAuthRevocation[] =>
+  (file.revoked ?? [])
+    .filter((r) => r.clientId === clientId)
+    .sort((a, b) => a.revokedAt - b.revokedAt || a.actor.localeCompare(b.actor));
 
 /** The issued token with this digest, or undefined. One digest names one client (checkUnique). */
 export const tokenFor = (file: OAuthFile, digest: string): OAuthToken | undefined =>
