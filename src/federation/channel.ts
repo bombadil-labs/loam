@@ -72,6 +72,17 @@ export interface ChannelStatus {
   readonly consecutiveFailures: number;
   /** The peer's address, or "" for a channel opened before addresses were recorded. */
   readonly from: string;
+  /**
+   * Arrivals this channel accepted and could not stamp — the custody debt, carried on the record
+   * until a later sync names them. Empty is the healthy reading, and every record written before
+   * this field existed reads back empty.
+   *
+   * It is on the RECORD rather than in memory because the sync that could not stamp is exactly the
+   * sync that throws: a standing sync swallows that throw, and the next poll holds the same deltas,
+   * so it accepts none and would have nothing to stamp. Without the debt written down, the gap
+   * could never be found again except by scanning the pool against its own stamps.
+   */
+  readonly unattested: readonly string[];
 }
 
 export const CTX_CHANNEL = "loam.channel";
@@ -113,6 +124,15 @@ export function channelRecordClaims(
       ...(status.from === ""
         ? []
         : [{ role: "from" as const, target: { kind: "primitive" as const, value: status.from } }]),
+      // THE CUSTODY DEBT, one pointer per owed arrival, and omitted entirely when there is none —
+      // the same idiom as `from`, so a healthy record reads exactly as it did before this field
+      // existed. The ids ride as primitives rather than delta-refs on purpose: the arrivals live in
+      // the POOL's ground, and this record lives in the receiver's, where a citation of them would
+      // point at nothing. The list is bounded by what arrived since the last successful stamp.
+      ...status.unattested.map((id) => ({
+        role: "unattested" as const,
+        target: { kind: "primitive" as const, value: id },
+      })),
     ],
   };
 }
@@ -172,14 +192,32 @@ export function arrivalClaims(
 }
 
 /**
+ * A refusal that KNOWS what it left unstamped. The caller writes these ids onto the channel record
+ * before rethrowing, which is what turns a custody gap into a debt a later sync can pay.
+ */
+class UnattestedArrivals extends Error {
+  readonly unattested: readonly string[];
+  constructor(message: string, unattested: readonly string[]) {
+    super(message);
+    this.unattested = unattested;
+  }
+}
+
+/**
  * Stamp this sync's custody into the channel's own pool — one attestation per `ARRIVAL_FAN` refs.
  *
- * NOTHING ACCEPTED, NOTHING WRITTEN. Liveness is already the channel record's job, and a standing
- * sync polls forever: a stamp per poll would grow the pool without recording a single arrival.
+ * NOTHING ACCEPTED AND NOTHING OWED, NOTHING WRITTEN. Liveness is already the channel record's job,
+ * and a standing sync polls forever: a stamp per poll would grow the pool without recording a
+ * single arrival.
  *
  * ONE TIMESTAMP for the whole sync, so a batch split by the cap still reads as one arrival rather
  * than as several. It comes from the POOL's clock because the stamps live in the pool, and an as-of
  * read there is what reads them back.
+ *
+ * `owed` is what an earlier sync accepted and could not stamp, read from the channel record. It
+ * joins this sync's arrivals in one batch, so a refusal HEALS on a later poll instead of stranding
+ * those arrivals: the deltas are already held, so no later sync would ever accept them again, and
+ * nothing else would ever bring them back into view.
  */
 async function attestArrival(
   gw: Gateway,
@@ -187,49 +225,74 @@ async function attestArrival(
   name: string,
   from: string,
   report: FederationReport,
+  owed: readonly string[],
 ): Promise<void> {
+  // CHECKED FIRST, so a quiet poll never refuses: nothing arrived and nothing is owed, so there is
+  // no custody to claim and no sentence about one that would be true. The guard below is deferred
+  // by this, never skipped — a door that will not name its arrivals is caught on the first poll
+  // that accepts one.
+  if (report.accepted === 0 && owed.length === 0) return;
   // REFUSE RATHER THAN STAMP A CUSTODY THIS CANNOT POINT AT. The door names what it ingested only
   // when asked (`ids: true`); asked and answered with a shorter list, an attestation would silently
   // under-claim, and a custody trail with an undeclared gap is worse than none.
   const arrived = report.acceptedIds;
   if (arrived === undefined || arrived.length !== report.accepted) {
+    // A plain refusal, because there is nothing to write down: the debt is real and UNNAMEABLE —
+    // the door would not say which deltas it took. The channel records the failure and the counter;
+    // this sync's arrivals are recoverable only by scanning the pool against its stamps.
     throw new Error(
       `sync could not record the arrival on "${name}": the pool's door reported ${report.accepted} ` +
         `accepted delta(s) and named ${arrived?.length ?? 0} of them, so an attestation would ` +
-        `claim a custody it cannot point at. The peer's deltas landed; nothing was attested.`,
+        `claim a custody it cannot point at. The peer's deltas landed; nothing was attested, and ` +
+        `the channel cannot record which arrivals are owed one.`,
     );
   }
-  if (arrived.length === 0) return;
+  // The debt first, then this sync's arrivals, deduped — the cap chunks the UNION, so a healing
+  // sync obeys the same fan as any other. A carried ref is stamped LATE and says so only by the
+  // stamp's own timestamp: the moment is the sync that recorded it, not the sync it arrived on.
+  const union = [...new Set([...owed, ...arrived])];
   const at = ground.nextTimestamp();
-  const stamps: Delta[] = [];
-  for (let i = 0; i < arrived.length; i += ARRIVAL_FAN) {
-    stamps.push(
-      signClaims(
-        arrivalClaims(
-          { channel: name, from, arrived: arrived.slice(i, i + ARRIVAL_FAN) },
-          gw.operatorAuthor!,
-          at,
-        ),
+  const batch: { refs: string[]; stamp: Delta }[] = [];
+  for (let i = 0; i < union.length; i += ARRIVAL_FAN) {
+    const refs = union.slice(i, i + ARRIVAL_FAN);
+    batch.push({
+      refs,
+      stamp: signClaims(
+        arrivalClaims({ channel: name, from, arrived: refs }, gw.operatorAuthor!, at),
         gw.options.seed!,
       ),
-    );
+    });
   }
   // `federate`, like the manifest rows the channel writes beside them: the pool is a separate
-  // ground, and this is the door the receiver's own writes into it already take. That door counts
-  // its refusals rather than naming them, so the count is checked here: a refused stamp would leave
-  // the same undeclared gap the guard above exists to prevent, and nothing would say so.
+  // ground, and this is the door the receiver's own writes into it already take. `ids: true` for
+  // the same reason the arrivals call asks: a PARTIAL landing must name which stamps stand, or the
+  // debt below would carry refs already recorded — or, far worse, drop refs nothing recorded.
   //
   // A stamp IS a citation of its arrivals, so a slate closing `cite` is the mechanism that could
   // refuse one. No offer reaches it today — a slate's members are frozen from the ground the pool
   // already holds, and a delta the pool already holds is `held` rather than newly accepted, so this
   // sync's refs and that slate's members are disjoint sets. The check is what keeps that an
   // observation about today rather than a load-bearing assumption.
-  const landed = await ground.federate(stamps);
-  if (landed.accepted !== stamps.length) {
-    throw new Error(
-      `sync could not record the arrival on "${name}": the pool took ${landed.accepted} of ` +
-        `${stamps.length} attestation(s), so the custody trail would have a gap nothing declares. ` +
-        `The peer's deltas landed; the stamp did not.`,
+  let landed: FederationReport;
+  try {
+    landed = await ground.federate(
+      batch.map((b) => b.stamp),
+      { ids: true },
+    );
+  } catch (err) {
+    // The door failed the whole batch, so every ref is owed. Over-carrying costs a second stamp for
+    // a ref that may already stand; under-carrying costs the gap this exists to close.
+    throw new UnattestedArrivals(err instanceof Error ? err.message : String(err), union);
+  }
+  if (landed.accepted !== batch.length) {
+    const stood = new Set(landed.acceptedIds ?? []);
+    const covered = new Set(batch.filter((b) => stood.has(b.stamp.id)).flatMap((b) => b.refs));
+    const unattested = union.filter((id) => !covered.has(id));
+    throw new UnattestedArrivals(
+      `sync could not fully record the arrival on "${name}": the pool took ${landed.accepted} of ` +
+        `${batch.length} attestation(s). The ${unattested.length} arrival(s) not yet named are ` +
+        `recorded on the channel and will be re-attested on the next sync.`,
+      unattested,
     );
   }
 }
@@ -270,6 +333,13 @@ function readChannels(
     const channel = marker.target.entity.id.slice("channel:".length);
     const held = latest.get(channel);
     if (held !== undefined && held.at >= d.claims.timestamp) continue;
+    // Repeated role, read by hand: `of` answers with ONE primitive, and the custody debt is a list.
+    const unattested: string[] = [];
+    for (const p of d.claims.pointers) {
+      if (p.role === "unattested" && p.target.kind === "primitive") {
+        unattested.push(String(p.target.value));
+      }
+    }
     latest.set(channel, {
       at: d.claims.timestamp,
       status: {
@@ -281,6 +351,7 @@ function readChannels(
         lastSyncedAt: Number(of("lastSyncedAt") ?? 0),
         consecutiveFailures: Number(of("consecutiveFailures") ?? 0),
         from: String(of("from") ?? ""),
+        unattested,
       },
     });
   }
@@ -512,6 +583,9 @@ async function syncChannel(
   // The peer's address as the RECORD holds it, resolved once: the failure stamp, the success stamp
   // and the arrival attestation must all name the same door.
   const from = before?.from ?? opts.from ?? "";
+  // What an earlier sync accepted and could not stamp. It is read here and written back on every
+  // exit, so no path silently forgets a debt the record was carrying.
+  const owed = before?.unattested ?? [];
   // FROZEN: read the toggle from the ground on every sync, so a freeze takes effect on the next
   // poll without restarting anything — the same "state is data" discipline as `loam:trust`. A
   // frozen channel reports honestly rather than silently doing nothing: it did not fail, and it
@@ -534,6 +608,9 @@ async function syncChannel(
       lastSyncedAt: before?.lastSyncedAt ?? 0,
       consecutiveFailures: (before?.consecutiveFailures ?? 0) + 1,
       from,
+      // A peer that went quiet does not pay the channel's custody debt: carry it forward, or an
+      // unreachable peer would clear a gap it had nothing to do with.
+      unattested: owed,
     });
     throw err;
   }
@@ -553,7 +630,28 @@ async function syncChannel(
     : { bound: [] as string[], parked: [] as string[], witnessed: [] as string[] };
   // AFTER the blessing, never before: `bindArrived` freezes the pool's members to address a module
   // version, so a stamp landing first would move that address on every poll for no reason.
-  await attestArrival(gw, ground, name, from, report);
+  try {
+    await attestArrival(gw, ground, name, from, report, owed);
+  } catch (err) {
+    // Record before rethrowing, exactly as the pull failure above does — and for a sharper reason.
+    // A standing sync swallows this throw, and the deltas are already IN the pool, so the next poll
+    // accepts none of them: without this record the arrivals would be unstampable forever, and the
+    // next success would write a healthy record over the gap.
+    await stamp(gw, {
+      name,
+      into: opts.into,
+      prefix: opts.prefix,
+      receiving: before?.receiving ?? true,
+      blessing,
+      lastSyncedAt: before?.lastSyncedAt ?? 0,
+      consecutiveFailures: (before?.consecutiveFailures ?? 0) + 1,
+      from,
+      // A refusal that could not name what it left unstamped carries the debt it already knew
+      // about — the door's own silence is what the counter is left to report.
+      unattested: err instanceof UnattestedArrivals ? err.unattested : owed,
+    });
+    throw err;
+  }
   await stamp(gw, {
     name,
     into: opts.into,
@@ -563,6 +661,8 @@ async function syncChannel(
     lastSyncedAt: gw.nextTimestamp(),
     consecutiveFailures: 0,
     from,
+    // Cleared, and only here: the stamps for every owed arrival are in the pool above.
+    unattested: [],
   });
   return {
     offered: report.offered,
@@ -667,6 +767,7 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
     lastSyncedAt: 0,
     consecutiveFailures: 0,
     from: opts.from ?? "",
+    unattested: [],
   });
 
   const channel: Channel = {
@@ -833,10 +934,12 @@ export interface StandingSync {
  * second sync of an unchanged peer accepts nothing. A frozen channel is skipped by its own toggle,
  * read from the ground each time.
  *
- * A failing channel must never take the loop down with it. One unreachable peer raises its own
- * `consecutiveFailures` and the others keep going — the counter is where that failure becomes
- * visible, which is why swallowing the error here is honest rather than H9: the record is written
- * before the throw.
+ * A failing channel must never take the loop down with it. One failing peer raises its own
+ * `consecutiveFailures` and the others keep going — the record is where that failure becomes
+ * visible, which is why swallowing the error here is honest rather than H9. Both failures a peer
+ * can cause write that record before `sync` throws: an unreachable door raises the counter, and an
+ * arrival that could not be stamped raises it AND writes down which arrivals are still owed a
+ * stamp, so the next poll can pay the debt.
  */
 export function keepSyncingImpl(gw: Gateway, opts: { everyMs?: number } = {}): StandingSync {
   const everyMs = Math.max(20, opts.everyMs ?? 60_000);
@@ -849,8 +952,10 @@ export function keepSyncingImpl(gw: Gateway, opts: { everyMs?: number } = {}): S
       try {
         await channel.sync();
       } catch {
-        // Recorded on the channel's own record by `sync` before it threw. One dead peer does not
-        // stop the others.
+        // Recorded on the channel's own record by `sync` before it threw — the unreachable door and
+        // the unstampable arrival both stamp a failure on the way out. A failure of the RECEIVER's
+        // own ground is not recorded and cannot be, because the record is itself a write to it.
+        // One dead peer does not stop the others.
       }
     }
   };
