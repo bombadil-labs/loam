@@ -182,6 +182,62 @@ ${listing}
 </form>`;
   };
 
+  // A moment, in words a person can read — and NEVER `Invalid Date`. A binding delta carries its
+  // stamp as a number, so this guard is unreachable through the publish path; `toISOString` throws
+  // on a non-finite value, and one such row would take the whole dashboard down with it.
+  const momentOf = (ms: number): string =>
+    Number.isFinite(ms) ? new Date(ms).toISOString() : "an unreadable time";
+
+  // The registrations this store is WITHHOLDING (§47.1). Under a declared `conflicts` policy a
+  // contested name is refused rather than decided, and without this block a person meets a lens
+  // that is simply not there — the 404-shaped hole §47.1 promises not to dig. The reading is the
+  // gateway's, over every ground it serves law from; this panel renders it and derives nothing of
+  // its own.
+  //
+  // STORE-WIDE, like the schema panel above and for the same reason: a lens is how this store
+  // reads, for every reader, so a withheld name is not one subtree's business. The block is absent
+  // when nothing is contested — a panel that is always there says nothing.
+  //
+  // The prose speaks of the CONTENDERS it lists, never of the name as a whole. A name contested
+  // inside one ground can still be answered from another — a root pair withheld between themselves
+  // while a channel's pool binds the same name — and "the store serves neither" would be false
+  // there. What is always true is that no LISTED contender serves.
+  //
+  // Delta ids are TEXT. No delta-addressed view exists to link to, and the members list already
+  // renders ids this way; a link to nothing would be worse than a name a person can paste.
+  const contestedPanelHtml = (gw: Gateway): string => {
+    const names = [...gw.contestedNames()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
+    if (names.length === 0) return "";
+    const listing = names
+      .map(
+        ([lens, rows]) =>
+          `<li><strong>${escapeHtml(lens)}</strong> — ${rows.length} registration` +
+          `${rows.length === 1 ? "" : "s"} want this name, and none of them serves.\n` +
+          `<ul>\n${rows
+            .map(
+              (r) =>
+                `<li><code>${escapeHtml(r.entity)}</code>, from ` +
+                `<code>${escapeHtml(r.origin)}</code>, signed by ` +
+                `<code>${escapeHtml(r.author)}</code> at ` +
+                `${escapeHtml(momentOf(r.timestamp))} — binding ` +
+                `<code>${escapeHtml(r.deltaId)}</code></li>`,
+            )
+            .join("\n")}\n</ul></li>`,
+      )
+      .join("\n");
+    return `<section class="contested">
+<h2>Contested names.</h2>
+<p>This store declares a <code>conflicts</code> binding policy. Two or more registrations want each
+name below, and the policy serves none of the contenders it lists — the store refuses to choose for
+you. Each contender names its definition, the ground it was bound in (<code>root</code>, or a
+channel's pool), the key that signed the binding, and the moment. Withdraw one binding, or declare a
+policy that picks, and the name serves again.</p>
+<ul>
+${listing}
+</ul>
+</section>`;
+  };
+
   // The row's opening half: which peer, under which local name, feeding which container.
   const channelHeadHtml = (c: ChannelStatus): string =>
     `<a href="${escapeHtml(detailHref(c.name))}"><code>${escapeHtml(c.name)}</code></a> — ` +
@@ -287,6 +343,7 @@ ${channelsPanelHtml(gw, (c) => reach.has(c.name), {
   empty: "No channel receives into a container your subtree reaches.",
 })}
 ${declareFormHtml(user, reach, formToken)}
+${contestedPanelHtml(gw)}
 ${schemaPanelHtml(gw, formToken)}
 ${signOutFormHtml(formToken)}`,
     );

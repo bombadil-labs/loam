@@ -300,9 +300,13 @@ export const page = (title: string, body: string): string => `<!doctype html>
   p { margin: 0.75rem 0; }
   code { font: 0.92em ui-monospace, "Cascadia Mono", monospace; background: #00000012;
          padding: 0.1em 0.4em; border-radius: 0.3em; word-break: break-all; }
+  /* A withheld name is amber: the store is refusing, not failing. The markup says so too
+     (a heading and a list), so a reader with no stylesheet loses the colour and nothing else. */
+  .contested { border-left: 0.25rem solid #b57314; padding-left: 0.9rem; }
   @media (prefers-color-scheme: dark) {
     body { color: #e6dfd4; background: #1f1b17; }
     code { background: #ffffff1f; }
+    .contested { border-left-color: #e0a33c; }
   }
 </style>
 </head>
