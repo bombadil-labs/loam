@@ -30,7 +30,7 @@ import {
 import { CTX_REGISTRATION, lawfulNegated } from "../gateway/registration.js";
 import { freezeMembers } from "../gateway/container-identity.js";
 import type { RendererBinding } from "../gateway/renderers.js";
-import { readForeignRenderers, routeServableOn } from "../gateway/renderers.js";
+import { readForeignRenderers, readPoolRenderers, routeServableOn } from "../gateway/renderers.js";
 
 /** Where a channel's deltas come from. A live peer, a frozen offer, or a fixture. */
 export interface ChannelSource {
@@ -82,13 +82,22 @@ export interface ArrivedApp {
   /** What this store serves it as: the receiver's prefix over the peer's route (§46.2). */
   readonly serves: string;
   /**
-   * The content address of the bundle the PEER OFFERS today. Absent once the peer withdrew the app —
-   * and the row survives that, because this store may still be running what it blessed.
+   * The identity of the app the PEER OFFERS today. Absent once the peer withdrew it — and the row
+   * survives that, because this store may still be running what it blessed.
    */
   readonly hash?: string;
-  /** The bundle this store RUNS at that route, if any. Absent means the route answers nothing. */
+  /** The app this channel has MOUNTED at that route, if any. Mounted is not the same as serving. */
+  readonly mounted?: string;
+  /** The app this store actually ANSWERS WITH at `serves`. Absent means that name answers nothing. */
   readonly serving?: string;
-  /** Is the code the peer offers the code that runs? The two absences above are why this is not one field. */
+  /**
+   * Why a mounted app does not answer: something of the RECEIVER'S OWN holds the name. Names the
+   * thing that is in the way, because the remedy is to move it, and no blessing can help.
+   */
+  readonly shadowed?: string;
+  /** A mounted app whose LENS is not bound here — cursed, or its registration withdrawn (§23.6). */
+  readonly dark?: true;
+  /** Is the code the peer offers the code that answers? Every absence above is why this is not one field. */
   readonly blessed: boolean;
 }
 
@@ -579,6 +588,13 @@ async function bindArrived(
 const appIdentity = (r: RendererBinding): string =>
   contentAddress(
     new TextEncoder().encode(
+      // LENGTH-PREFIXED, not separated. A separator is only unambiguous over values that cannot
+      // contain it, and a peer SIGNS these fields: a renderer binding's route, bundle and pen name
+      // are checked for shape at this store's publish door, and a federated binding never passes
+      // through it. Given any separator, a hostile peer can move bytes across a field boundary and
+      // mint two different bindings with one identity — which would defeat `expect` (swap the
+      // bundle after the listing, the pin still matches) and make `blessed` true about code that is
+      // not what runs. A count cannot be forged into a different reading of the same bytes.
       [
         "loam.channel.app",
         r.route,
@@ -586,9 +602,9 @@ const appIdentity = (r: RendererBinding): string =>
         r.bundle,
         JSON.stringify([...(r.writable ?? [])]),
         r.pen ?? "",
-        // NUL-separated, the same separator every content address in this store uses: a field
-        // value can contain a space, and a separator a value can contain is not one.
-      ].join("\u0000"),
+      ]
+        .map((field) => `${field.length}:${field}`)
+        .join(""),
     ),
   );
 
@@ -631,30 +647,42 @@ function arrivedBindings(gw: Gateway, ground: Gateway): RendererBinding[] {
  * the ground — the residual is named here rather than papered over.
  */
 function appsOf(gw: Gateway, ground: Gateway, channel: string, prefix: string): ArrivedApp[] {
-  // WHAT THIS STORE RUNS AT THAT ROUTE — asked exactly as the serving path asks it, or the report
-  // and the door disagree. Both halves matter. `routeServableOn` is the door's own predicate, so a
-  // binding whose lens was withdrawn is not counted as running (§23.6). And the CUSTODY check is
-  // the same one delegation makes: a pool is one-way seeded with the receiver's whole ground, so
-  // every renderer this store owns has an operator-signed twin in here — counting a twin would tell
-  // an operator their peer's route runs code it does not, and offer `--supersede` for a conflict
-  // that does not exist.
-  const running = new Map(
-    ground
-      .renderers()
-      .filter((r) => routeServableOn(ground, r, "full") && gw.reactor.get(r.deltaId) === undefined)
-      .map((r) => [r.route, appIdentity(r)]),
-  );
+  // WHAT THIS CHANNEL HAS MOUNTED at each route: the operator-authored bindings that live only in
+  // the POOL. The custody test is the same one delegation makes — a pool is one-way seeded with the
+  // receiver's whole ground, so every renderer this store owns has an operator-signed twin in here,
+  // and counting a twin would tell an operator their peer's route runs code it does not.
+  const mounted = new Map(readPoolRenderers(ground, gw).map((r) => [r.route, r]));
   const offered = new Map(arrivedBindings(gw, ground).map((r) => [r.route, appIdentity(r)]));
   const rows: ArrivedApp[] = [];
-  for (const route of new Set([...offered.keys(), ...running.keys()])) {
+  for (const route of new Set([...offered.keys(), ...mounted.keys()])) {
     const hash = offered.get(route);
-    const serving = running.get(route);
+    const own = mounted.get(route);
+    // MOUNTED IS NOT SERVING, and the difference is the whole reason this report exists. Three ways
+    // a standing blessing answers nothing, each with a different remedy and none of them "bless it":
+    const shadow =
+      // (a) the receiver's own law answers the name this app would serve under. Their own name is
+      // theirs (§46.2) and the delegation is the fallback, so the channel's app never gets the call.
+      gw.renderers().some((r) => r.route === `${prefix}:${route}`)
+        ? `your own route "${prefix}:${route}"`
+        : // (b) a twin of the receiver's own route re-seeded into the pool and took the bare name
+          // there. Every attach re-pulses the seeding edge, so this can arrive long after a blessing.
+          own !== undefined &&
+            ground.renderers().find((r) => r.route === route)?.deltaId !== own.deltaId
+          ? `your own route "${route}", seeded into this pool`
+          : undefined;
+    // (c) the lens it reads is not bound here — a curse, or a withdrawn registration (§23.6).
+    const dark = own !== undefined && shadow === undefined && !routeServableOn(ground, own, "full");
+    const serving =
+      own === undefined || shadow !== undefined || dark ? undefined : appIdentity(own);
     rows.push({
       channel,
       route,
       serves: `${prefix}:${route}`,
       ...(hash === undefined ? {} : { hash }),
+      ...(own === undefined ? {} : { mounted: appIdentity(own) }),
       ...(serving === undefined ? {} : { serving }),
+      ...(shadow === undefined ? {} : { shadowed: shadow }),
+      ...(dark ? { dark: true as const } : {}),
       blessed: hash !== undefined && hash === serving,
     });
   }
@@ -733,12 +761,23 @@ export async function blessChannelAppImpl(
   // THE IDENTITY THE OPERATOR MEANT, when they named one. `federate list` and this call are separate
   // invocations with a standing sync between them, so "the app at route hello" can mean different
   // code by the time this runs. A prefix of the identity the listing printed is enough to say which.
-  if (opts.expect !== undefined && !appIdentity(app).startsWith(opts.expect)) {
-    throw new Error(
-      `bless-app refused: "${route}" on "${channel}" is ${appIdentity(app).slice(0, 12)}… now, ` +
-        `and you asked for ${opts.expect}. The peer changed it between the listing and this call. ` +
-        "Nothing was blessed; re-read `loam federate list`.",
-    );
+  if (opts.expect !== undefined) {
+    // A PIN SHORT ENOUGH TO MATCH ANYTHING IS NOT A PIN, and the empty string matches everything —
+    // so a caller who believes they pinned would be told they had. Refused rather than honoured.
+    if (opts.expect.length < 8) {
+      throw new Error(
+        `bless-app refused: --expect "${opts.expect}" is too short to identify an app. Paste at ` +
+          "least the first 8 characters of the id `loam federate list` printed. A pin that matches " +
+          "anything reads as a pin and is not one.",
+      );
+    }
+    if (!appIdentity(app).startsWith(opts.expect)) {
+      throw new Error(
+        `bless-app refused: "${route}" on "${channel}" is ${appIdentity(app).slice(0, 12)}… now, ` +
+          `and you asked for ${opts.expect}. The peer changed it between the listing and this ` +
+          "call. Nothing was blessed; re-read `loam federate list`.",
+      );
+    }
   }
   // A ROUTE THE RECEIVER'S OWN LAW ALREADY ANSWERS INSIDE THE POOL. A pool is one-way seeded with
   // this store's whole ground, so a route name the receiver uses has an operator-signed twin in

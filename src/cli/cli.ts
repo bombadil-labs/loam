@@ -1056,32 +1056,40 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
         // (a peer had shipped new code at the route) and printed a remedy that throws. What an
         // operator needs to see is the pair: what the peer OFFERS, and what this store RUNS.
         const short = (h: string): string => `${h.slice(0, 12)}…`;
+        // TWO SENTENCES PER APP: what the peer OFFERS, and what this store DOES about it — then the
+        // remedy for that exact state. Every earlier shape of this printed one line that had to
+        // cover several states, and each time the line was wrong for one of them and its remedy
+        // refused. A remedy is part of a report's truth: printing a command that throws is a false
+        // statement about the store, made on the surface a person reads before deciding.
         const apps = (appsByChannel.get(r.name) ?? []).map((a) => {
-          const head = `\n  app "${a.route}"`;
-          if (a.hash !== undefined && a.hash === a.serving) {
-            return `${head} serves at "${a.serves}", bundle ${short(a.hash)}`;
-          }
-          if (a.hash === undefined) {
-            // Withdrawn upstream. `serving` may be gone too — the blessing landed and something it
-            // needs no longer holds — and a branch that assumed otherwise would crash the listing.
-            return a.serving === undefined
-              ? `${head} was WITHDRAWN by the peer, and nothing runs at "${a.serves}" either\n` +
-                  "    the blessing is still in the pool; dropping the channel is what clears it"
-              : `${head} was WITHDRAWN by the peer, and this store still runs the bundle it ` +
-                  `blessed (${short(a.serving)}) at "${a.serves}"\n` +
-                  `    dropping the channel is what removes it: \`loam federate drop --channel ${r.name} --yes\``;
-          }
-          if (a.serving === undefined) {
+          const bless = `\`loam federate bless-app --channel ${r.name} --route ${a.route}`;
+          const offers =
+            a.hash === undefined
+              ? `\n  app "${a.route}" — the peer WITHDREW it`
+              : `\n  app "${a.route}" — the peer offers ${short(a.hash)}`;
+          // Something of the operator's OWN holds the name. No blessing can move it, so the report
+          // names the thing in the way rather than a command that would refuse.
+          if (a.shadowed !== undefined) {
             return (
-              `${head} ARRIVED, INERT — bundle ${short(a.hash)}\n` +
-              `    nothing of it runs until \`loam federate bless-app --channel ${r.name} ` +
-              `--route ${a.route}\``
+              `${offers}\n    it is MOUNTED here and answers nothing: ${a.shadowed} holds that name\n` +
+              "    rename your own route to give this one back its name"
             );
           }
+          if (a.dark === true) {
+            return (
+              `${offers}\n    it is MOUNTED here and answers nothing: the lens it reads is not ` +
+              "bound here\n    lift the curse on that lens, or re-bless it, and this answers again"
+            );
+          }
+          if (a.serving === undefined) {
+            return a.hash === undefined
+              ? `${offers}\n    and nothing of it is mounted here — the row is about to go quiet`
+              : `${offers}\n    ARRIVED, INERT — nothing of it runs until ${bless}\``;
+          }
+          if (a.blessed) return `${offers}\n    it SERVES at "${a.serves}"`;
           return (
-            `${head} ARRIVED, and this store runs DIFFERENT code at "${a.serves}"\n` +
-            `    the peer now offers ${short(a.hash)}; this store runs ${short(a.serving)}\n` +
-            `    to move it: \`loam federate bless-app --channel ${r.name} --route ${a.route} --supersede\``
+            `${offers}\n    this store runs DIFFERENT code at "${a.serves}": ${short(a.serving)}\n` +
+            `    to move it onto what the peer offers now: ${bless} --supersede\``
           );
         });
         io.out(

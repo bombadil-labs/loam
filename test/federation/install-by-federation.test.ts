@@ -39,6 +39,7 @@ import { freezeMembers } from "../../src/gateway/container-identity.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { publicClaims } from "../../src/gateway/public.js";
+import { serve } from "../../src/server/http.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, pickLatest } from "../gateway/fixtures.js";
@@ -147,8 +148,11 @@ const anyPoolFileHolds = (home: string, needle: string): boolean => {
 // THE APP IDENTITY THE REPORT SHOULD PRINT, spelled out here as a literal rather than imported from
 // the reader under test (H10): a shared helper cannot witness its own bug, and this is the number an
 // operator compares two stores by. It covers everything the binding serves with EXCEPT the lens
-// name, which the receiver renames on the way in — the sibling rails move the bundle, the pen and
-// the writable list in turn and watch it change.
+// name, which the receiver renames on the way in — the sibling rails move the bundle, the writable
+// list and the PEN in turn and watch it change.
+//
+// LENGTH-PREFIXED, restated here for the same reason: a peer signs these fields, so a separator any
+// of them may contain would let two different bindings mint one identity.
 const appIdOf = (
   bundle: string,
   opts: { route?: string; consumes?: string[]; writable?: string[]; pen?: string } = {},
@@ -162,7 +166,9 @@ const appIdOf = (
         bundle,
         JSON.stringify(opts.writable ?? []),
         opts.pen ?? "",
-      ].join("\u0000"),
+      ]
+        .map((field) => `${field.length}:${field}`)
+        .join(""),
     ),
   );
 
@@ -252,11 +258,14 @@ describe("T209 — the report and the listing name what arrived", () => {
       // And it turns true only when THIS code is what serves — with `serving` naming the bundle the
       // store actually runs, so the two facts stay separate.
       await bob.blessChannelApp(CHANNEL, "hello");
+      // MOUNTED and SERVING are separate facts and both are present here, which is what makes the
+      // sibling rails able to show a mount that answers nothing.
       expect(bob.channelApps()[0]).toEqual({
         channel: CHANNEL,
         route: "hello",
         serves: "alice:hello",
         hash: appIdOf(APP),
+        mounted: appIdOf(APP),
         serving: appIdOf(APP),
         blessed: true,
       });
@@ -965,6 +974,76 @@ describe("T209 — what an app IS, for the report and for the blessing", () => {
     }
   });
 
+  it("moving ONLY the pen moves the identity", async () => {
+    // The sibling rail moves `writable` and `pen` together, because the parse gate keeps them
+    // paired — so it cannot see a reader that dropped the PEN alone. This one holds `writable`
+    // constant and swaps the pen name, which is a §6 write-standing change and nothing else.
+    const alice = await peer(ALICE_SEED, { route: "hello", app: APP, height: 62, writes: true });
+    const bob = await store(BOB_SEED, { pens: { "alice-pen": PEN_SEED } });
+    try {
+      const channel = await link(bob, alice, "alice");
+      await channel.sync();
+      expect(bob.channelApps(CHANNEL)[0]!.hash).toBe(
+        appIdOf(APP, { writable: ["height"], pen: "alice-pen" }),
+      );
+
+      await alice.publishRenderer({
+        route: "hello",
+        schema: "Plant",
+        consumes: ["height"],
+        bundle: APP,
+        writable: ["height"], // held constant
+        pen: "alice-pen-2", // the only thing that moved
+      });
+      expect((await channel.sync()).apps[0]!.hash).toBe(
+        appIdOf(APP, { writable: ["height"], pen: "alice-pen-2" }),
+      );
+    } finally {
+      await alice.close();
+      await bob.close();
+    }
+  });
+
+  it("a pin too short to identify anything is refused, not honoured", async () => {
+    // `startsWith("")` is true of every identity, so an empty pin reads as a pin and is not one.
+    const alice = await peer(ALICE_SEED, { route: "hello", app: APP, height: 62 });
+    const bob = await store(BOB_SEED);
+    try {
+      const channel = await link(bob, alice, "alice");
+      await channel.sync();
+      await expect(bob.blessChannelApp(CHANNEL, "hello", { expect: "" })).rejects.toThrow(
+        /too short to identify/,
+      );
+      await expect(bob.blessChannelApp(CHANNEL, "hello", { expect: "1e20" })).rejects.toThrow(
+        /too short to identify/,
+      );
+      expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(404);
+      // Two-sided: a pin long enough to mean something is honoured.
+      await bob.blessChannelApp(CHANNEL, "hello", {
+        expect: bob.channelApps(CHANNEL)[0]!.hash!.slice(0, 12),
+      });
+      expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(200);
+    } finally {
+      await alice.close();
+      await bob.close();
+    }
+  });
+
+  it("a peer cannot mint two different apps with one identity", () => {
+    // The fields are length-prefixed, not separated. A peer SIGNS these bytes and never passes this
+    // store's publish door, so any separator they can put inside a field would let them move bytes
+    // across a boundary — and pin one identity to two different bundles.
+    const carrier = `EVIL\u0000${JSON.stringify(["height"])}\u0000tail`;
+    const a = appIdOf(carrier, { writable: ["height"], pen: "p" });
+    const b = appIdOf("EVIL", {
+      writable: ["height"],
+      pen: `tail\u0000${JSON.stringify(["height"])}\u0000p`,
+    });
+    expect(a).not.toBe(b);
+    // …and the encoding is not merely long: two ordinary apps still differ.
+    expect(appIdOf(APP)).not.toBe(appIdOf(OTHER_APP));
+  });
+
   it("--expect refuses when the peer changed the app between the listing and the blessing", async () => {
     // `list` and `bless-app` are separate acts with a standing sync between them. Without a pin the
     // door is last-writer-wins; with one, the operator blesses the identity they read.
@@ -1044,6 +1123,74 @@ describe("T209 — what an app IS, for the report and for the blessing", () => {
       await bob.blessChannelApp(CHANNEL, "hello", { supersede: true });
       expect(bob.channelApps(CHANNEL)[0]!.blessed).toBe(true);
       expect(bodyOf(await bob.serveRoute("alice:hello", FERN, "full"))).toContain("<p id=h>62</p>");
+    } finally {
+      await alice.close();
+      await bob.close();
+    }
+  });
+
+  it("a mounted app the receiver's own route later SHADOWS says so, and names what is in the way", async () => {
+    // The twin guard runs at bless time, and the seeding edge re-pulses on every attach — so an
+    // operator who publishes their own route AFTER blessing a peer's app of the same bare name
+    // silently unmounts it. Reporting that as "ARRIVED, INERT" would print a remedy that refuses.
+    const alice = await peer(ALICE_SEED, { route: "hello", app: APP, height: 62 });
+    const bob = await store(BOB_SEED);
+    try {
+      const channel = await link(bob, alice, "alice");
+      await channel.sync();
+      await bob.blessChannelApp(CHANNEL, "hello");
+      expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(200);
+
+      // Bob now publishes his OWN route of that bare name, and the edge re-pulses.
+      await bob.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+      await bob.publishRenderer({
+        route: "hello",
+        schema: "Plant",
+        consumes: ["height"],
+        bundle: OTHER_APP,
+      });
+      await channel.pool.reseed();
+
+      const row = bob.channelApps(CHANNEL)[0]!;
+      expect(row.mounted).toBe(appIdOf(APP)); // the blessing is still there…
+      expect(row.serving).toBeUndefined(); // …and it answers nothing
+      expect(row.blessed).toBe(false);
+      expect(row.shadowed).toContain("your own route");
+      expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(404);
+    } finally {
+      await alice.close();
+      await bob.close();
+    }
+  });
+
+  it("a blessing the receiver's own PREFIXED route answers is never reported as serving", async () => {
+    // The receiver's own law wins its own name, prefix and all (§46.2) — so the channel's app is
+    // mounted in the pool and the operator's door never reaches it. Asking the POOL would say
+    // "serving"; asking the door that a person hits says otherwise, and that is the one that counts.
+    const alice = await peer(ALICE_SEED, { route: "hello", app: APP, height: 62 });
+    const bob = await store(BOB_SEED);
+    try {
+      await bob.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+      await bob.append([observed(FERN, "height", 7, 2_000, BOB_SEED)]);
+      await bob.publishRenderer({
+        route: "alice:hello", // the literal name the channel would serve under
+        schema: "Plant",
+        consumes: ["height"],
+        bundle: OTHER_APP,
+      });
+      const channel = await link(bob, alice, "alice");
+      await channel.sync();
+      await bob.blessChannelApp(CHANNEL, "hello");
+
+      const row = bob.channelApps(CHANNEL)[0]!;
+      expect(row.mounted).toBe(appIdOf(APP));
+      expect(row.serving).toBeUndefined();
+      expect(row.blessed).toBe(false);
+      expect(row.shadowed).toContain("alice:hello");
+      // And the door confirms it: bob's own app answers that name, on bob's own ground.
+      expect(bodyOf(await bob.serveRoute("alice:hello", FERN, "full"))).toContain(
+        "<section id=other>7</section>",
+      );
     } finally {
       await alice.close();
       await bob.close();
@@ -1144,7 +1291,8 @@ describe("T209 — the CLI names what arrived and mounts one app", () => {
 
       fresh();
       expect(await run(["federate", "list", "--home", me], io()), said()).toBe(0);
-      expect(said()).toContain('app "hello" ARRIVED, INERT');
+      expect(said()).toContain('app "hello" — the peer offers');
+      expect(said()).toContain("ARRIVED, INERT");
       expect(said()).toContain("federate bless-app --channel channel:friends:alice --route hello");
 
       fresh();
@@ -1163,9 +1311,11 @@ describe("T209 — the CLI names what arrived and mounts one app", () => {
       );
       expect(said()).toContain("wants --route");
 
-      // AN UNKNOWN VERB IS REFUSED BY NAME, and this matters more than it looks: `drop` is the
-      // fall-through at the bottom of the group, so an allowlist that let a stranger past would
-      // hand a typo an irreversible purge. Two-sided — the channel is still here afterwards.
+      // AN UNKNOWN VERB IS REFUSED BY NAME. This one is FORWARD protection, not a proof of anything
+      // in this change: the allowlist already refused unknown verbs and this change only added a
+      // name to it. It is here because a mutation of that allowlist's `||` SURVIVED the suite, and
+      // what it survives into is ugly — `drop` is the fall-through at the bottom of the group, so a
+      // typo would reach an irreversible purge. Two-sided: the channel is still here afterwards.
       fresh();
       expect(
         await run(["federate", "frobnicate", "--channel", CHANNEL, "--yes", "--home", me], io()),
@@ -1174,6 +1324,29 @@ describe("T209 — the CLI names what arrived and mounts one app", () => {
       fresh();
       expect(await run(["federate", "list", "--home", me], io()), said()).toBe(0);
       expect(said()).toContain(CHANNEL);
+
+      // --expect REACHES THE GATEWAY FROM THE COMMAND LINE. The flag whose whole purpose is to stop
+      // a peer moving between `list` and `bless-app` is only worth having at the door a person types
+      // it at, so the wiring is driven here rather than only through the method.
+      fresh();
+      expect(
+        await run(
+          [
+            "federate",
+            "bless-app",
+            "--channel",
+            CHANNEL,
+            "--route",
+            "hello",
+            "--expect",
+            "1e20deadbeefcafe",
+            "--home",
+            me,
+          ],
+          io(),
+        ),
+      ).toBe(2);
+      expect(said()).toContain("you asked for 1e20deadbeefcafe");
 
       fresh();
       expect(
@@ -1187,7 +1360,7 @@ describe("T209 — the CLI names what arrived and mounts one app", () => {
 
       fresh();
       expect(await run(["federate", "list", "--home", me], io()), said()).toBe(0);
-      expect(said()).toContain('app "hello" serves at "alice:hello"');
+      expect(said()).toContain('it SERVES at "alice:hello"');
       expect(said()).not.toContain("ARRIVED, INERT");
 
       // ALICE SHIPS NEW CODE at the mounted route. The listing must say what runs, and the remedy it
@@ -1245,7 +1418,7 @@ describe("T209 — the CLI names what arrived and mounts one app", () => {
       ).toBe(0);
       fresh();
       expect(await run(["federate", "list", "--home", me], io()), said()).toBe(0);
-      expect(said()).toContain('app "hello" serves at "alice:hello"');
+      expect(said()).toContain('it SERVES at "alice:hello"');
       expect(said()).not.toContain("runs DIFFERENT code");
 
       // THE BYTES, on a real file. Every other drop rail here runs on an in-memory pool, where
@@ -1338,6 +1511,65 @@ describe("T209 — the CLI names what arrived and mounts one app", () => {
     } finally {
       await alice.close();
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+});
+
+describe("T209 — the connector tool names what arrived, and mounts nothing", () => {
+  it("loam_federate_status carries the apps, and no tool can bless one", async () => {
+    // §46.5: tools are the unit of CONSENT, and mounting a stranger's code is not a consent a
+    // connector token may give. So the arrivals are READABLE here and the act is the CLI's alone.
+    const alice = await peer(ALICE_SEED, { route: "hello", app: APP, height: 62 });
+    const bob = await store(BOB_SEED);
+    const channel = await link(bob, alice, "alice");
+    await channel.sync();
+    const door = await serve({
+      mounts: { default: bob },
+      tokens: { "tok-op": { operator: true } },
+      port: 0,
+    });
+    const call = async (name: string): Promise<{ text: string; isError: boolean }> => {
+      const res = await fetch(`${door.url}/default/mcp`, {
+        method: "POST",
+        headers: { authorization: "Bearer tok-op", "content-type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name, arguments: {} },
+        }),
+      });
+      const body = (await res.json()) as {
+        result?: { content?: { text?: string }[]; isError?: boolean };
+      };
+      return {
+        text: body.result?.content?.[0]?.text ?? "",
+        isError: body.result?.isError === true,
+      };
+    };
+    try {
+      const status = await call("loam_federate_status");
+      expect(status.isError).toBe(false);
+      const rows = JSON.parse(status.text) as { name: string; apps: { route: string }[] }[];
+      const mine = rows.find((c) => c.name === CHANNEL)!;
+      expect(mine.apps.map((a) => a.route)).toEqual(["hello"]);
+      expect(status.text).toContain(appIdOf(APP)); // the identity, not a count
+
+      // And READING is all this surface does: no tool it offers mounts an app.
+      const listed = await fetch(`${door.url}/default/mcp`, {
+        method: "POST",
+        headers: { authorization: "Bearer tok-op", "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
+      });
+      const tools = (await listed.json()) as { result?: { tools?: { name: string }[] } };
+      const names = (tools.result?.tools ?? []).map((t) => t.name);
+      expect(names).toContain("loam_federate_status"); // the listing really is offered…
+      expect(names.filter((n) => n.includes("bless"))).toEqual([]); // …and nothing mounts
+      expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(404);
+    } finally {
+      await door.close();
+      await alice.close();
+      await bob.close();
     }
   });
 });

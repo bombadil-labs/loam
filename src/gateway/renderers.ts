@@ -359,6 +359,29 @@ function latestPerRoute(
 }
 
 /**
+ * The renderer bindings a POOL holds OF ITS OWN — operator-authored, and absent from the host's
+ * ground (SPEC §24.6).
+ *
+ * A pool is one-way seeded with the host's whole ground and the edge re-pulses on every attach, so
+ * every renderer the host owns has an operator-signed twin in here, minted fresh each reseed.
+ * Custody is what tells them apart: a blessing is published on the pool's gateway and never travels
+ * back, so its binding is absent from the host's ground while a twin is present by construction.
+ *
+ * LATEST-PER-ROUTE IS TAKEN AMONG THE POOL'S OWN, deliberately. Filtering `readRenderers`
+ * afterwards would ask a different question — "is the pool's WINNER at this route ours?" — and
+ * answer "no app here" for a route where a re-seeded twin merely out-timestamped a standing
+ * blessing. That difference is exactly a mounted-but-shadowed app, and a caller that cannot see it
+ * cannot say so.
+ */
+export function readPoolRenderers(pool: Gateway, host: Gateway): RendererBinding[] {
+  const negated = lawfulNegated(pool.reactor, pool.operatorAuthor);
+  return latestPerRoute(
+    lawfulSnapshot(pool.reactor, pool.operatorAuthor),
+    (d) => !negated(d.id) && host.reactor.get(d.id) === undefined,
+  );
+}
+
+/**
  * Every surviving renderer binding NOT authored by `operator`, latest per route — the arrivals a
  * channel pool holds (SPEC §24.6).
  *
