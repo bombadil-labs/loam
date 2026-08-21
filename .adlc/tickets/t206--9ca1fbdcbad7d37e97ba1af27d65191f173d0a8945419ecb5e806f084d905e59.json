@@ -3,5 +3,8 @@
   "category": "feature",
   "duration": 2,
   "id": "T206",
+  "rails": [
+    "test/cli/erasure-verbs.test.ts"
+  ],
   "title": "Erasure gets a CLI — slate list, erase, and the tombstone reader"
 }

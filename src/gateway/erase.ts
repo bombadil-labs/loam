@@ -76,16 +76,28 @@ const tombstoneParts = (
   targetId: string | undefined;
   spokenBy: string | undefined;
   slate: string | undefined;
+  // EVERY reason on the delta, not the first. The door validates the erased id, the author, and the
+  // §29.6 join, and says nothing about how many reasons a tombstone carries — so a reader that took
+  // one and dropped the rest would silently narrow a compliance record.
+  reasons: string[];
   count: { erases: number; spokenBy: number; slate: number };
 } => {
   let targetId: string | undefined;
   let spokenBy: string | undefined;
   let slate: string | undefined;
+  const reasons: string[] = [];
   const count = { erases: 0, spokenBy: 0, slate: 0 };
   for (const p of claims.pointers) {
     if (p.role === "erases" && p.target.kind === "delta") {
       count.erases += 1;
       targetId = p.target.deltaRef.delta;
+    }
+    if (
+      p.role === "reason" &&
+      p.target.kind === "primitive" &&
+      typeof p.target.value === "string"
+    ) {
+      reasons.push(p.target.value);
     }
     if (p.role === "spoken-by") {
       count.spokenBy += 1;
@@ -100,7 +112,7 @@ const tombstoneParts = (
       }
     }
   }
-  return { targetId, spokenBy, slate, count };
+  return { targetId, spokenBy, slate, reasons, count };
 };
 
 /** The id a tombstone erases, for readers that join on it (SPEC §29.6's arithmetic). */
@@ -196,6 +208,77 @@ export function survivingTombstones(reactor: Reactor, operator: string | undefin
     out.push(delta);
   }
   return out;
+}
+
+/** One receipt, as a reader sees it: THAT an id was forgotten, by whose order, when, and why. */
+export interface TombstoneReceipt {
+  /** The receipt's own content address — what an erase prints and what a reader can look up. */
+  readonly tombstone: string;
+  /** The id it forgot. Retaining a hash retains zero content, which is what makes this honest. */
+  readonly erased: string;
+  /**
+   * The erased delta's author, recorded while the target could still be seen. ABSENT rather than
+   * blank when the tombstone carries none: `eraseDefect` requires it at the DOOR, and replay ingests
+   * straight into the reactor, so a receipt replanted from an archive or written by an older version
+   * can survive without one. A blank cell reads as an oversight; an absence has to be stated.
+   */
+  readonly spokenBy?: string;
+  /** Who signed the removal order. §11 admits exactly one signer, so this is always the operator. */
+  readonly orderedBy: string;
+  readonly at: number;
+  /** Why, in the operator's own words. EMPTY when the tombstone carries none — never invented. */
+  readonly reasons: readonly string[];
+  /** The §29.6 cut this was one member of. Absent on an ordinary single-delta erase, forever. */
+  readonly slate?: string;
+}
+
+/**
+ * The receipts this ground still stands behind, oldest first — read through `survivingTombstones`,
+ * so no surface can print a receipt the admission door does not honour, or hide one it does.
+ *
+ * `inert` is the other half, and it is not decoration. A struck tombstone is FORGIVENESS: the
+ * erasure order is withdrawn and the id may return, so the receipt leaves the surviving set. On a
+ * screen that merely drops the row, an omission and a revocation look identical — and this listing
+ * is read on the morning that difference decides a case. So the count is disclosed.
+ *
+ * It counts OPERATOR-AUTHORED tombstone-shaped deltas that are not in the surviving set: struck, or
+ * malformed in a way the surviving reader refuses. A tombstone signed by anyone else was never a
+ * receipt here — the door refuses one at admission — so it is not counted as one lost.
+ */
+export function receiptLedger(
+  reactor: Reactor,
+  operator: string | undefined,
+): { receipts: TombstoneReceipt[]; inert: number } {
+  // ONE walk, not two. `reactor.snapshot()` re-derives every delta's content address on the way in
+  // — a full claim validation and a hash each — so a second pass to count the shaped set would pay
+  // the whole store twice. `byTarget(ERASE_ENTITY)` narrows it to the tombstones: the index is
+  // written beside the set it indexes, so it cannot go stale against a snapshot taken in the same
+  // breath, and a row the driver set aside is invisible to both.
+  let shaped = 0;
+  if (operator !== undefined) {
+    for (const id of reactor.byTarget(ERASE_ENTITY)) {
+      const delta = reactor.get(id);
+      if (delta !== undefined && isTombstone(delta.claims) && delta.claims.author === operator) {
+        shaped += 1;
+      }
+    }
+  }
+  const surviving = survivingTombstones(reactor, operator);
+  const receipts = surviving
+    .map((d) => {
+      const parts = tombstoneParts(d.claims);
+      return {
+        tombstone: d.id,
+        erased: parts.targetId!, // survivingTombstones proved it well-shaped
+        ...(parts.spokenBy === undefined ? {} : { spokenBy: parts.spokenBy }),
+        orderedBy: d.claims.author,
+        at: d.claims.timestamp,
+        reasons: parts.reasons,
+        ...(parts.slate === undefined ? {} : { slate: parts.slate }),
+      };
+    })
+    .sort((a, b) => a.at - b.at || (a.tombstone < b.tombstone ? -1 : 1));
+  return { receipts, inert: shaped - receipts.length };
 }
 
 // The erasure annotation (SPEC §26): the moments at which this ground lawfully forgot something
@@ -426,18 +509,105 @@ export async function erasureOutstanding(
   id: string,
   seen = new Set<Gateway>(),
 ): Promise<boolean> {
-  if (seen.has(gw)) return false;
+  return (await erasureStanding(gw, id, seen)) !== "settled";
+}
+
+/**
+ * What a standing receipt is worth, keeping the difference a boolean throws away.
+ *
+ * "Could not be asked" and "still holds it" are both reasons not to call an erasure done, and they
+ * are not the same sentence to whoever reads the screen: one is a measurement, the other is a
+ * refusal to guess. Collapsed into `true`, a screen built on this reports a fact it never
+ * established (H9).
+ */
+export type ErasureStanding =
+  /** A tier still has the bytes at rest. */
+  | "held"
+  /** A tier refused the question. Nothing was proven in either direction. */
+  | "unasked"
+  /** No receipt in some ground in reach: the delivery is still owed there. */
+  | "owed"
+  /** Asked everywhere in reach, and clean. */
+  | "settled";
+
+// STRONGEST WINS, and "unasked" outranks "owed" deliberately: a tier that refused the question is
+// the fact that most limits what any sentence below may claim, and a screen that said "no receipt
+// yet" would be reporting the half it could measure while burying the half it could not.
+//
+// A RANK CANNOT CARRY A REFUSAL, though, which is why `unasked` is ALSO returned as its own set.
+// "Held here" is a stronger true sentence than "unasked there", so it wins the cell — and if that
+// were the only record, a store whose primary refused a purge while a pool's file was locked would
+// report `unproven: false` and settle-in-progress over a tier that had answered nothing. The rank
+// decides what a screen SAYS; the set decides what the store may claim to have established.
+const STANDING_RANK: Record<ErasureStanding, number> = {
+  held: 3,
+  unasked: 2,
+  owed: 1,
+  settled: 0,
+};
+
+/** Per-id verdicts, and — independently — every id some ground could not be asked about. */
+export interface StandingReport {
+  readonly standings: ReadonlyMap<string, ErasureStanding>;
+  readonly unasked: ReadonlySet<string>;
+}
+
+export async function erasureStanding(
+  gw: Gateway,
+  id: string,
+  seen = new Set<Gateway>(),
+): Promise<ErasureStanding> {
+  return (await erasureStandings(gw, [id], seen)).standings.get(id) ?? "settled";
+}
+
+/**
+ * THE ONE WALK, for one id or a thousand.
+ *
+ * An id is outstanding where bytes are held, where a tier cannot answer (H9 — unprovable is not
+ * clean), or where a reachable replica does not yet carry the tombstone. This is the ONLY place
+ * that model lives: the erase door, the health door and the receipt readers all read it from here,
+ * because three copies of one fault model in one file is three chances for the screens to disagree
+ * about a single store.
+ *
+ * Batched because the cost is not per id: `readTombstones` walks a whole ground, and
+ * `ArchiveBackend.holds` pays a full sweep for every ABSENT id. The tombstone set is read once per
+ * ground, and the backend is asked through `heldAmong` — one pass for the whole set — wherever the
+ * driver offers it.
+ */
+export async function erasureStandings(
+  gw: Gateway,
+  ids: readonly string[],
+  seen = new Set<Gateway>(),
+): Promise<StandingReport> {
+  const standings = new Map<string, ErasureStanding>(ids.map((id) => [id, "settled"]));
+  const unasked = new Set<string>();
+  const note = (id: string, verdict: ErasureStanding): void => {
+    if (verdict === "unasked") unasked.add(id); // recorded whatever a louder ground says
+    if (STANDING_RANK[verdict] > STANDING_RANK[standings.get(id) ?? "settled"]) {
+      standings.set(id, verdict);
+    }
+  };
+  if (ids.length === 0 || seen.has(gw)) return { standings, unasked };
   seen.add(gw);
   try {
-    if (await gw.backend.holds(id)) return true;
+    if (gw.backend.heldAmong) {
+      for (const id of await gw.backend.heldAmong(ids)) note(id, "held");
+    } else {
+      for (const id of ids) if (await gw.backend.holds(id)) note(id, "held");
+    }
   } catch {
-    return true; // could not be proven clean — treat as outstanding, never as done
+    for (const id of ids) note(id, "unasked"); // proven nothing here, in either direction
   }
-  if (!readTombstones(gw.reactor, gw.operatorAuthor).has(id)) return true; // delivery still owed
+  // ASKED EVEN WHERE THE BYTES COULD NOT BE. The reactor is a separate question from the tier, and
+  // a ground with no receipt still owes the delivery whatever its disk would have said.
+  const tombs = readTombstones(gw.reactor, gw.operatorAuthor);
+  for (const id of ids) if (!tombs.has(id)) note(id, "owed");
   for (const pool of gw.quarantinePools) {
-    if (await erasureOutstanding(pool, id, seen)) return true;
+    const sub = await erasureStandings(pool, ids, seen);
+    for (const [id, verdict] of sub.standings) note(id, verdict);
+    for (const id of sub.unasked) unasked.add(id); // a refusal one ground down is still a refusal
   }
-  return false;
+  return { standings, unasked };
 }
 
 // Everything standing between this call and a completed erasure, collected rather than raced:
@@ -653,38 +823,21 @@ export interface StoreHealth {
   readonly nonSwept: readonly string[];
 }
 
-// The whole promised set, asked everywhere at once — `erasureOutstanding` above is this same fault
-// model per id (the two MUST agree or the erase door and the health door drift): an id is
-// outstanding where bytes are held, where a tier cannot answer (H9 — unprovable is not clean), or
-// where a reachable replica does not yet carry the tombstone (delivery still owed). Batched so the
-// backend's single-pass probe (`heldAmong`) carries the whole set in one sweep per store.
+// The health door's reading of `erasureStandings` — the SAME walk the erase door and the receipt
+// readers use, so the three cannot drift on what "outstanding" means. Everything but `settled` is
+// outstanding; `unasked` is also what `unproven` means, which is why the walk keeps them apart.
 async function outstandingAmong(
   gw: Gateway,
   ids: readonly string[],
   seen: Set<Gateway>,
 ): Promise<{ outstanding: Set<string>; unproven: boolean }> {
+  const report = await erasureStandings(gw, ids, seen);
   const outstanding = new Set<string>();
-  let unproven = false;
-  if (seen.has(gw)) return { outstanding, unproven };
-  seen.add(gw);
-  try {
-    if (gw.backend.heldAmong) {
-      for (const id of await gw.backend.heldAmong(ids)) outstanding.add(id);
-    } else {
-      for (const id of ids) if (await gw.backend.holds(id)) outstanding.add(id);
-    }
-  } catch {
-    for (const id of ids) outstanding.add(id); // proven nothing: the whole set is unproven here
-    unproven = true;
-  }
-  const tombs = readTombstones(gw.reactor, gw.operatorAuthor);
-  for (const id of ids) if (!tombs.has(id)) outstanding.add(id); // delivery still owed
-  for (const pool of gw.quarantinePools) {
-    const sub = await outstandingAmong(pool, ids, seen);
-    for (const id of sub.outstanding) outstanding.add(id);
-    unproven ||= sub.unproven;
-  }
-  return { outstanding, unproven };
+  for (const [id, verdict] of report.standings) if (verdict !== "settled") outstanding.add(id);
+  // FROM THE SET, NEVER FROM THE CELLS. A tier that refused is not visible in a verdict another
+  // ground answered louder, and `unproven` is the one field that must not miss it.
+  for (const id of report.unasked) outstanding.add(id);
+  return { outstanding, unproven: report.unasked.size > 0 };
 }
 
 export async function healthImpl(gw: Gateway, now = Date.now()): Promise<StoreHealth> {

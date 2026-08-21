@@ -24,7 +24,15 @@ import { toWire } from "../federation/wire.js";
 import { migrate } from "../migrate/migrate.js";
 import { pullFrom } from "../federation/pull.js";
 import { sourceFor } from "../federation/channel.js";
-import { tombstonesIn } from "../gateway/erase.js";
+import {
+  erasureStandings,
+  receiptLedger,
+  tombstonesIn,
+  type ErasureStanding,
+  type StandingReport,
+  type TombstoneReceipt,
+} from "../gateway/erase.js";
+import type { SlateReport } from "../gateway/slate.js";
 import { assembleGenesis } from "../gateway/genesis.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
 import {
@@ -74,8 +82,9 @@ import type { StoreBackend } from "../store/backend.js";
 import { ArchiveBackend } from "../store/archive.js";
 import { MirrorBackend } from "../store/mirror.js";
 import { SqliteBackend } from "../store/sqlite.js";
+import { unreachableStoreReport } from "../gateway/container.js";
 import { legibilityWarnings, reAdmit } from "../gateway/repair.js";
-import { strandedStrikeWarnings } from "../store/quarantine.js";
+import { isRepairable, strandedStrikeWarnings } from "../store/quarantine.js";
 import { parseArgs, rejectUnknown, UsageError, type Parsed } from "./args.js";
 import {
   archivePath,
@@ -123,7 +132,9 @@ type CommandName =
   | "artifact"
   | "user"
   | "pen"
-  | "grant";
+  | "grant"
+  | "slate"
+  | "tombstones";
 
 interface CommandSpec {
   readonly summary: string; // the line the top-level help shows
@@ -346,6 +357,42 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "signs with <home>/operator.seed and needs only home access, never a live session.",
     ],
   },
+  slate: {
+    summary: "read the erasure slates staged over this store (SPEC §29)",
+    usage: "loam slate list [options]",
+    flags: new Set(["home", "store"]),
+    notes: [
+      "subcommands:",
+      "  list    every standing slate: who asked, when, the deadline, and the frozen condemned set",
+      "",
+      "A SLATE IS A PROMISE WITH A CLOCK. It names a condemned set, freezes it at one content",
+      "address so it cannot grow after identification, and closes the doors its record declares.",
+      "This verb READS that record. It stages nothing and destroys nothing.",
+      "",
+      "THE DEADLINE IS READ AT THIS MOMENT. A lapsed slate does not expire, it TIGHTENS: `read`",
+      "closes too, and the block says so. And what a slate DECLARES is not always what it enforces",
+      "— every closure is seeded from the member set, so a slate whose condemned set cannot be read",
+      "enforces nothing. That is printed rather than implied.",
+    ],
+  },
+  tombstones: {
+    summary: "read the receipts: which ids this store forgot, for whom, and why (SPEC §11)",
+    usage: "loam tombstones list | show <id> [options]",
+    flags: new Set(["home", "store"]),
+    notes: [
+      "subcommands:",
+      "  list          every receipt this ground still stands behind, oldest first",
+      "  show <id>     one receipt in full — by its own address, or by the id it erased",
+      "",
+      "A RECEIPT REMEMBERS THAT, NEVER WHAT. A tombstone holds the erased id, the author it was",
+      "spoken by, the moment, and the reason the operator gave. It holds none of the content, and",
+      "retaining a content address retains zero content — which is what makes keeping it honest.",
+      "",
+      "A STRUCK RECEIPT IS FORGIVENESS (§11): the erasure order is withdrawn and the id may return,",
+      "so the receipt leaves this listing. It is never dropped silently — the count of receipts that",
+      "no longer bind is disclosed, because an omission and a revocation look identical otherwise.",
+    ],
+  },
 };
 
 // One blurb per flag NAME — a name means the same thing in every command that takes it. The LIST a
@@ -407,9 +454,12 @@ const FLAG_HELP: Readonly<
 };
 
 function topHelp(): string {
-  const commands = (Object.keys(COMMANDS) as CommandName[]).map(
-    (name) => `  ${name.padEnd(10)}${COMMANDS[name].summary}`,
-  );
+  const names = Object.keys(COMMANDS) as CommandName[];
+  // The column fits the longest command NAME rather than a fixed ten: a name exactly as wide as the
+  // pad would butt straight against its summary, which is the same defect `helpFor` already fixed
+  // one level down.
+  const width = Math.max(...names.map((n) => n.length)) + 2;
+  const commands = names.map((name) => `  ${name.padEnd(width)}${COMMANDS[name].summary}`);
   return [
     "loam — a general database grown on rhizomatic",
     "",
@@ -2764,6 +2814,561 @@ async function cmdGrantRevoke(
   }
 }
 
+// --- the erasure surface (SPEC §11, §29; T206) ---------------------------------------------------
+//
+// Two readers over machinery that already exists — §29.1's slate record, printed, and the per-id
+// receipts `survivingTombstones` governs admission with. Neither invents erasure semantics, and
+// neither widens what any sweep can destroy.
+//
+// A CHANNEL'S POOL IS ITS OWN FILE, and a store that does not attach it reads smaller than it is.
+// A separate container's bytes are unreadable until it is attached, and `slate list` computes its
+// affected set over exactly those containers — a pool attached over empty MEMORY would answer "no
+// overlap" for a wall full of condemned deltas. `serve` opens them, so these verbs do too.
+//
+// The cold ARCHIVE is deliberately NOT opened here. A mirror is a shadow, not a second voice:
+// `deltasSince` answers from the primary, and replanting what the primary lost is `serve`'s boot
+// heal, not a reader's job. The archive matters where bytes are REMOVED, not where they are read.
+
+/** The home's operator identity, or the said reason there is none. Erasure has exactly one signer. */
+function operatorSeed(home: string, label: string, io: IO): string | { code: number } {
+  try {
+    return readSeed(home);
+  } catch (err) {
+    io.err(
+      `${label}: ${home} has no readable operator identity, and erasure is the instance ` +
+        `operator's alone — \`loam init\` makes one: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    );
+    return { code: 1 };
+  }
+}
+
+/** A gateway over the home's store with every standing channel's own pool file attached. */
+async function openTiers(
+  home: string,
+  seed: string,
+  parsed: Parsed,
+  io: IO,
+  vaults: readonly string[] = [],
+): Promise<{ gateway: Gateway; path: string; lagged: string[] }> {
+  // A LAGGING MIRROR IS A QUALIFICATION, not a diagnostic. `MirrorBackend.append` swallows a
+  // mirror-write failure into `onLag` while `purge` and `holds` on that same tier can still
+  // succeed — so a run can exit 0 saying the archive was swept while the tier never took the
+  // tombstone. Collected rather than printed here, so the caller can file it WITH the claim it
+  // weakens, or report it as a fault, depending on how the run ends.
+  const lagged: string[] = [];
+  const path = storePath(home, parsed.flags.get("store"));
+  // One mirror per vault, folded. `MirrorBackend` composes: purge and the byte verdict each reach
+  // both sides, so a nest of them reaches every tier in the chain.
+  const backend: StoreBackend = vaults.reduce<StoreBackend>(
+    (below, vault) =>
+      new MirrorBackend(below, new ArchiveBackend(vault), {
+        onLag: (err) =>
+          lagged.push(
+            `the archive at ${vault} is LAGGING — ` +
+              `${err instanceof Error ? err.message : String(err)}. It did not take everything this ` +
+              `run appended, so its line in the sweep above is weaker than it reads; the next serve ` +
+              `heals it, and an erase after that reaches it.`,
+          ),
+      }),
+    openStore(path, io),
+  );
+  // `channelBackend` and NOT `channelToken`: the pool's own file has to be attached, or a channel's
+  // bytes sit outside this store's reach. The TOKEN only rebuilds a live syncing Channel, and none
+  // of these verbs sync — carrying it would open a network client for a command that reads a store.
+  const gateway = await Gateway.boot(backend, assembleGenesis({ operatorSeed: seed }), {
+    channelBackend: channelBackendFor(home, io),
+  });
+  return { gateway, path, lagged };
+}
+
+// A content address, short enough for a column and long enough to identify. The abbreviation never
+// elides the middle — an operator matching an id against a log matches a PREFIX. `shortAuthor` does
+// the same job for an author, where the algorithm tag has to survive.
+const shortId = (id: string): string => (id.length <= 13 ? id : `${id.slice(0, 12)}…`);
+
+/**
+ * The §25 pen, said out loud — because a row it holds is OUTSIDE everything these verbs print.
+ *
+ * `deltasSince` sets a row the driver could not admit ASIDE rather than returning it, so the reactor
+ * never sees it. Two inversions follow and neither is visible on the screens above: a set-aside
+ * operator negation of a tombstone leaves a WITHDRAWN erasure printing as live, and a set-aside
+ * tombstone leaves a forgotten id printing as never forgotten. The receipt listing's own copy argues
+ * that an omission and a revocation must not look alike; a row the reader never saw is the same
+ * failure one layer further down.
+ */
+interface PenReading {
+  /** Which of the three states this is — an empty pen, rows in it, or a pen nobody could read. */
+  readonly state: "empty" | "rows" | "unreadable";
+  /** The sentence to print, absent only when the pen is empty AND readable. */
+  readonly text?: string;
+}
+
+async function setAsideWarning(gw: Gateway): Promise<PenReading> {
+  // EVERY STORE THESE VERBS READ, not the primary alone. `openTiers` attaches each channel's pool
+  // precisely so its deltas are in scope, and a pool is its own driver with its own pen — so a
+  // sentence that read only the host's would report an all-clear over a container it just brought
+  // into the reading.
+  const stores = [gw, ...gw.quarantinePools];
+  let rows = 0;
+  let stranded = 0;
+  const unreadable: string[] = [];
+  for (const store of stores) {
+    if (!isRepairable(store.backend)) continue;
+    try {
+      const pen = await store.backend.quarantine();
+      rows += pen.length;
+      stranded += strandedStrikeWarnings(pen).length;
+    } catch (err) {
+      unreadable.push(err instanceof Error ? err.message : String(err));
+    }
+  }
+  if (unreadable.length > 0) {
+    return {
+      state: "unreadable",
+      text:
+        `a §25 quarantine could not be read, so nothing here can say whether a set-aside row ` +
+        `changes what is printed: ${unreadable.join("; ")}`,
+    };
+  }
+  if (rows === 0) return { state: "empty" };
+  return {
+    state: "rows",
+    text:
+      `${rows} row(s) sit in the §25 quarantine of this store or an attached pool, and are OUTSIDE ` +
+      `everything printed here — the reader never saw them` +
+      (stranded === 0
+        ? ""
+        : `, and ${stranded} of them claim(s) to strike something, so a withdrawal may be ` +
+          `reading LIVE`) +
+      ". `loam repair list` names what the pen holds.",
+  };
+}
+
+// A list an operator has to act on, capped so one enormous slate cannot bury the block it sits in —
+// and the remainder COUNTED rather than dropped, because a silent truncation on a compliance screen
+// is the omission these readers exist to prevent.
+function capped(ids: readonly string[], limit = 8, total = ids.length): string {
+  if (total <= limit) return ids.join(", ");
+  return `${ids.slice(0, limit).join(", ")}, and ${total - limit} more`;
+}
+
+// --- `loam slate list` ---------------------------------------------------------------------------
+//
+// A slate prints as a BLOCK, not a table row, and `federate list` is the precedent: a store holds a
+// handful of slates, each dense with compliance facts, and every address on one must be readable in
+// FULL so the operator can act on it. A table would abbreviate exactly the fields a legal record
+// must not abbreviate. The receipt listing below goes the other way, for the opposite reason.
+
+const closureList = (closes: readonly string[]): string =>
+  closes.length === 0 ? "none" : closes.join(", ");
+
+function slateBlock(s: SlateReport): string[] {
+  const lines: string[] = [s.container];
+  const say = (label: string, text: string): void => {
+    lines.push(`  ${label.padEnd(14)}${text}`);
+  };
+  // The FORM is named, never guessed: a reader of a permanent compliance record must never be left
+  // wondering whether an identifier is a person or a preimage (§29.1).
+  say(
+    "requested by",
+    `${s.requestedBy} (${
+      s.requestedByForm === "sealed" ? "a §11 sealed commitment, not a name" : "a plain identifier"
+    })`,
+  );
+  say("requested at", new Date(s.requestedAt).toISOString());
+  // The lapse TIGHTENS what a slate closes (§29.4) — but only over a set it can read, and only if
+  // that set has anything in it. Saying "`read` is closed too" about a slate that closes nothing
+  // would promise a protection this store is not delivering, on the line an operator reads first.
+  // The two ways to enforce nothing get their OWN sentence: `enforcedBy` returns empty for an
+  // unreadable set AND for an empty one, and only the first prints an UNRESOLVED row — so one
+  // shared cross-reference would point half its readers at a line that is not on the screen.
+  const idle =
+    s.unresolved !== undefined
+      ? " — LAPSED (§29.4), and see UNRESOLVED below: no door is closed by it"
+      : " — LAPSED (§29.4), and its condemned set is EMPTY: there is nothing to close a door over";
+  say(
+    "deadline",
+    `${new Date(s.deadline).toISOString()}${
+      s.lapsed
+        ? s.enforced.length === 0
+          ? idle
+          : " — LAPSED, so `read` is closed too (§29.4)"
+        : ""
+    }`,
+  );
+  // ZERO IS NOT UNKNOWN. A slate whose frozen set cannot be read here has a condemned set — it was
+  // identified and frozen at an address that is printed on the next line — and this store merely
+  // cannot resolve it. Printing "0 deltas" would tell a compliance officer nothing was ever slated,
+  // which is the collapse `readFrozenTerm` refuses one layer down.
+  say(
+    "condemned",
+    s.unresolved !== undefined
+      ? `UNKNOWN — a set was frozen at ${s.version}, and this store cannot read it (see UNRESOLVED)`
+      : `${s.members.length} delta${s.members.length === 1 ? "" : "s"}, frozen at ${s.version}`,
+  );
+  say("membership", s.membershipAt);
+  say("closes", `${closureList(s.closes)} — enforcing ${closureList(s.enforced)}`);
+  say("record", s.record);
+  if (s.reason !== undefined) say("reason", s.reason);
+  // A slate that enforces nothing is the one state an operator most needs to see: reporting
+  // `closes` as though it were in force would be a claim of protection never delivered.
+  if (s.unresolved !== undefined) {
+    say("UNRESOLVED", `${s.unresolved} — so this slate closes no door at all`);
+  }
+  if (s.disagreement !== undefined) say("DISAGREEMENT", s.disagreement);
+  if (s.affected.length > 0) say("affected", capped(s.affected));
+  if (s.affectedUnknown.length > 0) {
+    say("UNKNOWN reach", `${capped(s.affectedUnknown)} — the overlap could not be computed`);
+  }
+  if (s.resurfacing.length > 0) {
+    say(
+      "resurfacing",
+      `${s.resurfacing.length} claim(s) come back to life at the cut: ${capped(s.resurfacing)}`,
+    );
+  }
+  if (s.duplicates.length > 0) {
+    // NAMED, not counted. This is the one screen whose purpose is to act before the cut, and a
+    // count tells an operator a copy exists without telling them which id to slate.
+    // Sliced BEFORE the map: `duplicates` grows with the ground, and building a string for every
+    // one of them to print eight is the walk this screen is otherwise careful to avoid.
+    say(
+      "duplicates",
+      `${s.duplicates.length} record(s) link to a member and must be slated by their own ids: ` +
+        `${capped(
+          s.duplicates.slice(0, 8).map((d) => `${d.record} (${d.role} → ${shortId(d.member)})`),
+          8,
+          s.duplicates.length,
+        )}`,
+    );
+  }
+  if (s.acceptsIncomplete.length > 0) {
+    say("accepts", `cutting around ${capped(s.acceptsIncomplete)}, at the operator's signature`);
+  }
+  return lines;
+}
+
+async function cmdSlate(args: readonly string[], io: IO): Promise<number> {
+  const parsed = parseFor("slate", args);
+  const sub = parsed.positionals[0];
+  if (sub !== "list") {
+    io.err(
+      sub === undefined
+        ? "slate wants a subcommand: `loam slate list`"
+        : `slate: there is no \`slate ${sub}\` — today this reads, and only reads: ` +
+            "`loam slate list`. Staging a slate and cutting it are deliberate acts with no CLI verb yet.",
+    );
+    return 2;
+  }
+  if (parsed.positionals.length > 1) {
+    io.err("slate list takes no arguments");
+    return 2;
+  }
+  const home = parsed.flags.get("home") ?? defaultHome();
+  const unusable = homeDefect(home, { allowMissing: false });
+  if (unusable !== undefined) {
+    io.err(`slate list: ${unusable}`);
+    return 1;
+  }
+  const seed = operatorSeed(home, "slate list", io);
+  if (typeof seed !== "string") return seed.code;
+  const { gateway, path } = await openTiers(home, seed, parsed, io);
+  let slates: SlateReport[];
+  let pen: PenReading;
+  try {
+    slates = gateway.slates();
+    pen = await setAsideWarning(gateway);
+  } finally {
+    await gateway.close();
+  }
+  // STDOUT, with the claim it qualifies. `loam slate list > proof.txt` files an absence, and the
+  // sentence saying the reader never saw the set-aside rows belongs in the same file.
+  if (pen.text !== undefined) io.out(`loam: ${pen.text}`);
+  if (slates.length === 0) {
+    // SCOPED TO THE SIGNER, because that is exactly how wide the check was: a slate is the
+    // operator's alone, and `readSlates` asks about THIS home's operator key. Over a store governed
+    // by another key an unqualified "nothing is staged" would be an absence never verified.
+    io.out(
+      `loam: no slate signed by ${shortAuthor(authorForSeed(seed))} stands over ${path} — ` +
+        `nothing is staged for erasure\n` +
+        `  a slate names a condemned set, freezes it at one address so it cannot grow, and starts ` +
+        `the clock\n  \`loam tombstones list\` reads what this store has already forgotten`,
+    );
+    return 0;
+  }
+  const lapsed = slates.filter((s) => s.lapsed).length;
+  const idle = slates.filter((s) => s.enforced.length === 0).length;
+  io.out(
+    `loam: ${slates.length} slate${slates.length === 1 ? "" : "s"} over ${path}` +
+      `${lapsed === 0 ? "" : ` — ${lapsed} past deadline`}` +
+      `${idle === 0 ? "" : `${lapsed === 0 ? " —" : ","} ${idle} closing no door`}`,
+  );
+  for (const s of slates) for (const line of slateBlock(s)) io.out(line);
+  return 0;
+}
+
+// --- `loam tombstones list | show <id>` ----------------------------------------------------------
+
+// WHAT A STANDING RECEIPT IS WORTH, in one cell. A tombstone is a PROMISE: §11 lands it, then
+// purges, then reports a replica that refused — so a receipt can stand over bytes that are still on
+// this disk. Printing "forgotten at <date>" from the receipt alone states a completion nothing
+// asked about, which is the overclaim these screens exist to prevent.
+const SWEEP_CELL: Record<ErasureStanding, string> = {
+  settled: "swept — no tier this run opened still holds it",
+  held: "NOT SWEPT — a tier this run opened STILL HOLDS the bytes",
+  owed: "NOT SETTLED — a store in reach has no receipt for it yet",
+  unasked: "UNPROVEN — a tier refused the question, so nothing here was measured",
+};
+
+function receiptDetail(r: TombstoneReceipt, standing: ErasureStanding): string {
+  const lines = [`loam: receipt ${r.tombstone}`];
+  const say = (label: string, text: string): void => {
+    lines.push(`  ${label.padEnd(14)}${text}`);
+  };
+  say("erased", r.erased);
+  // A stated absence, never a blank. The door requires `spoken-by`, but replay does not, so a
+  // receipt replanted from a cold copy can survive without one — and an empty cell on a compliance
+  // log reads as an oversight rather than as the answer it is.
+  say(
+    "spoken by",
+    r.spokenBy ?? `${LEDGER_NONE} this receipt does not record whose record it forgot`,
+  );
+  say("ordered by", `${r.orderedBy} (the instance operator — §11 admits no other signer)`);
+  // ORDERED, not finished. The two are one act only when the sweep below says so.
+  say("ordered at", new Date(r.at).toISOString());
+  say(
+    "reason",
+    r.reasons.length === 0 ? "none recorded — this receipt cannot say why" : r.reasons.join(" · "),
+  );
+  if (r.slate !== undefined) say("slate", `${r.slate} — one member of that cut (§29.6)`);
+  // THE DATE ABOVE IS THE ORDER'S, NOT THE SWEEP'S. Asked here rather than assumed, because this is
+  // the screen a compliance officer reads.
+  say("sweep", SWEEP_CELL[standing]);
+  lines.push(
+    "  the receipt remembers THAT this id was forgotten, and none of what it said — which is what",
+    "  makes keeping it honest.",
+  );
+  return lines.join("\n");
+}
+
+/** The receipts an invocation will actually print — all of them for `list`, one row for `show`. */
+function wantedRows(
+  receipts: readonly TombstoneReceipt[],
+  sub: "list" | "show",
+  wanted: string | undefined,
+): string[] {
+  const rows = sub === "list" ? receipts : receipts.filter((r) => matchesReceipt(r, wanted ?? ""));
+  return rows.map((r) => r.erased);
+}
+
+/**
+ * Either address answers, and a PREFIX of either does too.
+ *
+ * The listing abbreviates every id to twelve characters, and its own closing line tells the
+ * operator to run `loam tombstones show <id>`. Matching only in full made that instruction
+ * unfollowable from the screen that prints it — the same shape as a refusal naming a path its own
+ * flag will not take. An ambiguous prefix is refused rather than guessed.
+ */
+function matchesReceipt(r: TombstoneReceipt, wanted: string): boolean {
+  if (wanted.length < 8) return r.tombstone === wanted || r.erased === wanted;
+  return r.tombstone.startsWith(wanted) || r.erased.startsWith(wanted);
+}
+
+async function cmdTombstones(args: readonly string[], io: IO): Promise<number> {
+  const parsed = parseFor("tombstones", args);
+  const sub = parsed.positionals[0];
+  if (sub !== "list" && sub !== "show") {
+    io.err(
+      sub === undefined
+        ? "tombstones wants a subcommand: `loam tombstones list`, or `loam tombstones show <id>`"
+        : `tombstones: there is no \`tombstones ${sub}\` — the reader is ` +
+            "`loam tombstones list` and `loam tombstones show <id>`",
+    );
+    return 2;
+  }
+  const wanted = parsed.positionals[1];
+  if (sub === "show" && wanted === undefined) {
+    io.err(
+      "tombstones show wants an id: `loam tombstones show <id>` — the receipt's own address, or " +
+        "the id it erased",
+    );
+    return 2;
+  }
+  if (parsed.positionals.length > (sub === "show" ? 2 : 1)) {
+    io.err(`tombstones ${sub} takes ${sub === "show" ? "exactly one id" : "no arguments"}`);
+    return 2;
+  }
+  const home = parsed.flags.get("home") ?? defaultHome();
+  const unusable = homeDefect(home, { allowMissing: false });
+  if (unusable !== undefined) {
+    io.err(`tombstones ${sub}: ${unusable}`);
+    return 1;
+  }
+  const seed = operatorSeed(home, `tombstones ${sub}`, io);
+  if (typeof seed !== "string") return seed.code;
+  // THE COLD TIER IS OPENED HERE, unlike in the slate reader, because this screen makes a claim
+  // ABOUT THE BYTES. The archive stays shut where a verb only READS the ground — a mirror is a
+  // shadow and `deltasSince` answers from the primary — but "swept" is a byte verdict, and one
+  // computed without asking the vault this home's own config.json names is the overclaim this
+  // whole file exists to refuse.
+  //
+  // UNCONDITIONALLY, exactly as `erase` opens it. A prior `existsSync` guard here failed OPEN in
+  // the one direction that costs: a vault behind an unreadable parent, or an unmounted path,
+  // answers "does not exist" to a stat — so the tier was skipped, no probe could throw, and every
+  // row printed SWEPT about a store nobody had asked. Opened, the same directory makes `holds`
+  // throw, and the cell reads UNPROVEN, which is what was actually established.
+  const configured = archivePath(home);
+  const cold = configured === undefined ? [] : [configured];
+  const { gateway, path } = await openTiers(home, seed, parsed, io, cold);
+  let ledger: { receipts: TombstoneReceipt[]; inert: number };
+  let pen: PenReading;
+  let standings: StandingReport;
+  let outside: string[] = [];
+  try {
+    ledger = receiptLedger(gateway.reactor, gateway.operatorAuthor);
+    pen = await setAsideWarning(gateway);
+    // ASKED WHILE THE TIERS ARE STILL OPEN. `openTiers` has the host and every attached pool right
+    // here; once this block closes them the screen can only repeat what the receipt says, and a
+    // receipt is a promise rather than a report. One walk of the tombstone set per ground, then a
+    // point lookup per id — never a scan per row.
+    // ONLY WHAT THIS INVOCATION WILL PRINT. `show` names one receipt; asking the standing of
+    // every receipt in the ledger to print one row is a walk per row of a screen nobody asked for.
+    // `list` prints them all, so it pays for them all.
+    standings = await erasureStandings(gateway, wantedRows(ledger.receipts, sub, wanted));
+    const stores = unreachableStoreReport(gateway);
+    outside = [...stores.faultEntities, ...stores.kept];
+  } finally {
+    await gateway.close();
+  }
+  const standingOf = (erased: string): ErasureStanding =>
+    standings.standings.get(erased) ?? "unasked";
+  // STDOUT, for the reason the slate reader gives: a filed absence carries its own limits.
+  if (pen.text !== undefined) io.out(`loam: ${pen.text}`);
+  // AND THE TIER THIS SCREEN COULD NOT ASK. `--archive <path>` never writes its name into
+  // config.json, so a home can be served with a cold vault its own configuration does not mention —
+  // and every "swept" below then speaks for tiers that do not include it.
+  io.out(
+    configured !== undefined
+      ? `loam: the sweep column below asked ${path}, every attached pool, and the cold archive at ` +
+          `${configured}. A vault this home is served with under \`--archive\` but does not name ` +
+          `in config.json was NOT asked, and is not covered by any verdict here.`
+      : `loam: the sweep column below asked ${path} and every attached pool. This home's ` +
+          `config.json names no cold archive — if this store is served with \`--archive <dir>\`, ` +
+          `that vault was NOT asked and may still hold what a row here calls swept.`,
+  );
+  // AND THE CONTAINERS THIS SWEEP WOULD NOT HAVE ENTERED. `unreachableStoreReport` routes a
+  // container covered by a detach record to `kept` and an unattached one to `faults`; neither is
+  // in the probe's reach, so a row can read SWEPT over bytes sitting in either. The erase screens
+  // treat this disclosure as load-bearing, and this is the screen a compliance officer reads.
+  if (outside.length > 0) {
+    io.out(
+      `loam: ${outside.length} container(s) are OUTSIDE every verdict below — ` +
+        `${capped(outside, 4)}. A container kept out at your own say-so, or declared and not ` +
+        `attached, is not asked by this probe, and a row can read swept while its bytes sit there.`,
+    );
+  }
+
+  if (sub === "show") {
+    // EITHER address answers. The operator holding a complaint has the id that was erased; the
+    // operator holding an erase's own output has the receipt's address, and neither should have to
+    // know which of the two this verb wanted.
+    const found = ledger.receipts.filter((r) => matchesReceipt(r, wanted ?? ""));
+    // AN AMBIGUOUS PREFIX IS NOT A CHOICE THIS COMMAND MAY MAKE. Two receipts under one prefix is
+    // an operator asking about a row this screen cannot identify, and picking either would answer
+    // a question nobody asked.
+    if (found.length > 1 && !found.some((r) => r.tombstone === wanted || r.erased === wanted)) {
+      io.err(
+        `tombstones show: ${wanted} names ${found.length} receipts here — ` +
+          `${capped(found.map((r) => shortId(r.tombstone)))}. Give more of the address.`,
+      );
+      return 2;
+    }
+
+    if (found.length === 0) {
+      // "NOT AN ID THIS STORE FORGOT" WOULD CONTRADICT THE GROUND for a forgiven id. Striking a
+      // tombstone withdraws the erasure, and the receipt leaves the surviving set — so an id this
+      // store really did forget, and then forgave, reads here exactly like one it never held. The
+      // count of receipts that do not bind is already in hand; the listing discloses it, and so
+      // must this, or the two screens disagree about the same store.
+      io.err(
+        `tombstones show: no receipt STANDS for ${wanted} — not as a receipt, and not as an id ` +
+          `this store is currently forgetting. \`loam tombstones list\` shows what stands.` +
+          (ledger.inert <= 0
+            ? ""
+            : `\n  ${ledger.inert} receipt${ledger.inert === 1 ? "" : "s"} here ` +
+              `${ledger.inert === 1 ? "does" : "do"} not bind — struck (forgiveness, §11) or ` +
+              `malformed. If ${wanted} was forgiven, it was forgotten once and is not now, and ` +
+              `this screen cannot tell that apart from an id never held.`),
+      );
+      // 1, not 2. The id is well formed and the invocation is correct — what is missing is a receipt
+      // in THIS store, which is a state rather than a typo. Two lines up, `erase` draws the same
+      // line for the same reason, and a script tells them apart by exactly this.
+      return 1;
+    }
+    for (const r of found) io.out(receiptDetail(r, standingOf(r.erased)));
+    return 0;
+  }
+
+  const withheld =
+    ledger.inert <= 0
+      ? ""
+      : `\n  ${ledger.inert} more receipt${ledger.inert === 1 ? "" : "s"} in the ground ` +
+        `${ledger.inert === 1 ? "does" : "do"} not bind — struck (forgiveness: the id may return, ` +
+        `§11) or malformed. Named here rather than dropped: an omission and a revocation look ` +
+        `identical on a screen that only loses the row.`;
+  if (ledger.receipts.length === 0) {
+    // SCOPED TO THE SIGNER, because that is exactly how wide the check was: erasure is the
+    // operator's alone, and this reads THIS home's operator key. Over a store governed by another
+    // key — a `--store` pointed elsewhere, a replaced seed — an unqualified "has forgotten nothing"
+    // would be an absence the command never verified.
+    io.out(
+      `loam: ${path} has forgotten nothing — no erasure signed by ` +
+        `${shortAuthor(authorForSeed(seed))} stands here${withheld}`,
+    );
+    return 0;
+  }
+  io.out(
+    `loam: ${ledger.receipts.length} receipt${ledger.receipts.length === 1 ? "" : "s"} in ${path} — ` +
+      `this store remembers THAT it forgot these ids, never what they said${withheld}`,
+  );
+  for (const line of ledgerTable(
+    ["erased", "receipt", "ordered at", "sweep", "spoken by", "reason"],
+    ledger.receipts.map((r) => [
+      shortId(r.erased),
+      shortId(r.tombstone),
+      new Date(r.at).toISOString(),
+      // NOT "forgotten at". The timestamp is when the ORDER was signed; whether the sweep it
+      // promised finished is a separate question, and it is asked per row rather than assumed.
+      standingOf(r.erased) === "settled" ? "swept" : standingOf(r.erased).toUpperCase(),
+      r.spokenBy === undefined ? LEDGER_NONE : shortAuthor(r.spokenBy),
+      r.reasons.length === 0 ? LEDGER_NONE : r.reasons.join(" · "),
+    ]),
+  )) {
+    io.out(line);
+  }
+  // A REFUSAL THE CELL CANNOT SHOW. "Held here" outranks "unasked there", so a row can read NOT
+  // SWEPT — a true sentence — while the reason it cannot be trusted further is invisible.
+  const refused = ledger.receipts.filter((r) => standings.unasked.has(r.erased));
+  if (refused.length > 0) {
+    io.out(
+      `loam: on ${refused.length} of these row(s) a tier REFUSED the question: ` +
+        `${capped(refused.map((r) => shortId(r.erased)))}. Whatever the cell says, nothing about ` +
+        `those tiers was established here.`,
+    );
+  }
+  const unswept = ledger.receipts.filter((r) => standingOf(r.erased) !== "settled");
+  if (unswept.length > 0) {
+    io.out(
+      `loam: ${unswept.length} of these receipt(s) stand over an UNFINISHED sweep: ` +
+        `${capped(unswept.map((r) => shortId(r.erased)))}. A tombstone is a promise — §11 lands it, ` +
+        `purges, and only then reports a tier that refused — so a receipt can stand while the bytes ` +
+        `do not. \`loam erase <id> --reason "…"\` re-runs the sweep; \`loam tombstones show <id>\` ` +
+        `reads one row in full.`,
+    );
+  }
+  return 0;
+}
+
 function defaultHome(): string {
   return process.env["LOAM_HOME"] ?? ".loam";
 }
@@ -2825,6 +3430,10 @@ export async function run(
         return await cmdPen(rest, io);
       case "grant":
         return await cmdGrant(rest, io);
+      case "slate":
+        return await cmdSlate(rest, io);
+      case "tombstones":
+        return await cmdTombstones(rest, io);
       default:
         io.err(`loam: unknown command "${command}" — run \`loam --help\``);
         return 2;

@@ -727,19 +727,30 @@ export interface SlateReport extends Omit<Slate, "members" | "closes"> {
  */
 export function slateReportsImpl(gw: Gateway, now: number): SlateReport[] {
   const slates = readSlates(gw.reactor, gw.operatorAuthor, now);
-  return slates.map((s) => {
-    const reach = affectedContainers(gw, s.members, s.container);
-    return {
-      ...s,
-      closes: [...s.closes].sort(),
-      enforced: enforcedBy(s),
-      members: [...s.members].sort(),
-      resurfacing: resurfacingOf(gw.reactor, s.members),
-      affected: reach.affected,
-      affectedUnknown: reach.unknown,
-      duplicates: duplicatesOf(gw, s.members),
-    };
-  });
+  if (slates.length === 0) return [];
+  // ONE SCOPE READ PER CONTAINER AND ONE WALK OF THE GROUND, FOR THE WHOLE LISTING. Asked per
+  // slate, this was slates × containers × store, and every inner step re-hashed the ground from
+  // scratch. That price is defensible for a CUT, which is a rare and deliberate act; `loam slate
+  // list` is a routine read that paid it on every invocation (H8). The answers are identical —
+  // only the loop nesting moved.
+  const reach = affectedFor(
+    gw,
+    slates.map((s) => ({ members: s.members, container: s.container })),
+  );
+  const duplicates = duplicatesFor(
+    gw,
+    slates.map((s) => s.members),
+  );
+  return slates.map((s, i) => ({
+    ...s,
+    closes: [...s.closes].sort(),
+    enforced: enforcedBy(s),
+    members: [...s.members].sort(),
+    resurfacing: resurfacingOf(gw.reactor, s.members),
+    affected: reach[i]!.affected,
+    affectedUnknown: reach[i]!.unknown,
+    duplicates: duplicates[i]!,
+  }));
 }
 
 // If a member is a NEGATION, cutting it REVIVES its target (§11's own consequence) — so the review
@@ -767,36 +778,73 @@ function affectedContainers(
   members: ReadonlySet<string>,
   self: string,
 ): { affected: string[]; unknown: string[] } {
+  return affectedFor(gw, [{ members, container: self }])[0]!;
+}
+
+/**
+ * The same question for EVERY slate at once: one scope read per container rather than one per pair.
+ *
+ * Only the CONDEMNED ids a container holds are kept, never its whole scope, so the memory this
+ * trades for the scans is bounded by the members under review rather than by the store.
+ */
+function affectedFor(
+  gw: Gateway,
+  slates: readonly { members: ReadonlySet<string>; container: string }[],
+): { affected: string[]; unknown: string[] }[] {
   const table = readContainerTable(gw.reactor, gw.operatorAuthor);
-  const affected: string[] = [];
-  const unknown: string[] = [];
-  for (const name of [...table.containers.keys()].sort()) {
-    if (name === self) continue;
+  const names = [...table.containers.keys()].sort();
+  const wanted = new Set<string>();
+  for (const s of slates) for (const id of s.members) wanted.add(id);
+  const hits = new Map<string, Set<string> | "unknown">();
+  for (const name of names) {
     // A scope that cannot be READ cannot be excluded either (H9), so it is named as UNDETERMINED
     // rather than skipped — and the operator's review read must not throw because some unrelated
     // wall is unattached. The CUT refuses on exactly this state, so the undetermined list is empty
     // at every moment the affected set becomes durable.
     try {
-      const scoped = containerScopeImpl(gw, { containers: [name] });
-      if (scoped.some((d) => members.has(d.id))) affected.push(name);
+      const here = new Set<string>();
+      for (const d of containerScopeImpl(gw, { containers: [name] })) {
+        if (wanted.has(d.id)) here.add(d.id);
+      }
+      hits.set(name, here);
     } catch {
-      unknown.push(name);
+      hits.set(name, "unknown");
     }
   }
-  return { affected, unknown };
+  return slates.map((s) => {
+    const affected: string[] = [];
+    const unknown: string[] = [];
+    for (const name of names) {
+      if (name === s.container) continue;
+      const here = hits.get(name)!;
+      if (here === "unknown") unknown.push(name);
+      else if ([...s.members].some((id) => here.has(id))) affected.push(name);
+    }
+    return { affected, unknown };
+  });
 }
 
 function duplicatesOf(gw: Gateway, members: ReadonlySet<string>): Duplicate[] {
-  if (members.size === 0) return [];
-  const out: Duplicate[] = [];
-  // THE WHOLE GROUND, not just the operator's own signature. A copy is a copy whoever signed it, and
-  // the copies that matter most here are minted by STANDING PASSES under a pen or a granted author —
-  // a rendering's `translates`, a promotion's `source-delta`. Scoping this to operator-authored
-  // deltas made exactly those invisible to the one review that could surface them, and a review that
-  // OVER-reports links costs an operator a second look while one that under-reports costs them the
-  // copy. (Wider than §29.3's wording, which says "operator-authored"; the direction is deliberate.)
+  return duplicatesFor(gw, [members])[0]!;
+}
+
+/**
+ * Every slate's links, found in ONE walk of the ground rather than one walk per slate.
+ *
+ * THE WHOLE GROUND, not just the operator's own signature. A copy is a copy whoever signed it, and
+ * the copies that matter most here are minted by STANDING PASSES under a pen or a granted author —
+ * a rendering's `translates`, a promotion's `source-delta`. Scoping this to operator-authored
+ * deltas made exactly those invisible to the one review that could surface them, and a review that
+ * OVER-reports links costs an operator a second look while one that under-reports costs them the
+ * copy. (Wider than §29.3's wording, which says "operator-authored"; the direction is deliberate.)
+ */
+function duplicatesFor(gw: Gateway, slates: readonly ReadonlySet<string>[]): Duplicate[][] {
+  const out = slates.map(() => [] as Duplicate[]);
+  const wanted = new Set<string>();
+  for (const members of slates) for (const id of members) wanted.add(id);
+  if (wanted.size === 0) return out;
   for (const d of gw.reactor.snapshot()) {
-    if (members.has(d.id) || isTombstone(d.claims) || isGraveyard(d.claims)) continue;
+    if (wanted.has(d.id) || isTombstone(d.claims) || isGraveyard(d.claims)) continue;
     for (const p of d.claims.pointers) {
       const named =
         p.target.kind === "delta"
@@ -806,12 +854,15 @@ function duplicatesOf(gw: Gateway, members: ReadonlySet<string>): Duplicate[] {
               (PRIMITIVE_DELTA_REF_ROLES as readonly string[]).includes(p.role)
             ? p.target.value
             : undefined;
-      if (named !== undefined && members.has(named)) {
-        out.push({ member: named, record: d.id, role: p.role });
-      }
+      if (named === undefined || !wanted.has(named)) continue;
+      slates.forEach((members, i) => {
+        if (members.has(named)) out[i]!.push({ member: named, record: d.id, role: p.role });
+      });
     }
   }
-  out.sort((a, b) => (a.record + a.member < b.record + b.member ? -1 : 1));
+  for (const rows of out) {
+    rows.sort((a, b) => (a.record + a.member < b.record + b.member ? -1 : 1));
+  }
   return out;
 }
 
