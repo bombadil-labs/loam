@@ -1006,6 +1006,17 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
 // agent, with ONE deliberate asymmetry: `drop` needs `--yes` here and cannot be reached at all by an
 // MCP caller, because an agent staging an irreversible purge and a person confirming it are
 // different acts on different surfaces.
+/** `--bless` on `federate open`: absent means yes, and only the two words are understood. */
+function blessFlagOf(raw: string | undefined): boolean {
+  if (raw === undefined) return true;
+  if (raw === "true" || raw === "false") return raw === "true";
+  throw new UsageError(
+    `federate open --bless takes exactly "true" or "false", and got "${raw}" — a spelling this ` +
+      "does not understand would be read as true, and this door never prints the blessing state " +
+      "it settled on. Nothing was opened.",
+  );
+}
+
 async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
   const verb = args[0];
   const parsed = parseFor("federate", args.slice(1));
@@ -1015,6 +1026,37 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
         "it is doing), set (freeze or unbless, both reversible), bless-app (mount one app a peer " +
         "sent, the only act that lets their code run), drop (sever and purge, not reversible) — " +
         "`loam federate --help`",
+    );
+    return 2;
+  }
+  // WHAT EACH VERB TAKES — because the parser's allowlist is per COMMAND, and `federate` is five
+  // commands wearing one name. Without this, a flag one verb reads is silently accepted by all the
+  // others: `bless-app --bless false` granted the resolvers and left the channel blessing, and the
+  // operator was told nothing. That direction is the dangerous one — a dropped `--route` merely
+  // fails to do something, while a dropped `--bless` fails to STOP something.
+  const TAKES: Record<string, readonly string[]> = {
+    open: ["from", "into", "prefix", "token", "bless"],
+    list: [],
+    set: ["channel", "receiving", "bless"],
+    "bless-app": ["channel", "route", "resolvers", "expect", "pen", "supersede"],
+    drop: ["channel", "yes"],
+  };
+  const takes = new Set(["home", "store", ...(TAKES[verb] ?? [])]);
+  // BOTH PARSER MAPS. A declared boolean lands in `booleans` and never in `flags`, so reading one
+  // is a check that half the names always pass.
+  const strayFlags = [...parsed.flags.keys(), ...parsed.booleans]
+    .filter((f) => !takes.has(f))
+    .sort();
+  if (strayFlags.length > 0) {
+    io.err(
+      `federate ${verb} does not take ${strayFlags.map((f) => `--${f}`).join(", ")} — it takes ` +
+        `${[...takes]
+          .sort()
+          .map((f) => `--${f}`)
+          .join(
+            ", ",
+          )}. Nothing was done: a flag this verb never reads is a request that would go ` +
+        "unanswered in silence, and one of them decides whether a peer's law binds at all.",
     );
     return 2;
   }
@@ -1181,7 +1223,9 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
         into,
         prefix,
         from,
-        bless: parsed.flags.get("bless") !== "false",
+        // The same strictness the `set` verb keeps, for the same reason — and this door is worse to
+        // guess at, because its report never prints the resulting blessing state.
+        bless: blessFlagOf(parsed.flags.get("bless")),
         source: sourceFor(from, token, (f) => readFileSync(f, "utf8"), parseOffer),
       });
       // The credential is written where secrets live, so the next boot can resume this channel.
@@ -1214,10 +1258,24 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
 
     if (verb === "set") {
       const next: { receiving?: boolean; blessing?: boolean } = {};
-      const receiving = parsed.flags.get("receiving");
-      const bless = parsed.flags.get("bless");
-      if (receiving !== undefined) next.receiving = receiving !== "false";
-      if (bless !== undefined) next.blessing = bless !== "false";
+      // EXACTLY `true` OR `false`. `!== "false"` reads `FALSE`, `0`, `no` and `off` as ON — and the
+      // direction is the one that matters: an operator typing `--bless FALSE` to stop new law
+      // binding would have turned it on and been told the channel was blessing, in a sentence they
+      // had just asked to make false. A spelling this does not understand is a refusal.
+      const toggle = (flag: string): boolean | undefined => {
+        const raw = parsed.flags.get(flag);
+        if (raw === undefined) return undefined;
+        if (raw === "true" || raw === "false") return raw === "true";
+        throw new UsageError(
+          `federate set --${flag} takes exactly "true" or "false", and got "${raw}" — a spelling ` +
+            "this does not understand would be read as true, which is the wrong direction to " +
+            "guess in. Nothing was changed.",
+        );
+      };
+      const receiving = toggle("receiving");
+      const bless = toggle("bless");
+      if (receiving !== undefined) next.receiving = receiving;
+      if (bless !== undefined) next.blessing = bless;
       if (next.receiving === undefined && next.blessing === undefined) {
         io.err("federate set wants --receiving <true|false> or --bless <true|false>, or both");
         return 2;
@@ -1238,13 +1296,12 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
       // lens's computed fields run. Neither rides the blessing toggle, and neither rides the other.
       const lens = parsed.flags.get("resolvers");
       if (lens !== undefined) {
-        // FLAGS THIS FORM DOES NOT TAKE ARE REFUSED, not ignored. `--expect` pins an APP's identity
-        // and there is no identity for a lens's resolver law to pin; `--pen` and `--supersede`
-        // belong to a route; and `--route` names the OTHER act entirely — asked for both, an
-        // operator would have got one and heard about one. Accepting any of them silently tells
-        // someone they asked for something, which for a pin is the difference between a check and
-        // the belief in one. BOTH maps are read: the parser puts a declared boolean in `booleans`
-        // and never in `flags`, so testing one is a test that half the names always pass.
+        // THE TWO ACTS ARE SEPARATE, and the flags that belong to the other one are refused rather
+        // than dropped. `--route` mounts an app; `--pen` and `--supersede` qualify that mount; and
+        // `--expect` pins an app's identity, which a lens's resolver law does not have. Asked for
+        // both acts at once, an operator would have got one and heard about one. BOTH parser maps
+        // are read: a declared boolean lands in `booleans` and never in `flags`, so testing one is
+        // a test that half the names always pass.
         const stray = ["route", "expect", "pen", "supersede"].filter(
           (f) => parsed.flags.has(f) || parsed.booleans.has(f),
         );
@@ -1252,10 +1309,10 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
           const named = stray.map((f) => `--${f}`).join(", ");
           io.err(
             `federate bless-app --resolvers does not take ${named} — ${
-              stray.length === 1 ? "that belongs" : "those belong"
-            } to \`--route\`, which mounts an app. This act grants the resolver code on ONE lens, ` +
-              "and it has no identity to pin: `federate list` names the lens and nothing finer. " +
-              "Nothing was granted; run the two acts separately.",
+              stray.length === 1 ? "that flag belongs" : "those flags belong"
+            } to the OTHER act, \`--route\`, which mounts an app. This one grants the resolver ` +
+              "code on ONE lens, and there is no identity for it to pin: `federate list` names the " +
+              "lens and nothing finer. Nothing was granted; run the two acts separately.",
           );
           return 2;
         }

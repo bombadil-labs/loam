@@ -172,6 +172,64 @@ async function forgingPeer(): Promise<Gateway> {
   return gw;
 }
 
+/**
+ * A CLI home with one channel open to `from`, and the io capture the CLI rails read.
+ *
+ * `reopen` re-exports the peer's offer and opens the channel again, which is how a fresh CLI
+ * invocation pulls what the peer has published since — a file offer carries no credential, so
+ * nothing resumes and nothing polls on its own.
+ */
+async function cliHome(
+  root: string,
+  from: Gateway,
+): Promise<{
+  me: string;
+  io: () => { out: (s: string) => void; err: (s: string) => void };
+  said: () => string;
+  fresh: () => void;
+  reopen: () => Promise<void>;
+}> {
+  const out: string[] = [];
+  const err: string[] = [];
+  const io = (): { out: (s: string) => void; err: (s: string) => void } => ({
+    out: (t: string) => out.push(t),
+    err: (t: string) => err.push(t),
+  });
+  const said = (): string => [...out, ...err].join("\n");
+  const fresh = (): void => {
+    out.length = 0;
+    err.length = 0;
+  };
+  const me = join(root, "me");
+  const offer = join(root, "peer.offer");
+  const open = async (): Promise<void> => {
+    writeFileSync(offer, exportOffer(from));
+    fresh();
+    expect(
+      await run(
+        [
+          "federate",
+          "open",
+          "--from",
+          offer,
+          "--into",
+          "friends",
+          "--prefix",
+          "alice",
+          "--home",
+          me,
+        ],
+        io(),
+      ),
+      said(),
+    ).toBe(0);
+    fresh();
+  };
+  expect(await run(["init", "--home", me], io())).toBe(0);
+  await open();
+  return { me, io, said, fresh, reopen: open };
+}
+
 const link = (bob: Gateway, from: Gateway, prefix: string, bless = true) =>
   bob.openChannel({
     into: "friends",
@@ -1525,85 +1583,33 @@ describe("T209 — what an app IS, for the report and for the blessing", () => {
 });
 
 describe("T209 — the CLI names what arrived and mounts one app", () => {
+  // ONE ACT PER RAIL. This was a single test that drove twenty CLI invocations against a sqlite
+  // home, and it timed out under a loaded suite — a flake in a rail, which is worse than a slow
+  // test: a red bar nobody can attribute trains whoever reads it to re-run instead of look. Split,
+  // each one names a behaviour, each stays well inside the clock, and a failure points at one thing.
+
   it("list says INERT with the recipe, bless-app mounts it, list says it serves", async () => {
     // Driven through the shipped CLI on a sqlite home, in FRESH invocations — the state where the
     // channel cannot resume (a file offer carries no token) and only its pool is re-attached. An app
     // must stay blessable and stay served there: whether this store can currently reach the peer has
     // nothing to do with whether the operator's own blessing stands.
     const root = mkdtempSync(join(tmpdir(), "loam-t209-cli-"));
-    const out: string[] = [];
-    const err: string[] = [];
-    const io = () => ({ out: (s: string) => out.push(s), err: (s: string) => err.push(s) });
-    const said = (): string => [...out, ...err].join("\n");
-    const fresh = (): void => {
-      out.length = 0;
-      err.length = 0;
-    };
-    const me = join(root, "me");
-    const offer = join(root, "alice.offer");
     const alice = await peer(ALICE_SEED, { route: "hello", app: APP, height: 62 });
     try {
-      writeFileSync(offer, exportOffer(alice));
-      expect(await run(["init", "--home", me], io())).toBe(0);
-      fresh();
-      expect(
-        await run(
-          [
-            "federate",
-            "open",
-            "--from",
-            offer,
-            "--into",
-            "friends",
-            "--prefix",
-            "alice",
-            "--home",
-            me,
-          ],
-          io(),
-        ),
-        said(),
-      ).toBe(0);
+      const cli = await cliHome(root, alice);
+      const { me, io, said, fresh } = cli;
 
-      fresh();
       expect(await run(["federate", "list", "--home", me], io()), said()).toBe(0);
       expect(said()).toContain('app "hello" — the peer offers');
       expect(said()).toContain("ARRIVED, INERT");
       expect(said()).toContain("federate bless-app --channel channel:friends:alice --route hello");
 
-      fresh();
-      expect(
-        await run(
-          ["federate", "bless-app", "--channel", CHANNEL, "--route", "nope", "--home", me],
-          io(),
-        ),
-      ).toBe(2);
-      expect(said()).toContain('"hello"'); // it names what it does have
-
-      // The flag guard is its own refusal, before the gateway is ever asked.
-      fresh();
-      expect(await run(["federate", "bless-app", "--channel", CHANNEL, "--home", me], io())).toBe(
-        2,
-      );
-      expect(said()).toContain("wants --route");
-
-      // AN UNKNOWN VERB IS REFUSED BY NAME. This one is FORWARD protection, not a proof of anything
-      // in this change: the allowlist already refused unknown verbs and this change only added a
-      // name to it. It is here because a mutation of that allowlist's `||` SURVIVED the suite, and
-      // what it survives into is ugly — `drop` is the fall-through at the bottom of the group, so a
-      // typo would reach an irreversible purge. Two-sided: the channel is still here afterwards.
-      fresh();
-      expect(
-        await run(["federate", "frobnicate", "--channel", CHANNEL, "--yes", "--home", me], io()),
-      ).toBe(2);
-      expect(said()).toContain("federate takes a verb");
-      fresh();
-      expect(await run(["federate", "list", "--home", me], io()), said()).toBe(0);
-      expect(said()).toContain(CHANNEL);
-
-      // A FLAG THIS FORM DOES NOT TAKE IS REFUSED, not ignored. `--expect` is an accepted federate
-      // flag, and the resolvers branch returns before anything reads it — so an operator who
-      // reached for the pin would be granted, told nothing, and left believing they had pinned.
+      // THE DOCUMENTED WORKFLOW, END TO END: read the listing, paste what it printed, bless. The
+      // listing used to print twelve characters and the floor demanded twenty, so pasting the id a
+      // person could actually see was refused every time — a remedy the surface offering it could
+      // not satisfy. The pin here is READ OUT OF THE LISTING's own bytes, never hand-typed.
+      const printed = /1e20[0-9a-f]+/.exec(said())?.[0];
+      expect(printed, said()).toBeDefined();
       fresh();
       expect(
         await run(
@@ -1612,22 +1618,57 @@ describe("T209 — the CLI names what arrived and mounts one app", () => {
             "bless-app",
             "--channel",
             CHANNEL,
-            "--resolvers",
-            "alice:Plant",
+            "--route",
+            "hello",
             "--expect",
-            "1e20deadbeefcafe0123456789",
+            printed!,
             "--home",
             me,
           ],
           io(),
         ),
-      ).toBe(2);
-      expect(said()).toContain("does not take --expect");
-      expect(said()).toContain("Nothing was granted");
+        said(),
+      ).toBe(0);
+      expect(said()).toContain('serves the app "hello" at "alice:hello"');
 
-      // BOTH HALVES OF THE PARSER. A declared boolean lands in `booleans` and never in `flags`, so
-      // a guard that read one map would let two of the four names through while looking complete —
-      // the same shape this CLI's own arg parser already records having been bitten by.
+      fresh();
+      expect(await run(["federate", "list", "--home", me], io()), said()).toBe(0);
+      expect(said()).toContain('it SERVES at "alice:hello"');
+      expect(said()).not.toContain("ARRIVED, INERT");
+    } finally {
+      await alice.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
+  it("a flag this verb never reads is refused, in both halves of the parser", async () => {
+    // `federate` is five commands wearing one name, and its flag allowlist is per COMMAND — so a
+    // flag one verb reads was silently accepted by all the others. The direction that matters is
+    // `--bless`: dropped on `bless-app`, an operator who asked to STOP new law binding was granted
+    // and told nothing. A dropped `--route` merely failed to mount.
+    const root = mkdtempSync(join(tmpdir(), "loam-t209-flags-"));
+    const alice = await peer(ALICE_SEED, { route: "hello", app: APP, height: 62 });
+    try {
+      const { me, io, said, fresh } = await cliHome(root, alice);
+
+      // The flag guard is its own refusal, before the gateway is ever asked.
+      expect(await run(["federate", "bless-app", "--channel", CHANNEL, "--home", me], io())).toBe(
+        2,
+      );
+      expect(said()).toContain("wants --route");
+
+      // AN UNKNOWN VERB IS REFUSED BY NAME. Forward protection, not a proof of this change: the
+      // allowlist already refused unknown verbs and this change only added a name to it. It is here
+      // because a mutation of that allowlist's `||` SURVIVED the suite, and `drop` is the
+      // fall-through at the bottom of the group — so a typo would reach an irreversible purge.
+      fresh();
+      expect(
+        await run(["federate", "frobnicate", "--channel", CHANNEL, "--yes", "--home", me], io()),
+      ).toBe(2);
+      expect(said()).toContain("federate takes a verb");
+
+      // BOTH PARSER MAPS. A declared boolean lands in `booleans` and never in `flags`, so a guard
+      // that read one map would let half the names through while looking complete.
       for (const stray of ["--pen", "--supersede"]) {
         fresh();
         expect(
@@ -1650,8 +1691,35 @@ describe("T209 — the CLI names what arrived and mounts one app", () => {
         expect(said()).toContain(`does not take ${stray}`);
       }
 
-      // AND `--route`, which names the OTHER act: asked for both, an operator would have been
-      // granted one and told about one.
+      // AND THE FAIL-OPEN ONE. `--bless` is a real flag of this command, read only by `set`.
+      fresh();
+      expect(
+        await run(
+          [
+            "federate",
+            "bless-app",
+            "--channel",
+            CHANNEL,
+            "--resolvers",
+            "alice:Plant",
+            "--bless",
+            "false",
+            "--home",
+            me,
+          ],
+          io(),
+        ),
+        said(),
+      ).toBe(2);
+      expect(said()).toContain("does not take --bless");
+      // Two-sided at the STORE, not only at the exit code: the channel is still blessing, because
+      // the refusal happened before anything was granted or changed.
+      fresh();
+      expect(await run(["federate", "list", "--home", me], io()), said()).toBe(0);
+      expect(said()).toContain("blessing");
+      expect(said()).not.toContain("NOT blessing");
+
+      // `--route` names the OTHER act: asked for both, an operator got one and heard about one.
       fresh();
       expect(
         await run(
@@ -1669,76 +1737,64 @@ describe("T209 — the CLI names what arrived and mounts one app", () => {
           ],
           io(),
         ),
+        said(),
       ).toBe(2);
       expect(said()).toContain("does not take --route");
-      expect(said()).toContain("run the two acts separately");
+    } finally {
+      await alice.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
 
-      // THE BARE `--resolvers` FORM, through the door a person types it at. Nothing on this
-      // channel is withheld, so the act refuses — which is the point: the refusal proves the CLI
-      // reached the gateway with a name it could resolve, rather than passing a string that could
-      // never match anything and calling the silence success.
-      fresh();
-      expect(
-        await run(
-          ["federate", "bless-app", "--channel", CHANNEL, "--resolvers", "Plant", "--home", me],
-          io(),
-        ),
-      ).toBe(2);
-      expect(said()).toContain("holds no withheld resolvers");
+  it("a toggle spelling this does not understand is refused, never read as yes", async () => {
+    // `!== "false"` made `FALSE`, `0`, `no` and `off` all mean ON — in the one direction where
+    // guessing is unsafe, since the operator was asking to stop new law binding. And `open` never
+    // prints the blessing state it settled on, so there the wrong guess is silent at the door that
+    // makes it.
+    const root = mkdtempSync(join(tmpdir(), "loam-t209-toggle-"));
+    const alice = await peer(ALICE_SEED, { route: "hello", app: APP, height: 62 });
+    try {
+      const { me, io, said, fresh } = await cliHome(root, alice);
 
-      // THE DOCUMENTED WORKFLOW, END TO END: read the listing, paste what it printed, bless. The
-      // listing used to print twelve characters and the floor demanded twenty, so pasting the id a
-      // person could actually see was refused every time — a remedy the surface offering it could
-      // not satisfy. The pin here is READ OUT OF THE LISTING's own bytes, never hand-typed.
+      for (const spelling of ["FALSE", "0", "no"]) {
+        fresh();
+        expect(
+          await run(
+            ["federate", "set", "--channel", CHANNEL, "--bless", spelling, "--home", me],
+            io(),
+          ),
+          said(),
+        ).toBe(2);
+        expect(said()).toContain('exactly "true" or "false"');
+      }
       fresh();
       expect(await run(["federate", "list", "--home", me], io()), said()).toBe(0);
-      const printed = /1e20[0-9a-f]+/.exec(said())?.[0];
-      expect(printed, said()).toBeDefined();
+      expect(said()).not.toContain("NOT blessing"); // none of them changed anything
+
+      // Two-sided: the spelling it DOES understand works, and the listing says so.
       fresh();
       expect(
         await run(
-          [
-            "federate",
-            "bless-app",
-            "--channel",
-            CHANNEL,
-            "--route",
-            "hello",
-            "--expect",
-            printed!,
-            "--home",
-            me,
-          ],
+          ["federate", "set", "--channel", CHANNEL, "--bless", "false", "--home", me],
           io(),
         ),
         said(),
       ).toBe(0);
-      expect(said()).toContain('serves the app "hello"');
-
-      // --expect REACHES THE GATEWAY FROM THE COMMAND LINE. The flag whose whole purpose is to stop
-      // a peer moving between `list` and `bless-app` is only worth having at the door a person types
-      // it at, so the wiring is driven here rather than only through the method.
       fresh();
-      expect(
-        await run(
-          [
-            "federate",
-            "bless-app",
-            "--channel",
-            CHANNEL,
-            "--route",
-            "hello",
-            "--expect",
-            "1e20deadbeefcafe0123456789",
-            "--home",
-            me,
-          ],
-          io(),
-        ),
-      ).toBe(2);
-      expect(said()).toContain("you asked for 1e20deadbeefcafe0123456789");
+      expect(await run(["federate", "list", "--home", me], io()), said()).toBe(0);
+      expect(said()).toContain("NOT blessing");
+    } finally {
+      await alice.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
 
-      fresh();
+  it("the peer ships new code, and --supersede is what moves the route onto it", async () => {
+    const root = mkdtempSync(join(tmpdir(), "loam-t209-bump-"));
+    const alice = await peer(ALICE_SEED, { route: "hello", app: APP, height: 62 });
+    try {
+      const cli = await cliHome(root, alice);
+      const { me, io, said, fresh } = cli;
       expect(
         await run(
           ["federate", "bless-app", "--channel", CHANNEL, "--route", "hello", "--home", me],
@@ -1746,43 +1802,17 @@ describe("T209 — the CLI names what arrived and mounts one app", () => {
         ),
         said(),
       ).toBe(0);
-      expect(said()).toContain('serves the app "hello" at "alice:hello"');
 
-      fresh();
-      expect(await run(["federate", "list", "--home", me], io()), said()).toBe(0);
-      expect(said()).toContain('it SERVES at "alice:hello"');
-      expect(said()).not.toContain("ARRIVED, INERT");
-
-      // ALICE SHIPS NEW CODE at the mounted route. The listing must say what runs, and the remedy it
-      // prints must be one that works — a recipe that throws is worse than none.
+      // ALICE SHIPS NEW CODE at the mounted route. The listing must say what runs, and the remedy
+      // it prints must be one that works — a recipe that throws is worse than none.
       await alice.publishRenderer({
         route: "hello",
         schema: "Plant",
         consumes: ["height"],
         bundle: OTHER_APP,
       });
-      writeFileSync(offer, exportOffer(alice));
-      fresh();
-      expect(
-        await run(
-          [
-            "federate",
-            "open",
-            "--from",
-            offer,
-            "--into",
-            "friends",
-            "--prefix",
-            "alice",
-            "--home",
-            me,
-          ],
-          io(),
-        ),
-        said(),
-      ).toBe(0);
+      await cli.reopen();
 
-      fresh();
       expect(await run(["federate", "list", "--home", me], io()), said()).toBe(0);
       expect(said()).toContain("runs DIFFERENT code");
       expect(said()).toContain("--supersede");
@@ -1810,50 +1840,42 @@ describe("T209 — the CLI names what arrived and mounts one app", () => {
       expect(await run(["federate", "list", "--home", me], io()), said()).toBe(0);
       expect(said()).toContain('it SERVES at "alice:hello"');
       expect(said()).not.toContain("runs DIFFERENT code");
+    } finally {
+      await alice.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
 
-      // ALICE WITHDRAWS IT. There is nothing left to bless and nothing newer to move onto, so every
-      // remedy but one would refuse — and the listing must not offer them. The row landing in the
-      // "runs DIFFERENT code … --supersede" branch was the shape this whole block exists to stop.
-      // EVERY binding at that route — she has published twice by now, and striking only the first
-      // would leave the second standing as what she still offers.
-      const atHello = [...alice.reactor.snapshot()]
-        .filter((d) =>
-          d.claims.pointers.some(
-            (p) =>
-              p.role === "route" && p.target.kind === "primitive" && p.target.value === "hello",
-          ),
-        )
-        .map((d) => d.id);
-      expect(atHello.length).toBeGreaterThan(1);
-      await alice.append(
-        atHello.map((id, i) =>
-          signClaims(
-            makeNegationClaims(authorForSeed(ALICE_SEED), 7_000 + i, id, "withdrawn"),
-            ALICE_SEED,
-          ),
-        ),
-      );
-      writeFileSync(offer, exportOffer(alice));
-      fresh();
+  it("a withdrawal is reported honestly, and drop purges the app at the bytes", async () => {
+    const root = mkdtempSync(join(tmpdir(), "loam-t209-drop-"));
+    const alice = await peer(ALICE_SEED, { route: "hello", app: APP, height: 62 });
+    try {
+      const cli = await cliHome(root, alice);
+      const { me, io, said, fresh } = cli;
       expect(
         await run(
-          [
-            "federate",
-            "open",
-            "--from",
-            offer,
-            "--into",
-            "friends",
-            "--prefix",
-            "alice",
-            "--home",
-            me,
-          ],
+          ["federate", "bless-app", "--channel", CHANNEL, "--route", "hello", "--home", me],
           io(),
         ),
         said(),
       ).toBe(0);
-      fresh();
+
+      // ALICE WITHDRAWS IT. There is nothing left to bless and nothing newer to move onto, so every
+      // remedy but one would refuse — and the listing must not offer them. The row landing in the
+      // "runs DIFFERENT code … --supersede" branch was the shape this block exists to stop.
+      await alice.append([
+        signClaims(
+          makeNegationClaims(
+            authorForSeed(ALICE_SEED),
+            7_000,
+            bindingOf(alice, "hello"),
+            "withdrawn",
+          ),
+          ALICE_SEED,
+        ),
+      ]);
+      await cli.reopen();
+
       expect(await run(["federate", "list", "--home", me], io()), said()).toBe(0);
       expect(said()).toContain("the peer WITHDREW it");
       expect(said()).toContain("still runs the app it blessed");
