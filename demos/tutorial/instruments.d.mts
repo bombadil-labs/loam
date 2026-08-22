@@ -5,6 +5,7 @@ import type { Delta } from "@bombadil/rhizomatic";
 
 export interface DeltaClass {
   readonly kind:
+    | "tutorial"
     | "constitution"
     | "registration"
     | "schema"
@@ -27,6 +28,11 @@ export declare function renderGround(
   deltas: readonly Delta[],
   selfAuthor: string,
   toWire: unknown,
-  state: { seen: Set<string>; expanded: Set<string> },
+  state: {
+    seen: Set<string>;
+    expanded: Set<string>;
+    showTutorial?: boolean;
+    highlight?: string | null;
+  },
 ): void;
 export declare function renderViews(holder: unknown, ctx: unknown, ui: unknown): Promise<void>;

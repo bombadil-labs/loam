@@ -1,10 +1,17 @@
-// The tutorial's anti-rot guarantee (SPEC §19): the whole arc, headless. This suite drives
-// the EXACT functions the page calls — demos/tutorial/lessons.mjs `buildArc(loam)` over the
-// browser barrel — through all seventeen lessons IN ORDER, asserting every check green, that no
-// check is vacuously green before its lesson runs, that a revisit (reboot from the same
-// origin) re-verifies every green from the ground alone, that lesson 6's evolution leaves an
-// already-open subscription's SHAPE untouched (a subscription is a pinned lens), and the
-// finale's whole claim: export → `loam init --seed` → `loam pull` → `_hex` for `_hex`.
+// The tutorial's data layer, headless (§48). The page and this suite drive EXACTLY the same
+// two modules — `demos/tutorial/lessons.mjs` (the arc as data) and `demos/tutorial/player.mjs`
+// (the engine that plays any arc of that shape) — over the browser barrel. That identity is the
+// anti-rot guarantee: a step whose `run` stops doing its work fails here, named.
+//
+// WHAT THIS SUITE ASSERTS AND WHAT IT DELIBERATELY DOES NOT. Every step carries two observe
+// predicates; only the STORE one is checkable without a DOM, so that is what this file asserts,
+// on every step of the arc. The PAGE predicate, the rendered rail, the in-page revert confirm,
+// and the reload are `test/browser/tutorial.test.ts`'s — a real Chrome over the real page. Both
+// levels are covered; neither file covers both, and the split is the T143 lesson kept honest.
+//
+// The arc here is the STUB (T226): two or three lessons that exercise every mechanic the real
+// fifteen will need. T227 replaces the arc and extends this file; the engine's assertions are
+// written against the arc's SHAPE and its lesson ROLES, never against a lesson number.
 
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -17,142 +24,437 @@ import { storePath } from "../../src/cli/config.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemStorage } from "../store/mem-storage.js";
-// The page and this test share one arc — that identity IS the anti-rot guarantee.
 import {
-  ALICE,
-  FILM,
+  DIARY,
+  VIEWING,
   bootTutorialStore,
   buildArc,
   buildExport,
-  recordHomecoming,
+  type Lesson,
   type LessonCtx,
+  type LessonStep,
 } from "../../demos/tutorial/lessons.mjs";
+import {
+  CKPT_PREFIX,
+  SEED_KEY,
+  STORE_PREFIX,
+  TUTORIAL_CONTEXTS,
+  answerQuiz,
+  bankCheckpoint,
+  checkpointLessons,
+  clearCheckpoints,
+  completeStep,
+  enterLesson,
+  readCheckpoint,
+  readGlossary,
+  readProgress,
+  restoreCheckpoint,
+  resumeState,
+  sweepCheckpoints,
+  takeCheckpoint,
+} from "../../demos/tutorial/player.mjs";
+import { classifyDelta } from "../../demos/tutorial/instruments.mjs";
 
-// A hang guard, not a performance bound: this suite walks the whole 16-lesson tutorial arc
-// and takes 21-35s wall-clock when the machine is CPU-contended (parallel suites, background
-// builds), so a 20s clock raced real work and lost only under load — the T73/T75 shape, a
-// guard below the work's own honest runtime. 120s still catches a genuine hang cold.
+// A hang guard, not a performance bound (the T73/T75 shape): the whole arc plus a CLI round
+// trip runs in seconds unloaded and legitimately takes tens under contention.
 vi.setConfig({ testTimeout: 120_000 });
-
-const packetFile = (name: string): unknown[] =>
-  (
-    JSON.parse(readFileSync(join(process.cwd(), "demos", "tutorial", "packets", name), "utf8")) as {
-      deltas: unknown[];
-    }
-  ).deltas;
 
 let clock = 1_753_000_000_000;
 const nextTs = (): number => ++clock;
 
-// A lesson is a SEQUENCE of steps now; running it end-to-end is running every step in order —
-// the exact walk the page drives one click at a time.
-async function runLesson(
-  lesson: { steps: { run(ctx: LessonCtx): Promise<void> }[] },
-  ctx: LessonCtx,
-): Promise<void> {
-  for (const step of lesson.steps) await step.run(ctx);
-}
-
 async function makeCtx(storage: MemStorage): Promise<LessonCtx> {
   const { gateway, seed, author } = await bootTutorialStore(loam, storage);
-  return {
-    gateway,
-    storage,
-    seed,
-    author,
-    packets: {
-      circle: packetFile("circle.json"),
-      adversary: packetFile("adversary.json"),
-      dialect: packetFile("dialect.json"),
-    },
-    ts: nextTs,
-  };
+  return { gateway, storage, seed, author, ts: nextTs };
 }
 
+/** The page's own motion, minus the theater: enter, then complete every step in order. */
+async function playLesson(lesson: Lesson, ctx: LessonCtx): Promise<void> {
+  await enterLesson(loam, ctx, lesson);
+  for (const step of lesson.steps) {
+    const outcome = await completeStep(loam, ctx, lesson, step);
+    expect(outcome.ok, `step ${step.id}: ${outcome.ok ? "" : outcome.message}`).toBe(true);
+  }
+}
+
+const lessonOfRole = (arc: Lesson[], role: string): Lesson => {
+  const found = arc.find((l) => l.role === role);
+  expect(found, `the arc declares no lesson with role "${role}"`).toBeDefined();
+  return found!;
+};
+
+/** The ids of the deltas a store's rows hold, read from storage rather than from the gateway. */
+const rowIds = (storage: MemStorage): string[] =>
+  storage
+    .keys()
+    .filter((k) => k.startsWith(STORE_PREFIX) && k !== SEED_KEY)
+    .map((k) => k.slice(STORE_PREFIX.length))
+    .sort();
+
+const claimsWithContext = (ctx: LessonCtx, context: string): unknown[] =>
+  ctx.gateway
+    .offeredDeltas()
+    .filter((d) =>
+      d.claims.pointers.some(
+        (p) => p.target.kind === "entity" && p.target.entity.context === context,
+      ),
+    );
+
 beforeAll(() => {
-  // The packets are committed data, regenerated byte-identically — a drifted generator or a
-  // hand-edited packet fails here before any lesson gets to be confused by it.
+  // The packets are committed data the arc's federation lessons stand on; a drifted generator
+  // fails here rather than inside a lesson that is confused by it.
   execFileSync(process.execPath, [join("scripts", "gen-packets.mjs"), "--check"], {
     cwd: process.cwd(),
     stdio: "pipe",
   });
 });
 
-describe("the tutorial arc, headless", () => {
-  it("runs all seventeen lessons in order; every check earns its green", async () => {
+describe("the arc, headless: every step earns its store observable", () => {
+  it("walks the whole arc in order; no lesson is green before it runs; every step's store predicate turns true", async () => {
     const storage = new MemStorage();
     const ctx = await makeCtx(storage);
     const arc = buildArc(loam);
-    expect(arc).toHaveLength(17);
+    expect(arc.length).toBeGreaterThanOrEqual(2);
 
     for (const lesson of arc) {
-      // No lesson may be green before it runs — a vacuous check teaches nothing and can lie.
-      // (Lesson 1 is exempt: boot itself performed it, and the check still reads the ground.)
-      if (lesson.id !== 1) {
-        expect(await lesson.check(ctx), `lesson ${lesson.id} green before it ran`).toBe(false);
-      }
-      // Before lesson 2 registers anything, the store has no queryable surface at all — a fact
-      // can be real before any schema is (the reveal lesson 5 makes explicit).
-      if (lesson.id === 2) {
-        await expect(ctx.gateway.query(`{ film(entity: "${FILM}") { title } }`)).rejects.toThrow(
-          /nothing is registered/,
-        );
-      }
-      // Before lesson 15, the stranger at the window sees a store with nothing public.
-      if (lesson.id === 15) {
-        await expect(
-          ctx.gateway.queryPublic(`{ film(entity: "${FILM}") { title } }`),
-        ).rejects.toThrow(loam.NothingPublic);
-      }
-      await runLesson(lesson, ctx);
-      if (lesson.id === 17) {
-        // The finale's green is earned OUTSIDE the tab: perform alone must not grant it. The
-        // page records the homecoming after a verified localhost match (the honest path is
-        // driven whole by the second test); here we take the side door the copy celebrates —
-        // the record itself is the check's subject, and it reads back from the ground.
-        expect(await lesson.check(ctx), "lesson 17 green without a homecoming").toBe(false);
-        await recordHomecoming(loam, ctx, "side-door");
-      }
-      expect(await lesson.check(ctx), `lesson ${lesson.id} (${lesson.title})`).toBe(true);
+      expect(await lesson.check(ctx), `lesson ${lesson.id} green before it ran`).toBe(false);
 
-      // The reveal at the heart of Act II, pinned: after lesson 5 writes Alice with the pen but
-      // before lesson 6 evolves the lens, the Film view has no `guests` field at all — a lens
-      // shows only what it gathers. This stops being true the moment lesson 6 runs, so it can
-      // only be an in-order pin, never a durable check.
-      if (lesson.id === 5) {
-        const res = await ctx.gateway.query(`{ film(entity: "${FILM}") { guests } }`);
+      // A step is EARNED when its store predicate is false before its run — the property the
+      // browser suite's red-probe needs, and the anti-vacuity bar for the arc: a lesson made
+      // only of look-steps would teach a click and prove nothing.
+      const earned: string[] = [];
+      for (const step of lesson.steps) {
+        if (!(await step.observe.store(ctx))) earned.push(step.id);
+        const outcome = await completeStep(loam, ctx, lesson, step);
+        expect(outcome.ok, `step ${step.id}: ${outcome.ok ? "" : outcome.message}`).toBe(true);
         expect(
-          (res.errors ?? []).join(" "),
-          "guests must be an unknown field before lesson 6",
-        ).toMatch(/guests/);
+          await step.observe.store(ctx),
+          `step ${step.id}'s store observable is false after its run`,
+        ).toBe(true);
       }
+      expect(
+        earned.length,
+        `lesson ${lesson.id} has no step that earns its observable`,
+      ).toBeGreaterThan(0);
+      expect(await lesson.check(ctx), `lesson ${lesson.id} (${lesson.title})`).toBe(true);
     }
-
-    // The adversary's forgery is still in the ground after lesson 8's defense — visible,
-    // preserved, and refusing to matter (the lesson's check asserted the defended title).
-    const forged = ctx.packets.adversary[0] as { id: string };
-    expect(ctx.gateway.offeredDeltas().some((d) => d.id === forged.id)).toBe(true);
-
     await ctx.gateway.close();
-
-    // THE REVISIT: reboot from the same origin — progress is the store, so every lesson
-    // re-verifies green from the ground alone, no memory anywhere else.
-    const again = await makeCtx(storage);
-    for (const lesson of buildArc(loam)) {
-      expect(await lesson.check(again), `lesson ${lesson.id} after revisit`).toBe(true);
-    }
-    await again.gateway.close();
   });
 
-  it("the finale keeps its whole promise: export → init --seed → pull → _hex for _hex", async () => {
+  it("refuses to bank a step whose work did not land, naming the lesson and the step", async () => {
     const storage = new MemStorage();
     const ctx = await makeCtx(storage);
-    for (const lesson of buildArc(loam)) {
-      await runLesson(lesson, ctx);
+    const arc = buildArc(loam);
+    // The same arc-agnostic choice the browser probe makes: the first step whose store
+    // predicate is false before it runs.
+    let target: { lesson: Lesson; step: LessonStep } | undefined;
+    for (const lesson of arc) {
+      await enterLesson(loam, ctx, lesson);
+      for (const step of lesson.steps) {
+        if (!(await step.observe.store(ctx))) {
+          target = { lesson, step };
+          break;
+        }
+        await completeStep(loam, ctx, lesson, step);
+      }
+      if (target !== undefined) break;
     }
-    const inTab = await ctx.gateway.query(`{ film(entity: "${FILM}") { title _hex } }`);
-    const tabView = inTab.data as { film: { title: string; _hex: string } };
-    expect(tabView.film.title).toBe("Arrival");
+    expect(target, "no step in this arc earns its own observable").toBeDefined();
+    const { lesson, step } = target!;
+
+    const neutered: LessonStep = { ...step, run: async () => {} };
+    const outcome = await completeStep(loam, ctx, lesson, neutered);
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.message).toContain(String(lesson.id));
+    expect(outcome.message).toContain(step.id);
+    // and nothing was banked: the store holds no step claim for it
+    expect(readProgress(ctx).steps.has(step.id)).toBe(false);
+    await ctx.gateway.close();
+  });
+});
+
+describe("progress is claims", () => {
+  it("lands one claim per kind, counts at or above the actions performed, and reads back as the rail", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    const arc = buildArc(loam);
+    let steps = 0;
+    let quizzes = 0;
+    for (const lesson of arc) {
+      await playLesson(lesson, ctx);
+      steps += lesson.steps.length;
+      await bankCheckpoint(loam, ctx, lesson.id);
+      if (lesson.quiz !== undefined) {
+        for (const [i] of lesson.quiz.questions.entries()) {
+          await answerQuiz(loam, ctx, lesson.quiz, i, 0);
+          quizzes += 1;
+        }
+      }
+    }
+
+    // DELTA LEVEL: every kind is really in the ground, under the tutorial vocabulary.
+    expect(claimsWithContext(ctx, TUTORIAL_CONTEXTS.entered).length).toBeGreaterThanOrEqual(
+      arc.length,
+    );
+    expect(claimsWithContext(ctx, TUTORIAL_CONTEXTS.step).length).toBeGreaterThanOrEqual(steps);
+    expect(claimsWithContext(ctx, TUTORIAL_CONTEXTS.quiz).length).toBeGreaterThanOrEqual(quizzes);
+    expect(claimsWithContext(ctx, TUTORIAL_CONTEXTS.checkpoint).length).toBeGreaterThanOrEqual(1);
+
+    // OBJECT LEVEL: the rail is a reading of those claims, not a parallel counter.
+    const progress = readProgress(ctx);
+    expect(progress.entered).toEqual(arc.map((l) => l.id));
+    expect(progress.steps.size).toBe(steps);
+    expect(progress.quiz.size).toBe(quizzes);
+    await ctx.gateway.close();
+  });
+
+  it("reconstructs where the student stood from the claims alone — every other key deleted", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    const arc = buildArc(loam);
+    const first = arc[0]!;
+    const second = arc[1]!;
+    await playLesson(first, ctx);
+    takeCheckpoint(storage, first.id);
+    await enterLesson(loam, ctx, second);
+    await completeStep(loam, ctx, second, second.steps[0]!);
+    if (first.quiz !== undefined) await answerQuiz(loam, ctx, first.quiz, 0, 0);
+    const before = resumeState(arc, readProgress(ctx));
+    expect(before.lessonId).toBe(second.id);
+    expect(before.stepIndex).toBe(1);
+    await ctx.gateway.close();
+
+    // THE FALSIFIER: delete every key that is not a store row and not the seed — the
+    // checkpoints, and anything a future build might be tempted to remember position in.
+    for (const key of storage.keys()) {
+      if (key === SEED_KEY) continue;
+      if (key.startsWith(STORE_PREFIX) && /^[0-9a-f]+$/.test(key.slice(STORE_PREFIX.length))) {
+        continue;
+      }
+      storage.removeItem(key);
+    }
+    expect(storage.keys().some((k) => k.startsWith(CKPT_PREFIX))).toBe(false);
+
+    const again = await makeCtx(storage);
+    const after = resumeState(buildArc(loam), readProgress(again));
+    expect(after.lessonId).toBe(before.lessonId);
+    expect(after.stepIndex).toBe(before.stepIndex);
+    expect([...after.quiz.keys()].sort()).toEqual([...before.quiz.keys()].sort());
+    await again.gateway.close();
+  });
+});
+
+describe("the glossary is made of deltas", () => {
+  it("plants a lesson's terms as claims when the lesson is entered, and reads them back in order", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    const arc = buildArc(loam);
+    const first = arc[0]!;
+    expect(first.terms.length, "the opening lesson introduces no term").toBeGreaterThan(0);
+
+    expect(readGlossary(ctx)).toHaveLength(0);
+    await enterLesson(loam, ctx, first);
+    const planted = readGlossary(ctx);
+    expect(planted.map((e) => e.term)).toEqual(first.terms.map((t) => t.term));
+    for (const entry of planted) {
+      expect(entry.meaning.length).toBeGreaterThan(0);
+      expect(entry.lesson).toBe(first.id);
+      // the entry names the claim it is made of — the "where does this live?" control's target
+      expect(ctx.gateway.offeredDeltas().some((d) => d.id === entry.deltaId)).toBe(true);
+    }
+
+    // The reveal lesson plants a term from a STEP, not from its entry — the payoff needs the
+    // student to open the drawer for it.
+    const reveal = lessonOfRole(arc, "reveal");
+    const beforeReveal = new Set(readGlossary(ctx).map((e) => e.term));
+    for (const lesson of arc) {
+      if (lesson.id > reveal.id) break;
+      await playLesson(lesson, ctx);
+    }
+    const revealed = readGlossary(ctx).filter((e) => !beforeReveal.has(e.term));
+    expect(revealed.length, "the reveal lesson plants no new term").toBeGreaterThan(0);
+    await ctx.gateway.close();
+  });
+
+  it("badges the tutorial's own records `tutorial`, and leaves the student's facts alone", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    const arc = buildArc(loam);
+    await playLesson(arc[0]!, ctx);
+    const ground = ctx.gateway.offeredDeltas();
+
+    const contexts = new Set(Object.values(TUTORIAL_CONTEXTS));
+    const progressClaims = ground.filter((d) =>
+      d.claims.pointers.some(
+        (p) => p.target.kind === "entity" && contexts.has(p.target.entity.context ?? ""),
+      ),
+    );
+    expect(progressClaims.length).toBeGreaterThan(0);
+    for (const d of progressClaims) {
+      expect(classifyDelta(d, ctx.author).kind, `${d.id} is the tutorial's own record`).toBe(
+        "tutorial",
+      );
+    }
+    // ...and the student's own claim — the diary's name — is still a plain fact.
+    const mine = ground.find((d) =>
+      d.claims.pointers.some((p) => p.target.kind === "entity" && p.target.entity.id === DIARY),
+    );
+    expect(mine, "lesson one lands no claim of the student's own").toBeDefined();
+    expect(classifyDelta(mine!, ctx.author).kind).toBe("fact");
+    await ctx.gateway.close();
+  });
+});
+
+describe("checkpoints, revert, and the sweep", () => {
+  it("a checkpoint is the store's rows frozen; restoring it yields exactly that id set, two-sided", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    const arc = buildArc(loam);
+    const first = arc[0]!;
+    const second = arc[1]!;
+
+    await playLesson(first, ctx);
+    expect(takeCheckpoint(storage, first.id).ok).toBe(true);
+    const frozen = rowIds(storage);
+    const survivor = ctx.gateway
+      .offeredDeltas()
+      .find((d) =>
+        d.claims.pointers.some((p) => p.target.kind === "entity" && p.target.entity.id === DIARY),
+      );
+    expect(survivor, "lesson one lands no claim to survive the revert").toBeDefined();
+
+    await playLesson(second, ctx);
+    const discarded = ctx.gateway.offeredDeltas().filter((d) => !frozen.includes(d.id));
+    expect(discarded.length, "the second lesson landed nothing to discard").toBeGreaterThan(0);
+    await ctx.gateway.close();
+
+    expect(restoreCheckpoint(storage, first.id).ok).toBe(true);
+    expect(rowIds(storage)).toEqual(frozen);
+
+    const back = await makeCtx(storage);
+    const ids = new Set(back.gateway.offeredDeltas().map((d) => d.id));
+    // TWO-SIDED: the discarded work is gone AND the pre-checkpoint claim survived.
+    for (const d of discarded) expect(ids.has(d.id), `${d.id} survived the revert`).toBe(false);
+    expect(ids.has(survivor!.id), "the pre-checkpoint claim did not survive the revert").toBe(true);
+    // and the student stands exactly where the checkpoint was taken — the later lesson was
+    // never entered in this ground, so reopening it writes nothing at all
+    expect(resumeState(buildArc(loam), readProgress(back)).lessonId).toBe(first.id);
+    expect(rowIds(storage)).toEqual(frozen);
+    await back.gateway.close();
+  });
+
+  it("one checkpoint per boundary, superseded in place; start-over clears them all", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    const arc = buildArc(loam);
+    await playLesson(arc[0]!, ctx);
+    takeCheckpoint(storage, arc[0]!.id);
+    const firstRows = readCheckpoint(storage, arc[0]!.id)!.rows;
+    await playLesson(arc[1]!, ctx);
+    takeCheckpoint(storage, arc[0]!.id); // the same boundary again
+    expect(checkpointLessons(storage)).toEqual([arc[0]!.id]);
+    expect(Object.keys(readCheckpoint(storage, arc[0]!.id)!.rows).length).toBeGreaterThan(
+      Object.keys(firstRows).length,
+    );
+
+    takeCheckpoint(storage, arc[1]!.id);
+    expect(checkpointLessons(storage)).toEqual([arc[0]!.id, arc[1]!.id]);
+    clearCheckpoints(storage);
+    expect(checkpointLessons(storage)).toEqual([]);
+    expect(storage.keys().some((k) => k.startsWith(CKPT_PREFIX))).toBe(false);
+    await ctx.gateway.close();
+  });
+
+  it("refuses an over-quota checkpoint, naming the boundary, and leaves no half-written blob", async () => {
+    const roomy = new MemStorage();
+    const ctx = await makeCtx(roomy);
+    const arc = buildArc(loam);
+    await playLesson(arc[0]!, ctx);
+
+    // A storage whose quota is smaller than the blob it is asked to hold.
+    const tight = new MemStorage(2048);
+    for (const key of roomy.keys()) {
+      try {
+        tight.setItem(key, roomy.getItem(key)!);
+      } catch {
+        break; // the rows themselves may not fit; the refusal is what this rail is about
+      }
+    }
+    const refused = takeCheckpoint(tight, arc[0]!.id, { label: `lesson ${arc[0]!.id}` });
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.message).toContain(`lesson ${arc[0]!.id}`);
+    expect(tight.keys().some((k) => k.startsWith(CKPT_PREFIX))).toBe(false);
+    await ctx.gateway.close();
+  });
+
+  it("an erasure destroys every checkpoint that could hold the bytes, and spares the ones that cannot", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    const arc = buildArc(loam);
+    const finale = lessonOfRole(arc, "erasure-finale");
+
+    // Play up to (not including) the erasure lesson, taking a checkpoint at every boundary.
+    for (const lesson of arc) {
+      if (lesson.id === finale.id) break;
+      await playLesson(lesson, ctx);
+      expect(takeCheckpoint(storage, lesson.id).ok).toBe(true);
+    }
+    const boundaries = checkpointLessons(storage);
+    expect(boundaries.length, "the arc reaches its erasure with no checkpoints").toBeGreaterThan(1);
+
+    await playLesson(finale, ctx);
+    const erased = [...loam.readTombstones(ctx.gateway.reactor, ctx.author)];
+    expect(erased.length, "the erasure lesson erased nothing").toBeGreaterThan(0);
+
+    const report = sweepCheckpoints(storage, erased);
+    // TWO-SIDED, at the bytes: the condemned checkpoints are gone from storage entirely, and a
+    // named bystander checkpoint is still there AND still readable.
+    expect(report.destroyed.length, "no checkpoint held the erased bytes").toBeGreaterThan(0);
+    expect(
+      report.kept.length,
+      "every checkpoint was destroyed — this is over-purging",
+    ).toBeGreaterThan(0);
+    for (const gone of report.destroyed) {
+      expect(gone.reason.length).toBeGreaterThan(0);
+      expect(storage.getItem(`${CKPT_PREFIX}${gone.lesson}`)).toBeNull();
+    }
+    for (const kept of report.kept) {
+      const blob = readCheckpoint(storage, kept.lesson);
+      expect(blob, `the bystander checkpoint ${kept.lesson} was destroyed`).not.toBeNull();
+      for (const id of erased) expect(Object.keys(blob!.rows)).not.toContain(STORE_PREFIX + id);
+    }
+    // No surviving blob anywhere holds an erased id — the claim the page makes on screen.
+    for (const lesson of checkpointLessons(storage)) {
+      const blob = readCheckpoint(storage, lesson)!;
+      for (const id of erased) expect(Object.keys(blob.rows)).not.toContain(STORE_PREFIX + id);
+    }
+    await ctx.gateway.close();
+  });
+});
+
+describe("the tutorial's store is a real store", () => {
+  it("boot heals a key poisoned under the store's own prefix", async () => {
+    const storage = new MemStorage();
+    const first = await bootTutorialStore(loam, storage);
+    await first.gateway.close();
+    storage.setItem(`${STORE_PREFIX}ui:pins`, JSON.stringify([["a", "{ viewing { title } }"]]));
+
+    const healed = await bootTutorialStore(loam, storage);
+    expect(storage.getItem(`${STORE_PREFIX}ui:pins`)).toBeNull();
+    expect(storage.getItem(SEED_KEY)).toBe(first.seed);
+    expect(healed.gateway.offeredDeltas().length).toBeGreaterThan(0);
+    await healed.gateway.close();
+  });
+
+  it("what the student exports IS the store: export → init --seed → pull → _hex for _hex", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    for (const lesson of buildArc(loam)) await playLesson(lesson, ctx);
+
+    const inTab = await ctx.gateway.query(`{ viewing(entity: "${VIEWING}") { rating _hex } }`);
+    const tabView = inTab.data as { viewing: { rating: number; _hex: string } };
+    expect(tabView.viewing._hex.length).toBeGreaterThan(0);
 
     const dir = mkdtempSync(join(tmpdir(), "loam-tutorial-"));
     const io = { out: () => {}, err: (s: string) => console.error(s) };
@@ -160,97 +462,17 @@ describe("the tutorial arc, headless", () => {
       const file = join(dir, "my-store.json");
       writeFileSync(file, buildExport(loam, ctx));
       const exported = JSON.parse(readFileSync(file, "utf8")) as { seed: string };
-
       expect(await run(["init", "--home", dir, "--seed", exported.seed], io)).toBe(0);
       expect(await run(["pull", file, "--home", dir], io)).toBe(0);
 
-      const laptop = await Gateway.open(new SqliteBackend(storePath(dir)), {
-        seed: exported.seed,
-      });
-      const answer = await laptop.query(`{ film(entity: "${FILM}") { title _hex } }`);
-      const laptopView = answer.data as { film: { title: string; _hex: string } };
-      // Not a copy that resembles it: THE SAME STORE, proven by content address.
-      expect(laptopView.film.title).toBe("Arrival");
-      expect(laptopView.film._hex).toBe(tabView.film._hex);
+      const laptop = await Gateway.open(new SqliteBackend(storePath(dir)), { seed: exported.seed });
+      const answer = await laptop.query(`{ viewing(entity: "${VIEWING}") { rating _hex } }`);
+      const laptopView = answer.data as { viewing: { rating: number; _hex: string } };
+      expect(laptopView.viewing._hex).toBe(tabView.viewing._hex);
       await laptop.close();
-
-      // The honest homecoming: the match verified, the page records it, and the finale's
-      // check reads it back from the ground — progress is the store, all the way to the end.
-      const finale = buildArc(loam).find((l) => l.id === 17)!;
-      expect(await finale.check(ctx)).toBe(false);
-      await recordHomecoming(loam, ctx, laptopView.film._hex);
-      expect(await finale.check(ctx)).toBe(true);
     } finally {
       await ctx.gateway.close();
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
-  });
-
-  // SPEC §19's mandated lesson-6 pin: a subscription is a standing question against the lens
-  // as it was when you asked, and it can never sprout a field you never selected. Open one
-  // against the pre-guests Film, evolve the lens (lesson 6), and prove the open subscription
-  // keeps its OLD shape while a fresh query sees the new field.
-  it("lesson 6: an open subscription keeps its shape across the evolution", async () => {
-    const storage = new MemStorage();
-    const ctx = await makeCtx(storage);
-    const arc = buildArc(loam);
-    for (const lesson of arc.filter((l) => l.id <= 5)) await runLesson(lesson, ctx);
-
-    // Film is at its pre-guests generation. Open a subscription selecting only what that lens
-    // offers, and collect every payload it emits.
-    const seen: Array<Record<string, unknown>> = [];
-    const sub = await ctx.gateway.subscribe(`subscription { film(entity: "${FILM}") { title } }`);
-    const pump = (async () => {
-      for await (const ev of sub) {
-        const film = (ev as { film?: Record<string, unknown> }).film;
-        if (film) seen.push(film);
-      }
-    })();
-    await new Promise((r) => setTimeout(r, 30)); // the initial snapshot
-    const before = seen.length;
-    expect(before).toBeGreaterThan(0);
-
-    // Lesson 6 evolves the lens (adds `guests`) and re-registers — a ground change the open
-    // subscription will re-resolve under its ORIGINAL shape.
-    await runLesson(
-      arc.find((l) => l.id === 6)!,
-      ctx,
-    );
-    await new Promise((r) => setTimeout(r, 30));
-
-    // The pinned lens never grew guests — every payload it ever emitted is title-only.
-    expect(seen.length).toBeGreaterThanOrEqual(before);
-    for (const film of seen) {
-      expect(Object.keys(film), "the old subscription must keep its shape").toEqual(["title"]);
-    }
-    // ...while a fresh query, asked with the new field, sees Alice.
-    const fresh = await ctx.gateway.query(`{ film(entity: "${FILM}") { guests } }`);
-    expect((fresh.data as { film: { guests: unknown[] } }).film.guests).toContain(ALICE);
-
-    await sub.return?.(undefined);
-    await pump.catch(() => {});
-    await ctx.gateway.close();
-  });
-
-  // Regression: an earlier build wrote UI pins to `loam:tutorial:ui:pins`, which collides with
-  // the LocalStorageBackend's delta namespace and bricked boot ("row ui:pins is not a delta").
-  // Boot must heal a store already poisoned that way — the button that could clear it never
-  // wires up if boot throws, so recovery has to be automatic.
-  it("boot heals a store poisoned by the legacy pins key", async () => {
-    const storage = new MemStorage();
-    // a first clean boot, so the store holds a real seed and a genesis delta
-    const first = await bootTutorialStore(loam, storage);
-    await first.gateway.close();
-    // now poison it exactly as the old build did
-    storage.setItem("loam:tutorial:ui:pins", JSON.stringify([["a", "{ film { title } }"]]));
-
-    // the poisoned store must still open (the stray key is purged before the backend reads)
-    const healed = await bootTutorialStore(loam, storage);
-    expect(healed.gateway).toBeDefined();
-    expect(storage.getItem("loam:tutorial:ui:pins")).toBeNull();
-    // and the real seed and genesis survived the heal
-    expect(storage.getItem("loam:tutorial:seed")).toBe(first.seed);
-    expect(healed.gateway.offeredDeltas().length).toBeGreaterThan(0);
-    await healed.gateway.close();
   });
 });

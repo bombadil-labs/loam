@@ -1,54 +1,81 @@
-// Types for site/lessons.mjs — the module stays plain JS (it is bundled into the page and
-// imported by the headless arc test alike); this declaration keeps the test typed.
+// Types for demos/tutorial/lessons.mjs — the module stays plain JS (it is bundled into the page
+// and imported by the headless arc suite alike); this declaration keeps both typed.
 
 import type { Gateway } from "../../src/gateway/gateway.js";
-
-export interface LessonStorage {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-}
+import type { StorageLike } from "../../src/store/local-storage.js";
 
 export interface LessonCtx {
   gateway: Gateway;
-  storage: LessonStorage;
+  storage: StorageLike;
   seed: string;
   author: string;
-  packets: { circle: unknown[]; adversary: unknown[]; dialect: unknown[] };
   ts(): number;
 }
 
-// One clickable step: a button label, the "where to look / what to notice" line shown once it
-// has run, and the slice of work it performs. The lessons are a SEQUENCE of these now — a
-// learner walks them one at a time so every intermediary state is actually seen.
+/** A step's PAGE observable: a selector, and optionally the text it must show. */
+export interface PageObserve {
+  readonly selector: string;
+  readonly contains?: string;
+}
+
+/**
+ * One step: the T106 three-way framing, the work, and TWO machine-checkable observables. The
+ * page predicate and the store predicate must both hold after `run` — prose is never compared
+ * to the DOM it produced.
+ */
 export interface LessonStep {
-  label: string;
-  look: string;
+  readonly id: string;
+  readonly label: string;
+  readonly have: string;
+  readonly want: string;
+  readonly how: string;
   run(ctx: LessonCtx): Promise<void>;
+  readonly observe: {
+    readonly page?: PageObserve;
+    store(ctx: LessonCtx): Promise<boolean>;
+  };
+}
+
+export interface QuizQuestion {
+  readonly ask: string;
+  readonly choices: readonly string[];
+  /** The index of the right choice; checked locally, never sent anywhere. */
+  readonly answer: number;
+  /** The id of the step that teaches this — a wrong answer links it rather than scolding. */
+  readonly teaches: string;
+}
+
+export interface Quiz {
+  readonly id: string;
+  readonly questions: readonly QuizQuestion[];
+}
+
+export interface GlossaryTerm {
+  readonly term: string;
+  readonly meaning: string;
 }
 
 export interface Lesson {
-  id: number;
-  title: string;
-  copy: string;
-  steps: LessonStep[];
+  readonly id: number;
+  /** The browser suite's targeting contract: "opening", "reveal", "erasure-finale". */
+  readonly role: string;
+  readonly title: string;
+  readonly copy: string;
+  readonly terms: readonly GlossaryTerm[];
+  readonly quiz?: Quiz;
+  readonly steps: readonly LessonStep[];
   check(ctx: LessonCtx): Promise<boolean>;
 }
 
-export declare const FILM: string;
-export declare const ALICE: string;
-export declare const SEED_KEY: string;
+export declare const DIARY: string;
+export declare const VIEWING: string;
+export declare const RAE: string;
 
 export declare function bootTutorialStore(
   loam: unknown,
-  storage: LessonStorage,
+  storage: StorageLike,
 ): Promise<{ gateway: Gateway; seed: string; author: string }>;
 
 export declare function buildArc(loam: unknown): Lesson[];
 
 export declare function buildExport(loam: unknown, ctx: LessonCtx): string;
-
-export declare function recordHomecoming(
-  loam: unknown,
-  ctx: LessonCtx,
-  matchedHex: string,
-): Promise<void>;

@@ -73,4 +73,32 @@ describe("the tutorial site build", () => {
     expect(html).toContain(`src="./app.js"`);
     expect(html).toContain(`href="./style.css"`);
   });
+
+  // §48: the page that ships is the v3 PLAYER. The shell it needs is in the deployed HTML and
+  // the engine is in the deployed bundle — a build that quietly kept shipping the old page
+  // would otherwise pass every assertion above.
+  it("the deployed tutorial is the v3 player: the shell it renders into, and the engine inside the bundle", () => {
+    const html = readFileSync(join(OUT, "tutorial.html"), "utf8");
+    for (const id of [
+      "lesson-pane",
+      "progress-rail",
+      "glossary-entries",
+      "ground-show-tutorial",
+      "drawer",
+    ]) {
+      expect(html, `the shipped page has no #${id}`).toContain(`id="${id}"`);
+    }
+    const app = readFileSync(join(OUT, "app.js"), "utf8");
+    expect(app, "the checkpoint store did not ship").toContain("loam:tutorial-ckpt:");
+    expect(app, "the tutorial's own vocabulary did not ship").toContain("tutorial.glossary");
+  });
+
+  // A native dialog blocks the page's own script until a human answers it, and no CDP-driven
+  // rail can answer one — so a `window.confirm` in the shipped bundle is a revert nobody can
+  // test and a student can meet on a page with dialogs suppressed. The page confirms in-page.
+  it("ships no native dialog: every confirmation is a control in the page", () => {
+    const app = readFileSync(join(OUT, "app.js"), "utf8");
+    expect(app).not.toMatch(/window\.confirm\s*\(/);
+    expect(app).not.toMatch(/(?<![.\w])confirm\s*\(["'`]/);
+  });
 });
