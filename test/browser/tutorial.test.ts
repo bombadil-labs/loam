@@ -330,6 +330,15 @@ describe("§48 — the progress is in the store, and nowhere else", () => {
       await page.attrs(`.delta[data-delta-id="${foreign}"]`, "data-kind"),
       "a stranger's record was hidden by the tutorial filter",
     ).toEqual(["tutorial"]);
+
+    // ...and neither is a record of the student's OWN that wears the vocabulary alongside
+    // something constitutional. What may be hidden is exactly what the progress reading counts;
+    // anything that falls between those two rules would be both uncounted and unseen.
+    const hybrid = await page.plantHybridTutorialClaim();
+    expect(
+      await page.exists(`.delta[data-delta-id="${hybrid}"]`),
+      "a record that is more than the tutorial's own bookkeeping was hidden",
+    ).toBe(true);
   });
 });
 

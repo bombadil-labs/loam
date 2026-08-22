@@ -18,6 +18,8 @@ export declare const TUTORIAL_CONTEXTS: {
 };
 
 export declare function isTutorialDelta(delta: Delta): boolean;
+/** ...and ONLY that: no constitutional context, no delta ref, no `rhizomatic.*` role. */
+export declare function isOnlyTutorial(delta: Delta): boolean;
 
 export interface QuizResult {
   readonly choice: number;

@@ -6,7 +6,7 @@
 // page's CodeMirror wiring); the classifier lives here because it is pure and CI can pin it.
 
 import { parse } from "graphql";
-import { isTutorialDelta } from "./player.mjs";
+import { isOnlyTutorial, isTutorialDelta } from "./player.mjs";
 
 // Only READS may re-run themselves. A pinned mutation would be executed on every render —
 // and a mutation that touches a subscribed view triggers a render, which is a self-
@@ -138,15 +138,20 @@ const BADGE_LABELS = {
 export function renderGround(holder, deltas, selfAuthor, toWire, state) {
   holder.textContent = "";
   const classified = [...deltas].map((d) => ({ d, c: classifyDelta(d, selfAuthor) }));
-  // SIGNED, self-authored, and the tutorial's own: all three, because `claims.author` is a plain
-  // field and an UNSIGNED row is admitted to the ground (the driver quarantines a signature that
-  // fails, not one that is missing). Without the signature test, a row nobody signed could name
-  // the student as its author and land in the one place the pane does not look. A writer who has
-  // read the seed can sign as them and is not stopped by this; nothing at this layer could.
+  // WHAT MAY BE HIDDEN IS EXACTLY WHAT PROGRESS COUNTS — `isOnlyTutorial`, the same predicate
+  // the reading uses, so no record can fall between the two rules and be both uncounted and
+  // unseen. A delta that is the tutorial's vocabulary AND something else is still badged
+  // `tutorial`, and it stays on screen.
+  //
+  // SIGNED and self-authored too, because `claims.author` is a plain field and an UNSIGNED row
+  // is admitted to the ground (the driver quarantines a signature that fails, not one that is
+  // missing). Without that test, a row nobody signed could name the student as its author and
+  // land in the one place the pane does not look. A writer who has read the seed can sign as
+  // them and is not stopped by this; nothing at this layer could.
   const hidden =
     state.showTutorial === true
       ? []
-      : classified.filter((x) => x.c.kind === "tutorial" && !x.c.foreign && x.d.sig !== undefined);
+      : classified.filter((x) => isOnlyTutorial(x.d) && !x.c.foreign && x.d.sig !== undefined);
   const shown = classified.filter((x) => !hidden.includes(x));
 
   const head = document.createElement("p");

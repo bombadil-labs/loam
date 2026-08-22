@@ -49,7 +49,7 @@ export function isTutorialDelta(delta) {
  * same rule, or one delta is banked progress at one level and a grant at the other, and the two
  * levels disagree about the same bytes.
  */
-function isOnlyTutorial(delta) {
+export function isOnlyTutorial(delta) {
   if (!isTutorialDelta(delta)) return false;
   return !delta.claims.pointers.some(
     (p) =>

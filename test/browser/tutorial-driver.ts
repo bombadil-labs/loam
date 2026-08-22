@@ -428,6 +428,33 @@ export class TutorialPage {
     return String(id);
   }
 
+  /**
+   * Land a claim signed by the STUDENT'S OWN key that wears the tutorial's vocabulary AND a
+   * constitutional context. It is not the tutorial's bookkeeping, so the pane must not hide it.
+   * Returns its delta id.
+   */
+  async plantHybridTutorialClaim(): Promise<string> {
+    const id = await this.tab.eval(
+      `(async () => {
+         const loam = window.loam, ctx = window.tutorial.ctx;
+         const claim = loam.signClaims(
+           { timestamp: Date.now(), author: ctx.author,
+             pointers: [
+               { role: "step", target: { kind: "entity",
+                 entity: { id: "tutorial:step:88.8", context: "tutorial.step" } } },
+               { role: "name", target: { kind: "primitive", value: "88.8" } },
+               { role: "declares", target: { kind: "entity",
+                 entity: { id: "loam:something", context: "loam.something-else" } } },
+             ] },
+           ctx.seed);
+         await ctx.gateway.federate([claim]);
+         return claim.id;
+       })()`,
+    );
+    await this.tab.eval(`window.tutorial.refresh()`);
+    return String(id);
+  }
+
   /** Every localStorage key this origin holds, straight from the browser. */
   keys(): Promise<string[]> {
     return this.tab.eval(`Object.keys(localStorage).sort()`).then((v) => json<string[]>(v));
