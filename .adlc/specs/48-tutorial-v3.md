@@ -35,6 +35,11 @@ June finishes lesson 6 and a quiz card offers three questions. She answers one w
 does not scold — it names the step that teaches the thing and offers to jump there. She can
 skip the whole quiz and the arc never blocks on it.
 
+June hits the word "delta" for the first time and it is introduced in one plain sentence
+before it is ever used bare; a glossary entry appears in a side pane she can consult. Lessons
+later, the tutorial shows her the glossary itself is made of the same signed records she has
+been studying — her own store has been teaching her from inside.
+
 June closes the tab on Tuesday. On Thursday the tutorial reopens exactly where she left it —
 same lesson, same step, same quiz results — because the progress was in the store all along.
 
@@ -94,6 +99,16 @@ step's observable is a predicate over the page and the store — never an echo o
    content parity. T106's plain-language bar and the three-way framing govern every new step.
    `test/site/arc.test.ts` is NOT frozen (verified: T106 lists it under scope, not rails) and
    is rewritten alongside.
+9. **Language assumes nothing, and the glossary is data** (Myk, 2026-08-21). No technical term
+   appears before the arc introduces it in plain words — delta, lens, schema, operator, all of
+   them earn their first use. Each introduction also lands a glossary entry as a delta in the
+   student's own store (the tutorial vocabulary), and a growing glossary pane renders as a
+   lens over those claims. The payoff is a mid-journey reveal, a secondary lesson in Myk's
+   words: the glossary the student has been consulting all along IS made of the records they
+   have been learning about — open the Ground pane and there they are, signed. The reveal
+   composes with decision 2 (progress is deltas): by then the student has seen two of their
+   own instruments turn out to be ordinary claims, which is the thesis taught twice without
+   repeating a lesson.
 
 ## Acceptance criteria
 
@@ -131,7 +146,13 @@ step's observable is a predicate over the page and the store — never an echo o
 9. INTROSPECTION. The drawer shows the current derived GraphQL SDL and the step's
    before/after deltas, and its content comes from the live gateway, never a fixture —
    verified by `test/browser/tutorial.test.ts`.
-10. THE DEPLOYED PAGE. The tutorial still ships at the repo's github.io path from `demos/`,
+10. VOCABULARY DISCIPLINE. Every technical term used in lesson copy has a glossary
+    introduction that precedes its first bare use in the arc, checked mechanically — the arc
+    exports its term manifest and a scan asserts intro-before-use for every term — and each
+    introduction lands a `tutorial.*` glossary delta the pane renders from — verified by a
+    vocabulary case in the revised `test/site/arc.test.ts` plus the glossary-reveal step's
+    observe predicates in `test/browser/tutorial.test.ts`.
+11. THE DEPLOYED PAGE. The tutorial still ships at the repo's github.io path from `demos/`,
     self-contained, no server — verified by the existing site build check extended to the v3
     entry point (`npm run check` site suite).
 
