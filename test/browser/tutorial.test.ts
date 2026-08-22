@@ -495,6 +495,10 @@ describe("§48 — the quiz teaches rather than scolds", () => {
     while (await page.exists("#quiz-card [data-question] button[data-choice]:not([disabled])")) {
       await page.answerFirstQuestion("right");
     }
+    // The button says what pressing it means: nothing is being skipped any more.
+    expect(await page.text("#quiz-skip"), "an answered card still offers to skip itself").toBe(
+      "done",
+    );
     await page.click("#quiz-skip");
     expect(await page.exists("#quiz-card")).toBe(false);
     expect(
@@ -517,8 +521,13 @@ describe("§48 — the right to be forgotten reaches the checkpoints", () => {
     for (let i = 0; i < target.steps.length; i++) await page.runPending();
 
     expect(await page.exists("#sweep-notice"), "the sweep said nothing at all").toBe(true);
-    expect(await page.text("#sweep-notice")).toMatch(/checkpoint/i);
     expect(await page.attrs("#sweep-notice [data-swept]", "data-swept")).toEqual([]);
+    // ...and it says WHAT HAPPENED, in its own words: a heading that mentions checkpoints would
+    // read the same whether the sweep destroyed everything or found nothing.
+    expect(
+      await page.text("#sweep-notice"),
+      "the notice appeared but never said the sweep found nothing",
+    ).toMatch(/nothing to destroy/i);
     const banked = (await page.position()).banked;
     for (const step of target.steps) {
       expect(banked, `step ${step.id} could not be completed after the erasure`).toContain(step.id);

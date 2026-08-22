@@ -149,6 +149,33 @@ describe("the arc, headless: every step earns its store observable", () => {
     await ctx.gateway.close();
   });
 
+  it("refuses to bank a step whose work THREW, and says what the store said", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    const arc = buildArc(loam);
+    const lesson = arc[0]!;
+    const step = lesson.steps[0]!;
+    await enterLesson(loam, ctx, lesson);
+
+    // The store refuses a write — a real path, since every step writes through the door.
+    const throwing: LessonStep = {
+      ...step,
+      run: async () => {
+        throw new Error("the door said no");
+      },
+    };
+    const outcome = await completeStep(loam, ctx, lesson, throwing);
+    expect(outcome.ok, "a step whose work threw was banked anyway").toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.message).toContain(String(lesson.id));
+    expect(outcome.message).toContain(step.id);
+    expect(outcome.message, "the refusal hides what the store actually said").toContain(
+      "the door said no",
+    );
+    expect(readProgress(ctx).steps.has(step.id)).toBe(false);
+    await ctx.gateway.close();
+  });
+
   it("refuses to bank a step whose work did not land, naming the lesson and the step", async () => {
     const storage = new MemStorage();
     const ctx = await makeCtx(storage);
