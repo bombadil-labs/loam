@@ -14,6 +14,22 @@
 // (that is `test/site/arc.test.ts`, which drives the same two modules with no DOM at all).
 // Both levels are covered between the two files; this one owns the page, the reload, the bytes
 // in localStorage, and every claim the student can actually see.
+//
+// THREE THINGS STATED RATHER THAN ASSERTED, so nobody reads more into a green than it means:
+//
+//   REVERT'S ID-SET EQUALITY IS QUALIFIED. Spec criterion 3 asks for a store whose sorted
+//   delta-id set equals the checkpoint's, and the revert case asserts exactly that — but the
+//   equality holds only while no erasure has happened, because an erasure RECEIPT is deliberately
+//   kept beyond the checkpoint's set (an undo may take back the student's work, never a
+//   forgetting). The case after it drives that arrangement and asserts the receipt survives.
+//
+//   THE PAGE OBSERVABLE ASKS WHAT THE PAGE HOLDS, NOT WHAT IS ON SCREEN. The panes are tabs and
+//   an inactive one is display:none, so these cases prove a pane RENDERED the evidence, never
+//   that it was visible at that moment. A visibility test would refuse every step whose evidence
+//   lands in a pane the student is about to open.
+//
+//   THE STUB ARC IS NOT THE CURRICULUM. Coverage of the real fifteen lessons lands with T227,
+//   which extends the headless file; this one is frozen and must not need editing for it.
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Browser } from "./cdp.js";
@@ -83,6 +99,12 @@ describe("§48 — one step at a time, and every step observed twice", () => {
     await page.reset();
     const arc = await page.arc();
     expect(arc.length).toBeGreaterThanOrEqual(2);
+
+    // The arc names its own beginning: `opening` is a role T227 must keep, so it is read here
+    // rather than left as decoration nothing checks.
+    expect(arc[0]!.role, "the arc's first lesson does not declare the opening role").toBe(
+      "opening",
+    );
 
     for (const lesson of arc) {
       expect((await page.position()).lesson, `the page is not on lesson ${lesson.id}`).toBe(
@@ -180,6 +202,18 @@ describe("§48 — one step at a time, and every step observed twice", () => {
       (await page.position()).banked,
       "a step whose pane says something else banked anyway",
     ).not.toContain(step);
+
+    // AND THE WORK IS NOT DONE TWICE. The run already landed its claim; only the display
+    // failed. Pressing the button again must re-ask the observables, not re-write the store —
+    // a student who retries should not end up with two of everything. (What "the page does not
+    // show it" means here is that nothing RENDERED it, not that it was off screen: see the
+    // header.)
+    const afterFirst = await page.storeIds();
+    await page.runPending();
+    expect(
+      await page.storeIds(),
+      "retrying a step whose work had landed wrote it a second time",
+    ).toEqual(afterFirst);
   });
 });
 
@@ -454,15 +488,44 @@ describe("§48 — the quiz teaches rather than scolds", () => {
       "a right answer was pointed at a teaching step anyway",
     ).toEqual([]);
 
-    // the arc never blocks on a quiz
+    // Every question is answered now, so dismissing the card is DONE, not skipped: a store
+    // that recorded a skip here would hold a claim about the student that is simply false.
+    const quizId = withQuiz!.quiz!.id;
+    for (const q of withQuiz!.steps) void q;
+    while (await page.exists("#quiz-card [data-question] button[data-choice]:not([disabled])")) {
+      await page.answerFirstQuestion("right");
+    }
     await page.click("#quiz-skip");
     expect(await page.exists("#quiz-card")).toBe(false);
+    expect(
+      await page.skippedQuizzes(),
+      "a fully answered quiz was recorded as skipped",
+    ).not.toContain(quizId);
     if (await page.exists("[data-next-lesson]")) await page.click("[data-next-lesson]");
     expect((await page.position()).lesson).toBeGreaterThan(withQuiz!.id);
   });
 });
 
 describe("§48 — the right to be forgotten reaches the checkpoints", () => {
+  it("the erasure step is passable when NO checkpoint held the bytes — the notice says so", async () => {
+    const { target } = await playUntil("erasure-finale");
+    // Every checkpoint gone before the erasure: a refused quota, a partial site-data clear, a
+    // student who started over mid-arc. The act is irreversible, so a page observable that can
+    // only be satisfied by DESTRUCTION would strand them on the last lesson forever.
+    expect(await page.dropCheckpoints()).toBeGreaterThan(0);
+
+    for (let i = 0; i < target.steps.length; i++) await page.runPending();
+
+    expect(await page.exists("#sweep-notice"), "the sweep said nothing at all").toBe(true);
+    expect(await page.text("#sweep-notice")).toMatch(/checkpoint/i);
+    expect(await page.attrs("#sweep-notice [data-swept]", "data-swept")).toEqual([]);
+    const banked = (await page.position()).banked;
+    for (const step of target.steps) {
+      expect(banked, `step ${step.id} could not be completed after the erasure`).toContain(step.id);
+    }
+    expect((await page.position()).pending, "the finale is stuck on a pending step").toBeNull();
+  });
+
   it("reverting past an erasure does not un-forget it: the receipt stays, the bytes do not come back", async () => {
     const { target } = await playUntil("erasure-finale");
     const surviving = (await page.checkpointLessons())[0]!;

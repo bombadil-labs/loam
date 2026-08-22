@@ -455,6 +455,24 @@ export class TutorialPage {
     return String(id);
   }
 
+  /** Drop every checkpoint blob, the way a partial site-data clear or a full quota would. */
+  async dropCheckpoints(): Promise<number> {
+    const gone = await this.tab.eval(
+      `(() => {
+         const doomed = Object.keys(localStorage).filter((k) =>
+           k.startsWith("loam:tutorial-ckpt:"));
+         for (const k of doomed) localStorage.removeItem(k);
+         return doomed.length;
+       })()`,
+    );
+    return Number(gone);
+  }
+
+  /** The quizzes the student's own store records as SKIPPED. */
+  skippedQuizzes(): Promise<string[]> {
+    return this.tab.eval(`window.tutorial.skipped()`).then((v) => json<string[]>(v));
+  }
+
   /** Every localStorage key this origin holds, straight from the browser. */
   keys(): Promise<string[]> {
     return this.tab.eval(`Object.keys(localStorage).sort()`).then((v) => json<string[]>(v));

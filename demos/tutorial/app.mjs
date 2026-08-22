@@ -97,6 +97,7 @@ function loadPins() {
 const ui = {
   lesson: arc[0].id,
   refusal: null, // something was asked and could not be done — the student must read it
+  workDone: null, // a step whose work landed while its page observable refused
   notice: null, // something happened that they should know about, which is not a failure
   askRevert: null,
   askStartOver: false,
@@ -133,7 +134,15 @@ const act = (fn) => {
   return inFlight;
 };
 
-/** A step's PAGE observable, asked of the real DOM — never of the step's own prose. */
+/**
+ * A step's PAGE observable, asked of the real DOM — never of the step's own prose.
+ *
+ * IT ASKS WHAT THE PAGE HOLDS, NOT WHAT IS ON SCREEN. The panes are tabs and an inactive one is
+ * `display: none`, so a step's evidence often lands in a pane the student is about to open; a
+ * visibility test would refuse those steps and push the arc into driving the tabs for them.
+ * What this catches is a pane that never rendered the thing at all, which is the failure that
+ * matters — and it is why the copy tells the student which pane to look in.
+ */
 const seePage = (want) => {
   if (want === undefined || want === null) return true;
   const el = document.querySelector(want.selector);
@@ -151,6 +160,7 @@ window.tutorial = {
   seePage,
   idle: () => inFlight,
   bankedSteps: () => [...readProgress(ctx).steps],
+  skipped: () => [...readProgress(ctx).skipped],
   // Re-read everything from the store. The panes are readings, so anything that lands by
   // another door — this console, a federation pull — becomes visible by asking again.
   refresh: () => act(() => rerender()),
@@ -275,6 +285,7 @@ async function goToLesson(id) {
   ui.refusal = null;
   ui.notice = null;
   ui.sweep = null;
+  ui.workDone = null;
   ui.highlightStep = null;
   await enterLesson(loam, ctx, lessonOf(id));
   await rerender();
@@ -291,6 +302,9 @@ async function runPendingStep() {
 
   const outcome = await completeStep(loam, ctx, lesson, step, {
     seePage,
+    // This step's work already landed once and only the page refused it — read again, do not
+    // write again.
+    workAlreadyDone: ui.workDone === step.id,
     // Between the work and the page predicate the panes must catch up — the predicate asks what
     // the student can SEE, and an unrendered change is not yet seen. The sweep runs here too:
     // an erasure's reach into the checkpoints is part of what the step's page observable names.
@@ -302,9 +316,11 @@ async function runPendingStep() {
   });
   if (!outcome.ok) {
     ui.refusal = outcome.message;
+    ui.workDone = outcome.workDone === true ? step.id : null;
     await rerender();
     return;
   }
+  ui.workDone = null;
   // The boundary: a green lesson freezes its store for the revert rail. A refusal here is the
   // student's to read — the lesson still stands; only the undo into this moment is missing.
   if (await lesson.check(ctx)) {
@@ -546,12 +562,14 @@ function renderQuiz(progress) {
 
   const skip = document.createElement("button");
   skip.id = "quiz-skip";
-  skip.textContent = quiz.questions.every((_, i) => progress.quiz.has(`${quiz.id}#${i}`))
-    ? "done"
-    : "skip this quiz";
+  const answered = quiz.questions.every((_, i) => progress.quiz.has(`${quiz.id}#${i}`));
+  skip.textContent = answered ? "done" : "skip this quiz";
   skip.onclick = () =>
     act(async () => {
-      await skipQuiz(loam, ctx, quiz);
+      // A skip is only a skip. Recording one for a card the student ANSWERED would put a claim
+      // about them in their own store that is simply untrue — the ledger is theirs, and it is
+      // the same ledger the arc teaches them to trust.
+      if (!answered) await skipQuiz(loam, ctx, quiz);
       ui.quizDismissed.add(quiz.id);
       await rerender();
     });
@@ -601,8 +619,12 @@ function renderGlossary() {
 async function runSweep() {
   const dead = [...loam.readTombstones(gateway.reactor, author)];
   if (dead.length === 0) return;
-  const report = sweepCheckpoints(storage, dead);
-  if (report.destroyed.length > 0) ui.sweep = { ...report, erased: dead };
+  // THE NOTICE APPEARS FOR EVERY FORGETTING, including one that found nothing to destroy. The
+  // erasure lesson's page observable asks for this element, and erasure is irreversible: if the
+  // notice only existed when a checkpoint died, a student whose checkpoints were already gone
+  // (a refused quota, a cleared origin, a start-over mid-arc) could never satisfy the step they
+  // had already performed. An empty sweep is a result, and saying so is the honest report.
+  ui.sweep = { ...sweepCheckpoints(storage, dead), erased: dead };
 }
 
 function renderSweep() {
@@ -620,6 +642,13 @@ function renderSweep() {
     "pane-hint",
     "a checkpoint is a copy, and a copy holds the bytes — so the right to be forgotten costs you your undo into the time the thing was known",
   );
+  if (ui.sweep.destroyed.length === 0) {
+    line(
+      notice,
+      "kept",
+      "no checkpoint here was holding those bytes — there was nothing to destroy",
+    );
+  }
   for (const gone of ui.sweep.destroyed) {
     const row = document.createElement("div");
     row.className = "swept";

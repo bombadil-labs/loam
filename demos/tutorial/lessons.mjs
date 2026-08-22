@@ -21,9 +21,15 @@
 //
 // ROLES are the browser suite's targeting contract. `test/browser/tutorial.test.ts` freezes at
 // its landing and finds the mechanics it exercises by role, never by lesson number or title:
-//   "opening"         — the first lesson; boot has already happened
-//   "reveal"          — plants a glossary term from inside a step (the where-does-this-live payoff)
-//   "erasure-finale"  — erases a record the arc landed earlier, which sweeps the checkpoints
+//   "opening"         — the arc's FIRST lesson; boot has already happened
+//   "reveal"          — plants a glossary term from inside a STEP, not from the lesson's `terms`
+//                       (those are planted on entry); the payoff needs the student to act
+//   "erasure-finale"  — erases a record that landed AFTER at least one checkpoint boundary, so
+//                       one blob is holding those bytes when the sweep runs and an EARLIER blob
+//                       is not. The frozen suite asserts both sides: a finale erasing a
+//                       lesson-1 record leaves no bystander to spare, and one erasing its own
+//                       lesson's record leaves nothing to destroy — either turns that file red
+//                       with no bug behind it.
 // T227's arc MUST keep these three roles pointing at lessons that do those things.
 
 import { STORE_PREFIX, SEED_KEY, plantTerm } from "./player.mjs";

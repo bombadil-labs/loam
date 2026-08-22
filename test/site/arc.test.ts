@@ -12,6 +12,14 @@
 // The arc here is the STUB (T226): two or three lessons that exercise every mechanic the real
 // fifteen will need. T227 replaces the arc and extends this file; the engine's assertions are
 // written against the arc's SHAPE and its lesson ROLES, never against a lesson number.
+//
+// TWO GAPS, NAMED. (1) The progress-claims case asserts the CLAIMS and the reading over them;
+// the page's revert rail renders its checkpoint rows from the BLOB KEYS instead, because a
+// claim whose blob was refused must not offer a revert into nothing — so the rendered rail and
+// the claim count can legitimately differ by a refused boundary. What binds them is that the
+// claim is never written unless a blob backs it, which is its own case below. (2) Nothing here
+// drives the page: the render, the in-page confirm and the reload belong to
+// `test/browser/tutorial.test.ts`.
 
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -199,7 +207,9 @@ describe("progress is claims", () => {
     );
     expect(claimsWithContext(ctx, TUTORIAL_CONTEXTS.step).length).toBeGreaterThanOrEqual(steps);
     expect(claimsWithContext(ctx, TUTORIAL_CONTEXTS.quiz).length).toBeGreaterThanOrEqual(quizzes);
-    expect(claimsWithContext(ctx, TUTORIAL_CONTEXTS.checkpoint).length).toBeGreaterThanOrEqual(1);
+    expect(claimsWithContext(ctx, TUTORIAL_CONTEXTS.checkpoint).length).toBeGreaterThanOrEqual(
+      arc.length,
+    );
 
     // OBJECT LEVEL: the rail is a reading of those claims, not a parallel counter.
     const progress = readProgress(ctx);
@@ -802,6 +812,90 @@ describe("checkpoints, revert, and the sweep", () => {
     // ...and the real row, which the store DOES hold, is in there.
     expect(Object.keys(blob.rows)).toContain(`${STORE_PREFIX}${real}`);
     await ctx.gateway.close();
+  });
+
+  it("a revert keeps a forgiveness whose tombstone is INSIDE the checkpoint too", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    const arc = buildArc(loam);
+    const finale = lessonOfRole(arc, "erasure-finale");
+    for (const lesson of arc) {
+      await playLesson(lesson, ctx);
+      if (lesson.id === finale.id) break;
+    }
+    // The checkpoint is taken AFTER the erasure, so the tombstone is in the BLOB rather than
+    // only in the store. The forgiveness comes later still, and lives nowhere but the store.
+    expect((await bankCheckpoint(loam, ctx, finale.id)).ok).toBe(true);
+    const tombstone = ctx.gateway
+      .offeredDeltas()
+      .find((d) =>
+        d.claims.pointers.some(
+          (p) => p.target.kind === "entity" && p.target.entity.context === "loam.erasure",
+        ),
+      )!;
+    expect(Object.keys(readCheckpoint(storage, finale.id)!.rows)).toContain(
+      `${STORE_PREFIX}${tombstone.id}`,
+    );
+    const forgiveness = loam.signClaims(
+      loam.makeNegationClaims(ctx.author, ctx.ts(), tombstone.id, "on reflection"),
+      ctx.seed,
+    );
+    await ctx.gateway.append([forgiveness]);
+    expect(loam.readTombstones(ctx.gateway.reactor, ctx.author).size).toBe(0);
+    await ctx.gateway.close();
+
+    // Reverting to that boundary restores the tombstone from the blob. The forgiveness is not
+    // in the blob — so a guard that only looked at what SURVIVES outside it would delete the
+    // strike and re-assert a forgetting the operator had withdrawn.
+    const restored = restoreCheckpoint(storage, finale.id, { erasedIds: [] });
+    expect(restored.ok).toBe(true);
+    const back = await makeCtx(storage);
+    expect(
+      loam.readTombstones(back.gateway.reactor, back.author).size,
+      "a revert re-asserted a forgetting the operator had withdrawn",
+    ).toBe(0);
+    await back.gateway.close();
+  });
+
+  it("a refused checkpoint claims nothing: no blob, and no signed record that one was taken", async () => {
+    const roomy = new MemStorage();
+    const ctx = await makeCtx(roomy);
+    await playLesson(buildArc(loam)[0]!, ctx);
+    await ctx.gateway.close();
+
+    // A storage that takes the store's rows and refuses the BLOB.
+    const tight = new MemStorage();
+    for (const key of roomy.keys()) tight.setItem(key, roomy.getItem(key)!);
+    const failing = {
+      get length() {
+        return tight.length;
+      },
+      key: (i: number) => tight.key(i),
+      getItem: (k: string) => tight.getItem(k),
+      removeItem: (k: string) => tight.removeItem(k),
+      setItem: (k: string, v: string) => {
+        if (k.startsWith(CKPT_PREFIX)) {
+          throw new DOMException("the quota has been exceeded", "QuotaExceededError");
+        }
+        tight.setItem(k, v);
+      },
+    };
+    const on = await makeCtx(failing as unknown as MemStorage);
+    const outcome = await bankCheckpoint(loam, on, 1, { label: "lesson 1" });
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    // THE CLAIM MUST NOT OUTLIVE THE BLOB. A signed "a checkpoint was taken here" with nothing
+    // behind it is a record of a thing that did not happen (H7) — and the rail reads it back.
+    expect(
+      readProgress(on).checkpoints,
+      "the store says a checkpoint was taken, and no blob backs it",
+    ).not.toContain(1);
+    expect(checkpointLessons(failing as unknown as MemStorage)).toEqual([]);
+    // ...and the refusal does not pretend the lesson is unaffected: a later lesson may reach
+    // back for this boundary, so it says the checkpoint was not taken.
+    expect(outcome.message).toContain("lesson 1");
+    expect(outcome.message).toMatch(/no checkpoint/i);
+    await on.gateway.close();
   });
 
   it("a revert keeps the receipt AND the strike that forgave it — an undo does not re-assert a withdrawn forgetting", async () => {

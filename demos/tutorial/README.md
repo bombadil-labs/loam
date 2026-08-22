@@ -47,9 +47,11 @@ suite by design. What each role must actually DO:
 - `reveal` — plants at least one glossary term from INSIDE a step, not from the lesson's
   `terms` (which are planted on entry). The where-does-this-live payoff needs the student to
   have done something for it.
-- `erasure-finale` — erases a record an EARLIER lesson landed, so a boundary checkpoint is
-  holding it when the sweep runs. Erasing something the same lesson created leaves the sweep
-  with nothing to destroy, and the rail says so.
+- `erasure-finale` — erases a record that landed AFTER at least one checkpoint boundary. One
+  blob is then holding those bytes when the sweep runs, and an earlier blob is not: the frozen
+  suite asserts both sides. Erasing something the same lesson created leaves the sweep nothing
+  to destroy; erasing a lesson-1 record leaves it no bystander to spare. Either turns the frozen
+  file red with no bug behind it.
 
 **Four more things the arc owes the player**, each with a rail that fails without it: every
 lesson has at least one step whose store predicate is FALSE before it runs (a lesson of pure

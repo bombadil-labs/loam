@@ -268,10 +268,16 @@ export async function plantTerm(loam, ctx, lessonId, term, meaning) {
  */
 export async function completeStep(loam, ctx, lesson, step, opts = {}) {
   const where = `lesson ${lesson.id}, step ${step.id}`;
-  try {
-    await step.run(ctx);
-  } catch (err) {
-    return { ok: false, failed: "run", message: `${where}: the store refused — ${err.message}` };
+  // WORK DONE, DISPLAY FAILED is a real state. When a step's work has landed and only its page
+  // observable refused, running it again would write the same thing a second time — a student
+  // who retries would end up with two of everything. The caller remembers, and asks for a
+  // re-reading rather than a re-run; the observables are checked either way.
+  if (opts.workAlreadyDone !== true) {
+    try {
+      await step.run(ctx);
+    } catch (err) {
+      return { ok: false, failed: "run", message: `${where}: the store refused — ${err.message}` };
+    }
   }
   if (opts.afterRun !== undefined) await opts.afterRun();
   const page = step.observe.page;
@@ -283,6 +289,7 @@ export async function completeStep(loam, ctx, lesson, step, opts = {}) {
     return {
       ok: false,
       failed: "page",
+      workDone: true, // the store has it; only the page could not show it
       message: `${where}: the page does not show what this step promised (${looked})`,
     };
   }
@@ -376,28 +383,35 @@ export function takeCheckpoint(storage, lesson, opts = {}) {
     return {
       ok: false,
       message:
-        `this browser has no room for the checkpoint after ${opts.label ?? `lesson ${lesson}`} ` +
-        `(${err.name ?? "the write was refused"}) — the lesson stands, but you cannot revert to ` +
-        `this moment. "Start over" frees the space.`,
+        `no checkpoint was taken after ${opts.label ?? `lesson ${lesson}`}: this browser has no ` +
+        `room for it (${err.name ?? "the write was refused"}). You cannot revert to this moment, ` +
+        `and a later lesson that reaches back for it will say so. "Start over" frees the space.`,
     };
   }
   return { ok: true, lesson, rows: Object.keys(rows).length };
 }
 
-/** Take the checkpoint AND record that it was taken — the claim first, so the blob holds it. */
+/**
+ * Take the checkpoint AND record that it was taken — THE BLOB FIRST. A signed "a checkpoint was
+ * taken here" that no blob backs is a record of a thing that did not happen (H7), and the rail
+ * that renders it would then offer a revert into nothing. So the claim is landed only once the
+ * write has succeeded, and the blob is then re-taken so it carries the claim describing it; if
+ * that second write is refused the first blob stands and the claim is still true — the
+ * checkpoint is simply one delta older than the record of it.
+ */
 export async function bankCheckpoint(loam, ctx, lesson, opts = {}) {
-  if (!readProgress(ctx).checkpoints.includes(lesson)) {
-    await ctx.gateway.append([
-      sign(loam, ctx, [
-        entity("checkpoint", `tutorial:checkpoint:${lesson}`, TUTORIAL_CONTEXTS.checkpoint),
-        prim("lesson", lesson),
-      ]),
-    ]);
-  }
-  return takeCheckpoint(ctx.storage, lesson, {
-    ...opts,
-    holds: [...ctx.gateway.reactor.snapshot()].map((d) => d.id),
-  });
+  const holds = () => [...ctx.gateway.reactor.snapshot()].map((d) => d.id);
+  const taken = takeCheckpoint(ctx.storage, lesson, { ...opts, holds: holds() });
+  if (!taken.ok) return taken; // nothing was written, so nothing is claimed
+  if (readProgress(ctx).checkpoints.includes(lesson)) return taken;
+  await ctx.gateway.append([
+    sign(loam, ctx, [
+      entity("checkpoint", `tutorial:checkpoint:${lesson}`, TUTORIAL_CONTEXTS.checkpoint),
+      prim("lesson", lesson),
+    ]),
+  ]);
+  const withClaim = takeCheckpoint(ctx.storage, lesson, { ...opts, holds: holds() });
+  return withClaim.ok ? withClaim : taken;
 }
 
 /** The id a stored row's own bytes claim to be — `undefined` if it will not say. */
@@ -551,6 +565,13 @@ export function restoreCheckpoint(storage, lesson, opts = {}) {
   const keptOrders = [];
   const orders = new Set();
   const present = rowKeys(storage).filter((key) => !wanted.has(key));
+  // Every erasure order that will be STANDING when this is over — the ones already outside the
+  // checkpoint, AND the ones the blob is putting back. A guard that looked only outside would
+  // keep a tombstone restored from the blob while deleting the strike that forgave it, which
+  // re-asserts a forgetting the operator had withdrawn: the same law, broken on the other side.
+  for (const [key, value] of wanted) {
+    if (isErasureOrder(value)) orders.add(key.slice(STORE_PREFIX.length));
+  }
   for (const key of present) {
     if (isErasureOrder(storage.getItem(key))) orders.add(key.slice(STORE_PREFIX.length));
   }
