@@ -1271,8 +1271,19 @@ describe("the tutorial's store is a real store", () => {
     // TWO-SIDED, at the bytes of the file the student walks out with: one of those two notes is
     // gone from it entirely, and the other is still in there. A file that carried neither would
     // pass a one-sided check while having quietly lost the diary.
-    const gone = condemned.filter((w) => !text.includes(w));
-    const survived = condemned.filter((w) => text.includes(w));
+    //
+    // THE NEEDLE IS ESCAPED THE WAY THE HAYSTACK IS. `text` is `JSON.stringify` output, so a
+    // sentence containing a quote is spelled with backslashes in it. Searching for the raw
+    // sentence finds nothing whether the words are in the file or not — a guard that can only
+    // ever say "clean", which is the worst shape an erasure check can have.
+    const stored = (w: string): string => JSON.stringify(w).slice(1, -1);
+    const gone = condemned.filter((w) => !text.includes(stored(w)));
+    const survived = condemned.filter((w) => text.includes(stored(w)));
+    // ...and the escaping is not theoretical: at least one of these two really does need it.
+    expect(
+      condemned.some((w) => stored(w) !== w),
+      "neither note needs escaping — this rail would pass with the naive comparison too",
+    ).toBe(true);
     expect(gone.length, "the export still carries the erased words").toBe(1);
     expect(survived.length, "the export lost the note that was never condemned").toBe(1);
     for (const id of erased) {
@@ -1443,6 +1454,86 @@ describe("the fifteen lessons, end to end", () => {
     await ctx.gateway.close();
   });
 
+  it("a stranger's strike reaches the plain description and neither shelf: trust is the reading's, not the store's", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    const arc = buildArc(loam);
+    // Through lesson 9, so both shelves exist and Rae has written.
+    for (const lesson of arc) {
+      await playLesson(lesson, ctx);
+      if (lesson.id === 9) break;
+    }
+
+    // The claim a stranger is about to try to retract: YOUR rating of 7, the one My Diary
+    // answers with. A shelf that names whose word it hears, and then obeys a stranger's
+    // taking-back, is not narrowed at all — it only looks it (H1, the mask half).
+    const mine = ctx.gateway
+      .offeredDeltas()
+      .find(
+        (d) =>
+          d.claims.author === ctx.author &&
+          d.claims.pointers.some((p) => p.target.kind === "primitive" && p.target.value === 7),
+      );
+    expect(mine, "no rating of your own to strike").toBeDefined();
+    const before = (await ctx.gateway.query(`{ myDiary(entity: "${VIEWING}") { rating } }`)).data;
+    expect((before as { myDiary: { rating: number } }).myDiary.rating).toBe(7);
+
+    // AND Rae's 4, which is what the plain description currently answers with. Striking only
+    // YOUR 7 would leave the plain answer at 4 either way, and the second half of this rail
+    // would pass whether the strike bound or not.
+    const raes = ctx.gateway
+      .offeredDeltas()
+      .find(
+        (d) =>
+          d.claims.author !== ctx.author &&
+          d.claims.pointers.some((p) => p.target.kind === "primitive" && p.target.value === 4),
+      );
+    expect(raes, "Rae has written no rating to strike").toBeDefined();
+
+    const strangerSeed = "5c".repeat(32);
+    const stranger = loam.authorForSeed(strangerSeed);
+    const strikes = [mine!.id, raes!.id].map((target, i) =>
+      loam.signClaims(
+        loam.makeNegationClaims(stranger, 9_100_001 + i, target, "no it isn't"),
+        strangerSeed,
+      ),
+    );
+    await ctx.gateway.federate(strikes);
+    for (const strike of strikes) {
+      expect(
+        ctx.gateway.offeredDeltas().some((d) => d.id === strike.id),
+        "the stranger's strike never landed — this rail would prove nothing",
+      ).toBe(true);
+    }
+
+    // THE SHELVES DO NOT HEAR IT. Both of them name their hands, and a hand they never named
+    // cannot retract what one of them wrote.
+    const shelves = (await ctx.gateway.query(
+      `{ mine: myDiary(entity: "${VIEWING}") { rating } house: houseDiary(entity: "${VIEWING}") { rating } }`,
+    )) as { data?: { mine: { rating: number }; house: { rating: number[] } } };
+    expect(
+      shelves.data?.mine.rating,
+      "a stranger struck the student's own word off their private shelf",
+    ).toBe(7);
+    expect(shelves.data?.house.rating, "a stranger struck a rating off the house shelf").toEqual([
+      9, 7, 4,
+    ]);
+
+    // ...and the plain description from lesson two, which hears anybody, DOES obey it. That is
+    // the contrast lesson 12 teaches, and a rail that only proved the first half would leave
+    // "trust lives in the reading" as decoration.
+    const plain = (await ctx.gateway.query(`{ viewing(entity: "${VIEWING}") { rating } }`)) as {
+      data?: { viewing: { rating: number } };
+    };
+    // Both of its top two ratings have been struck by somebody it never agreed to hear, and it
+    // obeyed: it falls all the way back to the 9 from lesson three.
+    expect(
+      plain.data?.viewing.rating,
+      "the plain description ignored a strike it has no rule to ignore",
+    ).toBe(9);
+    await ctx.gateway.close();
+  });
+
   it("the finale sweeps the REAL checkpoints — the arc does it, not this rail, and a bystander survives", async () => {
     const storage = new MemStorage();
     const ctx = await makeCtx(storage);
@@ -1468,6 +1559,28 @@ describe("the fifteen lessons, end to end", () => {
       return Object.values(blob.rows).some((row) => String(row).includes("jamie texted me"));
     });
     expect(doomed.length, "no checkpoint was holding the words the finale erases").toBe(1);
+
+    // THE ESCAPING TRAP, proven rather than commented. A stored row is `JSON.stringify` output,
+    // so the condemned sentence lives in it with its quotes backslashed. Searching a row for the
+    // sentence as it is written in the source finds NOTHING — a byte-level guard that can only
+    // ever report "clean". The lesson's own verdict escapes its needle for this reason, and this
+    // is the assertion that would notice if it stopped.
+    const rowsOfDoomed = Object.values(readCheckpoint(storage, doomed[0]!)!.rows).map(String);
+    const sentence = ctx.gateway
+      .offeredDeltas()
+      .flatMap((d) => d.claims.pointers)
+      .map((pt) => (pt.target.kind === "primitive" ? String(pt.target.value) : ""))
+      .find((v) => v.startsWith("jamie texted me"))!;
+    expect(sentence, "the condemned sentence is not in the ground").toContain('"');
+    expect(
+      rowsOfDoomed.some((row) => row.includes(sentence)),
+      "the raw sentence WAS findable in a stored row — the escaping hazard has gone away, and " +
+        "the lesson's escaped needle is now over-careful rather than necessary",
+    ).toBe(false);
+    expect(
+      rowsOfDoomed.some((row) => row.includes(JSON.stringify(sentence).slice(1, -1))),
+      "the escaped sentence is not in the blob either — this rail is measuring nothing",
+    ).toBe(true);
 
     await playLesson(finale, ctx);
 

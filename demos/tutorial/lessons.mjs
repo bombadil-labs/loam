@@ -53,11 +53,10 @@
 // every latest-wins read in Act III, and a flake in every rail that asserts one.
 
 import {
+  CKPT_PREFIX,
   STORE_PREFIX,
   SEED_KEY,
-  checkpointLessons,
   plantTerm,
-  readCheckpoint,
   readGlossary,
   readProgress,
   sweepCheckpoints,
@@ -81,6 +80,7 @@ const RAE_SECOND_SEED = "b3".repeat(32);
 const STRANGER_SEED = "5c".repeat(32);
 
 // The words the arc writes, kept here so a rail can ask about the exact bytes.
+const DIARY_TITLE = "A film diary of my own";
 const FIRST_NOTE = "made me cry on a Tuesday";
 const REGRET = "understood it completely";
 const SECOND_THOUGHT = "the 9 was the night, not the film";
@@ -92,7 +92,9 @@ const PRIVATE_LINE =
 // The shortest fragment of it that could only have come from those bytes — what a rail asks for
 // when it wants to know whether the words survived somewhere they should not.
 const PRIVATE_FRAGMENT = "jamie texted me";
-const LAST_LINE = "four films, two pens, one thing forgotten on purpose — and all of it still mine";
+const LAST_LINE =
+  "four films, three pens, one thing forgotten on purpose — and every line of it still mine";
+const STRANGER_NOTE = "a perfect film, no notes";
 const ERASURE_REASON = "a third person's words, never mine to keep";
 
 // The store's own vocabulary for a forgetting, restated here so a lesson can ask about a receipt
@@ -116,6 +118,13 @@ const OPEN_GATHER = {
 
 // The same program, narrowed to the hands this reading agrees to hear. This is where "whose
 // word counts" actually lives — in the reading, not in the store, and never in a platform.
+//
+// TWO NARROWINGS, NOT ONE, and the second is the one that is easy to forget. The `select`
+// decides whose CLAIMS this reading admits. The `mask` decides whose TAKING-BACK it honours, and
+// it runs FIRST, over the whole ground — so a plain "drop" mask would let any stranger who can
+// get a record in here strike the student's own rating and watch it vanish from their private
+// shelf. A shelf that names whose word it hears and then obeys a stranger's retraction is not
+// narrowed at all; it just looks it. Both halves take the same set of hands.
 const heardFrom = (authors) => ({
   op: "group",
   key: "byTargetContext",
@@ -127,7 +136,11 @@ const heardFrom = (authors) => ({
         { match: { field: "author", cmp: "inSet", const: [...authors] } },
       ],
     },
-    in: { op: "mask", policy: "drop", in: "input" },
+    in: {
+      op: "mask",
+      policy: { trust: { match: { field: "author", cmp: "inSet", const: [...authors] } } },
+      in: "input",
+    },
   },
 });
 
@@ -185,6 +198,40 @@ const rowsSaying = (ctx, id, context, value) =>
 
 /** Does any record anywhere in the ground carry these words? */
 const anywhere = (ctx, value) => ground(ctx).some((d) => holds(d, value));
+
+/**
+ * The words as a STORED ROW spells them. Rows are `JSON.stringify` of the wire delta, so a
+ * needle taken from the source will not be found in the haystack the moment it contains a quote
+ * or a backslash — silently, which is the worst way for a byte-level guard to be wrong. Escaping
+ * the needle the same way the row was escaped is the whole fix.
+ */
+const asStored = (words) => JSON.stringify(words).slice(1, -1);
+
+/** The id a stored row's own bytes claim to be — "" if it will not say. */
+function claimedIdOf(row) {
+  try {
+    const parsed = JSON.parse(row);
+    return typeof parsed?.id === "string" ? parsed.id : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Do these words appear in any ROW this browser has written under the store's prefix — not in a
+ * reading of the ground, in the stored text itself? `offeredDeltas()` is what a reader is served;
+ * a row the driver set aside, or one filed under a key that does not name it, is legibly present
+ * on this machine and invisible there. An erasure's promise is about the second thing.
+ */
+function wordsInStorage(ctx, words) {
+  const needle = asStored(words);
+  for (let i = 0; i < ctx.storage.length; i++) {
+    const key = ctx.storage.key(i);
+    if (key === null || !key.startsWith(STORE_PREFIX) || key === SEED_KEY) continue;
+    if ((ctx.storage.getItem(key) ?? "").includes(needle)) return true;
+  }
+  return false;
+}
 
 const list = (v) => (Array.isArray(v) ? v : v === undefined || v === null ? [] : [v]);
 
@@ -327,7 +374,9 @@ export const TERMS = [
     term: "operator",
     lesson: 1,
     forms: ["operator", "operators"],
-    meaning: "the one key a store obeys. Here that is you, and only you.",
+    meaning:
+      "the one key a store answers to. It decides who else may write here, and what may be " +
+      "removed. Here that is you.",
   },
   {
     term: "lens",
@@ -339,7 +388,7 @@ export const TERMS = [
     term: "shape",
     lesson: 2,
     forms: ["shape", "shapes", "shaped"],
-    meaning: "the fields a thing has — for a viewing: a date, a film, a rating.",
+    meaning: "the fields a thing has — for a viewing: a date, a film, a rating, and notes.",
   },
   {
     term: "claim",
@@ -424,7 +473,9 @@ export const TERMS = [
     term: "erase",
     lesson: 14,
     forms: ["erase", "erases", "erased", "erasing", "erasure"],
-    meaning: "the operator's order to remove a record's bytes, everywhere, for good.",
+    meaning:
+      "the operator's order to remove a record's words themselves, everywhere, for good — " +
+      "including from every copy this browser kept.",
   },
   {
     term: "receipt",
@@ -477,10 +528,11 @@ export function buildArc(loam) {
       id: 1,
       role: "opening",
       title: "The keys are yours",
-      copy: `This page just made you a database. It runs in this tab, on your machine, and it
-answers to exactly one key — the one it made for you a second ago. Nobody signed up for
-anything. There is no server waiting to be asked. Everything from here is yours to keep, and the
-last thing you do in this lesson is take the key that proves it.`,
+      copy: `This page just made you a database — a store, which is the word this tutorial will
+use from here. It runs in this tab, on your machine, and it answers to exactly one key: the one
+it made for you a second ago. Nobody signed up for anything. Nothing was sent anywhere. What you
+write here is yours to keep, and the last thing you do in this lesson is take the key that
+proves it.`,
       terms: termsEntering(1),
       steps: [
         {
@@ -505,11 +557,11 @@ last thing you do in this lesson is take the key that proves it.`,
           how: "Press the button. Watch a second row appear in the Ground pane.",
           run: async (ctx) => {
             await ctx.gateway.append([
-              say(loam, ctx, [entity("subject", DIARY, "name"), prim("A film diary of my own")]),
+              say(loam, ctx, [entity("subject", DIARY, "name"), prim(DIARY_TITLE)]),
             ]);
           },
           observe: {
-            page: { selector: "#ground-rows", contains: "A film diary of my own" },
+            page: { selector: "#ground-rows", contains: DIARY_TITLE },
             store: async (ctx) => mineAt(ctx, DIARY, "name"),
           },
         },
@@ -522,11 +574,16 @@ last thing you do in this lesson is take the key that proves it.`,
           run: async () => {},
           observe: {
             page: { selector: "#author-chip", contains: "ed25519:" },
-            store: async (ctx) =>
-              loam.authorForSeed(ctx.seed) === ctx.author &&
-              rowsSaying(ctx, DIARY, "name", "A film diary of my own").every(
-                (d) => d.claims.author === ctx.author,
-              ),
+            store: async (ctx) => {
+              // `every` over an empty set is true, so the row has to be FOUND before its author
+              // is asked about — otherwise "no such record" reads as "the record is yours".
+              const written = rowsSaying(ctx, DIARY, "name", DIARY_TITLE);
+              return (
+                loam.authorForSeed(ctx.seed) === ctx.author &&
+                written.length === 1 &&
+                written[0].claims.author === ctx.author
+              );
+            },
           },
         },
         {
@@ -558,9 +615,10 @@ last thing you do in this lesson is take the key that proves it.`,
       role: "describe",
       title: "Say what a viewing is",
       copy: `You watched Arrival last night and you want it written down. A store keeps records,
-not vibes, so before you write anything you say what the thing IS: a viewing has a date, a film
-and a rating, plus one house rule — when two viewings of the same film disagree, your latest
-word wins. That whole description is a lens, and it lives in the store like everything else.`,
+not vibes, so before you write anything you say what the thing IS. A viewing has a date, a film,
+a rating and as many notes as you feel like — that is its shape. And one house rule: when two
+viewings of the same film disagree about the rating, your latest word wins. Shape plus rule is a
+lens, and it lives in the store like everything else in here.`,
       terms: termsEntering(2),
       steps: [
         {
@@ -606,7 +664,7 @@ from the claims at the time you ask — which is why nothing here has to be kept
             choices: [
               "A row somebody updated in place",
               "Your signed records, gathered together at the time you ask",
-              "A copy kept on a server somewhere",
+              "A copy kept on somebody else's computer",
             ],
             answer: 1,
             teaches: "3.1",
@@ -626,7 +684,7 @@ from the claims at the time you ask — which is why nothing here has to be kept
             choices: [
               "Yes, it is only a file",
               "No — the mark on each record needs your key, which never left your tab",
-              "Only if they ask the server",
+              "Only with your permission, which they would have to ask you for",
             ],
             answer: 1,
             teaches: "3.1",
@@ -706,11 +764,12 @@ from the claims at the time you ask — which is why nothing here has to be kept
       id: 4,
       role: "rewatch",
       title: "The rewatch",
-      copy: `Two weeks later you watch Arrival again and, honestly, it is a 7. This is not a
-problem to resolve. You watched it twice; both nights happened; the diary keeps both. Everything
-it holds sits together in one place, called the ground, and the answer you read is a view of it:
-worked out on the spot, using the house rule you wrote in lesson two. The earlier 9 is not
-overwritten, or archived, or hidden. It is simply not the latest thing you said.`,
+      copy: `Two weeks later you put Arrival on again, on a laptop, half-asleep, and it is a 7.
+Same film, same you, different Tuesday. This is not a problem to resolve. You watched it twice;
+both nights happened; the diary keeps both. Everything it holds sits together in one place,
+called the ground, and the answer you read is a view of it: worked out on the spot, using the
+house rule you wrote in lesson two. The 9 is not overwritten, archived or hidden. It is simply
+not the latest thing you said.`,
       terms: termsEntering(4),
       steps: [
         {
@@ -773,7 +832,13 @@ entry carries a note claiming you understood it completely. You did not. Nobody 
 back does not reach into the past and tidy it. You write one more claim — a strike, which says
 "I take that back" and names what it takes back — and from then on no view repeats the line. The
 claim it struck stays exactly where it was, in the ground, dimmed. Your diary gets to show that
-you outgrew something, which is more than most of them can do.`,
+you outgrew something, which is more than most of them can do.
+
+Look down the side while you are here. Every lesson you finish leaves a checkpoint: a whole copy
+of this store, frozen exactly where you left it, with a button offering to put you back there.
+That is your
+undo, and you have been collecting one per lesson since the first screen. Remember it. The last
+act is going to send you a bill for it.`,
       terms: termsEntering(5),
       steps: [
         {
@@ -796,9 +861,12 @@ you outgrew something, which is more than most of them can do.`,
             page: { selector: "#ground-rows", contains: "negates" },
             store: async (ctx) => {
               const note = rowSaying(ctx, TENET, "note", REGRET);
+              const now = await read(ctx, "viewing", TENET);
               return (
-                // OBJECT LEVEL: no reader repeats it any more...
-                !list((await read(ctx, "viewing", TENET)).note).includes(REGRET) &&
+                // OBJECT LEVEL: no reader repeats it any more — and the SAME answer still says
+                // 6, because `!includes` is satisfied by a lens that answers nothing at all.
+                now.rating === 6 &&
+                !list(now.note).includes(REGRET) &&
                 // ...and DELTA LEVEL: the record it struck is still lying in the ground, and the
                 // strike itself names it. Removal and retraction are different acts.
                 note !== undefined &&
@@ -853,7 +921,7 @@ it to read.`,
             teaches: "6.2",
           },
           {
-            ask: "You take the extra word off and ask again. What got restored?",
+            ask: "You take the moment off and ask again. What got restored?",
             choices: [
               "The present view, from the archive",
               "Nothing — nothing had gone anywhere",
@@ -927,6 +995,8 @@ it to read.`,
               return (
                 now.rating === 7 &&
                 list(now.note).includes(SECOND_THOUGHT) &&
+                // the positive twin: this answer is a real one, and it still says 6
+                tenetNow.rating === 6 &&
                 !list(tenetNow.note).includes(REGRET)
               );
             },
@@ -957,7 +1027,7 @@ Rae is a character. You would never hold anybody else's.)`,
         {
           id: "7.1",
           label: "Give Rae a pen",
-          have: "A store that takes writing from exactly one key: yours.",
+          have: "A store where one key writes and the same key decides who else ever will.",
           want: "A second key that may write here, on your say-so and nobody else's.",
           how: "Press the button. A permission lands in the Ground pane, signed by you.",
           run: async (ctx) => {
@@ -990,10 +1060,10 @@ Rae is a character. You would never hold anybody else's.)`,
         },
         {
           id: "7.3",
-          label: "Try to write as Rae, using your own key",
-          have: "Two keys, and the temptation to put words in somebody's mouth.",
-          want: "To watch the door refuse, and to see that nothing landed.",
-          how: "Press the button. The store says no. Look for the line in the Ground pane; it is not there.",
+          label: "Try softening Rae's verdict in Rae's own name",
+          have: "A 4 sitting in your diary, and a very human urge to improve it slightly.",
+          want: "To find out what stops you, since nothing on this page is asking permission.",
+          how: "Press the button. The store says no. Look in the Ground pane: the line is not there.",
           run: async (ctx) => {
             try {
               // Your seed, Rae's name on the front. The mark will not check out, and the door
@@ -1077,7 +1147,7 @@ can keep as many lenses as you have moods.`,
           label: "Check that nothing was copied to make that happen",
           have: "Two answers to one question, both of them true.",
           want: "Proof that there is still exactly one of each record underneath.",
-          how: "Press the button. Count the rating rows in the Ground pane: still three.",
+          how: "Press the button. Count this film's rating rows in the Ground pane: still three.",
           run: async () => {},
           observe: {
             page: { selector: "#view-cards", contains: "MyDiary" },
@@ -1097,10 +1167,12 @@ can keep as many lenses as you have moods.`,
       id: 9,
       role: "shelves",
       title: "My shelf, our shelf",
-      copy: `Keep both worlds, permanently. My Diary is for your future self: your word, first.
-The house shelf is for the fridge door: every rating anyone gave, in the order they gave them,
-nobody's opinion quietly deleted to make the page tidier. Two shelves, one set of records
-underneath, and not a single thing copied between them.`,
+      copy: `Rae has seen My Diary and has opinions about being second in the queue. Fine: keep
+both worlds, permanently. My Diary is for your future self, and it puts your word first. The
+house shelf is for the fridge door, and it keeps every rating from every hand you have given a
+pen to — yours and Rae's — in the order they were written, nobody quietly deleted to make the
+page tidier. Two shelves, one set of records underneath, and not a single thing copied between
+them.`,
       terms: termsEntering(9),
       steps: [
         {
@@ -1142,11 +1214,17 @@ underneath, and not a single thing copied between them.`,
       id: 10,
       role: "evolution",
       title: "Movie night",
-      copy: `You and Rae start watching things together, and the description you wrote in lesson
-two has no way to say so. So change it: a second version of Viewing, carrying guests. This is the
-part every other database makes you dread, and here is the whole bill. Nothing is rewritten. No
-claims are converted. The old version keeps working — even on entries written under the new one —
-and last May's entry needs nothing done to it to live in the new world.`,
+      copy: `Something changed and the diary has not noticed. You and Rae watch things together
+now — properly, on purpose, with the good snacks — and every entry in here still reads as though
+you were alone on the sofa. A viewing has a date, a film, a rating and notes. There is nowhere to
+put the person beside you.
+
+So change what a viewing is: a second version, with room for guests. Here is the whole bill for
+that. Nothing already written is touched. No entry is converted or moved. The first version keeps
+answering, including about entries written under the second — and May's Arrival needs nothing
+done to it to live in the new world. You will check both of those yourself, in a minute, because
+this is the promise
+most worth checking rather than believing.`,
       terms: termsEntering(10),
       steps: [
         {
@@ -1154,7 +1232,7 @@ and last May's entry needs nothing done to it to live in the new world.`,
           label: "Add guests to what a viewing is",
           have: "A description of a viewing with nowhere to put the person beside you.",
           want: "A second version with room for guests, and the first one left undisturbed.",
-          how: "Press the button, then open the drawer: guests is part of the shape now.",
+          how: "Press the button, then open the panel asking 'is that really what happened?' — guests is in the shape now.",
           run: async (ctx) => {
             await ctx.gateway.publishRegistration(
               { name: "Viewing", alg: 1, body: loam.parseTerm(OPEN_GATHER) },
@@ -1181,9 +1259,9 @@ and last May's entry needs nothing done to it to live in the new world.`,
         {
           id: "10.2",
           label: "Log movie night: Paddington 2, a 10, Rae beside you",
-          have: "A description that knows about guests and an evening nobody wrote down.",
-          want: "Tonight in the diary, with Rae named on it.",
-          how: "Press the button. A Paddington 2 card appears with Rae on the guest line.",
+          have: "The 2nd of July, Paddington 2, and Rae texting their friend Jamie through it.",
+          want: "Tonight in the diary the way tonight actually was: not yours, but both of yours.",
+          how: "Press the button. A Paddington 2 card appears with Rae named on the guest line.",
           run: async (ctx) => {
             await ctx.gateway.append([
               field(loam, ctx, MOVIE_NIGHT, "date", "2 July"),
@@ -1204,9 +1282,9 @@ and last May's entry needs nothing done to it to live in the new world.`,
         {
           id: "10.3",
           label: "Read tonight's entry through the OLD version",
-          have: "An entry written under a shape the first version never heard of.",
-          want: "To find out what the first version does with it. (Spoiler: it reads it.)",
-          how: "Press the button. It answers Paddington 2, a 10, and says nothing about guests.",
+          have: "Copies of this diary in the world that still use the first version — Rae has one.",
+          want: "To know what happens when one of them opens tonight's entry.",
+          how: "Press the button. It answers Paddington 2, a 10, exactly as it always did.",
           run: async () => {},
           observe: {
             page: { selector: "#view-cards", contains: "person:rae" },
@@ -1215,9 +1293,12 @@ and last May's entry needs nothing done to it to live in the new world.`,
               if (first === undefined) return false;
               const asItWas = ctx.gateway.resolvePinned(first, MOVIE_NIGHT).view;
               return (
-                // The old edition never learned the word...
+                // The first version has no rule for guests — it was written before the word...
                 !first.schema.props.has("guests") &&
-                // ...and it still renders the entry perfectly.
+                // ...and it reads the entry anyway, film and rating intact. What it is NOT
+                // asserted to do is hide the guest: a reading with no rule for a field falls
+                // back to its default one, so the value is still in there. The promise being
+                // kept is "the old reading still works", never "the old reading is blind".
                 asItWas.film === "Paddington 2" &&
                 asItWas.rating === 10
               );
@@ -1227,9 +1308,9 @@ and last May's entry needs nothing done to it to live in the new world.`,
         {
           id: "10.4",
           label: "Read May's entry through the NEW version",
-          have: "An old entry, written before guests existed as an idea.",
-          want: "To see what the new version needs done to it. (Spoiler: nothing.)",
-          how: "Press the button. Arrival answers as it always did, with an empty guest line.",
+          have: "An entry from May, written before guests existed as an idea in this diary.",
+          want: "To know what the new version demands of it before it will answer.",
+          how: "Press the button. Arrival answers exactly as it always did; its guest line is empty.",
           run: async () => {},
           observe: {
             page: { selector: "#view-cards", contains: "Arrival" },
@@ -1252,8 +1333,13 @@ and last May's entry needs nothing done to it to live in the new world.`,
       copy: `Time to look behind the furniture. The glossary you have been consulting since lesson
 one is not part of this page. Every definition in it is a claim in YOUR store, signed by your key,
 planted the moment you first needed the word. So is your progress. So are your quiz answers. This
-tutorial has no memory of its own — it has been reading yours the whole time. And here is the real
-name of the thing you have been reading since the first screen: a delta.`,
+tutorial has no memory of its own — it has been reading yours the whole time.
+
+And one piece of housekeeping, now that you have handled a few thousand of them. Record, claim
+and delta are three words for the same object: one signed statement that never changes, with a
+name made out of its own contents, so two of them that say the same thing ARE the same one.
+"Record" is what it is. "Claim" is what it does — somebody asserting something. "Delta" is what
+everyone who builds on this calls it, and now you can read their documentation.`,
       terms: termsEntering(11),
       quiz: {
         id: "act-iii",
@@ -1263,7 +1349,7 @@ name of the thing you have been reading since the first screen: a delta.`,
             choices: [
               "In this page's code",
               "In your own store, as claims you made while you learned",
-              "On a server somewhere, keyed to your session",
+              "On somebody else's computer, filed under your name",
             ],
             answer: 1,
             teaches: "11.1",
@@ -1315,12 +1401,15 @@ name of the thing you have been reading since the first screen: a delta.`,
           observe: {
             page: { selector: "#progress-rail", contains: "✓ 1." },
             store: async (ctx) => {
-              const held = new Set(ground(ctx).map((d) => d.id));
               const entries = readGlossary(ctx);
               const progress = readProgress(ctx);
               return (
                 entries.length >= 16 &&
-                entries.every((e) => held.has(e.deltaId)) &&
+                // AT THE BYTES, which is the reveal's actual claim. `readGlossary` is derived
+                // from `offeredDeltas()`, so checking its entries against `offeredDeltas()`
+                // compares the code with itself and can never fail. The rows are a different
+                // level: every word in that pane is a record this browser wrote down.
+                entries.every((e) => ctx.storage.getItem(STORE_PREFIX + e.deltaId) !== null) &&
                 progress.steps.size >= 24 &&
                 progress.entered.length >= 11
               );
@@ -1330,7 +1419,7 @@ name of the thing you have been reading since the first screen: a delta.`,
       ],
       check: async (ctx) =>
         mineAt(ctx, "tutorial:term:delta", "tutorial.glossary") &&
-        readGlossary(ctx).every((e) => ground(ctx).some((d) => d.id === e.deltaId)),
+        readGlossary(ctx).every((e) => ctx.storage.getItem(STORE_PREFIX + e.deltaId) !== null),
     },
 
     // ============================ ACT IV — who gets in ============================
@@ -1357,7 +1446,7 @@ in each reading the whole time, waiting for you to notice.`,
             const file = JSON.stringify({
               deltas: [
                 fieldAs(loam, ctx, STRANGER_SEED, TENET, "rating", 10),
-                fieldAs(loam, ctx, STRANGER_SEED, TENET, "note", "a perfect film, no notes"),
+                fieldAs(loam, ctx, STRANGER_SEED, TENET, "note", STRANGER_NOTE),
               ].map((d) => loam.toWire(d)),
             });
             await ctx.gateway.federate(loam.parseOffer(file));
@@ -1373,11 +1462,19 @@ in each reading the whole time, waiting for you to notice.`,
                 // It LANDED, under the stranger's own key — the store does not burn mail...
                 landed.length === 1 &&
                 landed[0].claims.author === STRANGER &&
-                // ...and neither shelf hears it, because you named whose word they hear...
+                // ...and neither shelf hears it. The NOTE is what proves that, not the rating:
+                // both shelves put your own hand first anyway, so a shelf that had quietly
+                // stopped narrowing would still answer 6 and this would notice nothing. The
+                // note field keeps everything it hears, so a leak has nowhere to hide.
+                house.rating.includes(6) &&
                 !list(house.rating).includes(10) &&
+                !list(house.note).includes(STRANGER_NOTE) &&
                 mine.rating === 6 &&
-                // ...while the plain description from lesson two hears everyone, and believed it.
-                plain.rating === 10
+                !list(mine.note).includes(STRANGER_NOTE) &&
+                // ...while the plain description from lesson two hears everyone, and believed
+                // it — note and all.
+                plain.rating === 10 &&
+                list(plain.note).includes(STRANGER_NOTE)
               );
             },
           },
@@ -1396,12 +1493,15 @@ in each reading the whole time, waiting for you to notice.`,
             );
           },
           observe: {
-            page: { selector: "#view-cards", contains: "a perfect film, no notes" },
+            page: { selector: "#view-cards", contains: STRANGER_NOTE },
             store: async (ctx) => {
               const house = await read(ctx, "houseDiary", TENET);
               const forged = rowsSaying(ctx, TENET, "rating", 10)[0];
               return (
                 list(house.rating).includes(10) &&
+                list(house.note).includes(STRANGER_NOTE) &&
+                // ...and it did not lose your own word to make room for theirs
+                list(house.rating).includes(6) &&
                 // and it wears the key that really wrote it — never Rae's name
                 forged !== undefined &&
                 forged.claims.author === STRANGER &&
@@ -1422,12 +1522,12 @@ in each reading the whole time, waiting for you to notice.`,
       id: 13,
       role: "revocation",
       title: "The cousin incident",
-      copy: `Rae's cousin found Rae's pen and logged fourteen viewings of the same car film.
-Revoke the grant — the door will refuse that key from now on. What it will not do is pretend the
-fourteen were never written, because a history you can quietly rewrite is not a history. Then do
-the part most systems get wrong twice: hand Rae a fresh key on the spot and grant that one. Keys
-are cheap. What you actually govern is who may write, and you are about to change it twice in a
-minute without losing a single line.`,
+      copy: `Rae's cousin found Rae's pen and logged fourteen nights of the same car film.
+Revoke the grant — the store's front door will refuse that key from now on. What it will not do
+is pretend the fourteen were never written, because a history you can quietly rewrite is not a
+history. Then do the part most systems get wrong twice: hand Rae a fresh key on the spot and
+grant that one. Keys are cheap. What you actually govern is who may write, and you are about to
+change it twice in a minute without losing a single line of anything.`,
       terms: termsEntering(13),
       quiz: {
         id: "act-iv",
@@ -1463,10 +1563,10 @@ minute without losing a single line.`,
       steps: [
         {
           id: "13.1",
-          label: "Fourteen viewings of the same car film",
+          label: "Fourteen nights of the same car film",
           have: "A pen you gave to Rae, and a cousin who found it.",
           want: "The damage on the page, where you can see exactly what happened.",
-          how: "Press the button. Fourteen rows land, all wearing Rae's first key.",
+          how: "Press the button. Fifteen rows land — fourteen dates and the film's name — all in Rae's first hand.",
           run: async (ctx) => {
             const batch = [];
             for (let n = 1; n <= 14; n++) {
@@ -1502,13 +1602,25 @@ minute without losing a single line.`,
           },
           observe: {
             page: { selector: "#ground-rows", contains: "viewing:fast-and-furious" },
-            store: async (ctx) =>
-              // the key is refused from here on...
-              !canWrite(ctx, RAE_FIRST) &&
-              // ...and every line it ever wrote is still here, still saying who wrote it
-              ground(ctx).filter((d) => d.claims.author === RAE_FIRST && pointsAt(CHASE, "date")(d))
-                .length === 14 &&
-              rowsSaying(ctx, VIEWING, "rating", 4).some((d) => d.claims.author === RAE_FIRST),
+            store: async (ctx) => {
+              const binge = await read(ctx, "viewing", CHASE);
+              return (
+                // the key is refused from here on...
+                !canWrite(ctx, RAE_FIRST) &&
+                // ...and every line it ever wrote is still here, still saying who wrote it, at
+                // the delta...
+                ground(ctx).filter(
+                  (d) => d.claims.author === RAE_FIRST && pointsAt(CHASE, "date")(d),
+                ).length === 14 &&
+                rowsSaying(ctx, VIEWING, "rating", 4).some((d) => d.claims.author === RAE_FIRST) &&
+                // ...AND at the reading, which is the half that would go quiet first if losing
+                // standing ever un-said what a key had already written. The copy and the quiz
+                // both promise this; the delta level alone cannot keep the promise.
+                binge.film === "Fast & Furious" &&
+                list(binge.date).length === 14 &&
+                (await read(ctx, "viewing", VIEWING)).rating === 4
+              );
+            },
           },
         },
         {
@@ -1528,9 +1640,9 @@ minute without losing a single line.`,
         {
           id: "13.4",
           label: "Rae writes again — and writes down something that was never theirs",
-          have: "Rae, back at the diary, with a fresh pen and no bad intentions.",
-          want: "Tonight's line on the movie night entry. You are about to get two.",
-          how: "Press the button, then read both new lines on Paddington 2. One of them is not okay.",
+          have: "Rae, back at the diary with a fresh pen, still thinking about movie night.",
+          want: "Their two lines about that evening. One of them is about Jamie.",
+          how: "Press the button, then read both new lines on Paddington 2. Read the first one twice.",
           run: async (ctx) => {
             // Two lines, in this order on purpose: the second one's timestamp is what lesson 14
             // pins its as-of read to, so the past it reads is a past that CONTAINED the first.
@@ -1560,13 +1672,17 @@ minute without losing a single line.`,
       id: 14,
       role: "erasure-finale",
       title: "What never should have landed",
-      copy: `Read that first line again. Those are Jamie's words, and Jamie did not agree to be
-in your diary. A strike is not enough this time: a struck claim stays exactly where it is, and
-these bytes should not be in your store at all. So erase it — the one door only the operator has.
-The words leave everywhere they were kept, and a receipt stays behind saying that something went.
-Everywhere includes the checkpoints down the side, because a checkpoint is a copy and a copy
-holds the words. You are about to lose part of your own undo. That loss is the honest price of
-the promise, and it is the lesson.`,
+      copy: `Read that first line again. Jamie sent it to Rae at eleven at night, to Rae only,
+and now it is in your film diary. A strike is not enough this time. A struck claim stays exactly
+where it was — that is the whole point of a strike — and these particular words should not be
+anywhere in your store at all. So erase it: the one order only the operator can give. The words
+themselves go, everywhere this browser wrote them down, and a receipt stays behind saying that
+something went.
+
+Everywhere includes the checkpoints down the side. A checkpoint is a copy, and a copy has the
+words in it, so some of your undo is about to be destroyed in front of you — named, one line
+each, with the reason. That is the bill. A right to be forgotten that spares your undo button is
+not a right to be forgotten, and Jamie is owed the real one.`,
       terms: termsEntering(14),
       quiz: {
         id: "act-v",
@@ -1595,7 +1711,7 @@ the promise, and it is the lesson.`,
             ask: "Striking and erasing — what is the difference?",
             choices: [
               "None; erasing is just a stronger word",
-              "A strike hides a record and keeps it; erasing removes the bytes, and only the operator may",
+              "A strike hides a record and keeps it; erasing removes the words, and only the operator may",
               "A strike needs a receipt too",
             ],
             answer: 1,
@@ -1608,7 +1724,7 @@ the promise, and it is the lesson.`,
           id: "14.1",
           label: "Erase it, and say why",
           have: "A third person's private words, in a store you are responsible for.",
-          want: "Those bytes gone — from the store and from every copy of it you kept.",
+          want: "Those words gone — from the store and from every copy of it you kept.",
           how: "Press the button. Read what the page says it reached, and what it left alone.",
           run: async (ctx) => {
             const line = ground(ctx).find((d) => holds(d, PRIVATE_LINE));
@@ -1623,8 +1739,13 @@ the promise, and it is the lesson.`,
             store: async (ctx) => {
               const night = list((await read(ctx, "viewing", MOVIE_NIGHT)).note);
               return (
-                // gone, at the bytes, from every record the store holds...
+                // gone from what any reader is served...
                 !anywhere(ctx, PRIVATE_LINE) &&
+                // ...AND from the rows themselves, which is the harder half and the one the
+                // promise is actually about: a row the driver set aside, or one filed under a
+                // key that does not name it, is legibly on this machine and invisible to the
+                // reading above.
+                !wordsInStorage(ctx, PRIVATE_LINE) &&
                 loam.readTombstones(ctx.gateway.reactor, ctx.author).size >= 1 &&
                 // ...and the diary is whole around the hole: the line beside it survived, and so
                 // did everything else. A door that removed too much would pass the first test.
@@ -1647,8 +1768,9 @@ the promise, and it is the lesson.`,
               const receipts = ground(ctx).filter(pointsAt(ERASURE_ENTITY, ERASURE_CONTEXT));
               return (
                 receipts.length >= 1 &&
-                // it says WHY...
-                receipts.some((d) => holds(d, ERASURE_REASON)) &&
+                // EVERY one says WHY — `some` would let a reasonless receipt ride along beside
+                // a good one and still call the ledger honest.
+                receipts.every((d) => holds(d, ERASURE_REASON)) &&
                 // ...and it cannot say WHAT, because it never kept the words. At the bytes.
                 receipts.every((d) => !JSON.stringify(d).includes(PRIVATE_FRAGMENT)) &&
                 receipts.every((d) => d.claims.author === ctx.author)
@@ -1680,15 +1802,41 @@ the promise, and it is the lesson.`,
             // names the id it forgot, and every checkpoint taken after the erasure carries that
             // receipt. Asking "does this blob mention the id" would destroy those too — which is
             // over-purging, in the one direction whose mistakes cannot be undone.
+            //
+            // AND IT WALKS THE KEYS, not a list of lesson numbers derived from them. The sweep
+            // reads every key under the prefix verbatim, for the reason `player.mjs` states: a
+            // suffix that does not round-trip through `Number` would be skipped, leaving a blob
+            // with the record in it while the report said none had. A verdict that re-derived
+            // the numbers would be blind to exactly the blob the sweep exists to catch.
             store: async (ctx) => {
               const dead = loam.readTombstones(ctx.gateway.reactor, ctx.author);
               if (dead.size === 0) return false;
-              for (const lesson of checkpointLessons(ctx.storage)) {
-                const blob = readCheckpoint(ctx.storage, lesson);
-                if (blob === null) return false; // unreadable: the sweep should have taken it
+              const words = asStored(PRIVATE_LINE);
+              for (let i = 0; i < ctx.storage.length; i++) {
+                const key = ctx.storage.key(i);
+                if (key === null || !key.startsWith(CKPT_PREFIX)) continue;
+                const raw = ctx.storage.getItem(key);
+                let blob = null;
+                try {
+                  blob = raw === null ? null : JSON.parse(raw);
+                } catch {
+                  blob = null;
+                }
+                // A blob that will not read cannot be shown to be clean, and the sweep destroys
+                // exactly those. One still lying here means the sweep did not run.
+                if (blob === null || typeof blob.rows !== "object" || blob.rows === null) {
+                  return false;
+                }
                 for (const [rowKey, row] of Object.entries(blob.rows)) {
+                  // The two questions the sweep itself asks: the key that FILES the row, and the
+                  // id the row's own bytes CLAIM — the second catches a misfiled row.
                   if (dead.has(rowKey.slice(STORE_PREFIX.length))) return false;
-                  if (typeof row === "string" && row.includes(PRIVATE_LINE)) return false;
+                  if (typeof row !== "string") continue;
+                  if (dead.has(claimedIdOf(row))) return false;
+                  // ...and the words themselves, escaped the way a stored row escapes them. The
+                  // raw sentence is never found in a row: the row is JSON, and the quotes in it
+                  // are backslashed. A needle taken from the source is a guard that never fires.
+                  if (row.includes(words)) return false;
                 }
               }
               return true;
@@ -1736,18 +1884,22 @@ the promise, and it is the lesson.`,
       id: 15,
       role: "homecoming",
       title: "The homecoming",
-      copy: `Take it home. What comes out of this tab is not an export in the usual sense — not a
-flattened report, not a best-effort dump. It is the store: the same records, the same key, the
-same law, so that opening it somewhere else gives you the same answers down to the last
-character. Including the answer about what you forgot. You have had the key since lesson one.`,
+      copy: `Take it home. What comes out of this tab is not a report about your diary and it is
+not a best-effort dump of it. It is the diary: the same records, the same key, the same rules
+about who may write and what was removed — so opening it somewhere else gives you the same
+answers, character for character. Including the answer about Jamie, which is that there is no
+answer, and a receipt saying so. You have had the key since lesson one; this is the part where it
+turns out to have been the whole point.
+
+Afterwards, Rae wants a store of their own. That is the next journey.`,
       terms: termsEntering(15),
       steps: [
         {
           id: "15.1",
-          label: "Write the last line",
-          have: "Four films, two pens, one thing removed on purpose.",
-          want: "One sentence at the end of it, because it is your diary.",
-          how: "Press the button. It lands like everything else did.",
+          label: `Write the last line: "${LAST_LINE}"`,
+          have: "Four films, three pens, and one thing removed on purpose.",
+          want: "A sentence at the end of it, because a diary should end with one.",
+          how: "Press the button. It lands the same way every other line did.",
           run: async (ctx) => {
             await ctx.gateway.append([field(loam, ctx, DIARY, "note", LAST_LINE)]);
           },
@@ -1770,18 +1922,24 @@ character. Including the answer about what you forgot. You have had the key sinc
             store: async (ctx) => {
               const copy = await openTheCopy(loam, ctx, buildExport(loam, ctx));
               try {
-                const here = await ctx.gateway.query(
-                  `{ viewing(entity: "${VIEWING}") { _hex rating } }`,
-                );
-                const there = await copy.query(`{ viewing(entity: "${VIEWING}") { _hex rating } }`);
-                const mine = here.data?.viewing;
-                const theirs = there.data?.viewing;
-                return (
-                  typeof mine?._hex === "string" &&
-                  mine._hex.length > 0 &&
+                // TWO ENTITIES, and the second is the one that matters. Arrival is a plain
+                // pile of ratings; Tenet carries a strike of your own AND a stranger's
+                // federated claim, so it is the entity where a seeding edge that dropped a
+                // retraction would show up — as a copy serving a taken-back note as live.
+                for (const entity of [VIEWING, TENET]) {
+                  const here = await ctx.gateway.query(
+                    `{ viewing(entity: "${entity}") { _hex rating } }`,
+                  );
+                  const there = await copy.query(
+                    `{ viewing(entity: "${entity}") { _hex rating } }`,
+                  );
+                  const mine = here.data?.viewing;
+                  const theirs = there.data?.viewing;
+                  if (typeof mine?._hex !== "string" || mine._hex.length === 0) return false;
                   // the same answer, character for character — the law travelled with the records
-                  mine._hex === theirs?._hex
-                );
+                  if (mine._hex !== theirs?._hex) return false;
+                }
+                return true;
               } finally {
                 await copy.close();
               }
