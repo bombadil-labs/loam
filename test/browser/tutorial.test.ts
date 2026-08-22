@@ -275,7 +275,16 @@ describe("§48 — the progress is in the store, and nowhere else", () => {
   it("a query pinned to the Views pane is still there after a reload", async () => {
     await page.reset();
     const arc = await page.arc();
-    await playLesson(arc[0]!); // a store with something to ask about
+    // Walk until the store can answer something — the console opens on a real question then,
+    // whichever lesson in whatever arc happens to describe the first lens.
+    for (const lesson of arc) {
+      if ((await page.lensNames()).length > 0) break;
+      await playLesson(lesson);
+    }
+    expect(
+      (await page.lensNames()).length,
+      "no lesson in this arc registers a lens",
+    ).toBeGreaterThan(0);
     await page.click('.tabs button[data-pane="gql"]');
     await page.fill("#gql-pin-label", "my pin");
     await page.click("#gql-pin");

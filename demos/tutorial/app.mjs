@@ -709,17 +709,53 @@ async function introspect(asStranger) {
   }
 }
 
+/**
+ * A read of whatever this store can currently answer — derived from ITS OWN registrations, so
+ * the page never has to know what the arc is about. The editor opens on it, and the View pane's
+ * subscription follows the same lens; an arc that renames every entity changes neither.
+ */
+function firstReadable() {
+  for (const version of gateway.registrationVersions()) {
+    const root = version.roots[0];
+    if (root === undefined) continue;
+    const name = version.hyperschema.name;
+    const field = name.charAt(0).toLowerCase() + name.slice(1);
+    return { field, root, props: [...version.schema.props.keys()] };
+  }
+  return null;
+}
+
+const NO_LENS_YET = "# nothing is registered yet — describe a lens and this pane comes alive\n";
+const readAloud = (r) =>
+  `{ ${r.field}(entity: ${JSON.stringify(r.root)}) { ${r.props.join(" ")} } }`;
+
+const opening = firstReadable();
 const editor = new EditorView({
-  doc: `{ viewing(entity: "viewing:arrival") { film rating note } }`,
+  doc: opening === null ? NO_LENS_YET : readAloud(opening),
   extensions: [basicSetup, graphqlLang()],
   parent: $("#gql-editor"),
 });
+
+/**
+ * When the store grows its first lens, the console stops apologizing and offers a real question.
+ * Only ever while the editor still holds the placeholder EXACTLY — a student's own draft is
+ * theirs, and a pane that rewrote what someone was typing would be worse than an empty one.
+ */
+function offerFirstQuestion() {
+  if (editor.state.doc.toString() !== NO_LENS_YET) return;
+  const readable = firstReadable();
+  if (readable === null) return;
+  editor.dispatch({
+    changes: { from: 0, to: editor.state.doc.length, insert: readAloud(readable) },
+  });
+}
 
 // A call token keeps racing introspections honest: only the LATEST request may install its
 // schema, so a fast toggle mid-render cannot leave the stranger's schema under the operator's
 // caption.
 let introspectionTurn = 0;
 async function refreshEditorSchema() {
+  offerFirstQuestion();
   const turn = ++introspectionTurn;
   const asStranger = $("#gql-stranger").checked;
   const schema = await introspect(asStranger);
@@ -822,10 +858,12 @@ $("#export").onclick = () =>
 async function watchStore() {
   for (;;) {
     try {
-      const roots = gateway.registrationVersions();
-      if (roots.length > 0) {
+      // Whatever this store can answer, asked of the store itself — an evolution or a whole new
+      // arc changes the question, and the pane follows without a line changing here.
+      const readable = firstReadable();
+      if (readable !== null && readable.props.length > 0) {
         const sub = await gateway.subscribe(
-          `subscription { viewing(entity: "viewing:arrival") { film rating } }`,
+          `subscription { ${readable.field}(entity: ${JSON.stringify(readable.root)}) { ${readable.props.join(" ")} } }`,
         );
         for (;;) {
           const item = await sub.next();

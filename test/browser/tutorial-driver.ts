@@ -236,6 +236,11 @@ export class TutorialPage {
       .then((v) => json<string[]>(v));
   }
 
+  /** The lenses this store holds a registration for, asked of the live gateway. */
+  lensNames(): Promise<string[]> {
+    return this.tab.eval(`window.tutorial.lensNames()`).then((v) => json<string[]>(v));
+  }
+
   /** Every pending step the page is showing — the count matters, not only the first one. */
   pendingSteps(): Promise<string[]> {
     return this.attrs('[data-step][data-state="pending"]', "data-step");
