@@ -219,6 +219,21 @@ describe("§48 — the progress is in the store, and nowhere else", () => {
     expect(after.quiz).toEqual(before.quiz);
   });
 
+  it("a query pinned to the Views pane is still there after a reload", async () => {
+    await page.reset();
+    const arc = await page.arc();
+    await playLesson(arc[0]!); // a store with something to ask about
+    await page.click('.tabs button[data-pane="gql"]');
+    await page.fill("#gql-pin-label", "my pin");
+    await page.click("#gql-pin");
+    expect(await page.text("#view-cards")).toContain("my pin");
+
+    await page.reload();
+    // The pin is the page's own memory rather than the store's, and it lives OUTSIDE the delta
+    // namespace on purpose — so this rail is the one that notices if it stops being read at all.
+    expect(await page.text("#view-cards")).toContain("my pin");
+  });
+
   it("the Ground pane hides the tutorial's own records until the student asks, then badges them `tutorial`", async () => {
     await page.reset();
     const arc = await page.arc();

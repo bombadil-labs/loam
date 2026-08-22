@@ -180,6 +180,18 @@ export class TutorialPage {
       .then((v) => String(v));
   }
 
+  /** Type into a field the way a person does — the value, then the input event the page hears. */
+  async fill(selector: string, value: string): Promise<void> {
+    const hit = await this.tab.eval(
+      `(() => { const el = document.querySelector(${JSON.stringify(selector)});
+                if (!el) return false;
+                el.value = ${JSON.stringify(value)};
+                el.dispatchEvent(new Event("input", { bubbles: true }));
+                return true; })()`,
+    );
+    if (hit !== true) throw new Error(`no field at ${selector}`);
+  }
+
   exists(selector: string): Promise<boolean> {
     return this.tab
       .eval(`document.querySelector(${JSON.stringify(selector)}) !== null`)

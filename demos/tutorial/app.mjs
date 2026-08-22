@@ -49,7 +49,7 @@ window.addEventListener("error", (e) => {
   window.__tutorialError = String(e.message);
 });
 window.addEventListener("unhandledrejection", (e) => {
-  window.__tutorialError = String((e.reason && e.reason.message) || e.reason);
+  window.__tutorialError = String(e.reason?.message ?? e.reason);
 });
 
 // ---- boot ------------------------------------------------------------------------------------
@@ -68,6 +68,26 @@ const ctx = {
 
 const arc = buildArc(loam);
 const lessonOf = (id) => arc.find((l) => l.id === id) ?? arc[0];
+
+// Pins live OUTSIDE the store's delta namespace: the backend owns every `loam:tutorial:<id>` key
+// and reads what it finds there as a delta. Dots, not colons — this cannot collide.
+//
+// DECLARED BEFORE ITS READER, and that is not style: `loadPins` runs while the `ui` literal
+// below is being built, so a key declared after it would still be in its dead zone — and the
+// catch here, which exists for a corrupt VALUE, would swallow that as an empty Map and lose
+// every pin the student saved, silently.
+const PINS_KEY = "loam.tutorial.ui.pins";
+function loadPins() {
+  try {
+    const raw = JSON.parse(storage.getItem(PINS_KEY) ?? "[]");
+    if (!Array.isArray(raw)) return new Map();
+    return new Map(
+      raw.filter((e) => Array.isArray(e) && typeof e[0] === "string" && typeof e[1] === "string"),
+    );
+  } catch {
+    return new Map(); // disposable UI memory: a corrupt value must never kill the boot
+  }
+}
 
 // The page's own memory — panes, drawers, and questions in flight. Never progress: that lives
 // in the store, and every render reads it back from there.
@@ -93,21 +113,6 @@ const groundState = {
   showTutorial: false,
   highlight: null,
 };
-
-// Pins live OUTSIDE the store's delta namespace: the backend owns every `loam:tutorial:<id>` key
-// and reads what it finds there as a delta. Dots, not colons — this cannot collide.
-const PINS_KEY = "loam.tutorial.ui.pins";
-function loadPins() {
-  try {
-    const raw = JSON.parse(storage.getItem(PINS_KEY) ?? "[]");
-    if (!Array.isArray(raw)) return new Map();
-    return new Map(
-      raw.filter((e) => Array.isArray(e) && typeof e[0] === "string" && typeof e[1] === "string"),
-    );
-  } catch {
-    return new Map(); // disposable UI memory: a corrupt value must never kill the boot
-  }
-}
 
 // One action at a time, in a chain the page can be ASKED about. Every button goes through this,
 // so a rail (and a curious console) can await exactly the work a click started, and a thrown
