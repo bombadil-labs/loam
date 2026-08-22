@@ -21,6 +21,14 @@ if (outFlag !== -1 && process.argv[outFlag + 1] === undefined) {
 }
 const out = outFlag === -1 ? join(root, "site-dist") : resolve(process.argv[outFlag + 1]);
 
+// The first thing this script does is DELETE what stands at `out`, recursively. A mistyped
+// `--out .` would take the repository with it, so the two paths that can never be an output —
+// the repository itself and any directory containing it — are refused rather than emptied.
+if (out === root || root.startsWith(out + "/") || out === "/") {
+  console.error(`loam: refusing to build into ${out} — this build deletes its output directory`);
+  process.exit(1);
+}
+
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 
