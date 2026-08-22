@@ -9,24 +9,36 @@
 // and the reload are `test/browser/tutorial.test.ts`'s — a real Chrome over the real page. Both
 // levels are covered; neither file covers both, and the split is the T143 lesson kept honest.
 //
-// The arc here is the STUB (T226): two or three lessons that exercise every mechanic the real
-// fifteen will need. T227 replaces the arc and extends this file; the engine's assertions are
-// written against the arc's SHAPE and its lesson ROLES, never against a lesson number.
+// The arc here is "A Store of Your Own" (T227): fifteen lessons in five acts. The engine's
+// assertions are written against the arc's SHAPE and its lesson ROLES, never against a lesson
+// number, so a later rewrite of the content leaves them standing. The CONTENT assertions — the
+// term manifest, the vocabulary scan, the glossary trail — name the arc on purpose, because
+// that is what they are for.
 //
-// TWO GAPS, NAMED. (1) The progress-claims case asserts the CLAIMS and the reading over them;
+// FIVE GAPS, NAMED. (1) The progress-claims case asserts the CLAIMS and the reading over them;
 // the page's revert rail renders its checkpoint rows from the BLOB KEYS instead, so the two can
 // legitimately differ. The ordinary cause is a REVERT — restoring an earlier boundary drops the
 // later blobs while the claims that recorded them stay in the ground, which is right: the
 // claims are history and the blobs are what you can still return to. (A refused boundary cannot
 // cause it: the claim is never written unless a blob backs it, which is its own case below.)
 // (2) Nothing here drives the page: the render, the in-page confirm and the reload belong to
-// `test/browser/tutorial.test.ts`.
+// `test/browser/tutorial.test.ts`. (3) The finale's own sweep observable is deliberately
+// ONE-SIDED — it may not require a surviving checkpoint, because the frozen browser suite
+// requires that lesson to be passable with every blob deleted. The other side (a bystander blob
+// is SPARED) is asserted here, in "the finale sweeps the REAL checkpoints", where this file owns
+// the fixture and can guarantee a bystander exists. (4) The vocabulary scan reads the arc's own
+// copy, not the page's furniture: a pane LABEL in `index.html` is not a lesson's word, and the
+// scan says so by allowing the capitalised pane names and nothing else. (5) A narrowed reading
+// has TWO halves, asserted in two places: whose CLAIMS it admits is bound by lesson 12's own step
+// observables (a stranger's rating and note reach the plain description and neither shelf), and
+// whose STRIKES it honours is bound here, in "a stranger's STRIKE reaches the plain description
+// and neither shelf". Neither case covers the other; a reading that lost one half would still
+// pass the case for the other.
 
-import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as loam from "../../src/browser/index.js";
 import { run } from "../../src/cli/cli.js";
 import { storePath } from "../../src/cli/config.js";
@@ -34,7 +46,14 @@ import { SqliteBackend } from "../../src/store/sqlite.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemStorage } from "../store/mem-storage.js";
 import {
+  CHASE,
   DIARY,
+  asStored,
+  claimedIdOf,
+  MOVIE_NIGHT,
+  RAE,
+  TENET,
+  TERMS,
   VIEWING,
   bootTutorialStore,
   buildArc,
@@ -109,14 +128,93 @@ const claimsWithContext = (ctx: LessonCtx, context: string): unknown[] =>
       ),
     );
 
-beforeAll(() => {
-  // The packets are committed data the arc's federation lessons stand on; a drifted generator
-  // fails here rather than inside a lesson that is confused by it.
-  execFileSync(process.execPath, [join("scripts", "gen-packets.mjs"), "--check"], {
-    cwd: process.cwd(),
-    stdio: "pipe",
-  });
-});
+// --- the vocabulary scan ------------------------------------------------------------------------
+//
+// One rule, mechanically: NO TERM APPEARS IN LESSON COPY BEFORE THE LESSON THAT INTRODUCES IT.
+// Lesson granularity is deliberate. A lesson's own terms are planted the moment the student
+// arrives, before a word of it is on screen, so a lesson may use what it introduces; a term
+// planted from inside a STEP (the reveal's payoff) still belongs to its lesson, because the
+// lesson that earns a word is the lesson allowed to say it.
+//
+// PANE NAMES ARE FURNITURE, NOT VOCABULARY. `index.html` labels a tab "Ground" and another
+// "View", and lesson one has to be able to say which tab to open. The scan therefore allows a
+// match whose exact text is one of those labels — CAPITALISED, exactly as the page prints them —
+// and nothing else. The case is the whole of the carve-out's safety: lowercase "ground" in lesson
+// one is the concept, not the tab, and stays a violation. Both directions are asserted below,
+// because a carve-out nobody probes is a hole nobody sees.
+
+const PANE_LABELS = ["View", "Views", "Ground", "Glossary"] as const;
+
+interface CopyUnit {
+  readonly lesson: number;
+  readonly where: string;
+  readonly text: string;
+}
+
+/** Every sentence the arc SHOWS a student, in reading order, tagged with its lesson. */
+function copyUnits(arc: Lesson[]): CopyUnit[] {
+  const units: CopyUnit[] = [];
+  for (const lesson of arc) {
+    const at = (where: string, text: string): void => {
+      units.push({ lesson: lesson.id, where: `lesson ${lesson.id} ${where}`, text });
+    };
+    at("title", lesson.title);
+    at("copy", lesson.copy);
+    for (const t of lesson.terms) at(`glossary entry "${t.term}"`, t.meaning);
+    for (const step of lesson.steps) {
+      at(`step ${step.id} label`, step.label);
+      at(`step ${step.id} have`, step.have);
+      at(`step ${step.id} want`, step.want);
+      at(`step ${step.id} how`, step.how);
+    }
+    if (lesson.quiz !== undefined) {
+      for (const q of lesson.quiz.questions) {
+        at(`quiz ${lesson.quiz.id} question`, q.ask);
+        for (const choice of q.choices) at(`quiz ${lesson.quiz.id} choice`, choice);
+      }
+    }
+  }
+  return units;
+}
+
+/**
+ * The names this arc refuses to use at all. A workshop decision: schema, hyperschema and gather
+ * are the deeper names, and the arc teaches without them.
+ */
+const BANNED = ["schema", "hyperschema", "gather"] as const;
+
+/** Every place the arc reaches for a name it agreed not to use. */
+function bannedUses(arc: Lesson[]): string[] {
+  const found: string[] = [];
+  for (const unit of copyUnits(arc)) {
+    for (const word of BANNED) {
+      if (new RegExp(`\\b${word}s?\\b`, "i").test(unit.text))
+        found.push(`"${word}" in ${unit.where}`);
+    }
+  }
+  return found;
+}
+
+/** Every place a word of the arc's vocabulary is used before the lesson that introduces it. */
+function earlyUses(arc: Lesson[]): string[] {
+  const found: string[] = [];
+  for (const unit of copyUnits(arc)) {
+    for (const term of TERMS) {
+      if (term.lesson <= unit.lesson) continue;
+      for (const form of term.forms) {
+        const hits = unit.text.match(new RegExp(`\\b${form}\\b`, "gi")) ?? [];
+        for (const hit of hits) {
+          if ((PANE_LABELS as readonly string[]).includes(hit)) continue;
+          found.push(
+            `"${term.term}" (introduced in lesson ${term.lesson}) is used as "${hit}" in ` +
+              `${unit.where}`,
+          );
+        }
+      }
+    }
+  }
+  return found;
+}
 
 describe("the arc, headless: every step earns its store observable", () => {
   it("walks the whole arc in order; no lesson is green before it runs; every step's store predicate turns true", async () => {
@@ -127,6 +225,10 @@ describe("the arc, headless: every step earns its store observable", () => {
 
     for (const lesson of arc) {
       expect(await lesson.check(ctx), `lesson ${lesson.id} green before it ran`).toBe(false);
+      // ARRIVING is part of playing a lesson, exactly as it is on the page: the entry claim and
+      // the lesson's glossary terms land before a word of it is on screen. A walk that skipped
+      // it would run the steps in a store no student could ever be standing in.
+      await enterLesson(loam, ctx, lesson);
 
       // A step is EARNED when its store predicate is false before its run — the property the
       // browser suite's red-probe needs, and the anti-vacuity bar for the arc: a lesson made
@@ -418,7 +520,11 @@ describe("progress is claims", () => {
     expect(withQuiz, "the arc declares no quiz").toBeDefined();
     const quiz = withQuiz!.quiz!;
 
-    await playLesson(withQuiz!, ctx);
+    // From the top: a quiz closes an ACT, and its lesson stands on the ones before it.
+    for (const lesson of arc) {
+      await playLesson(lesson, ctx);
+      if (lesson.id === withQuiz!.id) break;
+    }
     expect(readProgress(ctx).skipped.has(quiz.id)).toBe(false);
     await skipQuiz(loam, ctx, quiz);
 
@@ -1052,11 +1158,22 @@ describe("checkpoints, revert, and the sweep", () => {
     const boundaries = checkpointLessons(storage);
     expect(boundaries.length, "the arc reaches its erasure with no checkpoints").toBeGreaterThan(1);
 
-    await playLesson(finale, ctx);
-    const erased = [...loam.readTombstones(ctx.gateway.reactor, ctx.author)];
-    expect(erased.length, "the erasure lesson erased nothing").toBeGreaterThan(0);
+    // The id the finale is about to condemn, named while it is still readable. The sweep is
+    // exercised HERE, against these real boundaries, BEFORE the lesson runs its own — so this
+    // case pins the function's rule (destroy what holds it, spare what does not) rather than
+    // whatever the arc happens to have already cleaned up. The arc's own trigger is the case
+    // "the finale sweeps the REAL checkpoints" below.
+    const condemned = ctx.gateway
+      .offeredDeltas()
+      .filter((d) =>
+        d.claims.pointers.some(
+          (p) => p.target.kind === "primitive" && String(p.target.value).includes("jamie texted"),
+        ),
+      )
+      .map((d) => d.id);
+    expect(condemned.length, "nothing in the ground is what the finale erases").toBe(1);
 
-    const report = sweepCheckpoints(storage, erased);
+    const report = sweepCheckpoints(storage, condemned);
     // TWO-SIDED, at the bytes: the condemned checkpoints are gone from storage entirely, and a
     // named bystander checkpoint is still there AND still readable.
     expect(report.destroyed.length, "no checkpoint held the erased bytes").toBeGreaterThan(0);
@@ -1071,13 +1188,20 @@ describe("checkpoints, revert, and the sweep", () => {
     for (const kept of report.kept) {
       const blob = readCheckpoint(storage, kept.lesson);
       expect(blob, `the bystander checkpoint ${kept.lesson} was destroyed`).not.toBeNull();
-      for (const id of erased) expect(Object.keys(blob!.rows)).not.toContain(STORE_PREFIX + id);
+      for (const id of condemned) expect(Object.keys(blob!.rows)).not.toContain(STORE_PREFIX + id);
     }
-    // No surviving blob anywhere holds an erased id — the claim the page makes on screen.
+    // No surviving blob anywhere holds the condemned id — the claim the page makes on screen.
     for (const lesson of checkpointLessons(storage)) {
       const blob = readCheckpoint(storage, lesson)!;
-      for (const id of erased) expect(Object.keys(blob.rows)).not.toContain(STORE_PREFIX + id);
+      for (const id of condemned) expect(Object.keys(blob.rows)).not.toContain(STORE_PREFIX + id);
     }
+    // IDEMPOTENT: a second pass finds nothing to destroy and says so, rather than taking the
+    // survivors on a second look. The page runs this on every render, so it had better be.
+    const again = sweepCheckpoints(storage, condemned);
+    expect(again.destroyed, "a second sweep destroyed a checkpoint it had already spared").toEqual(
+      [],
+    );
+    expect(again.kept.length).toBe(report.kept.length);
     await ctx.gateway.close();
   });
 });
@@ -1123,5 +1247,640 @@ describe("the tutorial's store is a real store", () => {
       await ctx.gateway.close();
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
+  });
+
+  it("the homecoming's forgetting travels: the erased words are in no byte of the export, and the diary around them is", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    const arc = buildArc(loam);
+    const finale = lessonOfRole(arc, "erasure-finale");
+
+    // Play up to the finale and take the erased record's own words out of the ground BEFORE it
+    // is erased — after the erasure there is nowhere left to read them from, which is the point,
+    // and a rail that asked for them afterwards would be asserting against an empty string.
+    for (const lesson of arc) {
+      if (lesson.id === finale.id) break;
+      await playLesson(lesson, ctx);
+    }
+    const condemned = ctx.gateway
+      .offeredDeltas()
+      .filter((d) =>
+        d.claims.pointers.some(
+          (p) =>
+            p.target.kind === "entity" &&
+            p.target.entity.id === MOVIE_NIGHT &&
+            p.target.entity.context === "note",
+        ),
+      )
+      .map((d) => {
+        const words = d.claims.pointers.find((p) => p.target.kind === "primitive");
+        return words?.target.kind === "primitive" ? String(words.target.value) : "";
+      })
+      .filter((w) => w.length > 0);
+    expect(condemned.length, "the movie-night entry carries no notes to forget").toBe(2);
+
+    for (const lesson of arc) {
+      if (lesson.id < finale.id) continue;
+      await playLesson(lesson, ctx);
+    }
+
+    const text = buildExport(loam, ctx);
+    const erased = [...loam.readTombstones(ctx.gateway.reactor, ctx.author)];
+    expect(erased.length, "the finale erased nothing").toBeGreaterThan(0);
+
+    // TWO-SIDED, at the bytes of the file the student walks out with: one of those two notes is
+    // gone from it entirely, and the other is still in there. A file that carried neither would
+    // pass a one-sided check while having quietly lost the diary.
+    //
+    // THE NEEDLE IS ESCAPED THE WAY THE HAYSTACK IS. `text` is `JSON.stringify` output, so a
+    // sentence containing a quote is spelled with backslashes in it. Searching for the raw
+    // sentence finds nothing whether the words are in the file or not — a guard that can only
+    // ever say "clean", which is the worst shape an erasure check can have.
+    const stored = (w: string): string => JSON.stringify(w).slice(1, -1);
+    const gone = condemned.filter((w) => !text.includes(stored(w)));
+    const survived = condemned.filter((w) => text.includes(stored(w)));
+    // ...and the escaping is not theoretical: at least one of these two really does need it.
+    expect(
+      condemned.some((w) => stored(w) !== w),
+      "neither note needs escaping — this rail would pass with the naive comparison too",
+    ).toBe(true);
+    expect(gone.length, "the export still carries the erased words").toBe(1);
+    expect(survived.length, "the export lost the note that was never condemned").toBe(1);
+    for (const id of erased) {
+      expect(
+        (JSON.parse(text) as { deltas: { id: string }[] }).deltas.map((d) => d.id),
+        `the export carries the erased record ${id}`,
+      ).not.toContain(id);
+    }
+    // ...and the receipt DOES travel, so the other machine knows a forgetting happened here.
+    expect(text, "the export dropped the receipt along with the bytes").toContain("loam.erasure");
+    await ctx.gateway.close();
+  });
+});
+
+describe("the vocabulary is earned before it is used", () => {
+  it("the manifest is the arc script's twenty-one, in the script's order", () => {
+    // The list from `.adlc/specs/48-arc-script.md`, written out rather than derived: a manifest
+    // that checked itself would agree with any drift it introduced.
+    expect(TERMS.map((t) => t.term)).toEqual([
+      "store",
+      "record",
+      "key",
+      "operator",
+      "lens",
+      "shape",
+      "claim",
+      "signature",
+      "ground",
+      "view",
+      "strike",
+      "moment",
+      "author",
+      "policy",
+      "version",
+      "delta",
+      "trust",
+      "grant",
+      "revoke",
+      "erase",
+      "receipt",
+    ]);
+    for (const term of TERMS) {
+      expect(term.meaning.length, `"${term.term}" has no plain-words meaning`).toBeGreaterThan(20);
+      expect(term.forms, `"${term.term}" lists no forms for the scan`).toContain(term.term);
+    }
+    // `delta` is withheld until the reveal EARNS it: it is the one term a step plants.
+    const fromSteps = TERMS.filter((t) => t.step !== undefined);
+    expect(fromSteps.map((t) => t.term)).toEqual(["delta"]);
+    const reveal = lessonOfRole(buildArc(loam), "reveal");
+    expect(reveal.steps.map((s) => s.id)).toContain(fromSteps[0]!.step);
+  });
+
+  it("no lesson uses a word before the lesson that introduces it", () => {
+    expect(earlyUses(buildArc(loam))).toEqual([]);
+  });
+
+  it("...and the scan is not vacuous: a term slipped in early is named, with its lesson", () => {
+    const arc = buildArc(loam);
+    const early = arc.find((l) => l.id === 3)!;
+    // The exact failure this rail exists to catch: a lesson reaching for a word the student has
+    // not met. Lesson 3 has no business saying "delta" — the reveal is eight lessons away.
+    const planted: Lesson = { ...early, copy: `${early.copy} Every delta here is signed.` };
+    const violations = earlyUses(arc.map((l) => (l.id === early.id ? planted : l)));
+    expect(violations.length, "the scan did not notice a term used eight lessons early").toBe(1);
+    expect(violations[0]).toContain("delta");
+    expect(violations[0]).toContain("lesson 3");
+    expect(violations[0]).toContain("lesson 11"); // and it says where the word is introduced
+
+    // ...and the SAME violation planted in a step's framing and in a quiz choice, because the
+    // lesson's `copy` is one unit out of nearly two hundred. A scan narrowed to `copy` alone
+    // would leave every step sentence and every quiz answer unread, and nothing above would say
+    // so — the BREADTH is what is pinned here, not the rule.
+    const inStep: Lesson = {
+      ...early,
+      steps: early.steps.map((st, i) => (i === 0 ? { ...st, want: `${st.want} A delta.` } : st)),
+    };
+    const stepHits = earlyUses(arc.map((l) => (l.id === early.id ? inStep : l)));
+    expect(stepHits.length, "a term used early in a step's framing went unscanned").toBe(1);
+    expect(stepHits[0]).toContain(`step ${early.steps[0]!.id} want`);
+
+    const withQuiz = arc.find((l) => l.quiz !== undefined && l.id < 11)!;
+    const inChoice: Lesson = {
+      ...withQuiz,
+      quiz: {
+        ...withQuiz.quiz!,
+        questions: withQuiz.quiz!.questions.map((q, i) =>
+          i === 0 ? { ...q, choices: [...q.choices, "Every delta, in order"] } : q,
+        ),
+      },
+    };
+    const choiceHits = earlyUses(arc.map((l) => (l.id === withQuiz.id ? inChoice : l)));
+    expect(choiceHits.length, "a term used early in a quiz choice went unscanned").toBe(1);
+    expect(choiceHits[0]).toContain("choice");
+
+    // ...and the OTHER half: it does not fire on the page's own furniture. "Ground" is a label
+    // `index.html` prints, and lesson one has to be able to name the tab it is pointing at.
+    const shell = readFileSync(join(process.cwd(), "demos", "tutorial", "index.html"), "utf8");
+    for (const label of PANE_LABELS) {
+      expect(shell, `"${label}" is not a label this page prints`).toContain(label);
+    }
+    const furniture: Lesson = { ...early, copy: `${early.copy} Open the Ground pane.` };
+    expect(earlyUses(arc.map((l) => (l.id === early.id ? furniture : l)))).toEqual([]);
+
+    // THE CARVE-OUT IS THE CASE, and this is the direction that would rot silently. Lowercase
+    // "ground" in lesson 3 is the IDEA — introduced in lesson 4 — not the tab, and a carve-out
+    // that stopped reading capitals would wave it through along with every other term.
+    const idea: Lesson = { ...early, copy: `${early.copy} It all sits in the ground together.` };
+    const ideaHits = earlyUses(arc.map((l) => (l.id === early.id ? idea : l)));
+    expect(
+      ideaHits.length,
+      "lowercase `ground` passed as a pane name — the carve-out stopped reading case",
+    ).toBe(1);
+    expect(ideaHits[0]).toContain('"ground"');
+  });
+
+  it("every word the arc introduces is a word the arc actually says — in a lesson, not in the glossary", () => {
+    const arc = buildArc(loam);
+    // GLOSSARY MEANINGS ARE EXCLUDED FROM THE "SAID" SIDE, and that is the whole point of this
+    // case. The manifest can satisfy itself: "erase" appears in the definition of "receipt", and
+    // "record" in the definition of "key", so counting meanings as usage would let a word be
+    // introduced, defined, and never once spoken in a lesson — a glossary entry for something
+    // the student never meets. Meanings stay on the SCANNED side (a definition may not reach for
+    // a word the student has not met either); they are simply not evidence that the arc says it.
+    const spoken = copyUnits(arc).filter((u) => !u.where.includes("glossary entry"));
+    const orphans: string[] = [];
+    for (const term of TERMS) {
+      const said = spoken.some(
+        (u) =>
+          u.lesson >= term.lesson &&
+          term.forms.some((form) => new RegExp(`\\b${form}\\b`, "i").test(u.text)),
+      );
+      if (!said) orphans.push(term.term);
+    }
+    expect(orphans, "the glossary defines words the arc never says").toEqual([]);
+    // ...and the exclusion is not theoretical: at least one term really is used inside another
+    // term's meaning, so a version of this case that counted meanings would pass on less.
+    const inMeaningsOnly = TERMS.filter((t) =>
+      TERMS.some(
+        (other) => other.term !== t.term && new RegExp(`\\b${t.term}\\b`, "i").test(other.meaning),
+      ),
+    );
+    expect(
+      inMeaningsOnly.length,
+      "no term is used inside another's meaning — this exclusion is measuring nothing",
+    ).toBeGreaterThan(0);
+  });
+
+  it("the names this arc refuses to use never appear — and the scan for them is not asleep", () => {
+    const arc = buildArc(loam);
+    expect(bannedUses(arc)).toEqual([]);
+
+    // RED-PROOF, in the two places the scan is most likely to stop looking: a step's framing and
+    // a quiz choice. The lesson's `copy` is the obvious unit; the other 160-odd are the ones a
+    // narrowed scan would drop silently while every case here stayed green.
+    const withQuiz = arc.find((l) => l.quiz !== undefined)!;
+    const inStep: Lesson = {
+      ...withQuiz,
+      steps: withQuiz.steps.map((st, i) =>
+        i === 0 ? { ...st, want: `${st.want} The schema decides.` } : st,
+      ),
+    };
+    const caughtInStep = bannedUses(arc.map((l) => (l.id === withQuiz.id ? inStep : l)));
+    expect(caughtInStep.length, "a banned name in a step's framing went unscanned").toBe(1);
+    expect(caughtInStep[0]).toContain("step");
+
+    const inChoice: Lesson = {
+      ...withQuiz,
+      quiz: {
+        ...withQuiz.quiz!,
+        questions: withQuiz.quiz!.questions.map((q, i) =>
+          i === 0 ? { ...q, choices: [...q.choices, "By running a gather"] } : q,
+        ),
+      },
+    };
+    const caughtInChoice = bannedUses(arc.map((l) => (l.id === withQuiz.id ? inChoice : l)));
+    expect(caughtInChoice.length, "a banned name in a quiz choice went unscanned").toBe(1);
+    expect(caughtInChoice[0]).toContain("choice");
+  });
+});
+
+describe("the byte-level guards, at the level bytes are spelled", () => {
+  it("asStored is the row's own escaping: a needle it produces round-trips back to the words", () => {
+    // THE CONTRACT, not the implementation. `asStored` must yield exactly the body a row's JSON
+    // spells these words as — so wrapping it back in quotes and parsing it returns what went in.
+    // A slice that took one character too many still MATCHES inside a row (a shorter substring
+    // is still a substring), which is why "does the guard find it" cannot pin this and a
+    // round-trip can. The erasure lesson's whole byte-level claim rests on this function.
+    for (const words of [
+      "plain words",
+      'a line with "quotes" in it',
+      "a back\\slash and a \ttab",
+      "a newline\nand another",
+      "unicode — em dash, curly ’quote’",
+    ]) {
+      expect(JSON.parse(`"${asStored(words)}"`), `asStored mangled: ${words}`).toBe(words);
+    }
+    // ...and it really does differ from the raw text for the sentence the finale erases, or the
+    // escaping would be ceremony.
+    const condemned = 'jamie texted me tonight: "i can\'t do this on my own any more."';
+    expect(asStored(condemned)).not.toBe(condemned);
+    expect(asStored(condemned)).toContain('\\"');
+  });
+
+  it("claimedIdOf reads a row's own id, and refuses to invent one", () => {
+    expect(claimedIdOf(JSON.stringify({ id: "abc123", claims: {} }))).toBe("abc123");
+    // Everything that is not a string id answers "" — never null, never undefined, never the
+    // value itself. The caller asks `dead.has(claimedIdOf(row))`, and a set never holds "",
+    // so an unreadable row must not be able to answer with something a set might hold.
+    expect(claimedIdOf(JSON.stringify({ id: 7 }))).toBe("");
+    expect(claimedIdOf(JSON.stringify({ claims: {} }))).toBe("");
+    expect(claimedIdOf("not json at all")).toBe("");
+    expect(claimedIdOf(JSON.stringify(null))).toBe("");
+    expect(claimedIdOf(JSON.stringify(["a"]))).toBe("");
+  });
+
+  it("the finale's verdict catches a MISFILED row: innocent key, condemned bytes", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    const arc = buildArc(loam);
+    const finale = lessonOfRole(arc, "erasure-finale");
+    for (const lesson of arc) {
+      await playLesson(lesson, ctx);
+      if (lesson.id === finale.id) break;
+    }
+    // BY ID, because two finale steps observe `#sweep-holder` and only one of them is the
+    // checkpoint verdict. The id is pinned by "the arc's names are durable", so a step that
+    // moves turns that rail red and names itself rather than quietly re-pointing this one.
+    const sweepStep = finale.steps.find((s) => s.id === "14.3")!;
+    expect(sweepStep, "the finale has no 14.3 to ask about the checkpoints").toBeDefined();
+    const erased = [...loam.readTombstones(ctx.gateway.reactor, ctx.author)];
+    expect(erased.length, "the finale erased nothing").toBeGreaterThan(0);
+
+    // Clean to start with: the arc's own sweep has run, so the verdict says yes.
+    expect(await sweepStep.observe.store(ctx)).toBe(true);
+
+    // A blob holding the condemned record under a key that names something else entirely. The
+    // key-side test sees nothing wrong; only the row's own bytes give it away — which is the
+    // branch mutation testing showed nothing in the arc could reach.
+    const innocent = "cd".repeat(34);
+    storage.setItem(
+      `${CKPT_PREFIX}99`,
+      JSON.stringify({
+        version: 1,
+        lesson: 99,
+        rows: { [`${STORE_PREFIX}${innocent}`]: JSON.stringify({ id: erased[0]!, claims: {} }) },
+      }),
+    );
+    expect(
+      await sweepStep.observe.store(ctx),
+      "a checkpoint holding the erased record under another name passed the finale's verdict",
+    ).toBe(false);
+
+    // TWO-SIDED: the same blob, with a row whose bytes claim an id nothing forgot, is fine. The
+    // verdict must condemn the record, never the shape of the blob.
+    storage.setItem(
+      `${CKPT_PREFIX}99`,
+      JSON.stringify({
+        version: 1,
+        lesson: 99,
+        rows: { [`${STORE_PREFIX}${innocent}`]: JSON.stringify({ id: innocent, claims: {} }) },
+      }),
+    );
+    expect(
+      await sweepStep.observe.store(ctx),
+      "a blob holding nothing condemned was refused anyway",
+    ).toBe(true);
+    await ctx.gateway.close();
+  });
+});
+
+describe("the arc's names are durable", () => {
+  it("pins every id a banked record already points at — renaming one orphans a student mid-arc", () => {
+    // WHY THIS IS A RAIL AND NOT A STYLE NOTE. Every one of these strings is written into a
+    // student's own store the moment they reach the step that uses it: a banked step is a claim
+    // naming the step BY ID, a viewing is a claim filed AT an entity id, a glossary word is a
+    // claim at `tutorial:term:<word>`. Change one in a later version and the store on somebody's
+    // laptop still points at the old name — their banked step silently un-banks, their diary
+    // entry becomes an orphan nothing reads. The README states this for step ids; the entity ids
+    // are the same promise and had nothing holding them.
+    //
+    // It is also the mutation `hollow-test` walked straight through: renaming the movie-night
+    // entity changed no behaviour any other rail could see.
+    expect({ DIARY, VIEWING, TENET, MOVIE_NIGHT, CHASE, RAE }).toEqual({
+      DIARY: "diary:mine",
+      VIEWING: "viewing:arrival",
+      TENET: "viewing:tenet",
+      MOVIE_NIGHT: "viewing:paddington-2",
+      CHASE: "viewing:fast-and-furious",
+      RAE: "person:rae",
+    });
+
+    const arc = buildArc(loam);
+    expect(arc.map((l) => `${l.id}:${l.role}`)).toEqual([
+      "1:opening",
+      "2:describe",
+      "3:first-write",
+      "4:rewatch",
+      "5:unsay",
+      "6:as-of",
+      "7:second-hand",
+      "8:policies",
+      "9:shelves",
+      "10:evolution",
+      "11:reveal",
+      "12:stranger",
+      "13:revocation",
+      "14:erasure-finale",
+      "15:homecoming",
+    ]);
+    expect(arc.flatMap((l) => l.steps.map((s) => s.id))).toEqual([
+      "1.1",
+      "1.2",
+      "1.3",
+      "1.4",
+      "2.1",
+      "3.1",
+      "3.2",
+      "3.3",
+      "4.1",
+      "4.2",
+      "5.1",
+      "6.1",
+      "6.2",
+      "6.3",
+      "7.1",
+      "7.2",
+      "7.3",
+      "8.1",
+      "8.2",
+      "8.3",
+      "9.1",
+      "10.1",
+      "10.2",
+      "10.3",
+      "10.4",
+      "11.1",
+      "11.2",
+      "12.1",
+      "12.2",
+      "13.1",
+      "13.2",
+      "13.3",
+      "13.4",
+      "14.1",
+      "14.2",
+      "14.3",
+      "14.4",
+      "15.1",
+      "15.2",
+      "15.3",
+    ]);
+    expect(arc.filter((l) => l.quiz !== undefined).map((l) => l.quiz!.id)).toEqual([
+      "act-i",
+      "act-ii",
+      "act-iii",
+      "act-iv",
+      "act-v",
+    ]);
+  });
+});
+
+describe("the fifteen lessons, end to end", () => {
+  it("plants every term as a claim, in the manifest's order, and every quiz teaches its own lesson", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    const arc = buildArc(loam);
+    expect(arc.length, "the arc is not the fifteen").toBe(15);
+    expect(arc[0]!.role).toBe("opening");
+
+    let steps = 0;
+    let quizzes = 0;
+    for (const lesson of arc) {
+      await playLesson(lesson, ctx);
+      steps += lesson.steps.length;
+      await bankCheckpoint(loam, ctx, lesson.id);
+      if (lesson.quiz === undefined) continue;
+      // A wrong answer names the step that teaches it, and the page can only LINK a step in the
+      // lesson the card belongs to — so a pointer out of the lesson renders nothing at all.
+      const own = new Set(lesson.steps.map((s) => s.id));
+      for (const [i, q] of lesson.quiz.questions.entries()) {
+        expect(
+          own.has(q.teaches),
+          `quiz ${lesson.quiz.id} question ${i} teaches ${q.teaches}, which is not in lesson ${lesson.id}`,
+        ).toBe(true);
+        expect(q.answer).toBeGreaterThanOrEqual(0);
+        expect(q.answer).toBeLessThan(q.choices.length);
+        await answerQuiz(loam, ctx, lesson.quiz, i, q.answer);
+        quizzes += 1;
+      }
+    }
+
+    // THE GLOSSARY TRAIL: one claim per term, in the order the arc earns them, each naming a
+    // record the ground really holds.
+    const glossary = readGlossary(ctx);
+    expect(glossary.map((e) => e.term)).toEqual(TERMS.map((t) => t.term));
+    expect(glossary.map((e) => e.meaning)).toEqual(TERMS.map((t) => t.meaning));
+    for (const entry of glossary) {
+      expect(entry.lesson).toBe(TERMS.find((t) => t.term === entry.term)!.lesson);
+      expect(ctx.gateway.offeredDeltas().some((d) => d.id === entry.deltaId)).toBe(true);
+    }
+
+    // PER-KIND COUNTS, honest ones: the arc's own totals rather than a floor that any arc meets.
+    expect(claimsWithContext(ctx, TUTORIAL_CONTEXTS.glossary).length).toBe(TERMS.length);
+    expect(claimsWithContext(ctx, TUTORIAL_CONTEXTS.entered).length).toBe(15);
+    expect(claimsWithContext(ctx, TUTORIAL_CONTEXTS.step).length).toBe(steps);
+    expect(claimsWithContext(ctx, TUTORIAL_CONTEXTS.quiz).length).toBe(quizzes);
+    expect(claimsWithContext(ctx, TUTORIAL_CONTEXTS.checkpoint).length).toBe(15);
+
+    const progress = readProgress(ctx);
+    expect(progress.entered).toEqual(arc.map((l) => l.id));
+    expect(progress.steps.size).toBe(steps);
+    expect(progress.quiz.size).toBe(quizzes);
+    expect(progress.checkpoints).toEqual(arc.map((l) => l.id));
+    // five acts close with a quiz, and every answer above was the right one
+    expect(arc.filter((l) => l.quiz !== undefined).length).toBe(5);
+    expect([...progress.quiz.values()].every((r) => r.correct)).toBe(true);
+    await ctx.gateway.close();
+  });
+
+  it("a stranger's STRIKE reaches the plain description and neither shelf — the mask half of a narrowed reading", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    const arc = buildArc(loam);
+    // Through lesson 9, so both shelves exist and Rae has written.
+    for (const lesson of arc) {
+      await playLesson(lesson, ctx);
+      if (lesson.id === 9) break;
+    }
+
+    // The claim a stranger is about to try to retract: YOUR rating of 7, the one My Diary
+    // answers with. A shelf that names whose word it hears, and then obeys a stranger's
+    // taking-back, is not narrowed at all — it only looks it (H1, the mask half).
+    const mine = ctx.gateway
+      .offeredDeltas()
+      .find(
+        (d) =>
+          d.claims.author === ctx.author &&
+          d.claims.pointers.some((p) => p.target.kind === "primitive" && p.target.value === 7),
+      );
+    expect(mine, "no rating of your own to strike").toBeDefined();
+    const before = (await ctx.gateway.query(`{ myDiary(entity: "${VIEWING}") { rating } }`)).data;
+    expect((before as { myDiary: { rating: number } }).myDiary.rating).toBe(7);
+
+    // AND Rae's 4, which is what the plain description currently answers with. Striking only
+    // YOUR 7 would leave the plain answer at 4 either way, and the second half of this rail
+    // would pass whether the strike bound or not.
+    const raes = ctx.gateway
+      .offeredDeltas()
+      .find(
+        (d) =>
+          d.claims.author !== ctx.author &&
+          d.claims.pointers.some((p) => p.target.kind === "primitive" && p.target.value === 4),
+      );
+    expect(raes, "Rae has written no rating to strike").toBeDefined();
+
+    const strangerSeed = "5c".repeat(32);
+    const stranger = loam.authorForSeed(strangerSeed);
+    const strikes = [mine!.id, raes!.id].map((target, i) =>
+      loam.signClaims(
+        loam.makeNegationClaims(stranger, 9_100_001 + i, target, "no it isn't"),
+        strangerSeed,
+      ),
+    );
+    await ctx.gateway.federate(strikes);
+    for (const strike of strikes) {
+      expect(
+        ctx.gateway.offeredDeltas().some((d) => d.id === strike.id),
+        "the stranger's strike never landed — this rail would prove nothing",
+      ).toBe(true);
+    }
+
+    // THE SHELVES DO NOT HEAR IT. Both of them name their hands, and a hand they never named
+    // cannot retract what one of them wrote.
+    const shelves = (await ctx.gateway.query(
+      `{ mine: myDiary(entity: "${VIEWING}") { rating } house: houseDiary(entity: "${VIEWING}") { rating } }`,
+    )) as { data?: { mine: { rating: number }; house: { rating: number[] } } };
+    expect(
+      shelves.data?.mine.rating,
+      "a stranger struck the student's own word off their private shelf",
+    ).toBe(7);
+    expect(shelves.data?.house.rating, "a stranger struck a rating off the house shelf").toEqual([
+      9, 7, 4,
+    ]);
+
+    // ...and the plain description from lesson two, which hears anybody, DOES obey it. That is
+    // the contrast lesson 12 teaches, and a rail that only proved the first half would leave
+    // "trust lives in the reading" as decoration.
+    const plain = (await ctx.gateway.query(`{ viewing(entity: "${VIEWING}") { rating } }`)) as {
+      data?: { viewing: { rating: number } };
+    };
+    // Both of its top two ratings have been struck by somebody it never agreed to hear, and it
+    // obeyed: it falls all the way back to the 9 from lesson three.
+    expect(
+      plain.data?.viewing.rating,
+      "the plain description ignored a strike it has no rule to ignore",
+    ).toBe(9);
+    await ctx.gateway.close();
+  });
+
+  it("the finale sweeps the REAL checkpoints — the arc does it, not this rail, and a bystander survives", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    const arc = buildArc(loam);
+    const finale = lessonOfRole(arc, "erasure-finale");
+
+    // Every boundary before the forgetting gets a real checkpoint, exactly as the page takes
+    // them. Nothing below calls `sweepCheckpoints`: if lesson 14 stopped triggering it, this
+    // goes red.
+    for (const lesson of arc) {
+      if (lesson.id === finale.id) break;
+      await playLesson(lesson, ctx);
+      expect((await bankCheckpoint(loam, ctx, lesson.id)).ok).toBe(true);
+    }
+    const before = checkpointLessons(storage);
+    expect(before.length, "the arc reaches its forgetting with no checkpoints").toBeGreaterThan(1);
+    const bystander = before[0]!;
+    const bystanderHeld = Object.keys(readCheckpoint(storage, bystander)!.rows);
+    // An empty baseline would make "the bystander is untouched" true of a destroyed blob too.
+    expect(
+      bystanderHeld.length,
+      "the bystander checkpoint holds nothing to be spared",
+    ).toBeGreaterThan(0);
+    // The blob that WILL be holding the condemned bytes when the sweep runs — named before the
+    // erasure, because afterwards there is no way to identify it.
+    const doomed = before.filter((lesson) => {
+      const blob = readCheckpoint(storage, lesson)!;
+      return Object.values(blob.rows).some((row) => String(row).includes("jamie texted me"));
+    });
+    expect(doomed.length, "no checkpoint was holding the words the finale erases").toBe(1);
+
+    // THE ESCAPING TRAP, proven rather than commented. A stored row is `JSON.stringify` output,
+    // so the condemned sentence lives in it with its quotes backslashed. Searching a row for the
+    // sentence as it is written in the source finds NOTHING — a byte-level guard that can only
+    // ever report "clean". The lesson's own verdict escapes its needle for this reason, and this
+    // is the assertion that would notice if it stopped.
+    const rowsOfDoomed = Object.values(readCheckpoint(storage, doomed[0]!)!.rows).map(String);
+    const sentence = ctx.gateway
+      .offeredDeltas()
+      .flatMap((d) => d.claims.pointers)
+      .map((pt) => (pt.target.kind === "primitive" ? String(pt.target.value) : ""))
+      .find((v) => v.startsWith("jamie texted me"))!;
+    expect(sentence, "the condemned sentence is not in the ground").toContain('"');
+    expect(
+      rowsOfDoomed.some((row) => row.includes(sentence)),
+      "the raw sentence WAS findable in a stored row — the escaping hazard has gone away, and " +
+        "the lesson's escaped needle is now over-careful rather than necessary",
+    ).toBe(false);
+    expect(
+      rowsOfDoomed.some((row) => row.includes(JSON.stringify(sentence).slice(1, -1))),
+      "the escaped sentence is not in the blob either — this rail is measuring nothing",
+    ).toBe(true);
+
+    await playLesson(finale, ctx);
+
+    const after = checkpointLessons(storage);
+    const erased = [...loam.readTombstones(ctx.gateway.reactor, ctx.author)];
+    expect(erased.length, "the finale erased nothing").toBeGreaterThan(0);
+    // TWO-SIDED. The blob that held the words is gone from storage entirely...
+    for (const lesson of doomed) {
+      expect(after, `checkpoint ${lesson} held the erased words and survived`).not.toContain(
+        lesson,
+      );
+      expect(storage.getItem(`${CKPT_PREFIX}${lesson}`)).toBeNull();
+    }
+    // ...and the bystander is untouched, down to the rows it was keeping.
+    expect(after, "the sweep took a checkpoint that held none of those bytes").toContain(bystander);
+    expect(Object.keys(readCheckpoint(storage, bystander)!.rows)).toEqual(bystanderHeld);
+    // No surviving blob holds the record, by key or by its own words.
+    for (const lesson of after) {
+      const blob = readCheckpoint(storage, lesson)!;
+      for (const id of erased) expect(Object.keys(blob.rows)).not.toContain(STORE_PREFIX + id);
+      for (const row of Object.values(blob.rows)) {
+        expect(String(row), `checkpoint ${lesson} still carries the words`).not.toContain(
+          "jamie texted me",
+        );
+      }
+    }
+    await ctx.gateway.close();
   });
 });

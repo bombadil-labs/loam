@@ -67,8 +67,36 @@ export interface Lesson {
   check(ctx: LessonCtx): Promise<boolean>;
 }
 
+/**
+ * One word the arc introduces, and where. `step` marks the term a STEP plants rather than the
+ * lesson's arrival; `forms` are the shapes the vocabulary scan hunts for, written out rather
+ * than stemmed (this arc's subject is a "viewing", which is not an inflection of "view").
+ */
+export interface ArcTerm {
+  readonly term: string;
+  readonly lesson: number;
+  readonly step?: string;
+  readonly forms: readonly string[];
+  readonly meaning: string;
+}
+
+/** The glossary manifest, in the order a student meets it. */
+export declare const TERMS: readonly ArcTerm[];
+
+/**
+ * The words as a STORED ROW spells them: the body of the JSON string a row is serialised as.
+ * A needle taken from source text is never found in a row that escapes it.
+ */
+export declare function asStored(words: string): string;
+
+/** The id a stored row's own bytes claim to be — `""` if it will not say. */
+export declare function claimedIdOf(row: string): string;
+
 export declare const DIARY: string;
 export declare const VIEWING: string;
+export declare const TENET: string;
+export declare const MOVIE_NIGHT: string;
+export declare const CHASE: string;
 export declare const RAE: string;
 
 export declare function bootTutorialStore(

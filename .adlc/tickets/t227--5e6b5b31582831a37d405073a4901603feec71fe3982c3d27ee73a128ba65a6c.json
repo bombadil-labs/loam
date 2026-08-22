@@ -3,5 +3,8 @@
   "category": "feature",
   "duration": 4,
   "id": "T227",
+  "rails": [
+    "test/site/arc.test.ts"
+  ],
   "title": "Tutorial v3, the arc — fifteen lessons of A Store of Your Own"
 }
