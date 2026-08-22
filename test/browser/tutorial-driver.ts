@@ -335,6 +335,30 @@ export class TutorialPage {
     return pick.key;
   }
 
+  /**
+   * Fixture mutation, the other half: blind a step's PAGE observable. The step's real work
+   * still runs, so only an honest page predicate can refuse — the half a store-only probe
+   * cannot reach. Two modes, because a page predicate can be dishonest in two ways:
+   *   "selector" — look for an element this page does not have;
+   *   "text"     — look at an element it DOES have, for words it will never say.
+   * Returns the string the refusal must name.
+   */
+  async blindPageObserve(lesson: number, step: string, mode: "selector" | "text"): Promise<string> {
+    const selector = mode === "selector" ? "#nothing-on-this-page-matches-this" : "#lesson-pane";
+    const contains = mode === "selector" ? "never" : "a-sentence-this-page-will-never-say";
+    const done = await this.tab.eval(
+      `(() => {
+         const l = window.tutorial.arc.find((x) => x.id === ${lesson});
+         const s = l && l.steps.find((x) => x.id === ${JSON.stringify(step)});
+         if (!s || !s.observe.page) return false;
+         s.observe.page = { selector: ${JSON.stringify(selector)}, contains: ${JSON.stringify(contains)} };
+         return true;
+       })()`,
+    );
+    if (done !== true) throw new Error(`step ${step} has no page observable to blind`);
+    return mode === "selector" ? selector : contains;
+  }
+
   /** Fixture mutation: replace a step's real work with a no-op, in the loaded arc. */
   async neutralize(lesson: number, step: string): Promise<void> {
     const done = await this.tab.eval(

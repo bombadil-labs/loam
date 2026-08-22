@@ -112,6 +112,16 @@ describe("§48 — one step at a time, and every step observed twice", () => {
         const after = await page.position();
         expect(after.banked, `step ${step.id} did not bank`).toContain(step.id);
         expect(after.pending).not.toBe(step.id);
+        // banked VISIBLY: the mark a person reads, not only the attribute a rail reads
+        expect(await page.text(`[data-step="${step.id}"] .step-mark`)).toBe("✓");
+        if (after.pending !== null) {
+          expect(await page.text(`[data-step="${after.pending}"] .step-mark`)).toBe("○");
+          // and the page says honestly how much of the lesson is still ahead
+          const left = lesson.steps.length - after.banked.length - 1;
+          if (left > 0) {
+            expect(await page.text("#lesson-pane")).toContain(`${left} more step`);
+          }
+        }
       }
 
       // A green lesson takes its checkpoint at the boundary, before the student moves on.
@@ -138,6 +148,34 @@ describe("§48 — one step at a time, and every step observed twice", () => {
     expect(after.banked, "a step with no effect banked anyway").not.toContain(step);
     expect(after.pending, "the neutralized step stopped being the pending one").toBe(step);
     expect(await page.checkpointLessons()).not.toContain(lesson);
+  });
+
+  it("the red probe, other half: the PAGE observable gates too — work that lands unseen does not bank", async () => {
+    await page.reset();
+    const target = await page.advanceToEarningStep();
+    expect(target, "no step in this arc earns its own observable").not.toBeNull();
+    const { lesson, step } = target!;
+
+    // The work still runs and the store still changes; only the page predicate is blinded. A
+    // page predicate that always said yes would bank here, and the student would be told a
+    // thing landed on a page where they cannot see it.
+    const missing = await page.blindPageObserve(lesson, step, "selector");
+    await page.runPending();
+    expect(await page.text("#step-refusal")).toContain(missing);
+    expect(await page.text("#step-refusal")).toContain(step);
+    expect((await page.position()).banked, "a step nobody could see banked anyway").not.toContain(
+      step,
+    );
+
+    // ...and the other dishonesty: a pane that IS there, saying something else entirely. A
+    // predicate that only checked the element's existence would bank this one.
+    const unsaid = await page.blindPageObserve(lesson, step, "text");
+    await page.runPending();
+    expect(await page.text("#step-refusal")).toContain(unsaid);
+    expect(
+      (await page.position()).banked,
+      "a step whose pane says something else banked anyway",
+    ).not.toContain(step);
   });
 });
 

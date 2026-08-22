@@ -228,10 +228,14 @@ export async function completeStep(loam, ctx, lesson, step, opts = {}) {
   if (opts.afterRun !== undefined) await opts.afterRun();
   const page = step.observe.page;
   if (opts.seePage !== undefined && page !== undefined && !opts.seePage(page)) {
+    // Name what it looked for, both halves: a refusal that named only the selector cannot tell
+    // "the pane is missing" from "the pane says something else", and those are different bugs.
+    const looked =
+      page.contains === undefined ? page.selector : `${page.selector} showing "${page.contains}"`;
     return {
       ok: false,
       failed: "page",
-      message: `${where}: the page does not show what this step promised (${page.selector})`,
+      message: `${where}: the page does not show what this step promised (${looked})`,
     };
   }
   if (!(await step.observe.store(ctx))) {
