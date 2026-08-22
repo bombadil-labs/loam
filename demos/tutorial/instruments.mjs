@@ -6,6 +6,7 @@
 // page's CodeMirror wiring); the classifier lives here because it is pure and CI can pin it.
 
 import { parse } from "graphql";
+import { isOnlyTutorial } from "./player.mjs";
 
 // Only READS may re-run themselves. A pinned mutation would be executed on every render —
 // and a mutation that touches a subscribed view triggers a render, which is a self-
@@ -80,6 +81,22 @@ export function classifyDelta(delta, selfAuthor) {
   } else if (hasDeltaRef) {
     kind = "negation";
     note = "a taking-back: it strikes another record by id, and stays on the record itself";
+  } else if (isOnlyTutorial(delta)) {
+    // The tutorial's OWN bookkeeping — progress, quiz answers, glossary entries. It is data like
+    // everything else and it is signed like everything else, which is the reveal; but badging it
+    // "fact" would bury the student's own records under the record of their reading, in the very
+    // pane a lesson tells them to watch. Named, so the Ground pane can hold it back by default.
+    //
+    // LAST, and ONLY-tutorial. This kind is the only one that can HIDE a row, and a delta can
+    // carry a tutorial pointer alongside anything else — so it is claimed here only when the
+    // delta is nothing but the tutorial's vocabulary. That is the same predicate the progress
+    // reading uses, so the badge, the filter and the reading cannot disagree; a hybrid is an
+    // ordinary claim, badged `fact`, and stays on screen. The classifier's own list of
+    // constitutional contexts is not the guard — there are more of them than it names.
+    kind = "tutorial";
+    note = foreign
+      ? "another store's tutorial record — it arrived as data and moves nothing here"
+      : "the tutorial's own record: your progress and your glossary live in your store, signed by you";
   }
 
   return { kind, foreign, note };
@@ -96,6 +113,7 @@ export function summarizePointer(p) {
 // ---- the Ground pane ---------------------------------------------------------------------------
 
 const BADGE_LABELS = {
+  tutorial: "tutorial",
   constitution: "constitution",
   registration: "registration",
   schema: "schema",
@@ -111,20 +129,54 @@ const BADGE_LABELS = {
 // Render the ground newest-first: badge, author, one-line summary; click a row for the full
 // wire JSON. `seenIds` lets arrivals highlight once; `expanded` keeps open rows open across
 // re-renders (the set is the caller's — UI state, not store state).
+//
+// THE FILTER. `state.showTutorial` is off by default and the tutorial's OWN records are held
+// back — a lesson that says "watch the Ground" must not be drowned out by the record of the
+// student reading it. Held back, never dropped: the count says how many, the toggle shows them,
+// and the glossary's "where does this live?" control turns it on to point at one. Only the
+// student's own tutorial records are hidden; a FOREIGN claim wearing the tutorial's vocabulary
+// arrived as data and is shown, because hiding it would let a packet write into a blind spot.
+// `state.highlight` marks one row by id — the target of that control.
 export function renderGround(holder, deltas, selfAuthor, toWire, state) {
   holder.textContent = "";
+  const classified = [...deltas].map((d) => ({ d, c: classifyDelta(d, selfAuthor) }));
+  // WHAT MAY BE HIDDEN IS EXACTLY WHAT PROGRESS COUNTS — `isOnlyTutorial`, the same predicate
+  // the reading uses, so no record can fall between the two rules and be both uncounted and
+  // unseen. A delta that is the tutorial's vocabulary AND something else is still badged
+  // `tutorial`, and it stays on screen.
+  //
+  // SIGNED and self-authored too, because `claims.author` is a plain field and an UNSIGNED row
+  // is admitted to the ground (the driver quarantines a signature that fails, not one that is
+  // missing). Without that test, a row nobody signed could name the student as its author and
+  // land in the one place the pane does not look. A writer who has read the seed can sign as
+  // them and is not stopped by this; nothing at this layer could.
+  const hidden =
+    state.showTutorial === true
+      ? []
+      : classified.filter((x) => isOnlyTutorial(x.d) && !x.c.foreign && x.d.sig !== undefined);
+  const shown = classified.filter((x) => !hidden.includes(x));
+
   const head = document.createElement("p");
   head.className = "pane-hint";
-  head.textContent = `${deltas.length} records — each immutable, signed, named by the hash of its content; newest first`;
+  head.id = "ground-filter-note";
+  head.textContent =
+    `${shown.length} records — each immutable, signed, named by the hash of its content; newest first` +
+    (hidden.length === 0
+      ? ""
+      : ` · ${hidden.length} more are the tutorial's own records, held back — tick the box above to see them`);
   holder.appendChild(head);
 
-  const ordered = [...deltas].sort(
-    (a, b) => b.claims.timestamp - a.claims.timestamp || (a.id < b.id ? 1 : -1),
-  );
+  const ordered = shown
+    .map((x) => x.d)
+    .sort((a, b) => b.claims.timestamp - a.claims.timestamp || (a.id < b.id ? 1 : -1));
   for (const d of ordered) {
     const { kind, foreign, note } = classifyDelta(d, selfAuthor);
     const row = document.createElement("div");
-    row.className = `delta kind-${kind}${state.seen.has(d.id) ? "" : " fresh"}`;
+    const marked = state.highlight === d.id;
+    row.className =
+      `delta kind-${kind}${state.seen.has(d.id) ? "" : " fresh"}` + (marked ? " highlight" : "");
+    row.dataset.kind = kind;
+    row.dataset.deltaId = d.id;
 
     const line = document.createElement("div");
     line.className = "delta-line";

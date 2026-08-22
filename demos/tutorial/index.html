@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Loam — learn it by growing one</title>
+    <title>Loam — a store of your own</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
@@ -25,18 +25,40 @@
       <div class="identity">
         <span class="identity-label">this store's operator (you):</span>
         <code id="author-chip">booting…</code>
-        <button id="start-over" title="Erase this store and begin the tutorial from lesson 1">
+        <button id="export" class="secondary" title="Download this store as a file">
+          Export my store
+        </button>
+        <button id="start-over" title="Erase this store and begin again at lesson 1">
           Start over
         </button>
+        <!-- Confirmations are rendered HERE, in the page. Never window.confirm: a native dialog
+             blocks the page's own script until a human answers it. -->
+        <div id="start-over-holder"></div>
       </div>
     </header>
     <main>
-      <nav id="lesson-nav" aria-label="lessons"></nav>
-      <section id="lesson"></section>
+      <section id="lesson-pane" aria-label="the lesson"></section>
+      <section id="sweep-holder" aria-label="what an erasure reached"></section>
+      <section id="quiz-holder" aria-label="the quiz"></section>
+      <aside id="progress-rail" aria-label="your progress"></aside>
+      <section id="drawer">
+        <button data-drawer-toggle class="secondary">
+          the drawer — is that really what happened?
+        </button>
+        <div id="drawer-body" hidden>
+          <p class="pane-hint">
+            the shape your store can be asked about right now, derived from your own registrations —
+            and the records the last step moved
+          </p>
+          <pre id="drawer-sdl"></pre>
+          <div id="drawer-deltas"></div>
+        </div>
+      </section>
       <section id="panes">
         <div class="tabs" role="tablist">
           <button data-pane="view" class="active">View</button>
           <button data-pane="ground">Ground</button>
+          <button data-pane="glossary">Glossary</button>
           <button data-pane="gql">GraphQL</button>
         </div>
         <div id="pane-view" class="pane active">
@@ -51,7 +73,18 @@
             the store, RAW: every signed record it holds, named by the hash of its own content —
             this is all there is; everything else is reading
           </p>
+          <label class="ground-filter">
+            <input type="checkbox" id="ground-show-tutorial" />
+            show the tutorial's own records
+          </label>
           <div id="ground-rows"></div>
+        </div>
+        <div id="pane-glossary" class="pane">
+          <p class="pane-hint">
+            every word this tutorial has introduced — and each one is a record in your own store,
+            planted when you met it
+          </p>
+          <div id="glossary-entries"></div>
         </div>
         <div id="pane-gql" class="pane">
           <p class="pane-hint">

@@ -9,7 +9,25 @@ import { build } from "esbuild";
 import { stubRenderWorker } from "./esbuild-stub-render-worker.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const out = join(root, "site-dist");
+// The output directory is a PARAMETER, defaulting to the deployed one. This build begins by
+// deleting whatever stands at `out`, so two callers sharing one path race: the browser rail
+// serves a built site while `test/site/build.test.ts` rebuilds it, and a page vanishes
+// mid-suite. `--out <dir>` gives each caller its own directory, which removes the race rather
+// than serializing it. CI and Pages pass nothing and keep `site-dist/`.
+const outFlag = process.argv.indexOf("--out");
+if (outFlag !== -1 && process.argv[outFlag + 1] === undefined) {
+  console.error("loam: --out needs a directory");
+  process.exit(1);
+}
+const out = outFlag === -1 ? join(root, "site-dist") : resolve(process.argv[outFlag + 1]);
+
+// The first thing this script does is DELETE what stands at `out`, recursively. A mistyped
+// `--out .` would take the repository with it, so the two paths that can never be an output —
+// the repository itself and any directory containing it — are refused rather than emptied.
+if (out === root || root.startsWith(out + "/") || out === "/") {
+  console.error(`loam: refusing to build into ${out} — this build deletes its output directory`);
+  process.exit(1);
+}
 
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
@@ -56,4 +74,4 @@ cpSync(join(root, "demos", "tutorial", "packets"), join(out, "packets"), { recur
 cpSync(join(root, "demos", "tutorial", "intro.html"), join(out, "intro.html"));
 cpSync(join(root, "demos", "capabilities", "index.html"), join(out, "capabilities.html"));
 
-console.log("loam: built site-dist/ (the landing, the tutorial, the deck, the book)");
+console.log(`loam: built ${out} (the landing, the tutorial, the deck, the book)`);

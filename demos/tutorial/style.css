@@ -83,68 +83,292 @@ h1 {
 
 main {
   display: grid;
-  grid-template-columns: 13rem minmax(24rem, 1.1fr) minmax(24rem, 1fr);
-  gap: 0;
+  grid-template-columns: 15rem minmax(24rem, 1.1fr) minmax(24rem, 1fr);
+  grid-template-rows: auto auto auto auto 1fr;
+  grid-template-areas:
+    "rail lesson panes"
+    "rail sweep panes"
+    "rail quiz panes"
+    "rail drawer panes"
+    "rail . panes";
   min-height: calc(100vh - 4.5rem);
 }
-nav {
+#progress-rail {
+  grid-area: rail;
   border-right: 1px solid var(--line);
-  padding: 0.75rem 0;
+  padding: 0.9rem 1rem 2rem;
+  font-size: 0.85rem;
 }
-nav button {
+#progress-rail h3 {
+  margin: 0.9rem 0 0.2rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+#progress-rail h3:first-child {
+  margin-top: 0;
+}
+.rail-row {
+  margin: 0.2rem 0;
+}
+.rail-jump {
   display: block;
   width: 100%;
   text-align: left;
-  padding: 0.45rem 1rem;
+  padding: 0.3rem 0.35rem;
   border: 0;
+  border-radius: 5px;
   background: none;
   color: var(--ink);
   font: inherit;
   font-size: 0.85rem;
   cursor: pointer;
 }
-nav button:hover {
+.rail-jump:hover:not(:disabled) {
   background: var(--code-bg);
 }
-nav button.current {
-  background: var(--code-bg);
-  font-weight: 700;
+.rail-jump:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
 }
-nav .mark {
+.rail-ckpt {
   display: inline-block;
-  width: 1.2rem;
+  margin: 0 0.35rem 0 0.6rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.rail-quiz {
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin: 0.15rem 0;
+}
+.rail-quiz[data-correct="true"] {
   color: var(--green);
 }
-nav .mark.todo {
-  color: var(--line);
+.confirm {
+  margin: 0.4rem 0;
+  padding: 0.6rem;
+  border: 1px solid var(--amber);
+  border-radius: 6px;
+  background: var(--card);
+  font-size: 0.82rem;
+}
+.confirm button {
+  margin: 0.45rem 0.35rem 0 0;
 }
 
-#lesson {
-  padding: 1.25rem 1.75rem 3rem;
+#lesson-pane {
+  grid-area: lesson;
+  padding: 1.25rem 1.75rem 1rem;
   border-right: 1px solid var(--line);
-  overflow-y: auto;
 }
-#lesson h2 {
+#lesson-pane h2 {
   margin-top: 0.25rem;
 }
-#lesson .lesson-no {
+.lesson-no {
   color: var(--muted);
   font-size: 0.8rem;
   text-transform: uppercase;
   letter-spacing: 0.1em;
 }
-#lesson p {
+.lesson-copy {
   max-width: 46rem;
   white-space: pre-line;
+  margin: 0.6rem 0 1rem;
 }
-.act {
-  margin-top: 1rem;
-  padding: 1rem;
+#sweep-holder {
+  grid-area: sweep;
+  border-right: 1px solid var(--line);
+  padding: 0 1.75rem;
+}
+#quiz-holder {
+  grid-area: quiz;
+  border-right: 1px solid var(--line);
+  padding: 0 1.75rem;
+}
+#drawer {
+  grid-area: drawer;
+  border-right: 1px solid var(--line);
+  padding: 0.5rem 1.75rem 2.5rem;
+}
+
+/* One step per card: the mark and its label, then the three sentences, then its one button. */
+.step {
+  margin: 0.7rem 0;
+  padding: 0.75rem 0.9rem;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--card);
 }
-.act button,
+.step[data-state="banked"] {
+  opacity: 0.85;
+  border-color: color-mix(in srgb, var(--green) 35%, var(--line));
+}
+.step.highlight {
+  border-color: var(--amber);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--amber) 25%, transparent);
+}
+.step-head {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+.step-mark {
+  color: var(--green);
+}
+.step[data-state="pending"] .step-mark {
+  color: var(--muted);
+}
+.step-frame {
+  margin: 0.35rem 0 0;
+  font-size: 0.87rem;
+  max-width: 44rem;
+}
+.frame-key {
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+.steps-waiting {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-style: italic;
+}
+.refusal,
+.notice {
+  margin-top: 0.6rem;
+  font-size: 0.85rem;
+  max-width: 44rem;
+}
+.refusal.bad {
+  color: var(--danger);
+}
+.notice.ok {
+  color: var(--green);
+}
+.done-note {
+  color: var(--green);
+  font-size: 0.9rem;
+  margin: 0.6rem 0;
+}
+
+#sweep-notice {
+  display: block;
+  margin: 0 0 1rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  background: var(--card);
+}
+#sweep-notice h3 {
+  margin: 0 0 0.3rem;
+  font-size: 1rem;
+}
+.swept {
+  color: var(--danger);
+  font-size: 0.85rem;
+}
+.kept {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+#quiz-card {
+  display: block;
+  margin: 0 0 1rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+}
+#quiz-card h3 {
+  margin: 0 0 0.2rem;
+  font-size: 1rem;
+}
+.question {
+  margin: 0.7rem 0;
+}
+.ask {
+  margin-bottom: 0.35rem;
+}
+.question button {
+  margin: 0 0.35rem 0.35rem 0;
+}
+.verdict {
+  font-size: 0.85rem;
+}
+.verdict.ok {
+  color: var(--green);
+}
+.verdict.bad {
+  color: var(--amber);
+}
+button.link {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.85rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+#drawer-body {
+  margin-top: 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  padding: 0.6rem 0.9rem;
+}
+#drawer-sdl {
+  max-height: 14rem;
+  overflow: auto;
+  white-space: pre;
+  margin: 0.3rem 0;
+}
+.drawer-delta {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 0.72rem;
+  color: var(--green);
+  word-break: break-all;
+}
+.drawer-delta.gone {
+  color: var(--danger);
+  text-decoration: line-through;
+}
+
+.glossary-entry {
+  margin: 0.45rem 0;
+  padding-bottom: 0.45rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.9rem;
+}
+.glossary-entry button.link {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.78rem;
+}
+.ground-filter {
+  display: block;
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.delta.highlight {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+
+#lesson-pane button,
+#progress-rail button:not(.rail-jump):not(.link),
+#quiz-holder button,
+#drawer button,
+.identity button,
 .gql-controls button {
   font: inherit;
   font-size: 0.9rem;
@@ -155,34 +379,25 @@ nav .mark.todo {
   color: var(--accent-ink);
   cursor: pointer;
 }
-.act button.secondary {
+#lesson-pane button.link,
+#quiz-holder button.link {
+  border: 0;
+  background: none;
+  color: var(--accent);
+  padding: 0;
+}
+#lesson-pane button.secondary,
+#progress-rail button.secondary,
+#quiz-holder button.secondary,
+#drawer button.secondary,
+.identity button.secondary,
+.gql-controls button.secondary {
   background: none;
   color: var(--accent);
 }
-.act input[type="text"] {
-  font: inherit;
-  font-size: 0.85rem;
-  padding: 0.35rem 0.5rem;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--ink);
-  width: 100%;
-  margin: 0.25rem 0;
-}
-.act .result {
-  margin-top: 0.5rem;
-  font-size: 0.85rem;
-}
-.act .result.ok {
-  color: var(--green);
-}
-.act .result.bad {
-  color: var(--danger);
-}
-.done-note {
-  color: var(--green);
-  font-size: 0.9rem;
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 #panes {
@@ -295,17 +510,19 @@ nav .mark.todo {
 @media (max-width: 1100px) {
   main {
     grid-template-columns: 1fr;
+    grid-template-areas:
+      "lesson"
+      "sweep"
+      "quiz"
+      "drawer"
+      "rail"
+      "panes";
   }
-  nav {
-    display: flex;
-    flex-wrap: wrap;
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-  }
-  nav button {
-    width: auto;
-  }
-  #lesson {
+  #progress-rail,
+  #lesson-pane,
+  #sweep-holder,
+  #quiz-holder,
+  #drawer {
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }
@@ -433,45 +650,6 @@ nav .mark.todo {
 #start-over:hover {
   border-color: var(--danger);
   color: var(--danger);
-}
-
-/* ---- step-through + in-order gating ---- */
-
-/* One step per row: the button, and (once run) its look-line beneath. */
-.step {
-  margin: 0.45rem 0;
-}
-/* The frontier step is the only live one; earlier steps are done, later steps wait. */
-.act button:disabled {
-  cursor: not-allowed;
-}
-.act button:disabled:not(.step-done) {
-  opacity: 0.45;
-}
-.act button.step-done {
-  background: none;
-  color: var(--green);
-  border-color: var(--green);
-  opacity: 1;
-}
-.step-look {
-  max-width: 42rem;
-  margin: 0.3rem 0 0.2rem;
-  font-size: 0.82rem;
-  font-style: italic;
-  color: var(--muted);
-}
-
-/* Locked lessons in the nav: visible but unreachable until the earlier ones are green. */
-nav button:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-nav button:disabled:hover {
-  background: none;
-}
-nav .mark.lock {
-  color: var(--muted);
 }
 
 #gql-editor {

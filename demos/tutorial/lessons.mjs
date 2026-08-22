@@ -1,25 +1,64 @@
-// The tutorial's arc (SPEC §19), UI-free: the lessons as data and functions. The page and the
-// headless test drive EXACTLY this module — each lesson is a SEQUENCE of steps, and
-// `step.run(ctx)` does one separately-observable slice of what the lesson teaches, while
-// `check(ctx)` verifies the whole with a REAL READ of the learner's store (a query or a ground
-// predicate), never a quiz answer and never UI state. Progress is the store: re-run every
-// check from the ground on every boot and a green mark can never lie.
+// The tutorial's ARC (§48), UI-free: the lessons as data. The page and the headless CI suite
+// drive exactly this module, so a lesson whose `run` stops doing its work fails in CI by name.
 //
-// The STEPS exist so intermediary states are actually seen. A learner clicks one button at a
-// time; only the next un-run step is live; each step's `look` says which pane just changed and
-// what to notice. The steps are the PATH to green; the check is the destination, and it stays
-// ground-derived so a reload re-proves it.
+// THIS IS THE STUB ARC (T226). It is three lessons long and it is not the curriculum: it exists
+// so every mechanic the player owns can be exercised end to end before the real fifteen land
+// (T227). It carries, deliberately, one of each thing the machine must be able to play — a
+// look-step and earning steps, a registration, a door write, a quiz, terms planted on entry and
+// a term planted from inside a step, and an erasure whose sweep destroys a checkpoint. Its copy
+// is minimal on purpose: the prose is T227's craft, and writing it twice would only invite the
+// two versions to disagree.
 //
-// §19's acceptance bars, normative: every check is EARNED (false before its lesson's steps
-// run), DURABLE (monotone in the ground — a later lesson can never un-green an earlier one),
-// and SIDE-EFFECT-FREE (safe to re-verify on every boot). The lesson TEACHES by need: you open
-// wanting to track your films, and the doctrine beats — data-first, a schema is a lens —
-// arrive as earned reveals at the moment only that truth explains what you see.
+// A LESSON'S SHAPE, which is the contract T227 fills:
+//   { id, role, title, copy, terms: [{term, meaning}], quiz?, steps: [...], check(ctx) }
+// and a STEP's:
+//   { id, label, have, want, how, run(ctx), observe: { page: {selector, contains?}, store(ctx) } }
 //
-// The module takes the library as a parameter (`buildArc(loam)`): the page passes the shipped
-// browser bundle, the test passes src/browser/index.ts — same functions, same commit, no skew.
+// `have` / `want` / `how` are the three sentences every step shows: what we have, what we want,
+// how we get there. `observe` is what makes a step CHECKABLE: the page predicate and the store
+// predicate must BOTH hold after `run`, so a step that quietly stops working is refused rather
+// than banked. Prose is never compared to the DOM it produced.
+//
+// ROLES are the browser suite's targeting contract. `test/browser/tutorial.test.ts` freezes at
+// its landing and finds the mechanics it exercises by role, never by lesson number or title:
+//   "opening"         — the arc's FIRST lesson; boot has already happened
+//   "reveal"          — plants a glossary term from inside a STEP, not from the lesson's `terms`
+//                       (those are planted on entry); the payoff needs the student to act
+//   "erasure-finale"  — erases a record that landed AFTER at least one checkpoint boundary, so
+//                       one blob is holding those bytes when the sweep runs and an EARLIER blob
+//                       is not. The frozen suite asserts both sides: a finale erasing a
+//                       lesson-1 record leaves no bystander to spare, and one erasing its own
+//                       lesson's record leaves nothing to destroy — either turns that file red
+//                       with no bug behind it.
+// T227's arc MUST keep these three roles pointing at lessons that do those things.
+//
+// THE SATISFIABILITY RULE, which governs every `observe.page` and is mechanically checked
+// (`test/site/arc.test.ts`, "every step's page observable roots at an element the SHELL
+// declares"): a step's selector must root at an element declared in `index.html` whose content
+// renders FROM THE STORE. Two halves, both learned the hard way:
+//
+//   (a) STATE, NOT EVENT. `seePage` must hold in every store state where the step's store
+//       predicate holds — including after a bare reload, and when `run` finds its work already
+//       done. An observable that is true only in the instant after its own run is a TRAP on any
+//       irreversible step: the act cannot be repeated, so the step can never be completed.
+//   (b) NO ui.* DEPENDENCE. No selector may name an element that exists only while some page
+//       field is set. The tell is a selector absent from `index.html`.
+//
+// THREE MORE RULES THE FROZEN SUITE PINS:
+//   - The finale must be FULLY PASSABLE with every checkpoint blob deleted. So no finale step
+//     may observe the revert rail SHRINKING — there may be nothing to shrink. The sweep notice
+//     is the witness, and it speaks for every forgetting, destroyed or not.
+//   - ONE PRESS PER FINALE STEP. A two-stage act belongs to two steps.
+//   - Two copy pins are frozen: a finished quiz card's button says "done", and a sweep that
+//     found nothing says "there was nothing to destroy".
 
-// ---- the domain: the learner's film log ----------------------------------------------------
+import { STORE_PREFIX, SEED_KEY, plantTerm } from "./player.mjs";
+
+// ---- the domain: one film diary ------------------------------------------------------------
+
+export const DIARY = "diary:mine";
+export const VIEWING = "viewing:arrival";
+export const RAE = "person:rae";
 
 const GATHER = {
   op: "group",
@@ -30,89 +69,50 @@ const GATHER = {
     in: { op: "mask", policy: "drop", in: "input" },
   },
 };
-// Film-with-screenings (lesson 4): the gather, then EXPAND the `screening` role's targets
-// through the Screening lens — so a film's view nests its screenings, each a little view.
-const FILM_EXPAND_BODY = {
-  op: "expand",
-  role: { exact: "screening" },
-  schema: "Screening",
-  reading: "Screening", // issue #23: each screening resolves through the Screening reading
-  in: GATHER,
-};
 const PICK = { pick: { order: { byTimestamp: "desc" } } };
 const ALL = { all: { order: { byTimestamp: "asc" } } };
+// A viewing is a date, a film and a rating; when two viewings disagree about a film, the latest
+// word wins — and the notes COLLECT rather than replace, because both were true when written.
+const VIEWING_POLICY = { props: { film: PICK, rating: PICK, note: ALL }, default: PICK };
 
-export const FILM = "film:arrival";
-export const ALICE = "person:alice";
-const SCREENING_1 = "screening:1";
-const SCREENING_2 = "screening:2";
-const SCREENING_3 = "screening:3";
-// Fixed identities so the Act-III/IV lessons' checks are stable across reboots (a fresh mint
-// each run would move the author). The roommate co-authors; the miller animates the store.
-const ROOMMATE_SEED = "5a".repeat(32);
-const MILLER_SEED = "71".repeat(32);
-// A second forger, distinct from the bundled adversary — its bounce at the trust door (lesson
-// 10) is the proof, so its author must be knowable and NOT on any roster we declare.
-const FORGER2_SEED = "f2".repeat(32);
-
-// Film, first registered (lesson 2). tags is an `all` list; rating and title are `pick` latest.
-const FILM_POLICY_V1 = { props: { title: PICK, rating: PICK, tags: ALL }, default: PICK };
-// Lesson 4: the body becomes an expand and the policy gains `screenings`.
-const FILM_POLICY_V2 = { props: { ...FILM_POLICY_V1.props, screenings: ALL }, default: PICK };
-// Lesson 6: `guests` joins — a top-level field, so the evolution is visible and a subscription
-// opened against the pre-guests shape can never grow it.
-const FILM_POLICY_V3 = { props: { ...FILM_POLICY_V2.props, guests: ALL }, default: PICK };
-// Lesson 8: the title's order becomes a trust chain — the learner's word first, recency second.
-const filmPolicyTrusted = (author) => ({
-  ...FILM_POLICY_V3,
-  props: {
-    ...FILM_POLICY_V3.props,
-    title: { pick: { order: { chain: [{ byAuthorRank: [author] }, { byTimestamp: "desc" }] } } },
-  },
-});
-const SCREENING_POLICY = { name: "Screening", props: { date: PICK }, default: PICK };
-const BOOK_POLICY = {
-  props: {
-    title: PICK,
-    pagesRead: { merge: "sum" },
-    finished: { absentAs: { const: false, then: PICK } },
-  },
-  default: PICK,
-};
-// `follows` matches the circle packet's friendship context; `guestAt` gathers the guest note
-// lesson 5 files on Alice's side, so her card shows the film she was your guest at.
-const PERSON_POLICY = { props: { name: PICK, follows: ALL, guestAt: ALL }, default: PICK };
-
-// The naming lesson's miniature: one guestbook gather, two readings of it. `Fresh` keeps the newest
-// word (pick desc), `Founding` keeps the first (pick asc) — the village's Townbook/FirstImpressions
-// shape, shrunk to two notes so the square is legible.
-const BOARD = "board:main";
-const OLDEST = { pick: { order: { byTimestamp: "asc" } } };
-const FRESH_POLICY = { name: "Fresh", props: { note: PICK }, default: PICK };
-const FOUNDING_POLICY = { name: "Founding", props: { note: OLDEST }, default: OLDEST };
-// The evolution: Fresh's `note` becomes the WHOLE list (all the words, oldest first) — a new version
-// of the living reading, while Founding never moves. Same gather underneath; only this rung changes.
-const FRESH_POLICY_V2 = { name: "Fresh", props: { note: ALL }, default: PICK };
-
-// ---- small delta grammar --------------------------------------------------------------------
+// ---- the delta grammar the arc writes in ----------------------------------------------------
 
 const entity = (role, id, context) => ({
   role,
   target: { kind: "entity", entity: { id, context } },
 });
-const prim = (v) => ({ role: "value", target: { kind: "primitive", value: v } });
+const prim = (value) => ({ role: "value", target: { kind: "primitive", value } });
 
-// ---- boot: the learner's store --------------------------------------------------------------
+const say = (loam, ctx, pointers) =>
+  loam.signClaims({ timestamp: ctx.ts(), author: ctx.author, pointers }, ctx.seed);
 
-export const SEED_KEY = "loam:tutorial:seed";
-const STORE_PREFIX = "loam:tutorial:";
+const ground = (ctx) => ctx.gateway.offeredDeltas();
+const pointsAt = (id, context) => (d) =>
+  d.claims.pointers.some(
+    (p) =>
+      p.target.kind === "entity" &&
+      p.target.entity.id === id &&
+      p.target.entity.context === context,
+  );
+const mineAt = (ctx, id, context) =>
+  ground(ctx).some((d) => d.claims.author === ctx.author && pointsAt(id, context)(d));
 
-// The LocalStorageBackend owns every `loam:tutorial:<id>` key and reads anything under that
-// prefix as a delta. An earlier build wrote UI pins to `loam:tutorial:ui:pins`, which the
-// backend then tries to parse as a delta and refuses ("not a delta"), bricking boot before any
-// button can wire up. Recovery: purge any key under the prefix whose suffix is not a delta id
-// (hex) and is not the seed — so a store poked by an old build heals on the next load. The
-// current pins key lives outside the prefix entirely, so this never touches it.
+async function view(ctx, query) {
+  try {
+    const res = await ctx.gateway.query(query);
+    return res.errors === undefined ? (res.data ?? {}) : {};
+  } catch {
+    return {}; // no surface yet — a view-shaped observable is simply not-yet-true
+  }
+}
+
+// ---- boot: the student's store ---------------------------------------------------------------
+
+// The LocalStorageBackend owns every `loam:tutorial:<id>` key and reads what it finds there as a
+// delta. A key under that prefix whose suffix is not a delta id was written by someone else, so
+// it is purged before the backend reads: the driver quarantines such rows rather than bricking,
+// and healing them here keeps the pane honest about what the store holds. This is also why the
+// checkpoints live under their OWN prefix (`loam:tutorial-ckpt:`) — they would be swept away here.
 function healStrayKeys(storage) {
   const strays = [];
   for (let i = 0; i < storage.length; i++) {
@@ -123,8 +123,8 @@ function healStrayKeys(storage) {
   for (const k of strays) storage.removeItem(k);
 }
 
-// First visit mints a seed and boots from genesis; every later visit reopens the same store
-// from the same origin. The seed lives at its own key (SPEC §15) — it never rides an export.
+// First visit mints a seed and boots from genesis; every later visit reopens the same store from
+// the same origin. The seed lives at its own key — it never rides an export of deltas.
 export async function bootTutorialStore(loam, storage) {
   healStrayKeys(storage);
   let seed = storage.getItem(SEED_KEY);
@@ -140,1094 +140,240 @@ export async function bootTutorialStore(loam, storage) {
   return { gateway, seed, author: loam.authorForSeed(seed) };
 }
 
-// ---- helpers the lessons share ----------------------------------------------------------------
-
-const say = (loam, ctx, pointers, seed) =>
-  loam.signClaims(
-    { timestamp: ctx.ts(), author: seed ? loam.authorForSeed(seed) : ctx.author, pointers },
-    seed ?? ctx.seed,
-  );
-
-const ground = (ctx) => ctx.gateway.offeredDeltas();
-const has = (ctx, pred) => ground(ctx).some(pred);
-
-const pointsAt = (id, context) => (d) =>
-  d.claims.pointers.some(
-    (p) =>
-      p.target.kind === "entity" &&
-      p.target.entity.id === id &&
-      p.target.entity.context === context,
-  );
-// A value claim by an author: a pointer at <id>#<context> plus a primitive value.
-const valueAt = (id, context, value) => (d) =>
-  d.claims.pointers.some(
-    (p) =>
-      p.target.kind === "entity" &&
-      p.target.entity.id === id &&
-      p.target.entity.context === context,
-  ) && d.claims.pointers.some((p) => p.target.kind === "primitive" && p.target.value === value);
-
-async function view(ctx, query) {
-  try {
-    const res = await ctx.gateway.query(query);
-    return res.errors === undefined ? (res.data ?? {}) : { __errors: res.errors };
-  } catch {
-    return {}; // no surface yet — every view-based check is simply not-yet-green
-  }
-}
-
-const registerFilm = (loam, ctx, policy, body = GATHER) =>
-  ctx.gateway.publishRegistration(
-    { name: "Film", alg: 1, body: loam.parseTerm(body) },
-    loam.parseSchema(policy),
-    [FILM],
-    undefined,
-    undefined,
-    undefined,
-    // Immutable-by-default (§14/§21): a registration opens its fields explicitly. The tutorial
-    // writes freely, so every field of the lens is writable.
-    Object.keys(policy.props),
-  );
-
-// Find the operator's grant to a specific grantee (grantClaims files the grantee as a `subject`
-// primitive at loam.grants). Shared by lesson 8's revoke step and its check so the two agree.
-const findGrantTo = (ctx, grantee) =>
-  ground(ctx).find(
-    (d) =>
-      d.claims.author === ctx.author &&
-      pointsAt("loam:store", "loam.grants")(d) &&
-      d.claims.pointers.some(
-        (p) => p.role === "subject" && p.target.kind === "primitive" && p.target.value === grantee,
-      ),
-  );
-
-// ---- the arc ---------------------------------------------------------------------------------
-
-export function buildArc(loam) {
-  const roommate = loam.authorForSeed(ROOMMATE_SEED);
-  const miller = loam.authorForSeed(MILLER_SEED);
-  return [
-    // ============================ ACT I — a store of your own ============================
-    {
-      id: 1,
-      title: "You are the operator",
-      copy: `This page just made you a database — a whole one, running in this tab, persisted in
-this browser and answerable to nobody but you. When it was born it minted you a cryptographic
-key; look in the Ground pane, at the record badged "constitution" — that record names your key
-as this store's operator, and it is the only authority this store will ever bow to. Nothing was
-sent anywhere. There is no server. Everything you do from here lands as a signed record in that
-same ground, and the store re-proves it all from those records every time it wakes.`,
-      // The boot already performed this one — there is nothing to click. The check reads the
-      // constitution off the ground, so the very first lesson is green the moment you arrive.
-      steps: [],
-      check: async (ctx) =>
-        ctx.storage.getItem(SEED_KEY) !== null &&
-        has(
-          ctx,
-          (d) => d.claims.author === ctx.author && pointsAt("loam:store", "loam.operator")(d),
-        ),
-    },
-
-    {
-      id: 2,
-      title: "Track your films",
-      copy: `Say you want to track the films you watch. You tell the store the SHAPE of a film —
-a title, a rating, some tags — and how to settle disagreement (for the title: keep the latest
-word). That's a schema and a policy, and registering them is the whole setup. The moment it
-lands, two things happen on the right: the GraphQL pane comes alive (open it and type "film {"
-— it now offers you the fields you just declared), and the Schemas view gains a Film entry.
-You never described a film to anybody; you described a LENS, and the store will answer through
-it. Register Book too — we'll want it later.`,
-      steps: [
-        {
-          label: "Register the Film lens",
-          look: `The Views pane grew a "Film" entry under Schemas — your registration, read back as
-data. Open the GraphQL pane and type "film {": it now offers title, rating, tags. You described a
-lens, not a row.`,
-          run: async (ctx) => {
-            await registerFilm(loam, ctx, FILM_POLICY_V1);
-          },
-        },
-        {
-          label: "Register the Book lens too",
-          look: `A "Book" entry joins Film in the Schemas view. It does nothing yet — but a store
-holds as many lenses as you like, side by side. We fill this one in in lesson 7.`,
-          run: async (ctx) => {
-            await ctx.gateway.publishRegistration(
-              { name: "Book", alg: 1, body: loam.parseTerm(GATHER) },
-              loam.parseSchema(BOOK_POLICY),
-              ["book:solaris"],
-              undefined,
-              undefined,
-              undefined,
-              Object.keys(BOOK_POLICY.props),
-            );
-          },
-        },
-      ],
-      // Green only once BOTH lenses exist — the second step is not optional flavour, it is what
-      // lesson 7's book reading needs, so it gates the green too.
-      check: async (ctx) =>
-        ctx.gateway.registrationVersions().some((v) => v.hyperschema.name === "Film") &&
-        ctx.gateway.registrationVersions().some((v) => v.hyperschema.name === "Book") &&
-        (await view(ctx, `{ film(entity: "${FILM}") { title } }`)).__errors === undefined,
-    },
-
-    {
-      id: 3,
-      title: "Write through the door",
-      copy: `Now fill it in: set the title to "Arrival", give it a 9, add a tag. These go through
-the GraphQL door — a mutation — and here is the thing worth slowing down for. Watch all three
-panes at once. The View updates. The Ground grows a new record, badged "fact". And that record
-is a signed CLAIM — the mutation didn't change a cell in a table, it COMPILED to a claim and
-signed it with your key. The claim is what's real; the mutation was just a convenient way to
-say it. (Expand the new Ground record to see exactly what got signed.)`,
-      steps: [
-        {
-          label: `Set the title to "Arrival"`,
-          look: `Three panes moved at once: the Film view shows the title, and the Ground grew a
-record badged "fact". Expand it — the mutation COMPILED to a signed claim. The claim is what's
-real; the mutation was just how you said it.`,
-          run: async (ctx) => {
-            await ctx.gateway.query(
-              `mutation { film(entity: "${FILM}", title: "Arrival") { title } }`,
-            );
-          },
-        },
-        {
-          label: "Give it a 9",
-          look: `A second "fact" joins the Ground and the rating appears in the view — another
-claim, signed with your key. Every write is one more record; nothing is ever overwritten in place.`,
-          run: async (ctx) => {
-            await ctx.gateway.query(`mutation { film(entity: "${FILM}", rating: 9) { rating } }`);
-          },
-        },
-        {
-          label: "Add a tag",
-          look: `One more claim. "tags" is an "all" field — it COLLECTS rather than replaces, so
-this joins any tags you add later instead of clobbering them.`,
-          run: async (ctx) => {
-            await ctx.gateway.query(
-              `mutation { film(entity: "${FILM}", tags: "first-contact") { tags } }`,
-            );
-          },
-        },
-      ],
-      // Durable: the door-written facts are in the ground forever (later lessons retract the
-      // rating and contest the title, but the ORIGINAL claims never leave the ground). All
-      // three are required, so the green waits for the last step.
-      check: async (ctx) =>
-        has(ctx, (d) => d.claims.author === ctx.author && valueAt(FILM, "title", "Arrival")(d)) &&
-        has(ctx, (d) => d.claims.author === ctx.author && valueAt(FILM, "rating", 9)(d)) &&
-        has(
-          ctx,
-          (d) => d.claims.author === ctx.author && valueAt(FILM, "tags", "first-contact")(d),
-        ),
-    },
-
-    {
-      id: 4,
-      title: "Screenings are entities too",
-      copy: `A film isn't just a title — it has screenings, and a screening is a thing in its own
-right: a date, later some guests. So give it its own lens (Screening), and teach Film to gather
-its screenings and show each one nested inside the film's view. That "show the nested thing" is
-a new move — an EXPAND — and Film's shape changes to use it, live, with no migration. Log last
-night's screening. Look at the Film view now: its screenings list holds a little Screening view,
-date and all. Two lenses, one film, composing.`,
-      steps: [
-        {
-          label: "Add the Screening lens",
-          look: `A "Screening" entry joins the Schemas view. It's its own lens — a date now,
-guests later. Nothing references it yet.`,
-          run: async (ctx) => {
-            await ctx.gateway.publishRegistration(
-              { name: "Screening", alg: 1, body: loam.parseTerm(GATHER) },
-              loam.parseSchema(SCREENING_POLICY),
-              [SCREENING_1, SCREENING_2],
-              undefined,
-              undefined,
-              undefined,
-              Object.keys(SCREENING_POLICY.props),
-            );
-          },
-        },
-        {
-          label: "Teach Film to gather its screenings",
-          look: `Film's shape just changed — live, no migration. Its view now carries a
-"screenings" list (empty until you log one). That "show the nested thing" move is an EXPAND.`,
-          run: async (ctx) => {
-            await registerFilm(loam, ctx, FILM_POLICY_V2, FILM_EXPAND_BODY);
-          },
-        },
-        {
-          label: "Log last night's screening",
-          look: `Look at the Film view: its "screenings" list now holds a nested Screening view,
-date and all. Two lenses, one film, composing.`,
-          run: async (ctx) => {
-            // The screening: it files at the film (so the film gathers it) and names screening:1
-            // via the `screening` role (so the expand resolves it), and dates the screening.
-            await ctx.gateway.append([
-              say(loam, ctx, [
-                entity("subject", FILM, "screenings"),
-                entity("screening", SCREENING_1, "film"),
-              ]),
-              say(loam, ctx, [entity("subject", SCREENING_1, "date"), prim(20260710)]),
-            ]);
-          },
-        },
-      ],
-      check: async (ctx) => {
-        const v = await view(ctx, `{ film(entity: "${FILM}") { screenings } }`);
-        return Array.isArray(v.film?.screenings) && v.film.screenings.length >= 1;
-      },
-    },
-
-    // ============================ ACT II — the ground truth ============================
-    {
-      id: 5,
-      title: "The secret: it was claims all along",
-      copy: `Here's what those mutations were hiding. You never needed the door. Write the next
-screening BY HAND — a raw signed claim, straight to the ground (the ✍️ pen, not the 🚪 door) —
-and make it say something no schema of yours knows how to hear: that Alice was your guest. The
-claim lands; it's real; the Ground shows it. But look at the Film view: Alice isn't there. A
-lens can only show what it was told to gather, and yours was never told about guests. The fact
-is in the world; your lens is just looking the other way. (Try the inspector: change one byte
-of any record and its id shatters — the id IS the content, so nothing can be quietly rewritten,
-only newly said.)`,
-      steps: [
-        {
-          label: "Log the next screening by hand",
-          look: `Straight to the Ground with the pen ✍️ — no door. Two "fact" records appear,
-signed by you. The door only ever made claims exactly like these.`,
-          run: async (ctx) => {
-            await ctx.gateway.append([
-              say(loam, ctx, [
-                entity("subject", FILM, "screenings"),
-                entity("screening", SCREENING_2, "film"),
-              ]),
-              say(loam, ctx, [entity("subject", SCREENING_2, "date"), prim(20260711)]),
-            ]);
-          },
-        },
-        {
-          label: "Name Alice your guest",
-          look: `The claim lands and the Ground shows it — but look at the Film view: Alice isn't
-there. Your lens was never told to gather guests. The fact is real; the lens is looking the other
-way. (Try the inspector below: flip one byte and the id shatters.)`,
-          run: async (ctx) => {
-            await ctx.gateway.append([
-              // a claim naming Alice a guest of the film: its root pointer files the film under
-              // `guests` (so a `guests` lens would gather it) and names Alice as the entry. No
-              // lens gathers `guests` yet, so she is real but unseen.
-              say(loam, ctx, [entity("subject", FILM, "guests"), entity("guest", ALICE, "at")]),
-              // the same occasion, filed on ALICE'S side too, so once you register a Person lens
-              // (lesson 12) her card shows the film she was your guest at.
-              say(loam, ctx, [
-                entity("subject", ALICE, "guestAt"),
-                entity("film", FILM, "screened"),
-              ]),
-            ]);
-          },
-        },
-      ],
-      // Durable: the pen-written guest claim naming Alice is in the ground forever. (That the
-      // OLD lens drops her is the between-lessons truth the arc test pins; it stops being true
-      // the moment lesson 6 evolves the lens, so it cannot be a durable check here.)
-      check: async (ctx) =>
-        has(
-          ctx,
-          (d) =>
-            d.claims.author === ctx.author &&
-            pointsAt(FILM, "guests")(d) &&
-            pointsAt(ALICE, "at")(d),
-        ),
-    },
-
-    {
-      id: 6,
-      title: "Evolve the lens, keep every past",
-      copy: `So teach the lens to see guests. Add a "guests" field to Film and re-register — an
-append, like everything else. Ask again and there's Alice. But notice what did NOT happen: any
-view you were already subscribed to kept its old shape. A subscription is a standing question
-against the lens as it was when you asked; it can't sprout a field you never selected. Nothing
-you were watching broke — you just ask anew to see more. And to prove nothing was overwritten,
-re-register the OLD policy under a new name, FilmClassic: now two lenses answer the same ground
-side by side, the new one showing Alice, the old one never having heard of her. The past isn't
-migrated away. It's still right there, still answerable.`,
-      steps: [
-        {
-          label: "Add guests to the Film lens",
-          look: `Ask the Film view again and there's Alice. But any view you were already
-subscribed to kept its old shape — a subscription is a standing question against the lens as it
-was when you asked. Nothing you were watching broke.`,
-          run: async (ctx) => {
-            await registerFilm(loam, ctx, FILM_POLICY_V3, FILM_EXPAND_BODY);
-          },
-        },
-        {
-          label: "Re-register the old lens as FilmClassic",
-          look: `Two lenses now answer the same ground side by side: the new Film shows Alice,
-FilmClassic never heard of her. Nothing was overwritten — the past is still right there, still
-answerable.`,
-          run: async (ctx) => {
-            await ctx.gateway.publishRegistration(
-              { name: "FilmClassic", alg: 1, body: loam.parseTerm(FILM_EXPAND_BODY) },
-              loam.parseSchema(FILM_POLICY_V2),
-              [FILM],
-              undefined,
-              undefined,
-              undefined,
-              Object.keys(FILM_POLICY_V2.props),
-            );
-          },
-        },
-      ],
-      check: async (ctx) => {
-        const v = await view(ctx, `{ film(entity: "${FILM}") { guests } }`);
-        const hasAlice = Array.isArray(v.film?.guests) && v.film.guests.includes(ALICE);
-        const classic = ctx.gateway
-          .registrationVersions()
-          .some((r) => r.hyperschema.name === "FilmClassic");
-        return hasAlice && classic;
-      },
-    },
-
-    {
-      id: 7,
-      title: "Taking it back, and what silence means",
-      copy: `Change your mind about that 9. You can't unsay a record — its id is a hash, the past
-is fixed — but you can NEGATE your own word, and the view resolves your retraction to absence:
-the rating key just empties. Both records stay in the Ground, because a store that forgot what
-was retracted couldn't prove the retraction happened. Now the book. Log two reading sessions,
-120 pages and 90: pagesRead reads 210 — their SUM, because that field's policy sums. And
-"finished", which you never set, reads false rather than missing, because its policy answers
-silence with a default. Three flavors of silence — a retracted value is absent, an unasked
-question has a default, and an aggregate is an ANSWER, not a settable field: try to set
-timesRead and watch the number ignore you, because there's nothing behind it to grab, only
-records to add or take back.`,
-      steps: [
-        {
-          label: "Retract the 9",
-          look: `The rating key just empties in the Film view — your retraction resolves to
-absence. Both records stay in the Ground; a store that forgot what it retracted couldn't prove
-the retraction happened.`,
-          run: async (ctx) => {
-            // Retract the rating written in lesson 3 by negating THAT record (a negation names an
-            // id; a fresh identical rating would be a different id). It may already be retracted
-            // on a re-run — negation is idempotent by content address, so this is safe to repeat.
-            const first = ground(ctx).find(
-              (d) => d.claims.author === ctx.author && valueAt(FILM, "rating", 9)(d),
-            );
-            if (first !== undefined) {
-              await ctx.gateway.append([
-                loam.signClaims(
-                  loam.makeNegationClaims(ctx.author, ctx.ts(), first.id, "changed my mind"),
-                  ctx.seed,
-                ),
-              ]);
-            }
-          },
-        },
-        {
-          label: "Log two reading sessions (120 + 90 pages)",
-          look: `Open the Book view: pagesRead reads 210, their SUM — that field's policy adds.
-And "finished", which you never set, reads false by default. Try setting a "timesRead" aggregate
-in the GraphQL pane and watch the number ignore you — there's nothing behind it to grab.`,
-          run: async (ctx) => {
-            await ctx.gateway.append([
-              say(loam, ctx, [entity("subject", "book:solaris", "pagesRead"), prim(120)]),
-              say(loam, ctx, [entity("subject", "book:solaris", "pagesRead"), prim(90)]),
-            ]);
-          },
-        },
-      ],
-      check: async (ctx) => {
-        // the retraction is on record: a negation by the learner of a rating fact
-        const retracted = has(
-          ctx,
-          (d) =>
-            d.claims.author === ctx.author &&
-            d.claims.pointers.some((p) => p.target.kind === "delta"),
-        );
-        const b = await view(ctx, `{ book(entity: "book:solaris") { pagesRead finished } }`);
-        return retracted && b.book?.pagesRead === 210 && b.book?.finished === false;
-      },
-    },
-
-    // ============================ ACT III — other people ============================
-    {
-      id: 8,
-      title: "A co-author",
-      copy: `Until now you've been the only voice. Invite another: your roommate keeps their own
-key (we minted one for the tutorial). Have them log a screening — and watch it BOUNCE. Anyone
-may write to their OWN store, but yours answers only to standing, and your roommate has none.
-So grant it: one signed record, from you the operator, saying this key may write here. Now their
-screening lands — under THEIR signature, not yours; the Ground shows a record whose author isn't
-you (the "foreign" mark). Then change your mind and revoke it — another record, striking the
-grant — and the door closes again. Authorship and authority are different things: they authored
-it; you decide whether it binds.`,
-      steps: [
-        {
-          label: "Roommate logs a screening — watch it bounce",
-          look: `It BOUNCED — the Ground didn't grow. Anyone may write to their OWN store, but
-yours answers only to standing, and your roommate has none yet.`,
-          run: async (ctx) => {
-            const screening = say(
-              loam,
-              ctx,
-              [entity("subject", FILM, "screenings"), entity("screening", SCREENING_3, "film")],
-              ROOMMATE_SEED,
-            );
-            // no standing yet — the door refuses it (nothing lands)
-            try {
-              await ctx.gateway.append([screening]);
-            } catch {
-              /* expected — no standing */
-            }
-          },
-        },
-        {
-          label: "Grant your roommate write standing",
-          look: `One signed record, from you the operator, says this key may write here. Look for a
-record badged "grant" in the Ground.`,
-          run: async (ctx) => {
-            // Idempotent: a mid-lesson reload replays the steps from the start, and a second
-            // grant (fresh timestamp → new id) would survive the revoke below and quietly hold
-            // the door open. One grant is enough — only file it if the roommate has none yet.
-            if (findGrantTo(ctx, roommate) === undefined) {
-              await ctx.gateway.append([
-                loam.signClaims(
-                  loam.grantClaims("loam:store", roommate, "write", ctx.author, ctx.ts()),
-                  ctx.seed,
-                ),
-              ]);
-            }
-          },
-        },
-        {
-          label: "Now their screening lands",
-          look: `It lands — under THEIR signature, not yours. The Ground shows a record whose
-author isn't you, carrying the amber "foreign" mark. Authorship and authority are different things.`,
-          run: async (ctx) => {
-            await ctx.gateway.append([
-              say(
-                loam,
-                ctx,
-                [entity("subject", FILM, "screenings"), entity("screening", SCREENING_3, "film")],
-                ROOMMATE_SEED,
-              ),
-            ]);
-          },
-        },
-        {
-          label: "Change your mind — revoke the grant",
-          look: `Another record strikes the grant by id, and the door closes again. They authored
-their screening; you decide whether it binds — and now it doesn't.`,
-          run: async (ctx) => {
-            const grant = findGrantTo(ctx, roommate);
-            if (grant !== undefined) {
-              await ctx.gateway.append([
-                loam.signClaims(loam.revocationClaims(grant.id, ctx.author, ctx.ts()), ctx.seed),
-              ]);
-            }
-          },
-        },
-      ],
-      check: async (ctx) => {
-        // Scope to the ROOMMATE's grant by its subject — lesson 14 mints a second operator
-        // grant (to the miller) that is never revoked, so "any operator grant" would let the
-        // iteration order decide this check.
-        const grant = findGrantTo(ctx, roommate);
-        const theirScreening = has(ctx, (d) => d.claims.author === roommate);
-        // the revocation strikes THIS grant by id — not just any negation the learner made
-        const revoked =
-          grant !== undefined &&
-          has(
-            ctx,
-            (d) =>
-              d.claims.author === ctx.author &&
-              d.claims.pointers.some(
-                (p) => p.target.kind === "delta" && p.target.deltaRef.delta === grant.id,
-              ),
-          );
-        return grant !== undefined && theirScreening && revoked;
-      },
-    },
-
-    {
-      id: 9,
-      title: "The adversary, and whose word wins",
-      copy: `A stranger's claim just arrived — we bundled one so you can meet it. Let it land in
-the Ground, authored by someone who is NOT you: "the title of Arrival is ARRIVAL 2: TOTALLY REAL
-SEQUEL", signed with the stranger's own real key, stamped far in the future. Let it in and your
-title flips — because your policy said "keep the latest word", and the stranger's word is latest.
-Nothing was hacked; anyone may write, and your READER was simply naive. So change the reader, not
-the writer: re-register the title to trust YOUR word first, recency second. Home it comes. And if
-you'd rather SEE the disagreement than settle it, a second lens with a "conflicts" policy shows
-both claims at once — the forgery preserved, visible, and powerless. Truth here is a policy you
-choose, and can always revisit.`,
-      steps: [
-        {
-          label: "Let the stranger's claim land",
-          look: `It lands in the Ground, authored by someone who is NOT you — and your Film title
-flips to "ARRIVAL 2: TOTALLY REAL SEQUEL". Nothing was hacked: your policy said "keep the latest
-word", and the stranger's word is latest.`,
-          run: async (ctx) => {
-            await ctx.gateway.federate(ctx.packets.adversary.map((w) => loam.fromWire(w)));
-          },
-        },
-        {
-          label: "Defend: trust your word first, recency second",
-          look: `Home it comes — the Film title reads "Arrival" again. You changed the READER, not
-the writer: your word first, recency second. The forgery is still in the Ground, just outvoted.`,
-          run: async (ctx) => {
-            await registerFilm(loam, ctx, filmPolicyTrusted(ctx.author), FILM_EXPAND_BODY);
-          },
-        },
-        {
-          label: "Add a lens that SHOWS the disagreement",
-          look: `The FilmDispute view shows both claims at once — the forgery preserved, visible,
-and powerless. Truth here is a policy you choose, and can always revisit.`,
-          run: async (ctx) => {
-            await ctx.gateway.publishRegistration(
-              { name: "FilmDispute", alg: 1, body: loam.parseTerm(GATHER) },
-              loam.parseSchema({
-                props: { title: { conflicts: { order: { byTimestamp: "desc" } } } },
-                default: PICK,
-              }),
-              [FILM],
-            );
-          },
-        },
-      ],
-      check: async (ctx) => {
-        const v = await view(ctx, `{ film(entity: "${FILM}") { title } }`);
-        const dispute = await view(ctx, `{ filmDispute(entity: "${FILM}") { title } }`);
-        const forgedInGround = has(
-          ctx,
-          (d) => d.claims.author !== ctx.author && pointsAt(FILM, "title")(d),
-        );
-        const disputed =
-          Array.isArray(dispute.filmDispute?.title) && dispute.filmDispute.title.length >= 2;
-        return v.film?.title === "Arrival" && forgedInGround && disputed;
-      },
-    },
-
-    {
-      id: 10,
-      title: "The door itself is policy",
-      copy: `Lesson 9 chose whose word wins AFTER it's in your ground — a reading policy. But you
-can also choose who gets IN. A trust ROSTER is one signed record naming the keys you'll admit
-across the wire: yourself, your roommate, the circle. Declare it, then let a fresh forgery
-knock. This time it doesn't just lose the vote — it BOUNCES at the door, never entering the
-ground at all, because its key isn't on the roster. Two different powers, and you hold both:
-admission trust decides what crosses your threshold; reading trust decides what matters once it
-has. Reopen the door when you're done (an "open" declaration) — a store that can't hear the
-world isn't federating, it's hiding.`,
-      steps: [
-        {
-          label: "Declare a roster of admitted keys",
-          look: `One signed record names the keys you'll admit across the wire — you and your
-roommate. Look for a record badged "trust" in the Ground.`,
-          run: async (ctx) => {
-            await ctx.gateway.append([
-              loam.signClaims(
-                loam.trustClaims("roster", [ctx.author, roommate], ctx.author, ctx.ts()),
-                ctx.seed,
-              ),
-            ]);
-          },
-        },
-        {
-          label: "Let a fresh forgery knock — watch it bounce",
-          look: `This forgery doesn't just lose the vote — it never enters the Ground at all,
-because its key isn't on the roster. Admission trust decides what crosses your threshold; reading
-trust decides what matters once it has.`,
-          run: async (ctx) => {
-            const forgery = say(
-              loam,
-              ctx,
-              [entity("subject", FILM, "title"), prim("ARRIVAL 3: THE ROSTER STRIKES BACK")],
-              FORGER2_SEED,
-            );
-            await ctx.gateway.federate([forgery]).catch(() => {});
-          },
-        },
-        {
-          label: "Reopen the door",
-          look: `An "open" declaration — a store that can't hear the world isn't federating, it's
-hiding. You'll need the door open for the wider world in the lessons ahead.`,
-          run: async (ctx) => {
-            await ctx.gateway.append([
-              loam.signClaims(loam.trustClaims("open", [], ctx.author, ctx.ts()), ctx.seed),
-            ]);
-          },
-        },
-      ],
-      check: async (ctx) => {
-        // A trust declaration of a given mode, on record by the operator. Both the roster and the
-        // reopen must be present: the reopen is required (lessons 12–13 federate the wider world,
-        // which a still-rostered door would bounce), so it gates the green.
-        const trustDecl = (mode) => (d) =>
-          d.claims.author === ctx.author &&
-          pointsAt("loam:trust", "loam.trust")(d) &&
-          d.claims.pointers.some(
-            (p) => p.role === "mode" && p.target.kind === "primitive" && p.target.value === mode,
-          );
-        const rostered = has(ctx, trustDecl("roster"));
-        const reopened = has(ctx, trustDecl("open"));
-        // the rostered forgery never entered the ground (it bounced at the door)
-        const forgerLeft = !has(ctx, (d) => d.claims.author === loam.authorForSeed(FORGER2_SEED));
-        return rostered && reopened && forgerLeft;
-      },
-    },
-
-    {
-      id: 11,
-      title: "The right to be forgotten, honestly",
-      copy: `You once jotted a private note about Alice, straight to the ground. She asks you to
-forget it. A retraction won't do — that resolves to absence but the bytes remain. ERASURE is
-the loud exception to a store that otherwise never forgets: as the operator, you (and only you)
-order the record removed, the bytes physically leave this browser's storage — watch the Ground
-shrink — and a signed TOMBSTONE stays behind: who asked, when, which id, never what it said. The
-tombstone is also a standing order: if those exact bytes ever try to come home, from a backup or
-a peer who copied them, the door refuses them by id. The store remembers THAT it forgot, and
-holds the door.`,
-      steps: [
-        {
-          label: "File a private note about Alice",
-          look: `A plain "fact" lands in the Ground — a private jotting, straight to the store with
-the pen.`,
-          run: async (ctx) => {
-            await ctx.gateway.append([
-              say(loam, ctx, [
-                entity("about", ALICE, "note"),
-                prim("cried twice — don't tell her"),
-              ]),
-            ]);
-          },
-        },
-        {
-          label: "She asks you to forget it — erase it",
-          look: `Watch the Ground SHRINK: the bytes physically leave this browser. A signed
-TOMBSTONE stays behind — who asked, when, which id, never what it said — and it holds the door
-against those exact bytes ever coming home.`,
-          run: async (ctx) => {
-            const note = ground(ctx).find(
-              (d) => d.claims.author === ctx.author && pointsAt(ALICE, "note")(d),
-            );
-            if (note !== undefined) await ctx.gateway.erase(note.id, { reason: "Alice asked" });
-          },
-        },
-      ],
-      check: async (ctx) => {
-        const noteGone = !has(
-          ctx,
-          (d) => d.claims.author === ctx.author && pointsAt(ALICE, "note")(d),
-        );
-        const tombstones = loam.readTombstones(ctx.gateway.reactor, ctx.author);
-        return noteGone && tombstones.size >= 1;
-      },
-    },
-
-    // ============================ ACT IV — the wider world ============================
-    {
-      id: 12,
-      title: "Alice was just an id",
-      copy: `All this time your store has said "person:alice" the way you'd name a stranger —
-confidently, knowing nothing. Somewhere there's a store that DOES know her: the circle, kept by
-its own operator with its own key. We bundled its whole export. Pull it. Names and friendships
-flow into your ground and Alice lights up — a name, the friends she keeps, and (because you
-logged a screening with her) the film she was your guest at. Now the fine print, which is the
-entire point: the circle's own
-SCHEMAS arrived too, and they do nothing here. Foreign law is inert — its registrations reshape
-nothing, because they aren't signed by YOUR key. You register your own Person lens; you decide
-what to believe. Data federates; authority never does.`,
-      steps: [
-        {
-          label: "Pull the circle's whole export",
-          look: `Names and friendships flow into your Ground and Alice lights up. But the circle's
-own SCHEMAS arrived too — and they do nothing here. Foreign law is inert: it isn't signed by YOUR
-key.`,
-          run: async (ctx) => {
-            await ctx.gateway.federate(ctx.packets.circle.map((w) => loam.fromWire(w)));
-          },
-        },
-        {
-          label: "Register your own Person lens",
-          look: `You decide what to believe. Alice's card now shows her name, the friends she
-keeps, and the film she was your guest at. Data federates; authority never does.`,
-          run: async (ctx) => {
-            await ctx.gateway.publishRegistration(
-              { name: "Person", alg: 1, body: loam.parseTerm(GATHER) },
-              loam.parseSchema(PERSON_POLICY),
-              [ALICE, "person:bob", "person:carol"],
-            );
-          },
-        },
-      ],
-      check: async (ctx) => {
-        const v = await view(ctx, `{ person(entity: "${ALICE}") { name follows guestAt } }`);
-        // the copy's promise, made honest: her name AND her friends AND the film she guested at
-        const lit =
-          v.person?.name === "Alice Song" &&
-          Array.isArray(v.person?.follows) &&
-          v.person.follows.length >= 1 &&
-          Array.isArray(v.person?.guestAt) &&
-          v.person.guestAt.includes(FILM);
-        const foreignArrived = has(
-          ctx,
-          (d) =>
-            d.claims.author !== ctx.author &&
-            d.claims.pointers.some(
-              (p) => p.target.kind === "entity" && p.target.entity.id === "hyperschema:Friends",
-            ),
-        );
-        const foreignInert = !loam
-          .readRegistrations(ctx.gateway.reactor, ctx.author)
-          .some((r) => r.hyperschema.name === "Friends");
-        return lit && foreignArrived && foreignInert;
-      },
-    },
-
-    {
-      id: 13,
-      title: "Another tongue",
-      copy: `The circle spoke your language. This next store doesn't. We bundled a stranger's
-film log written in a dialect your schemas can't read — it says "film_watched" where you say
-"screening", "on" where you say a date. Pull it and the records land, honest and signed, but
-inert: no lens of yours gathers them. You don't rewrite the stranger's records (you can't —
-they're signed, content-addressed). Instead you teach a TRANSLATION: one operator-signed spec
-that reads the dialect and emits your vocabulary. Run it, and your film's history grows an entry
-recorded by an app that never heard of your schema — with its provenance visible right in the
-resolved view: this line was translated, and here's the record it came from. Anyone may write,
-in any tongue; the reader decides what it means, and can learn a new language without asking
-the writer to change.`,
-      steps: [
-        {
-          label: "Pull the stranger's dialect log",
-          look: `The records land — honest and signed — but inert: no lens of yours gathers them.
-They say "film_watched" where you say "screening", "on" where you say a date.`,
-          run: async (ctx) => {
-            await ctx.gateway.federate(ctx.packets.dialect.map((w) => loam.fromWire(w)));
-          },
-        },
-        {
-          label: "Teach a translation, then run it",
-          look: `Your film's history grows an entry recorded by an app that never heard of your
-schema — with its provenance visible right in the resolved view. The reader decides what a record
-means, without asking the writer to change.`,
-          run: async (ctx) => {
-            // an operator-signed spec: recognize the dialect's `film_watched` role, render it into
-            // the film's `elsewhere` bucket with the date carried across and provenance attached
-            await ctx.gateway.append([
-              loam.signClaims(
-                loam.translationClaims(
-                  "dialect",
-                  { hasPointer: { role: { exact: "film_watched" } } },
-                  {
-                    pointers: [
-                      {
-                        role: "film",
-                        at: { from: { role: "film_watched" } },
-                        context: "elsewhere",
-                      },
-                      { role: "note", value: { from: { role: "on" } } },
-                      { role: "origin", value: "a stranger's app" },
-                    ],
-                  },
-                  ctx.author,
-                  ctx.ts(),
-                ),
-                ctx.seed,
-              ),
-            ]);
-            await loam.translate(ctx.gateway, { seed: ctx.seed });
-          },
-        },
-      ],
-      check: async (ctx) => {
-        // a translated record is on the ground, authored by you, carrying its provenance link
-        const translated = has(
-          ctx,
-          (d) =>
-            d.claims.author === ctx.author &&
-            d.claims.pointers.some((p) => p.role === "translates" && p.target.kind === "delta"),
-        );
-        return translated && loam.readTranslations(ctx.gateway.reactor, ctx.author).length >= 1;
-      },
-    },
-
-    {
-      id: 14,
-      title: "An animate store",
-      copy: `So far the store only knows what you tell it. Teach it to think. Bless ONE derived
-function — a little recipe that reads a film's screenings and writes back a running tally —
-then attach a Runner, and the tab comes alive: the recipe fires, and a derived record appears
-in the Ground, badged "derived" and signed not by you but by the runner's own key. It's the
-same store, now with a heartbeat. And here's the quiet part: reload the page — no runner
-running now — and the tally is still there. A derived fact is ground like any other; the runner
-made it, but it doesn't own it. An animate tab is just a deploy choice; the truth it grinds
-outlives it.`,
-      steps: [
-        {
-          label: "Grant the runner write standing",
-          look: `The runner will write derived facts, so it needs standing — one grant, exactly
-like your roommate's. A "grant" badge appears in the Ground.`,
-          run: async (ctx) => {
-            await ctx.gateway.append([
-              loam.signClaims(
-                loam.grantClaims("loam:store", miller, "write", ctx.author, ctx.ts()),
-                ctx.seed,
-              ),
-            ]);
-          },
-        },
-        {
-          label: "Bless a derived function",
-          look: `One signed record blesses a recipe — read a film's screenings, write back a
-running tally — bound to the Film lens. It doesn't run yet; it's just been made lawful.`,
-          run: async (ctx) => {
-            const binding = {
-              name: "binding:tally",
-              fnId: "fn:tally",
-              materialization: "Film",
-              pure: true,
-              budget: 10_000,
-              emit: { keyed: ["tally"] },
-            };
-            await ctx.gateway.append([
-              loam.signClaims(
-                loam.bindingDefinitionClaims(binding, ctx.author, ctx.ts()),
-                ctx.seed,
-              ),
-            ]);
-          },
-        },
-        {
-          label: "Attach the runner — the tab comes alive",
-          look: `A derived record appears in the Ground, badged "derived" and signed by the
-runner's own key, not yours. Reload the page later — no runner running — and the tally is still
-there. A derived fact is ground like any other.`,
-          run: async (ctx) => {
-            const tally = (hview, root) => {
-              const n = (hview.props.get("screenings") ?? []).length;
-              return [
-                [
-                  {
-                    role: "subject",
-                    target: { kind: "entity", entity: { id: root, context: "tally" } },
-                  },
-                  {
-                    role: "value",
-                    target: { kind: "primitive", value: `${n} screenings logged` },
-                  },
-                ],
-              ];
-            };
-            // the store becomes animate: ingest now drains derivations through the runner
-            loam.Runner.attach(ctx.gateway, {
-              seed: MILLER_SEED,
-              implementations: { "fn:tally": tally },
-            });
-            // nudge the wheel: a fresh screening triggers the derivation, and the runner grinds a
-            // `tally` line into the ground — durable, so a later reboot (no runner) still shows it
-            await ctx.gateway.append([
-              say(loam, ctx, [
-                entity("subject", FILM, "screenings"),
-                entity("screening", SCREENING_1, "film"),
-              ]),
-            ]);
-            await new Promise((r) => setTimeout(r, 40));
-          },
-        },
-      ],
-      check: async (ctx) => {
-        // a derived record, signed by the runner, sits in the ground — durable past detach
-        return has(
-          ctx,
-          (d) =>
-            d.claims.author === miller &&
-            d.claims.pointers.some((p) => p.role === "rhizomatic.derived.by"),
-        );
-      },
-    },
-
-    // ============================ ACT V — the door out ============================
-    {
-      id: 15,
-      title: "The stranger at the window",
-      copy: `Everything so far went through YOUR door, signed or refused by standing. But a reader
-with no key at all — a stranger, a search engine, a friend you sent a link — has been knocking
-this whole time and getting the same answer: nothing here is public. Declare ONE lens public —
-Film — with a single signed record (openness is data too). The stranger instantly reads your
-films, and only that. Toggle "ask as the stranger" in the GraphQL pane: the hints shrink to the
-smaller world you declared. Ask for Person as the stranger and the window shows nothing — not
-"forbidden", just a world in which Person does not exist. The public surface is a smaller world,
-not a guarded copy of the big one.`,
-      steps: [
-        {
-          label: "Declare Film public",
-          look: `Toggle "ask as the stranger" in the GraphQL pane: the hints shrink to the smaller
-world you declared. Ask for Person as the stranger and the window shows nothing — not
-"forbidden", just a world in which Person does not exist.`,
-          run: async (ctx) => {
-            await ctx.gateway.append([
-              loam.signClaims(loam.publicClaims(["Film"], ctx.author, ctx.ts()), ctx.seed),
-            ]);
-          },
-        },
-      ],
-      check: async (ctx) => {
-        try {
-          const open = await ctx.gateway.queryPublic(`{ film(entity: "${FILM}") { title } }`);
-          if (open.data?.film?.title !== "Arrival") return false;
-          const shut = await ctx.gateway.queryPublic(`{ person(entity: "${ALICE}") { name } }`);
-          return Array.isArray(shut.errors) && shut.errors.length > 0;
-        } catch {
-          return false;
-        }
-      },
-    },
-
-    {
-      id: 16,
-      title: "Name the lens: the shape you've been wearing",
-      copy: `One word has carried this whole tutorial, and you've never had to define it: the LENS.
-It isn't a type you can hold — it's the whole reading-side assembly, the path from ground to answer.
-See it plainly now, on the smallest thing. Lay ONE gather — a guestbook — and wear TWO readings over
-it: Fresh keeps the newest word, Founding keeps the first. Same ground, two answers. Then evolve the
-fresh reading (give it a full list) and leave the founding one untouched. Watch the square come apart
-and hold: the two readings share their gather down to the byte — they AGREE at that rung — and diverge
-only at the resolution, each with its own content address the store already minted. Nothing here is a
-new API; it's the shape of everything you've built, finally named.`,
-      steps: [
-        {
-          label: "Lay one gather, wear two readings",
-          look: `Two readings answer one guestbook: Fresh shows the newest word, Founding the first.
-Same two notes underneath — the lens decides which one you see.`,
-          run: async (ctx) => {
-            await ctx.gateway.publishRegistration(
-              { name: "Guestbook", alg: 1, body: loam.parseTerm(GATHER) },
-              loam.parseSchema(FRESH_POLICY),
-              [BOARD],
-              undefined,
-              undefined,
-              undefined,
-              ["note"],
-            );
-            await ctx.gateway.publishRegistration(
-              { name: "Guestbook", alg: 1, body: loam.parseTerm(GATHER) },
-              loam.parseSchema(FOUNDING_POLICY),
-              [BOARD],
-              undefined,
-              undefined,
-              undefined,
-              ["note"],
-            );
-            // Two notes, oldest first — ctx.ts() climbs, so Fresh (pick desc) and Founding (pick asc)
-            // will disagree about which is "the" note.
-            await ctx.gateway.append([
-              say(loam, ctx, [entity("subject", BOARD, "note"), prim("first foot in the door")]),
-            ]);
-            await ctx.gateway.append([
-              say(loam, ctx, [entity("subject", BOARD, "note"), prim("still here, years on")]),
-            ]);
-          },
-        },
-        {
-          label: "Evolve one reading, leave the other",
-          look: `Fresh's "note" became the WHOLE list — every word, oldest first — while Founding
-still shows just the founding one. The living reading evolved on its own clock; same gather beneath,
-only the resolution rung changed. The old reading is still right there, still answering.`,
-          run: async (ctx) => {
-            await ctx.gateway.publishRegistration(
-              { name: "Guestbook", alg: 1, body: loam.parseTerm(GATHER) },
-              loam.parseSchema(FRESH_POLICY_V2),
-              [BOARD],
-              undefined,
-              undefined,
-              undefined,
-              ["note"],
-            );
-          },
-        },
-      ],
-      // The divergence moment, made checkable: the two readings AGREE at the gather (one shared
-      // hyperschema entity — rung 1) and DIVERGE at the resolution (two distinct lens names, each a
-      // version with its own content-addressed `deltaId` — rung 3). And they answer differently over
-      // the very same ground: after the evolution Fresh shows the whole list, Founding just the first.
-      check: async (ctx) => {
-        const fresh = await view(ctx, `{ fresh(entity: "${BOARD}") { note } }`);
-        const founding = await view(ctx, `{ founding(entity: "${BOARD}") { note } }`);
-        const guestbook = ctx.gateway
-          .registrationVersions()
-          .filter((v) => v.hyperschema.name === "Guestbook");
-        // Rung 1 — the gather itself, compared as a program rather than by the name we filtered on:
-        // every version's body must be the SAME term. (Filtering by hyperschema name and then
-        // asserting the name matches would prove nothing; this compares what the gather IS.)
-        const bodies = new Set(guestbook.map((v) => JSON.stringify(v.hyperschema.body)));
-        // Rung 3 — the readings, which must genuinely DIFFER, not merely be two names: compare the
-        // resolution programs themselves.
-        const readings = new Map(guestbook.map((v) => [v.schema.name, JSON.stringify(v.schema)]));
-        return (
-          Array.isArray(fresh.fresh?.note) && // Fresh evolved to the whole list
-          fresh.fresh.note.includes("first foot in the door") &&
-          fresh.fresh.note.includes("still here, years on") &&
-          founding.founding?.note === "first foot in the door" && // Founding never moved
-          bodies.size === 1 && // one gather, byte for byte (rung 1: they AGREE)
-          readings.has("Fresh") &&
-          readings.has("Founding") &&
-          readings.get("Fresh") !== readings.get("Founding") // (rung 3: they DIVERGE)
-        );
-      },
-    },
-
-    {
-      id: 17,
-      title: "The same store, now on your machine",
-      copy: `This store is real, but a browser is a small home: it can't listen for peers, and
-"clear site data" is an extinction event. So walk it out. Export writes one file — your records,
-ids and signatures intact, plus (for this tutorial only) your operator seed; real data keeps its
-seed in your own custody, always. Then, in a terminal:
-
-    npm i -g @bombadil/loam
-    loam init --seed <the seed from the file>
-    loam pull <the file>
-    loam serve --http --token anything
-
-Ask the served store the same question this page asks and compare the _hex — the content address
-of the whole answer. It matches, hash for hash. Not a copy that resembles your store: THE SAME
-STORE, proven by content address, because your laptop's genesis, born from the same seed, is
-byte-for-byte the record this tab was born from. Nothing re-signed, nothing lost. It is yours,
-durable, and ready to federate.`,
-      // The finale is not a click-through: the export + homecoming controls are their own
-      // machinery (app.mjs), and the green is EARNED outside the tab by a verified _hex match.
-      steps: [],
-      check: async (ctx) =>
-        has(
-          ctx,
-          (d) => d.claims.author === ctx.author && pointsAt("tutorial:journey", "homecoming")(d),
-        ),
-    },
-  ];
-}
-
-// The finale's file: a frozen federation offer plus the identity that makes it THE SAME store on
-// arrival. The seed rides ON PURPOSE — disposable tutorial data (SPEC §16); the copy says so.
+// The file a student walks out with: the exact bytes `/federate` would serve, plus the identity
+// that makes it THE SAME store on arrival. The seed rides on purpose — disposable tutorial data.
 export function buildExport(loam, ctx) {
   const offer = JSON.parse(loam.exportOffer(ctx.gateway));
   return JSON.stringify({ version: 1, operator: ctx.author, seed: ctx.seed, deltas: offer.deltas });
 }
 
-// The page calls this after the localhost fetch matches _hex for _hex: the homecoming becomes
-// one more signed claim, and lesson 17's check reads it back — progress is the store, all the
-// way to the end.
-export async function recordHomecoming(loam, ctx, matchedHex) {
-  await ctx.gateway.append([
-    say(loam, ctx, [
-      entity("milestone", "tutorial:journey", "homecoming"),
-      prim(String(matchedHex)),
-    ]),
-  ]);
+// ---- the arc ---------------------------------------------------------------------------------
+
+export function buildArc(loam) {
+  return [
+    {
+      id: 1,
+      role: "opening",
+      title: "The keys are yours",
+      copy: `This page just made you a database. It runs in this tab, it keeps records, and it
+answers to one key — yours.`,
+      terms: [
+        { term: "store", meaning: "the whole thing this page just made: a keeper of records." },
+        { term: "record", meaning: "one thing you said, signed, that the store will never edit." },
+        { term: "key", meaning: "the secret that proves a record is yours. It never leaves here." },
+      ],
+      steps: [
+        {
+          id: "1.1",
+          label: "Look at the record it was born with",
+          have: "A store with one record in it already.",
+          want: "To see the record that names your key as the one this store obeys.",
+          how: "Open the Ground pane and read the first row — it is badged constitution.",
+          // A LOOK step: boot performed the work, and the observable is already true. The arc
+          // needs these; the red-probe deliberately skips them (there is nothing to neutralize).
+          run: async () => {},
+          observe: {
+            page: { selector: "#ground-rows", contains: "constitution" },
+            store: async (ctx) => mineAt(ctx, "loam:store", "loam.operator"),
+          },
+        },
+        {
+          id: "1.2",
+          label: "Name your diary",
+          have: "A store that holds records but has not been told what it is for.",
+          want: "One record of your own in the ground, signed by you.",
+          how: "Press the button. Watch the Ground pane grow a row that says diary:mine.",
+          run: async (ctx) => {
+            await ctx.gateway.append([
+              say(loam, ctx, [entity("subject", DIARY, "name"), prim("A film diary of my own")]),
+            ]);
+          },
+          observe: {
+            page: { selector: "#ground-rows", contains: DIARY },
+            store: async (ctx) => mineAt(ctx, DIARY, "name"),
+          },
+        },
+      ],
+      check: async (ctx) =>
+        mineAt(ctx, "loam:store", "loam.operator") && mineAt(ctx, DIARY, "name"),
+    },
+
+    {
+      id: 2,
+      role: "reveal",
+      title: "Say what a viewing is, then look behind the glossary",
+      copy: `A store keeps records, not vibes. Say what a viewing IS — a film, a rating, the
+notes you make — and the store will answer questions through that description.`,
+      terms: [
+        {
+          term: "lens",
+          meaning: "a description of what you want back, and how to settle disagreement.",
+        },
+        { term: "claim", meaning: "a record that says one thing, signed by whoever said it." },
+      ],
+      quiz: {
+        id: "act-i",
+        questions: [
+          {
+            ask: "You ask the diary for Arrival's rating. Where does the answer come from?",
+            choices: [
+              "A row somebody updated in place",
+              "Your signed claims, gathered at the moment you ask",
+              "A copy kept on a server",
+            ],
+            answer: 1,
+            teaches: "2.2",
+          },
+          {
+            ask: "You wrote the note down. What did the store do to the records already in it?",
+            choices: [
+              "Nothing — it added one more",
+              "Updated the viewing",
+              "Replaced the older one",
+            ],
+            answer: 0,
+            teaches: "2.3",
+          },
+        ],
+      },
+      steps: [
+        {
+          id: "2.1",
+          label: "Say what a viewing is",
+          have: "A store that will hold anything and answer nothing.",
+          want: "A description the store can answer through.",
+          how: "Register the Viewing lens. The Views pane gains a Viewing entry.",
+          run: async (ctx) => {
+            await ctx.gateway.publishRegistration(
+              { name: "Viewing", alg: 1, body: loam.parseTerm(GATHER) },
+              loam.parseSchema(VIEWING_POLICY),
+              [VIEWING],
+              undefined,
+              undefined,
+              undefined,
+              Object.keys(VIEWING_POLICY.props),
+            );
+          },
+          observe: {
+            page: { selector: "#view-cards", contains: "Viewing" },
+            store: async (ctx) =>
+              ctx.gateway.registrationVersions().some((v) => v.hyperschema.name === "Viewing"),
+          },
+        },
+        {
+          id: "2.2",
+          label: "Log last night: Arrival, a 9",
+          have: "A description with nothing behind it.",
+          want: "Last night's viewing in the diary, in your own hand.",
+          how: "Press the button. The write becomes a signed claim, and the view reassembles.",
+          run: async (ctx) => {
+            await ctx.gateway.query(
+              `mutation { viewing(entity: "${VIEWING}", film: "Arrival", rating: 9) { rating } }`,
+            );
+          },
+          observe: {
+            page: { selector: "#view-cards", contains: "Arrival" },
+            // OBJECT LEVEL: what a reader resolves through the lens, not merely what is in the
+            // ground. The two can disagree, and that disagreement is usually the bug.
+            store: async (ctx) =>
+              (await view(ctx, `{ viewing(entity: "${VIEWING}") { rating } }`))?.viewing?.rating ===
+              9,
+          },
+        },
+        {
+          id: "2.3",
+          label: "Write down what Rae told you in confidence",
+          have: "A diary about films.",
+          want: "A note about the evening — including a line that was never yours to keep.",
+          how: "Press the button. Remember this record; the last lesson comes back for it.",
+          run: async (ctx) => {
+            await ctx.gateway.append([
+              say(loam, ctx, [
+                entity("about", RAE, "note"),
+                prim("rae read me their friend's message out loud, and i wrote it down"),
+              ]),
+            ]);
+          },
+          observe: {
+            page: { selector: "#ground-rows", contains: RAE },
+            store: async (ctx) => mineAt(ctx, RAE, "note"),
+          },
+        },
+        {
+          id: "2.4",
+          label: "Ask the glossary where it lives",
+          have: "A glossary you have been reading as if the page owned it.",
+          want: "The real name of a record — and the proof the glossary is made of them.",
+          how: "Press the button, then use any entry's 'where does this live?' control.",
+          run: async (ctx) => {
+            await plantTerm(
+              loam,
+              ctx,
+              2,
+              "delta",
+              "the real name for a record here: one signed statement, named by its own content.",
+            );
+          },
+          observe: {
+            page: { selector: "#glossary-entries", contains: "delta" },
+            store: async (ctx) => mineAt(ctx, "tutorial:term:delta", "tutorial.glossary"),
+          },
+        },
+      ],
+      check: async (ctx) =>
+        ctx.gateway.registrationVersions().some((v) => v.hyperschema.name === "Viewing") &&
+        (await view(ctx, `{ viewing(entity: "${VIEWING}") { rating } }`))?.viewing?.rating === 9 &&
+        mineAt(ctx, RAE, "note") &&
+        mineAt(ctx, "tutorial:term:delta", "tutorial.glossary"),
+    },
+
+    {
+      id: 3,
+      role: "erasure-finale",
+      title: "What never should have landed",
+      copy: `Those words were a third person's, and they are in your store. Striking a record
+leaves the bytes at rest. Erasing removes them — and it reaches your checkpoints too, because a
+checkpoint is a copy, and a copy holds the bytes.`,
+      terms: [
+        { term: "erase", meaning: "the operator's order to remove a record's bytes, for good." },
+        {
+          term: "receipt",
+          meaning:
+            "what stays after an erasure: that something went, by whom, when, why. Never what.",
+        },
+      ],
+      steps: [
+        {
+          id: "3.1",
+          label: "Erase it, and say why",
+          have: "A record in your ground that was never yours to keep.",
+          want: "Those bytes gone — from the store AND from every checkpoint that copied them.",
+          how: "Press the button. Watch the revert rail get shorter, and read what it says.",
+          run: async (ctx) => {
+            const note = ground(ctx).find(
+              (d) => d.claims.author === ctx.author && pointsAt(RAE, "note")(d),
+            );
+            if (note !== undefined) {
+              await ctx.gateway.erase(note.id, { reason: "it was not mine to keep" });
+            }
+          },
+          observe: {
+            // The HOLDER, which index.html declares — not the notice rendered inside it. An
+            // observable rooted at a conjured element is satisfiable only while something
+            // conjures it, and this step is irreversible.
+            page: { selector: "#sweep-holder", contains: "checkpoint" },
+            store: async (ctx) =>
+              !mineAt(ctx, RAE, "note") &&
+              loam.readTombstones(ctx.gateway.reactor, ctx.author).size >= 1,
+          },
+        },
+      ],
+      check: async (ctx) =>
+        !mineAt(ctx, RAE, "note") &&
+        loam.readTombstones(ctx.gateway.reactor, ctx.author).size >= 1 &&
+        // the diary is whole around the hole: the bystander claims are still here
+        mineAt(ctx, DIARY, "name") &&
+        (await view(ctx, `{ viewing(entity: "${VIEWING}") { rating } }`))?.viewing?.rating === 9,
+    },
+  ];
 }

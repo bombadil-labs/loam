@@ -8,5 +8,9 @@
     }
   ],
   "id": "T226",
+  "rails": [
+    "test/browser/tutorial.test.ts",
+    "test/browser/tutorial-driver.ts"
+  ],
   "title": "Tutorial v3, the player — steps, checkpoints, quizzes, and the glossary made of deltas"
 }
