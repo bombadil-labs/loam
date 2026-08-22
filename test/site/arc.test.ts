@@ -160,9 +160,7 @@ describe("the arc, headless: every step earns its store observable", () => {
     // The store refuses a write — a real path, since every step writes through the door.
     const throwing: LessonStep = {
       ...step,
-      run: async () => {
-        throw new Error("the door said no");
-      },
+      run: () => Promise.reject(new Error("the door said no")),
     };
     const outcome = await completeStep(loam, ctx, lesson, throwing);
     expect(outcome.ok, "a step whose work threw was banked anyway").toBe(false);
