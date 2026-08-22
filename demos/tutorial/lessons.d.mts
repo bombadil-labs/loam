@@ -83,6 +83,15 @@ export interface ArcTerm {
 /** The glossary manifest, in the order a student meets it. */
 export declare const TERMS: readonly ArcTerm[];
 
+/**
+ * The words as a STORED ROW spells them: the body of the JSON string a row is serialised as.
+ * A needle taken from source text is never found in a row that escapes it.
+ */
+export declare function asStored(words: string): string;
+
+/** The id a stored row's own bytes claim to be — `""` if it will not say. */
+export declare function claimedIdOf(row: string): string;
+
 export declare const DIARY: string;
 export declare const VIEWING: string;
 export declare const TENET: string;

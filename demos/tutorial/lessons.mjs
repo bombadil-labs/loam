@@ -205,10 +205,14 @@ const anywhere = (ctx, value) => ground(ctx).some((d) => holds(d, value));
  * or a backslash — silently, which is the worst way for a byte-level guard to be wrong. Escaping
  * the needle the same way the row was escaped is the whole fix.
  */
-const asStored = (words) => JSON.stringify(words).slice(1, -1);
+export const asStored = (words) => JSON.stringify(words).slice(1, -1);
 
-/** The id a stored row's own bytes claim to be — "" if it will not say. */
-function claimedIdOf(row) {
+/**
+ * The id a stored row's own bytes CLAIM to be — "" if it will not say. The sweep asks this as
+ * well as asking the key, because a row filed under a name that is not its own is exactly the
+ * shape a byte-level guard misses: the key looks innocent and the bytes are anything at all.
+ */
+export function claimedIdOf(row) {
   try {
     const parsed = JSON.parse(row);
     return typeof parsed?.id === "string" ? parsed.id : "";

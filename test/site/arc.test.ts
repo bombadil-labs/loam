@@ -48,6 +48,8 @@ import { MemStorage } from "../store/mem-storage.js";
 import {
   CHASE,
   DIARY,
+  asStored,
+  claimedIdOf,
   MOVIE_NIGHT,
   RAE,
   TENET,
@@ -1479,6 +1481,96 @@ describe("the vocabulary is earned before it is used", () => {
     const caughtInChoice = bannedUses(arc.map((l) => (l.id === withQuiz.id ? inChoice : l)));
     expect(caughtInChoice.length, "a banned name in a quiz choice went unscanned").toBe(1);
     expect(caughtInChoice[0]).toContain("choice");
+  });
+});
+
+describe("the byte-level guards, at the level bytes are spelled", () => {
+  it("asStored is the row's own escaping: a needle it produces round-trips back to the words", () => {
+    // THE CONTRACT, not the implementation. `asStored` must yield exactly the body a row's JSON
+    // spells these words as — so wrapping it back in quotes and parsing it returns what went in.
+    // A slice that took one character too many still MATCHES inside a row (a shorter substring
+    // is still a substring), which is why "does the guard find it" cannot pin this and a
+    // round-trip can. The erasure lesson's whole byte-level claim rests on this function.
+    for (const words of [
+      "plain words",
+      'a line with "quotes" in it',
+      "a back\\slash and a \ttab",
+      "a newline\nand another",
+      "unicode — em dash, curly ’quote’",
+    ]) {
+      expect(JSON.parse(`"${asStored(words)}"`), `asStored mangled: ${words}`).toBe(words);
+    }
+    // ...and it really does differ from the raw text for the sentence the finale erases, or the
+    // escaping would be ceremony.
+    const condemned = 'jamie texted me tonight: "i can\'t do this on my own any more."';
+    expect(asStored(condemned)).not.toBe(condemned);
+    expect(asStored(condemned)).toContain('\\"');
+  });
+
+  it("claimedIdOf reads a row's own id, and refuses to invent one", () => {
+    expect(claimedIdOf(JSON.stringify({ id: "abc123", claims: {} }))).toBe("abc123");
+    // Everything that is not a string id answers "" — never null, never undefined, never the
+    // value itself. The caller asks `dead.has(claimedIdOf(row))`, and a set never holds "",
+    // so an unreadable row must not be able to answer with something a set might hold.
+    expect(claimedIdOf(JSON.stringify({ id: 7 }))).toBe("");
+    expect(claimedIdOf(JSON.stringify({ claims: {} }))).toBe("");
+    expect(claimedIdOf("not json at all")).toBe("");
+    expect(claimedIdOf(JSON.stringify(null))).toBe("");
+    expect(claimedIdOf(JSON.stringify(["a"]))).toBe("");
+  });
+
+  it("the finale's verdict catches a MISFILED row: innocent key, condemned bytes", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    const arc = buildArc(loam);
+    const finale = lessonOfRole(arc, "erasure-finale");
+    for (const lesson of arc) {
+      await playLesson(lesson, ctx);
+      if (lesson.id === finale.id) break;
+    }
+    // BY ID, because two finale steps observe `#sweep-holder` and only one of them is the
+    // checkpoint verdict. The id is pinned by "the arc's names are durable", so a step that
+    // moves turns that rail red and names itself rather than quietly re-pointing this one.
+    const sweepStep = finale.steps.find((s) => s.id === "14.3")!;
+    expect(sweepStep, "the finale has no 14.3 to ask about the checkpoints").toBeDefined();
+    const erased = [...loam.readTombstones(ctx.gateway.reactor, ctx.author)];
+    expect(erased.length, "the finale erased nothing").toBeGreaterThan(0);
+
+    // Clean to start with: the arc's own sweep has run, so the verdict says yes.
+    expect(await sweepStep.observe.store(ctx)).toBe(true);
+
+    // A blob holding the condemned record under a key that names something else entirely. The
+    // key-side test sees nothing wrong; only the row's own bytes give it away — which is the
+    // branch mutation testing showed nothing in the arc could reach.
+    const innocent = "cd".repeat(34);
+    storage.setItem(
+      `${CKPT_PREFIX}99`,
+      JSON.stringify({
+        version: 1,
+        lesson: 99,
+        rows: { [`${STORE_PREFIX}${innocent}`]: JSON.stringify({ id: erased[0]!, claims: {} }) },
+      }),
+    );
+    expect(
+      await sweepStep.observe.store(ctx),
+      "a checkpoint holding the erased record under another name passed the finale's verdict",
+    ).toBe(false);
+
+    // TWO-SIDED: the same blob, with a row whose bytes claim an id nothing forgot, is fine. The
+    // verdict must condemn the record, never the shape of the blob.
+    storage.setItem(
+      `${CKPT_PREFIX}99`,
+      JSON.stringify({
+        version: 1,
+        lesson: 99,
+        rows: { [`${STORE_PREFIX}${innocent}`]: JSON.stringify({ id: innocent, claims: {} }) },
+      }),
+    );
+    expect(
+      await sweepStep.observe.store(ctx),
+      "a blob holding nothing condemned was refused anyway",
+    ).toBe(true);
+    await ctx.gateway.close();
   });
 });
 
