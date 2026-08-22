@@ -36,16 +36,7 @@ export function classifyDelta(delta, selfAuthor) {
 
   let kind = "fact";
   let note;
-  if (isTutorialDelta(delta)) {
-    // The tutorial's OWN bookkeeping — progress, quiz answers, glossary entries. It is data like
-    // everything else and it is signed like everything else, which is the reveal; but badging it
-    // "fact" would bury the student's own records under the record of their reading, in the very
-    // pane a lesson tells them to watch. Named, so the Ground pane can hold it back by default.
-    kind = "tutorial";
-    note = foreign
-      ? "another store's tutorial record — it arrived as data and moves nothing here"
-      : "the tutorial's own record: your progress and your glossary live in your store, signed by you";
-  } else if (hasEntityCtx("loam.operator")) {
+  if (hasEntityCtx("loam.operator")) {
     kind = "constitution";
     // A FOREIGN constitutional record is data, not law — lesson 9's thesis must hold on
     // the very row that shows it.
@@ -90,6 +81,20 @@ export function classifyDelta(delta, selfAuthor) {
   } else if (hasDeltaRef) {
     kind = "negation";
     note = "a taking-back: it strikes another record by id, and stays on the record itself";
+  } else if (isTutorialDelta(delta)) {
+    // The tutorial's OWN bookkeeping — progress, quiz answers, glossary entries. It is data like
+    // everything else and it is signed like everything else, which is the reveal; but badging it
+    // "fact" would bury the student's own records under the record of their reading, in the very
+    // pane a lesson tells them to watch. Named, so the Ground pane can hold it back by default.
+    //
+    // LAST, deliberately. This kind is the only one that can HIDE a row, and `isTutorialDelta`
+    // fires on ANY ONE pointer — so testing it first would let a record that is also a grant, a
+    // tombstone or a registration disappear behind one tutorial-shaped pointer. Every
+    // constitutional kind is decided before this one can claim the row.
+    kind = "tutorial";
+    note = foreign
+      ? "another store's tutorial record — it arrived as data and moves nothing here"
+      : "the tutorial's own record: your progress and your glossary live in your store, signed by you";
   }
 
   return { kind, foreign, note };
@@ -133,10 +138,14 @@ const BADGE_LABELS = {
 export function renderGround(holder, deltas, selfAuthor, toWire, state) {
   holder.textContent = "";
   const classified = [...deltas].map((d) => ({ d, c: classifyDelta(d, selfAuthor) }));
+  // SIGNED, self-authored, and the tutorial's own: all three, because `claims.author` is a plain
+  // field and an UNSIGNED row is admitted to the ground (the driver quarantines a signature that
+  // fails, not one that is missing). Without the signature test, anything sharing this origin
+  // could name the student as its author and land in the one place the pane does not look.
   const hidden =
     state.showTutorial === true
       ? []
-      : classified.filter((x) => x.c.kind === "tutorial" && !x.c.foreign);
+      : classified.filter((x) => x.c.kind === "tutorial" && !x.c.foreign && x.d.sig !== undefined);
   const shown = classified.filter((x) => !hidden.includes(x));
 
   const head = document.createElement("p");

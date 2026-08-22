@@ -77,6 +77,9 @@ const lessonOf = (id) => arc.find((l) => l.id === id) ?? arc[0];
 // catch here, which exists for a corrupt VALUE, would swallow that as an empty Map and lose
 // every pin the student saved, silently.
 const PINS_KEY = "loam.tutorial.ui.pins";
+// A revert reloads the page, so anything it needs to TELL the student has to outlive the
+// reload. Dots, not colons, for the same reason as the pins: this is not a delta.
+const REVERT_NOTE_KEY = "loam.tutorial.ui.revert-note";
 function loadPins() {
   try {
     const raw = JSON.parse(storage.getItem(PINS_KEY) ?? "[]");
@@ -93,7 +96,8 @@ function loadPins() {
 // in the store, and every render reads it back from there.
 const ui = {
   lesson: arc[0].id,
-  refusal: null,
+  refusal: null, // something was asked and could not be done — the student must read it
+  notice: null, // something happened that they should know about, which is not a failure
   askRevert: null,
   askStartOver: false,
   quizDismissed: new Set(),
@@ -147,6 +151,9 @@ window.tutorial = {
   seePage,
   idle: () => inFlight,
   bankedSteps: () => [...readProgress(ctx).steps],
+  // Re-read everything from the store. The panes are readings, so anything that lands by
+  // another door — this console, a federation pull — becomes visible by asking again.
+  refresh: () => act(() => rerender()),
   introspectionQuery: () => getIntrospectionQuery(),
   lensNames: () => gateway.registrationVersions().map((v) => v.hyperschema.name),
   ready: false,
@@ -240,6 +247,12 @@ function renderLesson(progress) {
   refusal.textContent = ui.refusal ?? "";
   el.appendChild(refusal);
 
+  const notice = document.createElement("div");
+  notice.id = "step-notice";
+  notice.className = ui.notice === null ? "notice" : "notice ok";
+  notice.textContent = ui.notice ?? "";
+  el.appendChild(notice);
+
   if (lessonIsGreen(lesson, progress)) {
     line(
       el,
@@ -260,6 +273,7 @@ function renderLesson(progress) {
 async function goToLesson(id) {
   ui.lesson = id;
   ui.refusal = null;
+  ui.notice = null;
   ui.sweep = null;
   ui.highlightStep = null;
   await enterLesson(loam, ctx, lessonOf(id));
@@ -272,6 +286,7 @@ async function runPendingStep() {
   const step = pendingStepOf(lesson, readProgress(ctx));
   if (step === null) return;
   ui.refusal = null;
+  ui.notice = null;
   const before = new Set(gateway.offeredDeltas().map((d) => d.id));
 
   const outcome = await completeStep(loam, ctx, lesson, step, {
@@ -415,12 +430,23 @@ function confirmBox(what, lesson) {
 }
 
 async function doRevert(lesson) {
-  const restored = restoreCheckpoint(storage, lesson);
+  // The erased ids ride along as PROOF rather than an assumption that some earlier sweep
+  // cleaned this blob: a revert is the one motion that writes old bytes back, and it must not
+  // be the way a forgotten record comes home.
+  const erasedIds = [...loam.readTombstones(gateway.reactor, author)];
+  const restored = restoreCheckpoint(storage, lesson, { erasedIds });
   ui.askRevert = null;
   if (!restored.ok) {
     ui.refusal = restored.message;
     await rerender();
     return;
+  }
+  if (restored.refused.length > 0) {
+    // Say it out loud rather than quietly restoring less than the student asked for.
+    storage.setItem(
+      REVERT_NOTE_KEY,
+      `${restored.refused.length} record(s) this checkpoint held were erased since, and were not brought back.`,
+    );
   }
   window.location.reload(); // the panes re-render from the restored ground, by construction
 }
@@ -721,7 +747,10 @@ $("#gql-run").onclick = () =>
       text = String(err.message ?? err);
     }
     // A run may have been a WRITE — the console speaks to the same door — so every pane has to
-    // show it rather than wait for the next click.
+    // show it rather than wait for the next click. The sweep runs for the same reason: this
+    // door reaches the whole gateway, and a checkpoint holding erased bytes must not wait for
+    // the next lesson step to be found.
+    await runSweep();
     await rerender();
     $("#gql-out").textContent = text; // after the rerender, so the answer survives it
   });
@@ -776,7 +805,15 @@ $("#export").onclick = () =>
     a.download = "my-store.json";
     a.click();
     URL.revokeObjectURL(a.href);
-    ui.refusal = null;
+    // The file carries the SEED — say so, every time. It is what makes the export the same
+    // store on the other machine, and it is also the student's key: this page's data is
+    // disposable, and real data keeps its seed in its owner's own custody. The file also
+    // carries the tutorial's own records — the progress and the answers — because they are
+    // ordinary claims in this store, which is the lesson and is also worth stating.
+    ui.notice =
+      "the file carries your key ON PURPOSE — it is what makes this the SAME store when you " +
+      "pull it, and it is why tutorial data is disposable data. Your progress and your answers " +
+      "ride along too: they were always ordinary records in here.";
     await rerender();
   });
 
@@ -822,6 +859,12 @@ async function rerender() {
 }
 
 ui.lesson = resumeState(arc, readProgress(ctx)).lessonId;
+// A message a revert left for the student, read once and taken off the shelf.
+const note = storage.getItem(REVERT_NOTE_KEY);
+if (note !== null) {
+  ui.refusal = note;
+  storage.removeItem(REVERT_NOTE_KEY);
+}
 await enterLesson(loam, ctx, lessonOf(ui.lesson));
 await runSweep(); // a checkpoint that outlived an erasure must not survive a reload either
 await refreshSdl();

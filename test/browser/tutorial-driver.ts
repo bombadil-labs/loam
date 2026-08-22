@@ -89,6 +89,9 @@ export async function serveSite(dir: string): Promise<SiteHandle> {
 export interface ArcStep {
   readonly id: string;
   readonly label: string;
+  readonly have: string;
+  readonly want: string;
+  readonly how: string;
 }
 export interface ArcLesson {
   readonly id: number;
@@ -213,11 +216,29 @@ export class TutorialPage {
       .eval(
         `window.tutorial.arc.map((l) => ({
            id: l.id, role: l.role,
-           steps: l.steps.map((s) => ({ id: s.id, label: s.label })),
+           steps: l.steps.map((s) => ({
+             id: s.id, label: s.label, have: s.have, want: s.want, how: s.how,
+           })),
            quiz: l.quiz ? { id: l.quiz.id, questions: l.quiz.questions.length } : null,
          }))`,
       )
       .then((v) => json<ArcLesson[]>(v));
+  }
+
+  /** The order the three framing sentences are laid out in, as a person reads them. */
+  frameOrder(step: string): Promise<string[]> {
+    return this.tab
+      .eval(
+        `[...document.querySelectorAll('[data-step="${step}"] [data-have], [data-step="${step}"] [data-want], [data-step="${step}"] [data-how]')]
+           .map((el) => el.hasAttribute("data-have") ? "have"
+                      : el.hasAttribute("data-want") ? "want" : "how")`,
+      )
+      .then((v) => json<string[]>(v));
+  }
+
+  /** Every pending step the page is showing — the count matters, not only the first one. */
+  pendingSteps(): Promise<string[]> {
+    return this.attrs('[data-step][data-state="pending"]', "data-step");
   }
 
   /** Where the student stands, read from the rendered page — never from page memory. */
@@ -317,7 +338,9 @@ export class TutorialPage {
   async answerFirstQuestion(kind: "right" | "wrong"): Promise<string> {
     const pick = (await this.tab.eval(
       `(() => {
-         const block = document.querySelector("#quiz-card [data-question]");
+         // the first question still OPEN: an answered one has its choices disabled
+         const block = [...document.querySelectorAll("#quiz-card [data-question]")].find(
+           (b) => [...b.querySelectorAll("button[data-choice]")].some((x) => !x.disabled));
          if (!block) return null;
          const key = block.dataset.question;
          const quizId = key.slice(0, key.lastIndexOf("#"));
@@ -373,6 +396,33 @@ export class TutorialPage {
     if (done !== true) throw new Error(`no step ${step} in lesson ${lesson} to neutralize`);
   }
 
+  /**
+   * Land a STRANGER's claim in the tutorial's own vocabulary, through the page's real
+   * federation door, and re-render. Returns its delta id. The store does not burn mail: it
+   * lands — the question every caller asks is what the page then does with it.
+   */
+  async plantForeignTutorialClaim(): Promise<string> {
+    const id = await this.tab.eval(
+      `(async () => {
+         const seed = "5a".repeat(32);
+         const loam = window.loam;
+         const claim = loam.signClaims(
+           { timestamp: Date.now(), author: loam.authorForSeed(seed),
+             pointers: [
+               { role: "step", target: { kind: "entity",
+                 entity: { id: "tutorial:step:99.9", context: "tutorial.step" } } },
+               { role: "name", target: { kind: "primitive", value: "99.9" } },
+               { role: "lesson", target: { kind: "primitive", value: 99 } },
+             ] },
+           seed);
+         await window.tutorial.ctx.gateway.federate([claim]);
+         return claim.id;
+       })()`,
+    );
+    await this.tab.eval(`window.tutorial.refresh()`); // the panes are readings; ask again
+    return String(id);
+  }
+
   /** Every localStorage key this origin holds, straight from the browser. */
   keys(): Promise<string[]> {
     return this.tab.eval(`Object.keys(localStorage).sort()`).then((v) => json<string[]>(v));
@@ -385,6 +435,39 @@ export class TutorialPage {
       .filter((k) => /^loam:tutorial:[0-9a-f]+$/.test(k))
       .map((k) => k.slice("loam:tutorial:".length))
       .sort();
+  }
+
+  /** Every record the ground holds right now, as id → the wire text of its claims. */
+  groundText(): Promise<Record<string, string>> {
+    return this.tab
+      .eval(
+        `(() => {
+           const out = {};
+           for (const d of window.tutorial.ctx.gateway.offeredDeltas()) {
+             out[d.id] = JSON.stringify(window.loam.toWire(d).claims);
+           }
+           return out;
+         })()`,
+      )
+      .then((v) => json<Record<string, string>>(v));
+  }
+
+  /**
+   * Does a checkpoint blob carry these bytes ANYWHERE in it — in a row's own text, not merely
+   * under a key that names it? The row values are JSON strings inside the blob's JSON, so the
+   * search runs over the parsed values rather than the escaped envelope.
+   */
+  checkpointHolds(lesson: number, words: string): Promise<boolean> {
+    return this.tab
+      .eval(
+        `(() => {
+           const raw = localStorage.getItem("loam:tutorial-ckpt:" + ${lesson});
+           if (raw === null) return false;
+           const rows = Object.values(JSON.parse(raw).rows).join("\\n");
+           return rows.includes(${JSON.stringify(words)});
+         })()`,
+      )
+      .then((v) => v === true);
   }
 
   async checkpointLessons(): Promise<number[]> {

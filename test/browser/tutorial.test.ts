@@ -93,14 +93,18 @@ describe("§48 — one step at a time, and every step observed twice", () => {
 
       for (const step of lesson.steps) {
         const before = await page.position();
-        expect(before.pending, "more than one step is pending at once").toBe(step.id);
-        expect(await page.attrs(`[data-step="${step.id}"] [data-have]`, "data-have")).toHaveLength(
-          1,
-        );
-        expect(await page.attrs(`[data-step="${step.id}"] [data-want]`, "data-want")).toHaveLength(
-          1,
-        );
-        expect(await page.attrs(`[data-step="${step.id}"] [data-how]`, "data-how")).toHaveLength(1);
+        // EXACTLY one, not "the first of however many": rendering every un-banked step as
+        // pending would read the same if this only looked at [0].
+        expect(await page.pendingSteps(), "more than one step is pending at once").toEqual([
+          step.id,
+        ]);
+        expect(before.pending).toBe(step.id);
+        // The three sentences are SHOWN, in their order, and each says what the arc says. An
+        // attribute with no text would satisfy a presence check and teach nothing.
+        expect(await page.text(`[data-step="${step.id}"] [data-have]`)).toContain(step.have);
+        expect(await page.text(`[data-step="${step.id}"] [data-want]`)).toContain(step.want);
+        expect(await page.text(`[data-step="${step.id}"] [data-how]`)).toContain(step.how);
+        expect(await page.frameOrder(step.id)).toEqual(["have", "want", "how"]);
 
         await page.runPending();
 
@@ -257,6 +261,17 @@ describe("§48 — the progress is in the store, and nowhere else", () => {
     expect(after.quiz).toEqual(before.quiz);
   });
 
+  it("exporting says, every time, that the file carries the student's key", async () => {
+    await page.reset();
+    await playLesson((await page.arc())[0]!);
+    await page.click("#export");
+    // The export is the one act that takes this store out of the tab. The page must say what
+    // rides in the file — the key that makes it the SAME store, and the tutorial's own records.
+    const said = await page.text("#step-notice");
+    expect(said.toLowerCase()).toContain("key");
+    expect(said).toMatch(/progress|records/i);
+  });
+
   it("a query pinned to the Views pane is still there after a reload", async () => {
     await page.reset();
     const arc = await page.arc();
@@ -280,11 +295,15 @@ describe("§48 — the progress is in the store, and nowhere else", () => {
 
     expect(await page.attrs('#ground-rows .delta[data-kind="tutorial"]', "data-kind")).toEqual([]);
     const hiddenNote = await page.text("#ground-filter-note");
-    expect(hiddenNote).toMatch(/\d/); // it says how many it is holding back
 
     await page.click("#ground-show-tutorial");
     const revealed = await page.attrs('#ground-rows .delta[data-kind="tutorial"]', "data-kind");
     expect(revealed.length).toBeGreaterThan(0);
+    // The note says HOW MANY it was holding back — the number, not merely a digit. A pane that
+    // hides records without saying so is the opposite of the honesty the toggle is there for.
+    expect(hiddenNote, "the filter note does not say how many it held back").toContain(
+      `${revealed.length} more`,
+    );
     expect(await page.text('#ground-rows .delta[data-kind="tutorial"] .badge')).toContain(
       "tutorial",
     );
@@ -292,6 +311,16 @@ describe("§48 — the progress is in the store, and nowhere else", () => {
     expect(
       (await page.attrs('#ground-rows .delta[data-kind="fact"]', "data-kind")).length,
     ).toBeGreaterThan(0);
+
+    // A STRANGER'S record wearing the tutorial's vocabulary is NOT the tutorial's bookkeeping,
+    // and the default filter must never hide it — that would make this pane a blind spot any
+    // packet could write into.
+    await page.click("#ground-show-tutorial"); // back to the default
+    const foreign = await page.plantForeignTutorialClaim();
+    expect(
+      await page.attrs(`.delta[data-delta-id="${foreign}"]`, "data-kind"),
+      "a stranger's record was hidden by the tutorial filter",
+    ).toEqual(["tutorial"]);
   });
 });
 
@@ -394,6 +423,19 @@ describe("§48 — the quiz teaches rather than scolds", () => {
     await page.click("#quiz-card [data-teaches]");
     expect(await page.attrs(".step.highlight", "data-step")).toEqual([teaches]);
 
+    // A RIGHT answer is told apart from a wrong one — a grader wired to "no" would pass every
+    // assertion above, because every one of them is about the refusal.
+    const right = await page.answerFirstQuestion("right");
+    expect(
+      await page.attrs(`[data-quiz-result="${right}"]`, "data-correct"),
+      "a right answer was not recorded as right",
+    ).toEqual(["true"]);
+    expect(await page.text(`#quiz-card [data-question="${right}"] .verdict`)).not.toBe("");
+    expect(
+      await page.attrs(`#quiz-card [data-question="${right}"] [data-teaches]`, "data-teaches"),
+      "a right answer was pointed at a teaching step anyway",
+    ).toEqual([]);
+
     // the arc never blocks on a quiz
     await page.click("#quiz-skip");
     expect(await page.exists("#quiz-card")).toBe(false);
@@ -409,6 +451,10 @@ describe("§48 — the right to be forgotten reaches the checkpoints", () => {
     expect(before.length, "the arc reaches its erasure with no checkpoints").toBeGreaterThan(1);
     const heldBefore = new Map<number, string[]>();
     for (const lesson of before) heldBefore.set(lesson, await page.checkpointIds(lesson));
+    // What the ground SAYS, before any of it is forgotten: id → the record's own text. After
+    // the erasure this is the only place those words still exist, which is what lets the rail
+    // ask about BYTES rather than about key names.
+    const wordsById = await page.groundText();
 
     for (let i = 0; i < target.steps.length; i++) await page.runPending();
 
@@ -440,6 +486,32 @@ describe("§48 — the right to be forgotten reaches the checkpoints", () => {
       expect(after).toContain(lesson);
       expect(await page.checkpointIds(lesson)).toEqual(heldBefore.get(lesson));
     }
+
+    // THE BYTES THEMSELVES, not the key that named them: the erased record's own words appear
+    // in no surviving blob, anywhere in it — and a bystander's words are still there, which is
+    // the other side of the same claim.
+    for (const dead of erased) {
+      const words = wordsById[dead];
+      expect(words, "the erased record's text was never captured").toBeTruthy();
+      for (const lesson of after) {
+        expect(
+          await page.checkpointHolds(lesson, words!),
+          `checkpoint ${lesson} still carries the erased words`,
+        ).toBe(false);
+      }
+    }
+    const keptLesson = kept.map(Number)[0]!;
+    const bystanderId = (heldBefore.get(keptLesson) ?? []).find(
+      (id) => !erased.includes(id) && (wordsById[id]?.length ?? 0) > 24,
+    );
+    expect(
+      bystanderId,
+      "the kept checkpoint held nothing to check the other side with",
+    ).toBeDefined();
+    expect(
+      await page.checkpointHolds(keptLesson, wordsById[bystanderId!]!),
+      "a kept checkpoint lost the records it was keeping",
+    ).toBe(true);
     // and the student's store itself no longer holds the erased bytes
     const rows = await page.storeIds();
     for (const dead of erased) expect(rows).not.toContain(dead);

@@ -291,6 +291,66 @@ describe("progress is claims", () => {
     await ctx.gateway.close();
   });
 
+  it("a STRANGER'S strike retires nothing, and a struck strike gives the claim back", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    const arc = buildArc(loam);
+    const first = arc[0]!;
+    await playLesson(first, ctx);
+    const banked = first.steps[first.steps.length - 1]!.id;
+    const stepClaim = ctx.gateway
+      .offeredDeltas()
+      .find(
+        (d) =>
+          d.claims.author === ctx.author &&
+          d.claims.pointers.some((p) => p.target.kind === "primitive" && p.target.value === banked),
+      )!;
+
+    // A stranger's strike LANDS in the ground and retires nothing: standing is not something a
+    // federated packet can take away.
+    const strangerSeed = "5a".repeat(32);
+    const theirStrike = loam.signClaims(
+      loam.makeNegationClaims(loam.authorForSeed(strangerSeed), 9_000_001, stepClaim.id, "no"),
+      strangerSeed,
+    );
+    await ctx.gateway.federate([theirStrike]);
+    expect(
+      ctx.gateway.offeredDeltas().some((d) => d.id === theirStrike.id),
+      "the stranger's strike never landed — this rail would prove nothing",
+    ).toBe(true);
+    expect(readProgress(ctx).steps.has(banked), "a stranger un-banked the student's work").toBe(
+      true,
+    );
+
+    // The student's own strike DOES retire it...
+    const mine = loam.signClaims(
+      loam.makeNegationClaims(ctx.author, ctx.ts(), stepClaim.id, "not really"),
+      ctx.seed,
+    );
+    await ctx.gateway.append([mine]);
+    expect(readProgress(ctx).steps.has(banked)).toBe(false);
+
+    // ...and striking THAT strike gives the claim back. Presence is not survival, and one link
+    // of the chain is not the answer (H1).
+    const undo = loam.signClaims(
+      loam.makeNegationClaims(ctx.author, ctx.ts(), mine.id, "yes it was"),
+      ctx.seed,
+    );
+    await ctx.gateway.append([undo]);
+    expect(readProgress(ctx).steps.has(banked), "a struck strike did not revive its target").toBe(
+      true,
+    );
+
+    // ...and one more link flips it back again: a reader that stopped at two would say live.
+    const redo = loam.signClaims(
+      loam.makeNegationClaims(ctx.author, ctx.ts(), undo.id, "no it wasn't"),
+      ctx.seed,
+    );
+    await ctx.gateway.append([redo]);
+    expect(readProgress(ctx).steps.has(banked), "the third link was not followed").toBe(false);
+    await ctx.gateway.close();
+  });
+
   it("reconstructs where the student stood from the claims alone — every other key deleted", async () => {
     const storage = new MemStorage();
     const ctx = await makeCtx(storage);
@@ -347,15 +407,21 @@ describe("the glossary is made of deltas", () => {
     }
 
     // The reveal lesson plants a term from a STEP, not from its entry — the payoff needs the
-    // student to open the drawer for it.
+    // student to do something for it. So the snapshot is taken AFTER entering that lesson (its
+    // entry terms are already planted by then): whatever appears now was planted by a step.
     const reveal = lessonOfRole(arc, "reveal");
-    const beforeReveal = new Set(readGlossary(ctx).map((e) => e.term));
     for (const lesson of arc) {
-      if (lesson.id > reveal.id) break;
+      if (lesson.id >= reveal.id) break;
       await playLesson(lesson, ctx);
     }
-    const revealed = readGlossary(ctx).filter((e) => !beforeReveal.has(e.term));
-    expect(revealed.length, "the reveal lesson plants no new term").toBeGreaterThan(0);
+    await enterLesson(loam, ctx, reveal);
+    const beforeSteps = new Set(readGlossary(ctx).map((e) => e.term));
+    for (const step of reveal.steps) await completeStep(loam, ctx, reveal, step);
+    const revealed = readGlossary(ctx).filter((e) => !beforeSteps.has(e.term));
+    expect(
+      revealed.map((e) => e.term),
+      "the reveal lesson plants no term from inside a step — its role is unmet",
+    ).not.toEqual([]);
     await ctx.gateway.close();
   });
 
@@ -453,6 +519,70 @@ describe("checkpoints, revert, and the sweep", () => {
     expect(resumeState(buildArc(loam), readProgress(back)).lessonId).toBe(first.id);
     expect(rowIds(storage)).toEqual(frozen);
     await back.gateway.close();
+  });
+
+  it("a revert never writes an erased record back, and says which ones it would not", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    const arc = buildArc(loam);
+    await playLesson(arc[0]!, ctx);
+    expect(takeCheckpoint(storage, arc[0]!.id).ok).toBe(true);
+    const held = rowIds(storage);
+    const condemned = held[held.length - 1]!;
+
+    // The store moves on and that record is erased — so the checkpoint is the only copy left.
+    // A revert that trusted an earlier sweep would write it straight back into the ground.
+    storage.removeItem(`${STORE_PREFIX}${condemned}`);
+    const restored = restoreCheckpoint(storage, arc[0]!.id, { erasedIds: [condemned] });
+    expect(restored.ok).toBe(true);
+    if (!restored.ok) return;
+    expect(restored.refused, "the erased record was not named").toContain(condemned);
+    expect(rowIds(storage), "a revert resurrected an erased record").not.toContain(condemned);
+    // ...and everything else the checkpoint held IS back — refusing one row is not a licence
+    // to drop the rest.
+    for (const id of held) {
+      if (id === condemned) continue;
+      expect(rowIds(storage), `${id} was lost by a revert that refused another row`).toContain(id);
+    }
+    await ctx.gateway.close();
+  });
+
+  it("a revert that cannot be written loses nothing: no row is removed before every row is back", async () => {
+    const roomy = new MemStorage();
+    const ctx = await makeCtx(roomy);
+    await playLesson(buildArc(loam)[0]!, ctx);
+    expect(takeCheckpoint(roomy, 1).ok).toBe(true);
+    const frozen = rowIds(roomy);
+    await ctx.gateway.close();
+
+    // A storage that will take the blob but refuses the writes the restore needs.
+    const tight = new MemStorage();
+    for (const key of roomy.keys()) tight.setItem(key, roomy.getItem(key)!);
+    for (const id of frozen.slice(1)) tight.removeItem(`${STORE_PREFIX}${id}`); // rows to put back
+    let allowed = 0;
+    const failing = {
+      get length() {
+        return tight.length;
+      },
+      key: (i: number) => tight.key(i),
+      getItem: (k: string) => tight.getItem(k),
+      removeItem: (k: string) => tight.removeItem(k),
+      setItem: (k: string, v: string) => {
+        if (allowed++ > 0)
+          throw new DOMException("the quota has been exceeded", "QuotaExceededError");
+        tight.setItem(k, v);
+      },
+    };
+
+    const refused = restoreCheckpoint(failing, 1);
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.message).toMatch(/nothing was removed/);
+    // THE POINT: the rows that were there before the attempt are all still there. A restore
+    // that deleted first would have destroyed the only copy of whatever it could not rewrite.
+    expect(tight.getItem(`${STORE_PREFIX}${frozen[0]!}`)).not.toBeNull();
+    // and the checkpoint itself is untouched, so the student can try again
+    expect(readCheckpoint(tight, 1)).not.toBeNull();
   });
 
   it("one checkpoint per boundary, superseded in place; start-over clears them all", async () => {

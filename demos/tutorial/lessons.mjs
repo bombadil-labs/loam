@@ -198,6 +198,16 @@ notes you make — and the store will answer questions through that description.
             answer: 1,
             teaches: "2.2",
           },
+          {
+            ask: "You wrote the note down. What did the store do to the records already in it?",
+            choices: [
+              "Nothing — it added one more",
+              "Updated the viewing",
+              "Replaced the older one",
+            ],
+            answer: 0,
+            teaches: "2.3",
+          },
         ],
       },
       steps: [

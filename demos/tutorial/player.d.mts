@@ -113,7 +113,11 @@ export declare function checkpointLessons(storage: StorageLike): number[];
 export declare function restoreCheckpoint(
   storage: StorageLike,
   lesson: number,
-): { ok: true; restored: number } | { ok: false; message: string };
+  /** The ids an erasure condemned: proof, at the moment of the write, never an inference. */
+  opts?: { erasedIds?: readonly string[] },
+):
+  | { ok: true; restored: number; refused: string[] }
+  | { ok: false; refused?: string[]; message: string };
 export declare function clearCheckpoints(storage: StorageLike): void;
 
 export interface SweepReport {

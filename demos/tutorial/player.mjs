@@ -54,17 +54,48 @@ const sign = (loam, ctx, pointers) =>
   loam.signClaims({ timestamp: ctx.ts(), author: ctx.author, pointers }, ctx.seed);
 
 /**
- * The student's own LIVE tutorial records. Two filters, both load-bearing: someone else's
- * claim about my progress is data and moves nothing (a federated packet cannot advance the
- * lesson), and a struck claim is not a claim — a strike that is itself struck revives its
- * target, so survival is asked of the negation, never mere presence (H1).
+ * The student's own LIVE tutorial records. Progress is what THEY did, so three filters, each
+ * load-bearing and each with a direction it protects:
+ *
+ *   AUTHORED BY THEM — someone else's claim about my progress is data and moves nothing; a
+ *   federated packet cannot advance the lesson.
+ *   SIGNED — `claims.author` is a plain field, and an unsigned row planted under this origin's
+ *   prefix is admitted to the ground (the driver quarantines an INVALID signature, not a
+ *   missing one). Without this, anything on a shared origin could write the student's history.
+ *   NOT STRUCK — and struck by a strike that SURVIVES, and by one of the student's OWN, which
+ *   is the rule the gateway's readers keep: a stranger's strike retires nothing the operator
+ *   planted (H1), and a struck strike revives its target, so survival is recursive rather than
+ *   a one-link presence test. The chain guard makes a cycle answer "not struck" — a loop of
+ *   strikes proves nothing, and the safe direction here is to keep the student's progress.
  */
 function mine(ctx) {
   const reactor = ctx.gateway.reactor;
-  const struck = (id) => reactor.negationsOf(id).some((n) => reactor.negationsOf(n).length === 0);
+  // One index per reading, not one per delta: the page reads progress on every render.
+  const byId = new Map([...reactor.snapshot()].map((d) => [d.id, d]));
+  const struck = (id, chain = new Set()) => {
+    if (chain.has(id)) return false;
+    chain.add(id);
+    const answer = reactor.negationsOf(id).some((strikeId) => {
+      const strike = byId.get(strikeId);
+      return (
+        strike !== undefined &&
+        strike.claims.author === ctx.author &&
+        strike.sig !== undefined &&
+        !struck(strikeId, chain)
+      );
+    });
+    chain.delete(id);
+    return answer;
+  };
   return ctx.gateway
     .offeredDeltas()
-    .filter((d) => d.claims.author === ctx.author && isTutorialDelta(d) && !struck(d.id));
+    .filter(
+      (d) =>
+        d.claims.author === ctx.author &&
+        d.sig !== undefined &&
+        isTutorialDelta(d) &&
+        !struck(d.id),
+    );
 }
 
 const contextOf = (delta) => {
@@ -340,27 +371,46 @@ export async function bankCheckpoint(loam, ctx, lesson, opts = {}) {
   return takeCheckpoint(ctx.storage, lesson, opts);
 }
 
-export function readCheckpoint(storage, lesson) {
-  const raw = storage.getItem(ckptKey(lesson));
-  if (raw === null) return null;
+/** A blob is only a checkpoint if it parses AND carries rows; anything else is unreadable. */
+function parseBlob(raw) {
   try {
     const blob = JSON.parse(raw);
     if (blob === null || typeof blob !== "object" || typeof blob.rows !== "object") return null;
+    if (blob.rows === null) return null;
     return blob;
   } catch {
     return null;
   }
 }
 
-export function checkpointLessons(storage) {
-  const found = [];
+export function readCheckpoint(storage, lesson) {
+  const raw = storage.getItem(ckptKey(lesson));
+  return raw === null ? null : parseBlob(raw);
+}
+
+/**
+ * Every key under the checkpoint prefix, VERBATIM — the sweep walks these rather than a list of
+ * numbers it re-derives, because a suffix that does not round-trip through `Number` would either
+ * be skipped (a blob keeping condemned bytes while the report says none do) or point the removal
+ * at a different key entirely. Nothing in the arc writes such a key; reading the keys themselves
+ * means nothing has to.
+ */
+function checkpointKeys(storage) {
+  const keys = [];
   for (let i = 0; i < storage.length; i++) {
     const key = storage.key(i);
-    if (key === null || !key.startsWith(CKPT_PREFIX)) continue;
-    const lesson = Number(key.slice(CKPT_PREFIX.length));
-    if (Number.isInteger(lesson)) found.push(lesson);
+    if (key !== null && key.startsWith(CKPT_PREFIX)) keys.push(key);
   }
-  return found.sort((a, b) => a - b);
+  return keys;
+}
+
+/** The boundaries a student can revert to: the checkpoints whose suffix really is a lesson. */
+export function checkpointLessons(storage) {
+  return checkpointKeys(storage)
+    .map((key) => key.slice(CKPT_PREFIX.length))
+    .filter((suffix) => String(Number(suffix)) === suffix && Number.isInteger(Number(suffix)))
+    .map(Number)
+    .sort((a, b) => a - b);
 }
 
 /**
@@ -368,41 +418,61 @@ export function checkpointLessons(storage) {
  * load-bearing: the page captured the gateway at module scope and holds live subscriptions, so
  * swapping the ground underneath it would leave panes rendering a future that no longer exists.
  *
- * The present rows are held in memory until the last one is rewritten, so a write that fails
- * halfway (quota, a closed handle) restores what was there rather than stranding the student
- * between two stores.
+ * WRITE FIRST, REMOVE SECOND. Deleting the present rows before writing the checkpoint's means a
+ * write that fails halfway (quota, a closed handle) has already destroyed rows whose only copy
+ * was the one it deleted — and a rollback attempted into the same full quota can fail again,
+ * leaving a hole no report can honestly call "nothing changed". Restoring the rows first costs
+ * almost nothing (the two sets mostly share keys AND values) and cannot lose a row: a refusal
+ * leaves a store holding both states, which the next attempt finishes.
+ *
+ * AND AN ERASED ROW IS NEVER WRITTEN BACK. `erasedIds` is proof, asked at the moment of the
+ * write, rather than an inference that some earlier sweep must have cleaned this blob. Every
+ * refused id is named in the result so the page can say what it would not restore.
  */
-export function restoreCheckpoint(storage, lesson) {
+export function restoreCheckpoint(storage, lesson, opts = {}) {
   const blob = readCheckpoint(storage, lesson);
   if (blob === null) return { ok: false, message: `there is no readable checkpoint for ${lesson}` };
-  const present = new Map();
-  for (const key of rowKeys(storage)) present.set(key, storage.getItem(key));
-  for (const key of present.keys()) storage.removeItem(key);
+  const condemned = new Set(opts.erasedIds ?? []);
+  const wanted = new Map();
+  const refused = [];
+  for (const [key, value] of Object.entries(blob.rows)) {
+    if (!isRowKey(key) || typeof value !== "string") continue; // never write what is not a row
+    const id = key.slice(STORE_PREFIX.length);
+    if (condemned.has(id)) {
+      refused.push(id);
+      continue;
+    }
+    wanted.set(key, value);
+  }
+
   let restored = 0;
   try {
-    for (const [key, value] of Object.entries(blob.rows)) {
+    for (const [key, value] of wanted) {
+      if (storage.getItem(key) === value) continue; // already exactly this row
       storage.setItem(key, value);
       restored += 1;
     }
   } catch (err) {
-    for (const [key, value] of present) {
-      try {
-        storage.setItem(key, value);
-      } catch {
-        break; // nothing further can be put back; the refusal below says so
-      }
-    }
     return {
       ok: false,
-      message: `the revert could not be written (${err.name}) — nothing changed`,
+      refused,
+      message:
+        `the revert could not be written (${err.name ?? "the write was refused"}) — nothing was ` +
+        `removed, and every row it did put back belongs to that checkpoint. Free some space and ` +
+        `try again.`,
     };
   }
-  return { ok: true, restored };
+  for (const key of rowKeys(storage)) if (!wanted.has(key)) storage.removeItem(key);
+  return { ok: true, restored, refused };
 }
 
-/** Start over drops the checkpoints too: an undo into a store that no longer exists is a lie. */
+/**
+ * Start over drops the checkpoints too: an undo into a store that no longer exists is a lie.
+ * Every key under the prefix goes, not only the ones that parse as a lesson — the promise the
+ * confirmation makes is "every checkpoint", and a key this could not name is still a copy.
+ */
 export function clearCheckpoints(storage) {
-  for (const lesson of checkpointLessons(storage)) storage.removeItem(ckptKey(lesson));
+  for (const key of checkpointKeys(storage)) storage.removeItem(key);
 }
 
 /**
@@ -419,10 +489,13 @@ export function sweepCheckpoints(storage, erasedIds) {
   const dead = new Set(erasedIds);
   const destroyed = [];
   const kept = [];
-  for (const lesson of checkpointLessons(storage)) {
-    const blob = readCheckpoint(storage, lesson);
+  // Over the KEYS, and removing the key it read — never a key re-derived from a parsed name.
+  for (const key of checkpointKeys(storage)) {
+    const lesson = key.slice(CKPT_PREFIX.length);
+    const raw = storage.getItem(key);
+    const blob = raw === null ? null : parseBlob(raw);
     if (blob === null) {
-      storage.removeItem(ckptKey(lesson));
+      storage.removeItem(key);
       destroyed.push({
         lesson,
         ids: [],
@@ -430,19 +503,26 @@ export function sweepCheckpoints(storage, erasedIds) {
       });
       continue;
     }
+    // The bytes are in the VALUES; the keys only name them. A row filed under a key whose id it
+    // does not match is not a lawful row (the driver quarantines exactly that), so the id in the
+    // key is the right question — but a blob holding the condemned id ANYWHERE goes too, because
+    // this side of the wall cannot prove what an unexpected shape is carrying.
     const held = Object.keys(blob.rows)
       .filter(isRowKey)
-      .map((key) => key.slice(STORE_PREFIX.length))
+      .map((rowKey) => rowKey.slice(STORE_PREFIX.length))
       .filter((id) => dead.has(id));
-    if (held.length === 0) {
+    const hiding = held.length === 0 && [...dead].some((id) => raw.includes(id));
+    if (held.length === 0 && !hiding) {
       kept.push({ lesson });
       continue;
     }
-    storage.removeItem(ckptKey(lesson));
+    storage.removeItem(key);
     destroyed.push({
       lesson,
       ids: held,
-      reason: `it held ${held.length === 1 ? "the erased record" : `${held.length} erased records`}`,
+      reason: hiding
+        ? "an erased record's name is somewhere in it, in a shape this could not account for"
+        : `it held ${held.length === 1 ? "the erased record" : `${held.length} erased records`}`,
     });
   }
   return { destroyed, kept };
