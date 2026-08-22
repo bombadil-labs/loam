@@ -208,6 +208,64 @@ describe("progress is claims", () => {
     await ctx.gateway.close();
   });
 
+  it("reads only the student's own LIVE claims: a stranger's progress claim and a struck one move nothing", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    const arc = buildArc(loam);
+    const first = arc[0]!;
+    await playLesson(first, ctx);
+    const banked = first.steps[first.steps.length - 1]!.id;
+    expect(readProgress(ctx).steps.has(banked)).toBe(true);
+
+    // A STRANGER signs a claim in the tutorial's own vocabulary and federates it in. It lands
+    // in the ground — the store does not burn mail — and it must move nothing: progress is what
+    // the student did, and someone else's word about it is data.
+    const strangerSeed = "5a".repeat(32);
+    const stranger = loam.authorForSeed(strangerSeed);
+    const forged = loam.signClaims(
+      {
+        timestamp: ctx.ts(),
+        author: stranger,
+        pointers: [
+          {
+            role: "step",
+            target: { kind: "entity", entity: { id: "tutorial:step:9.9", context: "tutorial.step" } },
+          },
+          { role: "name", target: { kind: "primitive", value: "9.9" } },
+          { role: "lesson", target: { kind: "primitive", value: 9 } },
+        ],
+      },
+      strangerSeed,
+    );
+    await ctx.gateway.federate([forged]);
+    expect(
+      ctx.gateway.offeredDeltas().some((d) => d.id === forged.id),
+      "the forged progress claim never landed — this rail would prove nothing",
+    ).toBe(true);
+    expect(readProgress(ctx).steps.has("9.9")).toBe(false);
+
+    // ...and a claim of the student's OWN stops counting once it is struck: presence is not
+    // survival, and a reading that counted a retracted claim is the store lying upward (H1).
+    const stepClaim = ctx.gateway
+      .offeredDeltas()
+      .find(
+        (d) =>
+          d.claims.author === ctx.author &&
+          d.claims.pointers.some(
+            (p) => p.target.kind === "primitive" && p.target.value === banked,
+          ),
+      );
+    expect(stepClaim, "no step claim to strike").toBeDefined();
+    await ctx.gateway.append([
+      loam.signClaims(
+        loam.makeNegationClaims(ctx.author, ctx.ts(), stepClaim!.id, "not really done"),
+        ctx.seed,
+      ),
+    ]);
+    expect(readProgress(ctx).steps.has(banked)).toBe(false);
+    await ctx.gateway.close();
+  });
+
   it("reconstructs where the student stood from the claims alone — every other key deleted", async () => {
     const storage = new MemStorage();
     const ctx = await makeCtx(storage);
@@ -306,6 +364,35 @@ describe("the glossary is made of deltas", () => {
 });
 
 describe("checkpoints, revert, and the sweep", () => {
+  it("a checkpoint holds delta rows and NOTHING else — never the seed, never a stray key", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    await playLesson(buildArc(loam)[0]!, ctx);
+    // a key someone else parked under the shared prefix, after boot healed the store
+    storage.setItem(`${STORE_PREFIX}ui:junk`, "not a delta");
+
+    expect(takeCheckpoint(storage, 1).ok).toBe(true);
+    const blob = readCheckpoint(storage, 1)!;
+    for (const key of Object.keys(blob.rows)) {
+      expect(key, "a checkpoint copied something that is not a delta row").toMatch(
+        /^loam:tutorial:[0-9a-f]+$/,
+      );
+    }
+    // THE BYTES, not the key list: the seed is key material, and a checkpoint that carried it
+    // would put a copy of the student's key in a blob no erasure and no start-over thinks about.
+    expect(JSON.stringify(blob)).not.toContain(ctx.seed);
+    expect(storage.getItem(SEED_KEY)).toBe(ctx.seed);
+
+    // ...and restoring puts back exactly those rows, leaving the seed where it was. The stray
+    // is not the store's and the restore does not touch it; the next boot heals it away.
+    expect(restoreCheckpoint(storage, 1).ok).toBe(true);
+    expect(storage.getItem(SEED_KEY)).toBe(ctx.seed);
+    await ctx.gateway.close();
+    const back = await makeCtx(storage);
+    expect(storage.getItem(`${STORE_PREFIX}ui:junk`)).toBeNull();
+    await back.gateway.close();
+  });
+
   it("a checkpoint is the store's rows frozen; restoring it yields exactly that id set, two-sided", async () => {
     const storage = new MemStorage();
     const ctx = await makeCtx(storage);
