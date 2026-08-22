@@ -1679,4 +1679,47 @@ export const CHAPTERS = [
       },
     ],
   },
+  {
+    n: 17,
+    slug: "a-store-of-your-own",
+    title: "A store of your own",
+    thesis:
+      "The tutorial hands a stranger a real governed store in a browser tab and teaches Loam by having them keep a diary in it - every step proving itself at the page and at the store, every mechanism the student's own.",
+    covers: ["spec/48-tutorial-v3.md"],
+    body: [
+      {
+        kind: "prose",
+        text: "Fifteen lessons, one couch, two incompatible film takes. The student registers a viewing lens, changes their mind without losing their history, meets a housemate whose word cannot overwrite theirs, evolves the record shape the night a movie needs a guest, and discovers the glossary they have been consulting was claims in their own store all along. The finale erases something that should never have landed - destroying, by name, every checkpoint that held its bytes - and the homecoming carries the store out of the tab, hash for hash, erasure and receipt intact.",
+      },
+      {
+        kind: "claims",
+        claims: [
+          {
+            says: "A lesson's step completes only when the page shows what it promised AND the store provably holds it - and a page observable must be satisfiable in every store state where the store observable holds, enforced mechanically at authoring time.",
+            spec: "spec/48-tutorial-v3.md",
+            proof: "test/browser/tutorial.test.ts",
+            door: null,
+          },
+          {
+            says: "The tutorial's memory is the student's store: closing the tab and reopening lands on the same lesson, step, and quiz state, reconstructed from the tutorial's own signed claims alone - proven by deleting every other key and reloading.",
+            spec: "spec/48-tutorial-v3.md",
+            proof: "test/browser/tutorial.test.ts",
+            door: null,
+          },
+          {
+            says: "Every one of the twenty-one glossary terms is introduced in plain words before its first bare use, and a lesson that slips a term early goes red in CI naming the term and the lesson.",
+            spec: "spec/48-tutorial-v3.md",
+            proof: "test/site/arc.test.ts",
+            door: null,
+          },
+          {
+            says: "The erasure finale destroys every checkpoint holding the condemned bytes and spares every checkpoint that does not - two-sided at the bytes - and the sweep's report is a reading over the store that says the same thing after a reload.",
+            spec: "spec/48-tutorial-v3.md",
+            proof: "test/site/arc.test.ts",
+            door: null,
+          },
+        ],
+      },
+    ],
+  },
 ];
