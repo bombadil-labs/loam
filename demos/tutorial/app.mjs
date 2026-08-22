@@ -293,7 +293,9 @@ async function runPendingStep() {
   // The boundary: a green lesson freezes its store for the revert rail. A refusal here is the
   // student's to read — the lesson still stands; only the undo into this moment is missing.
   if (await lesson.check(ctx)) {
-    const taken = await bankCheckpoint(loam, ctx, lesson.id, { label: `lesson ${lesson.id}` });
+    const taken = await bankCheckpoint(loam, ctx, lesson.id, {
+      label: `lesson ${lesson.id}, step ${step.id}`,
+    });
     if (!taken.ok) ui.refusal = taken.message;
   }
   await rerender();
