@@ -12,9 +12,9 @@ The current tutorial is out of date, never fully worked right, and collapses mul
 into single interactions (Myk, 2026-08-21). The data layer already knows better than the UX
 shows: `demos/tutorial/lessons.mjs` models lessons with discrete steps (`{label, look, run}`)
 and per-lesson checks, but the page plays a lesson's steps as one motion, the student cannot
-step backward, and nothing verifies understanding. v3 keeps the arc's soul (the
-seventeen-lesson narrative is good prose) and rebuilds the player around the promises of both
-tickets: one step at a time, framed three ways; revert to any prior state; an optional quiz per
+step backward, and nothing verifies understanding. v3 keeps the film-diary
+MECHANISM (Myk, 2026-08-21: it is a useful mechanism for understanding) and rebuilds BOTH the
+player and the arc around the promises of both tickets: one step at a time, framed three ways; revert to any prior state; an optional quiz per
 lesson; and an introspection surface that shows what the words claim.
 
 ## User stories
@@ -67,7 +67,10 @@ step's observable is a predicate over the page and the store — never an echo o
    serialization) and NOT under `loam:tutorial:` (boot's healStrayKeys purges non-hex suffixes
    there). Start-over clears checkpoints too. One checkpoint per lesson boundary, superseded in
    place, so quota stays bounded; an over-quota write refuses with the step named.
-5. **Erasure sweeps the checkpoints — and the arc teaches it.** A checkpoint taken before an
+5. **Erasure sweeps the checkpoints — and the arc teaches it, as its finale.** SETTLED
+   (Myk, 2026-08-21): accepted, and erasure moves to the very END of the arc so the checkpoint
+   destruction IS part of the lesson — the student finishes by learning that the right to be
+   forgotten costs them their undo into the time the thing was known. A checkpoint taken before an
    erasure holds the condemned bytes; leaving it is T40 reproduced inside the lesson that
    teaches forgetting. When the erasure lesson runs, every checkpoint that could hold the
    erased delta is dropped, and the lesson SAYS so: "the right to be forgotten costs you your
@@ -84,10 +87,13 @@ step's observable is a predicate over the page and the store — never an echo o
    suite, because four Chrome suites racing `build-site.mjs`'s fixed `site-dist/` rmSync is a
    flake the repo has already paid for; the suite sets
    `vi.setConfig({testTimeout: 90_000, hookTimeout: 90_000})` like every existing browser file.
-8. **The player is rebuilt; the arc is revised.** `app.mjs` is a rewrite. The seventeen lessons
-   are revised for one-step-one-action and T106's plain-language bar (splitting collapsed
-   steps, refreshing stale copy), not discarded. `test/site/arc.test.ts` is NOT frozen
-   (verified: T106 lists it under scope, not rails) and is revised alongside.
+8. **The player is rebuilt; the arc is rewritten greenfield** (Myk, 2026-08-21). The
+   film-diary mechanism stays; the lessons do not carry over. The bar for the new arc, in his
+   words: it must demonstrate features that enable meaningful examples, never draw examples to
+   highlight features — it should feel human and real. No lesson-count parity with v2, no
+   content parity. T106's plain-language bar and the three-way framing govern every new step.
+   `test/site/arc.test.ts` is NOT frozen (verified: T106 lists it under scope, not rails) and
+   is rewritten alongside.
 
 ## Acceptance criteria
 
