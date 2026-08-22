@@ -630,6 +630,38 @@ describe("checkpoints, revert, and the sweep", () => {
     await ctx.gateway.close();
   });
 
+  it("a checkpoint that only REMEMBERS the erasure survives it — the receipt is not the bytes", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    const arc = buildArc(loam);
+    const finale = lessonOfRole(arc, "erasure-finale");
+    for (const lesson of arc) {
+      await playLesson(lesson, ctx);
+      if (lesson.id === finale.id) break;
+    }
+    const erased = [...loam.readTombstones(ctx.gateway.reactor, ctx.author)];
+    expect(erased.length, "the erasure lesson erased nothing").toBeGreaterThan(0);
+
+    // A checkpoint taken AFTER the forgetting holds the receipt, and a receipt names the id it
+    // forgot. It holds none of the bytes, so the sweep must leave it alone: destroying it would
+    // take the student's undo for the crime of remembering that something was forgotten.
+    expect(takeCheckpoint(storage, finale.id).ok).toBe(true);
+    const blob = readCheckpoint(storage, finale.id)!;
+    expect(
+      JSON.stringify(blob).includes(erased[0]!),
+      "the checkpoint does not mention the erasure at all — this rail proves nothing",
+    ).toBe(true);
+    for (const id of erased) expect(Object.keys(blob.rows)).not.toContain(STORE_PREFIX + id);
+
+    const report = sweepCheckpoints(storage, erased);
+    expect(
+      report.kept.map((k) => String(k.lesson)),
+      "a checkpoint was destroyed for holding the receipt",
+    ).toContain(String(finale.id));
+    expect(readCheckpoint(storage, finale.id)).not.toBeNull();
+    await ctx.gateway.close();
+  });
+
   it("an erasure destroys every checkpoint that could hold the bytes, and spares the ones that cannot", async () => {
     const storage = new MemStorage();
     const ctx = await makeCtx(storage);

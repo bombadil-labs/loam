@@ -503,16 +503,28 @@ export function sweepCheckpoints(storage, erasedIds) {
       });
       continue;
     }
-    // The bytes are in the VALUES; the keys only name them. A row filed under a key whose id it
-    // does not match is not a lawful row (the driver quarantines exactly that), so the id in the
-    // key is the right question — but a blob holding the condemned id ANYWHERE goes too, because
-    // this side of the wall cannot prove what an unexpected shape is carrying.
-    const held = Object.keys(blob.rows)
-      .filter(isRowKey)
-      .map((rowKey) => rowKey.slice(STORE_PREFIX.length))
-      .filter((id) => dead.has(id));
-    const hiding = held.length === 0 && [...dead].some((id) => raw.includes(id));
-    if (held.length === 0 && !hiding) {
+    // TWO WAYS a blob can be carrying an erased record, and only these two. The key it is FILED
+    // under names a condemned id — the ordinary case — or the row's own bytes CLAIM one, which
+    // catches a row misfiled under some other key.
+    //
+    // A blob is NOT condemned for merely mentioning the id: the receipt that records the
+    // erasure names it, and so does any strike that pointed at it. Destroying a checkpoint for
+    // holding the receipt would take the student's undo for the crime of remembering that
+    // something was forgotten — over-purging, in the one direction whose bugs cannot be undone.
+    const held = [];
+    for (const [rowKey, value] of Object.entries(blob.rows)) {
+      const filed = isRowKey(rowKey) ? rowKey.slice(STORE_PREFIX.length) : undefined;
+      let claimed;
+      try {
+        const row = typeof value === "string" ? JSON.parse(value) : null;
+        if (row !== null && typeof row === "object" && typeof row.id === "string") claimed = row.id;
+      } catch {
+        claimed = undefined; // an unreadable row cannot be shown to be a condemned one
+      }
+      if (filed !== undefined && dead.has(filed)) held.push(filed);
+      else if (claimed !== undefined && dead.has(claimed)) held.push(claimed);
+    }
+    if (held.length === 0) {
       kept.push({ lesson });
       continue;
     }
@@ -520,9 +532,7 @@ export function sweepCheckpoints(storage, erasedIds) {
     destroyed.push({
       lesson,
       ids: held,
-      reason: hiding
-        ? "an erased record's name is somewhere in it, in a shape this could not account for"
-        : `it held ${held.length === 1 ? "the erased record" : `${held.length} erased records`}`,
+      reason: `it held ${held.length === 1 ? "the erased record" : `${held.length} erased records`}`,
     });
   }
   return { destroyed, kept };
