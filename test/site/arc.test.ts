@@ -9,18 +9,26 @@
 // and the reload are `test/browser/tutorial.test.ts`'s — a real Chrome over the real page. Both
 // levels are covered; neither file covers both, and the split is the T143 lesson kept honest.
 //
-// The arc here is the STUB (T226): two or three lessons that exercise every mechanic the real
-// fifteen will need. T227 replaces the arc and extends this file; the engine's assertions are
-// written against the arc's SHAPE and its lesson ROLES, never against a lesson number.
+// The arc here is "A Store of Your Own" (T227): fifteen lessons in five acts. The engine's
+// assertions are written against the arc's SHAPE and its lesson ROLES, never against a lesson
+// number, so a later rewrite of the content leaves them standing. The CONTENT assertions — the
+// term manifest, the vocabulary scan, the glossary trail — name the arc on purpose, because
+// that is what they are for.
 //
-// TWO GAPS, NAMED. (1) The progress-claims case asserts the CLAIMS and the reading over them;
+// FOUR GAPS, NAMED. (1) The progress-claims case asserts the CLAIMS and the reading over them;
 // the page's revert rail renders its checkpoint rows from the BLOB KEYS instead, so the two can
 // legitimately differ. The ordinary cause is a REVERT — restoring an earlier boundary drops the
 // later blobs while the claims that recorded them stay in the ground, which is right: the
 // claims are history and the blobs are what you can still return to. (A refused boundary cannot
 // cause it: the claim is never written unless a blob backs it, which is its own case below.)
 // (2) Nothing here drives the page: the render, the in-page confirm and the reload belong to
-// `test/browser/tutorial.test.ts`.
+// `test/browser/tutorial.test.ts`. (3) The finale's own sweep observable is deliberately
+// ONE-SIDED — it may not require a surviving checkpoint, because the frozen browser suite
+// requires that lesson to be passable with every blob deleted. The other side (a bystander blob
+// is SPARED) is asserted here, in "the finale sweeps the real checkpoints", where this file owns
+// the fixture and can guarantee a bystander exists. (4) The vocabulary scan reads the arc's own
+// copy, not the page's furniture: a pane LABEL in `index.html` is not a lesson's word, and the
+// scan says so by allowing the capitalised pane names and nothing else.
 
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -35,6 +43,8 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { MemStorage } from "../store/mem-storage.js";
 import {
   DIARY,
+  MOVIE_NIGHT,
+  TERMS,
   VIEWING,
   bootTutorialStore,
   buildArc,
@@ -118,6 +128,74 @@ beforeAll(() => {
   });
 });
 
+// --- the vocabulary scan ------------------------------------------------------------------------
+//
+// One rule, mechanically: NO TERM APPEARS IN LESSON COPY BEFORE THE LESSON THAT INTRODUCES IT.
+// Lesson granularity is deliberate. A lesson's own terms are planted the moment the student
+// arrives, before a word of it is on screen, so a lesson may use what it introduces; a term
+// planted from inside a STEP (the reveal's payoff) still belongs to its lesson, because the
+// lesson that earns a word is the lesson allowed to say it.
+//
+// PANE NAMES ARE FURNITURE, NOT VOCABULARY. `index.html` labels a tab "Ground" and another
+// "View", and lesson one has to be able to say which tab to open. The scan therefore allows a
+// match whose exact text is one of those labels — capitalised, as the page prints them — and
+// nothing else. A lowercase "ground" in lesson one is still a violation, which is the point.
+
+const PANE_LABELS = ["View", "Views", "Ground", "Glossary"] as const;
+
+interface CopyUnit {
+  readonly lesson: number;
+  readonly where: string;
+  readonly text: string;
+}
+
+/** Every sentence the arc SHOWS a student, in reading order, tagged with its lesson. */
+function copyUnits(arc: Lesson[]): CopyUnit[] {
+  const units: CopyUnit[] = [];
+  for (const lesson of arc) {
+    const at = (where: string, text: string): void => {
+      units.push({ lesson: lesson.id, where: `lesson ${lesson.id} ${where}`, text });
+    };
+    at("title", lesson.title);
+    at("copy", lesson.copy);
+    for (const t of lesson.terms) at(`glossary entry "${t.term}"`, t.meaning);
+    for (const step of lesson.steps) {
+      at(`step ${step.id} label`, step.label);
+      at(`step ${step.id} have`, step.have);
+      at(`step ${step.id} want`, step.want);
+      at(`step ${step.id} how`, step.how);
+    }
+    if (lesson.quiz !== undefined) {
+      for (const q of lesson.quiz.questions) {
+        at(`quiz ${lesson.quiz.id} question`, q.ask);
+        for (const choice of q.choices) at(`quiz ${lesson.quiz.id} choice`, choice);
+      }
+    }
+  }
+  return units;
+}
+
+/** Every place a word of the arc's vocabulary is used before the lesson that introduces it. */
+function earlyUses(arc: Lesson[]): string[] {
+  const found: string[] = [];
+  for (const unit of copyUnits(arc)) {
+    for (const term of TERMS) {
+      if (term.lesson <= unit.lesson) continue;
+      for (const form of term.forms) {
+        const hits = unit.text.match(new RegExp(`\\b${form}\\b`, "gi")) ?? [];
+        for (const hit of hits) {
+          if ((PANE_LABELS as readonly string[]).includes(hit)) continue;
+          found.push(
+            `"${term.term}" (introduced in lesson ${term.lesson}) is used as "${hit}" in ` +
+              `${unit.where}`,
+          );
+        }
+      }
+    }
+  }
+  return found;
+}
+
 describe("the arc, headless: every step earns its store observable", () => {
   it("walks the whole arc in order; no lesson is green before it runs; every step's store predicate turns true", async () => {
     const storage = new MemStorage();
@@ -127,6 +205,10 @@ describe("the arc, headless: every step earns its store observable", () => {
 
     for (const lesson of arc) {
       expect(await lesson.check(ctx), `lesson ${lesson.id} green before it ran`).toBe(false);
+      // ARRIVING is part of playing a lesson, exactly as it is on the page: the entry claim and
+      // the lesson's glossary terms land before a word of it is on screen. A walk that skipped
+      // it would run the steps in a store no student could ever be standing in.
+      await enterLesson(loam, ctx, lesson);
 
       // A step is EARNED when its store predicate is false before its run — the property the
       // browser suite's red-probe needs, and the anti-vacuity bar for the arc: a lesson made
@@ -418,7 +500,11 @@ describe("progress is claims", () => {
     expect(withQuiz, "the arc declares no quiz").toBeDefined();
     const quiz = withQuiz!.quiz!;
 
-    await playLesson(withQuiz!, ctx);
+    // From the top: a quiz closes an ACT, and its lesson stands on the ones before it.
+    for (const lesson of arc) {
+      await playLesson(lesson, ctx);
+      if (lesson.id === withQuiz!.id) break;
+    }
     expect(readProgress(ctx).skipped.has(quiz.id)).toBe(false);
     await skipQuiz(loam, ctx, quiz);
 
@@ -1052,11 +1138,22 @@ describe("checkpoints, revert, and the sweep", () => {
     const boundaries = checkpointLessons(storage);
     expect(boundaries.length, "the arc reaches its erasure with no checkpoints").toBeGreaterThan(1);
 
-    await playLesson(finale, ctx);
-    const erased = [...loam.readTombstones(ctx.gateway.reactor, ctx.author)];
-    expect(erased.length, "the erasure lesson erased nothing").toBeGreaterThan(0);
+    // The id the finale is about to condemn, named while it is still readable. The sweep is
+    // exercised HERE, against these real boundaries, BEFORE the lesson runs its own — so this
+    // case pins the function's rule (destroy what holds it, spare what does not) rather than
+    // whatever the arc happens to have already cleaned up. The arc's own trigger is the case
+    // "the finale sweeps the REAL checkpoints" below.
+    const condemned = ctx.gateway
+      .offeredDeltas()
+      .filter((d) =>
+        d.claims.pointers.some(
+          (p) => p.target.kind === "primitive" && String(p.target.value).includes("jamie texted"),
+        ),
+      )
+      .map((d) => d.id);
+    expect(condemned.length, "nothing in the ground is what the finale erases").toBe(1);
 
-    const report = sweepCheckpoints(storage, erased);
+    const report = sweepCheckpoints(storage, condemned);
     // TWO-SIDED, at the bytes: the condemned checkpoints are gone from storage entirely, and a
     // named bystander checkpoint is still there AND still readable.
     expect(report.destroyed.length, "no checkpoint held the erased bytes").toBeGreaterThan(0);
@@ -1071,13 +1168,20 @@ describe("checkpoints, revert, and the sweep", () => {
     for (const kept of report.kept) {
       const blob = readCheckpoint(storage, kept.lesson);
       expect(blob, `the bystander checkpoint ${kept.lesson} was destroyed`).not.toBeNull();
-      for (const id of erased) expect(Object.keys(blob!.rows)).not.toContain(STORE_PREFIX + id);
+      for (const id of condemned) expect(Object.keys(blob!.rows)).not.toContain(STORE_PREFIX + id);
     }
-    // No surviving blob anywhere holds an erased id — the claim the page makes on screen.
+    // No surviving blob anywhere holds the condemned id — the claim the page makes on screen.
     for (const lesson of checkpointLessons(storage)) {
       const blob = readCheckpoint(storage, lesson)!;
-      for (const id of erased) expect(Object.keys(blob.rows)).not.toContain(STORE_PREFIX + id);
+      for (const id of condemned) expect(Object.keys(blob.rows)).not.toContain(STORE_PREFIX + id);
     }
+    // IDEMPOTENT: a second pass finds nothing to destroy and says so, rather than taking the
+    // survivors on a second look. The page runs this on every render, so it had better be.
+    const again = sweepCheckpoints(storage, condemned);
+    expect(again.destroyed, "a second sweep destroyed a checkpoint it had already spared").toEqual(
+      [],
+    );
+    expect(again.kept.length).toBe(report.kept.length);
     await ctx.gateway.close();
   });
 });
@@ -1123,5 +1227,273 @@ describe("the tutorial's store is a real store", () => {
       await ctx.gateway.close();
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
+  });
+
+  it("the homecoming's forgetting travels: the erased words are in no byte of the export, and the diary around them is", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    const arc = buildArc(loam);
+    const finale = lessonOfRole(arc, "erasure-finale");
+
+    // Play up to the finale and take the erased record's own words out of the ground BEFORE it
+    // is erased — after the erasure there is nowhere left to read them from, which is the point,
+    // and a rail that asked for them afterwards would be asserting against an empty string.
+    for (const lesson of arc) {
+      if (lesson.id === finale.id) break;
+      await playLesson(lesson, ctx);
+    }
+    const condemned = ctx.gateway
+      .offeredDeltas()
+      .filter((d) =>
+        d.claims.pointers.some(
+          (p) =>
+            p.target.kind === "entity" &&
+            p.target.entity.id === MOVIE_NIGHT &&
+            p.target.entity.context === "note",
+        ),
+      )
+      .map((d) => {
+        const words = d.claims.pointers.find((p) => p.target.kind === "primitive");
+        return words?.target.kind === "primitive" ? String(words.target.value) : "";
+      })
+      .filter((w) => w.length > 0);
+    expect(condemned.length, "the movie-night entry carries no notes to forget").toBe(2);
+
+    for (const lesson of arc) {
+      if (lesson.id < finale.id) continue;
+      await playLesson(lesson, ctx);
+    }
+
+    const text = buildExport(loam, ctx);
+    const erased = [...loam.readTombstones(ctx.gateway.reactor, ctx.author)];
+    expect(erased.length, "the finale erased nothing").toBeGreaterThan(0);
+
+    // TWO-SIDED, at the bytes of the file the student walks out with: one of those two notes is
+    // gone from it entirely, and the other is still in there. A file that carried neither would
+    // pass a one-sided check while having quietly lost the diary.
+    const gone = condemned.filter((w) => !text.includes(w));
+    const survived = condemned.filter((w) => text.includes(w));
+    expect(gone.length, "the export still carries the erased words").toBe(1);
+    expect(survived.length, "the export lost the note that was never condemned").toBe(1);
+    for (const id of erased) {
+      expect(
+        (JSON.parse(text) as { deltas: { id: string }[] }).deltas.map((d) => d.id),
+        `the export carries the erased record ${id}`,
+      ).not.toContain(id);
+    }
+    // ...and the receipt DOES travel, so the other machine knows a forgetting happened here.
+    expect(text, "the export dropped the receipt along with the bytes").toContain("loam.erasure");
+    await ctx.gateway.close();
+  });
+});
+
+describe("the vocabulary is earned before it is used", () => {
+  it("the manifest is the arc script's twenty-one, in the script's order", () => {
+    // The list from `.adlc/specs/48-arc-script.md`, written out rather than derived: a manifest
+    // that checked itself would agree with any drift it introduced.
+    expect(TERMS.map((t) => t.term)).toEqual([
+      "store",
+      "record",
+      "key",
+      "operator",
+      "lens",
+      "shape",
+      "claim",
+      "signature",
+      "ground",
+      "view",
+      "strike",
+      "moment",
+      "author",
+      "policy",
+      "version",
+      "delta",
+      "trust",
+      "grant",
+      "revoke",
+      "erase",
+      "receipt",
+    ]);
+    for (const term of TERMS) {
+      expect(term.meaning.length, `"${term.term}" has no plain-words meaning`).toBeGreaterThan(20);
+      expect(term.forms, `"${term.term}" lists no forms for the scan`).toContain(term.term);
+    }
+    // `delta` is withheld until the reveal EARNS it: it is the one term a step plants.
+    const fromSteps = TERMS.filter((t) => t.step !== undefined);
+    expect(fromSteps.map((t) => t.term)).toEqual(["delta"]);
+    const reveal = lessonOfRole(buildArc(loam), "reveal");
+    expect(reveal.steps.map((s) => s.id)).toContain(fromSteps[0]!.step);
+  });
+
+  it("no lesson uses a word before the lesson that introduces it", () => {
+    expect(earlyUses(buildArc(loam))).toEqual([]);
+  });
+
+  it("...and the scan is not vacuous: a term slipped in early is named, with its lesson", () => {
+    const arc = buildArc(loam);
+    const early = arc.find((l) => l.id === 3)!;
+    // The exact failure this rail exists to catch: a lesson reaching for a word the student has
+    // not met. Lesson 3 has no business saying "delta" — the reveal is eight lessons away.
+    const planted: Lesson = { ...early, copy: `${early.copy} Every delta here is signed.` };
+    const violations = earlyUses(arc.map((l) => (l.id === early.id ? planted : l)));
+    expect(violations.length, "the scan did not notice a term used eight lessons early").toBe(1);
+    expect(violations[0]).toContain("delta");
+    expect(violations[0]).toContain("lesson 3");
+    expect(violations[0]).toContain("lesson 11"); // and it says where the word is introduced
+
+    // ...and the OTHER half: it does not fire on the page's own furniture. "Ground" is a tab
+    // label in `index.html`, and lesson one has to be able to name the tab it is pointing at.
+    const shell = readFileSync(join(process.cwd(), "demos", "tutorial", "index.html"), "utf8");
+    for (const label of PANE_LABELS) {
+      if (label === "Views") continue; // rendered by app.mjs, not declared in the shell
+      expect(shell, `"${label}" is not a pane label in the shell`).toContain(`>${label}<`);
+    }
+    const furniture: Lesson = { ...early, copy: `${early.copy} Open the Ground pane.` };
+    expect(earlyUses(arc.map((l) => (l.id === early.id ? furniture : l)))).toEqual([]);
+  });
+
+  it("every word the arc introduces is a word the arc actually says", () => {
+    const arc = buildArc(loam);
+    const units = copyUnits(arc);
+    const orphans: string[] = [];
+    for (const term of TERMS) {
+      const said = units.some(
+        (u) =>
+          u.lesson >= term.lesson &&
+          term.forms.some((form) => new RegExp(`\\b${form}\\b`, "i").test(u.text)),
+      );
+      if (!said) orphans.push(term.term);
+    }
+    // A term planted in the glossary and never used in a lesson is a definition for a word the
+    // student never meets — the mirror of the failure above, and just as dishonest.
+    expect(orphans, "the glossary defines words the arc never says").toEqual([]);
+  });
+
+  it("the names this arc refuses to use never appear", () => {
+    // A workshop decision: schema, hyperschema and gather are the deeper names, and this arc
+    // teaches without them. They belong to the glossary's appendix, never to a lesson.
+    const banned = ["schema", "hyperschema", "gather"];
+    const found: string[] = [];
+    for (const unit of copyUnits(buildArc(loam))) {
+      for (const word of banned) {
+        if (new RegExp(`\\b${word}s?\\b`, "i").test(unit.text)) {
+          found.push(`"${word}" in ${unit.where}`);
+        }
+      }
+    }
+    expect(found).toEqual([]);
+  });
+});
+
+describe("the fifteen lessons, end to end", () => {
+  it("plants every term as a claim, in the manifest's order, and every quiz teaches its own lesson", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    const arc = buildArc(loam);
+    expect(arc.length, "the arc is not the fifteen").toBe(15);
+    expect(arc[0]!.role).toBe("opening");
+
+    let steps = 0;
+    let quizzes = 0;
+    for (const lesson of arc) {
+      await playLesson(lesson, ctx);
+      steps += lesson.steps.length;
+      await bankCheckpoint(loam, ctx, lesson.id);
+      if (lesson.quiz === undefined) continue;
+      // A wrong answer names the step that teaches it, and the page can only LINK a step in the
+      // lesson the card belongs to — so a pointer out of the lesson renders nothing at all.
+      const own = new Set(lesson.steps.map((s) => s.id));
+      for (const [i, q] of lesson.quiz.questions.entries()) {
+        expect(
+          own.has(q.teaches),
+          `quiz ${lesson.quiz.id} question ${i} teaches ${q.teaches}, which is not in lesson ${lesson.id}`,
+        ).toBe(true);
+        expect(q.answer).toBeGreaterThanOrEqual(0);
+        expect(q.answer).toBeLessThan(q.choices.length);
+        await answerQuiz(loam, ctx, lesson.quiz, i, q.answer);
+        quizzes += 1;
+      }
+    }
+
+    // THE GLOSSARY TRAIL: one claim per term, in the order the arc earns them, each naming a
+    // record the ground really holds.
+    const glossary = readGlossary(ctx);
+    expect(glossary.map((e) => e.term)).toEqual(TERMS.map((t) => t.term));
+    expect(glossary.map((e) => e.meaning)).toEqual(TERMS.map((t) => t.meaning));
+    for (const entry of glossary) {
+      expect(entry.lesson).toBe(TERMS.find((t) => t.term === entry.term)!.lesson);
+      expect(ctx.gateway.offeredDeltas().some((d) => d.id === entry.deltaId)).toBe(true);
+    }
+
+    // PER-KIND COUNTS, honest ones: the arc's own totals rather than a floor that any arc meets.
+    expect(claimsWithContext(ctx, TUTORIAL_CONTEXTS.glossary).length).toBe(TERMS.length);
+    expect(claimsWithContext(ctx, TUTORIAL_CONTEXTS.entered).length).toBe(15);
+    expect(claimsWithContext(ctx, TUTORIAL_CONTEXTS.step).length).toBe(steps);
+    expect(claimsWithContext(ctx, TUTORIAL_CONTEXTS.quiz).length).toBe(quizzes);
+    expect(claimsWithContext(ctx, TUTORIAL_CONTEXTS.checkpoint).length).toBe(15);
+
+    const progress = readProgress(ctx);
+    expect(progress.entered).toEqual(arc.map((l) => l.id));
+    expect(progress.steps.size).toBe(steps);
+    expect(progress.quiz.size).toBe(quizzes);
+    expect(progress.checkpoints).toEqual(arc.map((l) => l.id));
+    // five acts close with a quiz, and every answer above was the right one
+    expect(arc.filter((l) => l.quiz !== undefined).length).toBe(5);
+    expect([...progress.quiz.values()].every((r) => r.correct)).toBe(true);
+    await ctx.gateway.close();
+  });
+
+  it("the finale sweeps the REAL checkpoints — the arc does it, not this rail, and a bystander survives", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    const arc = buildArc(loam);
+    const finale = lessonOfRole(arc, "erasure-finale");
+
+    // Every boundary before the forgetting gets a real checkpoint, exactly as the page takes
+    // them. Nothing below calls `sweepCheckpoints`: if lesson 14 stopped triggering it, this
+    // goes red.
+    for (const lesson of arc) {
+      if (lesson.id === finale.id) break;
+      await playLesson(lesson, ctx);
+      expect((await bankCheckpoint(loam, ctx, lesson.id)).ok).toBe(true);
+    }
+    const before = checkpointLessons(storage);
+    expect(before.length, "the arc reaches its forgetting with no checkpoints").toBeGreaterThan(1);
+    const bystander = before[0]!;
+    const bystanderHeld = Object.keys(readCheckpoint(storage, bystander)!.rows);
+    // The blob that WILL be holding the condemned bytes when the sweep runs — named before the
+    // erasure, because afterwards there is no way to identify it.
+    const doomed = before.filter((lesson) => {
+      const blob = readCheckpoint(storage, lesson)!;
+      return Object.values(blob.rows).some((row) => String(row).includes("jamie texted me"));
+    });
+    expect(doomed.length, "no checkpoint was holding the words the finale erases").toBe(1);
+
+    await playLesson(finale, ctx);
+
+    const after = checkpointLessons(storage);
+    const erased = [...loam.readTombstones(ctx.gateway.reactor, ctx.author)];
+    expect(erased.length, "the finale erased nothing").toBeGreaterThan(0);
+    // TWO-SIDED. The blob that held the words is gone from storage entirely...
+    for (const lesson of doomed) {
+      expect(after, `checkpoint ${lesson} held the erased words and survived`).not.toContain(
+        lesson,
+      );
+      expect(storage.getItem(`${CKPT_PREFIX}${lesson}`)).toBeNull();
+    }
+    // ...and the bystander is untouched, down to the rows it was keeping.
+    expect(after, "the sweep took a checkpoint that held none of those bytes").toContain(bystander);
+    expect(Object.keys(readCheckpoint(storage, bystander)!.rows)).toEqual(bystanderHeld);
+    // No surviving blob holds the record, by key or by its own words.
+    for (const lesson of after) {
+      const blob = readCheckpoint(storage, lesson)!;
+      for (const id of erased) expect(Object.keys(blob.rows)).not.toContain(STORE_PREFIX + id);
+      for (const row of Object.values(blob.rows)) {
+        expect(String(row), `checkpoint ${lesson} still carries the words`).not.toContain(
+          "jamie texted me",
+        );
+      }
+    }
+    await ctx.gateway.close();
   });
 });

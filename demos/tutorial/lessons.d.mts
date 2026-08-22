@@ -67,8 +67,27 @@ export interface Lesson {
   check(ctx: LessonCtx): Promise<boolean>;
 }
 
+/**
+ * One word the arc introduces, and where. `step` marks the term a STEP plants rather than the
+ * lesson's arrival; `forms` are the shapes the vocabulary scan hunts for, written out rather
+ * than stemmed (this arc's subject is a "viewing", which is not an inflection of "view").
+ */
+export interface ArcTerm {
+  readonly term: string;
+  readonly lesson: number;
+  readonly step?: string;
+  readonly forms: readonly string[];
+  readonly meaning: string;
+}
+
+/** The glossary manifest, in the order a student meets it. */
+export declare const TERMS: readonly ArcTerm[];
+
 export declare const DIARY: string;
 export declare const VIEWING: string;
+export declare const TENET: string;
+export declare const MOVIE_NIGHT: string;
+export declare const CHASE: string;
 export declare const RAE: string;
 
 export declare function bootTutorialStore(
