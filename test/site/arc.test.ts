@@ -253,7 +253,10 @@ describe("progress is claims", () => {
         pointers: [
           {
             role: "step",
-            target: { kind: "entity", entity: { id: "tutorial:step:9.9", context: "tutorial.step" } },
+            target: {
+              kind: "entity",
+              entity: { id: "tutorial:step:9.9", context: "tutorial.step" },
+            },
           },
           { role: "name", target: { kind: "primitive", value: "9.9" } },
           { role: "lesson", target: { kind: "primitive", value: 9 } },
@@ -275,9 +278,7 @@ describe("progress is claims", () => {
       .find(
         (d) =>
           d.claims.author === ctx.author &&
-          d.claims.pointers.some(
-            (p) => p.target.kind === "primitive" && p.target.value === banked,
-          ),
+          d.claims.pointers.some((p) => p.target.kind === "primitive" && p.target.value === banked),
       );
     expect(stepClaim, "no step claim to strike").toBeDefined();
     await ctx.gateway.append([
