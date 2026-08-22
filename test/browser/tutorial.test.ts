@@ -528,6 +528,10 @@ describe("§48 — the right to be forgotten reaches the checkpoints", () => {
       await page.text("#sweep-notice"),
       "the notice appeared but never said the sweep found nothing",
     ).toMatch(/nothing to destroy/i);
+    // AND THE HEADING AGREES WITH THE BODY. A heading that claimed the forgetting REACHED the
+    // checkpoints, two lines above a body saying nothing was destroyed, is a report that
+    // contradicts itself — on the lesson whose whole subject is a ledger you can trust.
+    expect(await page.text("#sweep-notice h3")).toBe("the forgetting checked your checkpoints");
     const banked = (await page.position()).banked;
     for (const step of target.steps) {
       expect(banked, `step ${step.id} could not be completed after the erasure`).toContain(step.id);
@@ -602,6 +606,8 @@ describe("§48 — the right to be forgotten reaches the checkpoints", () => {
     // The page names what it destroyed, and why, and what it kept.
     const swept = await page.attrs("#sweep-notice [data-swept]", "data-swept");
     expect(swept.length, "the erasure destroyed no checkpoint").toBeGreaterThan(0);
+    // the other side of the same heading: something DID go, and the heading says so
+    expect(await page.text("#sweep-notice h3")).toBe("the forgetting reached your checkpoints");
     expect(await page.text("#sweep-notice")).toMatch(/eras|forgot|forgotten/i);
     const kept = await page.attrs("#sweep-notice [data-kept]", "data-kept");
     expect(
