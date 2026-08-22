@@ -6,7 +6,7 @@
 // page's CodeMirror wiring); the classifier lives here because it is pure and CI can pin it.
 
 import { parse } from "graphql";
-import { isOnlyTutorial, isTutorialDelta } from "./player.mjs";
+import { isOnlyTutorial } from "./player.mjs";
 
 // Only READS may re-run themselves. A pinned mutation would be executed on every render —
 // and a mutation that touches a subscribed view triggers a render, which is a self-
@@ -81,16 +81,18 @@ export function classifyDelta(delta, selfAuthor) {
   } else if (hasDeltaRef) {
     kind = "negation";
     note = "a taking-back: it strikes another record by id, and stays on the record itself";
-  } else if (isTutorialDelta(delta)) {
+  } else if (isOnlyTutorial(delta)) {
     // The tutorial's OWN bookkeeping — progress, quiz answers, glossary entries. It is data like
     // everything else and it is signed like everything else, which is the reveal; but badging it
     // "fact" would bury the student's own records under the record of their reading, in the very
     // pane a lesson tells them to watch. Named, so the Ground pane can hold it back by default.
     //
-    // LAST, deliberately. This kind is the only one that can HIDE a row, and `isTutorialDelta`
-    // fires on ANY ONE pointer — so testing it first would let a record that is also a grant, a
-    // tombstone or a registration disappear behind one tutorial-shaped pointer. Every
-    // constitutional kind is decided before this one can claim the row.
+    // LAST, and ONLY-tutorial. This kind is the only one that can HIDE a row, and a delta can
+    // carry a tutorial pointer alongside anything else — so it is claimed here only when the
+    // delta is nothing but the tutorial's vocabulary. That is the same predicate the progress
+    // reading uses, so the badge, the filter and the reading cannot disagree; a hybrid is an
+    // ordinary claim, badged `fact`, and stays on screen. The classifier's own list of
+    // constitutional contexts is not the guard — there are more of them than it names.
     kind = "tutorial";
     note = foreign
       ? "another store's tutorial record — it arrived as data and moves nothing here"

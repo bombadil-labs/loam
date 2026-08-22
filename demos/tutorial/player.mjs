@@ -35,8 +35,8 @@ export const TUTORIAL_CONTEXTS = {
 
 const CONTEXT_SET = new Set(Object.values(TUTORIAL_CONTEXTS));
 
-/** Is this delta one of the tutorial's own records? The classifier's question, shared. */
-export function isTutorialDelta(delta) {
+/** Does this delta speak the tutorial's vocabulary at all? */
+function isTutorialDelta(delta) {
   return delta.claims.pointers.some(
     (p) => p.target.kind === "entity" && CONTEXT_SET.has(p.target.entity.context),
   );
@@ -353,10 +353,19 @@ function rowKeys(storage) {
  * Freeze the store's rows at a lesson boundary. ONE checkpoint per boundary, superseded in
  * place, so the quota stays bounded no matter how often a lesson is replayed. The seed is
  * never copied: it is not a delta and a checkpoint has no business holding key material.
+ *
+ * `opts.holds` is the set of ids the STORE ITSELF holds, and passing it is what makes the
+ * sweep's promise provable. A row whose key and whose own bytes disagree about its id is
+ * quarantined by the driver and left lying in localStorage; copying it into a blob would put
+ * bytes in there that no id names truthfully, and the sweep — which can only ask about ids —
+ * would report that checkpoint clean while it carried them. Copy what the store vouches for,
+ * and every id in a blob is one the store computed rather than one a row asserted.
  */
 export function takeCheckpoint(storage, lesson, opts = {}) {
   const rows = {};
+  const vouched = opts.holds === undefined ? undefined : new Set(opts.holds);
   for (const key of rowKeys(storage)) {
+    if (vouched !== undefined && !vouched.has(key.slice(STORE_PREFIX.length))) continue;
     const value = storage.getItem(key);
     if (value !== null) rows[key] = value;
   }
@@ -385,7 +394,10 @@ export async function bankCheckpoint(loam, ctx, lesson, opts = {}) {
       ]),
     ]);
   }
-  return takeCheckpoint(ctx.storage, lesson, opts);
+  return takeCheckpoint(ctx.storage, lesson, {
+    ...opts,
+    holds: [...ctx.gateway.reactor.snapshot()].map((d) => d.id),
+  });
 }
 
 /** The id a stored row's own bytes claim to be — `undefined` if it will not say. */
@@ -416,13 +428,6 @@ function wirePointers(value) {
   }
 }
 
-/** The delta ids a stored row STRIKES, if it is a strike at all. */
-function strikeTargets(value) {
-  return wirePointers(value)
-    .filter((p) => typeof p?.target?.delta === "string")
-    .map((p) => p.target.delta);
-}
-
 /**
  * Is this stored row an ERASURE ORDER — the receipt that says something was removed? Recognized
  * by the same constitutional context the gateway's own readers key on (`loam.erasure`), because
@@ -430,7 +435,10 @@ function strikeTargets(value) {
  * A forged one costs nothing: only the operator's own orders bind, and this only ever KEEPS.
  */
 function isErasureOrder(value) {
-  return wirePointers(value).some((p) => p?.target?.context === "loam.erasure");
+  // The PREFIX, not the one context: a slate and a graveyard record (`loam.erasure.slate`,
+  // `loam.erasure.graveyard`) are records of forgetting too, and a revert that kept the receipt
+  // while deleting those would repair half of this and leave the other half broken.
+  return wirePointers(value).some((p) => String(p?.target?.context).startsWith("loam.erasure"));
 }
 
 /** A blob is only a checkpoint if it parses AND carries rows; anything else is unreadable. */
@@ -497,7 +505,6 @@ export function restoreCheckpoint(storage, lesson, opts = {}) {
   const condemned = new Set(opts.erasedIds ?? []);
   const wanted = new Map();
   const refused = [];
-  const stranded = [];
   for (const [key, value] of Object.entries(blob.rows)) {
     if (!isRowKey(key) || typeof value !== "string") continue; // never write what is not a row
     const id = key.slice(STORE_PREFIX.length);
@@ -505,19 +512,19 @@ export function restoreCheckpoint(storage, lesson, opts = {}) {
     // row's own bytes CLAIM. A row misfiled under some other key must not walk back in either.
     if (condemned.has(id) || condemned.has(claimedId(value) ?? "")) {
       refused.push(id);
-      // A refused row may be a STRIKE, and a claim restored without the strike that struck it
-      // reads live again — the store lying upward at a restore edge (H1). So whatever it struck
-      // is held back with it, and named: better a claim missing from the undo than a retracted
-      // claim quietly speaking again.
-      for (const target of strikeTargets(value)) stranded.push(target);
       continue;
     }
     wanted.set(key, value);
   }
-  for (const target of stranded) {
-    const key = STORE_PREFIX + target;
-    if (wanted.delete(key)) refused.push(target);
-  }
+
+  // A NAMED GAP. If the refused row is itself a STRIKE, the claim it struck comes back without
+  // it and reads live again — the store lying upward at a restore edge (H1). Nothing in the arc
+  // reaches that: it needs an erasure of a strike, which no lesson performs and no door but the
+  // console offers. It is not closed here because the closure is not cheap and the cheap version
+  // is worse: withholding by a one-link "is this a delta pointer" test deletes live bystanders
+  // (a migration's `supersededBy`, an adoption receipt), which is over-purging to prevent a
+  // reading error. Closing it properly means the same survival walk `mine()` runs, over roles,
+  // reported as its own kind of refusal — and a rail that plants a struck claim in a checkpoint.
 
   let restored = 0;
   try {
@@ -529,11 +536,12 @@ export function restoreCheckpoint(storage, lesson, opts = {}) {
   } catch (err) {
     return {
       ok: false,
+      restored,
       refused,
       message:
         `the revert could not be written (${err.name ?? "the write was refused"}) — nothing was ` +
-        `removed, and every row it did put back belongs to that checkpoint. Free some space and ` +
-        `try again.`,
+        `removed, and the ${restored} row(s) it did put back belong to that checkpoint. Free some ` +
+        `space and try again.`,
     };
   }
   // AND THE ERASURE ORDERS STAY. A tombstone written after this checkpoint is not in it, so a
@@ -541,10 +549,21 @@ export function restoreCheckpoint(storage, lesson, opts = {}) {
   // and with it the standing order that refuses those bytes at the door. The undo may take back
   // the student's work; it may not take back a forgetting.
   const keptOrders = [];
-  for (const key of rowKeys(storage)) {
-    if (wanted.has(key)) continue;
-    if (isErasureOrder(storage.getItem(key))) {
-      keptOrders.push(key.slice(STORE_PREFIX.length));
+  const orders = new Set();
+  const present = rowKeys(storage).filter((key) => !wanted.has(key));
+  for (const key of present) {
+    if (isErasureOrder(storage.getItem(key))) orders.add(key.slice(STORE_PREFIX.length));
+  }
+  for (const key of present) {
+    const id = key.slice(STORE_PREFIX.length);
+    // A receipt stays — AND so does anything that strikes one. Striking a tombstone is how an
+    // operator FORGIVES an erasure, so keeping the order while deleting its forgiveness would
+    // re-assert a forgetting that had been withdrawn: the mirror of the bug this repairs.
+    const forgives = wirePointers(storage.getItem(key)).some(
+      (p) => typeof p?.target?.delta === "string" && orders.has(p.target.delta),
+    );
+    if (orders.has(id) || forgives) {
+      keptOrders.push(id);
       continue;
     }
     storage.removeItem(key);

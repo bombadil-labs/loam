@@ -17,8 +17,8 @@ export declare const TUTORIAL_CONTEXTS: {
   readonly glossary: string;
 };
 
-export declare function isTutorialDelta(delta: Delta): boolean;
-/** ...and ONLY that: no constitutional context, no delta ref, no `rhizomatic.*` role. */
+/** The tutorial's own vocabulary and ONLY that: no constitutional context, no delta ref, no
+ * `rhizomatic.*` role. The badge, the Ground filter and the progress reading all ask this. */
 export declare function isOnlyTutorial(delta: Delta): boolean;
 
 export interface QuizResult {
@@ -100,7 +100,8 @@ export interface CheckpointBlob {
 export declare function takeCheckpoint(
   storage: StorageLike,
   lesson: number,
-  opts?: { label?: string },
+  /** `holds`: the ids the store itself vouches for — a blob copies nothing else. */
+  opts?: { label?: string; holds?: readonly string[] },
 ): CheckpointOutcome;
 
 export declare function bankCheckpoint(

@@ -491,8 +491,10 @@ describe("§48 — the right to be forgotten reaches the checkpoints", () => {
       expect(rows, "the erasure receipt was deleted by a revert").toContain(receipt);
     }
     expect(await page.erasureOrderIds()).toEqual(receipts);
-    // and the page says so rather than quietly keeping rows the checkpoint did not have
-    expect(await page.text("#step-refusal")).toMatch(/receipt|forgetting/i);
+    // and the page SAYS so rather than quietly keeping rows the checkpoint did not have — as a
+    // notice, because the revert did what was asked; this is only what it could not take back.
+    expect(await page.text("#step-notice")).toMatch(/receipt|forgetting/i);
+    expect(await page.text("#step-refusal"), "a completed revert reported a refusal").toBe("");
   });
 
   it("the sweep is two-sided at the bytes: the condemned blobs are gone, a named bystander is whole", async () => {

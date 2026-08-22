@@ -300,6 +300,46 @@ describe("progress is claims", () => {
       readProgress(ctx).steps.size,
       "a delta the pane calls a grant was banked as progress",
     ).toBe(before);
+
+    // ...and the same holds for a constitutional context the CLASSIFIER DOES NOT NAME. There
+    // are more `loam.*` contexts in this codebase than that list knows, so the badge cannot be
+    // decided by enumerating them: a hybrid is an ordinary claim, and it stays on screen.
+    await ctx.gateway.federate([
+      loam.signClaims(
+        {
+          timestamp: ctx.ts(),
+          author: ctx.author,
+          pointers: [
+            {
+              role: "step",
+              target: {
+                kind: "entity",
+                entity: { id: "tutorial:step:0.1", context: TUTORIAL_CONTEXTS.step },
+              },
+            },
+            { role: "name", target: { kind: "primitive", value: "0.1" } },
+            {
+              role: "declares",
+              target: { kind: "entity", entity: { id: "loam:store", context: "loam.tenant" } },
+            },
+          ],
+        },
+        ctx.seed,
+      ),
+    ]);
+    const unnamed = ctx.gateway
+      .offeredDeltas()
+      .find((d) =>
+        d.claims.pointers.some(
+          (p) => p.target.kind === "entity" && p.target.entity.id === "tutorial:step:0.1",
+        ),
+      );
+    expect(unnamed, "the unnamed-context delta never landed").toBeDefined();
+    expect(
+      classifyDelta(unnamed!, ctx.author).kind,
+      "a hybrid was claimed for the tutorial by a badge that only enumerates",
+    ).toBe("fact");
+    expect(readProgress(ctx).steps.size).toBe(before);
     await ctx.gateway.close();
   });
 
@@ -738,31 +778,80 @@ describe("checkpoints, revert, and the sweep", () => {
     await ctx.gateway.close();
   });
 
-  it("a MISFILED erased row is caught by its own bytes, not by the key it hides under", async () => {
+  it("a checkpoint copies only what the STORE vouches for — a misfiled row never enters one", async () => {
     const storage = new MemStorage();
     const ctx = await makeCtx(storage);
     await playLesson(buildArc(loam)[0]!, ctx);
     const rows = rowIds(storage);
-    const condemned = rows[rows.length - 1]!;
-    const smuggled = storage.getItem(`${STORE_PREFIX}${condemned}`)!;
+    const real = rows[rows.length - 1]!;
+    const smuggled = storage.getItem(`${STORE_PREFIX}${real}`)!;
+
+    // The row's bytes, filed under a key naming something else. The driver quarantines exactly
+    // this (the key and the claims disagree) and leaves it lying in localStorage — so a blob
+    // that copied every hex key would carry bytes no id names truthfully, and the sweep, which
+    // can only ask about ids, would call that checkpoint clean.
+    const decoy = "ab".repeat(34);
+    storage.setItem(`${STORE_PREFIX}${decoy}`, smuggled);
+    expect((await bankCheckpoint(loam, ctx, 7)).ok).toBe(true);
+
+    const blob = readCheckpoint(storage, 7)!;
+    expect(
+      Object.keys(blob.rows),
+      "a checkpoint copied a row the store does not hold",
+    ).not.toContain(`${STORE_PREFIX}${decoy}`);
+    // ...and the real row, which the store DOES hold, is in there.
+    expect(Object.keys(blob.rows)).toContain(`${STORE_PREFIX}${real}`);
+    await ctx.gateway.close();
+  });
+
+  it("a revert keeps the receipt AND the strike that forgave it — an undo does not re-assert a withdrawn forgetting", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    const arc = buildArc(loam);
+    const finale = lessonOfRole(arc, "erasure-finale");
+    await playLesson(arc[0]!, ctx);
+    expect((await bankCheckpoint(loam, ctx, arc[0]!.id)).ok).toBe(true);
+    for (const lesson of arc) {
+      if (lesson.id === arc[0]!.id) continue;
+      await playLesson(lesson, ctx);
+      if (lesson.id === finale.id) break;
+    }
+
+    // The operator forgives: striking a tombstone withdraws the erasure order (the gateway's
+    // own reader treats a struck tombstone as forgiven).
+    const tombstone = ctx.gateway
+      .offeredDeltas()
+      .find((d) =>
+        d.claims.pointers.some(
+          (p) => p.target.kind === "entity" && p.target.entity.context === "loam.erasure",
+        ),
+      )!;
+    const forgiveness = loam.signClaims(
+      loam.makeNegationClaims(ctx.author, ctx.ts(), tombstone.id, "on reflection"),
+      ctx.seed,
+    );
+    await ctx.gateway.append([forgiveness]);
+    expect(loam.readTombstones(ctx.gateway.reactor, ctx.author).size).toBe(0);
     await ctx.gateway.close();
 
-    // The row's bytes, filed under a key that names something else entirely. Only reading the
-    // VALUE can tell that this checkpoint is still carrying the record.
-    const decoy = "ab".repeat(34);
-    storage.removeItem(`${STORE_PREFIX}${condemned}`);
-    storage.setItem(`${STORE_PREFIX}${decoy}`, smuggled);
-    expect(takeCheckpoint(storage, 7).ok).toBe(true);
-    expect(Object.keys(readCheckpoint(storage, 7)!.rows)).not.toContain(
-      `${STORE_PREFIX}${condemned}`,
+    // Revert past both. The receipt stays — and so must its forgiveness, or the store
+    // re-asserts a forgetting the operator took back.
+    const restored = restoreCheckpoint(storage, arc[0]!.id, { erasedIds: [] });
+    expect(restored.ok).toBe(true);
+    if (!restored.ok) return;
+    expect(restored.keptOrders, "the erasure receipt was deleted by a revert").toContain(
+      tombstone.id,
+    );
+    expect(restored.keptOrders, "the forgiveness was deleted while its receipt stayed").toContain(
+      forgiveness.id,
     );
 
-    const report = sweepCheckpoints(storage, [condemned]);
+    const back = await makeCtx(storage);
     expect(
-      report.destroyed.map((d) => d.lesson),
-      "a checkpoint carrying the erased bytes under another name survived",
-    ).toContain("7");
-    expect(storage.getItem(`${CKPT_PREFIX}7`)).toBeNull();
+      loam.readTombstones(back.gateway.reactor, back.author).size,
+      "a revert re-asserted a forgetting the operator had withdrawn",
+    ).toBe(0);
+    await back.gateway.close();
   });
 
   it("a checkpoint that only REMEMBERS the erasure survives it — the receipt is not the bytes", async () => {

@@ -440,7 +440,7 @@ async function doRevert(lesson) {
     // A refused revert still leaves the store holding rows this attempt put back, so the page
     // must not go on rendering the ground it remembers. Reload with the message in hand: what
     // is on screen and what is in the store have to be the same thing.
-    storage.setItem(REVERT_NOTE_KEY, restored.message);
+    storage.setItem(REVERT_NOTE_KEY, JSON.stringify({ tone: "bad", text: restored.message }));
     window.location.reload();
     return;
   }
@@ -456,7 +456,11 @@ async function doRevert(lesson) {
       `${restored.keptOrders.length} erasure receipt(s) stayed: an undo may take back your work, never a forgetting.`,
     );
   }
-  if (said.length > 0) storage.setItem(REVERT_NOTE_KEY, said.join(" "));
+  if (said.length > 0) {
+    // A NOTICE, not a refusal: the revert did what was asked, and this is what it could not
+    // take back. The two read differently on the page, and a student deserves the difference.
+    storage.setItem(REVERT_NOTE_KEY, JSON.stringify({ tone: "note", text: said.join(" ") }));
+  }
   window.location.reload(); // the panes re-render from the restored ground, by construction
 }
 
@@ -906,11 +910,20 @@ async function rerender() {
 }
 
 ui.lesson = resumeState(arc, readProgress(ctx)).lessonId;
-// A message a revert left for the student, read once and taken off the shelf.
-const note = storage.getItem(REVERT_NOTE_KEY);
-if (note !== null) {
-  ui.refusal = note;
+// A message a revert left for the student, read once and taken off the shelf. A note that
+// cannot be read is dropped rather than shown as itself — this shelf holds only its own writes.
+const parked = storage.getItem(REVERT_NOTE_KEY);
+if (parked !== null) {
   storage.removeItem(REVERT_NOTE_KEY);
+  try {
+    const { tone, text } = JSON.parse(parked);
+    if (typeof text === "string") {
+      if (tone === "bad") ui.refusal = text;
+      else ui.notice = text;
+    }
+  } catch {
+    /* not ours to show */
+  }
 }
 await enterLesson(loam, ctx, lessonOf(ui.lesson));
 await runSweep(); // a checkpoint that outlived an erasure must not survive a reload either
