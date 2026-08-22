@@ -301,6 +301,16 @@ async function runPendingStep() {
 
 // ---- the progress rail --------------------------------------------------------------------------
 
+/** A quiz claim names its question by key (`<quiz>#<n>`); look the sentence back up in the arc. */
+function askOf(key) {
+  const cut = key.lastIndexOf("#");
+  if (cut === -1) return undefined;
+  const quizId = key.slice(0, cut);
+  const index = Number(key.slice(cut + 1));
+  const lesson = arc.find((l) => l.quiz !== undefined && l.quiz.id === quizId);
+  return lesson?.quiz.questions[index]?.ask;
+}
+
 function renderRail(progress) {
   const rail = $("#progress-rail");
   rail.textContent = "";
@@ -361,7 +371,8 @@ function renderRail(progress) {
       row.className = "rail-quiz";
       row.dataset.quizResult = question;
       row.dataset.correct = String(result.correct);
-      row.textContent = `${question} — ${result.correct ? "right" : "not this time"}`;
+      // The claim names the question by key; a person deserves the question itself.
+      row.textContent = `${askOf(question) ?? question} — ${result.correct ? "right" : "not this time"}`;
       rail.appendChild(row);
     }
   }
