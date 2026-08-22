@@ -14,11 +14,12 @@
 // written against the arc's SHAPE and its lesson ROLES, never against a lesson number.
 //
 // TWO GAPS, NAMED. (1) The progress-claims case asserts the CLAIMS and the reading over them;
-// the page's revert rail renders its checkpoint rows from the BLOB KEYS instead, because a
-// claim whose blob was refused must not offer a revert into nothing — so the rendered rail and
-// the claim count can legitimately differ by a refused boundary. What binds them is that the
-// claim is never written unless a blob backs it, which is its own case below. (2) Nothing here
-// drives the page: the render, the in-page confirm and the reload belong to
+// the page's revert rail renders its checkpoint rows from the BLOB KEYS instead, so the two can
+// legitimately differ. The ordinary cause is a REVERT — restoring an earlier boundary drops the
+// later blobs while the claims that recorded them stay in the ground, which is right: the
+// claims are history and the blobs are what you can still return to. (A refused boundary cannot
+// cause it: the claim is never written unless a blob backs it, which is its own case below.)
+// (2) Nothing here drives the page: the render, the in-page confirm and the reload belong to
 // `test/browser/tutorial.test.ts`.
 
 import { execFileSync } from "node:child_process";
@@ -204,6 +205,37 @@ describe("the arc, headless: every step earns its store observable", () => {
     // and nothing was banked: the store holds no step claim for it
     expect(readProgress(ctx).steps.has(step.id)).toBe(false);
     await ctx.gateway.close();
+  });
+});
+
+describe("the satisfiability rule", () => {
+  it("every step's page observable roots at an element the SHELL declares", () => {
+    // THE F1 CLASS, caught at authoring time. A selector that names an element some `ui` field
+    // conjures is satisfiable only while that field is set — so a step observing it can become
+    // impossible to complete after a reload, or after an irreversible act whose one-time notice
+    // has passed. Rooting every observable at an id in `index.html` makes the predicate a
+    // question about STATE rather than about an event, because those elements are always there
+    // and their content is rendered from the store.
+    const shell = readFileSync(join(process.cwd(), "demos", "tutorial", "index.html"), "utf8");
+    const declared = new Set([...shell.matchAll(/id="([^"]+)"/g)].map((m) => m[1]!));
+    expect(declared.size, "the shell declares no ids at all").toBeGreaterThan(4);
+
+    for (const lesson of buildArc(loam)) {
+      for (const step of lesson.steps) {
+        const selector = step.observe.page?.selector;
+        expect(selector, `step ${step.id} has no page observable`).toBeDefined();
+        const root = /^#([A-Za-z0-9_-]+)/.exec(selector!)?.[1];
+        expect(
+          root,
+          `step ${step.id} observes "${selector!}", which does not root at an id`,
+        ).toBeDefined();
+        expect(
+          declared.has(root!),
+          `step ${step.id} observes #${root!}, which index.html does not declare — ` +
+            `an element the page conjures can stop existing, and the step becomes impossible`,
+        ).toBe(true);
+      }
+    }
   });
 });
 

@@ -53,6 +53,28 @@ suite by design. What each role must actually DO:
   to destroy; erasing a lesson-1 record leaves it no bystander to spare. Either turns the frozen
   file red with no bug behind it.
 
+**THE SATISFIABILITY RULE**, which governs every `observe.page` and is checked mechanically
+(`test/site/arc.test.ts`, "every step's page observable roots at an element the SHELL declares"):
+
+> A step's `observe.page.selector` must root at an element declared in `index.html` whose content
+> renders from the STORE.
+
+Two halves, both learned from a trap this arc walked into:
+
+- **(a) STATE, NOT EVENT.** `seePage` must hold in every store state where the step's store
+  predicate holds — including after a bare reload, and when `run` finds its work already done. An
+  observable that is true only in the instant after its own run is a trap on any irreversible
+  step: the act cannot be repeated, so the step can never be completed.
+- **(b) NO `ui.*` DEPENDENCE.** No selector may name an element that exists only while some page
+  field is set. The tell is a selector absent from `index.html`.
+
+**Three rules the frozen suite pins about the finale:** it must be FULLY PASSABLE with every
+checkpoint blob deleted — so no finale step may observe the revert rail *shrinking*, since there
+may be nothing to shrink; the sweep notice is the witness, and it speaks for every forgetting,
+destroyed or not. ONE PRESS PER FINALE STEP; a two-stage act belongs to two steps. And two copy
+pins are frozen: a finished quiz card's button says **"done"**, and a sweep that found nothing says
+**"there was nothing to destroy"**.
+
 **Four more things the arc owes the player**, each with a rail that fails without it: every
 lesson has at least one step whose store predicate is FALSE before it runs (a lesson of pure
 look-steps teaches a click and proves nothing); every step carries both observables; at least

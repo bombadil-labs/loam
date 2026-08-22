@@ -101,9 +101,9 @@ const ui = {
   notice: null, // something happened that they should know about, which is not a failure
   askRevert: null,
   askStartOver: false,
-  quizDismissed: new Set(),
+  quizDismissed: new Set(), // cards closed in this session
+  quizTouched: new Set(), // cards answered in this session — a finished card stays up until then
   highlightStep: null,
-  sweep: null,
   drawerOpen: false,
   sdl: "",
   lastStep: null,
@@ -284,7 +284,6 @@ async function goToLesson(id) {
   ui.lesson = id;
   ui.refusal = null;
   ui.notice = null;
-  ui.sweep = null;
   ui.workDone = null;
   ui.highlightStep = null;
   await enterLesson(loam, ctx, lessonOf(id));
@@ -309,9 +308,8 @@ async function runPendingStep() {
     // the student can SEE, and an unrendered change is not yet seen. The sweep runs here too:
     // an erasure's reach into the checkpoints is part of what the step's page observable names.
     afterRun: async () => {
-      await runSweep();
       await refreshDrawer(before, step.id);
-      await rerender();
+      await rerender(); // the render sweeps and reports; there is no latch to set
     },
   });
   if (!outcome.ok) {
@@ -469,7 +467,8 @@ async function doRevert(lesson) {
   }
   if (restored.keptOrders.length > 0) {
     said.push(
-      `${restored.keptOrders.length} erasure receipt(s) stayed: an undo may take back your work, never a forgetting.`,
+      `${restored.keptOrders.length} record(s) of forgetting stayed — the receipts, and the ` +
+        `strikes that forgave them: an undo may take back your work, never a forgetting.`,
     );
   }
   if (said.length > 0) {
@@ -496,7 +495,14 @@ function quizOnOffer(lesson, progress) {
   const quiz = lesson.quiz;
   if (quiz === undefined || quiz === null) return null;
   if (!lessonIsGreen(lesson, progress)) return null;
-  if (progress.skipped.has(quiz.id) || ui.quizDismissed.has(quiz.id)) return null;
+  if (progress.skipped.has(quiz.id)) return null;
+  if (ui.quizDismissed.has(quiz.id)) return null;
+  // A CARD ALREADY FINISHED IS NOT ON OFFER. The dismissal set is this session's memory and
+  // dies with the tab, so without the store's own answer a completed quiz would be dealt out
+  // again on every reload. It stays up in the session it was answered IN — that is when the
+  // student is reading their verdicts and reaching for "done".
+  const answered = quiz.questions.every((_, i) => progress.quiz.has(`${quiz.id}#${i}`));
+  if (answered && !ui.quizTouched.has(quiz.id)) return null;
   return quiz;
 }
 
@@ -531,6 +537,7 @@ function renderQuiz(progress) {
       button.onclick = () =>
         act(async () => {
           await answerQuiz(loam, ctx, quiz, index, choiceIndex);
+          ui.quizTouched.add(quiz.id);
           await rerender();
         });
       block.appendChild(button);
@@ -616,51 +623,78 @@ function renderGlossary() {
 
 // ---- the sweep notice ------------------------------------------------------------------------------
 
-async function runSweep() {
+/**
+ * The sweep, run and reported IN THE RENDER — never latched into a field.
+ *
+ * It is a reading of two durable things: the tombstones the store holds, and the checkpoint
+ * blobs beside it. Enforcing while reading is the point — the invariant is that no blob may
+ * hold forgotten bytes, and asking on every render is the strongest form of it. It is also
+ * idempotent, so a second pass destroys nothing and says so.
+ *
+ * A LATCH WOULD BREAK THE RULE THIS PAGE NOW LIVES BY (see lessons.mjs): a field set once at
+ * the moment of the erasure makes the notice an EVENT, so the step observing it could not be
+ * satisfied after a reload — on the one lesson whose act cannot be repeated. Read from the
+ * store and the answer is the same in every session.
+ */
+function sweepNow() {
   const dead = [...loam.readTombstones(gateway.reactor, author)];
-  if (dead.length === 0) return;
-  // THE NOTICE APPEARS FOR EVERY FORGETTING, including one that found nothing to destroy. The
-  // erasure lesson's page observable asks for this element, and erasure is irreversible: if the
-  // notice only existed when a checkpoint died, a student whose checkpoints were already gone
-  // (a refused quota, a cleared origin, a start-over mid-arc) could never satisfy the step they
-  // had already performed. An empty sweep is a result, and saying so is the honest report.
-  ui.sweep = { ...sweepCheckpoints(storage, dead), erased: dead };
+  if (dead.length === 0) return null;
+  // ENFORCE FIRST — idempotent, so a second pass finds nothing and that is the point. After it
+  // runs, "destroyed just now" is empty BY CONSTRUCTION, which is exactly why the report cannot
+  // be built from it: a reader arriving one render later, or after a reload, would be told the
+  // opposite of what happened. So what the notice names is durable and asked of the store:
+  //   GONE — a boundary the student's own claims say has a checkpoint, with no blob behind it.
+  //   KEPT — a blob that is still there, proven to hold none of the forgotten bytes.
+  const kept = sweepCheckpoints(storage, dead).kept;
+  const blobs = new Set(checkpointLessons(storage));
+  const gone = readProgress(ctx).checkpoints.filter((lesson) => !blobs.has(lesson));
+  return { erased: dead, gone, kept };
 }
 
 function renderSweep() {
   const holder = $("#sweep-holder");
   holder.textContent = "";
-  if (ui.sweep === null) return;
+  const sweep = sweepNow();
+  if (sweep === null) return;
   const notice = document.createElement("section");
   notice.id = "sweep-notice";
-  notice.dataset.erased = ui.sweep.erased.join(" ");
+  notice.dataset.erased = sweep.erased.join(" ");
   const head = document.createElement("h3");
-  head.textContent = "the forgetting reached your checkpoints";
+  // THE HEADING STATES WHICH THING HAPPENED. "Reached" is a claim about destruction, and a
+  // notice that led with it and then said nothing was destroyed would contradict itself two
+  // lines later — in the lesson whose whole subject is a ledger you can trust.
+  head.textContent =
+    sweep.gone.length === 0
+      ? "the forgetting checked your checkpoints"
+      : "the forgetting reached your checkpoints";
   notice.appendChild(head);
   line(
     notice,
     "pane-hint",
     "a checkpoint is a copy, and a copy holds the bytes — so the right to be forgotten costs you your undo into the time the thing was known",
   );
-  if (ui.sweep.destroyed.length === 0) {
+  if (sweep.gone.length === 0) {
     line(
       notice,
       "kept",
       "no checkpoint here was holding those bytes — there was nothing to destroy",
     );
   }
-  for (const gone of ui.sweep.destroyed) {
+  for (const lesson of sweep.gone) {
     const row = document.createElement("div");
     row.className = "swept";
-    row.dataset.swept = String(gone.lesson);
-    row.textContent = `destroyed — the checkpoint after lesson ${gone.lesson}: ${gone.reason}`;
+    row.dataset.swept = String(lesson);
+    // What is TRUE is that the checkpoint is not there and cannot be returned to. Saying "this
+    // erasure destroyed it" would be a guess: a refused quota or a cleared origin takes a blob
+    // the same way, and the page cannot tell those apart after the fact.
+    row.textContent = `gone — no checkpoint remains for lesson ${lesson}, so you cannot go back to that moment`;
     notice.appendChild(row);
   }
-  for (const kept of ui.sweep.kept) {
+  for (const kept of sweep.kept) {
     const row = document.createElement("div");
     row.className = "kept";
     row.dataset.kept = String(kept.lesson);
-    row.textContent = `kept — the checkpoint after lesson ${kept.lesson} never held those bytes`;
+    row.textContent = `kept — the checkpoint after lesson ${kept.lesson} holds none of those bytes`;
     notice.appendChild(row);
   }
   holder.appendChild(notice);
@@ -825,10 +859,8 @@ $("#gql-run").onclick = () =>
       text = String(err.message ?? err);
     }
     // A run may have been a WRITE — the console speaks to the same door — so every pane has to
-    // show it rather than wait for the next click. The sweep runs for the same reason: this
-    // door reaches the whole gateway, and a checkpoint holding erased bytes must not wait for
-    // the next lesson step to be found.
-    await runSweep();
+    // show it rather than wait for the next click. The render sweeps as it reports, so an
+    // erasure ordered from this console reaches the checkpoints in the same breath.
     await rerender();
     $("#gql-out").textContent = text; // after the rerender, so the answer survives it
   });
@@ -955,7 +987,6 @@ if (parked !== null) {
   }
 }
 await enterLesson(loam, ctx, lessonOf(ui.lesson));
-await runSweep(); // a checkpoint that outlived an erasure must not survive a reload either
 await refreshSdl();
 await rerender();
 window.tutorial.ready = true;

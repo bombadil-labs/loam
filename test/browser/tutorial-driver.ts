@@ -468,6 +468,30 @@ export class TutorialPage {
     return Number(gone);
   }
 
+  /**
+   * Drop every checkpoint blob AND every claim that one was taken — the state of a student who
+   * has never reached a boundary, or whose origin was cleared between sessions. The caller
+   * reloads: the claims live in the store, so the page must re-read them to forget them.
+   */
+  async dropCheckpointRecords(): Promise<number> {
+    const gone = await this.tab.eval(
+      `(() => {
+         const doomed = Object.keys(localStorage).filter((k) => {
+           if (k.startsWith("loam:tutorial-ckpt:")) return true;
+           if (!/^loam:tutorial:[0-9a-f]+$/.test(k)) return false;
+           try {
+             const row = JSON.parse(localStorage.getItem(k));
+             return (row.claims.pointers ?? []).some(
+               (p) => p.target && p.target.context === "tutorial.checkpoint");
+           } catch { return false; }
+         });
+         for (const k of doomed) localStorage.removeItem(k);
+         return doomed.length;
+       })()`,
+    );
+    return Number(gone);
+  }
+
   /** The quizzes the student's own store records as SKIPPED. */
   skippedQuizzes(): Promise<string[]> {
     return this.tab.eval(`window.tutorial.skipped()`).then((v) => json<string[]>(v));

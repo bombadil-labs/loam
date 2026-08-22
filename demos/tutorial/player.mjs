@@ -531,14 +531,18 @@ export function restoreCheckpoint(storage, lesson, opts = {}) {
     wanted.set(key, value);
   }
 
-  // A NAMED GAP. If the refused row is itself a STRIKE, the claim it struck comes back without
-  // it and reads live again — the store lying upward at a restore edge (H1). Nothing in the arc
-  // reaches that: it needs an erasure of a strike, which no lesson performs and no door but the
-  // console offers. It is not closed here because the closure is not cheap and the cheap version
-  // is worse: withholding by a one-link "is this a delta pointer" test deletes live bystanders
-  // (a migration's `supersededBy`, an adoption receipt), which is over-purging to prevent a
-  // reading error. Closing it properly means the same survival walk `mine()` runs, over roles,
-  // reported as its own kind of refusal — and a rail that plants a struck claim in a checkpoint.
+  // A NAMED GAP, and the same one twice. If the refused row is itself a STRIKE, the claim it
+  // struck comes back without it and reads live again — the store lying upward at a restore edge
+  // (H1). And the `forgives` test below follows exactly ONE link: a strike of a strike of a
+  // receipt is not recognized as forgiveness and would be deleted with everything else.
+  //
+  // Nothing in the arc reaches either: both need an erasure of a strike, or a chain three deep,
+  // which no lesson performs and no door but the console offers. Neither is closed here because
+  // the cheap closure is worse than the gap: withholding by a one-link "is this a delta pointer"
+  // test deletes live bystanders (a migration's `supersededBy`, an adoption receipt), which is
+  // over-purging to prevent a reading error. Closing them properly means the same recursive
+  // survival walk `mine()` runs, over roles, reported as its own kind of refusal — with a rail
+  // that plants a struck claim in a checkpoint and one that stacks three strikes on a receipt.
 
   let restored = 0;
   try {

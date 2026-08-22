@@ -31,6 +31,26 @@
 //                       lesson's record leaves nothing to destroy — either turns that file red
 //                       with no bug behind it.
 // T227's arc MUST keep these three roles pointing at lessons that do those things.
+//
+// THE SATISFIABILITY RULE, which governs every `observe.page` and is mechanically checked
+// (`test/site/arc.test.ts`, "every step's page observable roots at an element the SHELL
+// declares"): a step's selector must root at an element declared in `index.html` whose content
+// renders FROM THE STORE. Two halves, both learned the hard way:
+//
+//   (a) STATE, NOT EVENT. `seePage` must hold in every store state where the step's store
+//       predicate holds — including after a bare reload, and when `run` finds its work already
+//       done. An observable that is true only in the instant after its own run is a TRAP on any
+//       irreversible step: the act cannot be repeated, so the step can never be completed.
+//   (b) NO ui.* DEPENDENCE. No selector may name an element that exists only while some page
+//       field is set. The tell is a selector absent from `index.html`.
+//
+// THREE MORE RULES THE FROZEN SUITE PINS:
+//   - The finale must be FULLY PASSABLE with every checkpoint blob deleted. So no finale step
+//     may observe the revert rail SHRINKING — there may be nothing to shrink. The sweep notice
+//     is the witness, and it speaks for every forgetting, destroyed or not.
+//   - ONE PRESS PER FINALE STEP. A two-stage act belongs to two steps.
+//   - Two copy pins are frozen: a finished quiz card's button says "done", and a sweep that
+//     found nothing says "there was nothing to destroy".
 
 import { STORE_PREFIX, SEED_KEY, plantTerm } from "./player.mjs";
 
@@ -338,7 +358,10 @@ checkpoint is a copy, and a copy holds the bytes.`,
             }
           },
           observe: {
-            page: { selector: "#sweep-notice", contains: "checkpoint" },
+            // The HOLDER, which index.html declares — not the notice rendered inside it. An
+            // observable rooted at a conjured element is satisfiable only while something
+            // conjures it, and this step is irreversible.
+            page: { selector: "#sweep-holder", contains: "checkpoint" },
             store: async (ctx) =>
               !mineAt(ctx, RAE, "note") &&
               loam.readTombstones(ctx.gateway.reactor, ctx.author).size >= 1,

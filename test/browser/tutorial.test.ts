@@ -491,7 +491,6 @@ describe("§48 — the quiz teaches rather than scolds", () => {
     // Every question is answered now, so dismissing the card is DONE, not skipped: a store
     // that recorded a skip here would hold a claim about the student that is simply false.
     const quizId = withQuiz!.quiz!.id;
-    for (const q of withQuiz!.steps) void q;
     while (await page.exists("#quiz-card [data-question] button[data-choice]:not([disabled])")) {
       await page.answerFirstQuestion("right");
     }
@@ -511,19 +510,20 @@ describe("§48 — the quiz teaches rather than scolds", () => {
 });
 
 describe("§48 — the right to be forgotten reaches the checkpoints", () => {
-  it("the erasure step is passable when NO checkpoint held the bytes — the notice says so", async () => {
+  it("the erasure step is passable when there is no checkpoint at all — and the notice says so", async () => {
     const { target } = await playUntil("erasure-finale");
-    // Every checkpoint gone before the erasure: a refused quota, a partial site-data clear, a
-    // student who started over mid-arc. The act is irreversible, so a page observable that can
+    // A student with no checkpoints when the forgetting happens: a refused quota, a cleared
+    // origin, a start-over mid-arc. The act is irreversible, so a page observable that could
     // only be satisfied by DESTRUCTION would strand them on the last lesson forever.
-    expect(await page.dropCheckpoints()).toBeGreaterThan(0);
+    expect(await page.dropCheckpointRecords()).toBeGreaterThan(0);
+    await page.reload();
 
     for (let i = 0; i < target.steps.length; i++) await page.runPending();
 
     expect(await page.exists("#sweep-notice"), "the sweep said nothing at all").toBe(true);
     expect(await page.attrs("#sweep-notice [data-swept]", "data-swept")).toEqual([]);
-    // ...and it says WHAT HAPPENED, in its own words: a heading that mentions checkpoints would
-    // read the same whether the sweep destroyed everything or found nothing.
+    // ...and it says WHAT HAPPENED, in its own words: a heading that mentions checkpoints reads
+    // the same whether the sweep took everything or found nothing.
     expect(
       await page.text("#sweep-notice"),
       "the notice appeared but never said the sweep found nothing",
@@ -533,6 +533,23 @@ describe("§48 — the right to be forgotten reaches the checkpoints", () => {
       expect(banked, `step ${step.id} could not be completed after the erasure`).toContain(step.id);
     }
     expect((await page.position()).pending, "the finale is stuck on a pending step").toBeNull();
+  });
+
+  it("the notice is a READING, not a moment: it says the same thing after a reload", async () => {
+    const { target } = await playUntil("erasure-finale");
+    for (let i = 0; i < target.steps.length; i++) await page.runPending();
+    const said = await page.text("#sweep-notice");
+    const swept = await page.attrs("#sweep-notice [data-swept]", "data-swept");
+    expect(swept.length, "nothing was reported gone").toBeGreaterThan(0);
+
+    // The sweep destroys at most once, so a notice built from "what I just destroyed" empties
+    // itself on the very next render — and the step observing it would become unsatisfiable on
+    // a lesson whose act cannot be repeated. Read from the store, the answer does not move.
+    await page.reload();
+    expect(await page.text("#sweep-notice"), "the notice changed its story after a reload").toBe(
+      said,
+    );
+    expect(await page.attrs("#sweep-notice [data-swept]", "data-swept")).toEqual(swept);
   });
 
   it("reverting past an erasure does not un-forget it: the receipt stays, the bytes do not come back", async () => {
@@ -606,9 +623,13 @@ describe("§48 — the right to be forgotten reaches the checkpoints", () => {
       for (const dead of erased)
         expect(ids, `checkpoint ${lesson} still holds ${dead}`).not.toContain(dead);
     }
+    // A kept boundary this run only just reached (the finale takes its own when it greens) has
+    // no baseline to compare against; the ones that existed BEFORE the forgetting must be
+    // exactly as they were.
     for (const lesson of kept.map(Number)) {
       expect(after).toContain(lesson);
-      expect(await page.checkpointIds(lesson)).toEqual(heldBefore.get(lesson));
+      const baseline = heldBefore.get(lesson);
+      if (baseline !== undefined) expect(await page.checkpointIds(lesson)).toEqual(baseline);
     }
 
     // THE BYTES THEMSELVES, not the key that named them: the erased record's own words appear
@@ -624,7 +645,8 @@ describe("§48 — the right to be forgotten reaches the checkpoints", () => {
         ).toBe(false);
       }
     }
-    const keptLesson = kept.map(Number)[0]!;
+    const keptLesson = kept.map(Number).find((l) => heldBefore.has(l))!;
+    expect(keptLesson, "no checkpoint that predates the forgetting survived it").toBeDefined();
     const bystanderId = (heldBefore.get(keptLesson) ?? []).find(
       (id) => !erased.includes(id) && (wordsById[id]?.length ?? 0) > 24,
     );
