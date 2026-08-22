@@ -140,8 +140,9 @@ export function renderGround(holder, deltas, selfAuthor, toWire, state) {
   const classified = [...deltas].map((d) => ({ d, c: classifyDelta(d, selfAuthor) }));
   // SIGNED, self-authored, and the tutorial's own: all three, because `claims.author` is a plain
   // field and an UNSIGNED row is admitted to the ground (the driver quarantines a signature that
-  // fails, not one that is missing). Without the signature test, anything sharing this origin
-  // could name the student as its author and land in the one place the pane does not look.
+  // fails, not one that is missing). Without the signature test, a row nobody signed could name
+  // the student as its author and land in the one place the pane does not look. A writer who has
+  // read the seed can sign as them and is not stopped by this; nothing at this layer could.
   const hidden =
     state.showTutorial === true
       ? []

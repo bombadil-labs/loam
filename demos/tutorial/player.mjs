@@ -42,6 +42,23 @@ export function isTutorialDelta(delta) {
   );
 }
 
+/**
+ * Is it ONLY that? A delta carrying a tutorial pointer AND a constitutional one — a grant, an
+ * erasure order, a registration, a strike — is that thing first, which is exactly how the Ground
+ * pane's classifier decides it (the `tutorial` badge is its LAST branch). Progress must read the
+ * same rule, or one delta is banked progress at one level and a grant at the other, and the two
+ * levels disagree about the same bytes.
+ */
+function isOnlyTutorial(delta) {
+  if (!isTutorialDelta(delta)) return false;
+  return !delta.claims.pointers.some(
+    (p) =>
+      p.target.kind === "delta" ||
+      String(p.role).startsWith("rhizomatic.") ||
+      (p.target.kind === "entity" && String(p.target.entity.context).startsWith("loam.")),
+  );
+}
+
 // ---- the claim grammar --------------------------------------------------------------------------
 
 const entity = (role, id, context) => ({
@@ -54,19 +71,22 @@ const sign = (loam, ctx, pointers) =>
   loam.signClaims({ timestamp: ctx.ts(), author: ctx.author, pointers }, ctx.seed);
 
 /**
- * The student's own LIVE tutorial records. Progress is what THEY did, so three filters, each
+ * The student's own LIVE tutorial records. Progress is what THEY did, so four filters, each
  * load-bearing and each with a direction it protects:
  *
  *   AUTHORED BY THEM — someone else's claim about my progress is data and moves nothing; a
  *   federated packet cannot advance the lesson.
- *   SIGNED — `claims.author` is a plain field, and an unsigned row planted under this origin's
+ *   SIGNED — `claims.author` is a plain field, and an UNSIGNED row planted under this origin's
  *   prefix is admitted to the ground (the driver quarantines an INVALID signature, not a
- *   missing one). Without this, anything on a shared origin could write the student's history.
+ *   missing one). What this stops is a plant nobody signed — a stray script, a devtools poke, a
+ *   packet arriving under an open trust posture. It is not protection from a thief: the seed
+ *   lives on this same origin, and anyone who can read it can sign as the student.
+ *   ONLY TUTORIAL — see above: both levels answer the same question about the same delta.
  *   NOT STRUCK — and struck by a strike that SURVIVES, and by one of the student's OWN, which
  *   is the rule the gateway's readers keep: a stranger's strike retires nothing the operator
  *   planted (H1), and a struck strike revives its target, so survival is recursive rather than
- *   a one-link presence test. The chain guard makes a cycle answer "not struck" — a loop of
- *   strikes proves nothing, and the safe direction here is to keep the student's progress.
+ *   a one-link presence test. The chain guard stops the walk at a node it is already inside;
+ *   content addressing makes a real cycle unmintable, so it is inert defence, not a rule.
  */
 function mine(ctx) {
   const reactor = ctx.gateway.reactor;
@@ -91,10 +111,7 @@ function mine(ctx) {
     .offeredDeltas()
     .filter(
       (d) =>
-        d.claims.author === ctx.author &&
-        d.sig !== undefined &&
-        isTutorialDelta(d) &&
-        !struck(d.id),
+        d.claims.author === ctx.author && d.sig !== undefined && isOnlyTutorial(d) && !struck(d.id),
     );
 }
 
@@ -371,6 +388,51 @@ export async function bankCheckpoint(loam, ctx, lesson, opts = {}) {
   return takeCheckpoint(ctx.storage, lesson, opts);
 }
 
+/** The id a stored row's own bytes claim to be — `undefined` if it will not say. */
+function claimedId(value) {
+  try {
+    const row = typeof value === "string" ? JSON.parse(value) : null;
+    return row !== null && typeof row === "object" && typeof row.id === "string"
+      ? row.id
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The pointers of a STORED row. Rows are held in the canonical WIRE profile, which is not the
+ * in-memory shape: an entity target is `{id, context}` and a delta target is `{delta}`, with no
+ * `kind` discriminator anywhere. Reading them as if they were `Delta` objects finds nothing at
+ * all — silently, which is the worst way for a guard to be wrong.
+ */
+function wirePointers(value) {
+  try {
+    const row = typeof value === "string" ? JSON.parse(value) : null;
+    const pointers = row?.claims?.pointers;
+    return Array.isArray(pointers) ? pointers : [];
+  } catch {
+    return [];
+  }
+}
+
+/** The delta ids a stored row STRIKES, if it is a strike at all. */
+function strikeTargets(value) {
+  return wirePointers(value)
+    .filter((p) => typeof p?.target?.delta === "string")
+    .map((p) => p.target.delta);
+}
+
+/**
+ * Is this stored row an ERASURE ORDER — the receipt that says something was removed? Recognized
+ * by the same constitutional context the gateway's own readers key on (`loam.erasure`), because
+ * a revert must be able to tell a record of forgetting from an ordinary claim without a gateway.
+ * A forged one costs nothing: only the operator's own orders bind, and this only ever KEEPS.
+ */
+function isErasureOrder(value) {
+  return wirePointers(value).some((p) => p?.target?.context === "loam.erasure");
+}
+
 /** A blob is only a checkpoint if it parses AND carries rows; anything else is unreadable. */
 function parseBlob(raw) {
   try {
@@ -435,14 +497,26 @@ export function restoreCheckpoint(storage, lesson, opts = {}) {
   const condemned = new Set(opts.erasedIds ?? []);
   const wanted = new Map();
   const refused = [];
+  const stranded = [];
   for (const [key, value] of Object.entries(blob.rows)) {
     if (!isRowKey(key) || typeof value !== "string") continue; // never write what is not a row
     const id = key.slice(STORE_PREFIX.length);
-    if (condemned.has(id)) {
+    // Both questions the sweep asks, asked here too: the key that FILES the row, and the id the
+    // row's own bytes CLAIM. A row misfiled under some other key must not walk back in either.
+    if (condemned.has(id) || condemned.has(claimedId(value) ?? "")) {
       refused.push(id);
+      // A refused row may be a STRIKE, and a claim restored without the strike that struck it
+      // reads live again — the store lying upward at a restore edge (H1). So whatever it struck
+      // is held back with it, and named: better a claim missing from the undo than a retracted
+      // claim quietly speaking again.
+      for (const target of strikeTargets(value)) stranded.push(target);
       continue;
     }
     wanted.set(key, value);
+  }
+  for (const target of stranded) {
+    const key = STORE_PREFIX + target;
+    if (wanted.delete(key)) refused.push(target);
   }
 
   let restored = 0;
@@ -462,8 +536,20 @@ export function restoreCheckpoint(storage, lesson, opts = {}) {
         `try again.`,
     };
   }
-  for (const key of rowKeys(storage)) if (!wanted.has(key)) storage.removeItem(key);
-  return { ok: true, restored, refused };
+  // AND THE ERASURE ORDERS STAY. A tombstone written after this checkpoint is not in it, so a
+  // plain "remove what the checkpoint did not have" deletes the store's record THAT it forgot —
+  // and with it the standing order that refuses those bytes at the door. The undo may take back
+  // the student's work; it may not take back a forgetting.
+  const keptOrders = [];
+  for (const key of rowKeys(storage)) {
+    if (wanted.has(key)) continue;
+    if (isErasureOrder(storage.getItem(key))) {
+      keptOrders.push(key.slice(STORE_PREFIX.length));
+      continue;
+    }
+    storage.removeItem(key);
+  }
+  return { ok: true, restored, refused, keptOrders };
 }
 
 /**
@@ -514,13 +600,7 @@ export function sweepCheckpoints(storage, erasedIds) {
     const held = [];
     for (const [rowKey, value] of Object.entries(blob.rows)) {
       const filed = isRowKey(rowKey) ? rowKey.slice(STORE_PREFIX.length) : undefined;
-      let claimed;
-      try {
-        const row = typeof value === "string" ? JSON.parse(value) : null;
-        if (row !== null && typeof row === "object" && typeof row.id === "string") claimed = row.id;
-      } catch {
-        claimed = undefined; // an unreadable row cannot be shown to be a condemned one
-      }
+      const claimed = claimedId(value);
       if (filed !== undefined && dead.has(filed)) held.push(filed);
       else if (claimed !== undefined && dead.has(claimed)) held.push(claimed);
     }

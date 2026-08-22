@@ -209,6 +209,100 @@ describe("progress is claims", () => {
     await ctx.gateway.close();
   });
 
+  it("an UNSIGNED row naming the student moves nothing — and is not hidden from them either", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    const arc = buildArc(loam);
+    await playLesson(arc[0]!, ctx);
+    const before = readProgress(ctx).steps.size;
+
+    // Take one of the student's OWN progress claims and strip its signature where it lies. The
+    // driver quarantines a signature that FAILS, not one that is missing, so this row is
+    // admitted to the ground and reads as the student's own — unless the reading asks.
+    const signed = ctx.gateway
+      .offeredDeltas()
+      .find(
+        (d) =>
+          d.claims.author === ctx.author &&
+          d.sig !== undefined &&
+          d.claims.pointers.some(
+            (p) => p.target.kind === "entity" && p.target.entity.context === TUTORIAL_CONTEXTS.step,
+          ),
+      )!;
+    const row = JSON.parse(storage.getItem(`${STORE_PREFIX}${signed.id}`)!) as Record<
+      string,
+      unknown
+    >;
+    delete row["sig"];
+    storage.setItem(`${STORE_PREFIX}${signed.id}`, JSON.stringify(row));
+    await ctx.gateway.close();
+
+    const again = await makeCtx(storage);
+    const landed = again.gateway.offeredDeltas().find((d) => d.id === signed.id);
+    expect(landed, "the unsigned row did not land — this rail would prove nothing").toBeDefined();
+    expect(landed!.sig, "the row is still signed — this rail would prove nothing").toBeUndefined();
+    expect(
+      readProgress(again).steps.size,
+      "an unsigned row was counted as the student's own progress",
+    ).toBeLessThan(before);
+    // ...and the Ground pane must SHOW it: a row nobody signed is exactly what a student needs
+    // to see, so it may not fall into the tutorial filter's blind spot.
+    expect(classifyDelta(landed!, again.author).kind).toBe("tutorial");
+    await again.gateway.close();
+  });
+
+  it("a record that is also a grant is a GRANT — one delta cannot be progress at one level and law at the other", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    await playLesson(buildArc(loam)[0]!, ctx);
+    const before = readProgress(ctx).steps.size;
+
+    // A single delta wearing both hats: the tutorial's step vocabulary AND the constitutional
+    // grant context. The classifier decides `grant`; progress must agree and not bank it.
+    // Through the FEDERATION door: the law door refuses a malformed grant outright, which is
+    // its job. What lands as data is what a reader then has to make sense of.
+    await ctx.gateway.federate([
+      loam.signClaims(
+        {
+          timestamp: ctx.ts(),
+          author: ctx.author,
+          pointers: [
+            {
+              role: "step",
+              target: {
+                kind: "entity",
+                entity: { id: "tutorial:step:0.0", context: TUTORIAL_CONTEXTS.step },
+              },
+            },
+            { role: "name", target: { kind: "primitive", value: "0.0" } },
+            {
+              role: "subject",
+              target: { kind: "entity", entity: { id: "loam:store", context: "loam.grants" } },
+            },
+          ],
+        },
+        ctx.seed,
+      ),
+    ]);
+    const wearingBoth = ctx.gateway
+      .offeredDeltas()
+      .find((d) =>
+        d.claims.pointers.some(
+          (p) => p.target.kind === "entity" && p.target.entity.id === "tutorial:step:0.0",
+        ),
+      );
+    expect(
+      wearingBoth,
+      "the two-hatted delta never landed — this rail proves nothing",
+    ).toBeDefined();
+    expect(classifyDelta(wearingBoth!, ctx.author).kind).toBe("grant");
+    expect(
+      readProgress(ctx).steps.size,
+      "a delta the pane calls a grant was banked as progress",
+    ).toBe(before);
+    await ctx.gateway.close();
+  });
+
   it("a skipped quiz is recorded as skipped, and manufactures no answer", async () => {
     const storage = new MemStorage();
     const ctx = await makeCtx(storage);
@@ -550,16 +644,25 @@ describe("checkpoints, revert, and the sweep", () => {
   it("a revert that cannot be written loses nothing: no row is removed before every row is back", async () => {
     const roomy = new MemStorage();
     const ctx = await makeCtx(roomy);
-    await playLesson(buildArc(loam)[0]!, ctx);
+    const arc = buildArc(loam);
+    await playLesson(arc[0]!, ctx);
     expect(takeCheckpoint(roomy, 1).ok).toBe(true);
     const frozen = rowIds(roomy);
+    // Work AFTER the checkpoint: these rows are in no blob, so they exist in exactly one place.
+    // They are what a remove-first restore destroys before it discovers it cannot finish.
+    await playLesson(arc[1]!, ctx);
+    const later = rowIds(roomy).filter((id) => !frozen.includes(id));
+    expect(
+      later.length,
+      "the second lesson landed nothing that lives only in the store",
+    ).toBeGreaterThan(0);
     await ctx.gateway.close();
 
-    // A storage that will take the blob but refuses the writes the restore needs.
+    // A storage that refuses EVERY row write, with one checkpoint row missing so the restore
+    // has real work to attempt.
     const tight = new MemStorage();
     for (const key of roomy.keys()) tight.setItem(key, roomy.getItem(key)!);
-    for (const id of frozen.slice(1)) tight.removeItem(`${STORE_PREFIX}${id}`); // rows to put back
-    let allowed = 0;
+    tight.removeItem(`${STORE_PREFIX}${frozen[0]!}`);
     const failing = {
       get length() {
         return tight.length;
@@ -568,8 +671,9 @@ describe("checkpoints, revert, and the sweep", () => {
       getItem: (k: string) => tight.getItem(k),
       removeItem: (k: string) => tight.removeItem(k),
       setItem: (k: string, v: string) => {
-        if (allowed++ > 0)
+        if (k.startsWith(STORE_PREFIX)) {
           throw new DOMException("the quota has been exceeded", "QuotaExceededError");
+        }
         tight.setItem(k, v);
       },
     };
@@ -578,11 +682,15 @@ describe("checkpoints, revert, and the sweep", () => {
     expect(refused.ok).toBe(false);
     if (refused.ok) return;
     expect(refused.message).toMatch(/nothing was removed/);
-    // THE POINT: the rows that were there before the attempt are all still there. A restore
-    // that deleted first would have destroyed the only copy of whatever it could not rewrite.
-    expect(tight.getItem(`${STORE_PREFIX}${frozen[0]!}`)).not.toBeNull();
-    // and the checkpoint itself is untouched, so the student can try again
-    expect(readCheckpoint(tight, 1)).not.toBeNull();
+    // THE POINT: every row that was there before the attempt is STILL there — including the
+    // later work, whose only copy is the store itself. A restore that deleted first would have
+    // destroyed exactly those before discovering it could not write the checkpoint back.
+    for (const id of [...frozen.slice(1), ...later]) {
+      expect(
+        tight.getItem(`${STORE_PREFIX}${id}`),
+        `${id} was lost by a refused revert`,
+      ).not.toBeNull();
+    }
   });
 
   it("one checkpoint per boundary, superseded in place; start-over clears them all", async () => {
@@ -628,6 +736,33 @@ describe("checkpoints, revert, and the sweep", () => {
     expect(refused.message).toContain(`lesson ${arc[0]!.id}`);
     expect(tight.keys().some((k) => k.startsWith(CKPT_PREFIX))).toBe(false);
     await ctx.gateway.close();
+  });
+
+  it("a MISFILED erased row is caught by its own bytes, not by the key it hides under", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    await playLesson(buildArc(loam)[0]!, ctx);
+    const rows = rowIds(storage);
+    const condemned = rows[rows.length - 1]!;
+    const smuggled = storage.getItem(`${STORE_PREFIX}${condemned}`)!;
+    await ctx.gateway.close();
+
+    // The row's bytes, filed under a key that names something else entirely. Only reading the
+    // VALUE can tell that this checkpoint is still carrying the record.
+    const decoy = "ab".repeat(34);
+    storage.removeItem(`${STORE_PREFIX}${condemned}`);
+    storage.setItem(`${STORE_PREFIX}${decoy}`, smuggled);
+    expect(takeCheckpoint(storage, 7).ok).toBe(true);
+    expect(Object.keys(readCheckpoint(storage, 7)!.rows)).not.toContain(
+      `${STORE_PREFIX}${condemned}`,
+    );
+
+    const report = sweepCheckpoints(storage, [condemned]);
+    expect(
+      report.destroyed.map((d) => d.lesson),
+      "a checkpoint carrying the erased bytes under another name survived",
+    ).toContain("7");
+    expect(storage.getItem(`${CKPT_PREFIX}7`)).toBeNull();
   });
 
   it("a checkpoint that only REMEMBERS the erasure survives it — the receipt is not the bytes", async () => {

@@ -108,7 +108,10 @@ export declare function bankCheckpoint(
   opts?: { label?: string },
 ): Promise<CheckpointOutcome>;
 
-export declare function readCheckpoint(storage: StorageLike, lesson: number): CheckpointBlob | null;
+export declare function readCheckpoint(
+  storage: StorageLike,
+  lesson: number | string,
+): CheckpointBlob | null;
 export declare function checkpointLessons(storage: StorageLike): number[];
 export declare function restoreCheckpoint(
   storage: StorageLike,
@@ -116,13 +119,14 @@ export declare function restoreCheckpoint(
   /** The ids an erasure condemned: proof, at the moment of the write, never an inference. */
   opts?: { erasedIds?: readonly string[] },
 ):
-  | { ok: true; restored: number; refused: string[] }
-  | { ok: false; refused?: string[]; message: string };
+  | { ok: true; restored: number; refused: string[]; keptOrders: string[] }
+  | { ok: false; restored?: number; refused?: string[]; message: string };
 export declare function clearCheckpoints(storage: StorageLike): void;
 
 export interface SweepReport {
-  readonly destroyed: { lesson: number; ids: string[]; reason: string }[];
-  readonly kept: { lesson: number }[];
+  /** The checkpoint's key SUFFIX, verbatim — the sweep never re-derives a name it read. */
+  readonly destroyed: { lesson: string; ids: string[]; reason: string }[];
+  readonly kept: { lesson: string }[];
 }
 
 export declare function sweepCheckpoints(

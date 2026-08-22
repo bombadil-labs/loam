@@ -437,17 +437,26 @@ async function doRevert(lesson) {
   const restored = restoreCheckpoint(storage, lesson, { erasedIds });
   ui.askRevert = null;
   if (!restored.ok) {
-    ui.refusal = restored.message;
-    await rerender();
+    // A refused revert still leaves the store holding rows this attempt put back, so the page
+    // must not go on rendering the ground it remembers. Reload with the message in hand: what
+    // is on screen and what is in the store have to be the same thing.
+    storage.setItem(REVERT_NOTE_KEY, restored.message);
+    window.location.reload();
     return;
   }
+  const said = [];
+  // Say it out loud rather than quietly restoring less, or more, than the student asked for.
   if (restored.refused.length > 0) {
-    // Say it out loud rather than quietly restoring less than the student asked for.
-    storage.setItem(
-      REVERT_NOTE_KEY,
+    said.push(
       `${restored.refused.length} record(s) this checkpoint held were erased since, and were not brought back.`,
     );
   }
+  if (restored.keptOrders.length > 0) {
+    said.push(
+      `${restored.keptOrders.length} erasure receipt(s) stayed: an undo may take back your work, never a forgetting.`,
+    );
+  }
+  if (said.length > 0) storage.setItem(REVERT_NOTE_KEY, said.join(" "));
   window.location.reload(); // the panes re-render from the restored ground, by construction
 }
 

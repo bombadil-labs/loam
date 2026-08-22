@@ -475,6 +475,28 @@ export class TutorialPage {
       .then((v) => v === true);
   }
 
+  /**
+   * The ids of the erasure receipts the store holds, read from the ROWS — in the canonical wire
+   * profile they are stored in, where an entity target is a bare `{id, context}`.
+   */
+  erasureOrderIds(): Promise<string[]> {
+    return this.tab
+      .eval(
+        `Object.keys(localStorage)
+           .filter((k) => /^loam:tutorial:[0-9a-f]+$/.test(k))
+           .filter((k) => {
+             try {
+               const row = JSON.parse(localStorage.getItem(k));
+               return (row.claims.pointers ?? []).some(
+                 (p) => p.target && p.target.context === "loam.erasure");
+             } catch { return false; }
+           })
+           .map((k) => k.slice("loam:tutorial:".length))
+           .sort()`,
+      )
+      .then((v) => json<string[]>(v));
+  }
+
   async checkpointLessons(): Promise<number[]> {
     const keys = await this.keys();
     return keys

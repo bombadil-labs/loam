@@ -310,8 +310,8 @@ describe("§48 — the progress is in the store, and nowhere else", () => {
     expect(revealed.length).toBeGreaterThan(0);
     // The note says HOW MANY it was holding back — the number, not merely a digit. A pane that
     // hides records without saying so is the opposite of the honesty the toggle is there for.
-    expect(hiddenNote, "the filter note does not say how many it held back").toContain(
-      `${revealed.length} more`,
+    expect(hiddenNote, "the filter note does not say how many it held back").toMatch(
+      new RegExp(`(^|\\D)${revealed.length} more`),
     );
     expect(await page.text('#ground-rows .delta[data-kind="tutorial"] .badge')).toContain(
       "tutorial",
@@ -454,6 +454,38 @@ describe("§48 — the quiz teaches rather than scolds", () => {
 });
 
 describe("§48 — the right to be forgotten reaches the checkpoints", () => {
+  it("reverting past an erasure does not un-forget it: the receipt stays, the bytes do not come back", async () => {
+    const { target } = await playUntil("erasure-finale");
+    const surviving = (await page.checkpointLessons())[0]!;
+    for (let i = 0; i < target.steps.length; i++) await page.runPending();
+
+    const erased = (await page.attrs("#sweep-notice", "data-erased"))[0]!
+      .split(" ")
+      .filter(Boolean);
+    expect(erased.length).toBeGreaterThan(0);
+    const receipts = await page.erasureOrderIds();
+    expect(receipts.length, "the erasure left no receipt in the store").toBeGreaterThan(0);
+    expect(await page.checkpointLessons(), "no checkpoint survived to revert to").toContain(
+      surviving,
+    );
+
+    // Revert to a moment BEFORE the forgetting. The student's work goes back; the record of the
+    // forgetting must not — an undo that deleted the receipt would leave the store no longer
+    // knowing it forgot, and the door would stop refusing those bytes.
+    await page.click(`[data-revert="${surviving}"]`);
+    await page.clickAndReload("[data-confirm-yes]");
+
+    const rows = await page.storeIds();
+    for (const dead of erased)
+      expect(rows, `${dead} came back through a revert`).not.toContain(dead);
+    for (const receipt of receipts) {
+      expect(rows, "the erasure receipt was deleted by a revert").toContain(receipt);
+    }
+    expect(await page.erasureOrderIds()).toEqual(receipts);
+    // and the page says so rather than quietly keeping rows the checkpoint did not have
+    expect(await page.text("#step-refusal")).toMatch(/receipt|forgetting/i);
+  });
+
   it("the sweep is two-sided at the bytes: the condemned blobs are gone, a named bystander is whole", async () => {
     const { target } = await playUntil("erasure-finale");
     const before = await page.checkpointLessons();
