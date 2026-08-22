@@ -40,9 +40,23 @@ live subscription; reloading makes "the panes re-render from the restored ground
 construction.
 
 **The lesson ROLES are a contract**, not decoration: `test/browser/tutorial.test.ts` freezes at
-its landing and finds what it exercises by role — `opening`, `reveal` (plants a term from
-inside a step), `erasure-finale` (erases a record an earlier lesson landed, which sweeps the
-checkpoints). An arc that renames or drops a role breaks that suite by design.
+its landing and finds what it exercises by role. An arc that renames or drops one breaks that
+suite by design. What each role must actually DO:
+
+- `opening` — the first lesson; boot has already happened.
+- `reveal` — plants at least one glossary term from INSIDE a step, not from the lesson's
+  `terms` (which are planted on entry). The where-does-this-live payoff needs the student to
+  have done something for it.
+- `erasure-finale` — erases a record an EARLIER lesson landed, so a boundary checkpoint is
+  holding it when the sweep runs. Erasing something the same lesson created leaves the sweep
+  with nothing to destroy, and the rail says so.
+
+**Four more things the arc owes the player**, each with a rail that fails without it: every
+lesson has at least one step whose store predicate is FALSE before it runs (a lesson of pure
+look-steps teaches a click and proves nothing); every step carries both observables; at least
+one lesson declares a quiz; and STEP IDS ARE DURABLE — a banked step is a claim naming the
+step by id, so renaming one in a later version silently un-banks it for every student who
+already did it.
 
 Build locally: `node scripts/build-site.mjs` then `node scripts/serve-site.mjs` →
 <http://127.0.0.1:4173/>. (`--out <dir>` builds elsewhere; the browser rail uses it so two
