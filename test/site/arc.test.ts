@@ -50,6 +50,7 @@ import {
   readProgress,
   restoreCheckpoint,
   resumeState,
+  skipQuiz,
   sweepCheckpoints,
   takeCheckpoint,
 } from "../../demos/tutorial/player.mjs";
@@ -206,6 +207,29 @@ describe("progress is claims", () => {
     expect(progress.steps.size).toBe(steps);
     expect(progress.quiz.size).toBe(quizzes);
     await ctx.gateway.close();
+  });
+
+  it("a skipped quiz is recorded as skipped, and manufactures no answer", async () => {
+    const storage = new MemStorage();
+    const ctx = await makeCtx(storage);
+    const arc = buildArc(loam);
+    const withQuiz = arc.find((l) => l.quiz !== undefined);
+    expect(withQuiz, "the arc declares no quiz").toBeDefined();
+    const quiz = withQuiz!.quiz!;
+
+    await playLesson(withQuiz!, ctx);
+    expect(readProgress(ctx).skipped.has(quiz.id)).toBe(false);
+    await skipQuiz(loam, ctx, quiz);
+
+    const after = readProgress(ctx);
+    expect(after.skipped.has(quiz.id), "the skip was not recorded").toBe(true);
+    // A skip is not an answer: it must not appear among the results the rail renders.
+    expect([...after.quiz.keys()]).toEqual([]);
+    // ...and it survives a reboot, so the arc does not re-ask on the next visit.
+    await ctx.gateway.close();
+    const back = await makeCtx(storage);
+    expect(readProgress(back).skipped.has(quiz.id)).toBe(true);
+    await back.gateway.close();
   });
 
   it("reads only the student's own LIVE claims: a stranger's progress claim and a struck one move nothing", async () => {
