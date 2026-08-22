@@ -93,7 +93,7 @@ const PRIVATE_LINE =
 // when it wants to know whether the words survived somewhere they should not.
 const PRIVATE_FRAGMENT = "jamie texted me";
 const LAST_LINE =
-  "four films, three pens, one thing forgotten on purpose — and every line of it still mine";
+  "four films, two of us, one thing forgotten on purpose — and every line of the rest still mine";
 const STRANGER_NOTE = "a perfect film, no notes";
 const ERASURE_REASON = "a third person's words, never mine to keep";
 
@@ -219,9 +219,12 @@ function claimedIdOf(row) {
 
 /**
  * Do these words appear in any ROW this browser has written under the store's prefix — not in a
- * reading of the ground, in the stored text itself? `offeredDeltas()` is what a reader is served;
- * a row the driver set aside, or one filed under a key that does not name it, is legibly present
- * on this machine and invisible there. An erasure's promise is about the second thing.
+ * reading of the ground, in the stored text itself? A reading is what a reader is SERVED; this is
+ * what the machine still HOLDS, and the erasure's promise is about the second one.
+ *
+ * It scopes to this origin's own prefix, which is the whole of what a page can ask about. Step
+ * 13.4 asserts it finds the words while they are there, so a false answer here is evidence
+ * rather than a needle that never matched.
  */
 function wordsInStorage(ctx, words) {
   const needle = asStored(words);
@@ -765,11 +768,14 @@ from the claims at the time you ask — which is why nothing here has to be kept
       role: "rewatch",
       title: "The rewatch",
       copy: `Two weeks later you put Arrival on again, on a laptop, half-asleep, and it is a 7.
-Same film, same you, different Tuesday. This is not a problem to resolve. You watched it twice;
-both nights happened; the diary keeps both. Everything it holds sits together in one place,
-called the ground, and the answer you read is a view of it: worked out on the spot, using the
-house rule you wrote in lesson two. The 9 is not overwritten, archived or hidden. It is simply
-not the latest thing you said.`,
+Same film, same you, different Tuesday. Everything this store holds sits together in one place,
+called the ground, and every answer you read is a view of it — worked out on the spot, using the
+house rule you wrote in lesson two. So the 7 does not overwrite the 9, or archive it, or hide it.
+It is simply the latest thing you said.
+
+Which means you never have to decide which night was the real one. Both were. That is not a
+compromise this thing is making; it is the only honest way to keep a diary, and almost nothing
+else lets you.`,
       terms: termsEntering(4),
       steps: [
         {
@@ -890,12 +896,12 @@ act is going to send you a bill for it.`,
       id: 6,
       role: "as-of",
       title: "The diary as of the night you wrote it",
-      copy: `Here is the question every other diary answers badly: not what you think of Arrival
-now, and not what you REMEMBER thinking — what did you actually say at the time? It is the same
-question with a moment pinned to it: as of the 14th of May. The 9 comes back. So does the Tenet
-note you struck, because on that evening you still believed it. Nothing is restored, because
-nothing was ever lost; the ground is all still there and the moment simply decides how much of
-it to read.`,
+      copy: `Here is a question worth asking a diary: not what you think of Arrival now, and not
+what you REMEMBER thinking — what did you actually say at the time? It is the same question with
+a moment pinned to it: as of the evening you wrote it all down. The 9 comes back. So does the
+Tenet note you struck, because that evening you still believed it. Nothing is restored, because
+nothing was ever lost; the ground is all still there, and the moment only decides how much of it
+to read.`,
       terms: termsEntering(6),
       quiz: {
         id: "act-ii",
@@ -1282,8 +1288,8 @@ most worth checking rather than believing.`,
         {
           id: "10.3",
           label: "Read tonight's entry through the OLD version",
-          have: "Copies of this diary in the world that still use the first version — Rae has one.",
-          want: "To know what happens when one of them opens tonight's entry.",
+          have: "A first version still sitting in your store, because nothing here is ever deleted.",
+          want: "To know whether it still answers, or whether you just broke it.",
           how: "Press the button. It answers Paddington 2, a 10, exactly as it always did.",
           run: async () => {},
           observe: {
@@ -1335,11 +1341,12 @@ one is not part of this page. Every definition in it is a claim in YOUR store, s
 planted the moment you first needed the word. So is your progress. So are your quiz answers. This
 tutorial has no memory of its own — it has been reading yours the whole time.
 
-And one piece of housekeeping, now that you have handled a few thousand of them. Record, claim
-and delta are three words for the same object: one signed statement that never changes, with a
-name made out of its own contents, so two of them that say the same thing ARE the same one.
-"Record" is what it is. "Claim" is what it does — somebody asserting something. "Delta" is what
-everyone who builds on this calls it, and now you can read their documentation.`,
+And one piece of housekeeping, now that you have made a hundred or so of them. Record, claim and
+delta are three words for the same object. "Record" is what it is: one signed statement that
+never changes. "Claim" is what it does: somebody saying something, and standing behind it.
+"Delta" is the name it goes by outside this tutorial. Same object, three angles, and that short
+string of letters on every row in the Ground pane is its name — worked out from the words
+themselves, which is why nothing in here ever had to be given a number.`,
       terms: termsEntering(11),
       quiz: {
         id: "act-iii",
@@ -1396,7 +1403,7 @@ everyone who builds on this calls it, and now you can read their documentation.`
           label: "Ask your own progress like any other question",
           have: "A progress list down the side, which looked like part of the page.",
           want: "To find every tick of it in your own store, signed by you.",
-          how: "Press the button. Every entry in the glossary names the record it is made of.",
+          how: "Press the button, then read the progress list: every tick on it is a record you signed.",
           run: async () => {},
           observe: {
             page: { selector: "#progress-rail", contains: "✓ 1." },
@@ -1410,7 +1417,13 @@ everyone who builds on this calls it, and now you can read their documentation.`
                 // compares the code with itself and can never fail. The rows are a different
                 // level: every word in that pane is a record this browser wrote down.
                 entries.every((e) => ctx.storage.getItem(STORE_PREFIX + e.deltaId) !== null) &&
-                progress.steps.size >= 24 &&
+                // EXACT, and both numbers are the same fact. The twenty-five steps of lessons
+                // 1-10 plus 11.1 make 26; this step's own banking makes 27, and the predicate is
+                // asked on both sides of it. Steps bank in order, one at a time, and the rail
+                // refuses a lesson the student has not reached, so no other count is reachable —
+                // which is why this is not a floor. A floor lets a step quietly stop banking and
+                // still read as a full journey.
+                (progress.steps.size === 26 || progress.steps.size === 27) &&
                 progress.entered.length >= 11
               );
             },
@@ -1525,8 +1538,8 @@ in each reading the whole time, waiting for you to notice.`,
       copy: `Rae's cousin found Rae's pen and logged fourteen nights of the same car film.
 Revoke the grant — the store's front door will refuse that key from now on. What it will not do
 is pretend the fourteen were never written, because a history you can quietly rewrite is not a
-history. Then do the part most systems get wrong twice: hand Rae a fresh key on the spot and
-grant that one. Keys are cheap. What you actually govern is who may write, and you are about to
+history. Then do the part that matters most and is easiest to get wrong: hand Rae a fresh key on
+the spot and grant that one. Nothing about Rae has changed, and keys are cheap anyway. What you actually govern is who may write, and you are about to
 change it twice in a minute without losing a single line of anything.`,
       terms: termsEntering(13),
       quiz: {
@@ -1655,7 +1668,16 @@ change it twice in a minute without losing a single line of anything.`,
             page: { selector: "#ground-rows", contains: MOVIE_NIGHT_NOTE },
             store: async (ctx) => {
               const night = list((await read(ctx, "viewing", MOVIE_NIGHT)).note);
-              return night.includes(PRIVATE_LINE) && night.includes(MOVIE_NIGHT_NOTE);
+              return (
+                night.includes(PRIVATE_LINE) &&
+                night.includes(MOVIE_NIGHT_NOTE) &&
+                // AND THE SCANNER CAN SEE THEM IN THE ROWS. Lesson 14 proves those words are in
+                // no row afterwards; that proof is worth nothing unless the same scanner, with
+                // the same needle, finds them HERE — where they certainly are. A needle escaped
+                // the wrong way reads "clean" on an empty store and on a full one alike, so this
+                // is the assertion that makes the later absence mean something.
+                wordsInStorage(ctx, PRIVATE_LINE)
+              );
             },
           },
         },
@@ -1741,10 +1763,10 @@ not a right to be forgotten, and Jamie is owed the real one.`,
               return (
                 // gone from what any reader is served...
                 !anywhere(ctx, PRIVATE_LINE) &&
-                // ...AND from the rows themselves, which is the harder half and the one the
-                // promise is actually about: a row the driver set aside, or one filed under a
-                // key that does not name it, is legibly on this machine and invisible to the
-                // reading above.
+                // ...AND from the rows this browser wrote, asked at the level the rows are
+                // spelled at. Step 13.4 proved this same scanner finds these same words when
+                // they are there, so the false here is a fact rather than a needle that never
+                // matched anything.
                 !wordsInStorage(ctx, PRIVATE_LINE) &&
                 loam.readTombstones(ctx.gateway.reactor, ctx.author).size >= 1 &&
                 // ...and the diary is whole around the hole: the line beside it survived, and so
@@ -1884,32 +1906,18 @@ not a right to be forgotten, and Jamie is owed the real one.`,
       id: 15,
       role: "homecoming",
       title: "The homecoming",
-      copy: `Take it home. What comes out of this tab is not a report about your diary and it is
-not a best-effort dump of it. It is the diary: the same records, the same key, the same rules
-about who may write and what was removed — so opening it somewhere else gives you the same
-answers, character for character. Including the answer about Jamie, which is that there is no
-answer, and a receipt saying so. You have had the key since lesson one; this is the part where it
-turns out to have been the whole point.
+      copy: `Take it home. What comes out of this tab is not a summary of your diary and it is not
+a picture of it. It IS the diary: the same records, the same key, the same rules about who may
+write and what was removed — so opening it on another machine gives you the same answers,
+character for character. Including the answer about Jamie, which is that there is no answer, and
+a receipt saying so.
 
-Afterwards, Rae wants a store of their own. That is the next journey.`,
+Rae has been watching all of this and wants one of their own. That is another journey. Yours ends
+the way it started, with the key in your hand and one more thing to write down.`,
       terms: termsEntering(15),
       steps: [
         {
           id: "15.1",
-          label: `Write the last line: "${LAST_LINE}"`,
-          have: "Four films, three pens, and one thing removed on purpose.",
-          want: "A sentence at the end of it, because a diary should end with one.",
-          how: "Press the button. It lands the same way every other line did.",
-          run: async (ctx) => {
-            await ctx.gateway.append([field(loam, ctx, DIARY, "note", LAST_LINE)]);
-          },
-          observe: {
-            page: { selector: "#ground-rows", contains: LAST_LINE },
-            store: async (ctx) => anywhere(ctx, LAST_LINE),
-          },
-        },
-        {
-          id: "15.2",
           label: "Carry it out, and open it somewhere else",
           have: "A store that lives in one browser tab, which is a frightening place to live.",
           want: "The same store somewhere else, proven the same rather than promised the same.",
@@ -1947,7 +1955,7 @@ Afterwards, Rae wants a store of their own. That is the next journey.`,
           },
         },
         {
-          id: "15.3",
+          id: "15.2",
           label: "Ask the copy for what you forgot",
           have: "A second store, holding everything this one holds.",
           want: "Proof that everything does not include the words you removed.",
@@ -1980,6 +1988,20 @@ Afterwards, Rae wants a store of their own. That is the next journey.`,
                 await copy.close();
               }
             },
+          },
+        },
+        {
+          id: "15.3",
+          label: `Write the last line: "${LAST_LINE}"`,
+          have: "Your whole diary, proven whole, in your hands and on your machine.",
+          want: "One more line in it, because that is what a diary is for.",
+          how: "Press the button. It lands the same way the very first one did, and you are done.",
+          run: async (ctx) => {
+            await ctx.gateway.append([field(loam, ctx, DIARY, "note", LAST_LINE)]);
+          },
+          observe: {
+            page: { selector: "#ground-rows", contains: LAST_LINE },
+            store: async (ctx) => anywhere(ctx, LAST_LINE),
           },
         },
       ],

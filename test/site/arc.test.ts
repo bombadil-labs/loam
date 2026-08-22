@@ -15,7 +15,7 @@
 // term manifest, the vocabulary scan, the glossary trail — name the arc on purpose, because
 // that is what they are for.
 //
-// FOUR GAPS, NAMED. (1) The progress-claims case asserts the CLAIMS and the reading over them;
+// FIVE GAPS, NAMED. (1) The progress-claims case asserts the CLAIMS and the reading over them;
 // the page's revert rail renders its checkpoint rows from the BLOB KEYS instead, so the two can
 // legitimately differ. The ordinary cause is a REVERT — restoring an earlier boundary drops the
 // later blobs while the claims that recorded them stay in the ground, which is right: the
@@ -25,16 +25,20 @@
 // `test/browser/tutorial.test.ts`. (3) The finale's own sweep observable is deliberately
 // ONE-SIDED — it may not require a surviving checkpoint, because the frozen browser suite
 // requires that lesson to be passable with every blob deleted. The other side (a bystander blob
-// is SPARED) is asserted here, in "the finale sweeps the real checkpoints", where this file owns
+// is SPARED) is asserted here, in "the finale sweeps the REAL checkpoints", where this file owns
 // the fixture and can guarantee a bystander exists. (4) The vocabulary scan reads the arc's own
 // copy, not the page's furniture: a pane LABEL in `index.html` is not a lesson's word, and the
-// scan says so by allowing the capitalised pane names and nothing else.
+// scan says so by allowing the capitalised pane names and nothing else. (5) A narrowed reading
+// has TWO halves, asserted in two places: whose CLAIMS it admits is bound by lesson 12's own step
+// observables (a stranger's rating and note reach the plain description and neither shelf), and
+// whose STRIKES it honours is bound here, in "a stranger's STRIKE reaches the plain description
+// and neither shelf". Neither case covers the other; a reading that lost one half would still
+// pass the case for the other.
 
-import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as loam from "../../src/browser/index.js";
 import { run } from "../../src/cli/cli.js";
 import { storePath } from "../../src/cli/config.js";
@@ -42,8 +46,11 @@ import { SqliteBackend } from "../../src/store/sqlite.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemStorage } from "../store/mem-storage.js";
 import {
+  CHASE,
   DIARY,
   MOVIE_NIGHT,
+  RAE,
+  TENET,
   TERMS,
   VIEWING,
   bootTutorialStore,
@@ -119,15 +126,6 @@ const claimsWithContext = (ctx: LessonCtx, context: string): unknown[] =>
       ),
     );
 
-beforeAll(() => {
-  // The packets are committed data the arc's federation lessons stand on; a drifted generator
-  // fails here rather than inside a lesson that is confused by it.
-  execFileSync(process.execPath, [join("scripts", "gen-packets.mjs"), "--check"], {
-    cwd: process.cwd(),
-    stdio: "pipe",
-  });
-});
-
 // --- the vocabulary scan ------------------------------------------------------------------------
 //
 // One rule, mechanically: NO TERM APPEARS IN LESSON COPY BEFORE THE LESSON THAT INTRODUCES IT.
@@ -138,8 +136,10 @@ beforeAll(() => {
 //
 // PANE NAMES ARE FURNITURE, NOT VOCABULARY. `index.html` labels a tab "Ground" and another
 // "View", and lesson one has to be able to say which tab to open. The scan therefore allows a
-// match whose exact text is one of those labels — capitalised, as the page prints them — and
-// nothing else. A lowercase "ground" in lesson one is still a violation, which is the point.
+// match whose exact text is one of those labels — CAPITALISED, exactly as the page prints them —
+// and nothing else. The case is the whole of the carve-out's safety: lowercase "ground" in lesson
+// one is the concept, not the tab, and stays a violation. Both directions are asserted below,
+// because a carve-out nobody probes is a hole nobody sees.
 
 const PANE_LABELS = ["View", "Views", "Ground", "Glossary"] as const;
 
@@ -173,6 +173,24 @@ function copyUnits(arc: Lesson[]): CopyUnit[] {
     }
   }
   return units;
+}
+
+/**
+ * The names this arc refuses to use at all. A workshop decision: schema, hyperschema and gather
+ * are the deeper names, and the arc teaches without them.
+ */
+const BANNED = ["schema", "hyperschema", "gather"] as const;
+
+/** Every place the arc reaches for a name it agreed not to use. */
+function bannedUses(arc: Lesson[]): string[] {
+  const found: string[] = [];
+  for (const unit of copyUnits(arc)) {
+    for (const word of BANNED) {
+      if (new RegExp(`\\b${word}s?\\b`, "i").test(unit.text))
+        found.push(`"${word}" in ${unit.where}`);
+    }
+  }
+  return found;
 }
 
 /** Every place a word of the arc's vocabulary is used before the lesson that introduces it. */
@@ -1352,47 +1370,206 @@ describe("the vocabulary is earned before it is used", () => {
     expect(violations[0]).toContain("lesson 3");
     expect(violations[0]).toContain("lesson 11"); // and it says where the word is introduced
 
-    // ...and the OTHER half: it does not fire on the page's own furniture. "Ground" is a tab
-    // label in `index.html`, and lesson one has to be able to name the tab it is pointing at.
+    // ...and the SAME violation planted in a step's framing and in a quiz choice, because the
+    // lesson's `copy` is one unit out of nearly two hundred. A scan narrowed to `copy` alone
+    // would leave every step sentence and every quiz answer unread, and nothing above would say
+    // so — the BREADTH is what is pinned here, not the rule.
+    const inStep: Lesson = {
+      ...early,
+      steps: early.steps.map((st, i) => (i === 0 ? { ...st, want: `${st.want} A delta.` } : st)),
+    };
+    const stepHits = earlyUses(arc.map((l) => (l.id === early.id ? inStep : l)));
+    expect(stepHits.length, "a term used early in a step's framing went unscanned").toBe(1);
+    expect(stepHits[0]).toContain(`step ${early.steps[0]!.id} want`);
+
+    const withQuiz = arc.find((l) => l.quiz !== undefined && l.id < 11)!;
+    const inChoice: Lesson = {
+      ...withQuiz,
+      quiz: {
+        ...withQuiz.quiz!,
+        questions: withQuiz.quiz!.questions.map((q, i) =>
+          i === 0 ? { ...q, choices: [...q.choices, "Every delta, in order"] } : q,
+        ),
+      },
+    };
+    const choiceHits = earlyUses(arc.map((l) => (l.id === withQuiz.id ? inChoice : l)));
+    expect(choiceHits.length, "a term used early in a quiz choice went unscanned").toBe(1);
+    expect(choiceHits[0]).toContain("choice");
+
+    // ...and the OTHER half: it does not fire on the page's own furniture. "Ground" is a label
+    // `index.html` prints, and lesson one has to be able to name the tab it is pointing at.
     const shell = readFileSync(join(process.cwd(), "demos", "tutorial", "index.html"), "utf8");
     for (const label of PANE_LABELS) {
-      if (label === "Views") continue; // rendered by app.mjs, not declared in the shell
-      expect(shell, `"${label}" is not a pane label in the shell`).toContain(`>${label}<`);
+      expect(shell, `"${label}" is not a label this page prints`).toContain(label);
     }
     const furniture: Lesson = { ...early, copy: `${early.copy} Open the Ground pane.` };
     expect(earlyUses(arc.map((l) => (l.id === early.id ? furniture : l)))).toEqual([]);
+
+    // THE CARVE-OUT IS THE CASE, and this is the direction that would rot silently. Lowercase
+    // "ground" in lesson 3 is the IDEA — introduced in lesson 4 — not the tab, and a carve-out
+    // that stopped reading capitals would wave it through along with every other term.
+    const idea: Lesson = { ...early, copy: `${early.copy} It all sits in the ground together.` };
+    const ideaHits = earlyUses(arc.map((l) => (l.id === early.id ? idea : l)));
+    expect(
+      ideaHits.length,
+      "lowercase `ground` passed as a pane name — the carve-out stopped reading case",
+    ).toBe(1);
+    expect(ideaHits[0]).toContain('"ground"');
   });
 
-  it("every word the arc introduces is a word the arc actually says", () => {
+  it("every word the arc introduces is a word the arc actually says — in a lesson, not in the glossary", () => {
     const arc = buildArc(loam);
-    const units = copyUnits(arc);
+    // GLOSSARY MEANINGS ARE EXCLUDED FROM THE "SAID" SIDE, and that is the whole point of this
+    // case. The manifest can satisfy itself: "erase" appears in the definition of "receipt", and
+    // "record" in the definition of "key", so counting meanings as usage would let a word be
+    // introduced, defined, and never once spoken in a lesson — a glossary entry for something
+    // the student never meets. Meanings stay on the SCANNED side (a definition may not reach for
+    // a word the student has not met either); they are simply not evidence that the arc says it.
+    const spoken = copyUnits(arc).filter((u) => !u.where.includes("glossary entry"));
     const orphans: string[] = [];
     for (const term of TERMS) {
-      const said = units.some(
+      const said = spoken.some(
         (u) =>
           u.lesson >= term.lesson &&
           term.forms.some((form) => new RegExp(`\\b${form}\\b`, "i").test(u.text)),
       );
       if (!said) orphans.push(term.term);
     }
-    // A term planted in the glossary and never used in a lesson is a definition for a word the
-    // student never meets — the mirror of the failure above, and just as dishonest.
     expect(orphans, "the glossary defines words the arc never says").toEqual([]);
+    // ...and the exclusion is not theoretical: at least one term really is used inside another
+    // term's meaning, so a version of this case that counted meanings would pass on less.
+    const inMeaningsOnly = TERMS.filter((t) =>
+      TERMS.some(
+        (other) => other.term !== t.term && new RegExp(`\\b${t.term}\\b`, "i").test(other.meaning),
+      ),
+    );
+    expect(
+      inMeaningsOnly.length,
+      "no term is used inside another's meaning — this exclusion is measuring nothing",
+    ).toBeGreaterThan(0);
   });
 
-  it("the names this arc refuses to use never appear", () => {
-    // A workshop decision: schema, hyperschema and gather are the deeper names, and this arc
-    // teaches without them. They belong to the glossary's appendix, never to a lesson.
-    const banned = ["schema", "hyperschema", "gather"];
-    const found: string[] = [];
-    for (const unit of copyUnits(buildArc(loam))) {
-      for (const word of banned) {
-        if (new RegExp(`\\b${word}s?\\b`, "i").test(unit.text)) {
-          found.push(`"${word}" in ${unit.where}`);
-        }
-      }
-    }
-    expect(found).toEqual([]);
+  it("the names this arc refuses to use never appear — and the scan for them is not asleep", () => {
+    const arc = buildArc(loam);
+    expect(bannedUses(arc)).toEqual([]);
+
+    // RED-PROOF, in the two places the scan is most likely to stop looking: a step's framing and
+    // a quiz choice. The lesson's `copy` is the obvious unit; the other 160-odd are the ones a
+    // narrowed scan would drop silently while every case here stayed green.
+    const withQuiz = arc.find((l) => l.quiz !== undefined)!;
+    const inStep: Lesson = {
+      ...withQuiz,
+      steps: withQuiz.steps.map((st, i) =>
+        i === 0 ? { ...st, want: `${st.want} The schema decides.` } : st,
+      ),
+    };
+    const caughtInStep = bannedUses(arc.map((l) => (l.id === withQuiz.id ? inStep : l)));
+    expect(caughtInStep.length, "a banned name in a step's framing went unscanned").toBe(1);
+    expect(caughtInStep[0]).toContain("step");
+
+    const inChoice: Lesson = {
+      ...withQuiz,
+      quiz: {
+        ...withQuiz.quiz!,
+        questions: withQuiz.quiz!.questions.map((q, i) =>
+          i === 0 ? { ...q, choices: [...q.choices, "By running a gather"] } : q,
+        ),
+      },
+    };
+    const caughtInChoice = bannedUses(arc.map((l) => (l.id === withQuiz.id ? inChoice : l)));
+    expect(caughtInChoice.length, "a banned name in a quiz choice went unscanned").toBe(1);
+    expect(caughtInChoice[0]).toContain("choice");
+  });
+});
+
+describe("the arc's names are durable", () => {
+  it("pins every id a banked record already points at — renaming one orphans a student mid-arc", () => {
+    // WHY THIS IS A RAIL AND NOT A STYLE NOTE. Every one of these strings is written into a
+    // student's own store the moment they reach the step that uses it: a banked step is a claim
+    // naming the step BY ID, a viewing is a claim filed AT an entity id, a glossary word is a
+    // claim at `tutorial:term:<word>`. Change one in a later version and the store on somebody's
+    // laptop still points at the old name — their banked step silently un-banks, their diary
+    // entry becomes an orphan nothing reads. The README states this for step ids; the entity ids
+    // are the same promise and had nothing holding them.
+    //
+    // It is also the mutation `hollow-test` walked straight through: renaming the movie-night
+    // entity changed no behaviour any other rail could see.
+    expect({ DIARY, VIEWING, TENET, MOVIE_NIGHT, CHASE, RAE }).toEqual({
+      DIARY: "diary:mine",
+      VIEWING: "viewing:arrival",
+      TENET: "viewing:tenet",
+      MOVIE_NIGHT: "viewing:paddington-2",
+      CHASE: "viewing:fast-and-furious",
+      RAE: "person:rae",
+    });
+
+    const arc = buildArc(loam);
+    expect(arc.map((l) => `${l.id}:${l.role}`)).toEqual([
+      "1:opening",
+      "2:describe",
+      "3:first-write",
+      "4:rewatch",
+      "5:unsay",
+      "6:as-of",
+      "7:second-hand",
+      "8:policies",
+      "9:shelves",
+      "10:evolution",
+      "11:reveal",
+      "12:stranger",
+      "13:revocation",
+      "14:erasure-finale",
+      "15:homecoming",
+    ]);
+    expect(arc.flatMap((l) => l.steps.map((s) => s.id))).toEqual([
+      "1.1",
+      "1.2",
+      "1.3",
+      "1.4",
+      "2.1",
+      "3.1",
+      "3.2",
+      "3.3",
+      "4.1",
+      "4.2",
+      "5.1",
+      "6.1",
+      "6.2",
+      "6.3",
+      "7.1",
+      "7.2",
+      "7.3",
+      "8.1",
+      "8.2",
+      "8.3",
+      "9.1",
+      "10.1",
+      "10.2",
+      "10.3",
+      "10.4",
+      "11.1",
+      "11.2",
+      "12.1",
+      "12.2",
+      "13.1",
+      "13.2",
+      "13.3",
+      "13.4",
+      "14.1",
+      "14.2",
+      "14.3",
+      "14.4",
+      "15.1",
+      "15.2",
+      "15.3",
+    ]);
+    expect(arc.filter((l) => l.quiz !== undefined).map((l) => l.quiz!.id)).toEqual([
+      "act-i",
+      "act-ii",
+      "act-iii",
+      "act-iv",
+      "act-v",
+    ]);
   });
 });
 
@@ -1454,7 +1631,7 @@ describe("the fifteen lessons, end to end", () => {
     await ctx.gateway.close();
   });
 
-  it("a stranger's strike reaches the plain description and neither shelf: trust is the reading's, not the store's", async () => {
+  it("a stranger's STRIKE reaches the plain description and neither shelf — the mask half of a narrowed reading", async () => {
     const storage = new MemStorage();
     const ctx = await makeCtx(storage);
     const arc = buildArc(loam);
@@ -1552,6 +1729,11 @@ describe("the fifteen lessons, end to end", () => {
     expect(before.length, "the arc reaches its forgetting with no checkpoints").toBeGreaterThan(1);
     const bystander = before[0]!;
     const bystanderHeld = Object.keys(readCheckpoint(storage, bystander)!.rows);
+    // An empty baseline would make "the bystander is untouched" true of a destroyed blob too.
+    expect(
+      bystanderHeld.length,
+      "the bystander checkpoint holds nothing to be spared",
+    ).toBeGreaterThan(0);
     // The blob that WILL be holding the condemned bytes when the sweep runs — named before the
     // erasure, because afterwards there is no way to identify it.
     const doomed = before.filter((lesson) => {

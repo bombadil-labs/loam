@@ -101,6 +101,13 @@ one lesson declares a quiz; and STEP IDS ARE DURABLE — a banked step is a clai
 step by id, so renaming one in a later version silently un-banks it for every student who
 already did it.
 
+**And the ENTITY ids are the same promise.** A viewing is a claim filed at `viewing:arrival`; a
+glossary word is a claim at `tutorial:term:<word>`. Rename one and the store on somebody's laptop
+still points at the old name — their diary entry becomes an orphan nothing reads, exactly as a
+renamed step un-banks itself. `test/site/arc.test.ts` pins every one of them literally ("the arc's
+names are durable"), because nothing else could: renaming an entity consistently changes no
+behaviour any other rail can see, and mutation testing walked straight through it.
+
 Build locally: `node scripts/build-site.mjs` then `node scripts/serve-site.mjs` →
 <http://127.0.0.1:4173/>. (`--out <dir>` builds elsewhere; the browser rail uses it so two
 suites never share one output directory.)
