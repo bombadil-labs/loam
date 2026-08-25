@@ -88,9 +88,9 @@ describe("stock dependencies are derived from the bytes", () => {
   });
 
   it("entryLensName refuses a shelf entry that carries no lens name at all", () => {
-    expect(() =>
-      entryLensName({ name: "broken", summary: "", registration: {} }),
-    ).toThrow(/no lens name/);
+    expect(() => entryLensName({ name: "broken", summary: "", registration: {} })).toThrow(
+      /no lens name/,
+    );
   });
 
   // The walk sees the expand's BOTH names — the child program (`schema`) and the child reading
