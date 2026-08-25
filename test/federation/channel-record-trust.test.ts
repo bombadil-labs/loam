@@ -532,6 +532,15 @@ describe("T217 — an illegible prefix refuses the read rather than answering fr
     grounds.push(me);
     await alice.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
     await alice.append([observed(FERN, "height", 11, 1000, PEER_SEED)]);
+
+    // A SECOND illegible channel, opened FIRST so it sorts ahead of alice's in the reader's
+    // first-append order. It is what forces the lookup to match on BOTH halves: a search that
+    // accepted "illegible" OR "this name's prefix" would find this one and refuse in its name,
+    // telling a person to go and look at a channel that has nothing to do with their lens.
+    const other = await me.openChannel({ into: "friends", prefix: "bram", source: nothing });
+    await truncate(me, other.name, "prefix");
+    expect(me.channelStatus(other.name)[0]!.unreadable).toEqual(["prefix"]);
+
     const ch = await me.openChannel({
       into: "friends",
       prefix: "alice",
@@ -558,8 +567,31 @@ describe("T217 — an illegible prefix refuses the read rather than answering fr
     // The half that matters: the receiver's own 999 did not answer in the peer's name.
     expect(JSON.stringify(after.data ?? {})).not.toContain("999");
     const said = JSON.stringify(after.errors ?? []);
-    expect(said).toContain(ch.name);
     expect(said).toMatch(/does not carry its prefix/);
+    // ...and it names THIS lens's channel, not the other illegible one.
+    expect(said).toContain(ch.name);
+    expect(said).not.toContain(other.name);
+
+    // THE SUBSCRIPTION DOOR TOO. It cannot scope a channel lens at all, so it refuses one by
+    // asking `channelLens` — and a reader that answered "not a channel lens" for an illegible
+    // prefix would stop that refusal and stream the receiver's own ground instead.
+    await expect(
+      me.subscribe(`subscription { alice_Plant(entity: "${FERN}") { height } }`),
+    ).rejects.toThrow(/federation channel/);
+
+    // Two-sided on that door: an ordinary lens, in a store with no channel at all, still
+    // subscribes. Without this a `channelLens` that answered TRUE for everything would satisfy the
+    // refusal above and break every subscription in the store. It needs its own store because
+    // `alice:Plant` already serves this law here, and identical law does not bind twice.
+    const solo = await Gateway.boot(
+      new MemoryBackend(),
+      assembleGenesis({ operatorSeed: "d5".repeat(32), registrations: [] }),
+    );
+    grounds.push(solo);
+    await solo.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+    const stream = await solo.subscribe(`subscription { plant(entity: "${FERN}") { height } }`);
+    expect(stream).toBeDefined();
+    await stream.return?.(undefined);
   });
 });
 

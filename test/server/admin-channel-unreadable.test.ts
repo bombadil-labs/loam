@@ -182,7 +182,9 @@ describe("T217 — the channels panel will not guess at a record it cannot read"
 
     const row = rowFor(html, BRAM);
     expect(row).not.toBe("");
-    expect(row).toContain("unreadable");
+    // STRUCTURAL, not a colour: the panel's own convention is that a marker survives a
+    // stylesheet-less read, so the tag is part of what this row promises.
+    expect(row).toContain("<strong>unreadable");
     // It NAMES the field, which is the half only the reader's marker can supply.
     expect(row).toContain("lastSyncedAt");
     // And it says nothing about a health it cannot read. "never synced" is the exact false report
