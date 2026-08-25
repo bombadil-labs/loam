@@ -1,0 +1,6 @@
+{
+  "body": "T233's severed-channel guard reads channelStatusImpl at stamp time, on every non-opening stamp — one full reactor.snapshot() walk per stamp on the standing-sync hot path, over a ground that only grows. The scan is CORRECT and must stay: a cached poll-top read reopens the resurrection in a concurrent-drop window (T233 proved this — the guard must read liveness current at the append). So the fix is not to cache; it is to make the stamp-time read O(1).\n\nBuild: maintain a live-channel-name index the guard consults in constant time — updated when a channel record is stamped and when dropChannel negates a lineage — instead of walking the ground. The index must derive from the same operator-authored, lawful-strike slice readChannels uses, so it can never disagree with the reader (the whole point of T233's guard).\n\nRail (two-sided): the guard refuses a severed lineage AND admits a live one, reading the index, with NO full-ground walk on the stamp path (assert the walk count, or a large-store timing bound); the T233 criterion (c) interleave stays green against the index-based guard.\n\nPure optimization; changes nothing a reader or a door observes. Self-merges on the ordinary bar once built and audited. Depends on T233.",
+  "category": "bug",
+  "id": "T237",
+  "title": "A stamp-time liveness check that does not walk the whole ground (T233's H8)"
+}
