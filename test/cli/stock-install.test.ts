@@ -20,6 +20,10 @@
 // is unpinnable on a one-dependency shelf — an interleaved check-then-install is observationally
 // identical here. The first multi-edge entry (person-graph, later in this arc) earns the rail
 // that distinguishes them: its second dependency mismatching must leave the FIRST unpublished.
+// The pre-flight also sees only LENS-name contests: a bespoke reading under a DIFFERENT lens
+// over stock's program at the default entity is invisible to it and is caught instead by the
+// publish trial's rival-body refusal — loud, before any delta, on today's shelf; on a multi-dep
+// shelf that refusal would fire mid-install, which is the same future rail's second case.
 
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -258,6 +262,53 @@ describe("loam register --stock installs the closure", () => {
     const lenses = await boundLenses(home);
     expect(lenses).not.toContain("ShallowPerson");
     expect(lenses.filter((l) => l === "Org")).toHaveLength(1);
+  });
+
+  // The evolve predicate's distinguishing state: a bespoke registration under stock's PROGRAM
+  // name at its OWN registration entity. Same program → the pre-flight passes; different entity
+  // → this is a contest, not an evolve, and the §42.4 qualified report is its voice. A lens-
+  // membership evolve check prints "evolves it" here; the entity-keyed one stays silent.
+  it("a same-program bespoke binding at another entity is a contest, never an evolve", async () => {
+    await run(["init", "--home", home], io());
+    const rival = join(home, "org-at-mine.json");
+    writeFileSync(
+      rival,
+      JSON.stringify({
+        hyperschema: {
+          name: "Org",
+          alg: 1,
+          body: {
+            op: "group",
+            key: "byTargetContext",
+            in: {
+              op: "select",
+              pred: { hasPointer: { targetEntity: { var: "root" } } },
+              in: { op: "mask", policy: "drop", in: "input" },
+            },
+          },
+        },
+        schema: {
+          name: "Org",
+          alg: 1,
+          props: { name: { pick: { order: { byTimestamp: "desc" } } } },
+          default: { pick: { order: { byTimestamp: "desc" } } },
+        },
+        roots: [],
+        entity: "hyperschema:Mine",
+        writable: ["name"],
+      }),
+    );
+    expect(await run(["register", rival, "--home", home], io())).toBe(0);
+
+    out.length = 0;
+    err.length = 0;
+    const code = await run(["register", "--stock", "org", "--home", home], io());
+    // The publish lands, qualified (two entities now contest the lens) — the frozen §42.4 shape.
+    expect(code).toBe(0);
+    const printed = out.join("\n");
+    expect(printed).toMatch(/registered\s+Org/i);
+    expect(printed, "a contest is not an evolve").not.toMatch(/evolves it/);
+    expect(err.join("\n")).toMatch(/does not bind/);
   });
 
   // The divergence warning's OTHER layer: a bespoke reading whose body is byte-identical to
