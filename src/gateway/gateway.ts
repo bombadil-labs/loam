@@ -120,6 +120,7 @@ import {
   programOf,
   readRegistrationVersions,
   readWithdrawnRegistrations,
+  type RefSpecs,
   type ResolverSpecs,
   type ClaimTemplates,
   type Registration,
@@ -168,9 +169,11 @@ import {
   claimEntityImpl,
   clearEntityImpl,
   linkEntityImpl,
+  linkRefEntityImpl,
   mutateEntityImpl,
   removeEntityImpl,
   severEntityImpl,
+  unlinkRefEntityImpl,
 } from "./mutate.js";
 import {
   gatherForRetractionImpl,
@@ -544,6 +547,10 @@ export class Gateway {
         this.linkEntity(name, entity, field, target, context, actorSeed),
       sever: (name, entity, field, targets, actorSeed) =>
         this.severEntity(name, entity, field, targets, actorSeed),
+      linkRef: (name, entity, prop, target, actorSeed) =>
+        this.linkRefEntity(name, entity, prop, target, actorSeed),
+      unlinkRef: (name, entity, prop, target, actorSeed) =>
+        this.unlinkRefEntity(name, entity, prop, target, actorSeed),
       watch: (name, entity) => this.watchEntity(name, entity, door),
       claim: (pointers, actorSeed) => this.claimEntity(pointers, actorSeed),
       list: (name, opts) => this.list(name, opts),
@@ -650,8 +657,9 @@ export class Gateway {
     roots: readonly string[],
     mutations?: ClaimTemplates,
     writable?: readonly string[],
+    refs?: RefSpecs,
   ): void {
-    return registerImpl(this, hyperschema, schema, roots, mutations, writable);
+    return registerImpl(this, hyperschema, schema, roots, mutations, writable, refs);
   }
 
   // Publish a schema and its registration as data, then bind them, so the surface survives
@@ -670,6 +678,7 @@ export class Gateway {
     mutations?: ClaimTemplates,
     writable?: readonly string[],
     resolvers?: ResolverSpecs,
+    refs?: RefSpecs,
   ): Promise<PublishOutcome> {
     // Through the living-name critical section (T33, criterion 14): a direct publish takes the
     // same latest-wins name a blessing does, so it must not be able to move a winner underneath a
@@ -685,6 +694,7 @@ export class Gateway {
         mutations,
         writable,
         resolvers,
+        refs,
       ),
     );
   }
@@ -1440,6 +1450,28 @@ export class Gateway {
     actorSeed?: string,
   ): Promise<ResolvedNode> {
     return severEntityImpl(this, name, entity, field, targets, actorSeed);
+  }
+
+  // Link a declared reference (SPEC §51): the body lives in mutate.ts.
+  private linkRefEntity(
+    name: string,
+    entity: string,
+    prop: string,
+    target: string,
+    actorSeed?: string,
+  ): Promise<ResolvedNode> {
+    return linkRefEntityImpl(this, name, entity, prop, target, actorSeed);
+  }
+
+  // Unlink a declared reference (SPEC §51): the body lives in mutate.ts.
+  private unlinkRefEntity(
+    name: string,
+    entity: string,
+    prop: string,
+    target: string,
+    actorSeed?: string,
+  ): Promise<ResolvedNode> {
+    return unlinkRefEntityImpl(this, name, entity, prop, target, actorSeed);
   }
 
   // One signed MULTI-POINTER delta from an explicit pointer list (SPEC §14): the body lives in mutate.ts.

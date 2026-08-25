@@ -16,7 +16,7 @@ import { authorForSeed, makeNegationClaims, signClaims } from "@bombadil/rhizoma
 import type { HVEntry, Primitive } from "@bombadil/rhizomatic";
 import type { Gateway } from "./gateway.js";
 import type { ClaimPointerSpec, ResolvedNode } from "./gql.js";
-import { edgeRoles } from "./registration.js";
+import { edgeRoles, referenceProps, type ReferenceProp } from "./registration.js";
 
 // One signed property-claim delta per provided property, signed as the ACTOR (or the
 // operator when no actor is named), appended through the same validated, capability-enforced
@@ -246,6 +246,98 @@ export function severEntityImpl(
           p.role === role &&
           p.target.kind === "entity" &&
           (wanted === undefined || wanted.has(p.target.entity.id)),
+      ),
+  );
+}
+
+// The declared reference prop behind a generated link/unlink mutation (SPEC §51), or a refusal.
+// The classification is re-derived from the def on every call — the same `referenceProps` walk the
+// surface generated the mutation from, so the write can never author a shape the surface did not
+// advertise. `links: false` (a prefix/inSet role family) refuses too: the surface minted no
+// mutation for it, and a door reaching here by hand gets the same answer.
+function referencePropFor(gw: Gateway, name: string, prop: string): ReferenceProp {
+  const def = gw.def(name);
+  const ref = referenceProps(def.hyperschema.body, def.refs).get(prop);
+  if (ref === undefined || !ref.links) {
+    throw new Error(
+      `schema ${name} declares no reference prop "${prop}" to link — a link mutation exists ` +
+        `only for a prop named in the registration's \`refs\` with a single canonical role (§51)`,
+    );
+  }
+  return ref;
+}
+
+// Link a declared reference (SPEC §51.3): assert ONE symmetric two-pointer delta —
+// { role R, at target, context C_reciprocal } + { role R_reverse, at entity, context P }.
+// The root-side context is always P: that is what folds the delta into the prop. With no
+// reciprocal declared, the target-side pointer carries NO context (nothing folds on the far
+// side — registration already warned, loudly) and the root-side pointer falls back to the
+// store-wide `subject` role every per-prop write carries.
+//
+// The `refs` declaration IS the write opening for its prop — `writable` is not consulted:
+// a prop is a reference or a primitive, never both, and refs wins the overlap (§51.5).
+export async function linkRefEntityImpl(
+  gw: Gateway,
+  name: string,
+  entity: string,
+  prop: string,
+  target: string,
+  actorSeed?: string,
+): Promise<ResolvedNode> {
+  const seed = actorSeed ?? gw.options.seed;
+  if (seed === undefined) {
+    throw new Error("this gateway holds no signing seed and cannot write");
+  }
+  const ref = referencePropFor(gw, name, prop);
+  const delta = signClaims(
+    {
+      timestamp: gw.nextTimestamp(),
+      author: authorForSeed(seed),
+      pointers: [
+        {
+          role: ref.role,
+          target: {
+            kind: "entity",
+            entity: {
+              id: target,
+              ...(ref.reciprocal === undefined ? {} : { context: ref.reciprocal.context }),
+            },
+          },
+        },
+        {
+          role: ref.reciprocal?.role ?? "subject",
+          target: { kind: "entity", entity: { id: entity, context: prop } },
+        },
+      ],
+    },
+    seed,
+  );
+  await gw.append([delta]);
+  return gw.resolvedNode(name, entity);
+}
+
+// Unlink a declared reference (SPEC §51.2): retract the caller's OWN link claim(s) for the
+// (entity, target) pair — the remove*/clear family's semantics: retraction is a claim, history
+// survives, another author's edge stands. Matches on the prop's bucket and the edge role's
+// pointer at the target, so a hand-authored _claim of the same shape retracts identically.
+export function unlinkRefEntityImpl(
+  gw: Gateway,
+  name: string,
+  entity: string,
+  prop: string,
+  target: string,
+  actorSeed?: string,
+): Promise<ResolvedNode> {
+  const ref = referencePropFor(gw, name, prop);
+  return retract(
+    gw,
+    name,
+    entity,
+    actorSeed,
+    (f, entry) =>
+      f === prop &&
+      entry.delta.claims.pointers.some(
+        (p) => p.role === ref.role && p.target.kind === "entity" && p.target.entity.id === target,
       ),
   );
 }

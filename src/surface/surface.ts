@@ -13,7 +13,7 @@
 // ground, one registration, the same view, _hex for _hex.
 
 import type { HyperSchema, Schema, Primitive, View } from "@bombadil/rhizomatic";
-import type { ClaimTemplates, ResolverSpecs } from "../gateway/registration.js";
+import type { ClaimTemplates, RefSpecs, ResolverSpecs } from "../gateway/registration.js";
 
 // One registered lens, as a generator receives it: the hyperschema (gather), its resolution
 // schema, the roots it holds live, and (optionally) the claim templates its mutations compile to.
@@ -32,6 +32,9 @@ export interface Registered {
   // Custom resolvers (SPEC §22), per field — a generator reads each resolved field's declared OUTPUT
   // TYPE to advertise the field honestly (the value is a computation the Policy algebra never named).
   readonly resolvers?: ResolverSpecs;
+  // Reference declarations (SPEC §51), per prop — what a generator derives link/unlink mutations
+  // from, and the props whose primitive write argument must NOT be offered.
+  readonly refs?: RefSpecs;
 }
 
 // What flows from a root resolution to a door's field readers: one resolution, many reads.
@@ -125,6 +128,24 @@ export interface SurfaceHooks {
     entity: string,
     field: string,
     targets: readonly string[] | undefined,
+    actorSeed?: string,
+  ): Promise<ResolvedNode>;
+  // Lens-derived edge writes (SPEC §51): assert ONE symmetric two-pointer edge delta into a
+  // declared reference prop — its exact shape (roles and contexts) derived from the registration's
+  // `refs` declaration, never supplied by the caller — and retract the caller's OWN matching
+  // edge(s). The dual pair the generated `link<n>_<P>` / `unlink<n>_<P>` mutations resolve through.
+  linkRef(
+    schemaName: string,
+    entity: string,
+    prop: string,
+    target: string,
+    actorSeed?: string,
+  ): Promise<ResolvedNode>;
+  unlinkRef(
+    schemaName: string,
+    entity: string,
+    prop: string,
+    target: string,
     actorSeed?: string,
   ): Promise<ResolvedNode>;
   watch(schemaName: string, entity: string): AsyncGenerator<PatchNode>;

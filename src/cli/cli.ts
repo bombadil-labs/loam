@@ -1087,6 +1087,7 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
       input.mutations,
       input.writable,
       input.resolvers,
+      input.refs,
     );
   } catch (err) {
     await gateway.close().catch(() => {}); // never let a close failure mask the real refusal
@@ -1097,6 +1098,8 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
     `loam: registered ${input.hyperschema.name} at ${schemaEntityFor(input.hyperschema, input.entity)}\n` +
       `  the definition is deltas now — the next serve grows the surface from it`,
   );
+  // Registration-time cautions (§51) have exactly one reader at this door: the operator's eyes.
+  for (const warning of outcome.warnings ?? []) io.err(`loam: ${warning}`);
   // PERSISTED IS NOT BOUND. `publishRegistration` reports a publish whose replay could not bind —
   // a rival body under the same program name, a lens another entity already answers for — and the
   // deltas are down either way, so the line above stays true. What would be false is leaving the

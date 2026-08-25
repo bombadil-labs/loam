@@ -70,6 +70,143 @@ export function edgeRoles(body: Term): string[] {
   return [...roles];
 }
 
+// A reference declaration (SPEC §51): the envelope's `refs` field marks a prop as a REFERENCE —
+// written by generated link/unlink mutations, never a primitive argument. `role` names the edge
+// role the link delta carries (the body's `expand` follows it into the child view); `reciprocal`
+// says how the same delta speaks on the TARGET's side — the role the target's own expand would
+// follow back, and the context that folds the delta into the target's prop. Names only, no code:
+// this field rides a scoped registration exactly as `roots`/`writable` do.
+export interface RefReciprocal {
+  readonly role: string;
+  readonly context: string;
+}
+export interface RefSpec {
+  readonly role: string;
+  readonly reciprocal?: RefReciprocal;
+}
+export type RefSpecs = Readonly<Record<string, RefSpec>>;
+
+// Parse and validate the refs' JSON profile. Throws on anything malformed — loud at publish, quiet
+// on replay (the schema still binds; the surface just lacks the derived mutations), the same split
+// every envelope passenger follows.
+export function parseRefs(raw: unknown): RefSpecs {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("refs must be an object of per-prop reference declarations");
+  }
+  const out: Record<string, RefSpec> = {};
+  for (const [prop, spec] of Object.entries(raw as Record<string, unknown>)) {
+    // "__proto__" would vanish into a plain object's prototype setter — and could never be a
+    // servable prop anyway (buildGqlSchema refuses it as a field).
+    if (prop === "__proto__") throw new Error(`refs: "${prop}" is not a usable prop name`);
+    const s = spec as {
+      role?: unknown;
+      reciprocal?: { role?: unknown; context?: unknown } | null;
+    } | null;
+    if (s === null || typeof s !== "object" || Array.isArray(s)) {
+      throw new Error(`refs "${prop}": wants { role, reciprocal? }`);
+    }
+    if (typeof s.role !== "string" || s.role === "") {
+      throw new Error(`refs "${prop}": role must be a non-empty string`);
+    }
+    if (s.reciprocal === undefined) {
+      out[prop] = { role: s.role };
+      continue;
+    }
+    const r = s.reciprocal;
+    if (
+      r === null ||
+      typeof r !== "object" ||
+      Array.isArray(r) ||
+      typeof r.role !== "string" ||
+      r.role === "" ||
+      typeof r.context !== "string" ||
+      r.context === ""
+    ) {
+      throw new Error(`refs "${prop}": reciprocal wants { role, context }, both non-empty strings`);
+    }
+    out[prop] = { role: s.role, reciprocal: { role: r.role, context: r.context } };
+  }
+  return out;
+}
+
+// One declared reference prop, classified against the body (SPEC §51.1). `links` is whether the
+// mutation pair generates: an exact-role expand (or no matching expand at all — the declaration
+// stands on its own) mints link/unlink; a prefix/inSet match marks the prop as a reference for
+// TYPING only, because a role family has no single canonical role to author. `target` is the
+// matched expand's child schema name — what the undeclared-reciprocal warning points at.
+export interface ReferenceProp {
+  readonly prop: string;
+  readonly role: string;
+  readonly reciprocal?: RefReciprocal;
+  readonly links: boolean;
+  readonly target?: string;
+}
+
+// The DETECTION walk (SPEC §51.1): classify each declared reference prop against the body's
+// `expand` nodes. This is the one derivation the surface, the publish-time warnings, and the
+// write path all read, so the three can never disagree about what a prop's edge delta looks like.
+export function referenceProps(body: Term, refs: RefSpecs | undefined): Map<string, ReferenceProp> {
+  const out = new Map<string, ReferenceProp>();
+  if (refs === undefined) return out;
+  // Every expand in the body, by its role matcher — the same traversal edgeRoles runs, plus the
+  // set operators it predates (`intersect`/`difference` gather nothing extra but must be walked).
+  const found: { matcher: { kind: string }; schemaName: string }[] = [];
+  const walk = (t: Term): void => {
+    switch (t.kind) {
+      case "expand":
+        found.push({
+          matcher: t.role,
+          schemaName: t.schema.kind === "name" ? t.schema.name : t.schema.hash,
+        });
+        walk(t.of);
+        break;
+      case "select":
+      case "mask":
+      case "group":
+      case "prune":
+      case "resolve":
+        walk(t.of);
+        break;
+      case "union":
+      case "intersect":
+        walk(t.left);
+        walk(t.right);
+        break;
+      case "difference":
+        walk(t.of);
+        walk(t.without);
+        break;
+      case "input":
+      case "fix":
+        break; // input gathers nothing; fix invokes another schema, classified on its own
+    }
+  };
+  walk(body);
+  // A matcher's verdict on the declared role. `aliased` never matches here: it resolves against
+  // the ambient input at read time, so nothing static can say which roles it admits.
+  const matches = (m: { kind: string }, role: string): boolean => {
+    const sm = m as { kind: string; value?: string; values?: readonly string[] };
+    if (sm.kind === "exact") return sm.value === role;
+    if (sm.kind === "prefix") return role.startsWith(sm.value ?? "");
+    if (sm.kind === "inSet") return (sm.values ?? []).includes(role);
+    return false;
+  };
+  for (const [prop, spec] of Object.entries(refs)) {
+    const exact = found.find((e) => e.matcher.kind === "exact" && matches(e.matcher, spec.role));
+    const family = exact ?? found.find((e) => matches(e.matcher, spec.role));
+    out.set(prop, {
+      prop,
+      role: spec.role,
+      ...(spec.reciprocal === undefined ? {} : { reciprocal: spec.reciprocal }),
+      // Exact → the canonical statement, mint the pair. No matching expand → the declaration
+      // still marks the prop and generates (§51.4). A prefix/inSet family → typing only.
+      links: family === undefined || family === exact,
+      ...(family === undefined ? {} : { target: family.schemaName }),
+    });
+  }
+  return out;
+}
+
 // The first `expand` in a gather that names NO `reading` (rhizomatic 0.8 / issue #23), reported by its
 // role so the refusal can point at it — or undefined when every expansion names the child's reading.
 // Shares `edgeRoles`' traversal exactly, including `union`'s two arms, so no branch of a body escapes
@@ -254,6 +391,8 @@ export interface Registration {
   readonly writable?: readonly string[];
   // Custom resolvers (SPEC §22), per field — the optional last step of the lens.
   readonly resolvers?: ResolverSpecs;
+  // Reference declarations (SPEC §51), per prop — the write side of an edge field, derived.
+  readonly refs?: RefSpecs;
 }
 
 const isPrimitive = (v: unknown): v is Primitive =>
@@ -405,6 +544,7 @@ export function registrationClaims(
   mutations?: ClaimTemplates,
   writable?: readonly string[],
   resolvers?: ResolverSpecs,
+  refs?: RefSpecs,
 ): Claims {
   return {
     timestamp,
@@ -434,6 +574,15 @@ export function registrationClaims(
             {
               role: "resolvers",
               target: { kind: "primitive" as const, value: JSON.stringify(resolvers) },
+            },
+          ]),
+      // Reference declarations ride the binding too (SPEC §51): serving discipline, like writable.
+      ...(refs === undefined
+        ? []
+        : [
+            {
+              role: "refs",
+              target: { kind: "primitive" as const, value: JSON.stringify(refs) },
             },
           ]),
       {
@@ -488,6 +637,7 @@ export function registrationDeltaClaims(
   mutations?: ClaimTemplates,
   writable?: readonly string[],
   resolvers?: ResolverSpecs,
+  refs?: RefSpecs,
 ): RegistrationDeltaClaims {
   const named: Schema = { ...schema, name, alg: schema.alg ?? 1 };
   const livingEntity = schemaLivingEntityFor(name);
@@ -504,6 +654,7 @@ export function registrationDeltaClaims(
     mutations,
     writable,
     resolvers,
+    refs,
   );
   return { living, snapshot, binding, livingEntity, snapshotEntity };
 }
@@ -524,6 +675,7 @@ export interface RegistrationInput {
   readonly mutations?: ClaimTemplates;
   readonly writable?: string[];
   readonly resolvers?: ResolverSpecs;
+  readonly refs?: RefSpecs;
 }
 
 // A Policy JSON shape carries only its own kind's fields. Naming both the failing prop path and
@@ -580,6 +732,7 @@ export function parseRegistrationInput(raw: unknown): RegistrationInput {
     mutations?: unknown;
     writable?: unknown;
     resolvers?: unknown;
+    refs?: unknown;
   } | null;
   if (
     o === null ||
@@ -616,6 +769,7 @@ export function parseRegistrationInput(raw: unknown): RegistrationInput {
     ...(o.mutations === undefined ? {} : { mutations: parseClaimTemplates(o.mutations) }),
     ...(o.writable === undefined ? {} : { writable: o.writable as string[] }),
     ...(o.resolvers === undefined ? {} : { resolvers: parseResolvers(o.resolvers) }),
+    ...(o.refs === undefined ? {} : { refs: parseRefs(o.refs) }),
   };
 }
 
@@ -738,6 +892,7 @@ interface Candidate {
   mutationsDefect?: string;
   writable?: readonly string[];
   resolvers?: ResolverSpecs;
+  refs?: RefSpecs;
   timestamp: number;
   id: string;
   /** The BINDING delta's author — what a declared byAuthorRank policy ranks on (§47). */
@@ -842,6 +997,17 @@ function survivingCandidates(
         resolvers = undefined;
       }
     }
+    // Reference declarations (SPEC §51): the same quiet drop — the schema binds, the surface
+    // simply serves no derived edge mutations. The loud refusal belongs to publish.
+    let refs: RefSpecs | undefined;
+    const refsJson = primitive(delta.claims, "refs");
+    if (typeof refsJson === "string") {
+      try {
+        refs = parseRefs(JSON.parse(refsJson));
+      } catch {
+        refs = undefined;
+      }
+    }
     const schemaEntity = schemaRef.target.entity.id;
     const candidate: Candidate = {
       schemaEntity,
@@ -852,6 +1018,7 @@ function survivingCandidates(
       ...(mutationsDefect === undefined ? {} : { mutationsDefect }),
       ...(writable === undefined ? {} : { writable }),
       ...(resolvers === undefined ? {} : { resolvers }),
+      ...(refs === undefined ? {} : { refs }),
       timestamp: delta.claims.timestamp,
       id: delta.id,
       author: delta.claims.author,
@@ -1016,6 +1183,7 @@ export function readRegistrations(reactor: Reactor, operator?: string): Registra
         ...(cand.mutationsDefect === undefined ? {} : { mutationsDefect: cand.mutationsDefect }),
         ...(cand.writable === undefined ? {} : { writable: cand.writable }),
         ...(cand.resolvers === undefined ? {} : { resolvers: cand.resolvers }),
+        ...(cand.refs === undefined ? {} : { refs: cand.refs }),
       });
     } catch {
       // no surviving (or a malformed) definition/schema: the registration is unbound, not fatal
@@ -1075,6 +1243,7 @@ export function readRegistrationVersions(
         ...(cand.mutations === undefined ? {} : { mutations: cand.mutations }),
         ...(cand.writable === undefined ? {} : { writable: cand.writable }),
         ...(cand.resolvers === undefined ? {} : { resolvers: cand.resolvers }),
+        ...(cand.refs === undefined ? {} : { refs: cand.refs }),
         version: n,
         deltaId: cand.id,
         timestamp: cand.timestamp,

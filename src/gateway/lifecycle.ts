@@ -40,10 +40,12 @@ import {
   parseClaimTemplates,
   readContestedBindings,
   readRegistrations,
+  referenceProps,
   registrationDeltaClaims,
   schemaEntityFor,
   type ClaimTemplates,
   type ContestedBinding,
+  type RefSpecs,
   type ResolverSpecs,
   lensNameFor,
 } from "./registration.js";
@@ -170,6 +172,13 @@ export interface PublishOutcome {
    * mutation templates (T96) — a bound schema missing a declared door is not a clean success.
    */
   readonly reason?: string;
+  /**
+   * Registration-time cautions (SPEC §51): the publish succeeded, and something about the
+   * declaration deserves the author's eye — a reference prop with no declared reciprocal (its
+   * link deltas will not fold on the far side), a prop in both `writable` and `refs` (refs
+   * wins). Facts about the registration itself, so they ride bound and unbound outcomes alike.
+   */
+  readonly warnings?: readonly string[];
 }
 
 /**
@@ -195,6 +204,7 @@ export function boundKey(r: Bound): string {
     JSON.stringify(r.mutations ?? null),
     JSON.stringify(r.writable ?? null),
     JSON.stringify(r.resolvers ?? null),
+    JSON.stringify(r.refs ?? null),
     r.entity ?? "",
     r.origin,
   ].join(NUL);
@@ -727,6 +737,7 @@ export function registerImpl(
   roots: readonly string[],
   mutations?: ClaimTemplates,
   writable?: readonly string[],
+  refs?: RefSpecs,
 ): void {
   if (hyperschema.name.includes(NUL)) {
     throw new Error("a schema name may not contain NUL — that alphabet is the gateway's own");
@@ -744,6 +755,7 @@ export function registerImpl(
       lensName: lensNameFor(hyperschema, schema),
       ...(templates ? { mutations: templates } : {}),
       ...(writable ? { writable } : {}),
+      ...(refs ? { refs } : {}),
     },
   ];
   const registry = SchemaRegistry.build(programHyperschemas(next), programReadings(next)); // groups: refs + the rival-body refusal
@@ -827,6 +839,7 @@ export async function publishRegistrationImpl(
   mutations?: ClaimTemplates,
   writable?: readonly string[],
   resolvers?: ResolverSpecs,
+  refs?: RefSpecs,
   internals?: PublishInternals,
 ): Promise<PublishOutcome> {
   const seed = context?.actor ?? gw.options.seed;
@@ -866,6 +879,41 @@ export async function publishRegistrationImpl(
     await loadResolvers([resolvers]);
   }
   const lensName = lensNameFor(hyperschema, schema);
+  // Reference declarations (SPEC §51): a ref rides an existing prop — loud here, at publish, where
+  // the schema is known; the surface generator skips a stray quietly on replay. The WARNINGS are
+  // the loud-but-not-fatal tier: the publish stands, and the register response says what the
+  // author should look at — the spec's exact sentence for an undeclared reciprocal, and the
+  // refs-wins overlap with `writable`.
+  const warnings: string[] = [];
+  if (refs !== undefined) {
+    for (const prop of Object.keys(refs)) {
+      if (!schema.props.has(prop)) {
+        throw new Error(
+          `refs "${prop}": no such field in the schema — a reference declaration rides an ` +
+            `existing property`,
+        );
+      }
+    }
+    const opened = new Set(writable ?? []);
+    for (const ref of referenceProps(hyperschema.body, refs).values()) {
+      if (opened.has(ref.prop)) {
+        warnings.push(
+          `"${ref.prop}" on "${lensName}" is declared in both \`writable\` and \`refs\`; ` +
+            "refs wins — the prop takes no primitive argument, and its writes are the " +
+            "link/unlink mutations. Remove it from `writable`.",
+        );
+      }
+      // Only a prop that MINTS link mutations can author a delta whose far side goes nowhere;
+      // a typing-only (prefix/inSet) reference authors nothing, so there is nothing to warn of.
+      if (ref.links && ref.reciprocal === undefined) {
+        warnings.push(
+          `reciprocal context for ${lensName}.${ref.prop} undeclared; link deltas will not ` +
+            `fold on the ${ref.target ?? "target"} side`,
+        );
+      }
+    }
+  }
+  const caveats = warnings.length === 0 ? {} : { warnings };
   const schemaEntity = schemaEntityFor(hyperschema, entity);
   const survivors = gw.registered.filter(
     (r) => !(programOf(r) === hyperschema.name && lensOf(r) === lensName),
@@ -909,6 +957,7 @@ export async function publishRegistrationImpl(
         ...(templates ? { mutations: templates } : {}),
         ...(writable ? { writable } : {}),
         ...(resolvers ? { resolvers } : {}),
+        ...(refs ? { refs } : {}),
       },
     ],
     gw.gqlHooks(),
@@ -938,6 +987,7 @@ export async function publishRegistrationImpl(
     templates,
     writable,
     resolvers,
+    refs,
   );
   // A blessing that TAKES a living name retires the incumbent from the binding itself (§27.8's
   // reversible supersede): its own timestamp is the source's, so it cannot win on recency, and a
@@ -971,8 +1021,8 @@ export async function publishRegistrationImpl(
     // a full bind clears it — so surface it rather than report an unqualified success.
     const shed = lastBindFailure(gw, failureKey(schemaEntity, lensName));
     return shed === undefined
-      ? { persisted: true, lens: lensName, bound: true }
-      : { persisted: true, lens: lensName, bound: true, reason: shed };
+      ? { persisted: true, lens: lensName, bound: true, ...caveats }
+      : { persisted: true, lens: lensName, bound: true, reason: shed, ...caveats };
   }
   // Valid law, written, not serving HERE. Reported, never thrown: the deltas exist and would bind on
   // a peer that pulls them, or on a later boot without whatever shadows them. Throwing would call a
@@ -983,6 +1033,7 @@ export async function publishRegistrationImpl(
     persisted: true,
     lens: lensName,
     bound: false,
+    ...caveats,
     reason:
       lastBindFailure(gw, failureKey(schemaEntity, lensName)) ??
       (mode !== undefined && gw.registered.some((r) => lensOf(r) === lensName)
