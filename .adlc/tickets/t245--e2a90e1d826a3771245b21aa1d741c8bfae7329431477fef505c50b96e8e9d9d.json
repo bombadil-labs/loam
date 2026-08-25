@@ -3,5 +3,8 @@
   "category": "feature",
   "duration": 3,
   "id": "T245",
+  "rails": [
+    "test/gateway/edge-mutations.test.ts"
+  ],
   "title": "Lens-derived edge mutations - the write side generated as the adjoint of the read program"
 }
