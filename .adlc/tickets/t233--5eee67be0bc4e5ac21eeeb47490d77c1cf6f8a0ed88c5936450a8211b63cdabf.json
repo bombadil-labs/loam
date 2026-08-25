@@ -3,5 +3,8 @@
   "category": "bug",
   "duration": 1,
   "id": "T233",
+  "rails": [
+    "test/federation/stale-handle-restamp.test.ts"
+  ],
   "title": "A stale handle can re-stamp a severed channel back into existence"
 }

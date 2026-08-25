@@ -1,0 +1,6 @@
+{
+  "body": "After drop + re-open, a stale handle from the FIRST channel (its closure still holds the old ground) can call sync. The severed guard does not fire — the re-open made the lineage live again — so the stale handle's success stamp lands a fresh lastSyncedAt on the NEW lineage, reporting a sync it ran against the OLD, purged ground. Benign for an empty poll (a wrong lastSyncedAt); a non-empty poll throws first at federate on the closed old ground. Pre-existing; T233 deliberately scoped to the severed window only.\n\nBuild: bind each Channel handle to a lineage identity (the opening record's id, or an epoch), and refuse a stamp whose handle-epoch does not match the current live record's epoch. So a handle from a prior lineage cannot stamp onto a later one.\n\nRail (two-sided): a stale handle from before a drop+re-open REFUSES to stamp onto the new lineage AND the current handle stamps normally; assert at both levels (no spurious record; channelStatus unchanged by the stale handle). Depends on T233.",
+  "category": "bug",
+  "id": "T239",
+  "title": "A stale handle must not stamp a spurious sync onto a re-opened lineage"
+}

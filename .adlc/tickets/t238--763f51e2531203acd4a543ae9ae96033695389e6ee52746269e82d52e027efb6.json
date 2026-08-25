@@ -1,0 +1,6 @@
+{
+  "body": "T233's guard tells a SEVERED channel from a NEVER-OPENED one by channelsEver > 0: a severed channel still has its negated records in the receiver's primary ground, so channelsEver names it. If a future §11 erasure ever PURGES the negated channel-record lineage from the primary ground, channelsEver collapses to 0, the guard reads 'never existed', and a surviving stale handle's stamp is admitted — resurrection. Pre-existing: the door's own channelGroundFor rests on the same channelsEver distinction (the T199 shape), so both sites share the assumption.\n\nThis is an ERASURE-REACH question, so it is Myk's merge if the answer widens what gets purged. The likely correct answer does NOT widen purge: erasure should either leave a durable tombstone-of-record that keeps channelsEver true for a purged lineage, or the guard and the door should key severed-ness on a durable marker erasure preserves. Decide which, then rail it.\n\nRail (two-sided): after erasing a channel's whole lineage, a stale handle's stamp still REFUSES (the severed-or-erased state is remembered) AND a genuinely-never-opened name is still openable cleanly. Depends on T233 and on the erasure ticket that reaches channel-record deltas.",
+  "category": "bug",
+  "id": "T238",
+  "title": "Erasure must not collapse the severed-vs-never-existed distinction (channelsEver)"
+}
