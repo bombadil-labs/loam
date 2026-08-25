@@ -643,7 +643,7 @@ export const CHAPTERS = [
           "Generating a typed client from a published reading is designed and not queued. You write your own client today.",
           "Only the REST door is versioned by path; asking GraphQL for a specific past generation is additive and queued, not silently present.",
           "A hosted, replicated storage driver is a one-file addition when a deployment needs one, and is not vendored here.",
-          "When two published definitions collide on a name, the winner is decided by a fixed rule rather than by a [[Policy]] you can configure — the one place in the system where resolution is not yours to choose. It has a ticket and no design yet (T89).",
+          "When two published definitions collide on a name, the winner is decided by law you declare — spec 47: one operator-signed declaration picks the mode (latest wins, mine outranks a peer, or serve neither and name both), it is data you can change or strike, and a store that declares nothing keeps its old loud collision. The gap this admission once named closed when law learned to resolve like data.",
         ],
       },
     ],
