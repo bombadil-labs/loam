@@ -361,12 +361,51 @@ ${listing}`;
   const channelsTouching = (gw: Gateway, name: string): string =>
     channelsPanelHtml(gw, (c) => c.name === name || c.into === name);
 
+  // The ORPHANED channels: those whose `into` container no longer resolves in the table (T218).
+  // Striking a receiving container leaves its pools' `inboxOf` edges dangling, so no subtree reaches
+  // them and no reach-scoped panel shows them — yet `channelStatus` still lists them receiving, and a
+  // resumed sync keeps writing peer bytes to disk. This block is the ONLY place they are visible, and
+  // it is rendered ONLY for an operator: the orphans are outside every subtree by construction, so a
+  // non-operator's page has nothing to say about them, and a store-wide read is the operator's remit.
+  // The health reading is the same channel-row renderer every other panel uses; the trailer names the
+  // two verbs that release the pool. Absent when nothing is orphaned — a panel always there says
+  // nothing.
+  const orphanedChannelsPanelHtml = (gw: Gateway, table: ContainerTable): string => {
+    const orphans = gw
+      .channelStatus()
+      .filter((c) => !table.containers.has(c.into))
+      .sort((a, b) => (a.name < b.name ? -1 : 1));
+    if (orphans.length === 0) return "";
+    const listing = orphans
+      .map((c) => {
+        const release =
+          ` · release it: <code>loam federate drop --channel ${escapeHtml(c.name)} --yes</code>, ` +
+          `or freeze the pull with <code>loam federate set --channel ${escapeHtml(c.name)} ` +
+          `--receiving false</code>`;
+        // The row is a complete `<li>…</li>`; the release verbs ride inside it, before its close.
+        return channelRowHtml(c, gw.federationChannels.has(c.name)).replace(
+          /<\/li>$/,
+          `${release}</li>`,
+        );
+      })
+      .join("\n");
+    return `<h2>Orphaned channels.</h2>
+<p>Each channel below feeds a container that no longer exists. The container was struck, so its pool
+sits outside every subtree and no other panel shows it — yet the channel still receives, and a
+resumed sync still writes the peer's bytes to disk. Release each one: drop it to forget its pool
+whole, or set it to stop receiving.</p>
+<ul>
+${listing}
+</ul>`;
+  };
+
   const dashboardPage = (
     gw: Gateway,
     user: string,
     table: ContainerTable,
     reach: ReadonlySet<string>,
     formToken: string,
+    isOperator: boolean,
   ): string =>
     page(
       "your containers",
@@ -380,6 +419,7 @@ ${channelsPanelHtml(gw, (c) => reach.has(c.name), {
   // is only that none of them lands anywhere THIS reader can see.
   empty: "No channel receives into a container your subtree reaches.",
 })}
+${isOperator ? orphanedChannelsPanelHtml(gw, table) : ""}
 ${declareFormHtml(user, reach, formToken)}
 ${contestedPanelHtml(gw, reach)}
 ${schemaPanelHtml(gw, formToken)}
