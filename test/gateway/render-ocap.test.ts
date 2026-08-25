@@ -30,7 +30,7 @@
 // process owns can fire to fail it politely. That is what the wedge IS, and the honest red for it is a
 // worker that never answers.
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createServer, type Server } from "node:http";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -44,7 +44,7 @@ import { loadedEsm } from "../../src/gateway/esm.js";
 import { rendererBindingClaims } from "../../src/gateway/renderers.js";
 import { ENVELOPE_ANY, envelopeClaims } from "../../src/gateway/envelope.js";
 import { plainText } from "../../src/gateway/plain-text.js";
-import { RENDER_TIMEOUT_MS } from "../../src/gateway/render-worker.js";
+import { RENDER_TIMEOUT_MS, TIMEOUT_MEMO_MS } from "../../src/gateway/render-worker.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
 import { FERN, observed } from "../spike/garden.js";
 
@@ -725,6 +725,24 @@ describe("T172 — the confinement composes with the budget, and a good renderer
     // Two further attempts, together, cost a small fraction of one. A per-request re-attempt would
     // cost at least another whole budget.
     expect(repeats).toBeLessThan(first / 4);
+
+    // AND THE MEMO LAPSES, which is the half that keeps it a COST BOUND rather than a verdict. A
+    // wall clock measures the box as much as the module body, so remembering "too slow" for good
+    // darkens a healthy federated route until the process restarts, with no republish available to
+    // clear it. Only `Date` is faked — the worker's own timers stay real, and `performance.now()` is
+    // the untouched clock this measurement reads.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.now() + TIMEOUT_MEMO_MS + 1_000);
+      const t2 = performance.now();
+      await gw.prepareRoute("wedge");
+      const afterCooldown = performance.now() - t2;
+      // It paid a real budget again: the cooldown lapsed and the route was re-examined rather than
+      // answered from a memory that had become permanent.
+      expect(afterCooldown).toBeGreaterThan(1000);
+    } finally {
+      vi.useRealTimers();
+    }
     await gw.close();
   }, 60_000);
 
