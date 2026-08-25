@@ -1244,31 +1244,85 @@ function channelNameOf(gw: Gateway, prefix: string): string {
 }
 
 /**
- * Every prefix this STORE already assigns, read live from the container table.
+ * Every prefix this STORE already assigns, and every pool whose prefix it cannot name.
  *
  * Store-wide, not per-container, and the distinction is a real defect this fixes: a living name is
  * `<prefix>:<alias>` and carries no container, so two channels in different containers that share a
  * prefix aim at the same names. Worse, both prefix-to-channel lookups (the scoped read path, and the
  * curse filter) resolve by prefix ALONE — so one peer's claims could answer a lens blessed from the
  * other, and a curse recorded on one channel was invisible to the other's poll.
+ *
+ * THE PREFIX IS NEVER GUESSED FROM THE POOL'S NAME ALONE. A pool is named `channel:<into>:<prefix>`
+ * and a container name may itself carry a colon, so no split of that name by itself can separate the
+ * two halves: into "ada:feed" + prefix "alice" and into "ada" + prefix "feed:alice" mint the SAME
+ * name. Two of the store's own records DO know, and both are read, in this order:
+ *
+ *  - the channel RECORD states the receiver's choice under its `prefix` role. It is the receiver's
+ *    own sentence rather than a derivation, so it stands whatever the pool is called or renamed;
+ *  - failing that, the pool's DECLARATION names the container half under its own `inboxOf` role,
+ *    and the remainder of the name is then the prefix exactly. It answers for a pool declared
+ *    before its record landed — openChannel appends the two separately, and a fault between them
+ *    would otherwise leave a pool assigning a prefix this guard could not see.
+ *
+ * WHAT COUNTS AS A POOL is either reading calling it one: a record that names it, or a declaration
+ * that marks a parent. A container the operator merely NAMED `channel:something` is not a pool,
+ * marks nothing, and assigns no prefix. And a record whose declaration is gone still assigns its
+ * prefix, because the two halves of a sever can fail apart: of the two mistakes available there,
+ * reserving a prefix nobody uses costs a person one rename, and freeing one that two channels answer
+ * to cannot be undone.
+ *
+ * A POOL NEITHER READING CAN NAME IS REPORTED, NEVER SKIPPED — a declaration that marks a parent its
+ * own name was not built from, with no record to say otherwise. Dropping it silently would let the
+ * caller's collision check report a clean result over a set it could not enumerate, which is the H9
+ * shape at the one door that exists to fail closed.
+ *
+ * WHICH CHANNELS EXIST stays the container table's answer: a severed channel leaves both readings by
+ * the same act, and only the operator's own lawful law binds in either.
  */
-function standingPrefixes(gw: Gateway): { channel: string; prefix: string }[] {
-  const table = readContainerTable(gw.reactor, gw.operatorAuthor);
-  const out: { channel: string; prefix: string }[] = [];
-  for (const name of table.containers.keys()) {
+function standingPrefixes(gw: Gateway): {
+  standing: { channel: string; prefix: string }[];
+  unresolved: string[];
+} {
+  const recorded = new Map(channelStatusImpl(gw).map((c) => [c.name, c.prefix]));
+  const standing: { channel: string; prefix: string }[] = [];
+  const unresolved: string[] = [];
+  const seen = new Set<string>();
+  for (const [name, rec] of readContainerTable(gw.reactor, gw.operatorAuthor).containers) {
     if (!name.startsWith("channel:")) continue;
-    const prefix = prefixOfChannelName(name);
-    if (prefix !== undefined) out.push({ channel: name, prefix });
+    const prefix = recorded.get(name) ?? declaredPrefix(name, rec.inboxOf);
+    if (prefix !== undefined) standing.push({ channel: name, prefix });
+    else if (rec.inboxOf === undefined)
+      continue; // not a pool: nothing calls it one
+    else unresolved.push(name);
+    seen.add(name);
   }
-  return out;
+  for (const [name, prefix] of recorded) {
+    if (!seen.has(name)) standing.push({ channel: name, prefix });
+  }
+  return { standing, unresolved };
+}
+
+/**
+ * The prefix half of a pool's name, cut against the parent its own declaration marks.
+ *
+ * `inboxOf` is what makes this a reading rather than a guess: it states the container half, so the
+ * remainder is the prefix however many colons either half carries. A declaration that does not mark
+ * the parent its name was built from cuts nothing — undefined, never a best effort.
+ */
+function declaredPrefix(name: string, inboxOf: string | undefined): string | undefined {
+  if (inboxOf === undefined) return undefined;
+  const lead = `channel:${inboxOf}:`;
+  return name.startsWith(lead) ? name.slice(lead.length) : undefined;
 }
 
 /**
  * The prefix a channel's own NAME carries — `channel:<into>:<prefix>`.
  *
- * The structural identity, and the only one available when a record's `prefix` primitive is among
- * the roles the reader condemned. A channel's name is read from the marker's entity id rather than
- * from a primitive, so it is legible exactly when the channel exists at all.
+ * A STRUCTURAL GUESS that splits at the first colon after `channel:`, so it cannot separate the two
+ * halves when either carries a colon (T215) — it is only the last resort `reads.ts` reaches when a
+ * record's `prefix` primitive is among the roles the reader condemned, where a legible reading is
+ * gone and the name is the only identity left. The collision guard reads the record and the
+ * declaration instead (`standingPrefixes`); it never calls this.
  */
 export function prefixOfChannelName(name: string): string | undefined {
   if (!name.startsWith("channel:")) return undefined;
@@ -1442,8 +1496,6 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
     );
   }
   const name = channelName(opts.into, opts.prefix);
-  const existing = gw.federationChannels.get(name);
-  if (existing !== undefined) return existing; // idempotent: re-opening resumes the same pool
 
   // INJECTIVITY, checked here because here is where a person can still choose differently. The
   // GraphQL door maps every non-alphanumeric to `_` (`legalNameFor`), so `alice:` and `alice_` are
@@ -1452,21 +1504,72 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
   // receiver does, and the receiver's own store knows every prefix it has already assigned. So the
   // collision is decidable locally, and it fails closed at assignment rather than at publish.
   const flattened = legalNameFor(opts.prefix);
-  for (const standing of standingPrefixes(gw)) {
+  const prefixes = standingPrefixes(gw);
+  if (prefixes.unresolved.length > 0) {
+    // A CHECK THAT CANNOT ENUMERATE ITS OWN SET HAS NO ANSWER TO GIVE. One pool whose assigned
+    // prefix neither reading can name is enough: "no collision" over the rest would be a verdict
+    // this store never verified, and the whole point of checking here is that a person is present.
+    //
+    // COUNTED, NOT NAMED. This refusal reaches every caller of `openChannel`, and the MCP door
+    // fences federation per container precisely so a caller cannot learn which channels exist
+    // (§12/T78). A list of pool names here would carry receiving containers and peer prefixes
+    // straight through that fence, so the operator reads them from the container listing instead.
+    throw new Error(
+      `openChannel refused: this store declares ${prefixes.unresolved.length} channel pool(s) ` +
+        `whose assigned prefix it cannot name. A pool's prefix is read from its channel record, ` +
+        `or cut from its name against the parent its declaration marks; neither answers for these, ` +
+        `so a collision check over the others would report a clean result it did not verify. The ` +
+        `container listing names them: re-declare each with an \`inboxOf\` that leads its name, or ` +
+        `drop it. Nothing was created.`,
+    );
+  }
+  // THIS pool's own standing entry, if it has one. Everything below turns on the difference between
+  // resuming the channel that owns this name and assigning the name afresh.
+  const claimed = prefixes.standing.find((s) => s.channel === name);
+  for (const standing of prefixes.standing) {
     // Skip only THIS channel — re-opening the same (into, prefix) resumes. Any OTHER channel whose
     // prefix flattens the same is a refusal, including one that is byte-identical in a different
     // container: the earlier guard compared prefixes and so skipped exactly that case.
-    if (standing.channel === name) continue;
-    if (legalNameFor(standing.prefix) === flattened) {
+    //
+    // SAME POOL NAME IS NOT SAME CHANNEL. `channel:<into>:<prefix>` cannot separate its halves, so
+    // into "ada:feed" + prefix "alice" and into "ada" + prefix "feed:alice" ask for ONE pool under
+    // two meanings. Resuming on the name alone would re-point the standing channel's parent and
+    // re-stamp its prefix — silently, and taking its blessed law's namespace with it.
+    if (standing.channel === name) {
+      if (standing.prefix === opts.prefix) continue;
       throw new Error(
-        `openChannel refused: the prefix "${opts.prefix}" collides with the prefix ` +
-          `"${standing.prefix}" already assigned by "${standing.channel}". A living name is ` +
-          `"<prefix>:<alias>" and carries no container, so two channels sharing a prefix aim at the ` +
-          `same names — and the door flattens every non-alphanumeric to "_", so near-misses collide ` +
-          `too. Choose another prefix.`,
+        `openChannel refused: the pool "${name}" already belongs to the channel this store opened ` +
+          `with the prefix "${standing.prefix}", and this call asks for "${opts.prefix}". A pool ` +
+          `is named "channel:<into>:<prefix>" and a container name may carry colons, so two ` +
+          `different (container, prefix) pairs can name one pool — resuming here would re-point ` +
+          `the standing channel instead. Choose another receiving container or another prefix. ` +
+          `Nothing was changed.`,
+      );
+    }
+    if (legalNameFor(standing.prefix) === flattened) {
+      // A COLLISION THIS STORE IS ALREADY LIVING WITH GETS DIFFERENT ADVICE. The old guard split
+      // the pool name, so a store opened before this check can hold two channels that really do
+      // answer to one prefix. Telling its operator to "choose another prefix" would be advice for
+      // a decision they are not making: they are re-opening what they already have, and the repair
+      // is to sever one of the two.
+      throw new Error(
+        claimed === undefined
+          ? `openChannel refused: the prefix "${opts.prefix}" collides with the prefix ` +
+              `"${standing.prefix}" already assigned by "${standing.channel}". A living name is ` +
+              `"<prefix>:<alias>" and carries no container, so two channels sharing a prefix aim at ` +
+              `the same names — and the door flattens every non-alphanumeric to "_", so near-misses ` +
+              `collide too. Choose another prefix.`
+          : `openChannel refused: "${name}" and "${standing.channel}" BOTH stand in this store, ` +
+              `and their prefixes "${claimed.prefix}" and "${standing.prefix}" answer at one ` +
+              `GraphQL field. A store opened before this check could reach that state, and while it ` +
+              `holds, one peer's claims can answer a lens blessed from the other. Sever one of the ` +
+              `two (\`loam federate drop\`) and re-open. Nothing was changed.`,
       );
     }
   }
+  // Past the ambiguity check, so a live handle is returned only for the channel that was ASKED for.
+  const existing = gw.federationChannels.get(name);
+  if (existing !== undefined) return existing; // idempotent: re-opening resumes the same pool
 
   // The receiving container must EXIST before a pool can mark it: `containerScope` skips an
   // inactive parent outright, and an inbox whose parent is not gathered is an inbox nobody reads.
