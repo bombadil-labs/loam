@@ -1438,7 +1438,12 @@ async function syncChannel(
         from,
         unattested: declared,
       },
-      illegible,
+      // "unattested" IS FRESHLY DETERMINED HERE, so it must not be omitted. `stamp` strips every
+      // role named in the list, and a prior record whose debt was itself illegible puts "unattested"
+      // into it — which would silently strip the `declared` debt this journal just computed, losing
+      // custody for the very arrivals it exists to protect. The success stamp drops it for the same
+      // reason; the other roles here ARE carried-forward coercions, so they stay omitted if illegible.
+      illegible.filter((r) => r !== "unattested"),
       false,
     );
   }

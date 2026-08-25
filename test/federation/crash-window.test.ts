@@ -39,6 +39,7 @@ import { FERN, observed } from "../spike/garden.js";
 
 const ME_SEED = "cc".repeat(32);
 const ALICE_SEED = "a1".repeat(32);
+const BRAM_SEED = "b0".repeat(32);
 const ALICE = authorForSeed(ALICE_SEED);
 
 // Vocabulary spelled out, never imported: these rails freeze the CONTEXT a later reader looks for,
@@ -150,6 +151,26 @@ function added(before: readonly Record[], after: readonly Record[]): Record[] {
   return after.filter((r) => !seen.has(r.deltaId));
 }
 
+/**
+ * Every operator-authored, NOT-struck channel record for one pool — the delta-level live view a
+ * resurrection would climb back into. `dropChannel` strikes every live record for the pool, so this
+ * reads empty after a sever and any new live record here is a re-stamp.
+ */
+const liveRecords = (gw: Gateway, name: string): string[] =>
+  [...gw.reactor.snapshot()]
+    .filter(
+      (d) =>
+        d.claims.author === gw.operator &&
+        d.claims.pointers.some(
+          (p) =>
+            p.target.kind === "entity" &&
+            p.target.entity.context === CTX_CHANNEL &&
+            p.target.entity.id === `channel:${name}`,
+        ) &&
+        gw.reactor.negationsOf(d.id).length === 0,
+    )
+    .map((d) => d.id);
+
 const isStamp = (d: Delta): boolean =>
   d.claims.pointers.some(
     (p) => p.target.kind === "entity" && p.target.entity.context === CTX_ARRIVAL,
@@ -178,6 +199,30 @@ function crashAfterArrivalsLand(
       throw new Error("simulated crash: the process died after federate landed the arrivals");
     }
     return landed;
+  };
+  return { seen, restore: () => (pool.federate = real) };
+}
+
+/**
+ * Simulate a crash AFTER the optimistic journal lands and BEFORE `federate` ingests anything — the
+ * new window the fix opens. The peer's batch throws before `real` runs, so the deltas never pool,
+ * exactly as a process that died between the two writes leaves it. Fires once; `restore` lets the
+ * next sync self-correct.
+ */
+function crashBeforeIngest(
+  pool: Gateway,
+  receiver: string,
+): { seen: { hits: number }; restore: () => void } {
+  const real = pool.federate.bind(pool);
+  const seen = { hits: 0 };
+  pool.federate = async (deltas, opts) => {
+    const all = [...deltas];
+    const isPeerBatch = all.some((d) => d.claims.author !== receiver && !isStamp(d));
+    if (isPeerBatch && seen.hits === 0) {
+      seen.hits += 1;
+      throw new Error("simulated crash: the process died after journaling, before federate");
+    }
+    return real(all, opts);
   };
   return { seen, restore: () => (pool.federate = real) };
 }
@@ -366,6 +411,127 @@ describe("T222 — a crash between federate and attest heals or names its own ga
       const addedThird = added(beforeThird, channelRecords(me));
       expect(addedThird.length).toBe(1);
       expect(addedThird.every((r) => r.unattested.length === 0)).toBe(true);
+    } finally {
+      await me.close();
+    }
+  });
+
+  it("(a3) the journal refuses to resurrect a severed channel [T233 intersection]", async () => {
+    // The journal is a NEW stamp site, and it fires BEFORE `federate` — so on a severed channel a
+    // real-delta poll reaches it first, ahead of the closed pool. Its `opening: false` must let the
+    // T233 severed-lineage guard refuse; a flip to `opening: true` would let the journal mint a fresh
+    // operator-signed record and resurrect the channel, silently undoing T233.
+    const me = await store(ME_SEED);
+    try {
+      // BYSTANDER: a live channel, never dropped — it proves the guard refuses the SEVERED case only,
+      // not journalling in general.
+      const live = peer();
+      const bram = await me.openChannel({
+        into: "friends",
+        prefix: "bram",
+        from: "https://bram.example/loam",
+        source: live.source,
+      });
+      live.offering.push(observed(FERN, "height", 1, 500, BRAM_SEED));
+      await bram.sync();
+      expect(me.channelStatus("channel:friends:bram")).toHaveLength(1);
+
+      // TARGET: opened, synced (a real record), then severed.
+      const target = peer();
+      const alice = await me.openChannel({
+        into: "friends",
+        prefix: "alice",
+        from: "https://alice.example/loam",
+        source: target.source,
+      });
+      target.offering.push(observed(FERN, "height", 10, 1000, ALICE_SEED));
+      await alice.sync();
+      expect(me.channelStatus("channel:friends:alice")).toHaveLength(1);
+
+      await me.dropChannel("channel:friends:alice");
+      // DELTA + OBJECT after the sever: the drop's strike stands, both readers agree severed.
+      expect(liveRecords(me, "channel:friends:alice")).toEqual([]);
+      expect(me.channelStatus("channel:friends:alice")).toHaveLength(0);
+      expect(me.channelsEver("channel:friends:alice")).toHaveLength(1);
+
+      // THE STALE HANDLE offers a NEW delta, so `declared.length > owed.length` and the journal WOULD
+      // fire. `opening: false` makes the severed guard refuse instead. Reverted to `true`, the journal
+      // stamps and `channelStatus` climbs back to 1 — the resurrection this rail forbids.
+      target.offering.push(observed(FERN, "height", 20, 2000, ALICE_SEED));
+      await expect(alice.sync()).rejects.toThrow(/severed/);
+
+      // DELTA + OBJECT: the refused journal minted nothing; still severed in both readings.
+      expect(liveRecords(me, "channel:friends:alice")).toEqual([]);
+      expect(me.channelStatus("channel:friends:alice")).toHaveLength(0);
+      expect(me.channelsEver("channel:friends:alice")).toHaveLength(1);
+
+      // TWO-SIDED: the bystander is live, so a new arrival journals and stamps as normal. Without
+      // this, a guard that refused every journal would pass every assertion above.
+      live.offering.push(observed(FERN, "height", 2, 600, BRAM_SEED));
+      const bramBefore = channelRecords(me).length;
+      const bramSync = await bram.sync();
+      expect(bramSync.accepted).toBe(1);
+      expect(me.channelStatus("channel:friends:bram")).toHaveLength(1);
+      // The journal AND the success stamp both landed — the live path is untouched.
+      expect(channelRecords(me).length).toBe(bramBefore + 2);
+    } finally {
+      await me.close();
+    }
+  });
+
+  it("(b2) a crash BETWEEN the journal and federate self-corrects, and a gone delta never stamps", async () => {
+    // THE NEW WINDOW the fix opens: the journal lands, then the process dies before `federate`
+    // ingests. The arrivals never pool, so the debt the journal wrote over-declares them — honest,
+    // because the owed-filter drops any that never come back, and nothing is ever stamped that did
+    // not land.
+    const me = await store(ME_SEED);
+    try {
+      const { offering, source } = peer();
+      const channel = await me.openChannel({
+        into: "friends",
+        prefix: "alice",
+        from: "https://alice.example/loam",
+        source,
+      });
+      const pool = channel.pool.gateway!;
+
+      // Two arrivals are journalled, then the crash lands before `federate` takes either. W will be
+      // re-offered and must heal; V vanishes (a rejected or withdrawn delta) and must NEVER stamp.
+      const w = observed(FERN, "height", 50, 1000, ALICE_SEED);
+      const v = observed(FERN, "height", 51, 1001, ALICE_SEED);
+      offering.push(w, v);
+      const crash = crashBeforeIngest(pool, me.operator!);
+      await expect(channel.sync()).rejects.toThrow(/before federate/);
+      expect(crash.seen.hits).toBe(1);
+      crash.restore();
+
+      // CRASH STATE. DELTA: neither delta pooled, and no stamp names either.
+      expect(pool.reactor.get(w.id)).toBeUndefined();
+      expect(pool.reactor.get(v.id)).toBeUndefined();
+      expect(stampsIn(pool)).toEqual([]);
+      // OBJECT: the journal over-declared both as owed — the honest, self-correcting shape.
+      const crashed = me.channelStatus(channel.name)[0]!;
+      expect([...crashed.unattested].sort()).toEqual([w.id, v.id].sort());
+
+      // THE HEAL. The peer re-offers only W; V is gone for good.
+      offering.length = 0;
+      offering.push(w);
+      const heal = await channel.sync();
+      expect(heal.accepted).toBe(1); // W lands this time; V does not
+
+      // DELTA, both sides: W pooled and stamped EXACTLY once; V never pooled, never stamped — the
+      // owed-filter dropped the phantom, so no stamp names a delta the pool does not hold.
+      expect(pool.reactor.get(w.id)).toBeDefined();
+      expect(pool.reactor.get(v.id)).toBeUndefined();
+      const refs = refsOf(stampsIn(pool));
+      expect(countOf(refs, w.id)).toBe(1);
+      expect(refs).not.toContain(v.id);
+      expect(new Set(refs).size).toBe(refs.length);
+      // OBJECT: the debt clears — W settled, V dropped, nothing stranded.
+      const healthy = me.channelStatus(channel.name)[0]!;
+      expect(healthy.unattested).toEqual([]);
+      expect(healthy.consecutiveFailures).toBe(0);
+      expect(healthy.lastSyncedAt).toBeGreaterThan(0);
     } finally {
       await me.close();
     }
