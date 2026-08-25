@@ -1,0 +1,20 @@
+{
+  "_adlcArchive": {
+    "archivedAt": "2026-08-25T06:29:25.234Z",
+    "reason": "completed",
+    "sourceRevision": null,
+    "sourceStoreHash": "b5cd9edf76b6135c5aaef4e29f2f8d2776277d32ec19824be86f1e0c6c16a553",
+    "ticketHash": "0b6c8bb0ebfb3f975ec5f95010d46158bdeeb7d1b2e904e106d1029325d501bd",
+    "version": 1
+  },
+  "body": "OBSERVED FLAKY 2026-08-19, with both directions measured before blaming anything.\n\nTHE FAILURE. Full suite on branch `adlc-1.10-upgrade`:\n\n    FAIL test/gateway/listing-warm.test.ts > a bulk of 5k plain arrivals folds in one read\n    Error: Test timed out in 60000ms.  (listing-warm.test.ts:147)\n    Test Files 1 failed | 232 passed    Tests 1 failed | 2267 passed\n\nMEASURED BOTH DIRECTIONS, which is what makes this attributable:\n- ISOLATION, same branch: PASSES, 28.58s for 16 tests.\n- FULL SUITE on main, same machine: PASSES, 51.97s.\n- FULL SUITE on the branch, second run: PASSES, 51.76s.\n- The test imports NOTHING from src/server. The branch's only source change was\n  src/server/http.ts (the listen path). The diff cannot reach this test.\n\nSo it is load-sensitive, not diff-caused and not broken: ~28s of work under a 60s per-test override,\nwhich the suite's parallel load can exceed. The margin looks like 2x and is not, because the\ndenominator moves with whatever else is running.\n\nWHY IT MATTERS MORE THAN ITS SIZE. Every gate in this repo reads an exit code as a verdict: P5\nevidence binds a revision, a self-merge hangs on a green bar, hollow-test refuses a non-green\nbaseline outright. A test that is sometimes red makes each of those a coin flip, and trains whoever\nsees red to re-run instead of investigate.\n\nTHE RAIL IS FROZEN. It is T163's declared rail and T163 is archived, so the CI backstop guards it.\nFixing it is an authorized edit, which is why this is a ticket rather than a repair.\n\nDIAGNOSE BEFORE FIXING — it is a RAIL bug, not a spec-accuracy bug. The promise (a bulk folds in one\nread, no scan) is TRUE; what is load-dependent is the fixture's runtime, not the assertion's force.\n\nDO NOT fix it by widening the timeout. That converts a visible flake into a hidden performance\nregression: the rail's whole point is that folding does not scale with the ground, and a bigger\nbudget is exactly how a scan-shaped regression would slip through green. Prefer a fixture whose cost\ndoes not ride wall-clock — assert the scan count (already spied) at a bulk size chosen for\ndetectability rather than for drama, and if the large bulk earns its keep as a performance probe,\ngive it its own file so a slow machine cannot take the correctness rail down with it.\n\nTWO-SIDED, as ever: the fix must still FAIL if the fold starts scanning. A rail that stops being\nflaky by stopping being sensitive has been deleted, not repaired.\n\n\nOVERTAKEN (stale sweep, 2026-08-25): PR #438 (with frozen-rail authorization #439) landed the prescribed fix: the fixture's bulk shrank 5000 to 1500 (test/gateway/listing-warm.test.ts:155) and still asserts the fold count, so the rail stays sensitive without riding wall-clock. Shard is still status todo — archive it.",
+  "edges": [],
+  "id": "T187",
+  "phase": "P0",
+  "rails": [],
+  "scope": [
+    "test/gateway/listing-warm.test.ts"
+  ],
+  "status": "todo",
+  "title": "The 5k bulk-fold rail times out under suite load — a frozen rail that is sometimes red"
+}

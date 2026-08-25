@@ -1,0 +1,7 @@
+{
+  "body": "ChannelStatus.unreadable (a list of ROLE NAMES that failed their shapes, T217) and\nForgivenHealth.unreadable (a list of DELTA IDS, slate.ts) share a name and a type, so a swap\ntype-checks silently. Nothing swaps them today. Rename one — recommendation:\nChannelStatus.unreadable → ChannelStatus.illegibleRoles (the reader-side vocabulary), keeping\nForgivenHealth as is since its name predates. Check every surface string that renders the\nfield, and note the loam_federate_status JSON key is now API surface for MCP clients — if the\nkey must stay stable for compatibility, rename only the TypeScript field and keep the wire\nkey, saying so at the definition.\n\nAcceptance criteria:\n(a) The two fields no longer share a name; every consumer compiles and every surface renders\n    as before (byte-parity on the three T217 surfaces' output for the same fixture). Verify:\n    the existing T217 rails stay green unedited, plus a compile.\n\nMerge tier: chore. Self-merge on green.",
+  "category": "chore",
+  "duration": 1,
+  "id": "T234",
+  "title": "Rename one of the two `unreadable` fields — roles vs delta ids, both readonly string[]"
+}

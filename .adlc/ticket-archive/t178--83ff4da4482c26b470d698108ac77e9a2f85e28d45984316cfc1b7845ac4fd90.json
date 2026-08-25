@@ -1,0 +1,22 @@
+{
+  "_adlcArchive": {
+    "archivedAt": "2026-08-25T06:29:24.117Z",
+    "reason": "completed",
+    "sourceRevision": null,
+    "sourceStoreHash": "8f0971fa337a8ca05a4a02fef7fe6bc414366207315a2f5436b46ff84206d43d",
+    "ticketHash": "1b4232d5dd324c3f550c39f72ff1da5b89ff59f5f9b66acb85d018e36c69c125",
+    "version": 1
+  },
+  "body": "MEASURED on 2026-08-17 from a request trace of two different Anthropic clients against the live store.\n\nWHAT HAPPENS. Both clients OPEN the conversation with `server/discover`, before `initialize`. Loam\nanswers `{\"code\":-32601,\"message\":\"no such method server/discover\"}`. One client (`Anthropic/Toolbox`)\ntolerates the refusal and falls back to `initialize` — that path works today. The other\n(`Anthropic/ClaudeAI`) treats it as a dead connection and stops, reporting only `Connection closed`,\nand caches that state so it will not retry without a reconnect.\n\nTHE SPEC: `server/discover` is in the current MCP draft and servers **MUST** implement it. It lets a\nclient read supported protocol versions, capabilities and identity in one call, before any other\nrequest. Verified at https://modelcontextprotocol.io/specification/draft/server/discover .\n\nTHE RESPONSE SHAPE, from the spec's own example — do not invent it:\n  result.resultType: \"complete\"\n  result.supportedVersions: string[]        // the client picks one for subsequent requests\n  result.capabilities: { tools: {}, ... }\n  result._meta[\"io.modelcontextprotocol/serverInfo\"]: { name, version }   // SHOULD be included\n  result.instructions: string               // optional guidance for an LLM\n  result.ttlMs / result.cacheScope          // optional, caching\n\nEVERY VALUE MUST BE THE STORE'S OWN. `supportedVersions` is `MCP_PROTOCOLS` verbatim (today\n[\"2025-06-18\",\"2025-03-26\"]) — NOT a version the store cannot speak. `capabilities` is what\n`initialize` already answers. `serverInfo` is the same name and version `initialize` reports, which\n`scripts/sync-version.mjs` keeps in step with package.json. A discover response that advertised more\nthan initialize honours would be a report that can be false (H7) on the store's own front step.\n\nNOTE THE VERSION SEAM, because it is the reason to be careful rather than quick: the clients ask for\nprotocol `2025-11-25` and `2026-07-28`; the store speaks `2025-06-18` and negotiates down correctly at\n`initialize`. This ticket does NOT add support for a newer revision. It reports honestly what is\nsupported, so a client can choose. If a client then demands a newer revision's semantics, that is a\nseparate ticket with a real feature in it.\n\nRAILS (new file — check whether test/server/mcp-tool-honesty.test.ts, FROZEN by T86, enumerates\nmethods before adding anything near it):\n1. `server/discover` answers a result whose `supportedVersions` EQUALS the exported `MCP_PROTOCOLS`,\n   compared to the constant rather than to a copied literal, so the two cannot drift.\n2. Its `capabilities` and `serverInfo` equal what `initialize` answers, asserted by calling both in\n   one test and comparing — the anti-drift rail.\n3. It works with NO token on a door that requires one? NO — assert the opposite: the method sits behind\n   the same bearer requirement as the rest of the MCP door, and unauthenticated it answers the same\n   401 with the same challenge. Discovery of the AUTH surface is the well-known documents' job (T177);\n   this method is inside the door.\n4. An unknown method still answers -32601, so the fix adds a method rather than making the door\n   permissive.\n5. A notification-shaped `server/discover` (no id) gets silence, like every other notification.\n\nTIER: repair. It implements a MUST the store already had the values for, and discloses nothing\n`initialize` did not. Self-merges on green plus P5.\n\nPART OF THE CONNECTOR ARC: one of four before the debugging proxy comes down. See T176, T177, T148.\n\nOVERTAKEN (stale sweep, 2026-08-25): PR #424 (commit 75a7407) implemented server/discover — case \"server/discover\" at src/server/http.ts:1189 on main, answering MCP_PROTOCOLS and initialize's own capabilities/serverInfo — with the ticket's rail test/server/mcp-discover.test.ts (228 lines). Shard still unarchived.",
+  "edges": [],
+  "id": "T178",
+  "phase": "P4",
+  "rails": [
+    "test/server/mcp-discover.test.ts"
+  ],
+  "scope": [
+    "src/server/http.ts"
+  ],
+  "status": "in_progress",
+  "title": "`server/discover` is unimplemented, and the spec says servers MUST implement it"
+}
