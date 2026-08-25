@@ -93,6 +93,35 @@ describe("stock dependencies are derived from the bytes", () => {
     );
   });
 
+  // THE 1:1 THE RESOLVER RESTS ON. `referencedLenses` folds an expand's schema ref (a PROGRAM
+  // name) and its reading ref (a LENS name) into one set that `stockDependencies` resolves
+  // against entry LENS names — sound only while every entry's lens equals its program. This rail
+  // makes that invariant load-bearing instead of accidental: a future two-name entry fails here
+  // and forces the resolver to split the two kinds before it can mis-map a dependency (H6).
+  it("every entry's lens name equals its program name", () => {
+    for (const entry of STOCK_SCHEMAS) {
+      const program = (entry.registration as { hyperschema: { name: string } }).hyperschema.name;
+      expect(entryLensName(entry), entry.name).toBe(program);
+    }
+  });
+
+  // The pinned-ref refusal, driven red directly — the shelf itself never carries one, so without
+  // this the guard is code no test has seen fail. The cycle and dangling-reference throws in
+  // installOrder/stockDependencies remain exercised only as shelf properties (the shelf is closed
+  // and acyclic, so their red paths need an injected shelf no public seam accepts); that gap is
+  // accepted and named here rather than hidden.
+  it("a pinned schema reference in a body refuses rather than being skipped", () => {
+    expect(() =>
+      referencedLenses({
+        op: "expand",
+        role: { exact: "members" },
+        schema: { pinned: "abc123" },
+        reading: "ShallowPerson",
+        in: "input",
+      }),
+    ).toThrow(/pinned/);
+  });
+
   // The walk sees the expand's BOTH names — the child program (`schema`) and the child reading
   // (`reading`). A walk that collected only one would still pass a shelf where the two coincide,
   // so this asserts against a body where they are made to differ.

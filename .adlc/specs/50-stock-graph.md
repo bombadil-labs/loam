@@ -86,6 +86,12 @@ writable non-empty). Heterogeneous edges (`comment.on`, `collection.items`) stay
 
 ## Doctrine
 
+- **Scale note (review finding, 2026-08-25).** An expand re-runs the child gather per matching
+  member pointer inside the reactor's own evaluation — members × operand-set work, amortized by
+  materialization, owned by the substrate. §50 is the first stock shape that puts this on a
+  fresh store's default path; a very large org on a very large store pays it. Named, not fixed:
+  the cost lives in frozen rhizomatic, and nesting through shallow readings already minimizes
+  the per-member gather.
 - **Termination is a DAG, derived from the bytes.** The shelf's reading-reference graph — entry
   → the readings its body's expands name — must be acyclic, with the flat bases and shallow
   readings as its sinks. Railed by walking the bodies, never a declared depth. `fix` stays off

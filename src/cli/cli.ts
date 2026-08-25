@@ -69,8 +69,10 @@ import {
   lensNameFor,
   lensOf,
   parseRegistrationInput,
+  programOf,
   readRegistrations,
   schemaEntityFor,
+  type Registration,
   type RegistrationInput,
 } from "../gateway/registration.js";
 import { STOCK_SCHEMAS, stockNames, stockSchema } from "../stock/index.js";
@@ -1098,35 +1100,47 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
     // line says so, naming both compared layers. Never a refusal: sovereignty stays, drift
     // becomes visible.
     if (source.stockName !== undefined) {
-      const bound = new Map(
-        readRegistrations(gateway.reactor, gateway.operatorAuthor).map((r) => [
-          lensOf(r) as string,
-          r,
-        ]),
-      );
+      // EVERY contender per lens, not latest-arbitrary: a contested lens (two entities claiming
+      // one name) must not be projected down to whichever row a Map insertion kept, because the
+      // pre-flight refusal below is a sovereignty decision and would otherwise decide from half
+      // the picture.
+      const contenders = new Map<string, Registration[]>();
+      for (const r of readRegistrations(gateway.reactor, gateway.operatorAuthor)) {
+        const lens = lensOf(r) as string;
+        const rows = contenders.get(lens);
+        if (rows === undefined) contenders.set(lens, [r]);
+        else rows.push(r);
+      }
       const order = installOrder(source.stockName);
       const deps = order.slice(0, -1);
-      evolves = bound.has(entryLensName(order[order.length - 1]!));
-      // PRE-FLIGHT, before any delta lands. The substrate resolves an expand's `schema` ref by
-      // PROGRAM name and admits one reading per lens, so a bespoke reading bound under a foreign
-      // program name can never serve a stock body's reference — and installing stock beside it
-      // would EVICT the bespoke binding (latest-per-lens), the exact destruction H6 warns about.
-      // Refusing here, with the store untouched, is the only honest exit: sovereignty outranks
-      // convergence when the two collide (§50).
-      for (const dep of deps) {
+      // An EVOLVE is a republish at the SAME registration entity — never mere lens membership. A
+      // bespoke binding holding this lens from another entity is a contest, and the qualified
+      // `does not bind` report below is that case's honest voice (§42.4); an "evolves" line there
+      // would claim an act that did not happen.
+      const targetEntity = schemaEntityFor(input.hyperschema, input.entity);
+      evolves = (contenders.get(entryLensName(order[order.length - 1]!)) ?? []).some(
+        (r) => r.entity === targetEntity,
+      );
+      // PRE-FLIGHT, before any delta lands — the WHOLE order, target included. The substrate
+      // resolves an expand's `schema` ref by PROGRAM name and admits one reading per lens, so a
+      // required lens is composable only when some contender serves it under the program name
+      // the stock body references. When none does, publishing stock beside it would evict or
+      // crash — the exact destruction H6 warns about — so refuse here, with the store untouched:
+      // sovereignty outranks convergence when the two collide (§50). A bespoke binding that
+      // SHARES the program name passes through to the ordinary §42.4 qualified outcome.
+      for (const dep of order) {
         const lens = entryLensName(dep);
-        const already = bound.get(lens);
-        if (already === undefined) continue;
-        const stockProgram = (dep.registration as { hyperschema: { name: string } }).hyperschema
-          .name;
-        const theirProgram = already.hyperschema.name;
-        if (theirProgram !== stockProgram) {
+        const rows = contenders.get(lens);
+        if (rows === undefined) continue;
+        const stockProgram = programOf(dep.registration as { hyperschema: { name: string } });
+        if (!rows.some((r) => programOf(r) === stockProgram)) {
+          const theirs = [...new Set(rows.map((r) => programOf(r) as string))].join('", "');
           io.err(
             `register: --stock ${source.stockName} needs the reading ${lens} served by a ` +
               `program of the same name, and this store serves it from the program ` +
-              `"${theirProgram}". Installing stock ${dep.name} beside it would evict your ` +
+              `"${theirs}". Installing stock ${dep.name} beside it would evict your ` +
               `reading, so nothing was installed. To compose, republish your reading under ` +
-              `the program name ${lens}; to adopt stock, retire yours first.`,
+              `the program name ${stockProgram}; to adopt stock, retire yours first.`,
           );
           await gateway.close();
           return 2;
@@ -1134,10 +1148,14 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
       }
       for (const dep of deps) {
         const lens = entryLensName(dep);
-        const already = bound.get(lens);
-        if (already !== undefined) {
+        const rows = contenders.get(lens);
+        if (rows !== undefined) {
           io.out(`loam: ${dep.name} already bound — skipped`);
-          const differs = divergenceOf(dep, already);
+          // Compare against the contender that actually serves the reference — the pre-flight
+          // proved one exists — never an arbitrary row of a contested name.
+          const stockProgram = programOf(dep.registration as { hyperschema: { name: string } });
+          const serving = rows.find((r) => programOf(r) === stockProgram)!;
+          const differs = divergenceOf(dep, serving);
           if (differs !== undefined) {
             io.err(
               `loam: ${dep.name} is bound to a reading that is not stock ` +
