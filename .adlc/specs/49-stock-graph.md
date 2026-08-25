@@ -9,17 +9,18 @@ divergence visible enough, that forking is a deliberate act rather than an accid
 margins.
 
 Design settled with Myk in chat, 2026-08-25; amended the same day after the independent
-premortem (`49-stock-graph.premortem.md`). Amendments that changed an approved decision are
-flagged **(Myk — re-approve)**.
+premortem (`49-stock-graph.premortem.md`). The three amendments that changed an approved
+decision — story 1's install set, the thread split, ShallowReference dropped — were approved
+by Myk in chat the same day.
 
 ## User stories
 
 1. Sam runs `loam register --stock org`. The CLI reports it also installed `shallow-person`.
    Sam adds `person:ada` as a member and writes ada's name. A GraphQL org query returns ada's
-   id and name nested — and not ada's follows. **(Myk — re-approve: the original story had
-   `person` installed too; premortem finding 1 shows that dependency is not derivable from the
-   bytes, and the observable outcome needs only `shallow-person`. The CLI may still print a
-   one-line tip pointing at `--stock person`.)**
+   id and name nested — and not ada's follows. (Amended post-premortem, approved by Myk: the original
+   story had `person` installed too; that dependency is not derivable from the bytes, and the
+   observable outcome needs only `shallow-person`. The CLI may still print a one-line tip
+   pointing at `--stock person`.)
 2. Ada replies to a post. Her reply carries `replyTo` (the parent) and `thread` (the anchor).
    A `PostThread` query at the anchor returns every post in the conversation in one read, no
    tree walk.
@@ -72,14 +73,14 @@ expand names its child reading.
 finding 5). `PostThread` and `MessageThread` are separate programs over the **same anchor
 entities**: one `thread:xyz`, three live readings (Thread, PostThread, MessageThread) — the
 hypergraph shown plainly. A mixed thread reads oddly through either typed lens; that is inherent
-to kind-free entities and the landing section says so. **(Myk — re-approve: the original design
-called these two readings of one hyperschema entity; sibling lenses share one gather body, so
-different nestings are necessarily different programs.)**
+to kind-free entities and the landing section says so. (Amended post-premortem, approved by Myk: the original
+design called these two readings of one hyperschema entity; sibling lenses share one gather
+body, so different nestings are necessarily different programs.)
 
 **`ShallowReference` is dropped** (premortem finding 3): with flat bases as terminals it buys
 nothing, and an `{ id }`-only entry violates the frozen T85 per-entry invariants (props and
 writable non-empty). Heterogeneous edges (`comment.on`, `collection.items`) stay flat ids, as
-§42 always had them. **(Myk — re-approve.)**
+§42 always had them. (Amended post-premortem, approved by Myk.)
 
 ## Doctrine
 
