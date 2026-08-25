@@ -2,7 +2,9 @@
 // synchronously on the event loop with no timeout, so an infinite-loop bundle wedged EVERY mount (the
 // capability-security panel's headline residual). Each render now runs in a worker_threads Worker with a
 // hard timeout + resourceLimits: a hanging/heavy bundle folds to a clean 500 and every other route keeps
-// answering. Honest scope: a Worker bounds the HANG/crash/memory — NOT fs/net (that ocap is §24 work).
+// answering. Scope of THIS file: the Worker bounding HANG / crash / memory, and nothing else. The
+// fs/net/process half is a different question with its own rails — `render-ocap.test.ts` (T172) — and it
+// is built, so read the line these rails do not draw as a division of labour rather than a gap.
 
 import { describe, expect, it } from "vitest";
 import { assembleGenesis } from "../../src/gateway/genesis.js";

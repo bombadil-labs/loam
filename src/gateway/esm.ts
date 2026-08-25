@@ -1,15 +1,40 @@
 // Executable code at rest (SPEC §22.3 snapshot doctrine): a delta asserts directly-runnable ESM, and
-// what you audit IS what runs — one hash, no signed-vs-executed gap. This is the shared loader for both
-// consumers of that doctrine: §22 resolvers (ground in, value out) and §23 renderers (view in, UI out).
-// The module is loaded ONCE from a `data:` URL and cached by CONTENT ADDRESS, so identical source loads
-// once across the process and a changed byte is a fresh key. Loading is async (a `data:` import); the
-// callers pre-load at bind time so their hot paths stay synchronous.
+// what you audit IS what runs — one hash, no signed-vs-executed gap. The module is loaded ONCE from a
+// `data:` URL and cached by CONTENT ADDRESS, so identical source loads once across the process and a
+// changed byte is a fresh key. Loading is async (a `data:` import); the caller pre-loads at bind time so
+// its hot path stays synchronous.
+//
+// THIS LOADER IS §22 RESOLVERS ONLY, and the narrowing is the point (T172). It used to carry §23
+// renderers too, which meant a renderer's MODULE BODY — top-level code in a bundle that could arrive by
+// federation and be blessed — evaluated HERE, on the serving thread, with the server's whole ambient
+// authority. A renderer now evaluates only inside `render-worker.ts`'s confined realm; what crosses back
+// to this thread is a boolean and a content address, never a namespace. Nothing in this file executes a
+// renderer any more.
+//
+// WHAT REMAINS, EXACTLY, AND IT IS NOT SMALL. A §22 resolver still evaluates in this process, on the
+// serving thread, with no confinement of any kind: it can reach `node:fs`, open a socket, read
+// `process.env`. That is deliberate and it is not reachable by the T172 mechanism — a resolver is a
+// DERIVED FUNCTION the resolution program calls SYNCHRONOUSLY while resolving a view, and a function
+// cannot cross a thread boundary. A renderer could be confined precisely because its protocol is
+// "source in, string out"; a resolver's is "be a function". What makes the in-process floor tolerable is
+// §7, not this file: a governed store binds only the OPERATOR'S law, so a federated stranger's resolver
+// is inert data here and never loads. Read that as the floor's PRECONDITION, not as a bound on the
+// code — if operator law ever became untrusted, this loader would be the widest hole in the system.
+// Closing it needs a resolver protocol that survives a thread boundary, and there is none today.
 //
 // WHAT ERASURE CANNOT REACH HERE (SPEC §11). Erasing the delta that carried a unit of code does
 // not unload the code: the source rides a `data:` URL into NODE'S OWN ESM registry, which retains
 // it for the life of the process and offers no eviction — re-importing the same URL hands back the
 // identical namespace. So clearing the Map below cannot make the bytes gone; it can only drop
 // Loam's own handle to them.
+//
+// THAT RESIDUAL IS NOW A RESOLVER'S ALONE. A renderer's bytes never enter this registry: its module
+// body is evaluated in a worker that is TERMINATED when the render or the admission ends, so the
+// eviction the registry cannot offer is what the thread's death performs, and this process keeps only
+// the bundle's content address — a hash of forgotten bytes is not the forgotten bytes. The disclosure
+// `erase.ts` publishes still names "a resolver or renderer", which is now BROADER than the truth: it
+// over-discloses, and over-disclosure is the safe direction, so it is left for the erasure surface to
+// narrow rather than narrowed from here.
 //
 // T105 (a) named the tier honestly: `health().nonSwept` and the compliance receipt's `nonClaim`
 // carry the ESM-residency disclosure unconditionally — the tier is in erasure's scope but no byte
@@ -27,21 +52,19 @@
 // registration still holds it, because that code came from the running process rather than the
 // ground, and no erasure has ever had standing over it. The honest remedy for erasable
 // executable law is a disposable realm (§6 confinement / §24's pools) whose teardown IS the
-// eviction — not a cache sweep here.
+// eviction — not a cache sweep here. §23 renderers TOOK that remedy (T172); §22 resolvers cannot,
+// for the protocol reason at the top of this file.
 //
-// This USED to say "a federated stranger's code never loads here", and since §24.6's install-by-
-// federation that is no longer true: an operator who blesses a peer's app publishes it into a pool,
-// and the publish — like every later `prepareRoute` — arrives at `importEsm` below. A stranger's
-// MODULE BODY therefore evaluates on this thread, with no timeout and no `resourceLimits`. Only the
-// exported render call is bounded, in §23.9's worker.
-//
-// The bound is real and it is narrower than the sentence it replaced: the blessing is an operator's
-// deliberate act, the pool confines what the code may WRITE, and the frame says what a person is
-// looking at. What none of that reaches is a top-level `while (true)` or an `import("node:fs")` in
-// the module body. Confinement for UNTRUSTED executable law (object-capability SES / Worker / wasm
-// compartments, §6) is §24.5's named open flag; this loader is the plain in-process floor beneath
-// it, and deliberately invents no parallel sandbox — but it no longer claims a stranger never
-// reaches it.
+// This loader is now §22 RESOLVERS ONLY. §24.6's install-by-federation lets an operator bless a
+// peer's app into a pool, but since T172 a renderer never arrives here: it evaluates — module body
+// and render call alike — inside `render-worker.ts`'s confined realm, and what crosses back to this
+// thread is a boolean and a content address, never a namespace. So the only code this loader now
+// imports is the operator's OWN resolver law in a governed store, where only the operator's law
+// binds (§7). It is the plain in-process floor, and it deliberately invents no parallel sandbox:
+// the object-capability confinement §6 names is built once, in `render-worker.ts`, for the code
+// whose protocol can cross a thread. A §22 resolver still evaluates here with no confinement of any
+// kind — tolerable only because §7 binds operator law alone; if that ever became untrusted, this
+// loader would be the widest hole in the system.
 
 import { contentAddress } from "@bombadil/rhizomatic";
 

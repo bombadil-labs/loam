@@ -23,11 +23,27 @@
 //     because they are the operator's own grantee. An unmetered quarantine is exactly the unbounded
 //     bill this file exists to close, so the built-in envelope is the floor everyone starts from.
 //
-// HONEST SCOPE, restated because §24.5 states it and this file must not outgrow it: a Worker bounds
-// HANG, CRASH, and MEMORY. It does NOT bound ambient authority — a worker can still reach `node:fs`
-// or open a socket. Until the full no-fs/no-net ocap layer ships (SES-in-worker or isolated-vm,
-// §23.9's named further work), a quarantine that admits effectful code bounds resource exhaustion and
-// does not bound reach. This is the resource half only.
+// HONEST SCOPE, and it changed. This file is still the RESOURCE half only — slots, a wall clock, a
+// memory ceiling. The REACH half is no longer open: §24.5's standing flag ("a worker can still reach
+// `node:fs` or open a socket") was closed by T172, and a pool's renders now run in a confined realm with
+// no filesystem, no network and no process authority (`render-worker.ts`). The two halves compose here
+// rather than replacing one another — a pool's declared clock and memory ceiling reach its ADMISSIONS
+// as well as its renders, so a stranger's module body runs against the ceiling the operator wrote down.
+//
+// READ `maxMemoryMb` PRECISELY, because it promises less than its name. It reaches the Worker's
+// `resourceLimits`, which cap V8's HEAP — an `ArrayBuffer` backing store is allocated outside it, and
+// a measured body took 600MB under a declared 128MB ceiling. So the dimension bounds a runaway object
+// graph and does not bound a pool's appetite. That residual is `render-worker.ts`'s to close and it is
+// named there; what this file must not do is print a number an operator would read as a wall.
+//
+// BOUND, not BILLED, and the distinction is this file's own: an admission increments no counter, holds
+// no slot, and appears nowhere in `envelopeReports()`. The counters below mean RENDERS, and a module
+// body evaluated at publish or bind is not one. So an operator reads the ceiling an admission ran
+// against, and cannot read that it ran. Naming a fifth counter for it is a §24.5 report widening and
+// belongs to that section.
+//
+// What is still NOT bounded by either half: CPU inside the realm past the clock (`terminate()` is the
+// answer, and it is the timeout's), and §22 resolvers, which are not confined at all (`esm.ts`).
 
 import type { Claims, Reactor } from "@bombadil/rhizomatic";
 import type { Gateway } from "./gateway.js";

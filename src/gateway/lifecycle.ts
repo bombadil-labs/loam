@@ -47,7 +47,12 @@ import {
   type ResolverSpecs,
   lensNameFor,
 } from "./registration.js";
-import { loadRenderers, readRenderers } from "./renderers.js";
+import {
+  admitRenderers,
+  readRenderers,
+  rendererAdmissionBudget,
+  reportUnmounted,
+} from "./renderers.js";
 import {
   interpretBindingPolicy,
   readBindingPolicy,
@@ -786,9 +791,22 @@ export async function preloadResolversImpl(gw: Gateway): Promise<void> {
     ...gw.registrationVersions().map((v) => v.resolvers),
   ];
   await loadResolvers(specs);
-  // Renderer bundles ride the same content-addressed ESM loader (SPEC §23/§22.3), pre-loaded here so
-  // the synchronous serve path always finds its function.
-  await loadRenderers(readRenderers(gw.reactor, gw.operatorAuthor).map((r) => r.bundle));
+  // Renderer bundles do NOT ride that loader (SPEC §23.9 / T172): a renderer's module body is evaluated
+  // in the confined worker realm and never on this thread, so what this call establishes is ADMISSION —
+  // which routes may mount — rather than a loaded namespace. Tolerant by construction: one bundle the
+  // realm will not admit leaves one route unmounted, and never fails the bind.
+  //
+  // AND IT SAYS WHICH ONE. A route that goes dark silently is a swallowed error (H9): the operator sees
+  // a 404 and has nothing to read that names the cause, which for a federated bundle is the difference
+  // between "the peer sent code that reaches for the filesystem" and "my store is broken". The write
+  // goes through `reportUnmounted` — host-guarded, because a peer that has no `process` still binds,
+  // and both peer-chosen strings scrubbed before a person reads them.
+  const bindings = readRenderers(gw.reactor, gw.operatorAuthor);
+  const refused = await admitRenderers(
+    bindings.map((r) => r.bundle),
+    rendererAdmissionBudget(gw),
+  );
+  for (const { bundle, why } of refused) reportUnmounted(bindings, bundle, why);
 }
 
 // Publish a schema and its registration as data, then bind them (the body of
