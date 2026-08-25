@@ -625,6 +625,8 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     }
     discovery = makeOAuthDoors({
       publicUrl: canonicalPublicUrl(options.publicUrl),
+      // The spread carries `cimdAllowPrivateOrigins` along INERTLY — the register door reads no
+      // CIMD field; the seam binds only where makeConsentDoor threads it below.
       ...(options.connectors === undefined
         ? {}
         : { registration: { ...options.connectors, redeeming } }),

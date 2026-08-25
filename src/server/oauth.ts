@@ -841,10 +841,12 @@ ${
   };
 
   // `exactMatch`'s CIMD counterpart (T242): the client's own metadata document is the registration.
-  // Fetched through the fetcher's cache and judged per request — so a document edit binds on the
-  // next authorize — and the presented uri must equal one of the document's redirect_uris byte for
-  // byte, then pass this store's own hygiene (cimdRedirectDefect). Every reason is a fixed string;
-  // no caller text and no fetched byte rides back through it.
+  // Fetched through the fetcher's cache and judged per request. FRESHNESS IS BOUNDED, not
+  // immediate: a document edit binds once the cached entry expires — up to CIMD_CACHE_TTL_MS
+  // (5 minutes), plus a minted code's 60s life — and not one request longer. The presented uri
+  // must equal one of the document's redirect_uris byte for byte, then pass this store's own
+  // hygiene (cimdRedirectDefect). Every reason is a fixed string; no caller text and no fetched
+  // byte rides back through it.
   const cimdMatch = async (
     clientId: string,
     uri: string,
@@ -1025,13 +1027,13 @@ ${
       }
       const document = found.document;
       mint = (file) => {
-        // ONE URL-keyed row per CIMD client, upserted at APPROVAL — never at any anonymous knock,
-        // and never through /oauth/register. The row exists so the generation gate, revocation and
-        // the grant ledger hold for a CIMD client exactly as for a registered one; it is
-        // idempotent by key, so a hundred approvals leave one row. Its name and uris are refreshed
-        // from the document each time, but AUTHORIZATION always reads the fetched document
-        // (cimdMatch above), never this row. The generation is read inside this locked write, not
-        // from any earlier snapshot.
+        // ONE URL-keyed row per CIMD client, upserted at the approval POST alone — a consent GET,
+        // served or refused, writes nothing (railed in oauth-cimd.test.ts), and /oauth/register is
+        // never involved. The row exists so the generation gate, revocation and the grant ledger
+        // hold for a CIMD client exactly as for a registered one; it is idempotent by key, so a
+        // hundred approvals leave one row. Its name and uris are refreshed from the document each
+        // time, but AUTHORIZATION always reads the fetched document (cimdMatch above), never this
+        // row. The generation is read inside this locked write, not from any earlier snapshot.
         const existing = clientFor(file, clientId);
         const row: OAuthClient =
           existing === undefined

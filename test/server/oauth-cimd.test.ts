@@ -15,6 +15,8 @@
 //
 // What this file deliberately does NOT assert: PKCE/single-use/expiry enforcement at the token door
 // (phase 15's rails, unchanged by CIMD) and the register door's own validation (phase 13's file).
+// CIMD revocation IS asserted here, at the object level, in section (g) — oauth-revoke.test.ts
+// stays the registered flow's rail.
 
 import { createServer, type Server as HttpServer } from "node:http";
 import { createHash, randomBytes } from "node:crypto";
@@ -39,11 +41,12 @@ import {
   writeOAuthFile,
   type OAuthFile,
 } from "../../src/server/oauth-file.js";
-import { authorizationServerDocument } from "../../src/server/oauth.js";
+import { authorizationServerDocument, revokeConnector } from "../../src/server/oauth.js";
 import {
   CIMD_CACHE_TTL_MS,
   CIMD_MAX_BYTES,
   CIMD_MAX_URIS,
+  CIMD_MAX_URL,
   CIMD_TIMEOUT_MS,
   makeCimdFetcher,
   plainText,
@@ -99,10 +102,13 @@ interface Meta {
   readonly origin: string;
   readonly url: (path: string) => string;
   readonly counts: Map<string, number>;
+  /** The `/rotating.json` document's redirect_uris — mutable, so a rail can rotate one out. */
+  readonly rotating: { uris: string[] };
 }
 
 async function startMeta(): Promise<Meta> {
   const counts = new Map<string, number>();
+  const rotating = { uris: [CIMD_REDIRECT] };
   const server = createServer((req, res) => {
     const path = (req.url ?? "").split("?")[0]!;
     counts.set(path, (counts.get(path) ?? 0) + 1);
@@ -120,6 +126,11 @@ async function startMeta(): Promise<Meta> {
       res.end(body);
     };
     if (path === "/client.json") return json(doc());
+    if (path === "/bystander.json") return json(doc({ client_name: "Bystander Connector" }));
+    if (path === "/rotating.json") return json(doc({ redirect_uris: [...rotating.uris] }));
+    if (path === "/insecure-redirect.json")
+      return json(doc({ redirect_uris: [CIMD_REDIRECT, "http://attacker.example/cb"] }));
+    if (path.startsWith("/pad-")) return json(doc()); // any length of path; the doc echoes self
     if (path === "/hostile.json") return json(doc({ client_name: HOSTILE_NAME }));
     if (path === "/mismatch.json")
       return json(doc({ client_id: "https://elsewhere.example/client.json" }));
@@ -158,12 +169,15 @@ async function startMeta(): Promise<Meta> {
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("no fixture port");
   const origin = `http://127.0.0.1:${address.port}`;
-  return { origin, url: (path: string) => `${origin}${path}`, counts };
+  return { origin, url: (path: string) => `${origin}${path}`, counts, rotating };
 }
 
 // --- the serve() fixture -------------------------------------------------------------------------
 
-async function cimdServer(meta: Meta): Promise<{ base: string; home: string; gateway: Gateway }> {
+async function cimdServer(
+  meta: Meta,
+  over: { maxClients?: number; monotonicNow?: () => number } = {},
+): Promise<{ base: string; home: string; gateway: Gateway }> {
   const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
   let ts = 9001;
   await gateway.append([
@@ -191,8 +205,13 @@ async function cimdServer(meta: Meta): Promise<{ base: string; home: string; gat
       home,
       allowRedirectOrigins: [ALLOW_ORIGIN],
       cimdAllowPrivateOrigins: [meta.origin],
+      ...(over.maxClients === undefined ? {} : { maxClients: over.maxClients }),
     },
-    users: { home, mount: "default" },
+    users: {
+      home,
+      mount: "default",
+      ...(over.monotonicNow === undefined ? {} : { monotonicNow: over.monotonicNow }),
+    },
   });
   handles.push(handle);
   return { base: handle.url, home, gateway };
@@ -356,6 +375,37 @@ describe("T242 (a) — the CIMD round-trip", () => {
     expect(meta.counts.get("/client.json")).toBe(1);
   });
 
+  it("a consent GET writes nothing: served or refused, the file stays empty until the approval POST", async () => {
+    // A signed-in person on a Lax top-level nav to a crafted authorize link renders a page; only
+    // their explicit approval may write. An upsert on the GET would mint rows pre-consent.
+    const meta = await startMeta();
+    const clientId = meta.url("/client.json");
+    const { base, home } = await cimdServer(meta);
+    const sessionId = await signIn(base, "myk", PASSWORD);
+    const { challenge } = pkce();
+
+    const served = await authorize(base, sessionId, clientId, CIMD_REDIRECT, challenge);
+    expect(served.status).toBe(200);
+    const refused = await authorize(
+      base,
+      sessionId,
+      clientId,
+      "https://evil.example/cb",
+      challenge,
+    );
+    expect(refused.status).toBe(400);
+    const file = readOAuthFile(home);
+    expect(file.clients).toEqual([]);
+    expect(file.codes ?? []).toEqual([]);
+
+    // …and the approval POST is exactly what writes: one row, one code.
+    const approved = await approve(base, sessionId, await served.text());
+    expect(approved.status).toBe(302);
+    const after = readOAuthFile(home);
+    expect(after.clients.map((c) => c.clientId)).toEqual([clientId]);
+    expect(after.codes ?? []).toHaveLength(1);
+  });
+
   it("a redirect_uri the document does not vouch for REFUSES with no Location — and the vouched one passes beside it", async () => {
     const meta = await startMeta();
     const clientId = meta.url("/client.json");
@@ -434,6 +484,63 @@ describe("T242 (b) — the SSRF fences", () => {
     await refusesButFixturePasses("https://bob@metadata.example/client.json", "userinfo");
   });
 
+  it("a fragment in the URL refuses", async () => {
+    await refusesButFixturePasses("https://metadata.example/client.json#frag", "fragment");
+  });
+
+  it("a query string in the URL refuses — one client, one spelling", async () => {
+    // An echoing metadata server satisfies the client_id binding for every ?v= spelling, and each
+    // approved spelling would mint its OWN row, grant and tokens — `grant revoke <url>` would then
+    // strike one spelling while sibling grants stand. Refusing the query removes the spelling axis.
+    await refusesButFixturePasses("https://metadata.example/client.json?v=1", "query");
+  });
+
+  it("an over-length URL refuses at the door with the length reason", async () => {
+    await refusesButFixturePasses(`https://metadata.example/${"a".repeat(2030)}.json`, "2048");
+  });
+
+  it("the URL length holds at its exact edge: 2048 dials, 2049 refuses undialed", async () => {
+    const meta = await startMeta();
+    const fetcher = makeCimdFetcher({ allowPrivateOrigins: [meta.origin] });
+    // A path padded so the WHOLE URL is exactly the requested length; the fixture answers any
+    // /pad- path with a document echoing its own address.
+    const padded = (length: number): string => {
+      const stem = `${meta.origin}/pad-`;
+      return `${stem}${"a".repeat(length - stem.length - 5)}.json`;
+    };
+    const edge = padded(2048);
+    expect(edge).toHaveLength(2048);
+    expect((await fetcher.fetch(edge)).kind).toBe("ok");
+    const over = await fetcher.fetch(padded(2049));
+    expect(over.kind).toBe("refused");
+    if (over.kind === "refused") expect(over.reason).toContain("2048");
+  });
+
+  it("a document may vouch an http:// target and still not get it: the hygiene fence refuses, the https sibling passes", async () => {
+    // The document decides WHICH uris vouch; this store still holds each vouched uri to its own
+    // hygiene. Without this fence a hostile document could 302 a real browser to a plaintext
+    // target with the authorization code in the query.
+    const meta = await startMeta();
+    const clientId = meta.url("/insecure-redirect.json");
+    const { base } = await cimdServer(meta);
+    const sessionId = await signIn(base, "myk", PASSWORD);
+    const { challenge } = pkce();
+
+    const refused = await authorize(
+      base,
+      sessionId,
+      clientId,
+      "http://attacker.example/cb",
+      challenge,
+    );
+    expect(refused.status).toBe(400);
+    expect(refused.headers.get("location")).toBeNull();
+    expect(await refused.text()).toContain("not https");
+
+    const fine = await authorize(base, sessionId, clientId, CIMD_REDIRECT, challenge);
+    expect(fine.status).toBe(200);
+  });
+
   it("a bare origin with no path refuses — a document has an address, a site does not", async () => {
     await refusesButFixturePasses("https://metadata.example/", "path");
   });
@@ -500,8 +607,10 @@ describe("T242 (b) — the SSRF fences", () => {
     const fetcher = makeCimdFetcher({ lookup: loopbackLookup });
     const outcome = await fetcher.fetch("https://rebind.example/client.json");
     expect(outcome.kind).toBe("refused");
+    // The REASON is the rail here: it names the address fence, so the refusal came from judging
+    // the lookup's answer — not from a failed dial. (The counts check below is only a sanity
+    // floor; the hostile URL's port 443 could never reach the fixture's ephemeral port anyway.)
     if (outcome.kind === "refused") expect(outcome.reason).toContain("private address");
-    // Nothing dialed the fixture: the refusal happened at the lookup, before any connection.
     expect(meta.counts.get("/client.json") ?? 0).toBe(before);
   });
 
@@ -573,12 +682,34 @@ describe("T242 (b) — the SSRF fences", () => {
     expect(meta.counts.get("/client.json")).toBe(2); // past it: refetched
   });
 
+  it("a document edit binds when its cache entry expires — the removed redirect outlives the edit by at most the TTL", async () => {
+    // The honest bound on freshness, pinned: a client that rotates a redirect out of its document
+    // keeps the removed target admitted for up to CIMD_CACHE_TTL_MS (plus a minted code's 60s),
+    // and not one request longer.
+    const meta = await startMeta();
+    const clientId = meta.url("/rotating.json");
+    let clock = 0;
+    const { base } = await cimdServer(meta, { monotonicNow: () => clock });
+    const sessionId = await signIn(base, "myk", PASSWORD);
+    const { challenge } = pkce();
+
+    expect((await authorize(base, sessionId, clientId, CIMD_REDIRECT, challenge)).status).toBe(200);
+    const replacement = "https://claude.example/replacement";
+    meta.rotating.uris = [replacement];
+    // Within the TTL the cached vouching still admits the removed target — the bound is real.
+    expect((await authorize(base, sessionId, clientId, CIMD_REDIRECT, challenge)).status).toBe(200);
+    clock += CIMD_CACHE_TTL_MS + 1;
+    expect((await authorize(base, sessionId, clientId, CIMD_REDIRECT, challenge)).status).toBe(400);
+    expect((await authorize(base, sessionId, clientId, replacement, challenge)).status).toBe(200);
+  });
+
   it("the caps are the promised constants", () => {
     // Pinned as literals so a quiet widening is a red bar, not a diff nobody reads.
     expect(CIMD_MAX_BYTES).toBe(64 * 1024);
     expect(CIMD_TIMEOUT_MS).toBe(5000);
     expect(CIMD_CACHE_TTL_MS).toBe(5 * 60 * 1000);
     expect(CIMD_MAX_URIS).toBe(32);
+    expect(CIMD_MAX_URL).toBe(2048);
   });
 
   it("the uri bounds hold at their exact edges: 32 uris and 2048 characters pass, one more of either refuses", async () => {
@@ -739,5 +870,54 @@ describe("T242 (f) — `loam grant <url>` treats a URL id as opaque", () => {
     const after = readOAuthFile(home);
     expect(after.grants).toHaveLength(0); // the revoke bound on the URL id
     expect(after.clients[0]!.generation).toBe(2);
+  });
+});
+
+// --- (g) revocation, eviction, and the resurrection fence ----------------------------------------
+//
+// A CIMD id is DETERMINISTIC: revoke a client, let the register door's cap evict its (now
+// unpinned) row, and a re-approval creates a FRESH row at generation 1 — the exact shape a stale
+// generation-1 token could match again. The purge at fresh-row creation is the fence. This rail
+// drives the whole lifecycle through the doors and asserts at the object level, with an unrevoked
+// CIMD bystander alive throughout.
+
+describe("T242 (g) — a revoked CIMD token stays dead through eviction and re-approval", () => {
+  it("revoke kills the token at the door; eviction + re-approval cannot resurrect it; the new token and the bystander live", async () => {
+    const meta = await startMeta();
+    const clientA = meta.url("/client.json");
+    const clientB = meta.url("/bystander.json");
+    const { base, home } = await cimdServer(meta, { maxClients: 2 });
+    const sessionId = await signIn(base, "myk", PASSWORD);
+
+    const tokenA = await roundTrip(base, sessionId, clientA);
+    const tokenB = await roundTrip(base, sessionId, clientB);
+    expect((await mutate(base, tokenA, 811)).status).toBe(200);
+    expect((await mutate(base, tokenB, 812)).status).toBe(200);
+
+    // Revoke A by its URL. OBJECT LEVEL: the live token stops authenticating on the next request.
+    const revoked = await revokeConnector(home, clientA, async () => {});
+    expect(revoked.kind).toBe("revoked");
+    expect((await mutate(base, tokenA, 813)).status).toBe(401);
+    expect((await mutate(base, tokenB, 814)).status).toBe(200); // the bystander is untouched
+
+    // An anonymous registration at the cap evicts the revoked row — no grant, no code, no pin —
+    // taking its generation counter with it.
+    const registered = await fetch(`${base}/oauth/register`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ client_name: "Filler", redirect_uris: [DCR_REDIRECT] }),
+    });
+    expect(registered.status).toBe(201);
+    expect(readOAuthFile(home).clients.map((c) => c.clientId)).not.toContain(clientA);
+
+    // Re-approve A: a FRESH row at generation 1, and a fresh token that works.
+    const tokenA2 = await roundTrip(base, sessionId, clientA);
+    const fresh = readOAuthFile(home).clients.find((c) => c.clientId === clientA);
+    expect(fresh?.generation).toBe(1);
+
+    // The old token was PURGED at fresh-row creation, so it cannot match the fresh generation.
+    expect((await mutate(base, tokenA, 815)).status).toBe(401);
+    expect((await mutate(base, tokenA2, 816)).status).toBe(200);
+    expect((await mutate(base, tokenB, 817)).status).toBe(200);
   });
 });

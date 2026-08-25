@@ -42,6 +42,14 @@ export const CIMD_CACHE_TTL_MS = 5 * 60 * 1000;
 /** The most redirect_uris a document may carry — far above any real client, far below a 64KB list. */
 export const CIMD_MAX_URIS = 32;
 
+/**
+ * The longest client_id URL this store accepts. Deliberately under the token door's own field cap
+ * (`MAX_TOKEN_BODY_FIELD`, 4096): a longer id could be approved at consent and then never be
+ * PRESENTED at redemption — the token door blanks an over-long body field, and the refusal would
+ * misname the defect as a missing one. Fenced here, early, with an honest reason instead.
+ */
+export const CIMD_MAX_URL = 2048;
+
 const MAX_URI = 2048;
 
 /**
@@ -139,6 +147,9 @@ export function cimdUrlDefect(
   clientId: string,
   allowPrivate: ReadonlySet<string>,
 ): string | undefined {
+  if (clientId.length > CIMD_MAX_URL) {
+    return `a client_id URL is at most ${CIMD_MAX_URL} characters`;
+  }
   let url: URL;
   try {
     url = new URL(clientId);
@@ -155,12 +166,20 @@ export function cimdUrlDefect(
   if (url.hash !== "" || clientId.includes("#")) {
     return "a client document URL carries no fragment";
   }
-  // The draft: the URL MUST contain a path component, with no single- or double-dot segments.
+  // No query either — stricter than the draft's SHOULD NOT, on purpose. The document's client_id
+  // binding is satisfied by an echoing server for EVERY ?v= spelling of one logical client, and
+  // each approved spelling would mint its own row, grant, generation and tokens — so a later
+  // `grant revoke <url>` would strike one spelling while sibling grants stand. One client, one
+  // spelling.
+  if (url.search !== "" || clientId.includes("?")) {
+    return "a client document URL carries no query";
+  }
+  // The draft: the URL MUST contain a path component. Its companion rule — no single- or
+  // double-dot segments — is enforced by the WHATWG parser itself, which normalizes `.` and `..`
+  // (percent-encoded forms included) out of `pathname` before any check here could read them, so
+  // no explicit fence for it can ever decide.
   if (url.pathname === "/" || url.pathname === "") {
     return "a client document URL names a path, not a bare origin";
-  }
-  if (url.pathname.split("/").some((segment) => segment === "." || segment === "..")) {
-    return "a client document URL carries no dot path segments";
   }
   if (insecure) return undefined;
   const bare = url.hostname.replace(/^\[|\]$/g, "");
