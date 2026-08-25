@@ -3,5 +3,8 @@
   "category": "bug",
   "duration": 2,
   "id": "T216",
+  "rails": [
+    "test/gateway/receipt-citations-tiers.test.ts"
+  ],
   "title": "Erasure receipts enumerate dangling citations over the primary only — the byte verdict walks every tier"
 }

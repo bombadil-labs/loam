@@ -4120,6 +4120,9 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
           `  a receipt is immutable. To say something else, strike it (forgiveness, §11) and erase again.\n`) +
       `  the bytes are gone, asked tier by tier: ${swept.join(", ")}\n` +
       `  \`loam tombstones show ${done.tombstone}\` reads the receipt back` +
+      // The count now spans every WALKABLE tier the byte verdict walks (T216) — a pool-resident
+      // dangler is counted here, not just the primary's. It does not span a WALL: a tier the verdict
+      // names `unproven` cannot be reached to enumerate its danglers, so the count omits it, as it must.
       (done.citations.length === 0
         ? ""
         : `\n  ${done.citations.length} surviving delta(s) still point at the hole: ` +
