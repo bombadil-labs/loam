@@ -23,6 +23,10 @@ import {
   type View,
 } from "@bombadil/rhizomatic";
 import { Channel } from "./channel.js";
+// NOT `./channel.js` above it — that is the gateway's own Channel. The federation module is where a
+// channel POOL's naming lives, and `prefixOfChannelName` is the structural identity both readers
+// need when a record's own `prefix` primitive is condemned.
+import { prefixOfChannelName } from "../federation/channel.js";
 import { forgottenSince } from "./erase.js";
 import { readClosedIds, readGround, requireMoment } from "./slate.js";
 import type { Gateway } from "./gateway.js";
@@ -199,6 +203,22 @@ function channelGroundFor(
           `store's own deltas. Re-open the channel, or retire the lens.`,
       );
     }
+    // THE SAME FALL-THROUGH, REACHED BY ILLEGIBILITY INSTEAD OF BY A SEVER. A channel whose record
+    // does not carry a legible `prefix` matches no prefix at all, so the lookup above misses it and
+    // the return below would resolve the peer's lens over the RECEIVER's own ground. The channel's
+    // NAME still carries the prefix structurally, which is what makes the match possible when the
+    // record's own primitive is condemned.
+    const illegible = gw
+      .channelsEver()
+      .find((c) => c.unreadable.includes("prefix") && prefixOfChannelName(c.name) === prefix);
+    if (illegible !== undefined) {
+      throw new Error(
+        `${lens} is served by the federation channel "${illegible.name}", whose record does not ` +
+          `carry its prefix in the shape a channel record is written in. This reading cannot be ` +
+          `scoped to that peer's pool, and it must not fall back to this store's own deltas. ` +
+          `\`loam federate list\` names what the record cannot say.`,
+      );
+    }
     return undefined;
   }
   const closed = readClosedIds(gw, now);
@@ -318,7 +338,18 @@ export function resolvedNodeImpl(
 export function channelLens(gw: Gateway, lens: string): boolean {
   const cut = lens.indexOf(":");
   if (cut <= 0) return false;
-  return gw.channelStatus().some((c) => c.prefix === lens.slice(0, cut));
+  const prefix = lens.slice(0, cut);
+  // A standing channel whose record cannot say its prefix is STILL a channel lens. Answering
+  // `false` would stop these doors refusing, and the refusal is the whole point of the function.
+  // Scoped to STANDING channels, exactly as before — a severed channel's lens is `channelGroundFor`'s
+  // refusal to make, and widening this reading is not this question's to decide.
+  return gw
+    .channelStatus()
+    .some(
+      (c) =>
+        c.prefix === prefix ||
+        (c.unreadable.includes("prefix") && prefixOfChannelName(c.name) === prefix),
+    );
 }
 
 export function resolvePinnedImpl(

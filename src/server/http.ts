@@ -1407,16 +1407,39 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
                 {
                   type: "text",
                   text: JSON.stringify(
-                    rows.map((c) => ({
-                      ...c,
-                      // Spelled out rather than left as a zero: a channel that has NEVER reached
-                      // its peer must not read like one that is merely quiet (H9, §46 criterion 8).
-                      lastSyncedAt: c.lastSyncedAt === 0 ? "never synced" : c.lastSyncedAt,
-                      // What a peer SENT that can run, and whether any of it does (§24.6). Read-only
-                      // like the rest of this tool: naming an app is not mounting it, and no
-                      // connector tool mounts one — that act is the CLI's, in a person's hands.
-                      apps: appsByChannel.get(c.name) ?? [],
-                    })),
+                    rows.map((c) => {
+                      // WITHHOLD EXACTLY THE ROLES THE VERDICT NAMES — no more, and no fewer.
+                      //
+                      // Fewer: JSON writes a NaN as `null`, and an absent field coerces to the very
+                      // 0 this tool spells "never synced", so a condemned role left alone is served
+                      // to an agent as health.
+                      //
+                      // More: blanking a fixed pair instead would withhold two good numbers from a
+                      // record whose only illegible field is a TOGGLE — while serving that toggle's
+                      // coerced `true`, which is the toward-health default this marker exists to
+                      // stop, as fact. The sound fields pass through untouched; the CLI and the
+                      // admin panel already draw this same line.
+                      const blank = Object.fromEntries(
+                        c.unreadable.map((role) => [role, "unreadable"]),
+                      );
+                      return {
+                        ...c,
+                        // Spelled out rather than left as a zero: a channel that has NEVER reached
+                        // its peer must not read like one that is merely quiet (H9, §46 criterion 8).
+                        ...(c.unreadable.includes("lastSyncedAt")
+                          ? {}
+                          : {
+                              lastSyncedAt: c.lastSyncedAt === 0 ? "never synced" : c.lastSyncedAt,
+                            }),
+                        // What a peer SENT that can run, and whether any of it does (§24.6).
+                        // Read-only like the rest of this tool: naming an app is not mounting it,
+                        // and no connector tool mounts one — that act is the CLI's, in a person's
+                        // hands. It is keyed on the channel NAME, which no illegible record can
+                        // corrupt, so it is served whatever the verdict says about the rest.
+                        apps: appsByChannel.get(c.name) ?? [],
+                        ...blank,
+                      };
+                    }),
                     null,
                     1,
                   ),

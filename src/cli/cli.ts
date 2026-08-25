@@ -1210,6 +1210,20 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
         return 0;
       }
       for (const r of rows) {
+        // A RECORD THIS STORE CANNOT READ GETS NO HEALTH LINE AT ALL. Every value below is a
+        // coercion, and coercion defaults toward health — an absent time reads 0, which this
+        // command spells "never synced", and a NaN reaches `toISOString`, which throws and took the
+        // whole listing down with it. Naming the fields is the point: a person goes and looks at
+        // the record instead of at a guess.
+        if (r.unreadable.length > 0) {
+          io.out(
+            `${r.name}\n  UNREADABLE — its record does not carry ${r.unreadable.join(", ")} in ` +
+              `the shape a channel record is written in, so this command will not guess at its ` +
+              `health.\n  \`federate set\` and \`federate drop\` still name it, and neither ` +
+              `repairs the record: a set carries the unreadable fields forward as unreadable.`,
+          );
+          continue;
+        }
         // "never synced" is spelled out rather than shown as a zero: a channel that has never
         // reached its peer must not read like one that is merely quiet (H9, §46 criterion 8).
         const when =

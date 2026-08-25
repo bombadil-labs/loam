@@ -276,10 +276,12 @@ ${listing}
   // One channel's health, from the record deltas §46.4 already writes — and ONLY where this store
   // can still stand behind the reading. Three shapes, because three different things are true:
   //
-  //   - UNREADABLE: the record's numbers are not numbers. `readChannels` coerces with `Number(...)`
-  //     and filters by no author, so NaN reaches here from any writer; rendering it would put
-  //     `Invalid Date` in front of a person, and `toISOString` throws on it — one bad record used
-  //     to take the whole page down with it.
+  //   - UNREADABLE: the record does not carry the fields `c.unreadable` names in the shape a
+  //     channel record is written in. The verdict is the READER's, not this page's: coercion
+  //     defaults toward health, so an absent `lastSyncedAt` arrives here as a perfectly finite 0
+  //     and a page sniffing the numbers itself would draw "never synced" over it. Rendering the
+  //     coerced values would also put `Invalid Date` in front of a person, and `toISOString` throws
+  //     on a NaN — one bad record used to take the whole page down with it.
   //   - NOT RESUMED: the record stands but this store rebuilt no channel for it at boot (no
   //     address, or no credential — gateway.ts's resumeChannels). Nothing polls it, so its failure
   //     count CANNOT move: reporting "0 failures" would be a health claim about a peer this store
@@ -290,10 +292,17 @@ ${listing}
   // drawn as a time reads as "synced a while ago". Same convention as `loam_federate_status`.
   const channelRowHtml = (c: ChannelStatus, resumed: boolean): string => {
     const head = channelHeadHtml(c);
-    if (!Number.isFinite(c.lastSyncedAt) || !Number.isFinite(c.consecutiveFailures)) {
+    if (c.unreadable.length > 0) {
+      // WITHOUT THE HEAD. `channelHeadHtml` draws the prefix and the receiving container from the
+      // record's own coerced primitives, and those are exactly what may be condemned here — an
+      // absent `into` renders as a link to no container at all. The channel's NAME comes from the
+      // marker's entity id rather than a primitive, so it is the one identity that is always
+      // legible, and it is the one a person needs to act on the row.
       return (
-        `<li>${head}<strong>unreadable — this channel's record does not carry its health as ` +
-        `numbers, so this page will not guess at it</strong></li>`
+        `<li><a href="${escapeHtml(detailHref(c.name))}"><code>${escapeHtml(c.name)}</code></a> — ` +
+        `<strong>unreadable — this channel's record does not carry ` +
+        `${escapeHtml(c.unreadable.join(", "))} in the shape a channel record is written in, so ` +
+        `this page will not guess at its health</strong></li>`
       );
     }
     const when =

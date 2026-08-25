@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
+import { channelRecordClaims } from "../../src/federation/channel.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
@@ -138,6 +139,98 @@ describe("T188 — federation tools over MCP", () => {
       expect(outside.isError).toBe(true);
       // And it did NOT take effect — a refusal that still acted would be the worst of both.
       expect(gw.channelStatus("channel:work:carol")[0]!.blessing).toBe(true);
+    } finally {
+      await door.close();
+      await gw.close();
+    }
+  });
+});
+
+describe("T217 — a record this store cannot read is reported unreadable, never healthy", () => {
+  /** One channel's record, minus one role — the product's own shape, partially legible. */
+  async function truncate(gw: Gateway, pool: string, role: string): Promise<void> {
+    const built = channelRecordClaims(
+      gw.channelStatus(pool)[0]!,
+      gw.operatorAuthor!,
+      gw.nextTimestamp(),
+    );
+    await gw.append([
+      signClaims({ ...built, pointers: built.pointers.filter((p) => p.role !== role) }, OP),
+    ]);
+  }
+
+  it("withholds exactly the roles the verdict names, and no others", async () => {
+    const gw = await storeWithChannels();
+    // TWO records, condemned on DIFFERENT roles. One alone cannot tell a handler that blanks the
+    // roles the verdict names from one that blanks a fixed pair — and the fixed-pair version is
+    // wrong in both directions at once: it withholds a good number it could have served, while
+    // serving a condemned field's coerced value as fact.
+    await truncate(gw, "channel:friends:alice", "lastSyncedAt");
+    await truncate(gw, "channel:work:carol", "receiving");
+
+    const door = await serve({
+      mounts: { default: gw },
+      tokens: { "tok-op": { operator: true } },
+      port: 0,
+    });
+    try {
+      const answer = await callTool(door.url, "tok-op", "loam_federate_status");
+      expect(answer.isError, answer.text).toBe(false);
+      const rows = JSON.parse(answer.text) as {
+        name: string;
+        unreadable: string[];
+        receiving: boolean | string;
+        lastSyncedAt: number | string;
+        consecutiveFailures: number | string;
+      }[];
+
+      // The record with no readable TIME: the time is withheld and named...
+      const noTime = rows.find((r) => r.name === "channel:friends:alice")!;
+      expect(noTime.unreadable).toEqual(["lastSyncedAt"]);
+      expect(noTime.lastSyncedAt).toBe("unreadable");
+      // ...and `never synced` — the coercion's own words — is gone from that row entirely.
+      expect(JSON.stringify(noTime)).not.toContain("never synced");
+      // ...while the count it CAN read is still served, rather than blanked along with it.
+      expect(noTime.consecutiveFailures).toBe(0);
+
+      // The record with no readable TOGGLE: the toggle is withheld, not served as a coerced
+      // `true`. This is the row a fixed-pair substitution gets exactly backwards.
+      const noToggle = rows.find((r) => r.name === "channel:work:carol")!;
+      expect(noToggle.unreadable).toEqual(["receiving"]);
+      expect(noToggle.receiving).toBe("unreadable");
+      expect(noToggle.receiving).not.toBe(true);
+      // Its two good numbers pass through untouched — including the "never synced" convention.
+      expect(noToggle.lastSyncedAt).toBe("never synced");
+      expect(noToggle.consecutiveFailures).toBe(0);
+    } finally {
+      await door.close();
+      await gw.close();
+    }
+  });
+
+  it("a legible channel is untouched by any of it", async () => {
+    // TWO-SIDED at the tool: with one channel condemned, the other must read exactly as it always
+    // did — marker empty, convention intact. A handler that blanked every row would pass the
+    // assertions above on their own.
+    const gw = await storeWithChannels();
+    await truncate(gw, "channel:friends:alice", "lastSyncedAt");
+    const door = await serve({
+      mounts: { default: gw },
+      tokens: { "tok-op": { operator: true } },
+      port: 0,
+    });
+    try {
+      const answer = await callTool(door.url, "tok-op", "loam_federate_status");
+      const rows = JSON.parse(answer.text) as {
+        name: string;
+        unreadable: string[];
+        receiving: boolean | string;
+        lastSyncedAt: number | string;
+      }[];
+      const good = rows.find((r) => r.name === "channel:work:carol")!;
+      expect(good.unreadable).toEqual([]);
+      expect(good.receiving).toBe(true);
+      expect(good.lastSyncedAt).toBe("never synced");
     } finally {
       await door.close();
       await gw.close();

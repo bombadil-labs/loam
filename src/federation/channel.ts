@@ -143,7 +143,47 @@ export interface ChannelStatus {
    * could never be found again except by scanning the pool against its own stamps.
    */
   readonly unattested: readonly string[];
+  /**
+   * The roles this record did not carry in the shape a channel record is written in — empty for a
+   * legible record, and the only honest reading of the fields it names.
+   *
+   * ADDITIVE, and that is load-bearing: the fields beside it keep their coerced values, so a
+   * `Number("soon")` still reads back NaN and no row is ever dropped. Nothing that already read a
+   * ChannelStatus loses a field; a surface that wants to tell the truth reads this instead of
+   * re-deriving a guess from the coercions, and the two cases it can see that a coercion cannot are
+   * the ones that mattered — an ABSENT field coerces to a perfectly finite 0, and a toggle that is
+   * any value but the boolean `false` coerces to "on".
+   *
+   * Derived at the READER and never written down. A marker carried on the record could be cleared
+   * by whoever wrote the record it is meant to indict.
+   */
+  readonly unreadable: readonly string[];
 }
+
+const isText = (v: unknown): boolean => typeof v === "string";
+const isFlag = (v: unknown): boolean => typeof v === "boolean";
+/** Finite and not below zero: "−3 consecutive failures" is not a health reading either. */
+const isCount = (v: unknown): boolean => typeof v === "number" && Number.isFinite(v) && v >= 0;
+
+/**
+ * The six roles every channel record carries, each with the test its value must pass.
+ *
+ * `channelRecordClaims` writes all six on every record it has ever written, so an absent one is not
+ * an older record — it is a record this store cannot read. `from` and `unattested` are deliberately
+ * NOT here: both are omitted when empty, so absence is legible for them and only a wrong shape is
+ * not.
+ *
+ * The test rides in the row rather than a name that is looked up: a name needs a fallback, and a
+ * fallback silently accepts whatever it does not recognise.
+ */
+const RECORD_SHAPES: readonly (readonly [string, (v: unknown) => boolean])[] = [
+  ["into", isText],
+  ["prefix", isText],
+  ["receiving", isFlag],
+  ["blessing", isFlag],
+  ["lastSyncedAt", isCount],
+  ["consecutiveFailures", isCount],
+];
 
 export const CTX_CHANNEL = "loam.channel";
 
@@ -151,10 +191,13 @@ export const CTX_CHANNEL = "loam.channel";
  * A channel's own state, as deltas. Myk's rule: channel state is expressible as deltas like
  * everything else, so a person can query how a channel is doing rather than ask the process.
  *
- * Latest-wins by timestamp — each sync appends a fresh record and the newest reading is the live
- * one. `consecutiveFailures` is the field that makes H9 visible here: "0 accepted" is the same
- * visible answer for a quiet peer and an unreachable one, and only the second licenses believing
- * you are current when you are not.
+ * Latest-wins by timestamp AMONG THE OPERATOR'S OWN RECORDS — each sync appends a fresh record and
+ * the newest reading is the live one. `consecutiveFailures` is the field that makes H9 visible
+ * here: "0 accepted" is the same visible answer for a quiet peer and an unreachable one, and only
+ * the second licenses believing you are current when you are not.
+ *
+ * `status.unreadable` is not written, and must not be: it is the reader's verdict ON a record, and
+ * a record that carried its own verdict could carry a false one.
  */
 export function channelRecordClaims(
   status: ChannelStatus,
@@ -379,13 +422,31 @@ function readChannels(
   name: string | undefined,
   includeSevered: boolean,
 ): ChannelStatus[] {
+  // EVERYTHING WHEN UNGOVERNED, THE OPERATOR'S DELTAS WHEN GOVERNED — `lawfulSnapshot`'s rule,
+  // applied here rather than borrowed, because this reader also needs the marker and the ordering.
+  //
+  // An early `return []` for the ungoverned case would be worse than useless: `channelGroundFor`
+  // reads "no channel with that prefix" as licence to resolve the lens over the RECEIVER's own
+  // ground, so a store that merely cannot name its operator would serve its own private claims
+  // under a peer's name. A reader that cannot tell must not answer "there is nothing".
+  const operator = gw.operatorAuthor;
+  // The substrate's negation algebra over the LAWFUL slice, the shape every constitutional reader
+  // here uses: a strike retires its target only while it survives itself, and only the operator's
+  // strike counts. A stranger's negation of a channel record used to sever the channel on every
+  // live reading — the same defect as the forged record below, arriving from the other side.
+  const negated = lawfulNegated(gw.reactor, operator);
   const latest = new Map<string, { at: number; status: ChannelStatus }>();
   for (const d of gw.reactor.snapshot()) {
+    // THE AUTHOR IS PART OF THE SHAPE. Every record is written by `stamp`, signed as the operator,
+    // so a channel-shaped delta from anyone else is a stranger's claim ABOUT this store's channels
+    // rather than one of them — and latest-wins would let one appended a millisecond later flip a
+    // real channel's toggles, invent a channel that was never opened, or hide one that was.
+    if (operator !== undefined && d.claims.author !== operator) continue;
     const marker = d.claims.pointers.find(
       (p) => p.target.kind === "entity" && p.target.entity.context === CTX_CHANNEL,
     );
     if (marker === undefined || marker.target.kind !== "entity") continue;
-    if (!includeSevered && struck(gw, d.id)) continue;
+    if (!includeSevered && negated(d.id)) continue;
     const of = (role: string): string | number | boolean | undefined => {
       const p = d.claims.pointers.find((q) => q.role === role);
       return p?.target.kind === "primitive" ? p.target.value : undefined;
@@ -393,13 +454,34 @@ function readChannels(
     const channel = marker.target.entity.id.slice("channel:".length);
     const held = latest.get(channel);
     if (held !== undefined && held.at >= d.claims.timestamp) continue;
+    // WHAT THIS RECORD DOES NOT SAY IN ITS OWN SHAPE. The coercions below are unchanged — a reader
+    // that threw on a bad record would take every channel surface down with it — but coercion
+    // alone defaults toward HEALTH, and that is the report this names instead of making: an absent
+    // `lastSyncedAt` reads 0, which is exactly what a channel that has never synced carries, and
+    // `receiving !== false` is true of every value that is not the boolean `false`.
+    const unreadable: string[] = [];
+    for (const [role, holds] of RECORD_SHAPES) {
+      if (!holds(of(role))) unreadable.push(role);
+    }
+    // Absent by design when empty, so only a wrong shape is illegible here — never an absence.
+    const address = d.claims.pointers.find((p) => p.role === "from");
+    if (
+      address !== undefined &&
+      (address.target.kind !== "primitive" || typeof address.target.value !== "string")
+    ) {
+      unreadable.push("from");
+    }
     // Repeated role, read by hand: `of` answers with ONE primitive, and the custody debt is a list.
     const unattested: string[] = [];
+    let debtUnreadable = false;
     for (const p of d.claims.pointers) {
-      if (p.role === "unattested" && p.target.kind === "primitive") {
-        unattested.push(String(p.target.value));
-      }
+      if (p.role !== "unattested") continue;
+      // Dropping one silently would UNDERSTATE the debt, which is the same toward-health direction
+      // every other default here took.
+      if (p.target.kind !== "primitive") debtUnreadable = true;
+      else unattested.push(String(p.target.value));
     }
+    if (debtUnreadable) unreadable.push("unattested");
     latest.set(channel, {
       at: d.claims.timestamp,
       status: {
@@ -412,6 +494,7 @@ function readChannels(
         consecutiveFailures: Number(of("consecutiveFailures") ?? 0),
         from: String(of("from") ?? ""),
         unattested,
+        unreadable,
       },
     });
   }
@@ -1174,10 +1257,23 @@ function standingPrefixes(gw: Gateway): { channel: string; prefix: string }[] {
   const out: { channel: string; prefix: string }[] = [];
   for (const name of table.containers.keys()) {
     if (!name.startsWith("channel:")) continue;
-    const cut = name.indexOf(":", "channel:".length);
-    if (cut > 0) out.push({ channel: name, prefix: name.slice(cut + 1) });
+    const prefix = prefixOfChannelName(name);
+    if (prefix !== undefined) out.push({ channel: name, prefix });
   }
   return out;
+}
+
+/**
+ * The prefix a channel's own NAME carries — `channel:<into>:<prefix>`.
+ *
+ * The structural identity, and the only one available when a record's `prefix` primitive is among
+ * the roles the reader condemned. A channel's name is read from the marker's entity id rather than
+ * from a primitive, so it is legible exactly when the channel exists at all.
+ */
+export function prefixOfChannelName(name: string): string | undefined {
+  if (!name.startsWith("channel:")) return undefined;
+  const cut = name.indexOf(":", "channel:".length);
+  return cut > 0 ? name.slice(cut + 1) : undefined;
 }
 
 /**
@@ -1194,6 +1290,14 @@ async function syncChannel(
   opts: { into: string; prefix: string; from?: string; source: ChannelSource; bless?: boolean },
 ): Promise<SyncReport> {
   const before = channelStatusImpl(gw, name)[0];
+  // WHAT THE RECORD THIS SYNC BUILDS ON COULD NOT SAY. Every stamp below copies most of its fields
+  // from `before`, so these roles ride forward as coercions unless they are named here and omitted.
+  // A FAILURE stamp carries all of them, its own counter included: `(before.consecutiveFailures ??
+  // 0) + 1` counts up from a number the reader condemned, and a count derived from an unknown base
+  // is not a count. It is also the arithmetic that used to make a failing sync THROW inside its own
+  // catch block — `NaN + 1` is not a finite primitive and the substrate refuses it — which replaced
+  // the peer's real error with a write error on the way out.
+  const illegible = before?.unreadable ?? [];
   // The peer's address as the RECORD holds it, resolved once: the failure stamp, the success stamp
   // and the arrival attestation must all name the same door.
   const from = before?.from ?? opts.from ?? "";
@@ -1229,19 +1333,23 @@ async function syncChannel(
   } catch (err) {
     // A peer that did not answer is NOT a peer with nothing new. Record the failure before
     // rethrowing, so the count survives even when the caller swallows the error (H9).
-    await stamp(gw, {
-      name,
-      into: opts.into,
-      prefix: opts.prefix,
-      receiving: before?.receiving ?? true,
-      blessing: before?.blessing ?? opts.bless !== false,
-      lastSyncedAt: before?.lastSyncedAt ?? 0,
-      consecutiveFailures: (before?.consecutiveFailures ?? 0) + 1,
-      from,
-      // A peer that went quiet does not pay the channel's custody debt: carry it forward, or an
-      // unreachable peer would clear a gap it had nothing to do with.
-      unattested: owed,
-    });
+    await stamp(
+      gw,
+      {
+        name,
+        into: opts.into,
+        prefix: opts.prefix,
+        receiving: before?.receiving ?? true,
+        blessing: before?.blessing ?? opts.bless !== false,
+        lastSyncedAt: before?.lastSyncedAt ?? 0,
+        consecutiveFailures: (before?.consecutiveFailures ?? 0) + 1,
+        from,
+        // A peer that went quiet does not pay the channel's custody debt: carry it forward, or an
+        // unreachable peer would clear a gap it had nothing to do with.
+        unattested: owed,
+      },
+      illegible,
+    );
     throw err;
   }
   // `federate`, never `append`. Admission and authorship are different axes (§28.1): a peer's
@@ -1267,33 +1375,46 @@ async function syncChannel(
     // A standing sync swallows this throw, and the deltas are already IN the pool, so the next poll
     // accepts none of them: without this record the arrivals would be unstampable forever, and the
     // next success would write a healthy record over the gap.
-    await stamp(gw, {
+    await stamp(
+      gw,
+      {
+        name,
+        into: opts.into,
+        prefix: opts.prefix,
+        receiving: before?.receiving ?? true,
+        blessing,
+        lastSyncedAt: before?.lastSyncedAt ?? 0,
+        consecutiveFailures: (before?.consecutiveFailures ?? 0) + 1,
+        from,
+        // A refusal that could not name what it left unstamped carries the debt it already knew
+        // about — the door's own silence is what the counter is left to report.
+        unattested: err instanceof UnattestedArrivals ? err.unattested : owed,
+      },
+      illegible,
+    );
+    throw err;
+  }
+  await stamp(
+    gw,
+    {
       name,
       into: opts.into,
       prefix: opts.prefix,
       receiving: before?.receiving ?? true,
-      blessing,
-      lastSyncedAt: before?.lastSyncedAt ?? 0,
-      consecutiveFailures: (before?.consecutiveFailures ?? 0) + 1,
+      blessing: before?.blessing ?? opts.bless !== false,
+      lastSyncedAt: gw.nextTimestamp(),
+      consecutiveFailures: 0,
       from,
-      // A refusal that could not name what it left unstamped carries the debt it already knew
-      // about — the door's own silence is what the counter is left to report.
-      unattested: err instanceof UnattestedArrivals ? err.unattested : owed,
-    });
-    throw err;
-  }
-  await stamp(gw, {
-    name,
-    into: opts.into,
-    prefix: opts.prefix,
-    receiving: before?.receiving ?? true,
-    blessing: before?.blessing ?? opts.bless !== false,
-    lastSyncedAt: gw.nextTimestamp(),
-    consecutiveFailures: 0,
-    from,
-    // Cleared, and only here: the stamps for every owed arrival are in the pool above.
-    unattested: [],
-  });
+      // Cleared, and only here: the stamps for every owed arrival are in the pool above.
+      unattested: [],
+    },
+    // A SUCCESS speaks for the three it just determined. This sync reached the peer, so the clock
+    // reading, the zeroed counter and the emptied debt are facts of THIS act rather than coercions
+    // of the last one — they are legible again even when the record before them was not.
+    illegible.filter(
+      (r) => r !== "lastSyncedAt" && r !== "consecutiveFailures" && r !== "unattested",
+    ),
+  );
   return {
     offered: report.offered,
     accepted: report.accepted,
@@ -1497,28 +1618,59 @@ export async function dropChannelImpl(gw: Gateway, name: string): Promise<void> 
   // re-attempted an attach that cannot work because the declaration is struck. One command said
   // severed and the next said standing — and of the two, the one that keeps being read is the lie.
   if (gw.options.seed !== undefined) {
+    // THE SAME SLICE THE READER READS, or a sever leaves a channel standing. `readChannels` counts
+    // only the operator's records and only the operator's strikes, so asking a different question
+    // here would strand exactly the records the reader still believes: a stranger's negation of a
+    // real record satisfies "already struck" while the reader goes on serving it.
+    const operator = gw.operatorAuthor!;
+    const negated = lawfulNegated(gw.reactor, operator);
     for (const d of [...gw.reactor.snapshot()]) {
+      if (d.claims.author !== operator) continue;
       const marker = d.claims.pointers.find(
         (pt) => pt.target.kind === "entity" && pt.target.entity.context === CTX_CHANNEL,
       );
       if (marker === undefined || marker.target.kind !== "entity") continue;
       if (marker.target.entity.id !== `channel:${name}`) continue;
-      if (gw.reactor.negationsOf(d.id).length > 0) continue;
+      if (negated(d.id)) continue;
       await gw.append([
-        signClaims(
-          makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), d.id),
-          gw.options.seed,
-        ),
+        signClaims(makeNegationClaims(operator, gw.nextTimestamp(), d.id), gw.options.seed),
       ]);
     }
   }
 }
 
-/** Append one channel record. Latest-wins, so a stamp is an ordinary append rather than an edit. */
-async function stamp(gw: Gateway, status: ChannelStatus): Promise<void> {
+/**
+ * Append one channel record. Latest-wins, so a stamp is an ordinary append rather than an edit.
+ *
+ * `unreadable` is the READER's verdict ON a record and never part of one, so a caller does not
+ * supply it: a marker a writer could set is a marker a forger could clear.
+ *
+ * `illegible` NAMES THE ROLES THIS STAMP MUST NOT SPEAK FOR, and it is what stops the verdict
+ * healing itself away. Every field here is either freshly determined by the act being recorded or
+ * CARRIED FORWARD from the record the reader just condemned — and carrying one forward writes a
+ * coercion down as a fact. One `federate set` over an illegible record would otherwise mint a
+ * clean, operator-signed record asserting `lastSyncedAt: 0`, which every surface then reads as a
+ * healthy peer that has never synced. So the condemned roles are OMITTED: absence is what the
+ * reader already condemns, so the truth survives the write instead of being overwritten by it.
+ *
+ * Omitting rather than refusing is deliberate. A channel a person cannot freeze is a channel they
+ * can only sever, and a sever is the one act with no way back.
+ */
+async function stamp(
+  gw: Gateway,
+  status: Omit<ChannelStatus, "unreadable">,
+  illegible: readonly string[] = [],
+): Promise<void> {
+  const claims = channelRecordClaims(
+    { ...status, unreadable: [] },
+    gw.operatorAuthor!,
+    gw.nextTimestamp(),
+  );
   await gw.append([
     signClaims(
-      channelRecordClaims(status, gw.operatorAuthor!, gw.nextTimestamp()),
+      illegible.length === 0
+        ? claims
+        : { ...claims, pointers: claims.pointers.filter((p) => !illegible.includes(p.role)) },
       gw.options.seed!,
     ),
   ]);
@@ -1546,8 +1698,21 @@ export async function setChannelImpl(
     ...(next.receiving === undefined ? {} : { receiving: next.receiving }),
     ...(next.blessing === undefined ? {} : { blessing: next.blessing }),
   };
-  await stamp(gw, status);
-  return status;
+  // A TOGGLE THIS CALL SETS IS LEGIBLE AGAIN; every other condemned role is still a coercion of the
+  // record being replaced, and writing one down would launder the reader's verdict into a fact.
+  await stamp(
+    gw,
+    status,
+    held.unreadable.filter(
+      (r) =>
+        !(r === "receiving" && next.receiving !== undefined) &&
+        !(r === "blessing" && next.blessing !== undefined),
+    ),
+  );
+  // READ THE RECORD BACK RATHER THAN ECHOING THE ONE WE BUILT. `status` is assembled from the
+  // REPLACED record's coerced fields, so returning it would hand the caller — and
+  // `loam_federate_set`'s reply — a verdict about a record that is no longer the live one.
+  return channelStatusImpl(gw, name)[0] ?? status;
 }
 
 export interface StandingSync {
