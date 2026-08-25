@@ -3,6 +3,10 @@
   "category": "feature",
   "duration": 3,
   "id": "T244",
+  "rails": [
+    "test/cli/stock-depth.test.ts",
+    "test/cli/stock-install.test.ts"
+  ],
   "scope": [
     "src/stock/**",
     "src/cli/**",
