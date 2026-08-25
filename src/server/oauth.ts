@@ -37,6 +37,7 @@ import {
 } from "./oauth-file.js";
 import { CSP, escapeHtml, page, sameSecret, type SessionGate } from "./session.js";
 import { AUTHORIZE_PATH, authorizeContinuation } from "./continuation.js";
+import { cimdRedirectDefect, isCimdClientId, makeCimdFetcher, type CimdDocument } from "./cimd.js";
 
 /** The one scope §37 ships. A scope LIST replaces it when a second one exists. */
 export const CONNECTOR_SCOPE = "loam.connector";
@@ -86,6 +87,9 @@ export function authorizationServerDocument(publicUrl: string): Record<string, u
     // still said the word.
     code_challenge_methods_supported: ["S256"],
     token_endpoint_auth_methods_supported: ["none"],
+    // CIMD (T242, draft-ietf-oauth-client-id-metadata-document-02): a client_id may be an https
+    // URL naming the client's own metadata document — no registration needed.
+    client_id_metadata_document_supported: true,
     scopes_supported: [CONNECTOR_SCOPE],
   };
 }
@@ -162,6 +166,13 @@ export interface ConnectorRegistration {
    * sources (grants and live codes) alone.
    */
   readonly redeeming?: ReadonlyMap<string, number>;
+  /**
+   * The CIMD test seam (T242): exact origins the document fetcher may reach past its https and
+   * private-address fences, so a rail's own 127.0.0.1 fixture is fetchable. Threaded to the consent
+   * door's fetcher; the CLI never sets it. The fences it opens — and the ones it does not — are
+   * documented where they live, in `cimd.ts`.
+   */
+  readonly cimdAllowPrivateOrigins?: readonly string[];
 }
 
 export interface OAuthOptions {
@@ -737,6 +748,8 @@ export interface ConsentOptions {
    * a code's life.
    */
   readonly now?: () => number;
+  /** The CIMD document fetcher's test seam (T242) — see `ConnectorRegistration` and `cimd.ts`. */
+  readonly cimdAllowPrivateOrigins?: readonly string[];
 }
 
 export interface ConsentDoor {
@@ -754,6 +767,14 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
   const home = options.home;
   const now = options.now ?? ((): number => performance.now());
   const digestOf = (secret: string): string => createHash("sha256").update(secret).digest("hex");
+  // The CIMD document fetcher (T242), sharing this door's monotonic clock so a rail that steps the
+  // session window steps the document cache with it. Its fences live in cimd.ts.
+  const cimd = makeCimdFetcher({
+    now,
+    ...(options.cimdAllowPrivateOrigins === undefined
+      ? {}
+      : { allowPrivateOrigins: options.cimdAllowPrivateOrigins }),
+  });
 
   const htmlOut = (
     res: ServerResponse,
@@ -781,7 +802,7 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
     htmlOut(res, status, page("this request was refused", `<h1>Refused.</h1>\n<p>${message}</p>`));
 
   const consentPage = (
-    client: OAuthClient,
+    client: Pick<OAuthClient, "clientId" | "clientName">,
     registeredUri: string,
     state: string,
     codeChallenge: string,
@@ -792,7 +813,13 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
       "approve a connector",
       `<h1>Approve a connector?</h1>
 <p><code>${escapeHtml(client.clientName)}</code> asks to act in this store under its own name.</p>
-<p>If you approve, this store will send it back to <code>${escapeHtml(registeredUri)}</code>.</p>
+${
+  // A CIMD client's real identity is its URL (T242) — the name above is whatever its document
+  // says, so the page shows the address a person can actually judge.
+  isCimdClientId(client.clientId)
+    ? `<p>Its identity is its own address: <code>${escapeHtml(client.clientId)}</code>, whose document vouches for the redirect below.</p>\n`
+    : ""
+}<p>If you approve, this store will send it back to <code>${escapeHtml(registeredUri)}</code>.</p>
 <p><strong>${escapeHtml(STRIKER_WARNING)}</strong></p>
 <form method="post" action="${AUTHORIZE_PATH}">
 <input type="hidden" name="form_token" value="${escapeHtml(formToken)}">
@@ -813,10 +840,29 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
     return client.redirectUris.includes(uri) ? client : undefined;
   };
 
+  // `exactMatch`'s CIMD counterpart (T242): the client's own metadata document is the registration.
+  // Fetched through the fetcher's cache and judged per request — so a document edit binds on the
+  // next authorize — and the presented uri must equal one of the document's redirect_uris byte for
+  // byte, then pass this store's own hygiene (cimdRedirectDefect). Every reason is a fixed string;
+  // no caller text and no fetched byte rides back through it.
+  const cimdMatch = async (
+    clientId: string,
+    uri: string,
+  ): Promise<{ kind: "ok"; document: CimdDocument } | { kind: "refused"; reason: string }> => {
+    const outcome = await cimd.fetch(clientId);
+    if (outcome.kind === "refused") return outcome;
+    if (!outcome.document.redirectUris.includes(uri)) {
+      return { kind: "refused", reason: "its document does not vouch for that redirect address" };
+    }
+    const defect = cimdRedirectDefect(uri);
+    if (defect !== undefined) return { kind: "refused", reason: defect };
+    return { kind: "ok", document: outcome.document };
+  };
+
   const readBodyFields = (req: IncomingMessage): Promise<Map<string, string>> =>
     readBody(req).then((body) => parseUrlEncoded(body ?? ""));
 
-  const handleGet = (req: IncomingMessage, res: ServerResponse): void => {
+  const handleGet = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     // Behind a phase-5 session. No session → the login form, and nothing minted. READ, don't slide:
     // a bare GET here can be a SameSite=Lax cross-site top-level nav carrying the victim's cookie, and
     // rendering the consent page must not extend their session's idle window. `peek` reads without
@@ -855,12 +901,25 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
       refuse(res, 400, challengeDefect);
       return;
     }
-    // The exact-match fence, on the GET as on the POST: an unknown client or a uri no registration
-    // holds is refused with no `Location` and no caller text reflected.
-    const client = exactMatch(clientId, redirectUri);
-    if (client === undefined) {
-      refuse(res, 400, "This store holds no connector that may be reached at that address.");
-      return;
+    // The exact-match fence, on the GET as on the POST: an unknown client or a uri nothing vouches
+    // for is refused with no `Location` and no caller text reflected. WHO vouches depends on the
+    // client_id's shape (T242): a URL-shaped id is judged against its own fetched metadata
+    // document, any other against the registration this store holds.
+    let client: Pick<OAuthClient, "clientId" | "clientName">;
+    if (isCimdClientId(clientId)) {
+      const found = await cimdMatch(clientId, redirectUri);
+      if (found.kind === "refused") {
+        refuse(res, 400, `This request was not accepted: ${found.reason}.`);
+        return;
+      }
+      client = { clientId, clientName: found.document.clientName };
+    } else {
+      const registered = exactMatch(clientId, redirectUri);
+      if (registered === undefined) {
+        refuse(res, 400, "This store holds no connector that may be reached at that address.");
+        return;
+      }
+      client = registered;
     }
     // Display the REGISTERED uri (`redirectUri` here is byte-equal to it, having matched), never the
     // caller's own text. `state` and the PKCE `code_challenge` ride the form so the approval echoes
@@ -939,29 +998,84 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
       refuse(res, 400, challengeDefect);
       return;
     }
-    // Re-run the exact-match fence on the POST's OWN fields — the hidden field is a caller's to
-    // forge, so the registration is re-read and re-checked here, never trusted from the GET.
-    const client = exactMatch(clientId, redirectUri);
-    if (client === undefined) {
-      refuse(res, 400, "This store holds no connector that may be reached at that address.");
-      return;
-    }
-    // Mint the code: a secret to the client, its DIGEST to the file — bound to the client, the exact
-    // uri, the PKCE challenge, and the client's current generation, with a monotonic deadline recorded
-    // now. No seed, no token, no grant (that is phase 15's redemption).
+    // Re-run the vouching fence on the POST's OWN fields — the hidden field is a caller's to
+    // forge, so the registration (or the CIMD document, through its cache) is re-read and
+    // re-checked here, never trusted from the GET.
+    //
+    // Mint the code: a secret to the client, its DIGEST to the file — bound to the client, the
+    // exact uri, the PKCE challenge, and the client's current generation, with a monotonic deadline
+    // recorded now. No seed, no token, no grant (that is phase 15's redemption). `mint` builds the
+    // whole next file inside the one locked write.
     const secret = randomBytes(32).toString("base64url");
-    const record: OAuthCode = {
+    const codeRecord = (generation: number): OAuthCode => ({
       digest: digestOf(secret),
       clientId,
       redirectUri,
       expiresAt: now() + CODE_TTL_MS,
       issuedAt: Date.now(),
       codeChallenge,
-      generation: client.generation,
-    };
+      generation,
+    });
+    let mint: (file: OAuthFile) => OAuthFile;
+    if (isCimdClientId(clientId)) {
+      const found = await cimdMatch(clientId, redirectUri);
+      if (found.kind === "refused") {
+        refuse(res, 400, `This request was not accepted: ${found.reason}.`);
+        return;
+      }
+      const document = found.document;
+      mint = (file) => {
+        // ONE URL-keyed row per CIMD client, upserted at APPROVAL — never at any anonymous knock,
+        // and never through /oauth/register. The row exists so the generation gate, revocation and
+        // the grant ledger hold for a CIMD client exactly as for a registered one; it is
+        // idempotent by key, so a hundred approvals leave one row. Its name and uris are refreshed
+        // from the document each time, but AUTHORIZATION always reads the fetched document
+        // (cimdMatch above), never this row. The generation is read inside this locked write, not
+        // from any earlier snapshot.
+        const existing = clientFor(file, clientId);
+        const row: OAuthClient =
+          existing === undefined
+            ? {
+                clientId,
+                clientName: document.clientName,
+                redirectUris: [...document.redirectUris],
+                registeredAt: Date.now(),
+                generation: 1,
+              }
+            : {
+                ...existing,
+                clientName: document.clientName,
+                redirectUris: [...document.redirectUris],
+              };
+        return {
+          ...file,
+          clients:
+            existing === undefined
+              ? [...file.clients, row]
+              : file.clients.map((c) => (c.clientId === clientId ? row : c)),
+          // A FRESH row starts at generation 1 — and a CIMD id is DETERMINISTIC, so if an earlier
+          // row under this same URL was evicted after a revoke, a stale token stamped with the old
+          // generation could match the fresh count. Purging this id's tokens at re-creation closes
+          // that resurrection; a registered client cannot reach it, its ids being random.
+          tokens:
+            existing === undefined
+              ? file.tokens.filter((t) => t.clientId !== clientId)
+              : file.tokens,
+          codes: [...(file.codes ?? []), codeRecord(row.generation)],
+        };
+      };
+    } else {
+      const client = exactMatch(clientId, redirectUri);
+      if (client === undefined) {
+        refuse(res, 400, "This store holds no connector that may be reached at that address.");
+        return;
+      }
+      const record = codeRecord(client.generation);
+      mint = (file) => ({ ...file, codes: [...(file.codes ?? []), record] });
+    }
     try {
       withOAuthFile<void>(home, (file) => ({
-        next: { ...file, codes: [...(file.codes ?? []), record] },
+        next: mint(file),
         result: undefined,
       }));
     } catch (err) {
@@ -996,7 +1110,7 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
     async handle(pathname, req, res) {
       try {
         if (req.method === "GET") {
-          handleGet(req, res);
+          await handleGet(req, res);
           return;
         }
         if (req.method === "POST") {
