@@ -3,5 +3,10 @@
   "category": "bug",
   "duration": 1,
   "id": "T217",
+  "rails": [
+    "test/federation/channel-record-trust.test.ts",
+    "test/server/admin-channel-unreadable.test.ts",
+    "test/server/federate-mcp.test.ts"
+  ],
   "title": "readChannels defaults toward health and filters by no author — a forged or partial record reads as a healthy channel"
 }
