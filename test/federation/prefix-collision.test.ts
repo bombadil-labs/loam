@@ -21,22 +21,26 @@
 //    test also reads the DOOR, which is where a re-pointed prefix leaks the receiver's own claims.
 //    Four of them separate the two prefix readings, so neither reading can be deleted or promoted
 //    while the file is green;
-//  - (e) holds four: a container merely NAMED like a pool, two (container, prefix) pairs that mint
-//    one pool name, the advice a store already holding a collision is given, and the operand set a
-//    sever strikes over. The last two are the only rails for those two behaviours.
+//  - (e) holds three: a container merely NAMED like a pool, two (container, prefix) pairs that mint
+//    one pool name, and the advice a store already holding a collision is given. A fourth — the
+//    operand set a sever strikes over — was dropped on the T217 rebase, because T217's
+//    channel-record-trust.test.ts ("a stranger's negation cannot make a sever leave the channel
+//    standing") lands exactly that operand-set property; the bottom-of-file note records the drop.
 //
 // WHAT THESE RAILS DO NOT SHOW: that two channels sharing a flattened prefix actually cross at the
 // served field. The guard refuses that state, so it cannot be built through the public API, and
 // nothing here demonstrates the harm the refusal prevents. It would want a fixture that plants both
 // pools at the delta level and then reads the door.
 //
-// TWO GAPS NAMED, NEITHER CLOSED HERE. `cursesOf` still resolves through `struck`, which counts a
+// ONE GAP NAMED, NOT CLOSED HERE. `cursesOf` still resolves through `struck`, which counts a
 // negation from ANY author and stops after two links — the channel readings moved to the
-// operator-scoped, transitive `lawfulNegated` and `cursesOf` did not. And on a store with NO
-// operator, `channelStatus` and `channelsEver` both answer empty, which `channelGroundFor`
-// (src/gateway/reads.ts) reads as "not a channel lens" and resolves over the receiver's own ground
-// rather than refusing — fail-open where the container table fails closed. No shipped boot reaches
-// that state; every one supplies a seed.
+// operator-scoped, transitive `lawfulNegated` and `cursesOf` did not (T232 owns this).
+//
+// (The seedless-store "fail-open" this note once claimed is CLOSED, not open: T217 removed
+// readChannels' `operator === undefined → []` early return, so an ungoverned store returns ALL its
+// channel records rather than empty — its channel-record-trust.test.ts "a store that cannot name its
+// operator still reports its channels" asserts exactly that. The old note here described a hole T217
+// had already filled.)
 
 import { describe, expect, it } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
