@@ -576,6 +576,22 @@ describe("§51 (h) — a prefix/inSet role expand: a reference for typing only",
   });
 });
 
+describe("§51 — the write scalar refuses a non-primitive VARIABLE value", () => {
+  it("PrimitiveValue.parseValue guards the variables path, not only literals", async () => {
+    const { gateway } = await world();
+    await registerExperience(gateway, { refs: REFS });
+    const result = await gateway.query(
+      `mutation ($v: PrimitiveValue) { sync_experience(entity: "${EXP}", title: $v) { title } }`,
+      { v: { an: "object" } },
+      { actor: WRITER_SEED },
+    );
+    expect(result.errors?.join(" ")).toMatch(
+      /a property value must be a string, number, or boolean/,
+    );
+    await gateway.close();
+  });
+});
+
 describe("§51 — the refs envelope parse refuses malformed declarations loudly", () => {
   it("names the defect: a non-object refs, a roleless prop, a half reciprocal", () => {
     const pick = { pick: { order: { byTimestamp: "desc" } } };
