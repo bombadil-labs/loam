@@ -700,6 +700,16 @@ export function containerScopeImpl(
   const membersOf = (name: string): { deltas: Delta[]; ground: Gateway } => {
     const rec = table.containers.get(name)!;
     if (rec.posture === "separate") {
+      // THIS STORE IS THAT CONTAINER. A separate container's ground is a one-way seeded copy of its
+      // host's, so it carries the host's declaration OF ITSELF — and a scope built INSIDE it then
+      // asks it to attach itself, which it can never do. Its own reactor holds exactly those bytes,
+      // so answering from there is the reading, not a fallback: H9's concern is a scope resolving as
+      // if a container were EMPTY, and this is the one case where the bytes are already in hand.
+      //
+      // Without it a pool cannot resolve any lens whose gather scopes the parent — which is every
+      // lens a channel blesses. It survives a restart only because of this: a re-attach re-pulses
+      // the seeding edge, and a full replay then builds the scope that asks the question.
+      if (name === gw.poolHandle) return { deltas: [...gw.reactor.snapshot()], ground: gw };
       const pool = gw.attachedContainers.get(name);
       if (pool === undefined || !gw.quarantinePools.has(pool)) {
         throw new Error(

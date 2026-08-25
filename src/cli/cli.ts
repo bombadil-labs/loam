@@ -229,7 +229,7 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
   },
   federate: {
     summary: "open, list, adjust, and sever federation channels (SPEC §46)",
-    usage: "loam federate <open|list|set|drop> [options]",
+    usage: "loam federate <open|list|set|bless-app|drop> [options]",
     flags: new Set([
       "home",
       "store",
@@ -240,24 +240,63 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "bless",
       "receiving",
       "channel",
+      "route",
+      "resolvers",
+      "expect",
+      "pen",
+      "supersede",
       "yes",
     ]),
     // `--yes` is a bare confirmation, not a value. Without this the parser demanded a value and
     // `federate drop --channel X --yes` could not be typed correctly by anyone.
-    booleans: new Set(["yes"]),
+    // `--pen` is the same shape: §6's second key for an app that can WRITE, asked as a word. So is
+    // `--supersede`: moving a mounted route to the peer's newer code is a decision, not a default.
+    booleans: new Set(["yes", "pen", "supersede"]),
     notes: [
       "Federation is container-to-container. `open` names the container you receive INTO and the",
       "PREFIX you assign the peer — the prefix is yours, never theirs, so no peer can take a name",
       "you serve. Law that arrives binds under that prefix; your own names are untouched.",
       "",
+      "Each verb takes only its own flags and refuses the rest rather than dropping them:",
+      "  open      --from --into --prefix --token --bless",
+      "  list      (nothing beyond --home/--store)",
+      "  set       --channel --receiving --bless",
+      "  bless-app --channel, then EITHER --route (with --expect/--pen/--supersede)",
+      "            OR --resolvers, which takes neither of those",
+      "  drop      --channel --yes",
+      "`--bless` and `--receiving` take exactly `true` or `false`. Any other spelling is refused,",
+      "never read as `true`.",
+      "",
       "  loam federate open --from https://peer.example/default --into friends --prefix alice",
       "  loam federate list",
       "  loam federate set --channel channel:friends:alice --bless false",
+      "  loam federate bless-app --channel channel:friends:alice --route hello",
+      "  loam federate bless-app --channel channel:friends:alice --resolvers alice:Plant",
       "  loam federate drop --channel channel:friends:alice --yes",
       "",
       "`set` is reversible: --receiving false freezes the channel and keeps what arrived,",
       "--bless false stops new law binding and leaves bound law serving. `drop` is NOT reversible:",
       "it purges that peer's pool at the bytes and needs --yes.",
+      "",
+      "A peer's RESOLVER code never runs on its own either. A registration whose fields are computed",
+      "binds with those resolvers WITHHELD: the fields refuse and say so, and `bless-app --resolvers",
+      "<lens>` is what lets that code run. Binding a name and running code are two decisions.",
+      "",
+      "An APP a peer sends never runs on its own. It arrives inert, `list` names it, and",
+      "`bless-app` mounts that one route — the toggles above govern NAMES, never code that runs.",
+      "A mounted app runs on the channel's own pool behind the probation frame, its writes stay",
+      "there, and it answers the token door only. Dropping the channel takes it away. Add --pen for",
+      "an app that writes: its pen must also be provisioned and granted, which is a separate act",
+      "(SPEC §6, §24.7). When a peer ships new code at a route you mounted, `list` says so and",
+      "--supersede is what moves the route onto it. Pass --expect <the id `list` prints> to refuse",
+      "if the peer changed the app between the listing and the blessing.",
+      "",
+      "WHAT MOUNTING DOES NOT BOUND. The pool bounds what a peer's app may WRITE to your store. It",
+      "does not bound what that code may REACH: a bundle can open a socket or read the filesystem of",
+      "the machine you run this on. And only the app's RENDER runs in a worker with a time and memory",
+      "limit — its module body is evaluated on the serving thread, when you bless it and again the",
+      "first time a process is asked for it, with no such limit. Mount a peer's app the way you would",
+      "run their program (SPEC §24.5, an open flag).",
     ],
   },
   migrate: {
@@ -1086,14 +1125,58 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
 // agent, with ONE deliberate asymmetry: `drop` needs `--yes` here and cannot be reached at all by an
 // MCP caller, because an agent staging an irreversible purge and a person confirming it are
 // different acts on different surfaces.
+/** `--bless` on `federate open`: absent means yes, and only the two words are understood. */
+function blessFlagOf(raw: string | undefined): boolean {
+  if (raw === undefined) return true;
+  if (raw === "true" || raw === "false") return raw === "true";
+  throw new UsageError(
+    `federate open --bless takes exactly "true" or "false", and got "${raw}" — a spelling this ` +
+      "does not understand would be read as true, and this door never prints the blessing state " +
+      "it settled on. Nothing was opened.",
+  );
+}
+
 async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
   const verb = args[0];
   const parsed = parseFor("federate", args.slice(1));
-  if (verb === undefined || !["open", "list", "set", "drop"].includes(verb)) {
+  if (verb === undefined || !["open", "list", "set", "drop", "bless-app"].includes(verb)) {
     io.err(
       "federate takes a verb: open (start receiving from a peer), list (what is standing and how " +
-        "it is doing), set (freeze or unbless, both reversible), drop (sever and purge, not " +
-        "reversible) — `loam federate --help`",
+        "it is doing), set (freeze or unbless, both reversible), bless-app (mount one app a peer " +
+        "sent, the only act that lets their code run), drop (sever and purge, not reversible) — " +
+        "`loam federate --help`",
+    );
+    return 2;
+  }
+  // WHAT EACH VERB TAKES — because the parser's allowlist is per COMMAND, and `federate` is five
+  // commands wearing one name. Without this, a flag one verb reads is silently accepted by all the
+  // others: `bless-app --bless false` granted the resolvers and left the channel blessing, and the
+  // operator was told nothing. That direction is the dangerous one — a dropped `--route` merely
+  // fails to do something, while a dropped `--bless` fails to STOP something.
+  const TAKES: Record<string, readonly string[]> = {
+    open: ["from", "into", "prefix", "token", "bless"],
+    list: [],
+    set: ["channel", "receiving", "bless"],
+    "bless-app": ["channel", "route", "resolvers", "expect", "pen", "supersede"],
+    drop: ["channel", "yes"],
+  };
+  const takes = new Set(["home", "store", ...(TAKES[verb] ?? [])]);
+  // BOTH PARSER MAPS. A declared boolean lands in `booleans` and never in `flags`, so reading one
+  // is a check that half the names always pass.
+  const strayFlags = [...parsed.flags.keys(), ...parsed.booleans]
+    .filter((f) => !takes.has(f))
+    .sort();
+  if (strayFlags.length > 0) {
+    io.err(
+      `federate ${verb} does not take ${strayFlags.map((f) => `--${f}`).join(", ")} — it takes ` +
+        `${[...takes]
+          .sort()
+          .map((f) => `--${f}`)
+          .join(
+            ", ",
+          )}. Nothing was done: a flag this verb never reads is a request that would go ` +
+        "unanswered in silence. These verbs do not share a vocabulary: `--bless` belongs to `open` " +
+        "and `set`, and it decides whether a peer's law binds at all.",
     );
     return 2;
   }
@@ -1114,6 +1197,12 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
   try {
     if (verb === "list") {
       const rows = gateway.channelStatus();
+      // Read ONCE for the whole listing. `channelApps` walks the ground to find the channels, so
+      // asking it per row would make a listing quadratic in the store (H8).
+      const appsByChannel = new Map<string, ReturnType<typeof gateway.channelApps>>();
+      for (const a of gateway.channelApps()) {
+        appsByChannel.set(a.channel, [...(appsByChannel.get(a.channel) ?? []), a]);
+      }
       if (rows.length === 0) {
         io.out(
           "loam: no federation channels — `loam federate open --from <url> --into <container> --prefix <name>`",
@@ -1129,10 +1218,109 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
             : `last synced ${new Date(r.lastSyncedAt).toISOString()}`;
         const trouble =
           r.consecutiveFailures > 0 ? `, ${r.consecutiveFailures} failed attempt(s) since` : "";
+        // An APP a peer sent is code, and no toggle above mounts it (§24.6). An operator who cannot
+        // see what arrived cannot decide about it, so every arrival is named here — and the bundle's
+        // address is printed so two stores can compare notes.
+        //
+        // FOUR STATES, NOT TWO. A single "blessed" flag said "nothing runs" while blessed code ran
+        // (a peer had shipped new code at the route) and printed a remedy that throws. What an
+        // operator needs to see is the pair: what the peer OFFERS, and what this store RUNS.
+        // LONG ENOUGH TO PASTE INTO `--expect`. Twelve characters looked tidy and were four real
+        // ones, since every id starts `1e20` — so the documented workflow (read the list, paste the
+        // id) refused every time. A listing that cannot supply its own remedy is not a listing.
+        const short = (h: string): string => h.slice(0, 28);
+        // TWO SENTENCES PER APP: what the peer OFFERS, and what this store DOES about it — then the
+        // remedy for that exact state. Every earlier shape of this printed one line that had to
+        // cover several states, and each time the line was wrong for one of them and its remedy
+        // refused. A remedy is part of a report's truth: printing a command that throws is a false
+        // statement about the store, made on the surface a person reads before deciding.
+        const apps = (appsByChannel.get(r.name) ?? []).map((a) => {
+          // THE RECIPE CARRIES EVERY FLAG THE DOOR WILL DEMAND. An app that holds a pen is refused
+          // without `--pen` (§6's two keys), so a recipe that omitted it was a printed command that
+          // throws — and worse, it left the operator unaware that this app asks to WRITE.
+          const bless =
+            `\`loam federate bless-app --channel ${r.name} --route ${a.route}` +
+            (a.wantsPen === undefined ? "" : " --pen");
+          const offers =
+            a.hash === undefined
+              ? `\n  app "${a.route}" — the peer WITHDREW it`
+              : `\n  app "${a.route}" — the peer offers ${short(a.hash)}`;
+          // WHY IT ANSWERS NOTHING, when it does not. Each cause has a different remedy and none of
+          // them is "bless it", so each says the thing that is actually in the way.
+          // "MOUNTED" only when something is. A shadowed row can have no blessing at all — the
+          // name is simply the operator's — and blessing it would land and still answer nothing.
+          const here = a.mounted === undefined ? "nothing of it is mounted" : "it is MOUNTED here";
+          const stuck =
+            a.shadowed !== undefined
+              ? `\n    ${here}, and "${a.serves}" answers nothing: ${a.shadowed} holds that name\n` +
+                `    ${a.remedy ?? ""}`
+              : a.dark === true
+                ? `\n    it is MOUNTED here and answers nothing: the lens it reads is not bound ` +
+                  "here\n    lift the curse on that lens, or re-bless it, and this answers again"
+                : undefined;
+          // WITHDRAWN FIRST. There is nothing to bless and nothing newer to move onto, so every
+          // remedy below would refuse — the only act left is dropping the channel.
+          if (a.hash === undefined) {
+            return (
+              offers +
+              (stuck ??
+                `\n    this store still runs the app it blessed (${short(a.serving ?? a.mounted ?? "")}) ` +
+                  `at "${a.serves}"`) +
+              `\n    dropping the channel is what removes it: \`loam federate drop --channel ${r.name} --yes\``
+            );
+          }
+          if (stuck !== undefined) return offers + stuck;
+          // NOTHING IS MOUNTED and nothing can be: a route of the operator's own holds that name
+          // inside the pool, and the blessing door refuses it by name. `stuck` cannot speak for this
+          // one — it says "it is MOUNTED here", and nothing is.
+          if (a.blocked !== undefined) {
+            return (
+              `${offers}\n    it cannot mount: ${a.blocked} holds that name\n` +
+              "    a peer's app cannot take a name your own law answers"
+            );
+          }
+          // A pin names a delta of the PEER's store, which this one does not hold: the blessing door
+          // refuses it by name, so offering the blessing here would be offering a refusal.
+          if (a.unmountable !== undefined) {
+            return (
+              `${offers}\n    it cannot mount here: ${a.unmountable}\n` +
+              "    only the peer can change that; nothing on this side will" +
+              // A re-point to a pinned binding leaves an EARLIER blessing serving, and saying only
+              // "it cannot mount" would leave an operator believing that route answers nothing.
+              (a.serving === undefined
+                ? ""
+                : `\n    this store still runs the app it blessed (${short(a.serving)}) at "${a.serves}"`)
+            );
+          }
+          // What an app ASKS FOR, said once and near the top: a pen is the one property of an
+          // arrival that changes what blessing it means, rather than only what it draws.
+          const asks =
+            a.wantsPen === undefined
+              ? ""
+              : `\n    it asks to WRITE, under the pen "${a.wantsPen}" — blessing it needs --pen, ` +
+                "and the pen itself needs provisioning and a grant";
+          if (a.serving === undefined) {
+            return `${offers}${asks}\n    ARRIVED, INERT — nothing of it runs until ${bless}\``;
+          }
+          if (a.blessed) return `${offers}\n    it SERVES at "${a.serves}"`;
+          return (
+            `${offers}${asks}\n    this store runs DIFFERENT code at "${a.serves}": ${short(a.serving)}\n` +
+            `    to move it onto what the peer offers now: ${bless} --supersede\``
+          );
+        });
+        // A LENS WHOSE RESOLVER CODE IS WITHHELD is a decision waiting on a person, exactly as an
+        // inert app is — and the help points here for it, so here is where it has to appear.
+        const withheld = gateway
+          .withheldOn(r.name)
+          .map(
+            (lens) =>
+              `\n  lens "${lens}" — its computed fields REFUSE: the peer's resolver code is not run here\n` +
+              `    to run it: \`loam federate bless-app --channel ${r.name} --resolvers "${lens}"\``,
+          );
         io.out(
           `${r.name}\n  into ${r.into}, serving the peer's law under "${r.prefix}:"\n` +
             `  ${r.receiving ? "receiving" : "FROZEN"}, ${r.blessing ? "blessing" : "NOT blessing"}\n` +
-            `  ${when}${trouble}`,
+            `  ${when}${trouble}${withheld.join("")}${apps.join("")}`,
         );
       }
       return 0;
@@ -1155,7 +1343,9 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
         into,
         prefix,
         from,
-        bless: parsed.flags.get("bless") !== "false",
+        // The same strictness the `set` verb keeps, for the same reason — and this door is worse to
+        // guess at, because its report never prints the resulting blessing state.
+        bless: blessFlagOf(parsed.flags.get("bless")),
         source: sourceFor(from, token, (f) => readFileSync(f, "utf8"), parseOffer),
       });
       // The credential is written where secrets live, so the next boot can resume this channel.
@@ -1188,10 +1378,24 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
 
     if (verb === "set") {
       const next: { receiving?: boolean; blessing?: boolean } = {};
-      const receiving = parsed.flags.get("receiving");
-      const bless = parsed.flags.get("bless");
-      if (receiving !== undefined) next.receiving = receiving !== "false";
-      if (bless !== undefined) next.blessing = bless !== "false";
+      // EXACTLY `true` OR `false`. `!== "false"` reads `FALSE`, `0`, `no` and `off` as ON — and the
+      // direction is the one that matters: an operator typing `--bless FALSE` to stop new law
+      // binding would have turned it on and been told the channel was blessing, in a sentence they
+      // had just asked to make false. A spelling this does not understand is a refusal.
+      const toggle = (flag: string): boolean | undefined => {
+        const raw = parsed.flags.get(flag);
+        if (raw === undefined) return undefined;
+        if (raw === "true" || raw === "false") return raw === "true";
+        throw new UsageError(
+          `federate set --${flag} takes exactly "true" or "false", and got "${raw}" — a spelling ` +
+            "this does not understand would be read as true, which is the wrong direction to " +
+            "guess in. Nothing was changed.",
+        );
+      };
+      const receiving = toggle("receiving");
+      const bless = toggle("bless");
+      if (receiving !== undefined) next.receiving = receiving;
+      if (bless !== undefined) next.blessing = bless;
       if (next.receiving === undefined && next.blessing === undefined) {
         io.err("federate set wants --receiving <true|false> or --bless <true|false>, or both");
         return 2;
@@ -1202,6 +1406,98 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
           `${now.blessing ? "blessing" : "NOT blessing"}\n` +
           (now.blessing ? "" : "  law already bound stays bound — this stops NEW law binding\n") +
           (now.receiving ? "" : "  what already arrived still reads — this stops NEW deltas\n"),
+      );
+      return 0;
+    }
+
+    if (verb === "bless-app") {
+      // TWO ACTS, ONE VERB, because they are the same decision about the same channel: let a
+      // peer's code run here. `--route` mounts an app; `--resolvers` lets the code behind one
+      // lens's computed fields run. Neither rides the blessing toggle, and neither rides the other.
+      const lens = parsed.flags.get("resolvers");
+      if (lens !== undefined) {
+        // THE TWO ACTS ARE SEPARATE, and the flags that belong to the other one are refused rather
+        // than dropped. `--route` mounts an app; `--pen` and `--supersede` qualify that mount; and
+        // `--expect` pins an app's identity, which a lens's resolver law does not have. Asked for
+        // both acts at once, an operator would have got one and heard about one. BOTH parser maps
+        // are read: a declared boolean lands in `booleans` and never in `flags`, so testing one is
+        // a test that half the names always pass.
+        const stray = ["route", "expect", "pen", "supersede"].filter(
+          (f) => parsed.flags.has(f) || parsed.booleans.has(f),
+        );
+        if (stray.length > 0) {
+          const named = stray.map((f) => `--${f}`).join(", ");
+          io.err(
+            `federate bless-app --resolvers does not take ${named} — ${
+              stray.length === 1 ? "that flag belongs" : "those flags belong"
+            } to the OTHER act, \`--route\`, which mounts an app. This one grants the resolver ` +
+              "code on ONE lens, and there is no identity for it to pin: `federate list` names the " +
+              "lens and nothing finer. Nothing was granted; run the two acts separately.",
+          );
+          return 2;
+        }
+        // THE NAME THE ACT USED, not the one that was typed. `--resolvers Plant` is a supported
+        // form and the reader below answers prefixed names, so comparing the operator's own string
+        // would be a check that can never match — a guard that passes because it is empty.
+        const served = await gateway.blessChannelResolvers(name, lens);
+        // READ IT BACK. The grant replaces a binding whose address is identical to the one it
+        // replaces, so "it landed" and "it took the name" are different questions — and announcing
+        // the first as the second is the shape this file refuses everywhere else (H7).
+        if (gateway.withheldOn(name).includes(served)) {
+          io.err(
+            `federate bless-app: ${name} published the grant for "${served}", and its fields still ` +
+              "refuse\n  the withheld binding is still what answers — nothing here should be read " +
+              "as a success",
+          );
+          return 2;
+        }
+        io.out(
+          `loam: ${name} now runs the peer's resolver code for "${served}"\n` +
+            "  it runs on this channel's pool, in this process, and not in the render worker\n" +
+            `  dropping the channel takes it with the peer's data — \`loam federate drop --channel ${name} --yes\``,
+        );
+        return 0;
+      }
+      const route = parsed.flags.get("route");
+      if (route === undefined) {
+        io.err(
+          "federate bless-app wants --route <route>, or --resolvers <lens> — `loam federate list` " +
+            "names every app a peer has sent and every lens whose resolver code is withheld, and " +
+            "these are the only two ways a peer's code ever runs here",
+        );
+        return 2;
+      }
+      const expected = parsed.flags.get("expect");
+      await gateway.blessChannelApp(name, route, {
+        pen: parsed.booleans.has("pen"),
+        supersede: parsed.booleans.has("supersede"),
+        ...(expected === undefined ? {} : { expect: expected }),
+      });
+      // Report what the store ANSWERS WITH, not what the call returned. A blessing that landed and
+      // does not serve — its lens withdrawn, say — must not be announced as a mount (H7).
+      const app = gateway.channelApps(name).find((a) => a.route === route);
+      if (app?.blessed !== true) {
+        // NAME THE CAUSE, or name that it is unknown. The first version of this line always blamed
+        // the lens, which is wrong for the commonest case: a name of the operator's own in the way.
+        const why =
+          app?.shadowed !== undefined
+            ? `${app.shadowed} holds that name — ${app.remedy ?? "move it and this answers"}`
+            : app?.dark === true
+              ? "the lens it reads is not bound here — lift the curse on it, or re-bless it"
+              : "check `loam federate list` for what this store says about it";
+        // EXIT 2, because a script that reads 0 here reads a mount. The blessing DID land and is
+        // not lost — it answers the moment what is in the way moves — and the message says so, so
+        // nobody re-runs this looking for a different result.
+        io.err(
+          `federate bless-app: ${name} blessed the app "${route}", and "${app?.serves ?? route}" ` +
+            `answers nothing\n  ${why}\n  the blessing is on the ground; it serves when that clears`,
+        );
+        return 2;
+      }
+      io.out(
+        `loam: ${name} now serves the app "${route}" at "${app.serves}"\n` +
+          "  it runs on this channel's pool, behind the probation frame, and its writes stay there\n" +
+          `  dropping the channel takes it with the peer's data — \`loam federate drop --channel ${name} --yes\``,
       );
       return 0;
     }

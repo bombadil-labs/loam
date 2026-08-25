@@ -1396,6 +1396,12 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             .filter((c) => federateAdmits(standing, c.into));
 
           if (name === "loam_federate_status") {
+            // Read ONCE for the whole answer: `channelApps` walks the ground to find the channels,
+            // so asking it per row would make this tool quadratic in the store (H8).
+            const appsByChannel = new Map<string, ReturnType<typeof gateway.channelApps>>();
+            for (const a of gateway.channelApps()) {
+              appsByChannel.set(a.channel, [...(appsByChannel.get(a.channel) ?? []), a]);
+            }
             reply({
               content: [
                 {
@@ -1406,6 +1412,10 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
                       // Spelled out rather than left as a zero: a channel that has NEVER reached
                       // its peer must not read like one that is merely quiet (H9, §46 criterion 8).
                       lastSyncedAt: c.lastSyncedAt === 0 ? "never synced" : c.lastSyncedAt,
+                      // What a peer SENT that can run, and whether any of it does (§24.6). Read-only
+                      // like the rest of this tool: naming an app is not mounting it, and no
+                      // connector tool mounts one — that act is the CLI's, in a person's hands.
+                      apps: appsByChannel.get(c.name) ?? [],
                     })),
                     null,
                     1,
@@ -1695,7 +1705,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
               });
               return;
             }
-            await gateway.prepareRoute(parsed.route); // load the bundle before the render (worker, §23.9)
+            await gateway.prepareRoute(parsed.route, "public"); // load the bundle before the render (worker, §23.9)
             if (!guard.live()) {
               guard.gone();
               return;

@@ -33,6 +33,7 @@ import {
   type Schema,
   type View,
 } from "@bombadil/rhizomatic";
+import { isWithheldResolver } from "./adopt-law.js";
 import { importEsm } from "./esm.js";
 import type { ResolverOutputType, ResolverSpecs } from "./registration.js";
 
@@ -288,10 +289,44 @@ export function applyResolvers(
   hview: HView,
   root: string,
   memo: ResolverMemo,
+  /**
+   * The READING these resolvers ride, and it is REQUIRED — `undefined` would make an un-threaded
+   * call site disable the withheld-field refusal in silence, which is how the expanded-children
+   * path came to answer a Policy value for a field this store had refused to compute. A caller with
+   * genuinely no reading passes `undefined` deliberately and says why.
+   */
+  lens: string | undefined,
 ): Record<string, View> {
   if (resolvers === undefined) return view;
   const out: Record<string, View> = { ...view };
   for (const [field, spec] of Object.entries(resolvers)) {
+    // A WITHHELD RESOLVER TAKES ITS FIELD AWAY. The availability rule below — a resolver that
+    // throws leaves the Policy value — is right about a resolver this store RAN and that failed. A
+    // withheld one was never run, deliberately, so the Policy value is a number nobody computed and
+    // nothing downstream would say so: REST, watch, list and a rendered page all read THIS
+    // function's output, and only GraphQL can attach a reason to a field.
+    //
+    // WHERE IT HOLDS, exactly: every top-level read (each door resolves through `resolvedNode`,
+    // `resolvePinned` or `watchEntity`, and all three name their lens), and an EXPANDED CHILD
+    // decorated through its own reading.
+    //
+    // WHERE IT DOES NOT is EVERY PLACE THE DECORATION PASS DOES NOT REACH, and that is a class
+    // rather than a list — do not read the examples as exhaustive. A child re-projected by a
+    // parent's OWN resolver builds its value from the hyperview and never passes here at all; and
+    // decoration skips a child whenever it cannot place it, which includes a positional mismatch
+    // under `conflicts`, an ambiguous (root, role) naming two readings, a stripped-id list whose
+    // length disagrees, and a reading this store does not hold. Each serves the Policy value for a
+    // field this store refused to compute.
+    //
+    // The EXECUTION guarantee is unaffected in all of them — what `loaded` holds for a withheld
+    // spec is this store's own stub, so a peer's ESM does not run on any of these paths. It is the
+    // DISPLAY guarantee that is partial. Closing it wants the field out of the READING rather than
+    // out of this view, which moves a published Schema and therefore a law address: its own change,
+    // with its own rails.
+    if (lens !== undefined && isWithheldResolver(spec.code, lens, field)) {
+      delete out[field];
+      continue;
+    }
     const fn = loaded.get(resolverAddress(spec.code));
     if (fn === undefined) continue; // not loaded → fall back to the Policy value
     const { entries, deltaIds } = bucketOf(hview, field, root);
@@ -422,6 +457,10 @@ const decorateOne = (
     ref.hview,
     ref.root,
     memo,
+    // THE CHILD'S OWN READING (§22.7). A withheld field is withheld wherever it is read, and an
+    // expanded child is read through a DIFFERENT lens than its parent — the one named here. Left
+    // out, a peer's lens embedded as a child answered its Policy value at every door.
+    ref.reading.name,
   );
   return decorateChildren(withOwn, ref.hview, ref.reading, readingResolvers, memo);
 };

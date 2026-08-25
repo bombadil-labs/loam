@@ -589,6 +589,22 @@ with rails (spec §46, §47):
   their own resolution under their own name.
 - **A binding lives in the pool it was blessed into**, so severing takes the peer's law with the
   peer's data — nothing to retire, and a bystander channel's names keep serving.
+- **A peer's app arrives inert, and one act mounts it.** `federate list` names every app a channel
+  has received — route, bundle id, and whether this store runs it — and `federate bless-app
+  --channel <name> --route <route>` is the only thing that mounts one. Neither toggle above reaches
+  it: `blessing` governs NAMES, and running a stranger's code is a wider grant that takes its own
+  act. A mounted app serves under the channel's prefix, from the channel's own pool, behind the
+  probation frame, with its writes sequestered there — and dropping the channel takes it away.
+- **A peer's computed fields refuse until you run their code.** A registration whose values come
+  from the peer's own resolver code binds with that code WITHHELD: the fields answer with a reason
+  naming the act that supplies them, and `bless-app --resolvers <lens>` is that act.
+
+**What mounting a peer's app does not bound.** The pool bounds what that app may WRITE to your
+store. It does not bound what its code may REACH: a bundle can open a socket or read the filesystem
+of the machine you run this on. And only the app's RENDER runs in a worker with a time and memory
+limit — its module body is evaluated on the serving thread, when you bless it and again the first
+time a process is asked for it. Mount a peer's app the way you would run their program (§24.5, an
+open flag).
 
 **What channels do NOT do yet.** Each of these is real today, and each has a ticket:
 
@@ -596,9 +612,6 @@ with rails (spec §46, §47):
   token also registers root law, mints grants and reads everything. A container-scoped offer token
   is designed and blocked on where a runtime-issued credential should live (T196/T188 — T196's
   restart half landed; its shard stays open for this decision).
-- **An arriving renderer is inert and invisible.** A peer's app rides the channel like any other
-  delta, but nothing notices it, offers a bless, or mounts it. Install-by-federation is ticketed
-  (T209), and inert-until-blessed is the designed posture: auto-bless will never auto-execute.
 
 **Over MCP**, an agent gets `loam_federate_status`, `_connect`, `_set` and `_drop`, each scoped by a
 `federate` grant naming one container. `_drop` **stages only**: it returns a link and a preview of

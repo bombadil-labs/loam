@@ -29,10 +29,19 @@
 // executable law is a disposable realm (§6 confinement / §24's pools) whose teardown IS the
 // eviction — not a cache sweep here.
 //
-// v1 runs the operator's OWN code in a governed store — only the operator's law binds (§7), so a
-// federated stranger's code never loads here. Confinement for UNTRUSTED executable law (object-capability
-// SES / Worker / wasm compartments, §6) is §24's quarantine and §23's renderer trust; this loader is the
-// plain in-process floor beneath that, and deliberately invents no parallel sandbox.
+// This USED to say "a federated stranger's code never loads here", and since §24.6's install-by-
+// federation that is no longer true: an operator who blesses a peer's app publishes it into a pool,
+// and the publish — like every later `prepareRoute` — arrives at `importEsm` below. A stranger's
+// MODULE BODY therefore evaluates on this thread, with no timeout and no `resourceLimits`. Only the
+// exported render call is bounded, in §23.9's worker.
+//
+// The bound is real and it is narrower than the sentence it replaced: the blessing is an operator's
+// deliberate act, the pool confines what the code may WRITE, and the frame says what a person is
+// looking at. What none of that reaches is a top-level `while (true)` or an `import("node:fs")` in
+// the module body. Confinement for UNTRUSTED executable law (object-capability SES / Worker / wasm
+// compartments, §6) is §24.5's named open flag; this loader is the plain in-process floor beneath
+// it, and deliberately invents no parallel sandbox — but it no longer claims a stranger never
+// reaches it.
 
 import { contentAddress } from "@bombadil/rhizomatic";
 

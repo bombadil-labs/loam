@@ -275,6 +275,7 @@ export function resolvedNodeImpl(
     hview,
     entity,
     gw.resolverMemo,
+    lensOf(def),
   );
   return annotateImpl(
     gw,
@@ -362,6 +363,7 @@ export function resolvePinnedImpl(
     result.hview,
     entity,
     gw.resolverMemo,
+    lensOf(reg),
   );
   return annotateImpl(
     gw,
@@ -447,6 +449,7 @@ export function watchEntityImpl(
       hview,
       entity,
       gw.resolverMemo,
+      lensOf(bound),
     );
     return {
       entity,
