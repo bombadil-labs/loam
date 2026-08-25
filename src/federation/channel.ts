@@ -1225,19 +1225,6 @@ function manifestAliasOf(claims: { pointers: readonly unknown[] }): string | und
   return alias?.target.kind === "primitive" ? String(alias.target.value) : undefined;
 }
 
-/**
- * Is this delta STRUCK — that is, does any negation of it SURVIVE?
- *
- * `negationsOf(id).length > 0` asks whether a strike EXISTS, which is not the same question: a
- * struck strike stops binding under the substrate's algebra, and its target revives. Reading
- * presence where survival is meant is H1's "one link is not enough" clause, and it is what makes
- * lifting a curse expressible at all — the lift negates the curse's negation, and every reader of
- * that binding must then see it as live again.
- */
-function struck(gw: Gateway, id: string): boolean {
-  return gw.reactor.negationsOf(id).some((n) => gw.reactor.negationsOf(n).length === 0);
-}
-
 /** The channel a prefix belongs to, for reading its curses during a bind. */
 function channelNameOf(gw: Gateway, prefix: string): string {
   return channelStatusImpl(gw).find((c) => c.prefix === prefix)?.name ?? "";
@@ -2085,16 +2072,33 @@ function replayEverywhere(gw: Gateway): void {
   gw.replayRegistrations();
 }
 
-/** The living names cursed on a channel, with the delta that said so. */
+/**
+ * The living names cursed on a channel, with the delta that said so.
+ *
+ * The SAME two-filter discipline `readChannels` uses (T217), because a curse is a §46.3 record with
+ * the same blast radius: it decides which lenses the standing sync must not re-bless. Both filters
+ * are load-bearing.
+ *   - AUTHOR. A curse is the OPERATOR's retirement, so a curse-shaped delta from anyone else is a
+ *     stranger's claim ABOUT this store rather than one of its curses; honoring it would let a
+ *     write-granted stranger retire a lens the operator never touched.
+ *   - LAWFUL NEGATION. Only the operator's OWN lift retires the curse, read through the negation
+ *     algebra over the lawful slice — a strike survives only while it is itself un-struck by a
+ *     lawful negation. `struck`'s author-blind survival check let a stranger negate the operator's
+ *     curse record and the next poll re-bless the retired lens (H1's survival clause; §46
+ *     criterion 11 durability).
+ */
 export function cursesOf(gw: Gateway, channel: string): { living: string; deltaId: string }[] {
+  const operator = gw.operatorAuthor;
+  const negated = lawfulNegated(gw.reactor, operator);
   const out: { living: string; deltaId: string }[] = [];
   for (const d of gw.reactor.snapshot()) {
+    if (operator !== undefined && d.claims.author !== operator) continue;
     const marker = d.claims.pointers.find(
       (p) => p.target.kind === "entity" && p.target.entity.context === CTX_CURSE,
     );
     if (marker === undefined || marker.target.kind !== "entity") continue;
     if (marker.target.entity.id !== `channel:${channel}`) continue;
-    if (struck(gw, d.id)) continue;
+    if (negated(d.id)) continue;
     const living = d.claims.pointers.find((p) => p.role === "living");
     if (living?.target.kind === "primitive") {
       out.push({ living: String(living.target.value), deltaId: d.id });
