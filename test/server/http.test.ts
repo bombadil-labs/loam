@@ -452,9 +452,19 @@ describe("POST /:mount/register: the schema-schema mutation mechanism, served", 
     };
     expect(okBody.result.isError).not.toBe(true);
     const listed = await rpcOn("garden", "alice-token", { method: "tools/list", params: {} });
-    const tools = ((await listed.json()) as { result: { tools: Array<{ name: string }> } }).result
-      .tools;
+    const tools = (
+      (await listed.json()) as { result: { tools: Array<{ name: string; description: string }> } }
+    ).result.tools;
     expect(tools.map((t) => t.name)).toContain("loam_register");
+    // The description is the door's own teaching (T241): it names the grant path a scoped
+    // connection would use, and it no longer claims the operator is the only standing. The
+    // REFUSAL string stays terse by design — register-verb.test.ts freezes it byte-for-byte so
+    // a denied probe cannot learn whether grants exist here; the description is where the
+    // recipe lives, because a client reads it BEFORE calling.
+    const registerTool = tools.find((t) => t.name === "loam_register");
+    expect(registerTool?.description).toContain("--verb=register");
+    expect(registerTool?.description).toContain("--prefix=");
+    expect(registerTool?.description).not.toContain("operator token only");
     const answer = await gql("garden", "alice-token", `{ pond(entity: "pond:1") { _hex } }`);
     expect(((await answer.json()) as { errors?: string[] }).errors).toBeUndefined();
   });

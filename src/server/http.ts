@@ -974,8 +974,12 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     {
       name: "loam_register",
       description:
-        "Define a schema as schema-schema deltas and register it (operator token only). " +
-        "The surface serves the new type immediately; republishing at the same entity evolves it.",
+        "Define a schema as schema-schema deltas and register it. The operator registers anywhere; " +
+        "a connection may instead hold register standing over a namespace — the operator mints it " +
+        "with `loam grant <client_id> --verb=register --prefix=<ns>:` — and then every name in the " +
+        "registration (the program's and the reading's) must sit under that prefix. Resolver code " +
+        "never rides a scoped registration; code arrives by federation and blessing. The surface " +
+        "serves the new type immediately; republishing at the same entity evolves it.",
       inputSchema: {
         type: "object",
         properties: {
