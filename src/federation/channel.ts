@@ -1390,6 +1390,7 @@ async function syncChannel(
         unattested: owed,
       },
       illegible,
+      false,
     );
     throw err;
   }
@@ -1432,6 +1433,7 @@ async function syncChannel(
         unattested: err instanceof UnattestedArrivals ? err.unattested : owed,
       },
       illegible,
+      false,
     );
     throw err;
   }
@@ -1455,6 +1457,7 @@ async function syncChannel(
     illegible.filter(
       (r) => r !== "lastSyncedAt" && r !== "consecutiveFailures" && r !== "unattested",
     ),
+    false,
   );
   return {
     offered: report.offered,
@@ -1605,17 +1608,27 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
 
   // The opening record: `lastSyncedAt: 0` says NEVER SYNCED, which is deliberately distinct from a
   // stale timestamp. A channel that has never reached its peer must not read as merely quiet.
-  await stamp(gw, {
-    name,
-    into: opts.into,
-    prefix: opts.prefix,
-    receiving: true,
-    blessing: opts.bless !== false,
-    lastSyncedAt: 0,
-    consecutiveFailures: 0,
-    from: opts.from ?? "",
-    unattested: [],
-  });
+  //
+  // `opening` past the severed-lineage guard: re-opening after a drop is the ONE act that writes a
+  // fresh record while the prior ones are struck, and it is the legitimate way a severed channel
+  // comes back (the re-open path the stamp guard names). Everything else that stamps — a sync poll,
+  // a toggle set — must refuse over a severed lineage rather than resurrect it.
+  await stamp(
+    gw,
+    {
+      name,
+      into: opts.into,
+      prefix: opts.prefix,
+      receiving: true,
+      blessing: opts.bless !== false,
+      lastSyncedAt: 0,
+      consecutiveFailures: 0,
+      from: opts.from ?? "",
+      unattested: [],
+    },
+    [],
+    true,
+  );
 
   const channel: Channel = {
     name,
@@ -1730,6 +1743,25 @@ export async function dropChannelImpl(gw: Gateway, name: string): Promise<void> 
 }
 
 /**
+ * Is this channel's record lineage SEVERED — the drop's negation stands and no open has re-created
+ * it? That is `channelStatus` (the live reading) empty while `channelsEver` still names the channel:
+ * `dropChannel` negates every live record, and only a fresh open stamps a new one. The reading is the
+ * reader's own — the same operator-authored, lawful-strike slice every channel surface resolves — so
+ * this guard cannot refuse a channel the reader serves nor admit one it treats as severed.
+ *
+ * RE-READ AT STAMP TIME, deliberately, and NOT redundant with a liveness the caller read earlier in
+ * the same sync. Refusing to resurrect a severed channel is a stamp-time SAFETY decision, so it must
+ * rest on liveness CURRENT AT THE APPEND. A `federate drop` can land while a poll is parked in
+ * `await pull()`: the poll-top reading still sees the channel live, but by the append it is severed,
+ * and only this fresh read sees that. Do not thread a cached poll-top status in to save the scan —
+ * the two are different-time questions, and a concurrent drop makes them disagree in exactly the
+ * direction that resurrects the channel.
+ */
+function channelLineageSevered(gw: Gateway, name: string): boolean {
+  return channelStatusImpl(gw, name).length === 0 && channelsEverImpl(gw, name).length > 0;
+}
+
+/**
  * Append one channel record. Latest-wins, so a stamp is an ordinary append rather than an edit.
  *
  * `unreadable` is the READER's verdict ON a record and never part of one, so a caller does not
@@ -1745,12 +1777,34 @@ export async function dropChannelImpl(gw: Gateway, name: string): Promise<void> 
  *
  * Omitting rather than refusing is deliberate. A channel a person cannot freeze is a channel they
  * can only sever, and a sever is the one act with no way back.
+ *
+ * `opening` bypasses the severed-lineage guard below — see it for why re-open is the one write that
+ * legitimately stamps a channel whose prior records are struck.
  */
 async function stamp(
   gw: Gateway,
   status: Omit<ChannelStatus, "unreadable">,
-  illegible: readonly string[] = [],
+  illegible: readonly string[],
+  // REQUIRED, no default: every caller states whether it is the re-open that legitimately writes over
+  // a struck lineage, so a new caller must decide rather than inherit a silent bypass.
+  opening: boolean,
 ): Promise<void> {
+  // A STALE HANDLE MUST NOT RE-STAMP A SEVERED CHANNEL BACK INTO EXISTENCE (T233). `dropChannel`
+  // negates every live record for this pool, but a handle captured before the sever still reaches
+  // this stamp: a sync poll that accepts nothing sails past the pool's own purged ground and lands
+  // the success stamp anyway, and latest-wins would let that fresh operator-signed record resurrect
+  // the channel — with no pool behind it, since the drop's negation only ever covered the OLD
+  // record. A drop can also land DURING a poll (an operator severs an unreachable peer while the sync
+  // is parked in `await pull()`), so the guard re-reads liveness HERE, at the append — a status the
+  // caller read at poll-top would be stale in exactly that case. OPENING is the one act that
+  // legitimately writes the first record while the old ones are struck, so it says so.
+  if (!opening && channelLineageSevered(gw, status.name)) {
+    throw new Error(
+      `refused to stamp "${status.name}": it was severed and its channel record struck, so a ` +
+        `stale handle cannot re-create it. Re-open it with \`loam federate open\` to receive on it ` +
+        `again.`,
+    );
+  }
   const claims = channelRecordClaims(
     { ...status, unreadable: [] },
     gw.operatorAuthor!,
@@ -1798,6 +1852,7 @@ export async function setChannelImpl(
         !(r === "receiving" && next.receiving !== undefined) &&
         !(r === "blessing" && next.blessing !== undefined),
     ),
+    false,
   );
   // READ THE RECORD BACK RATHER THAN ECHOING THE ONE WE BUILT. `status` is assembled from the
   // REPLACED record's coerced fields, so returning it would hand the caller — and
